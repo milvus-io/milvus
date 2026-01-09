@@ -37,7 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
-	interalratelimitutil "github.com/milvus-io/milvus/internal/util/ratelimitutil"
+	rlinternal "github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -337,12 +337,12 @@ func TestQuotaCenter(t *testing.T) {
 		err := quotaCenter.resetAllCurrentRates()
 		assert.NoError(t, err)
 
-		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, nil, []int64{4}, nil)
+		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, nil, []int64{4}, nil, "test")
 		assert.NoError(t, err)
 
 		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, nil, []int64{1, 2, 3}, map[int64][]int64{
 			1: {1000},
-		})
+		}, "test")
 		assert.NoError(t, err)
 
 		for collectionID := range collectionIDToPartitionIDs {
@@ -363,7 +363,7 @@ func TestQuotaCenter(t *testing.T) {
 			}
 		}
 
-		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, []int64{0}, nil, nil)
+		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, []int64{0}, nil, nil, "test")
 		assert.NoError(t, err)
 		dbLimiters := quotaCenter.rateLimiter.GetDatabaseLimiters(0)
 		assert.NotNil(t, dbLimiters)
@@ -401,14 +401,14 @@ func TestQuotaCenter(t *testing.T) {
 		err := quotaCenter.resetAllCurrentRates()
 		assert.NoError(t, err)
 
-		updateLimit := func(node *interalratelimitutil.RateLimiterNode, rateType internalpb.RateType, limit int64) {
+		updateLimit := func(node *rlinternal.RateLimiterNode, rateType internalpb.RateType, limit int64) {
 			limiter, ok := node.GetLimiters().Get(rateType)
 			if !ok {
 				return
 			}
 			limiter.SetLimit(Limit(limit))
 		}
-		assertLimit := func(node *interalratelimitutil.RateLimiterNode, rateType internalpb.RateType, expectValue int64) {
+		assertLimit := func(node *rlinternal.RateLimiterNode, rateType internalpb.RateType, expectValue int64) {
 			limiter, ok := node.GetLimiters().Get(rateType)
 			if !ok {
 				assert.FailNow(t, "limiter not found")
@@ -426,7 +426,7 @@ func TestQuotaCenter(t *testing.T) {
 		updateLimit(quotaCenter.rateLimiter.GetCollectionLimiters(0, 2), internalpb.RateType_DMLInsert, 10)
 		updateLimit(quotaCenter.rateLimiter.GetCollectionLimiters(0, 2), internalpb.RateType_DMLDelete, 9)
 
-		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, true, []int64{0}, []int64{1}, nil)
+		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, true, []int64{0}, []int64{1}, nil, "test")
 		assert.NoError(t, err)
 
 		assertLimit(quotaCenter.rateLimiter.GetRootLimiters(), internalpb.RateType_DMLInsert, 0)
@@ -742,11 +742,12 @@ func TestQuotaCenter(t *testing.T) {
 		for db, collections := range quotaCenter.writableCollections {
 			for collection := range collections {
 				states := quotaCenter.rateLimiter.GetCollectionLimiters(db, collection).GetQuotaStates()
-				code, _ := states.Get(milvuspb.QuotaState_DenyToWrite)
+				stateInfo, ok := states.Get(milvuspb.QuotaState_DenyToWrite)
 				if db == 0 {
-					assert.Equal(t, commonpb.ErrorCode_MemoryQuotaExhausted, code)
+					assert.True(t, ok)
+					assert.Equal(t, commonpb.ErrorCode_MemoryQuotaExhausted, stateInfo.ErrorCode)
 				} else {
-					assert.Equal(t, commonpb.ErrorCode_Success, code)
+					assert.False(t, ok)
 				}
 			}
 		}
@@ -971,8 +972,8 @@ func TestQuotaCenter(t *testing.T) {
 		collectionID := int64(1)
 		limitNode := quotaCenter.rateLimiter.GetCollectionLimiters(0, collectionID)
 		limitNode.GetLimiters().Insert(internalpb.RateType_DMLInsert, ratelimitutil.NewLimiter(100, 100))
-		limitNode.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, commonpb.ErrorCode_MemoryQuotaExhausted)
-		limitNode.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToRead, commonpb.ErrorCode_ForceDeny)
+		limitNode.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, &rlinternal.QuotaStateInfo{ErrorCode: commonpb.ErrorCode_MemoryQuotaExhausted})
+		limitNode.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToRead, &rlinternal.QuotaStateInfo{ErrorCode: commonpb.ErrorCode_ForceDeny})
 		err = quotaCenter.sendRatesToProxy()
 		assert.NoError(t, err)
 	})
@@ -991,8 +992,8 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.resetAllCurrentRates()
 		collectionID := int64(1)
 		limitNode := quotaCenter.rateLimiter.GetCollectionLimiters(0, collectionID)
-		limitNode.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, commonpb.ErrorCode_MemoryQuotaExhausted)
-		limitNode.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToRead, commonpb.ErrorCode_ForceDeny)
+		limitNode.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, &rlinternal.QuotaStateInfo{ErrorCode: commonpb.ErrorCode_MemoryQuotaExhausted})
+		limitNode.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToRead, &rlinternal.QuotaStateInfo{ErrorCode: commonpb.ErrorCode_ForceDeny})
 		quotaCenter.recordMetrics()
 	})
 
@@ -1530,7 +1531,7 @@ func TestUpdateLimiter(t *testing.T) {
 	})
 
 	t.Run("normal op", func(t *testing.T) {
-		node := interalratelimitutil.NewRateLimiterNode(internalpb.RateScope_Collection)
+		node := rlinternal.NewRateLimiterNode(internalpb.RateScope_Collection)
 		node.GetLimiters().Insert(internalpb.RateType_DQLSearch, ratelimitutil.NewLimiter(5, 5))
 		newLimit := ratelimitutil.NewLimiter(10, 10)
 		updateLimiter(node, newLimit, &LimiterRange{
@@ -1726,7 +1727,7 @@ func TestCheckDiskQuota(t *testing.T) {
 			}).Maybe()
 		quotaCenter := newQuotaCenterForTesting(t, ctx, meta)
 
-		checkRate := func(rateNode *interalratelimitutil.RateLimiterNode, expectValue float64) {
+		checkRate := func(rateNode *rlinternal.RateLimiterNode, expectValue float64) {
 			insertRate, ok := rateNode.GetLimiters().Get(internalpb.RateType_DMLInsert)
 			assert.True(t, ok)
 			assert.EqualValues(t, expectValue, insertRate.Limit())
@@ -1780,14 +1781,14 @@ func TestTORequestLimiter(t *testing.T) {
 
 	quotaCenter := NewQuotaCenter(pcm, qc, core.tsoAllocator, meta)
 	pcm.EXPECT().GetProxyCount().Return(2)
-	limitNode := interalratelimitutil.NewRateLimiterNode(internalpb.RateScope_Cluster)
+	limitNode := rlinternal.NewRateLimiterNode(internalpb.RateScope_Cluster)
 	a := ratelimitutil.NewLimiter(500, 500)
 	a.SetLimit(200)
 	b := ratelimitutil.NewLimiter(100, 100)
 	limitNode.GetLimiters().Insert(internalpb.RateType_DMLInsert, a)
 	limitNode.GetLimiters().Insert(internalpb.RateType_DMLDelete, b)
 	limitNode.GetLimiters().Insert(internalpb.RateType_DMLBulkLoad, GetInfLimiter(internalpb.RateType_DMLBulkLoad))
-	limitNode.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToRead, commonpb.ErrorCode_ForceDeny)
+	limitNode.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToRead, &rlinternal.QuotaStateInfo{ErrorCode: commonpb.ErrorCode_ForceDeny})
 
 	quotaCenter.rateAllocateStrategy = Average
 	proxyLimit := quotaCenter.toRequestLimiter(limitNode)

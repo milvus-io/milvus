@@ -30,9 +30,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+type QuotaStateInfo struct {
+	ErrorCode commonpb.ErrorCode
+	Reason    string
+}
+
 type RateLimiterNode struct {
 	limiters    *typeutil.ConcurrentMap[internalpb.RateType, *ratelimitutil.Limiter]
-	quotaStates *typeutil.ConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode]
+	quotaStates *typeutil.ConcurrentMap[milvuspb.QuotaState, *QuotaStateInfo]
 	level       internalpb.RateScope
 
 	// db id, collection id or partition id, cluster id is 0 for the cluster level
@@ -47,7 +52,7 @@ type RateLimiterNode struct {
 func NewRateLimiterNode(level internalpb.RateScope) *RateLimiterNode {
 	rln := &RateLimiterNode{
 		limiters:    typeutil.NewConcurrentMap[internalpb.RateType, *ratelimitutil.Limiter](),
-		quotaStates: typeutil.NewConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode](),
+		quotaStates: typeutil.NewConcurrentMap[milvuspb.QuotaState, *QuotaStateInfo](),
 		children:    typeutil.NewConcurrentMap[int64, *RateLimiterNode](),
 		level:       level,
 	}
@@ -90,17 +95,17 @@ func (rln *RateLimiterNode) Check(rt internalpb.RateType, n int) error {
 func (rln *RateLimiterNode) GetQuotaExceededError(rt internalpb.RateType) error {
 	switch rt {
 	case internalpb.RateType_DMLInsert, internalpb.RateType_DMLDelete, internalpb.RateType_DMLBulkLoad:
-		if errCode, ok := rln.quotaStates.Get(milvuspb.QuotaState_DenyToWrite); ok {
-			return merr.WrapErrServiceQuotaExceeded(ratelimitutil.GetQuotaErrorString(errCode))
+		if stateInfo, ok := rln.quotaStates.Get(milvuspb.QuotaState_DenyToWrite); ok {
+			return merr.WrapErrServiceQuotaExceeded(ratelimitutil.GetQuotaErrorStringWithReason(stateInfo.ErrorCode, stateInfo.Reason))
 		}
 	case internalpb.RateType_DQLSearch, internalpb.RateType_DQLQuery:
-		if errCode, ok := rln.quotaStates.Get(milvuspb.QuotaState_DenyToRead); ok {
-			return merr.WrapErrServiceQuotaExceeded(ratelimitutil.GetQuotaErrorString(errCode))
+		if stateInfo, ok := rln.quotaStates.Get(milvuspb.QuotaState_DenyToRead); ok {
+			return merr.WrapErrServiceQuotaExceeded(ratelimitutil.GetQuotaErrorStringWithReason(stateInfo.ErrorCode, stateInfo.Reason))
 		}
 	case internalpb.RateType_DDLCollection, internalpb.RateType_DDLPartition,
 		internalpb.RateType_DDLIndex, internalpb.RateType_DDLCompaction, internalpb.RateType_DDLFlush:
-		if errCode, ok := rln.quotaStates.Get(milvuspb.QuotaState_DenyToDDL); ok {
-			return merr.WrapErrServiceQuotaExceeded(ratelimitutil.GetQuotaErrorString(errCode))
+		if stateInfo, ok := rln.quotaStates.Get(milvuspb.QuotaState_DenyToDDL); ok {
+			return merr.WrapErrServiceQuotaExceeded(ratelimitutil.GetQuotaErrorStringWithReason(stateInfo.ErrorCode, stateInfo.Reason))
 		}
 	}
 	return merr.WrapErrServiceQuotaExceeded(fmt.Sprintf("rate type: %s", rt.String()))
@@ -111,15 +116,15 @@ func (rln *RateLimiterNode) GetRateLimitError(rate float64) error {
 }
 
 func TraverseRateLimiterTree(root *RateLimiterNode, fn1 func(internalpb.RateType, *ratelimitutil.Limiter) bool,
-	fn2 func(node *RateLimiterNode, state milvuspb.QuotaState, errCode commonpb.ErrorCode) bool,
+	fn2 func(node *RateLimiterNode, state milvuspb.QuotaState, errCode commonpb.ErrorCode, reason string) bool,
 ) {
 	if fn1 != nil {
 		root.limiters.Range(fn1)
 	}
 
 	if fn2 != nil {
-		root.quotaStates.Range(func(state milvuspb.QuotaState, errCode commonpb.ErrorCode) bool {
-			return fn2(root, state, errCode)
+		root.quotaStates.Range(func(state milvuspb.QuotaState, stateInfo *QuotaStateInfo) bool {
+			return fn2(root, state, stateInfo.ErrorCode, stateInfo.Reason)
 		})
 	}
 	root.GetChildren().Range(func(key int64, child *RateLimiterNode) bool {
@@ -149,11 +154,11 @@ func (rln *RateLimiterNode) SetLimiters(new *typeutil.ConcurrentMap[internalpb.R
 	rln.limiters = new
 }
 
-func (rln *RateLimiterNode) GetQuotaStates() *typeutil.ConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode] {
+func (rln *RateLimiterNode) GetQuotaStates() *typeutil.ConcurrentMap[milvuspb.QuotaState, *QuotaStateInfo] {
 	return rln.quotaStates
 }
 
-func (rln *RateLimiterNode) SetQuotaStates(new *typeutil.ConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode]) {
+func (rln *RateLimiterNode) SetQuotaStates(new *typeutil.ConcurrentMap[milvuspb.QuotaState, *QuotaStateInfo]) {
 	rln.quotaStates = new
 }
 
