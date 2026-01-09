@@ -31,9 +31,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -51,7 +49,8 @@ type IDFOracle interface {
 	// mark growing segment remove target version
 	LazyRemoveGrowings(targetVersion int64, segmentIDs ...int64)
 
-	Register(segmentID int64, stats bm25Stats, state commonpb.SegmentState)
+	RegisterGrowing(segmentID int64, stats bm25Stats)
+	RegisterSealed(segmentID int64, stats bm25Stats) error
 
 	BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error)
 
@@ -150,12 +149,6 @@ func (s *sealedBm25Stats) writeFile(localDir string) (error, bool) {
 	}
 
 	return nil, false
-}
-
-func (s *sealedBm25Stats) ShouldOffLoadToDisk() bool {
-	s.RLock()
-	defer s.RUnlock()
-	return s.inmemory && s.activate.Load() && !s.removed
 }
 
 // After merged the stats of a segment into the overall stats, Delegator still need to store the segment stats,
@@ -283,7 +276,10 @@ type idfOracle struct {
 	dirPath     string
 
 	closeCh chan struct{}
+	sf      conc.Singleflight[any]
 	wg      sync.WaitGroup
+
+	toDisk bool
 }
 
 // now only used for test
@@ -291,7 +287,7 @@ func (o *idfOracle) TargetVersion() int64 {
 	return o.targetVersion.Load()
 }
 
-func (o *idfOracle) preloadSealed(segmentID int64, stats bm25Stats) {
+func (o *idfOracle) preloadSealed(segmentID int64, stats *sealedBm25Stats, memoryStats bm25Stats) {
 	o.Lock()
 	defer o.Unlock()
 
@@ -299,51 +295,65 @@ func (o *idfOracle) preloadSealed(segmentID int64, stats bm25Stats) {
 	if o.targetVersion.Load() != 0 {
 		return
 	}
-	o.sealed.Insert(segmentID, &sealedBm25Stats{
+	o.sealed.Insert(segmentID, stats)
+	o.current.Merge(memoryStats)
+	stats.activate.Store(true)
+}
+
+func (o *idfOracle) RegisterGrowing(segmentID int64, stats bm25Stats) {
+	o.Lock()
+	defer o.Unlock()
+
+	if _, ok := o.growing[segmentID]; ok {
+		return
+	}
+	o.growing[segmentID] = &growingBm25Stats{
 		bm25Stats: stats,
-		ts:        time.Now(),
-		activate:  atomic.NewBool(true),
-		inmemory:  true,
-		segmentID: segmentID,
-	})
+		activate:  true,
+	}
 	o.current.Merge(stats)
 }
 
-func (o *idfOracle) Register(segmentID int64, stats bm25Stats, state commonpb.SegmentState) {
-	switch state {
-	case segments.SegmentTypeGrowing:
-		o.Lock()
-		defer o.Unlock()
-
-		if _, ok := o.growing[segmentID]; ok {
-			return
-		}
-		o.growing[segmentID] = &growingBm25Stats{
-			bm25Stats: stats,
-			activate:  true,
-		}
-		o.current.Merge(stats)
-	case segments.SegmentTypeSealed:
+func (o *idfOracle) RegisterSealed(segmentID int64, stats bm25Stats) error {
+	// singleflight to avoid duplicate register sealed segment
+	_, err, _ := o.sf.Do(fmt.Sprintf("register_sealed_%d", segmentID), func() (any, error) {
 		if ok := o.sealed.Contain(segmentID); ok {
-			return
+			return nil, nil
+		}
+
+		segStats := &sealedBm25Stats{
+			bm25Stats: stats,
+			ts:        time.Now(),
+			activate:  atomic.NewBool(false),
+			inmemory:  true,
+			segmentID: segmentID,
+		}
+
+		// make sure sealed segment stats is on disk after register
+		if o.toDisk {
+			err := segStats.ToLocal(o.dirPath)
+			if err != nil {
+				log.Warn("idf oracle to local failed, remain in memory", zap.Error(err))
+				return nil, err
+			}
 		}
 
 		// preload sealed segment to channel before first target
 		if o.targetVersion.Load() == 0 {
-			o.preloadSealed(segmentID, stats)
+			// segStats ToLocal finished but stats still in memory in this function
+			// so we could preload with memory stats
+			o.preloadSealed(segmentID, segStats, stats)
 		} else {
-			o.sealed.Insert(segmentID, &sealedBm25Stats{
-				bm25Stats: stats,
-				ts:        time.Now(),
-				activate:  atomic.NewBool(false),
-				inmemory:  true,
-				segmentID: segmentID,
-			})
+			o.sealed.Insert(segmentID, segStats)
 		}
-	default:
-		log.Warn("register segment with unknown state", zap.String("stats", state.String()))
-		return
+
+		return nil, nil
+	})
+
+	if err != nil {
+		return err
 	}
+	return nil
 }
 
 func (o *idfOracle) UpdateGrowing(segmentID int64, stats bm25Stats) {
@@ -379,11 +389,6 @@ func (o *idfOracle) LazyRemoveGrowings(targetVersion int64, segmentIDs ...int64)
 func (o *idfOracle) Start() {
 	o.wg.Add(1)
 	go o.syncloop()
-
-	if paramtable.Get().QueryNodeCfg.IDFEnableDisk.GetAsBool() {
-		o.wg.Add(1)
-		go o.localloop()
-	}
 }
 
 func (o *idfOracle) Close() {
@@ -430,49 +435,6 @@ func (o *idfOracle) syncloop() {
 				time.Sleep(time.Second * 10)
 				o.NotifySync()
 			}
-		case <-o.closeCh:
-			return
-		}
-	}
-}
-
-func (o *idfOracle) localloop() {
-	pool := conc.NewPool[struct{}](paramtable.Get().QueryNodeCfg.IDFWriteConcurrenct.GetAsInt())
-	// write local file to /{bm25_path}/{node_id}/{channel_name}
-	o.dirPath = path.Join(pathutil.GetPath(pathutil.BM25Path, paramtable.GetNodeID()), o.channel)
-
-	defer o.wg.Done()
-	for {
-		select {
-		case <-o.localNotify:
-			statsList := []*sealedBm25Stats{}
-			o.sealed.Range(func(segmentID int64, stats *sealedBm25Stats) bool {
-				if stats.ShouldOffLoadToDisk() {
-					statsList = append(statsList, stats)
-				}
-				return true
-			})
-
-			if _, err := os.Stat(o.dirPath); os.IsNotExist(err) {
-				err = os.MkdirAll(o.dirPath, 0o755)
-				if err != nil {
-					log.Warn("create idf local path failed", zap.Error(err))
-				}
-			}
-
-			features := []*conc.Future[struct{}]{}
-			for _, stats := range statsList {
-				features = append(features, pool.Submit(func() (struct{}, error) {
-					err := stats.ToLocal(o.dirPath)
-					if err != nil {
-						log.Warn("idf oracle to local failed", zap.Error(err))
-						return struct{}{}, nil
-					}
-					return struct{}{}, nil
-				}))
-			}
-
-			conc.AwaitAll(features...)
 		case <-o.closeCh:
 			return
 		}
@@ -617,8 +579,11 @@ func NewIDFOracle(channel string, functions []*schemapb.FunctionSchema) IDFOracl
 		current:       newBm25Stats(functions),
 		growing:       make(map[int64]*growingBm25Stats),
 		sealed:        typeutil.ConcurrentMap[int64, *sealedBm25Stats]{},
+		toDisk:        paramtable.Get().QueryNodeCfg.IDFEnableDisk.GetAsBool(),
+		dirPath:       path.Join(pathutil.GetPath(pathutil.BM25Path, paramtable.GetNodeID()), channel),
 		syncNotify:    make(chan struct{}, 1),
 		closeCh:       make(chan struct{}),
 		localNotify:   make(chan struct{}, 1),
+		sf:            conc.Singleflight[any]{},
 	}
 }
