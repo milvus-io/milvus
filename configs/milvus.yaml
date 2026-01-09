@@ -583,7 +583,6 @@ queryNode:
     size: 10 # the size for worker querynode client pool
   idfOracle:
     enableDisk: true
-    writeConcurrency: 4
   ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
   port: 21123 # TCP port of queryNode
   grpc:
@@ -924,6 +923,7 @@ common:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool
     middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
     lowPriority: 1 # This parameter specify how many times the number of threads is the number of cores in low priority pool
+    bm25Load: 1 # This parameter specify how many times the number of threads is the number of cores in BM25 load pool
   buildIndexThreadPoolRatio: 0.75
   DiskIndex:
     MaxDegree: 56

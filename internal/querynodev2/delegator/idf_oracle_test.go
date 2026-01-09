@@ -22,7 +22,6 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -128,18 +127,18 @@ func (suite *IDFOracleSuite) TestSealed() {
 	// register sealed
 	sealedSegs := []int64{1, 2, 3, 4}
 	for _, segID := range sealedSegs {
-		suite.idfOracle.Register(segID, suite.genStats(uint32(segID), uint32(segID)+1), commonpb.SegmentState_Sealed)
+		suite.idfOracle.RegisterSealed(segID, suite.genStats(uint32(segID), uint32(segID)+1))
 	}
 
 	// reduplicate register
 	for _, segID := range sealedSegs {
-		suite.idfOracle.Register(segID, suite.genStats(uint32(segID), uint32(segID)+1), commonpb.SegmentState_Sealed)
+		suite.idfOracle.RegisterSealed(segID, suite.genStats(uint32(segID), uint32(segID)+1))
 	}
 
 	// some sealed not in target
 	invalidSealedSegs := []int64{5, 6}
 	for _, segID := range invalidSealedSegs {
-		suite.idfOracle.Register(segID, suite.genStats(uint32(segID), uint32(segID)+1), commonpb.SegmentState_Sealed)
+		suite.idfOracle.RegisterSealed(segID, suite.genStats(uint32(segID), uint32(segID)+1))
 	}
 
 	// register sealed segment and all preload to current
@@ -177,11 +176,11 @@ func (suite *IDFOracleSuite) TestGrow() {
 	// register grow
 	growSegs := []int64{1, 2, 3, 4}
 	for _, segID := range growSegs {
-		suite.idfOracle.Register(segID, suite.genStats(uint32(segID), uint32(segID)+1), commonpb.SegmentState_Growing)
+		suite.idfOracle.RegisterGrowing(segID, suite.genStats(uint32(segID), uint32(segID)+1))
 	}
 	// reduplicate register
 	for _, segID := range growSegs {
-		suite.idfOracle.Register(segID, suite.genStats(uint32(segID), uint32(segID)+1), commonpb.SegmentState_Growing)
+		suite.idfOracle.RegisterGrowing(segID, suite.genStats(uint32(segID), uint32(segID)+1))
 	}
 
 	// register sealed segment but all deactvate
@@ -217,13 +216,13 @@ func (suite *IDFOracleSuite) TestLocalCache() {
 	// register sealed
 	sealedSegs := []int64{1, 2, 3, 4}
 	for _, segID := range sealedSegs {
-		suite.idfOracle.Register(segID, suite.genStats(uint32(segID), uint32(segID)+1), commonpb.SegmentState_Sealed)
+		suite.idfOracle.RegisterSealed(segID, suite.genStats(uint32(segID), uint32(segID)+1))
 	}
 
 	// some sealed not in target
 	invalidSealedSegs := []int64{5, 6}
 	for _, segID := range invalidSealedSegs {
-		suite.idfOracle.Register(segID, suite.genStats(uint32(segID), uint32(segID)+1), commonpb.SegmentState_Sealed)
+		suite.idfOracle.RegisterSealed(segID, suite.genStats(uint32(segID), uint32(segID)+1))
 	}
 
 	// register sealed segment and all preload to current
