@@ -84,7 +84,7 @@ class TestGroupSearch(TestMilvusClientV2Base):
             self.create_partition(client, self.collection_name, partition_name=partition_name)
 
         # Define number of insert iterations
-        insert_times = 100
+        insert_times = 150
         nb = 100
         # Insert data multiple times with non-duplicated primary keys
         for j in range(insert_times):
