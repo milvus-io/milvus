@@ -288,8 +288,8 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         method: 1. create a collection with nullable sparse vector field
                 2. insert data where some vectors are null
                 3. search by IDs including some with null vectors
-                4. verify result count equals non-null vector count (effective nq)
-        expected: null vectors are filtered out, result count = non-null vector count
+                4. verify error is raised when any ID has null vector
+        expected: raise error when any provided ID has null vector value
         """
         client = self._client()
         collection_name = cf.gen_unique_str("nullable_vec_search_")
@@ -320,37 +320,32 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
 
-        # Case 1: Search by IDs with mixed null and non-null vectors
-        # IDs [0, 2, 3, 5] -> 0, 3 are valid, 2, 5 are null
+        # Case 1: Search by IDs with mixed null and non-null vectors should raise error
         ids_to_search = [0, 2, 3, 5]
-        expected_nq = 2  # only 2 non-null vectors
-
-        res = self.search(
-            client,
-            collection_name,
-            ids=ids_to_search,
-            anns_field="sparse_vec",
-            search_params={"metric_type": "IP"},
-            limit=5
-        )[0]
-
-        log.info(f"Search with ids={ids_to_search}, expected_nq={expected_nq}, actual len(res)={len(res)}")
-        assert len(res) == expected_nq, f"Expected {expected_nq} results, got {len(res)}"
-
-        # Case 2: Search by IDs with all null vectors should raise error
-        all_null_ids = [2, 5, 8]
-        error = {"err_code": 65535,
-                 "err_msg": "all provided IDs have null vector values"}
+        error = {"err_code": 1100,
+                 "err_msg": "2 out of 4 provided IDs have null vector values"}
         self.search(
             client,
             collection_name,
-            ids=all_null_ids,
+            ids=ids_to_search,
             anns_field="sparse_vec",
             search_params={"metric_type": "IP"},
             limit=5,
             check_task=CheckTasks.err_res,
             check_items=error
         )
+
+        # Case 2: Search by IDs with all valid vectors should succeed
+        valid_ids = [0, 1, 3, 4]
+        res = self.search(
+            client,
+            collection_name,
+            ids=valid_ids,
+            anns_field="sparse_vec",
+            search_params={"metric_type": "IP"},
+            limit=5
+        )[0]
+        assert len(res) == len(valid_ids), f"Expected {len(valid_ids)} results, got {len(res)}"
 
         # Cleanup
         self.drop_collection(client, collection_name)
@@ -366,12 +361,36 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         client = self._client()
         collection_name = self.collection_name
 
-        # search with empty vectors
-        error = {"err_code": 999, "err_msg": "`ids` value [] is illegal"}
+        # search with empty ids should raise error (SDK validates this on client side)
+        error = {"err_code": 1, "err_msg": "`ids` value [] is illegal"}
         self.search(
             client,
             collection_name,
             ids=[],
+            anns_field=self.sparse_vector_field_name,
+            search_params={},
+            limit=default_limit,
+            check_task=CheckTasks.err_res,
+            check_items=error
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_by_pk_with_negative_ids(self):
+        """
+        target: test search by primary keys with negative id values
+        method: 1. connect and create a collection
+                2. search by primary keys with ids containing -1
+        expected: raise error for invalid ID value
+        """
+        client = self._client()
+        collection_name = self.collection_name
+
+        # search with negative id should raise error (SDK validates this on client side)
+        error = {"err_code": 1, "err_msg": "`ids` value [-1, 0, 1] is illegal"}
+        self.search(
+            client,
+            collection_name,
+            ids=[-1, 0, 1],
             anns_field=self.sparse_vector_field_name,
             search_params={},
             limit=default_limit,
