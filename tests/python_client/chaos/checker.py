@@ -2,6 +2,7 @@ import pytest
 import unittest
 from enum import Enum
 import random
+import re
 import time
 import threading
 import uuid
@@ -278,6 +279,33 @@ def create_index_params_from_dict(field_name: str, index_param_dict: dict) -> In
     return index_params
 
 
+def normalize_error_message(error_msg):
+    """
+    Normalize error message by extracting text from message= fields.
+    Only keep letter content from message values to group similar errors.
+    """
+    msg = str(error_msg)
+    # Extract all message= content
+    messages = re.findall(r'message[=:]\s*["\']?([^"\'>,\)]+)', msg, re.IGNORECASE)
+    if messages:
+        # Combine all message content and keep only letters and spaces
+        combined = ' '.join(messages)
+        combined = re.sub(r'[^a-zA-Z\s]', ' ', combined)
+        combined = re.sub(r'\s+', ' ', combined).strip()
+        return combined
+    # Fallback: extract text from details= if no message found
+    details = re.findall(r'details\s*=\s*"([^"]+)"', msg)
+    if details:
+        combined = ' '.join(details)
+        combined = re.sub(r'[^a-zA-Z\s]', ' ', combined)
+        combined = re.sub(r'\s+', ' ', combined).strip()
+        return combined
+    # Last fallback: keep only letters from entire message
+    msg = re.sub(r'[^a-zA-Z\s]', ' ', msg)
+    msg = re.sub(r'\s+', ' ', msg).strip()
+    return msg
+
+
 def trace(fmt=DEFAULT_FMT, prefix='test', flag=True):
     def decorate(func):
         @functools.wraps(func)
@@ -312,6 +340,14 @@ def trace(fmt=DEFAULT_FMT, prefix='test', flag=True):
             else:
                 self._fail += 1
                 self.fail_records.append(("failure", self._succ + self._fail, start_time, start_time_ts))
+                # Collect unique error messages (normalized to group similar errors)
+                if hasattr(res, 'message'):
+                    normalized_msg = normalize_error_message(res.message)
+                elif res is not None:
+                    normalized_msg = normalize_error_message(str(res))
+                else:
+                    normalized_msg = "Unknown error"
+                self.error_messages.add(normalized_msg)
             return res, result
 
         return inner_wrapper
@@ -360,6 +396,7 @@ class Checker:
         self._succ = 0
         self._fail = 0
         self.fail_records = []
+        self.error_messages = set()  # Store unique error messages
         self._keep_running = True
         self.rsp_times = []
         self.average_time = 0
@@ -689,6 +726,7 @@ class Checker:
         self._fail = 0
         self.rsp_times = []
         self.fail_records = []
+        self.error_messages = set()
         self.average_time = 0
 
     def get_rto(self):
