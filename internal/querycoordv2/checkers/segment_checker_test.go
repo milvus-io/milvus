@@ -28,7 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -55,6 +55,9 @@ func (suite *SegmentCheckerTestSuite) SetupSuite() {
 }
 
 func (suite *SegmentCheckerTestSuite) SetupTest() {
+	// Reset factory first to ensure clean state for each test
+	assign.ResetGlobalAssignPolicyFactoryForTest()
+
 	var err error
 	config := GenerateEtcdConfig()
 	cli, err := etcd.GetEtcdClient(
@@ -77,32 +80,21 @@ func (suite *SegmentCheckerTestSuite) SetupTest() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 
-	balancer := suite.createMockBalancer()
-	suite.checker = NewSegmentChecker(suite.meta, distManager, targetManager, suite.nodeMgr, func() balance.Balance { return balancer })
+	scheduler := task.NewMockScheduler(suite.T())
+	scheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	scheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+
+	// Initialize global assign policy factory before creating checker
+	assign.InitGlobalAssignPolicyFactory(scheduler, suite.nodeMgr, distManager, suite.meta, targetManager)
+
+	suite.checker = NewSegmentChecker(suite.meta, distManager, targetManager, suite.nodeMgr, scheduler)
 
 	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 }
 
 func (suite *SegmentCheckerTestSuite) TearDownTest() {
 	suite.kv.Close()
-}
-
-func (suite *SegmentCheckerTestSuite) createMockBalancer() balance.Balance {
-	balancer := balance.NewMockBalancer(suite.T())
-	balancer.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe().Return(func(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64, _ bool) []balance.SegmentAssignPlan {
-		plans := make([]balance.SegmentAssignPlan, 0, len(segments))
-		for i, s := range segments {
-			plan := balance.SegmentAssignPlan{
-				Segment: s,
-				From:    -1,
-				To:      nodes[i%len(nodes)],
-				Replica: meta.NilReplica,
-			}
-			plans = append(plans, plan)
-		}
-		return plans
-	})
-	return balancer
+	assign.ResetGlobalAssignPolicyFactoryForTest()
 }
 
 func (suite *SegmentCheckerTestSuite) TestLoadSegments() {

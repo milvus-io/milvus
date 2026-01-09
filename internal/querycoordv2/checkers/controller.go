@@ -61,18 +61,16 @@ func NewCheckerController(
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
 	broker meta.Broker,
-	getBalancerFunc GetBalancerFunc,
 ) *CheckerController {
 	// CheckerController runs checkers with the order,
 	// the former checker has higher priority
+	// Note: ChannelChecker and SegmentChecker now create their own RoundRobin policy internally
 	checkers := map[utils.CheckerType]Checker{
-		utils.ChannelChecker: NewChannelChecker(meta, dist, targetMgr, nodeMgr, getBalancerFunc),
-		utils.SegmentChecker: NewSegmentChecker(meta, dist, targetMgr, nodeMgr, getBalancerFunc),
-		utils.BalanceChecker: NewBalanceChecker(meta, targetMgr, nodeMgr, scheduler, getBalancerFunc),
+		utils.ChannelChecker: NewChannelChecker(meta, dist, targetMgr, nodeMgr, scheduler),
+		utils.SegmentChecker: NewSegmentChecker(meta, dist, targetMgr, nodeMgr, scheduler),
+		utils.BalanceChecker: NewBalanceChecker(meta, dist, targetMgr, nodeMgr, scheduler),
 		utils.IndexChecker:   NewIndexChecker(meta, dist, broker, nodeMgr, targetMgr),
-		// todo temporary work around must fix
-		// utils.LeaderChecker:  NewLeaderChecker(meta, dist, targetMgr, nodeMgr, true),
-		utils.LeaderChecker: NewLeaderChecker(meta, dist, targetMgr, nodeMgr),
+		utils.LeaderChecker:  NewLeaderChecker(meta, dist, targetMgr, nodeMgr),
 	}
 
 	manualCheckChs := map[utils.CheckerType]chan struct{}{
