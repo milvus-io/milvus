@@ -45,18 +45,41 @@ check_data_type(
                            EmbListFloatVector;
             }
         } else if (field_meta.get_element_type() == DataType::VECTOR_FLOAT16) {
-            return placeholder_value.type() ==
-                   milvus::proto::common::PlaceholderType::EmbListFloat16Vector;
+            if (placeholder_value.element_level()) {
+                return placeholder_value.type() ==
+                       milvus::proto::common::PlaceholderType::Float16Vector;
+            } else {
+                return placeholder_value.type() ==
+                       milvus::proto::common::PlaceholderType::
+                           EmbListFloat16Vector;
+            }
         } else if (field_meta.get_element_type() == DataType::VECTOR_BFLOAT16) {
-            return placeholder_value.type() ==
-                   milvus::proto::common::PlaceholderType::
-                       EmbListBFloat16Vector;
+            if (placeholder_value.element_level()) {
+                return placeholder_value.type() ==
+                       milvus::proto::common::PlaceholderType::BFloat16Vector;
+            } else {
+                return placeholder_value.type() ==
+                       milvus::proto::common::PlaceholderType::
+                           EmbListBFloat16Vector;
+            }
         } else if (field_meta.get_element_type() == DataType::VECTOR_BINARY) {
-            return placeholder_value.type() ==
-                   milvus::proto::common::PlaceholderType::EmbListBinaryVector;
+            if (placeholder_value.element_level()) {
+                return placeholder_value.type() ==
+                       milvus::proto::common::PlaceholderType::BinaryVector;
+            } else {
+                return placeholder_value.type() ==
+                       milvus::proto::common::PlaceholderType::
+                           EmbListBinaryVector;
+            }
         } else if (field_meta.get_element_type() == DataType::VECTOR_INT8) {
-            return placeholder_value.type() ==
-                   milvus::proto::common::PlaceholderType::EmbListInt8Vector;
+            if (placeholder_value.element_level()) {
+                return placeholder_value.type() ==
+                       milvus::proto::common::PlaceholderType::Int8Vector;
+            } else {
+                return placeholder_value.type() ==
+                       milvus::proto::common::PlaceholderType::
+                           EmbListInt8Vector;
+            }
         }
         return false;
     }

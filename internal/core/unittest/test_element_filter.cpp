@@ -25,8 +25,12 @@ using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
 
+// Test parameter: <use_hints, load_index, element_type, metric_type, dim>
+using ElementFilterSealedParam =
+    std::tuple<bool, bool, DataType, std::string, int>;
+
 class ElementFilterSealed
-    : public ::testing::TestWithParam<std::tuple<bool, bool>> {
+    : public ::testing::TestWithParam<ElementFilterSealedParam> {
  protected:
     bool
     use_hints() const {
@@ -36,18 +40,54 @@ class ElementFilterSealed
     load_index() const {
         return std::get<1>(GetParam());
     }
+    DataType
+    element_type() const {
+        return std::get<2>(GetParam());
+    }
+    std::string
+    metric_type() const {
+        return std::get<3>(GetParam());
+    }
+    int
+    vec_dim() const {
+        return std::get<4>(GetParam());
+    }
+
+    // Create placeholder group with element_level = true for element-level search
+    // Uses regular vector types (not EmbList), as query is single embedding per query
+    proto::common::PlaceholderGroup
+    CreatePlaceholderGroupForType(int num_queries, int dim, int seed) {
+        if (element_type() == DataType::VECTOR_BINARY) {
+            return CreatePlaceholderGroup<milvus::BinaryVector>(
+                num_queries, dim, seed, true);
+        } else if (element_type() == DataType::VECTOR_FLOAT16) {
+            return CreatePlaceholderGroup<milvus::Float16Vector>(
+                num_queries, dim, seed, true);
+        } else if (element_type() == DataType::VECTOR_BFLOAT16) {
+            return CreatePlaceholderGroup<milvus::BFloat16Vector>(
+                num_queries, dim, seed, true);
+        } else if (element_type() == DataType::VECTOR_INT8) {
+            return CreatePlaceholderGroup<milvus::Int8Vector>(
+                num_queries, dim, seed, true);
+        } else {
+            // VECTOR_FLOAT
+            return CreatePlaceholderGroup<milvus::FloatVector>(
+                num_queries, dim, seed, true);
+        }
+    }
 };
 
 TEST_P(ElementFilterSealed, RangeExpr) {
     bool with_hints = use_hints();
     bool with_load_index = load_index();
+    DataType elem_type = element_type();
+    std::string metric = metric_type();
+    int dim = vec_dim();
+
     // Step 1: Prepare schema with array field
-    int dim = 4;
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
-                                                    DataType::VECTOR_FLOAT,
-                                                    dim,
-                                                    knowhere::metric::L2);
+    auto vec_fid = schema->AddDebugVectorArrayField(
+        "structA[array_vec]", elem_type, dim, metric);
     auto int_array_fid = schema->AddDebugArrayField(
         "structA[price_array]", DataType::INT32, false);
 
@@ -68,7 +108,7 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                 ->mutable_data()
                 ->Clear();
 
-            for (int row = 0; row < N; row++) {
+            for (size_t row = 0; row < N; row++) {
                 auto* array_data = field_data->mutable_scalars()
                                        ->mutable_array_data()
                                        ->mutable_data()
@@ -89,30 +129,95 @@ TEST_P(ElementFilterSealed, RangeExpr) {
     // Step 4: Load vector index for element-level search
     auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
 
-    // DataGen generates VECTOR_ARRAY with data in float_vector (flattened),
-    // not in vector_array (nested structure)
-    std::vector<float> vector_data(dim * N * array_len);
-    for (int i = 0; i < N; i++) {
-        const auto& float_vec = array_vec_values[i].float_vector().data();
-        // float_vec contains array_len * dim floats
-        for (int j = 0; j < array_len * dim; j++) {
-            vector_data[i * array_len * dim + j] = float_vec[j];
+    // Flatten vector data and build index based on element type
+    std::unique_ptr<milvus::index::VectorIndex> indexing;
+    std::string actual_metric;
+
+    if (elem_type == DataType::VECTOR_FLOAT) {
+        std::vector<float> vector_data(dim * N * array_len);
+        for (size_t i = 0; i < N; i++) {
+            const auto& float_vec = array_vec_values[i].float_vector().data();
+            for (int j = 0; j < array_len * dim; j++) {
+                vector_data[i * array_len * dim + j] = float_vec[j];
+            }
         }
+        indexing = GenVecIndexing(N * array_len,
+                                  dim,
+                                  vector_data.data(),
+                                  knowhere::IndexEnum::INDEX_HNSW);
+        actual_metric = knowhere::metric::L2;
+    } else if (elem_type == DataType::VECTOR_FLOAT16) {
+        std::vector<knowhere::fp16> vector_data(dim * N * array_len);
+        for (size_t i = 0; i < N; i++) {
+            const auto& fp16_data = array_vec_values[i].float16_vector();
+            const knowhere::fp16* src =
+                reinterpret_cast<const knowhere::fp16*>(fp16_data.data());
+            for (int j = 0; j < array_len * dim; j++) {
+                vector_data[i * array_len * dim + j] = src[j];
+            }
+        }
+        indexing = GenVecIndexingFloat16(N * array_len,
+                                         dim,
+                                         vector_data.data(),
+                                         knowhere::IndexEnum::INDEX_HNSW);
+        actual_metric = knowhere::metric::L2;
+    } else if (elem_type == DataType::VECTOR_BFLOAT16) {
+        std::vector<knowhere::bf16> vector_data(dim * N * array_len);
+        for (size_t i = 0; i < N; i++) {
+            const auto& bf16_data = array_vec_values[i].bfloat16_vector();
+            const knowhere::bf16* src =
+                reinterpret_cast<const knowhere::bf16*>(bf16_data.data());
+            for (int j = 0; j < array_len * dim; j++) {
+                vector_data[i * array_len * dim + j] = src[j];
+            }
+        }
+        indexing = GenVecIndexingBFloat16(N * array_len,
+                                          dim,
+                                          vector_data.data(),
+                                          knowhere::IndexEnum::INDEX_HNSW);
+        actual_metric = knowhere::metric::L2;
+    } else if (elem_type == DataType::VECTOR_INT8) {
+        std::vector<int8_t> vector_data(dim * N * array_len);
+        for (size_t i = 0; i < N; i++) {
+            const auto& int8_data = array_vec_values[i].int8_vector();
+            const int8_t* src =
+                reinterpret_cast<const int8_t*>(int8_data.data());
+            for (int j = 0; j < array_len * dim; j++) {
+                vector_data[i * array_len * dim + j] = src[j];
+            }
+        }
+        indexing = GenVecIndexingInt8(N * array_len,
+                                      dim,
+                                      vector_data.data(),
+                                      knowhere::IndexEnum::INDEX_HNSW);
+        actual_metric = knowhere::metric::L2;
+    } else if (elem_type == DataType::VECTOR_BINARY) {
+        int byte_dim = (dim + 7) / 8;
+        std::vector<uint8_t> vector_data(byte_dim * N * array_len);
+        for (size_t i = 0; i < N; i++) {
+            const auto& bin_data = array_vec_values[i].binary_vector();
+            const uint8_t* src =
+                reinterpret_cast<const uint8_t*>(bin_data.data());
+            for (int j = 0; j < array_len * byte_dim; j++) {
+                vector_data[i * array_len * byte_dim + j] = src[j];
+            }
+        }
+        indexing =
+            GenVecIndexingBinary(N * array_len,
+                                 dim,
+                                 vector_data.data(),
+                                 knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP);
+        actual_metric = knowhere::metric::HAMMING;
     }
 
-    // For element-level search, index all elements (N * array_len vectors)
-    auto indexing = GenVecIndexing(N * array_len,
-                                   dim,
-                                   vector_data.data(),
-                                   knowhere::IndexEnum::INDEX_HNSW);
     LoadIndexInfo load_index_info;
     load_index_info.field_id = vec_fid.get();
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
-    load_index_info.index_params["metric_type"] = knowhere::metric::L2;
+    load_index_info.index_params["metric_type"] = actual_metric;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
-    load_index_info.element_type = DataType::VECTOR_FLOAT;
+    load_index_info.element_type = elem_type;
     if (with_load_index) {
         segment->LoadIndex(load_index_info);
     }
@@ -124,7 +229,8 @@ TEST_P(ElementFilterSealed, RangeExpr) {
     {
         std::string hints_line =
             with_hints ? R"(hints: "iterative_filter")" : "";
-        std::string raw_plan = boost::str(boost::format(R"(vector_anns: <
+        std::string raw_plan =
+            boost::str(boost::format(R"(vector_anns: <
                                         field_id: %1%
                                         predicates: <
                                           element_filter_expr: <
@@ -168,13 +274,13 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                                         query_info: <
                                           topk: 5
                                           round_decimal: 3
-                                          metric_type: "L2"
-                                          %4%
+                                          metric_type: "%4%"
+                                          %5%
                                           search_params: "{\"ef\": 50}"
                                         >
                                         placeholder_tag: "$0">)") %
-                                          vec_fid.get() % int_array_fid.get() %
-                                          int64_fid.get() % hints_line);
+                       vec_fid.get() % int_array_fid.get() % int64_fid.get() %
+                       metric % hints_line);
 
         proto::plan::PlanNode plan_node;
         auto ok =
@@ -187,7 +293,7 @@ TEST_P(ElementFilterSealed, RangeExpr) {
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw =
-            CreatePlaceholderGroup(num_queries, dim, seed, true);
+            CreatePlaceholderGroupForType(num_queries, dim, seed);
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -206,10 +312,10 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                   search_result->seg_offsets_.size());
 
         // Should have topK results per query
-        ASSERT_LE(search_result->element_indices_.size(), topK * num_queries);
+        ASSERT_LE(search_result->element_indices_.size(),
+                  static_cast<size_t>(topK * num_queries));
 
-        std::cout << "Element-level search returned:" << std::endl;
-        for (auto i = 0; i < search_result->seg_offsets_.size(); i++) {
+        for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
             int64_t doc_id = search_result->seg_offsets_[i];
             int32_t elem_idx = search_result->element_indices_[i];
             float distance = search_result->distances_[i];
@@ -230,7 +336,7 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                 << "Element value " << element_value << " should be < 400";
         }
 
-        // Verify distances are sorted (ascending for L2)
+        // Verify distances are sorted
         for (size_t i = 1; i < search_result->distances_.size(); ++i) {
             ASSERT_LE(search_result->distances_[i - 1],
                       search_result->distances_[i])
@@ -242,13 +348,14 @@ TEST_P(ElementFilterSealed, RangeExpr) {
 TEST_P(ElementFilterSealed, UnaryExpr) {
     bool with_hints = use_hints();
     bool with_load_index = load_index();
+    DataType elem_type = element_type();
+    std::string metric = metric_type();
+    int dim = vec_dim();
+
     // Step 1: Prepare schema with array field
-    int dim = 4;
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
-                                                    DataType::VECTOR_FLOAT,
-                                                    dim,
-                                                    knowhere::metric::L2);
+    auto vec_fid = schema->AddDebugVectorArrayField(
+        "structA[array_vec]", elem_type, dim, metric);
     auto int_array_fid = schema->AddDebugArrayField(
         "structA[price_array]", DataType::INT32, false);
 
@@ -269,7 +376,7 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
                 ->mutable_data()
                 ->Clear();
 
-            for (int row = 0; row < N; row++) {
+            for (size_t row = 0; row < N; row++) {
                 auto* array_data = field_data->mutable_scalars()
                                        ->mutable_array_data()
                                        ->mutable_data()
@@ -290,30 +397,95 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
     // Step 4: Load vector index for element-level search
     auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
 
-    // DataGen generates VECTOR_ARRAY with data in float_vector (flattened),
-    // not in vector_array (nested structure)
-    std::vector<float> vector_data(dim * N * array_len);
-    for (int i = 0; i < N; i++) {
-        const auto& float_vec = array_vec_values[i].float_vector().data();
-        // float_vec contains array_len * dim floats
-        for (int j = 0; j < array_len * dim; j++) {
-            vector_data[i * array_len * dim + j] = float_vec[j];
+    // Flatten vector data and build index based on element type
+    std::unique_ptr<milvus::index::VectorIndex> indexing;
+    std::string actual_metric;
+
+    if (elem_type == DataType::VECTOR_FLOAT) {
+        std::vector<float> vector_data(dim * N * array_len);
+        for (size_t i = 0; i < N; i++) {
+            const auto& float_vec = array_vec_values[i].float_vector().data();
+            for (int j = 0; j < array_len * dim; j++) {
+                vector_data[i * array_len * dim + j] = float_vec[j];
+            }
         }
+        indexing = GenVecIndexing(N * array_len,
+                                  dim,
+                                  vector_data.data(),
+                                  knowhere::IndexEnum::INDEX_HNSW);
+        actual_metric = knowhere::metric::L2;
+    } else if (elem_type == DataType::VECTOR_FLOAT16) {
+        std::vector<knowhere::fp16> vector_data(dim * N * array_len);
+        for (size_t i = 0; i < N; i++) {
+            const auto& fp16_data = array_vec_values[i].float16_vector();
+            const knowhere::fp16* src =
+                reinterpret_cast<const knowhere::fp16*>(fp16_data.data());
+            for (int j = 0; j < array_len * dim; j++) {
+                vector_data[i * array_len * dim + j] = src[j];
+            }
+        }
+        indexing = GenVecIndexingFloat16(N * array_len,
+                                         dim,
+                                         vector_data.data(),
+                                         knowhere::IndexEnum::INDEX_HNSW);
+        actual_metric = knowhere::metric::L2;
+    } else if (elem_type == DataType::VECTOR_BFLOAT16) {
+        std::vector<knowhere::bf16> vector_data(dim * N * array_len);
+        for (size_t i = 0; i < N; i++) {
+            const auto& bf16_data = array_vec_values[i].bfloat16_vector();
+            const knowhere::bf16* src =
+                reinterpret_cast<const knowhere::bf16*>(bf16_data.data());
+            for (int j = 0; j < array_len * dim; j++) {
+                vector_data[i * array_len * dim + j] = src[j];
+            }
+        }
+        indexing = GenVecIndexingBFloat16(N * array_len,
+                                          dim,
+                                          vector_data.data(),
+                                          knowhere::IndexEnum::INDEX_HNSW);
+        actual_metric = knowhere::metric::L2;
+    } else if (elem_type == DataType::VECTOR_INT8) {
+        std::vector<int8_t> vector_data(dim * N * array_len);
+        for (size_t i = 0; i < N; i++) {
+            const auto& int8_data = array_vec_values[i].int8_vector();
+            const int8_t* src =
+                reinterpret_cast<const int8_t*>(int8_data.data());
+            for (int j = 0; j < array_len * dim; j++) {
+                vector_data[i * array_len * dim + j] = src[j];
+            }
+        }
+        indexing = GenVecIndexingInt8(N * array_len,
+                                      dim,
+                                      vector_data.data(),
+                                      knowhere::IndexEnum::INDEX_HNSW);
+        actual_metric = knowhere::metric::L2;
+    } else if (elem_type == DataType::VECTOR_BINARY) {
+        int byte_dim = (dim + 7) / 8;
+        std::vector<uint8_t> vector_data(byte_dim * N * array_len);
+        for (size_t i = 0; i < N; i++) {
+            const auto& bin_data = array_vec_values[i].binary_vector();
+            const uint8_t* src =
+                reinterpret_cast<const uint8_t*>(bin_data.data());
+            for (int j = 0; j < array_len * byte_dim; j++) {
+                vector_data[i * array_len * byte_dim + j] = src[j];
+            }
+        }
+        indexing =
+            GenVecIndexingBinary(N * array_len,
+                                 dim,
+                                 vector_data.data(),
+                                 knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP);
+        actual_metric = knowhere::metric::HAMMING;
     }
 
-    // For element-level search, index all elements (N * array_len vectors)
-    auto indexing = GenVecIndexing(N * array_len,
-                                   dim,
-                                   vector_data.data(),
-                                   knowhere::IndexEnum::INDEX_HNSW);
     LoadIndexInfo load_index_info;
     load_index_info.field_id = vec_fid.get();
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
-    load_index_info.index_params["metric_type"] = knowhere::metric::L2;
+    load_index_info.index_params["metric_type"] = actual_metric;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
-    load_index_info.element_type = DataType::VECTOR_FLOAT;
+    load_index_info.element_type = elem_type;
     if (with_load_index) {
         segment->LoadIndex(load_index_info);
     }
@@ -321,11 +493,12 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
     int topK = 5;
 
     // Step 5: Test with element-level filter
-    // Query: Search array elements, filter by element_value < 10
+    // Query: Search array elements, filter by element_value > 10
     {
         std::string hints_line =
             with_hints ? R"(hints: "iterative_filter")" : "";
-        std::string raw_plan = boost::str(boost::format(R"(vector_anns: <
+        std::string raw_plan =
+            boost::str(boost::format(R"(vector_anns: <
                                       field_id: %1%
                                       predicates: <
                                         element_filter_expr: <
@@ -365,13 +538,13 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
                                       query_info: <
                                         topk: 5
                                         round_decimal: 3
-                                        metric_type: "L2"
-                                        %4%
+                                        metric_type: "%4%"
+                                        %5%
                                         search_params: "{\"ef\": 50}"
                                       >
                                       placeholder_tag: "$0">)") %
-                                          vec_fid.get() % int_array_fid.get() %
-                                          int64_fid.get() % hints_line);
+                       vec_fid.get() % int_array_fid.get() % int64_fid.get() %
+                       metric % hints_line);
 
         proto::plan::PlanNode plan_node;
         auto ok =
@@ -384,7 +557,7 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw =
-            CreatePlaceholderGroup(num_queries, dim, seed, true);
+            CreatePlaceholderGroupForType(num_queries, dim, seed);
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -397,24 +570,24 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
         // In element-level mode, results should be element indices, not doc offsets
         ASSERT_TRUE(search_result->element_level_);
         ASSERT_FALSE(search_result->element_indices_.empty());
-        // Also check seg_offsets_ which stores the doc IDs
         ASSERT_FALSE(search_result->seg_offsets_.empty());
         ASSERT_EQ(search_result->element_indices_.size(),
                   search_result->seg_offsets_.size());
 
-        // Should have topK results per query
-        ASSERT_LE(search_result->element_indices_.size(), topK * num_queries);
+        ASSERT_LE(search_result->element_indices_.size(),
+                  static_cast<size_t>(topK * num_queries));
 
-        std::cout << "Element-level search returned:" << std::endl;
-        for (auto i = 0; i < search_result->seg_offsets_.size(); i++) {
+        std::cout << "Element-level search returned ("
+                  << static_cast<int>(elem_type) << "):" << std::endl;
+        for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
             std::cout << "doc_id: " << search_result->seg_offsets_[i]
                       << ", element_index: "
-                      << search_result->element_indices_[i] << std::endl;
-            std::cout << "distance: " << search_result->distances_[i]
+                      << search_result->element_indices_[i]
+                      << ", distance: " << search_result->distances_[i]
                       << std::endl;
         }
 
-        // Verify distances are sorted (ascending for L2)
+        // Verify distances are sorted
         for (size_t i = 1; i < search_result->distances_.size(); ++i) {
             ASSERT_LE(search_result->distances_[i - 1],
                       search_result->distances_[i])
@@ -426,16 +599,53 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
 INSTANTIATE_TEST_SUITE_P(
     ElementFilter,
     ElementFilterSealed,
-    ::testing::Combine(::testing::Bool(),  // with_hints: true/false
-                       ::testing::Bool()   // with_load_index: true/false
-                       ),
-    [](const ::testing::TestParamInfo<ElementFilterSealed::ParamType>& info) {
+    ::testing::Values(
+        // FloatVector with L2
+        std::make_tuple(false, false, DataType::VECTOR_FLOAT, "L2", 4),
+        std::make_tuple(false, true, DataType::VECTOR_FLOAT, "L2", 4),
+        std::make_tuple(true, false, DataType::VECTOR_FLOAT, "L2", 4),
+        std::make_tuple(true, true, DataType::VECTOR_FLOAT, "L2", 4),
+        // Float16Vector with L2
+        std::make_tuple(false, true, DataType::VECTOR_FLOAT16, "L2", 4),
+        std::make_tuple(true, true, DataType::VECTOR_FLOAT16, "L2", 4),
+        // BFloat16Vector with L2
+        std::make_tuple(false, true, DataType::VECTOR_BFLOAT16, "L2", 4),
+        std::make_tuple(true, true, DataType::VECTOR_BFLOAT16, "L2", 4),
+        // Int8Vector with L2
+        std::make_tuple(false, true, DataType::VECTOR_INT8, "L2", 4),
+        std::make_tuple(true, true, DataType::VECTOR_INT8, "L2", 4),
+        // BinaryVector with HAMMING (no hints - BIN_FLAT doesn't support iterative filter)
+        std::make_tuple(false, true, DataType::VECTOR_BINARY, "HAMMING", 32)),
+    [](const ::testing::TestParamInfo<ElementFilterSealedParam>& info) {
         bool with_hints = std::get<0>(info.param);
         bool with_load_index = std::get<1>(info.param);
-        std::string name = "";
-        name += with_hints ? "WithHints" : "WithoutHints";
-        name += "_";
-        name += with_load_index ? "WithLoadIndex" : "WithoutLoadIndex";
+        DataType elem_type = std::get<2>(info.param);
+        std::string metric = std::get<3>(info.param);
+
+        std::string type_name;
+        switch (elem_type) {
+            case DataType::VECTOR_FLOAT:
+                type_name = "Float";
+                break;
+            case DataType::VECTOR_FLOAT16:
+                type_name = "Float16";
+                break;
+            case DataType::VECTOR_BFLOAT16:
+                type_name = "BFloat16";
+                break;
+            case DataType::VECTOR_INT8:
+                type_name = "Int8";
+                break;
+            case DataType::VECTOR_BINARY:
+                type_name = "Binary";
+                break;
+            default:
+                type_name = "Unknown";
+        }
+
+        std::string name = type_name + "_" + metric;
+        name += with_hints ? "_WithHints" : "_NoHints";
+        name += with_load_index ? "_WithIndex" : "_NoIndex";
         return name;
     });
 
@@ -619,23 +829,62 @@ TEST(ElementFilter, GrowingSegmentOutOfOrderInsert) {
     }
 }
 
-// Parameterized test fixture for GrowingIterativeRangeExpr
-class ElementFilterGrowing : public ::testing::TestWithParam<bool> {
+// Test parameter for Growing: <use_hints, element_type, metric_type, dim>
+using ElementFilterGrowingParam = std::tuple<bool, DataType, std::string, int>;
+
+class ElementFilterGrowing
+    : public ::testing::TestWithParam<ElementFilterGrowingParam> {
  protected:
     bool
     use_hints() const {
-        return GetParam();
+        return std::get<0>(GetParam());
+    }
+    DataType
+    element_type() const {
+        return std::get<1>(GetParam());
+    }
+    std::string
+    metric_type() const {
+        return std::get<2>(GetParam());
+    }
+    int
+    vec_dim() const {
+        return std::get<3>(GetParam());
+    }
+
+    // Create placeholder group with element_level = true for element-level search
+    // Uses regular vector types (not EmbList), as query is single embedding per query
+    proto::common::PlaceholderGroup
+    CreatePlaceholderGroupForType(int num_queries, int dim, int seed) {
+        if (element_type() == DataType::VECTOR_BINARY) {
+            return CreatePlaceholderGroup<milvus::BinaryVector>(
+                num_queries, dim, seed, true);
+        } else if (element_type() == DataType::VECTOR_FLOAT16) {
+            return CreatePlaceholderGroup<milvus::Float16Vector>(
+                num_queries, dim, seed, true);
+        } else if (element_type() == DataType::VECTOR_BFLOAT16) {
+            return CreatePlaceholderGroup<milvus::BFloat16Vector>(
+                num_queries, dim, seed, true);
+        } else if (element_type() == DataType::VECTOR_INT8) {
+            return CreatePlaceholderGroup<milvus::Int8Vector>(
+                num_queries, dim, seed, true);
+        } else {
+            // VECTOR_FLOAT
+            return CreatePlaceholderGroup<milvus::FloatVector>(
+                num_queries, dim, seed, true);
+        }
     }
 };
 
 TEST_P(ElementFilterGrowing, RangeExpr) {
     bool with_hints = use_hints();
-    int dim = 4;
+    DataType elem_type = element_type();
+    std::string metric = metric_type();
+    int dim = vec_dim();
+
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
-                                                    DataType::VECTOR_FLOAT,
-                                                    dim,
-                                                    knowhere::metric::L2);
+    auto vec_fid = schema->AddDebugVectorArrayField(
+        "structA[array_vec]", elem_type, dim, metric);
     auto int_array_fid = schema->AddDebugArrayField(
         "structA[price_array]", DataType::INT32, false);
 
@@ -657,7 +906,7 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
                 ->mutable_data()
                 ->Clear();
 
-            for (int row = 0; row < N; row++) {
+            for (size_t row = 0; row < N; row++) {
                 auto* array_data = field_data->mutable_scalars()
                                        ->mutable_array_data()
                                        ->mutable_data()
@@ -692,11 +941,11 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
     int topK = 5;
 
     // Execute element-level search with iterative filter
-    // Query: Search array elements where (id % 2 == 0) AND (price_array element in range (100, 400))
     {
         std::string hints_line =
             with_hints ? R"(hints: "iterative_filter")" : "";
-        std::string raw_plan = boost::str(boost::format(R"(vector_anns: <
+        std::string raw_plan =
+            boost::str(boost::format(R"(vector_anns: <
                                         field_id: %1%
                                         predicates: <
                                           element_filter_expr: <
@@ -740,13 +989,13 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
                                         query_info: <
                                           topk: 5
                                           round_decimal: 3
-                                          metric_type: "L2"
-                                          %4%
+                                          metric_type: "%4%"
+                                          %5%
                                           search_params: "{\"ef\": 50}"
                                         >
                                         placeholder_tag: "$0">)") %
-                                          vec_fid.get() % int_array_fid.get() %
-                                          int64_fid.get() % hints_line);
+                       vec_fid.get() % int_array_fid.get() % int64_fid.get() %
+                       metric % hints_line);
 
         proto::plan::PlanNode plan_node;
         auto ok =
@@ -759,7 +1008,7 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw =
-            CreatePlaceholderGroup(num_queries, dim, seed, true);
+            CreatePlaceholderGroupForType(num_queries, dim, seed);
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -769,7 +1018,6 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
         // Verify results
         ASSERT_NE(search_result, nullptr);
 
-        // In element-level mode, results should contain element indices
         ASSERT_TRUE(search_result->element_level_)
             << "Search should be in element-level mode";
         ASSERT_FALSE(search_result->element_indices_.empty())
@@ -780,12 +1028,12 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
                   search_result->seg_offsets_.size())
             << "Element indices and doc offsets should match in size";
 
-        // Should have topK results per query
-        ASSERT_LE(search_result->element_indices_.size(), topK * num_queries)
+        ASSERT_LE(search_result->element_indices_.size(),
+                  static_cast<size_t>(topK * num_queries))
             << "Should not exceed topK results";
 
-        std::cout << "Growing segment element-level search results:"
-                  << std::endl;
+        std::cout << "Growing segment element-level search ("
+                  << static_cast<int>(elem_type) << "):" << std::endl;
         for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
             int64_t doc_id = search_result->seg_offsets_[i];
             int32_t elem_idx = search_result->element_indices_[i];
@@ -795,17 +1043,13 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
                       << ", element_index=" << elem_idx
                       << ", distance=" << distance << std::endl;
 
-            // Verify the doc_id satisfies the predicate (id % 2 == 0)
             ASSERT_EQ(doc_id % 2, 0) << "Result doc_id " << doc_id
                                      << " should satisfy (id % 2 == 0)";
 
-            // Verify element_idx is valid
             ASSERT_GE(elem_idx, 0) << "Element index should be >= 0";
             ASSERT_LT(elem_idx, array_len)
                 << "Element index should be < array_len";
 
-            // Verify element value is in range (100, 400)
-            // Element value = doc_id * array_len + elem_idx + 1
             int element_value = doc_id * array_len + elem_idx + 1;
             ASSERT_GT(element_value, 100)
                 << "Element value " << element_value << " should be > 100";
@@ -813,7 +1057,7 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
                 << "Element value " << element_value << " should be < 400";
         }
 
-        // Verify distances are sorted (ascending for L2)
+        // Verify distances are sorted
         for (size_t i = 1; i < search_result->distances_.size(); ++i) {
             ASSERT_LE(search_result->distances_[i - 1],
                       search_result->distances_[i])
@@ -825,10 +1069,50 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
 INSTANTIATE_TEST_SUITE_P(
     ElementFilter,
     ElementFilterGrowing,
-    ::testing::Bool(),  // with_hints: true/false
-    [](const ::testing::TestParamInfo<ElementFilterGrowing::ParamType>& info) {
-        bool with_hints = info.param;
-        return with_hints ? "WithHints" : "WithoutHints";
+    ::testing::Values(
+        // FloatVector with L2
+        std::make_tuple(false, DataType::VECTOR_FLOAT, "L2", 4),
+        std::make_tuple(true, DataType::VECTOR_FLOAT, "L2", 4),
+        // Float16Vector with L2
+        std::make_tuple(false, DataType::VECTOR_FLOAT16, "L2", 4),
+        std::make_tuple(true, DataType::VECTOR_FLOAT16, "L2", 4),
+        // BFloat16Vector with L2
+        std::make_tuple(false, DataType::VECTOR_BFLOAT16, "L2", 4),
+        std::make_tuple(true, DataType::VECTOR_BFLOAT16, "L2", 4),
+        // Int8Vector with L2
+        std::make_tuple(false, DataType::VECTOR_INT8, "L2", 4),
+        std::make_tuple(true, DataType::VECTOR_INT8, "L2", 4),
+        // BinaryVector with HAMMING (no hints - brute force doesn't support iterative filter for binary)
+        std::make_tuple(false, DataType::VECTOR_BINARY, "HAMMING", 32)),
+    [](const ::testing::TestParamInfo<ElementFilterGrowingParam>& info) {
+        bool with_hints = std::get<0>(info.param);
+        DataType elem_type = std::get<1>(info.param);
+        std::string metric = std::get<2>(info.param);
+
+        std::string type_name;
+        switch (elem_type) {
+            case DataType::VECTOR_FLOAT:
+                type_name = "Float";
+                break;
+            case DataType::VECTOR_FLOAT16:
+                type_name = "Float16";
+                break;
+            case DataType::VECTOR_BFLOAT16:
+                type_name = "BFloat16";
+                break;
+            case DataType::VECTOR_INT8:
+                type_name = "Int8";
+                break;
+            case DataType::VECTOR_BINARY:
+                type_name = "Binary";
+                break;
+            default:
+                type_name = "Unknown";
+        }
+
+        std::string name = type_name + "_" + metric;
+        name += with_hints ? "_WithHints" : "_NoHints";
+        return name;
     });
 
 // Unit tests for ArrayOffsetsGrowing
