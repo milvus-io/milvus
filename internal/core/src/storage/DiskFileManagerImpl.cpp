@@ -388,8 +388,10 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
                     GetObjectData(rcm_.get(),
                                   batch_remote_files,
                                   milvus::PriorityForLoad(priority));
-                for (auto& chunk_future : index_chunks_futures) {
-                    auto chunk_codec = chunk_future.get();
+                // Wait for all futures to ensure all threads complete
+                auto chunk_codecs =
+                    storage::WaitAllFutures(index_chunks_futures);
+                for (auto& chunk_codec : chunk_codecs) {
                     file_writer.Write(chunk_codec->PayloadData(),
                                       chunk_codec->PayloadSize());
                 }
@@ -533,9 +535,11 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
 
     auto FetchRawData = [&]() {
         auto field_datas = GetObjectData(rcm_.get(), batch_files);
+        // Wait for all futures to ensure all threads complete
+        auto codecs = storage::WaitAllFutures(field_datas);
         int batch_size = batch_files.size();
         for (int i = 0; i < batch_size; i++) {
-            auto field_data = field_datas[i].get()->GetFieldData();
+            auto field_data = codecs[i]->GetFieldData();
             num_rows += uint32_t(field_data->get_valid_rows());
             cache_raw_data_to_disk_common<DataType>(
                 field_data,
