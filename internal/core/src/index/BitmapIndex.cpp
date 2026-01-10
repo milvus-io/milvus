@@ -62,7 +62,7 @@ BitmapIndex<T>::UnmapIndexData() {
     if (mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
         if (munmap(mmap_data_, mmap_size_) != 0) {
             AssertInfo(
-                true, "failed to unmap bitmap index, err={}", strerror(errno));
+                false, "failed to unmap bitmap index, err={}", strerror(errno));
         }
         mmap_data_ = nullptr;
         mmap_size_ = 0;
