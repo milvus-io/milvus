@@ -602,7 +602,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 		Status: merr.Status(nil),
 		ID:     11198,
 		Count:  10,
-	}, nil)
+	}, nil).Maybe()
 	idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
 	idAllocator.Start()
 	defer idAllocator.Close()

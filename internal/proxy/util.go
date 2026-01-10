@@ -2315,13 +2315,26 @@ func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, 
 func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) map[string][]int {
 	insertMsg.HashValues = typeutil.HashPK2Channels(pks, channelNames)
 
-	// groupedHashKeys represents the dmChannel index
-	channel2RowOffsets := make(map[string][]int) //   channelName to count
-	// assert len(it.hashValues) < maxInt
+	numChannels := len(channelNames)
+	if numChannels == 0 {
+		return nil
+	}
+
+	numRows := len(insertMsg.HashValues)
+	avgCapacity := (numRows / numChannels) + 1
+
+	channel2RowOffsets := make(map[string][]int, numChannels)
+
 	for offset, channelID := range insertMsg.HashValues {
-		channelName := channelNames[channelID]
+		idx := int(channelID)
+		if idx >= numChannels {
+			continue
+		}
+
+		channelName := channelNames[idx]
+
 		if _, ok := channel2RowOffsets[channelName]; !ok {
-			channel2RowOffsets[channelName] = []int{}
+			channel2RowOffsets[channelName] = make([]int, 0, avgCapacity)
 		}
 		channel2RowOffsets[channelName] = append(channel2RowOffsets[channelName], offset)
 	}
