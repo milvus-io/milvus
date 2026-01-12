@@ -164,7 +164,7 @@ MemFileManagerImpl::CacheRawDataToMemory(const Config& config) {
     auto storage_version =
         index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
             .value_or(0);
-    if (storage_version == STORAGE_V2) {
+    if (storage_version == STORAGE_V2 || storage_version == STORAGE_V3) {
         return cache_raw_data_to_memory_storage_v2(config);
     }
     return cache_raw_data_to_memory_internal(config);
