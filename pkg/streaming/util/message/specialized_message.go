@@ -23,6 +23,10 @@ var selfControlledMessageType = map[MessageType]struct{}{
 	MessageTypeFlush:         {},
 }
 
+var broadcastToAllMessageType = map[MessageType]struct{}{
+	MessageTypeFlushAll: {},
+}
+
 var cipherMessageType = map[MessageType]struct{}{
 	MessageTypeInsert: {},
 	MessageTypeDelete: {},
