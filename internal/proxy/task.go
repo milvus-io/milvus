@@ -358,9 +358,12 @@ func (t *createCollectionTask) validateClusteringKey(ctx context.Context) error 
 func validateCollectionTTL(props []*commonpb.KeyValuePair) (bool, error) {
 	for _, pair := range props {
 		if pair.Key == common.CollectionTTLConfigKey {
-			_, err := strconv.Atoi(pair.Value)
+			val, err := strconv.Atoi(pair.Value)
 			if err != nil {
 				return true, merr.WrapErrParameterInvalidMsg("collection TTL is not a valid positive integer")
+			}
+			if val <= 0 || val > common.MaxTTLSeconds {
+				return true, merr.WrapErrParameterInvalidMsg("collection TTL is out of range, expect (0, 31557600000], got %d", val)
 			}
 			return true, nil
 		}
@@ -1374,11 +1377,6 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			if loaded {
 				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
 			}
-		}
-
-		_, err = common.GetCollectionTTL(t.GetProperties())
-		if err != nil {
-			return merr.WrapErrParameterInvalidMsg("collection ttl properties value not valid, parse error: %s", err.Error())
 		}
 
 		enabled, _ := common.IsAllowInsertAutoID(t.Properties...)

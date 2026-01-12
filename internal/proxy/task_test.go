@@ -5919,3 +5919,32 @@ func TestHighlightTask(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestValidateCollectionTTL(t *testing.T) {
+	cases := []struct {
+		name      string
+		value     string
+		hasTTL    bool
+		expectErr bool
+	}{
+		{"zero_value", "0", true, true},                 // val <= 0
+		{"negative_value", "-1", true, true},            // val <= 0
+		{"exceed_max", "31557600001", true, true},       // val > MaxTTLSeconds
+		{"at_max_boundary", "31557600000", true, false}, // val == MaxTTLSeconds (边界)
+		{"valid_value", "3600", true, false},
+		{"min_valid", "1", true, false},
+		{"invalid_format", "abc", true, true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			hasTTL, err := validateCollectionTTL([]*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: c.value}})
+			assert.Equal(t, c.hasTTL, hasTTL)
+			if c.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
