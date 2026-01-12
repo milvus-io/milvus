@@ -732,6 +732,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         error = {ct.err_code: 999, ct.err_msg: 'should create connection first'}
         self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.skip(reason="Covered by test_milvus_client_insert_partition ")
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_default_partition(self):
         """
@@ -753,6 +754,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         assert results['insert_count'] == ct.default_nb
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.skip(reason="Covered by test_milvus_client_insert_not_exist_partition_name ")
     def test_insert_partition_not_existed(self):
         """
         target: test insert entities in collection created before
@@ -794,6 +796,11 @@ class TestInsertOperation(TestMilvusClientV2Base):
         result_2 = self.insert(client, collection_name, rows, partition_name=partition_name_2)[0]
         assert result_1['insert_count'] == ct.default_nb
         assert result_2['insert_count'] == ct.default_nb
+
+        self.flush(client, collection_name)
+        num_entities = self.get_collection_stats(client, collection_name)[0]
+        assert num_entities.get("row_count", None) == 2 * ct.default_nb
+
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -815,6 +822,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(ct.default_nb)]
         results = self.insert(client, collection_name, rows, partition_name=partition_name)[0]
         assert results['insert_count'] == ct.default_nb
+        assert sorted(results['ids']) == list(range(ct.default_nb))
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1282,7 +1290,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         """
         target: test insert same ids with auto_id false
         method: 1.create collection with auto_id=False 2.insert same int64 field values
-        expected: raise exception
+        expected: veryfiy insert count
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1401,9 +1409,29 @@ class TestInsertOperation(TestMilvusClientV2Base):
         method: 1.create all datatype collection 2.insert data
         expected: verify num entities
         """
-        # MilvusClient doesn't support construct_from_dataframe, skip this test
-        # or reimplement using schema with all data types
-        pytest.skip("MilvusClient doesn't support construct_from_dataframe")
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 100
+
+        # Create schema with all data types
+        schema = cf.gen_all_datatype_collection_schema(dim=default_dim, enable_struct_array_field=False)
+
+        # Create collection
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # Generate data for all data types
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
+
+        # Insert data
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == nb
+
+        # Verify num entities
+        self.flush(client, collection_name)
+        num_entities = self.get_collection_stats(client, collection_name)[0]
+        assert num_entities.get("row_count", None) == nb
+
+        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_equal_to_resource_limit(self):
