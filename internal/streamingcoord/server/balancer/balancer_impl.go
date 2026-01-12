@@ -231,6 +231,11 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 		b.Logger().Info("balancer execute finished")
 	}()
 
+	if err := b.blockUntilExpectedInitialStreamingNodeNumReached(b.backgroundTaskNotifier.Context()); err != nil {
+		b.Logger().Warn("fail to block until expected initial streaming node number reached", zap.Error(err))
+		return
+	}
+
 	balanceTimer := typeutil.NewBackoffTimer(&backoffConfigFetcher{})
 	nodeChanged, err := resource.Resource().StreamingNodeManagerClient().WatchNodeChanged(b.backgroundTaskNotifier.Context())
 	if err != nil {
@@ -358,6 +363,41 @@ func (b *balancerImpl) blockUntilAllNodeIsGreaterThan260AtBackground(ctx context
 		}
 	}
 	return b.channelMetaManager.MarkStreamingHasEnabled(ctx)
+}
+
+// blockUntilExpectedInitialStreamingNodeNumReached block until the expected initial streaming node number is reached.
+func (b *balancerImpl) blockUntilExpectedInitialStreamingNodeNumReached(ctx context.Context) error {
+	if b.channelMetaManager.IsStreamingEnabledOnce() {
+		b.Logger().Info("streaming has been enabled once, skip waiting initial streaming node number reached")
+		return nil
+	}
+
+	expectedInitialStreamingNodeNum := paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.GetAsInt()
+	if expectedInitialStreamingNodeNum <= 0 {
+		b.Logger().Info("no expected initial streaming node number, skip waiting initial streaming node number reached")
+		return nil
+	}
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	logger := b.Logger().With(zap.Int("expectedInitialStreamingNodeNum", expectedInitialStreamingNodeNum))
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			nodes, err := resource.Resource().StreamingNodeManagerClient().GetAllStreamingNodes(ctx)
+			if err != nil {
+				logger.Warn("fail to get all streaming nodes, ignore the error and continue to wait...", zap.Error(err))
+				continue
+			}
+			if len(nodes) >= expectedInitialStreamingNodeNum {
+				logger.Info("expected initial streaming node number reached, stop waiting...", zap.Int("streamingNodeNum", len(nodes)))
+				return nil
+			}
+			logger.Info("streaming node number is not enough, continue to wait...", zap.Int("streamingNodeNum", len(nodes)))
+		}
+	}
 }
 
 // blockUntilRoleGreaterThanVersion block until the role is greater than 2.6.0 at background.
