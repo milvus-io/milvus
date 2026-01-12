@@ -1706,11 +1706,18 @@ func GetAllFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldSche
 }
 
 // IsExternalCollection returns true when schema describes an external collection.
+// External collections are identified by having fields with ExternalField set,
+// since ExternalSource can be null for empty external collections.
 func IsExternalCollection(schema *schemapb.CollectionSchema) bool {
 	if schema == nil {
 		return false
 	}
-	return strings.TrimSpace(schema.GetExternalSource()) != ""
+	for _, field := range schema.GetFields() {
+		if field.GetExternalField() != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // GetVectorFieldSchemas get vector fields schema from collection schema.

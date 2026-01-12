@@ -352,11 +352,18 @@ External collections have the following restrictions enforced by `ValidateExtern
 
 ```go
 // IsExternalCollection returns true when schema describes an external collection.
+// External collections are identified by having fields with ExternalField set,
+// since ExternalSource can be null for empty external collections.
 func IsExternalCollection(schema *schemapb.CollectionSchema) bool {
     if schema == nil {
         return false
     }
-    return strings.TrimSpace(schema.GetExternalSource()) != ""
+    for _, field := range schema.GetFields() {
+        if field.GetExternalField() != "" {
+            return true
+        }
+    }
+    return false
 }
 
 // ValidateExternalCollectionSchema ensures unsupported features are disabled for external collections.

@@ -4978,14 +4978,31 @@ func TestSchemaHelper_CanRetrieveRawFieldData(t *testing.T) {
 }
 
 func TestIsExternalCollection(t *testing.T) {
+	// nil schema
 	assert.False(t, IsExternalCollection(nil))
 
+	// empty schema with no fields
 	schema := &schemapb.CollectionSchema{}
 	assert.False(t, IsExternalCollection(schema))
 
-	schema.ExternalSource = "   "
+	// schema with fields but no ExternalField set
+	schema.Fields = []*schemapb.FieldSchema{
+		{Name: "field1", ExternalField: ""},
+	}
 	assert.False(t, IsExternalCollection(schema))
 
+	// schema with ExternalSource but no ExternalField set
+	schema.ExternalSource = "s3://bucket/path"
+	assert.False(t, IsExternalCollection(schema))
+
+	// schema with ExternalField set (empty ExternalSource is allowed)
+	schema.ExternalSource = ""
+	schema.Fields = []*schemapb.FieldSchema{
+		{Name: "field1", ExternalField: "ext_field1"},
+	}
+	assert.True(t, IsExternalCollection(schema))
+
+	// schema with both ExternalSource and ExternalField set
 	schema.ExternalSource = "s3://bucket/path"
 	assert.True(t, IsExternalCollection(schema))
 }
@@ -5017,8 +5034,19 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 	}
 
 	t.Run("non external schema skipped", func(t *testing.T) {
-		schema := buildSchema()
-		schema.ExternalSource = ""
+		// A non-external schema has no ExternalField set on any field
+		schema := &schemapb.CollectionSchema{
+			Name: "regular_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "32"},
+					},
+				},
+			},
+		}
 		assert.NoError(t, ValidateExternalCollectionSchema(schema))
 	})
 

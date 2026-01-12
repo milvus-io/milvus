@@ -1893,8 +1893,31 @@ func TestNamespaceProperty(t *testing.T) {
 	})
 
 	t.Run("test namespace enabled with external collection", func(t *testing.T) {
-		schema := initSchema()
-		schema.ExternalSource = "s3://bucket/path"
+		// External collection is identified by having ExternalField set on fields
+		schema := &schemapb.CollectionSchema{
+			Name:           collectionName,
+			ExternalSource: "s3://bucket/path",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:       100,
+					Name:          "text",
+					DataType:      schemapb.DataType_VarChar,
+					ExternalField: "text_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+					},
+				},
+				{
+					FieldID:       101,
+					Name:          "vector",
+					DataType:      schemapb.DataType_FloatVector,
+					ExternalField: "vector_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "1024"},
+					},
+				},
+			},
+		}
 
 		task := &createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
