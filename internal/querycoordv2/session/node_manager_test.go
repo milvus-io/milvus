@@ -66,6 +66,96 @@ func (s *NodeManagerSuite) TestNodeOperation() {
 	s.False(s.nodeManager.IsStoppingNode(2))
 }
 
+func (s *NodeManagerSuite) TestResourceExhaustion() {
+	nodeID := int64(1)
+	s.nodeManager.Add(NewNodeInfo(ImmutableNodeInfo{NodeID: nodeID}))
+
+	s.Run("mark_exhausted", func() {
+		s.nodeManager.MarkResourceExhaustion(nodeID, 10*time.Minute)
+		s.True(s.nodeManager.IsResourceExhausted(nodeID))
+	})
+
+	s.Run("expired_without_cleanup", func() {
+		// IsResourceExhausted is pure read-only, does not auto-clear
+		s.nodeManager.MarkResourceExhaustion(nodeID, 1*time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
+		// After expiry, IsResourceExhausted returns false (pure check)
+		s.False(s.nodeManager.IsResourceExhausted(nodeID))
+	})
+
+	s.Run("clear_expired", func() {
+		// Set expired mark
+		s.nodeManager.MarkResourceExhaustion(nodeID, 1*time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
+		// ClearExpiredResourceExhaustion should clear expired marks
+		s.nodeManager.ClearExpiredResourceExhaustion()
+		s.False(s.nodeManager.IsResourceExhausted(nodeID))
+	})
+
+	s.Run("clear_does_not_affect_active", func() {
+		// Set active mark
+		s.nodeManager.MarkResourceExhaustion(nodeID, 10*time.Minute)
+		// ClearExpiredResourceExhaustion should not clear active marks
+		s.nodeManager.ClearExpiredResourceExhaustion()
+		s.True(s.nodeManager.IsResourceExhausted(nodeID))
+	})
+
+	s.Run("invalid_node", func() {
+		s.False(s.nodeManager.IsResourceExhausted(999))
+	})
+
+	s.Run("mark_non_existent_node", func() {
+		// MarkResourceExhaustion on non-existent node should not panic
+		s.nodeManager.MarkResourceExhaustion(999, 10*time.Minute)
+		s.False(s.nodeManager.IsResourceExhausted(999))
+	})
+
+	s.Run("clear_mark_with_zero_duration", func() {
+		// Mark the node as exhausted
+		s.nodeManager.MarkResourceExhaustion(nodeID, 10*time.Minute)
+		s.True(s.nodeManager.IsResourceExhausted(nodeID))
+		// Clear the mark by setting duration to 0
+		s.nodeManager.MarkResourceExhaustion(nodeID, 0)
+		s.False(s.nodeManager.IsResourceExhausted(nodeID))
+	})
+
+	s.Run("clear_mark_with_negative_duration", func() {
+		// Mark the node as exhausted
+		s.nodeManager.MarkResourceExhaustion(nodeID, 10*time.Minute)
+		s.True(s.nodeManager.IsResourceExhausted(nodeID))
+		// Clear the mark by setting negative duration
+		s.nodeManager.MarkResourceExhaustion(nodeID, -1*time.Second)
+		s.False(s.nodeManager.IsResourceExhausted(nodeID))
+	})
+
+	s.Run("multiple_nodes_cleanup", func() {
+		// Add more nodes
+		nodeID2 := int64(2)
+		nodeID3 := int64(3)
+		s.nodeManager.Add(NewNodeInfo(ImmutableNodeInfo{NodeID: nodeID2}))
+		s.nodeManager.Add(NewNodeInfo(ImmutableNodeInfo{NodeID: nodeID3}))
+
+		// Mark all nodes as exhausted with different durations
+		s.nodeManager.MarkResourceExhaustion(nodeID, 1*time.Millisecond)  // will expire
+		s.nodeManager.MarkResourceExhaustion(nodeID2, 10*time.Minute)     // won't expire
+		s.nodeManager.MarkResourceExhaustion(nodeID3, 1*time.Millisecond) // will expire
+
+		time.Sleep(2 * time.Millisecond)
+
+		// Before cleanup, check status
+		s.False(s.nodeManager.IsResourceExhausted(nodeID))  // expired
+		s.True(s.nodeManager.IsResourceExhausted(nodeID2))  // still active
+		s.False(s.nodeManager.IsResourceExhausted(nodeID3)) // expired
+
+		// Cleanup should clear expired marks only
+		s.nodeManager.ClearExpiredResourceExhaustion()
+
+		s.False(s.nodeManager.IsResourceExhausted(nodeID))
+		s.True(s.nodeManager.IsResourceExhausted(nodeID2)) // still active
+		s.False(s.nodeManager.IsResourceExhausted(nodeID3))
+	})
+}
+
 func (s *NodeManagerSuite) TestNodeInfo() {
 	node := NewNodeInfo(ImmutableNodeInfo{
 		NodeID:   1,
