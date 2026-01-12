@@ -1440,22 +1440,27 @@ SegmentGrowingImpl::bulk_subscript_ptr_impl(
     int64_t count,
     google::protobuf::RepeatedPtrField<std::string>* dst) const {
     auto vec = dynamic_cast<const ConcurrentVector<S>*>(vec_raw);
+    AssertInfo(vec, "Pointer of vec_raw is nullptr");
     auto& src = *vec;
-    if constexpr (std::is_same_v<S, Json>) {
-        // For Json type, we must use operator[] instead of view_element()
-        // to ensure the Json object lives long enough. view_element() returns
-        // a string_view that may point to memory owned by a temporary Json
-        // object, which gets destroyed before we can construct std::string.
-        // Using operator[] copies the Json object, extending its lifetime.
-        for (int64_t i = 0; i < count; ++i) {
-            auto offset = seg_offsets[i];
-            Json json = src[offset];  // Copy Json object to extend lifetime
-            dst->at(i) = std::string(json.data());
+    for (int64_t i = 0; i < count; ++i) {
+        auto offset = seg_offsets[i];
+        if (offset == INVALID_SEG_OFFSET) {
+            continue;
         }
-    } else {
-        for (int64_t i = 0; i < count; ++i) {
-            auto offset = seg_offsets[i];
-            dst->at(i) = std::string(src.view_element(offset));
+
+        if constexpr (IsVariableTypeSupportInChunk<S>) {
+            if (src.is_mmap()) {
+                auto view = src.view_element(offset);
+                dst->at(i).assign(view.data(), view.size());
+                continue;
+            }
+        }
+
+        if constexpr (std::is_same_v<S, Json>) {
+            const auto& json = src[offset];
+            dst->at(i).assign(json.data(), json.size());
+        } else {
+            dst->at(i) = src[offset];
         }
     }
 }
@@ -1467,13 +1472,43 @@ SegmentGrowingImpl::bulk_subscript_ptr_impl(const VectorBase* vec_raw,
                                             int64_t count,
                                             T* dst) const {
     auto vec = dynamic_cast<const ConcurrentVector<S>*>(vec_raw);
-    auto& src = *vec;
-    for (int64_t i = 0; i < count; ++i) {
-        auto offset = seg_offsets[i];
-        if (offset != INVALID_SEG_OFFSET) {
-            dst[i] = T(src.view_element(offset));
-        } else {
-            dst[i] = T();  // Default-initialize for invalid offsets
+    AssertInfo(vec != nullptr, "vec_raw must be ConcurrentVector<S>");
+
+    const auto& src = *vec;
+
+    if constexpr (IsVariableTypeSupportInChunk<S>) {
+        const bool use_mmap = src.is_mmap();
+
+        for (int64_t i = 0; i < count; ++i) {
+            auto offset = seg_offsets[i];
+            if (offset == INVALID_SEG_OFFSET) {
+                dst[i] = T{};
+                continue;
+            }
+
+            if (use_mmap) {
+                auto view = src.view_element(offset);
+                if constexpr (std::is_same_v<T, std::string>) {
+                    dst[i].assign(view.data(), view.size());
+                } else if constexpr (std::is_same_v<T, Json>) {
+                    dst[i] = Json(view.data(), view.size());
+                } else if constexpr (std::is_same_v<T, Array>) {
+                    view.output_data(dst[i]);
+                } else {
+                    dst[i] = T(view);
+                }
+            } else {
+                dst[i] = src[offset];
+            }
+        }
+    } else {
+        for (int64_t i = 0; i < count; ++i) {
+            const auto offset = seg_offsets[i];
+            if (offset == INVALID_SEG_OFFSET) {
+                dst[i] = T{};
+                continue;
+            }
+            dst[i] = src[offset];
         }
     }
 }
@@ -1711,17 +1746,10 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
         case DataType::ARRAY: {
             auto vec = dynamic_cast<const ConcurrentVector<Array>*>(vec_ptr);
             AssertInfo(vec, "Pointer of vec_ptr is nullptr for ARRAY type");
-            auto& src = *vec;
+            // The destination `data` is already Array*, so just cast it.
             auto dst = static_cast<Array*>(data);
-            for (int64_t i = 0; i < count; ++i) {
-                auto offset = seg_offsets[i];
-                if (offset != INVALID_SEG_OFFSET) {
-                    dst[i] = src[offset];
-                } else {
-                    dst[i] =
-                        Array();  // Default-construct empty Array for invalid offsets
-                }
-            }
+            // Call bulk_subscript_ptr_impl with S=Array (source type) and T=Array (destination type)
+            bulk_subscript_ptr_impl<Array, Array>(vec, seg_offsets, count, dst);
             break;
         }
         default: {

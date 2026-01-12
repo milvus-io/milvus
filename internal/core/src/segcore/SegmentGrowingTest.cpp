@@ -1446,3 +1446,1179 @@ TEST(Growing, MultipleFieldsResourceEstimation) {
                            N * sizeof(Timestamp);
     EXPECT_GE(resource.memory_bytes, min_expected);
 }
+TEST(Growing, BulkSubscriptPtrImpl) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto bool_field = schema->AddDebugField("bool", DataType::BOOL);
+    auto int8_field = schema->AddDebugField("int8", DataType::INT8);
+    auto int16_field = schema->AddDebugField("int16", DataType::INT16);
+    auto int32_field = schema->AddDebugField("int32", DataType::INT32);
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto float_field = schema->AddDebugField("float", DataType::FLOAT);
+    auto double_field = schema->AddDebugField("double", DataType::DOUBLE);
+    auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
+    auto json_field = schema->AddDebugField("json", DataType::JSON);
+    auto int_array_field =
+        schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT32);
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    // Insert data
+    int64_t N = 100;
+    int array_len = 5;
+    auto dataset = DataGen(schema, N, 42, 0, 1, array_len);
+
+    auto offset = segment->PreInsert(N);
+    segment->Insert(offset,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    // Seg offsets
+    std::vector<int64_t> seg_offsets(N);
+    std::iota(seg_offsets.begin(), seg_offsets.end(), 0);
+    FixedVector<bool> valid_data;
+
+    // Helper lambda for scalar types
+    auto test_scalar = [&](FieldId field, auto type_tag, auto buffer_type_tag) {
+        using T = decltype(type_tag);               // Original type
+        using BufferT = decltype(buffer_type_tag);  // Buffer type
+        FixedVector<BufferT> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     field,
+                                     schema->operator[](field).get_data_type(),
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data);
+
+        auto col_data = dataset.get_col<T>(field);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], (BufferT)col_data[i]);
+        }
+    };
+
+    test_scalar(bool_field, bool{}, bool{});
+    test_scalar(int8_field, int8_t{}, int32_t{});
+    test_scalar(int16_field, int16_t{}, int32_t{});
+    test_scalar(int32_field, int32_t{}, int32_t{});
+    test_scalar(int64_field, int64_t{}, int64_t{});
+    test_scalar(float_field, float{}, float{});
+    test_scalar(double_field, double{}, double{});
+
+    // Varchar
+    {
+        FixedVector<std::string> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     varchar_field,
+                                     DataType::VARCHAR,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data);
+        auto col_data = dataset.get_col<std::string>(varchar_field);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // JSON
+    {
+        FixedVector<Json> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     json_field,
+                                     DataType::JSON,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data);
+        auto col_data = dataset.get_col<std::string>(json_field);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(std::string(result[i].data()), col_data[i]);
+        }
+    }
+
+    // Array
+    {
+        auto int_array_proto_data =
+            dataset.get_col<ScalarFieldProto>(int_array_field);
+        FixedVector<Array> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     int_array_field,
+                                     DataType::ARRAY,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data);
+
+        for (int64_t i = 0; i < N; ++i) {
+            const auto& expected = int_array_proto_data[i];
+            const auto& actual = result[i];
+            EXPECT_EQ(actual.length(), expected.int_data().data_size())
+                << "Array length mismatch at index " << i;
+            EXPECT_EQ(actual.get_element_type(), DataType::INT32)
+                << "Element type mismatch at index " << i;
+            for (int j = 0; j < actual.length(); ++j) {
+                EXPECT_EQ(actual.get_data<int>(j), expected.int_data().data(j))
+                    << "Data mismatch at index " << i << ", element " << j;
+            }
+        }
+    }
+
+    // Test with INVALID_SEG_OFFSET (using Array field as representative)
+    {
+        auto int_array_proto_data =
+            dataset.get_col<ScalarFieldProto>(int_array_field);
+        std::vector<int64_t> offsets_with_invalid = {
+            0, INVALID_SEG_OFFSET, 2, 3};
+        FixedVector<Array> result(offsets_with_invalid.size());
+        segment_impl->bulk_subscript(nullptr,
+                                     int_array_field,
+                                     DataType::ARRAY,
+                                     offsets_with_invalid.data(),
+                                     offsets_with_invalid.size(),
+                                     result.data(),
+                                     valid_data);
+
+        EXPECT_EQ(result[1].length(), 0)
+            << "Invalid offset should produce empty array";
+        EXPECT_EQ(result[0].length(),
+                  int_array_proto_data[0].int_data().data_size());
+    }
+}
+
+// Test class for mmap mode bulk_subscript operations
+class GrowingMmapTest : public ::testing::Test {
+ public:
+    void
+    SetUp() override {
+        auto& mmap_config =
+            milvus::storage::MmapManager::GetInstance().GetMmapConfig();
+        mmap_config.SetEnableGrowingMmap(true);
+    }
+    void
+    TearDown() override {
+        auto& mmap_config =
+            milvus::storage::MmapManager::GetInstance().GetMmapConfig();
+        mmap_config.SetEnableGrowingMmap(false);
+    }
+};
+
+// Test bulk_subscript with mmap enabled for all scalar field types
+TEST_F(GrowingMmapTest, BulkSubscriptMmapAllScalarTypes) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto bool_field = schema->AddDebugField("bool", DataType::BOOL);
+    auto int8_field = schema->AddDebugField("int8", DataType::INT8);
+    auto int16_field = schema->AddDebugField("int16", DataType::INT16);
+    auto int32_field = schema->AddDebugField("int32", DataType::INT32);
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto float_field = schema->AddDebugField("float", DataType::FLOAT);
+    auto double_field = schema->AddDebugField("double", DataType::DOUBLE);
+    auto timestamptz_field =
+        schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ);
+    auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
+    auto json_field = schema->AddDebugField("json", DataType::JSON);
+    auto int_array_field =
+        schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT32);
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    // Insert data
+    int64_t N = 100;
+    int array_len = 5;
+    auto dataset = DataGen(schema, N, 42, 0, 1, array_len);
+
+    auto offset = segment->PreInsert(N);
+    segment->Insert(offset,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    // Seg offsets
+    std::vector<int64_t> seg_offsets(N);
+    std::iota(seg_offsets.begin(), seg_offsets.end(), 0);
+    TargetBitmap valid_data(N);
+
+    // Test bool field
+    {
+        FixedVector<bool> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     bool_field,
+                                     DataType::BOOL,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data);
+        auto col_data = dataset.get_col<bool>(bool_field);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test int8 field
+    {
+        FixedVector<int8_t> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     int8_field,
+                                     DataType::INT8,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data,
+                                     true);
+        auto col_data = dataset.get_col<int8_t>(int8_field);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test int16 field
+    {
+        FixedVector<int16_t> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     int16_field,
+                                     DataType::INT16,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data,
+                                     true);
+        auto col_data = dataset.get_col<int16_t>(int16_field);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test int32 field
+    {
+        FixedVector<int32_t> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     int32_field,
+                                     DataType::INT32,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data);
+        auto col_data = dataset.get_col<int32_t>(int32_field);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test int64 field
+    {
+        FixedVector<int64_t> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     int64_field,
+                                     DataType::INT64,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data);
+        auto col_data = dataset.get_col<int64_t>(int64_field);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test float field
+    {
+        FixedVector<float> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     float_field,
+                                     DataType::FLOAT,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data);
+        auto col_data = dataset.get_col<float>(float_field);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_FLOAT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test double field
+    {
+        FixedVector<double> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     double_field,
+                                     DataType::DOUBLE,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data);
+        auto col_data = dataset.get_col<double>(double_field);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_DOUBLE_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test timestamptz field
+    {
+        FixedVector<int64_t> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     timestamptz_field,
+                                     DataType::TIMESTAMPTZ,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data);
+        auto col_data = dataset.get_col<int64_t>(timestamptz_field);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test varchar field (variable length type - uses mmap view_element)
+    {
+        FixedVector<std::string> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     varchar_field,
+                                     DataType::VARCHAR,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data);
+        auto col_data = dataset.get_col<std::string>(varchar_field);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test json field (variable length type - uses mmap view_element)
+    {
+        FixedVector<Json> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     json_field,
+                                     DataType::JSON,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data);
+        auto col_data = dataset.get_col<std::string>(json_field);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(std::string(result[i].data()), col_data[i]);
+        }
+    }
+
+    // Test array field (variable length type - uses mmap view_element)
+    {
+        auto int_array_proto_data =
+            dataset.get_col<ScalarFieldProto>(int_array_field);
+        FixedVector<Array> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     int_array_field,
+                                     DataType::ARRAY,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data);
+
+        for (int64_t i = 0; i < N; ++i) {
+            const auto& expected = int_array_proto_data[i];
+            const auto& actual = result[i];
+            EXPECT_EQ(actual.length(), expected.int_data().data_size())
+                << "Array length mismatch at index " << i;
+            for (int j = 0; j < actual.length(); ++j) {
+                EXPECT_EQ(actual.get_data<int>(j), expected.int_data().data(j))
+                    << "Data mismatch at index " << i << ", element " << j;
+            }
+        }
+    }
+}
+
+// Test bulk_subscript with mmap enabled for nullable fields
+TEST_F(GrowingMmapTest, BulkSubscriptMmapNullableFields) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto varchar_field =
+        schema->AddDebugField("varchar", DataType::VARCHAR, true);
+    auto json_field = schema->AddDebugField("json", DataType::JSON, true);
+    auto int_array_field = schema->AddDebugField(
+        "int_array", DataType::ARRAY, DataType::INT32, true);
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    // Insert data with nullable fields
+    int64_t N = 100;
+    int null_percent = 20;
+    int array_len = 5;
+    auto dataset = DataGen(
+        schema, N, 42, 0, 1, array_len, 1, false, true, false, null_percent);
+
+    auto offset = segment->PreInsert(N);
+    segment->Insert(offset,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    // Seg offsets
+    std::vector<int64_t> seg_offsets(N);
+    std::iota(seg_offsets.begin(), seg_offsets.end(), 0);
+    TargetBitmap valid_data(N);
+
+    // Test nullable varchar field
+    {
+        FixedVector<std::string> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     varchar_field,
+                                     DataType::VARCHAR,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data);
+
+        auto col_valid = dataset.get_col_valid(varchar_field);
+        auto col_data = dataset.get_col<std::string>(varchar_field);
+        int valid_count = 0;
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(valid_data[i], col_valid[i]);
+            if (col_valid[i]) {
+                EXPECT_EQ(result[i], col_data[valid_count]);
+                valid_count++;
+            }
+        }
+    }
+
+    // Test nullable json field
+    {
+        FixedVector<Json> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     json_field,
+                                     DataType::JSON,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data);
+
+        auto col_valid = dataset.get_col_valid(json_field);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(valid_data[i], col_valid[i]);
+        }
+    }
+
+    // Test nullable array field
+    {
+        FixedVector<Array> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     int_array_field,
+                                     DataType::ARRAY,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data);
+
+        auto col_valid = dataset.get_col_valid(int_array_field);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(valid_data[i], col_valid[i]);
+        }
+    }
+}
+
+// Test bulk_subscript with geometry field in mmap mode
+TEST_F(GrowingMmapTest, BulkSubscriptMmapGeometry) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto geometry_field = schema->AddDebugField("geometry", DataType::GEOMETRY);
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    // Insert data
+    int64_t N = 100;
+    auto dataset = DataGen(schema, N, 42);
+
+    auto offset = segment->PreInsert(N);
+    segment->Insert(offset,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    // Seg offsets
+    std::vector<int64_t> seg_offsets(N);
+    std::iota(seg_offsets.begin(), seg_offsets.end(), 0);
+    TargetBitmap valid_data(N);
+
+    // Test geometry field (variable length type - uses mmap view_element)
+    {
+        FixedVector<std::string> result(N);
+        segment_impl->bulk_subscript(nullptr,
+                                     geometry_field,
+                                     DataType::GEOMETRY,
+                                     seg_offsets.data(),
+                                     N,
+                                     result.data(),
+                                     valid_data);
+        auto col_data = dataset.get_col<std::string>(geometry_field);
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+}
+
+// Test bulk_script_field_data function from Utils.cpp for all scalar types
+TEST(UtilsTest, BulkScriptFieldDataAllScalarTypes) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto bool_field = schema->AddDebugField("bool", DataType::BOOL);
+    auto int8_field = schema->AddDebugField("int8", DataType::INT8);
+    auto int16_field = schema->AddDebugField("int16", DataType::INT16);
+    auto int32_field = schema->AddDebugField("int32", DataType::INT32);
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto float_field = schema->AddDebugField("float", DataType::FLOAT);
+    auto double_field = schema->AddDebugField("double", DataType::DOUBLE);
+    auto timestamptz_field =
+        schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ);
+    auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
+    auto text_field = schema->AddDebugField("text", DataType::TEXT);
+    auto json_field = schema->AddDebugField("json", DataType::JSON);
+    auto geometry_field = schema->AddDebugField("geometry", DataType::GEOMETRY);
+    auto int_array_field =
+        schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT32);
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+
+    // Insert data
+    int64_t N = 50;
+    int array_len = 5;
+    auto dataset = DataGen(schema, N, 42, 0, 1, array_len);
+
+    auto offset = segment->PreInsert(N);
+    segment->Insert(offset,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    // Seg offsets
+    std::vector<int64_t> seg_offsets(N);
+    std::iota(seg_offsets.begin(), seg_offsets.end(), 0);
+
+    // Test BOOL
+    {
+        TargetBitmap valid_view(N);
+        auto field_data = bulk_script_field_data(nullptr,
+                                                 bool_field,
+                                                 DataType::BOOL,
+                                                 seg_offsets.data(),
+                                                 N,
+                                                 segment.get(),
+                                                 valid_view);
+        ASSERT_NE(field_data, nullptr);
+        EXPECT_EQ(field_data->get_num_rows(), N);
+        auto col_data = dataset.get_col<bool>(bool_field);
+        auto result = static_cast<const bool*>(field_data->Data());
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test INT8 with small_int_raw_type=true
+    {
+        TargetBitmap valid_view(N);
+        auto field_data = bulk_script_field_data(nullptr,
+                                                 int8_field,
+                                                 DataType::INT8,
+                                                 seg_offsets.data(),
+                                                 N,
+                                                 segment.get(),
+                                                 valid_view,
+                                                 true);
+        ASSERT_NE(field_data, nullptr);
+        EXPECT_EQ(field_data->get_num_rows(), N);
+        auto col_data = dataset.get_col<int8_t>(int8_field);
+        auto result = static_cast<const int8_t*>(field_data->Data());
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test INT16 with small_int_raw_type=true
+    {
+        TargetBitmap valid_view(N);
+        auto field_data = bulk_script_field_data(nullptr,
+                                                 int16_field,
+                                                 DataType::INT16,
+                                                 seg_offsets.data(),
+                                                 N,
+                                                 segment.get(),
+                                                 valid_view,
+                                                 true);
+        ASSERT_NE(field_data, nullptr);
+        EXPECT_EQ(field_data->get_num_rows(), N);
+        auto col_data = dataset.get_col<int16_t>(int16_field);
+        auto result = static_cast<const int16_t*>(field_data->Data());
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test INT32
+    {
+        TargetBitmap valid_view(N);
+        auto field_data = bulk_script_field_data(nullptr,
+                                                 int32_field,
+                                                 DataType::INT32,
+                                                 seg_offsets.data(),
+                                                 N,
+                                                 segment.get(),
+                                                 valid_view);
+        ASSERT_NE(field_data, nullptr);
+        EXPECT_EQ(field_data->get_num_rows(), N);
+        auto col_data = dataset.get_col<int32_t>(int32_field);
+        auto result = static_cast<const int32_t*>(field_data->Data());
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test INT64
+    {
+        TargetBitmap valid_view(N);
+        auto field_data = bulk_script_field_data(nullptr,
+                                                 int64_field,
+                                                 DataType::INT64,
+                                                 seg_offsets.data(),
+                                                 N,
+                                                 segment.get(),
+                                                 valid_view);
+        ASSERT_NE(field_data, nullptr);
+        EXPECT_EQ(field_data->get_num_rows(), N);
+        auto col_data = dataset.get_col<int64_t>(int64_field);
+        auto result = static_cast<const int64_t*>(field_data->Data());
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test TIMESTAMPTZ
+    {
+        TargetBitmap valid_view(N);
+        auto field_data = bulk_script_field_data(nullptr,
+                                                 timestamptz_field,
+                                                 DataType::TIMESTAMPTZ,
+                                                 seg_offsets.data(),
+                                                 N,
+                                                 segment.get(),
+                                                 valid_view);
+        ASSERT_NE(field_data, nullptr);
+        EXPECT_EQ(field_data->get_num_rows(), N);
+        auto col_data = dataset.get_col<int64_t>(timestamptz_field);
+        auto result = static_cast<const int64_t*>(field_data->Data());
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test FLOAT
+    {
+        TargetBitmap valid_view(N);
+        auto field_data = bulk_script_field_data(nullptr,
+                                                 float_field,
+                                                 DataType::FLOAT,
+                                                 seg_offsets.data(),
+                                                 N,
+                                                 segment.get(),
+                                                 valid_view);
+        ASSERT_NE(field_data, nullptr);
+        EXPECT_EQ(field_data->get_num_rows(), N);
+        auto col_data = dataset.get_col<float>(float_field);
+        auto result = static_cast<const float*>(field_data->Data());
+        for (int i = 0; i < N; ++i) {
+            EXPECT_FLOAT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test DOUBLE
+    {
+        TargetBitmap valid_view(N);
+        auto field_data = bulk_script_field_data(nullptr,
+                                                 double_field,
+                                                 DataType::DOUBLE,
+                                                 seg_offsets.data(),
+                                                 N,
+                                                 segment.get(),
+                                                 valid_view);
+        ASSERT_NE(field_data, nullptr);
+        EXPECT_EQ(field_data->get_num_rows(), N);
+        auto col_data = dataset.get_col<double>(double_field);
+        auto result = static_cast<const double*>(field_data->Data());
+        for (int i = 0; i < N; ++i) {
+            EXPECT_DOUBLE_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test VARCHAR
+    {
+        TargetBitmap valid_view(N);
+        auto field_data = bulk_script_field_data(nullptr,
+                                                 varchar_field,
+                                                 DataType::VARCHAR,
+                                                 seg_offsets.data(),
+                                                 N,
+                                                 segment.get(),
+                                                 valid_view);
+        ASSERT_NE(field_data, nullptr);
+        EXPECT_EQ(field_data->get_num_rows(), N);
+        auto col_data = dataset.get_col<std::string>(varchar_field);
+        auto result = static_cast<const std::string*>(field_data->Data());
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test TEXT
+    {
+        TargetBitmap valid_view(N);
+        auto field_data = bulk_script_field_data(nullptr,
+                                                 text_field,
+                                                 DataType::TEXT,
+                                                 seg_offsets.data(),
+                                                 N,
+                                                 segment.get(),
+                                                 valid_view);
+        ASSERT_NE(field_data, nullptr);
+        EXPECT_EQ(field_data->get_num_rows(), N);
+        auto col_data = dataset.get_col<std::string>(text_field);
+        auto result = static_cast<const std::string*>(field_data->Data());
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test JSON
+    {
+        TargetBitmap valid_view(N);
+        auto field_data = bulk_script_field_data(nullptr,
+                                                 json_field,
+                                                 DataType::JSON,
+                                                 seg_offsets.data(),
+                                                 N,
+                                                 segment.get(),
+                                                 valid_view);
+        ASSERT_NE(field_data, nullptr);
+        EXPECT_EQ(field_data->get_num_rows(), N);
+        auto col_data = dataset.get_col<std::string>(json_field);
+        auto result = static_cast<const Json*>(field_data->Data());
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(std::string(result[i].data()), col_data[i]);
+        }
+    }
+
+    // Test GEOMETRY
+    {
+        TargetBitmap valid_view(N);
+        auto field_data = bulk_script_field_data(nullptr,
+                                                 geometry_field,
+                                                 DataType::GEOMETRY,
+                                                 seg_offsets.data(),
+                                                 N,
+                                                 segment.get(),
+                                                 valid_view);
+        ASSERT_NE(field_data, nullptr);
+        EXPECT_EQ(field_data->get_num_rows(), N);
+        auto col_data = dataset.get_col<std::string>(geometry_field);
+        auto result = static_cast<const std::string*>(field_data->Data());
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test ARRAY
+    {
+        TargetBitmap valid_view(N);
+        auto field_data = bulk_script_field_data(nullptr,
+                                                 int_array_field,
+                                                 DataType::ARRAY,
+                                                 seg_offsets.data(),
+                                                 N,
+                                                 segment.get(),
+                                                 valid_view);
+        ASSERT_NE(field_data, nullptr);
+        EXPECT_EQ(field_data->get_num_rows(), N);
+        auto proto_data = dataset.get_col<ScalarFieldProto>(int_array_field);
+        auto result = static_cast<const Array*>(field_data->Data());
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i].length(), proto_data[i].int_data().data_size());
+        }
+    }
+}
+
+// Test bulk_script_field_data with mmap enabled
+TEST_F(GrowingMmapTest, BulkScriptFieldDataMmap) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
+    auto json_field = schema->AddDebugField("json", DataType::JSON);
+    auto int_array_field =
+        schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT32);
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+
+    // Insert data
+    int64_t N = 50;
+    int array_len = 5;
+    auto dataset = DataGen(schema, N, 42, 0, 1, array_len);
+
+    auto offset = segment->PreInsert(N);
+    segment->Insert(offset,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    // Seg offsets
+    std::vector<int64_t> seg_offsets(N);
+    std::iota(seg_offsets.begin(), seg_offsets.end(), 0);
+
+    // Test VARCHAR in mmap mode
+    {
+        TargetBitmap valid_view(N);
+        auto field_data = bulk_script_field_data(nullptr,
+                                                 varchar_field,
+                                                 DataType::VARCHAR,
+                                                 seg_offsets.data(),
+                                                 N,
+                                                 segment.get(),
+                                                 valid_view);
+        ASSERT_NE(field_data, nullptr);
+        EXPECT_EQ(field_data->get_num_rows(), N);
+        auto col_data = dataset.get_col<std::string>(varchar_field);
+        auto result = static_cast<const std::string*>(field_data->Data());
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i], col_data[i]);
+        }
+    }
+
+    // Test JSON in mmap mode
+    {
+        TargetBitmap valid_view(N);
+        auto field_data = bulk_script_field_data(nullptr,
+                                                 json_field,
+                                                 DataType::JSON,
+                                                 seg_offsets.data(),
+                                                 N,
+                                                 segment.get(),
+                                                 valid_view);
+        ASSERT_NE(field_data, nullptr);
+        EXPECT_EQ(field_data->get_num_rows(), N);
+        auto col_data = dataset.get_col<std::string>(json_field);
+        auto result = static_cast<const Json*>(field_data->Data());
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(std::string(result[i].data()), col_data[i]);
+        }
+    }
+
+    // Test ARRAY in mmap mode
+    {
+        TargetBitmap valid_view(N);
+        auto field_data = bulk_script_field_data(nullptr,
+                                                 int_array_field,
+                                                 DataType::ARRAY,
+                                                 seg_offsets.data(),
+                                                 N,
+                                                 segment.get(),
+                                                 valid_view);
+        ASSERT_NE(field_data, nullptr);
+        EXPECT_EQ(field_data->get_num_rows(), N);
+        auto proto_data = dataset.get_col<ScalarFieldProto>(int_array_field);
+        auto result = static_cast<const Array*>(field_data->Data());
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(result[i].length(), proto_data[i].int_data().data_size());
+        }
+    }
+}
+
+// Test bulk_script_field_data for array types with different element types
+TEST(UtilsTest, BulkScriptFieldDataArrayElementTypes) {
+    // Test arrays with different element types
+    std::vector<std::pair<DataType, std::string>> element_types = {
+        {DataType::BOOL, "bool_array"},
+        {DataType::INT8, "int8_array"},
+        {DataType::INT16, "int16_array"},
+        {DataType::INT32, "int32_array"},
+        {DataType::INT64, "int64_array"},
+        {DataType::FLOAT, "float_array"},
+        {DataType::DOUBLE, "double_array"},
+        {DataType::VARCHAR, "varchar_array"},
+    };
+
+    for (const auto& [element_type, field_name] : element_types) {
+        auto schema = std::make_shared<Schema>();
+        auto pk = schema->AddDebugField("pk", DataType::INT64);
+        auto array_field =
+            schema->AddDebugField(field_name, DataType::ARRAY, element_type);
+        schema->set_primary_field_id(pk);
+
+        auto segment = CreateGrowingSegment(schema, empty_index_meta);
+
+        // Insert data
+        int64_t N = 10;
+        int array_len = 3;
+        auto dataset = DataGen(schema, N, 42, 0, 1, array_len);
+
+        auto offset = segment->PreInsert(N);
+        segment->Insert(offset,
+                        N,
+                        dataset.row_ids_.data(),
+                        dataset.timestamps_.data(),
+                        dataset.raw_);
+
+        // Seg offsets
+        std::vector<int64_t> seg_offsets(N);
+        std::iota(seg_offsets.begin(), seg_offsets.end(), 0);
+
+        TargetBitmap valid_view(N);
+        auto field_data = bulk_script_field_data(nullptr,
+                                                 array_field,
+                                                 DataType::ARRAY,
+                                                 seg_offsets.data(),
+                                                 N,
+                                                 segment.get(),
+                                                 valid_view);
+        ASSERT_NE(field_data, nullptr)
+            << "Failed for element type: " << field_name;
+        EXPECT_EQ(field_data->get_num_rows(), N)
+            << "Row count mismatch for: " << field_name;
+    }
+}
+
+// Test bulk_subscript with INVALID_SEG_OFFSET for all types
+TEST(UtilsTest, BulkSubscriptWithInvalidOffset) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
+    auto json_field = schema->AddDebugField("json", DataType::JSON);
+    auto int_array_field =
+        schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT32);
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    // Insert data
+    int64_t N = 10;
+    int array_len = 3;
+    auto dataset = DataGen(schema, N, 42, 0, 1, array_len);
+
+    auto offset = segment->PreInsert(N);
+    segment->Insert(offset,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    // Seg offsets with INVALID_SEG_OFFSET mixed in
+    std::vector<int64_t> seg_offsets = {
+        0, INVALID_SEG_OFFSET, 2, 3, INVALID_SEG_OFFSET, 5};
+    TargetBitmap valid_data(seg_offsets.size());
+
+    // Test VARCHAR with invalid offsets
+    {
+        FixedVector<std::string> result(seg_offsets.size());
+        segment_impl->bulk_subscript(nullptr,
+                                     varchar_field,
+                                     DataType::VARCHAR,
+                                     seg_offsets.data(),
+                                     seg_offsets.size(),
+                                     result.data(),
+                                     valid_data);
+        // Invalid offsets should produce empty strings
+        EXPECT_TRUE(result[1].empty());
+        EXPECT_TRUE(result[4].empty());
+        // Valid offsets should have data
+        EXPECT_FALSE(result[0].empty());
+    }
+
+    // Test JSON with invalid offsets
+    {
+        FixedVector<Json> result(seg_offsets.size());
+        segment_impl->bulk_subscript(nullptr,
+                                     json_field,
+                                     DataType::JSON,
+                                     seg_offsets.data(),
+                                     seg_offsets.size(),
+                                     result.data(),
+                                     valid_data);
+        // Invalid offsets should produce empty JSON
+        EXPECT_EQ(result[1].data().size(), 0);
+        EXPECT_EQ(result[4].data().size(), 0);
+    }
+
+    // Test ARRAY with invalid offsets
+    {
+        FixedVector<Array> result(seg_offsets.size());
+        segment_impl->bulk_subscript(nullptr,
+                                     int_array_field,
+                                     DataType::ARRAY,
+                                     seg_offsets.data(),
+                                     seg_offsets.size(),
+                                     result.data(),
+                                     valid_data);
+        // Invalid offsets should produce empty arrays
+        EXPECT_EQ(result[1].length(), 0);
+        EXPECT_EQ(result[4].length(), 0);
+    }
+}
+
+// Test comparison between mmap and non-mmap mode for consistency
+TEST_F(GrowingMmapTest, MmapNonMmapConsistency) {
+    // First create segment with mmap mode (enabled in SetUp)
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
+    auto json_field = schema->AddDebugField("json", DataType::JSON);
+    auto int_array_field =
+        schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT32);
+    schema->set_primary_field_id(pk);
+
+    int64_t N = 50;
+    int array_len = 5;
+    auto dataset = DataGen(schema, N, 42, 0, 1, array_len);
+
+    // Create mmap segment
+    auto mmap_segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto mmap_impl = dynamic_cast<SegmentGrowingImpl*>(mmap_segment.get());
+    ASSERT_NE(mmap_impl, nullptr);
+
+    {
+        auto offset = mmap_segment->PreInsert(N);
+        mmap_segment->Insert(offset,
+                             N,
+                             dataset.row_ids_.data(),
+                             dataset.timestamps_.data(),
+                             dataset.raw_);
+    }
+
+    // Disable mmap and create non-mmap segment
+    auto& mmap_config =
+        milvus::storage::MmapManager::GetInstance().GetMmapConfig();
+    mmap_config.SetEnableGrowingMmap(false);
+
+    auto non_mmap_segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto non_mmap_impl =
+        dynamic_cast<SegmentGrowingImpl*>(non_mmap_segment.get());
+    ASSERT_NE(non_mmap_impl, nullptr);
+
+    {
+        auto offset = non_mmap_segment->PreInsert(N);
+        non_mmap_segment->Insert(offset,
+                                 N,
+                                 dataset.row_ids_.data(),
+                                 dataset.timestamps_.data(),
+                                 dataset.raw_);
+    }
+
+    // Re-enable mmap (will be disabled again in TearDown)
+    mmap_config.SetEnableGrowingMmap(true);
+
+    // Seg offsets
+    std::vector<int64_t> seg_offsets(N);
+    std::iota(seg_offsets.begin(), seg_offsets.end(), 0);
+    TargetBitmap mmap_valid(N);
+    TargetBitmap non_mmap_valid(N);
+
+    // Compare VARCHAR results
+    {
+        FixedVector<std::string> mmap_result(N);
+        FixedVector<std::string> non_mmap_result(N);
+
+        mmap_impl->bulk_subscript(nullptr,
+                                  varchar_field,
+                                  DataType::VARCHAR,
+                                  seg_offsets.data(),
+                                  N,
+                                  mmap_result.data(),
+                                  mmap_valid);
+        non_mmap_impl->bulk_subscript(nullptr,
+                                      varchar_field,
+                                      DataType::VARCHAR,
+                                      seg_offsets.data(),
+                                      N,
+                                      non_mmap_result.data(),
+                                      non_mmap_valid);
+
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(mmap_result[i], non_mmap_result[i])
+                << "VARCHAR mismatch at index " << i;
+        }
+    }
+
+    // Compare JSON results
+    {
+        FixedVector<Json> mmap_result(N);
+        FixedVector<Json> non_mmap_result(N);
+
+        mmap_impl->bulk_subscript(nullptr,
+                                  json_field,
+                                  DataType::JSON,
+                                  seg_offsets.data(),
+                                  N,
+                                  mmap_result.data(),
+                                  mmap_valid);
+        non_mmap_impl->bulk_subscript(nullptr,
+                                      json_field,
+                                      DataType::JSON,
+                                      seg_offsets.data(),
+                                      N,
+                                      non_mmap_result.data(),
+                                      non_mmap_valid);
+
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(std::string(mmap_result[i].data()),
+                      std::string(non_mmap_result[i].data()))
+                << "JSON mismatch at index " << i;
+        }
+    }
+
+    // Compare ARRAY results
+    {
+        FixedVector<Array> mmap_result(N);
+        FixedVector<Array> non_mmap_result(N);
+
+        mmap_impl->bulk_subscript(nullptr,
+                                  int_array_field,
+                                  DataType::ARRAY,
+                                  seg_offsets.data(),
+                                  N,
+                                  mmap_result.data(),
+                                  mmap_valid);
+        non_mmap_impl->bulk_subscript(nullptr,
+                                      int_array_field,
+                                      DataType::ARRAY,
+                                      seg_offsets.data(),
+                                      N,
+                                      non_mmap_result.data(),
+                                      non_mmap_valid);
+
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(mmap_result[i].length(), non_mmap_result[i].length())
+                << "Array length mismatch at index " << i;
+            for (int j = 0; j < mmap_result[i].length(); ++j) {
+                EXPECT_EQ(mmap_result[i].get_data<int>(j),
+                          non_mmap_result[i].get_data<int>(j))
+                    << "Array element mismatch at index " << i << ", element "
+                    << j;
+            }
+        }
+    }
+}

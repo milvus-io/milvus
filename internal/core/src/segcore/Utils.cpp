@@ -1515,6 +1515,48 @@ bulk_script_field_data(milvus::OpContext* op_ctx,
                 1, dataType, false, std::move(vec));
             break;
         }
+        case milvus::DataType::ARRAY: {
+            FixedVector<Array> vec(count);
+            segment->bulk_subscript(op_ctx,
+                                    fieldId,
+                                    dataType,
+                                    seg_offsets,
+                                    count,
+                                    vec.data(),
+                                    valid_view,
+                                    small_int_raw_type);
+            ret = std::make_shared<FieldDataImpl<Array, true>>(
+                1, dataType, segment->is_nullable(fieldId), std::move(vec));
+            break;
+        }
+        case milvus::DataType::JSON: {
+            FixedVector<Json> vec(count);
+            segment->bulk_subscript(op_ctx,
+                                    fieldId,
+                                    dataType,
+                                    seg_offsets,
+                                    count,
+                                    vec.data(),
+                                    valid_view,
+                                    small_int_raw_type);
+            ret = std::make_shared<FieldDataImpl<Json, true>>(
+                1, dataType, segment->is_nullable(fieldId), std::move(vec));
+            break;
+        }
+        case milvus::DataType::GEOMETRY: {
+            FixedVector<std::string> vec(count);
+            segment->bulk_subscript(op_ctx,
+                                    fieldId,
+                                    dataType,
+                                    seg_offsets,
+                                    count,
+                                    vec.data(),
+                                    valid_view,
+                                    small_int_raw_type);
+            ret = std::make_shared<FieldDataImpl<std::string, true>>(
+                1, dataType, segment->is_nullable(fieldId), std::move(vec));
+            break;
+        }
         default: {
             ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported data type {}", dataType));
