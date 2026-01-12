@@ -384,6 +384,16 @@ struct GroupByMap {
         }
         return true;
     }
+
+    int
+    GetGroupCount() const {
+        return group_map_.size();
+    }
+
+    int
+    GetEnoughGroupCount() const {
+        return enough_group_count_;
+    }
 };
 
 template <typename T>
