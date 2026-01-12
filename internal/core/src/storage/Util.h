@@ -185,7 +185,7 @@ GetObjectData(
 // This ensures all background threads complete before rethrowing exception
 template <typename T>
 std::vector<T>
-WaitAllFutures(std::vector<std::future<T>>& futures) {
+WaitAllFutures(std::vector<std::future<T>> futures) {
     std::vector<T> results;
     results.reserve(futures.size());
     std::exception_ptr first_exception = nullptr;

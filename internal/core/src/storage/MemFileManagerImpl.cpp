@@ -136,7 +136,7 @@ MemFileManagerImpl::LoadIndexToMemory(
         auto index_datas = GetObjectData(
             rcm_.get(), batch_files, milvus::PriorityForLoad(priority));
         // Wait for all futures to ensure all threads complete
-        auto codecs = storage::WaitAllFutures(index_datas);
+        auto codecs = storage::WaitAllFutures(std::move(index_datas));
         for (size_t idx = 0; idx < batch_files.size(); ++idx) {
             auto file_name =
                 batch_files[idx].substr(batch_files[idx].find_last_of('/') + 1);
@@ -189,7 +189,7 @@ MemFileManagerImpl::cache_raw_data_to_memory_internal(const Config& config) {
     auto FetchRawData = [&]() {
         auto raw_datas = GetObjectData(rcm_.get(), batch_files);
         // Wait for all futures to ensure all threads complete
-        auto codecs = storage::WaitAllFutures(raw_datas);
+        auto codecs = storage::WaitAllFutures(std::move(raw_datas));
         for (auto& codec : codecs) {
             field_datas.emplace_back(codec->GetFieldData());
         }
