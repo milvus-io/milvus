@@ -18,7 +18,9 @@ package log
 
 import (
 	"fmt"
+	"strconv"
 	"time"
+	"unsafe"
 
 	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/zapcore"
@@ -44,7 +46,7 @@ func NewAsyncTextIOCore(cfg *Config, ws zapcore.WriteSyncer, enab zapcore.LevelE
 		notifier:            syncutil.NewAsyncTaskNotifier[struct{}](),
 		enc:                 enc,
 		bws:                 bws,
-		pending:             make(chan *entryItem, cfg.AsyncWritePendingLength),
+		pending:             make(chan interface{}, cfg.AsyncWritePendingLength),
 		writeDroppedTimeout: cfg.AsyncWriteDroppedTimeout,
 		nonDroppableLevel:   nonDroppableLevel,
 		stopTimeout:         cfg.AsyncWriteStopTimeout,
@@ -61,7 +63,7 @@ type asyncTextIOCore struct {
 	notifier            *syncutil.AsyncTaskNotifier[struct{}]
 	enc                 zapcore.Encoder
 	bws                 *zapcore.BufferedWriteSyncer
-	pending             chan *entryItem // the incoming new write requests
+	pending             chan interface{} // the incoming new write requests
 	writeDroppedTimeout time.Duration
 	nonDroppableLevel   zapcore.Level
 	stopTimeout         time.Duration
@@ -139,6 +141,31 @@ func (s *asyncTextIOCore) Write(ent zapcore.Entry, fields []zapcore.Field) error
 	return nil
 }
 
+type CEntryTextIOCore interface {
+	WriteWithCEntry(ent CEntry)
+}
+
+type CEntry struct {
+	Time        time.Time
+	Level       zapcore.Level
+	Filename    unsafe.Pointer
+	FilenameLen int
+	Line        int
+	Message     unsafe.Pointer
+	MessageLen  int
+	ready       chan struct{}
+}
+
+func (s *asyncTextIOCore) WriteWithCEntry(ent CEntry) {
+	ent.ready = make(chan struct{})
+	select {
+	case s.pending <- ent:
+		<-ent.ready
+		return
+	case <-time.After(s.writeDroppedTimeout):
+	}
+}
+
 // Sync syncs the underlying buffered write syncer.
 func (s *asyncTextIOCore) Sync() error {
 	return nil
@@ -156,7 +183,12 @@ func (s *asyncTextIOCore) background() {
 		case <-s.notifier.Context().Done():
 			return
 		case ent := <-s.pending:
-			s.consumeEntry(ent)
+			switch ent := ent.(type) {
+			case *entryItem:
+				s.consumeEntry(ent)
+			case CEntry:
+				s.consumeCEntry(ent)
+			}
 		}
 	}
 }
@@ -175,6 +207,29 @@ func (s *asyncTextIOCore) consumeEntry(ent *entryItem) {
 	}
 	ent.buf.Free()
 	if ent.level > zapcore.ErrorLevel {
+		if err := s.bws.Sync(); err != nil {
+			metrics.LoggingIOFailureTotal.Inc()
+		}
+	}
+}
+
+func (s *asyncTextIOCore) consumeCEntry(ent CEntry) {
+	metrics.LoggingPendingWriteTotal.Dec()
+
+	s.bws.Write([]byte("["))
+	s.bws.Write([]byte(ent.Time.Format(defaultTimeFormat)))
+	s.bws.Write([]byte("] ["))
+	s.bws.Write([]byte(ent.Level.CapitalString()))
+	s.bws.Write([]byte("] [CGO] ["))
+	s.bws.Write(unsafe.Slice((*byte)(ent.Filename), ent.FilenameLen))
+	s.bws.Write([]byte(":"))
+	s.bws.Write([]byte(strconv.Itoa(ent.Line)))
+	s.bws.Write([]byte("] [\""))
+	s.bws.Write(unsafe.Slice((*byte)(ent.Message), (ent.MessageLen)))
+	s.bws.Write([]byte("\"]\n"))
+	close(ent.ready)
+
+	if ent.Level > zapcore.ErrorLevel {
 		if err := s.bws.Sync(); err != nil {
 			metrics.LoggingIOFailureTotal.Inc()
 		}
@@ -223,7 +278,12 @@ func (s *asyncTextIOCore) flushAllPendingWrites(done chan struct{}) {
 	for {
 		select {
 		case ent := <-s.pending:
-			s.consumeEntry(ent)
+			switch ent := ent.(type) {
+			case *entryItem:
+				s.consumeEntry(ent)
+			case CEntry:
+				s.consumeCEntry(ent)
+			}
 		default:
 			return
 		}

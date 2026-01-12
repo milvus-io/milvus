@@ -18,7 +18,6 @@
 
 #include "ConfigKnowhere.h"
 #include "common/EasyAssert.h"
-#include "glog/logging.h"
 #include "log/Log.h"
 #include "knowhere/comp/knowhere_config.h"
 #include "knowhere/version.h"
@@ -28,24 +27,13 @@ namespace milvus::config {
 
 std::once_flag init_knowhere_once_;
 
-static GoZapSink g_sink;
-
 void
 KnowhereInitImpl(const char* conf_file) {
     auto init = [&]() {
         knowhere::KnowhereConfig::SetBlasThreshold(16384);
         knowhere::KnowhereConfig::SetEarlyStopThreshold(0);
         knowhere::KnowhereConfig::ShowVersion();
-        if (!google::IsGoogleLoggingInitialized()) {
-            google::InitGoogleLogging("milvus");
-            google::AddLogSink(&g_sink);
-
-            // log is catched by zap, so we don't need to log to stderr/stdout/files anymore.
-            FLAGS_logtostdout = false;
-            FLAGS_logtostderr = false;
-            FLAGS_alsologtostderr = false;
-            FLAGS_log_dir = "";
-        }
+        InitGoogleLoggingWithZapSink();
 
 #ifdef EMBEDDED_MILVUS
         // always disable all logs for embedded milvus

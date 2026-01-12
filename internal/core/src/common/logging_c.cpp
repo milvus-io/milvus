@@ -15,13 +15,18 @@
 // limitations under the License.
 
 #include "logging_c.h"
+#include <glog/logging.h>
 
 #ifdef WITHOUT_GO_LOGGING
 
 // Empty implementation when there's no go logging implementation.
 void
-goZapLogExt(
-    int severity, const char* file, int line, const char* msg, int msg_len) {
+goZapLogExt(int severity,
+            const char* file,
+            int file_len,
+            int line,
+            const char* msg,
+            int msg_len) {
 }
 
 #elif defined(__APPLE__)
@@ -30,8 +35,12 @@ goZapLogExt(
 // will be implemented in github.com/milvus-io/milvus/internal/util/cgo/logging
 // macOS linker requires weak_import to allow unresolved symbols.
 extern "C" void
-goZapLogExt(
-    int severity, const char* file, int line, const char* msg, int msg_len) {
+goZapLogExt(int severity,
+            const char* file,
+            int file_len,
+            int line,
+            const char* msg,
+            int msg_len) {
 }
 __attribute__((weak_import));
 
@@ -40,10 +49,25 @@ __attribute__((weak_import));
 // Go export function.
 // will be implemented in github.com/milvus-io/milvus/internal/util/cgo/logging
 extern "C" void
-goZapLogExt(
-    int severity, const char* file, int line, const char* msg, int msg_len);
+goZapLogExt(int severity,
+            const char* file,
+            int file_len,
+            int line,
+            const char* msg,
+            int msg_len);
 
 #endif
+
+class GoZapSink : public google::LogSink {
+    void
+    send(google::LogSeverity severity,
+         const char* full_filename,
+         const char* base_filename,
+         int line,
+         const struct tm*,
+         const char* message,
+         size_t message_len) override;
+};
 
 void
 GoZapSink::send(google::LogSeverity severity,
@@ -53,10 +77,63 @@ GoZapSink::send(google::LogSeverity severity,
                 const struct tm*,
                 const char* message,
                 size_t message_len) {
-    // remove the '\n' added by glog
-    int len = static_cast<int>(message_len);
-    if (len > 0 && message[len - 1] == '\n') {
-        len--;
+    if (full_filename == nullptr || full_filename[0] == '\0') {
+        return;
     }
-    goZapLogExt(static_cast<int>(severity), full_filename, line, message, len);
+    int last_two_slash_index[] = {0, 0};
+    int idx = 0;
+    while (full_filename[idx] != '\0') {
+        if (full_filename[idx] == '/') {
+            last_two_slash_index[0] = last_two_slash_index[1];
+            last_two_slash_index[1] = idx;
+        }
+        idx++;
+    }
+
+    int from_index = last_two_slash_index[0] + 1;
+    goZapLogExt(static_cast<int>(severity),
+                full_filename + from_index,
+                idx - from_index,
+                line,
+                message,
+                message_len);
 };
+
+static GoZapSink g_sink;
+
+extern "C" {
+void
+InitGoogleLoggingWithZapSink() {
+    if (google::IsGoogleLoggingInitialized()) {
+        return;
+    }
+    google::InitGoogleLogging("milvus");
+    google::AddLogSink(&g_sink);
+
+    // log is catched by zap, so we don't need to log to stderr/stdout/files anymore.
+    FLAGS_logtostdout = false;
+    FLAGS_logtostderr = false;
+    FLAGS_alsologtostderr = false;
+    FLAGS_log_dir = "";
+    return;
+}
+
+void
+InitGoogleLoggingWithoutZapSink() {
+    if (google::IsGoogleLoggingInitialized()) {
+        return;
+    }
+    google::InitGoogleLogging("milvus");
+    // log is catched by zap, so we don't need to log to stderr/stdout/files anymore.
+    FLAGS_logtostdout = true;
+    FLAGS_logtostderr = false;
+    FLAGS_alsologtostderr = false;
+    FLAGS_log_dir = "";
+    return;
+}
+
+void
+GoogleLoggingAtLevel(int severity, const char* msg) {
+    google::LogAtLevel(severity, msg);
+}
+}
