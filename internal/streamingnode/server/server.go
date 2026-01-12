@@ -45,7 +45,7 @@ func (s *Server) init() {
 	s.initService()
 
 	// init file resource manager
-	fileresource.InitManager(resource.Resource().ChunkManager(), fileresource.ParseMode(paramtable.Get().QueryCoordCfg.FileResourceMode.GetValue()))
+	fileresource.InitManager(resource.Resource().ChunkManager(), fileresource.ParseMode(paramtable.Get().CommonCfg.QNFileResourceMode.GetValue()))
 
 	log.Info("init query segcore...")
 	if err := initcore.InitQueryNode(context.TODO()); err != nil {

@@ -172,7 +172,6 @@ func (s *ZillizHighlightProviderSuite) TestZillizHighlightProvider_Highlight_Suc
 		"Deep learning is a type of machine learning.",
 		"Natural language processing uses machine learning techniques.",
 	}
-	params := map[string]string{"param1": "value1"}
 	expectedHighlights := [][]string{
 		{"Machine learning", "artificial intelligence"},
 		{"Deep learning", "machine learning"},
@@ -198,7 +197,7 @@ func (s *ZillizHighlightProviderSuite) TestZillizHighlightProvider_Highlight_Suc
 	s.NoError(err)
 	s.NotNil(provider)
 
-	highlights, err := provider.highlight(ctx, query, texts, params)
+	highlights, err := provider.highlight(ctx, query, texts)
 
 	s.NoError(err)
 	s.Equal(expectedHighlights, highlights)
@@ -209,7 +208,6 @@ func (s *ZillizHighlightProviderSuite) TestZillizHighlightProvider_Highlight_Err
 	ctx := context.Background()
 	query := "test query"
 	texts := []string{"doc1", "doc2", "doc3"}
-	params := map[string]string{"param1": "value1"}
 	expectedError := errors.New("highlight service error")
 
 	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
@@ -232,7 +230,7 @@ func (s *ZillizHighlightProviderSuite) TestZillizHighlightProvider_Highlight_Err
 	s.NotNil(provider)
 
 	// Test the highlight method
-	highlights, err := provider.highlight(ctx, query, texts, params)
+	highlights, err := provider.highlight(ctx, query, texts)
 
 	s.Error(err)
 	s.Nil(highlights)

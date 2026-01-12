@@ -250,23 +250,29 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
 
         # Search with sparse vectors
         ids_to_search = [self.datas[i][self.pk_field_name] for i in range(default_nq)]
+        vectors_to_search = [self.datas[i][self.sparse_vector_field_name] for i in range(default_nq)]
         search_params = {"metric_type": self.sparse_vector_metric, "params": {}}
 
-        self.search(
-            client,
-            collection_name,
-            ids=ids_to_search,
-            anns_field=self.sparse_vector_field_name,
-            search_params=search_params,
-            limit=default_limit,
-            check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name,
-                         "metric": self.sparse_vector_metric
-                         }
-        )
+        # search by ids one by one
+        for i in range(default_nq):
+            expected_limit = default_limit
+            if len(vectors_to_search[i]) == 0:
+                expected_limit = 0
+            self.search(
+                client,
+                collection_name,
+                ids=[ids_to_search[i]],
+                anns_field=self.sparse_vector_field_name,
+                search_params=search_params,
+                limit=default_limit,
+                check_task=CheckTasks.check_search_results,
+                check_items={"enable_milvus_client_api": True,
+                             "nq": 1,
+                             "limit": expected_limit,
+                             "pk_name": self.pk_field_name,
+                             "metric": self.sparse_vector_metric
+                             }
+            )
 
         #  search again without specify anns_field
         error = {"err_code": 999,
@@ -280,6 +286,81 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items=error
         )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="need return error or none @Marcelo chen")
+    def test_search_by_pk_nullable_vector_field(self):
+        """
+        target: test search by pk with nullable vector field where some vectors are null
+        method: 1. create a collection with nullable sparse vector field
+                2. insert data where some vectors are null
+                3. search by IDs including some with null vectors
+                4. verify result count equals non-null vector count (effective nq)
+        expected: null vectors are filtered out, result count = non-null vector count
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str("nullable_vec_search_")
+
+        # Create collection with nullable sparse vector field
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("sparse_vec", DataType.SPARSE_FLOAT_VECTOR, nullable=True)
+        self.create_collection(client, collection_name, schema=schema)
+
+        # Insert data: 10 rows, where rows 2, 5, 8 have null vectors
+        nb = 10
+        null_indices = {2, 5, 8}
+        rows = []
+        for i in range(nb):
+            if i in null_indices:
+                row = {"id": i, "sparse_vec": None}
+            else:
+                row = {"id": i, "sparse_vec": {i: 1.0, i + 100: 0.5}}
+            rows.append(row)
+
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("sparse_vec", index_type="SPARSE_INVERTED_INDEX", metric_type="IP")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+
+        # Case 1: Search by IDs with mixed null and non-null vectors
+        # IDs [0, 2, 3, 5] -> 0, 3 are valid, 2, 5 are null
+        ids_to_search = [0, 2, 3, 5]
+        expected_nq = 2  # only 2 non-null vectors
+
+        res = self.search(
+            client,
+            collection_name,
+            ids=ids_to_search,
+            anns_field="sparse_vec",
+            search_params={"metric_type": "IP"},
+            limit=5
+        )[0]
+
+        log.info(f"Search with ids={ids_to_search}, expected_nq={expected_nq}, actual len(res)={len(res)}")
+        assert len(res) == expected_nq, f"Expected {expected_nq} results, got {len(res)}"
+
+        # Case 2: Search by IDs with all null vectors should raise error
+        all_null_ids = [2, 5, 8]
+        error = {"err_code": 65535,
+                 "err_msg": "all provided IDs have null vector values"}
+        self.search(
+            client,
+            collection_name,
+            ids=all_null_ids,
+            anns_field="sparse_vec",
+            search_params={"metric_type": "IP"},
+            limit=5,
+            check_task=CheckTasks.err_res,
+            check_items=error
+        )
+
+        # Cleanup
+        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_by_pk_with_empty_ids(self):

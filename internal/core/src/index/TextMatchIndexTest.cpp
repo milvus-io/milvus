@@ -959,6 +959,9 @@ TEST(TextMatch, SealedJieBaNullable) {
 
 // Test that growing segment loading flushed binlogs will build text match index.
 TEST(TextMatch, GrowingLoadData) {
+    milvus::exec::expression::FunctionFactory& factory =
+        milvus::exec::expression::FunctionFactory::Instance();
+    factory.Initialize();
     int64_t N = 7;
     auto schema = GenTestSchema({}, true);
     schema->AddField(

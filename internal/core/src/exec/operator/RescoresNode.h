@@ -37,7 +37,7 @@ class PhyRescoresNode : public Operator {
                     const std::shared_ptr<const plan::RescoresNode>& scorer);
 
     bool
-    IsFilter() override {
+    IsFilter() const override {
         return true;
     }
 

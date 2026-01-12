@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -45,10 +46,10 @@ func TestSortCompactionTaskSuite(t *testing.T) {
 type SortCompactionTaskSuite struct {
 	suite.Suite
 
-	mockBinlogIO *mock_util.MockBinlogIO
-
-	meta      *etcdpb.CollectionMeta
-	segWriter *SegmentWriter
+	mockChunkManager *mocks.ChunkManager
+	mockBinlogIO     *mock_util.MockBinlogIO
+	meta             *etcdpb.CollectionMeta
+	segWriter        *SegmentWriter
 
 	task *sortCompactionTask
 }
@@ -58,8 +59,8 @@ func (s *SortCompactionTaskSuite) SetupSuite() {
 }
 
 func (s *SortCompactionTaskSuite) setupTest() {
+	s.mockChunkManager = mocks.NewChunkManager(s.T())
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
-
 	s.meta = genTestCollectionMeta()
 
 	params, err := compaction.GenerateJSONParams()
@@ -87,7 +88,8 @@ func (s *SortCompactionTaskSuite) setupTest() {
 	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
 	s.NoError(err)
 
-	s.task = NewSortCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
+	s.task = NewSortCompactionTask(context.Background(), s.mockChunkManager, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
+	s.task.binlogIO = s.mockBinlogIO
 }
 
 func (s *SortCompactionTaskSuite) SetupTest() {
@@ -108,7 +110,7 @@ func (s *SortCompactionTaskSuite) TestNewSortCompactionTask() {
 	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
 	s.NoError(err)
 
-	task := NewSortCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
+	task := NewSortCompactionTask(context.Background(), s.mockChunkManager, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
 
 	s.NotNil(task)
 	s.Equal(plan.GetPlanID(), task.GetPlanID())
@@ -225,6 +227,7 @@ func (s *SortCompactionTaskSuite) TestSortCompactionWithBM25() {
 
 func (s *SortCompactionTaskSuite) setupBM25Test() {
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
+	s.mockChunkManager = mocks.NewChunkManager(s.T())
 	s.meta = genTestCollectionMetaWithBM25()
 	params, err := compaction.GenerateJSONParams()
 	if err != nil {
@@ -245,13 +248,14 @@ func (s *SortCompactionTaskSuite) setupBM25Test() {
 		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 9530, End: 19530},
 		MaxSize:                64 * 1024 * 1024,
 		JsonParams:             params,
-		TotalRows:              3,
+		TotalRows:              1,
 	}
 
 	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
 	s.NoError(err)
 
-	s.task = NewSortCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
+	s.task = NewSortCompactionTask(context.Background(), s.mockChunkManager, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
+	s.task.binlogIO = s.mockBinlogIO
 }
 
 func (s *SortCompactionTaskSuite) prepareSortCompactionWithBM25Task() {
@@ -281,7 +285,7 @@ func (s *SortCompactionTaskSuite) prepareSortCompactionWithBM25Task() {
 func (s *SortCompactionTaskSuite) TestSortCompactionWithExpiredData() {
 	segmentID := int64(1001)
 
-	s.initSegBuffer(1, segmentID)
+	s.initSegBuffer(1000, segmentID)
 	collTTL := 864000 // 10 days
 	s.task.currentTime = getMilvusBirthday().Add(time.Second * (time.Duration(collTTL) + 1))
 	s.task.plan.CollectionTtl = int64(collTTL)
@@ -368,7 +372,7 @@ func (s *SortCompactionTaskSuite) initSegBufferWithBM25(seed int64) {
 
 func TestSortCompactionTaskBasic(t *testing.T) {
 	ctx := context.Background()
-	mockBinlogIO := mock_util.NewMockBinlogIO(t)
+	mockChunkManager := mocks.NewChunkManager(t)
 
 	plan := &datapb.CompactionPlan{
 		PlanID: 123,
@@ -382,7 +386,7 @@ func TestSortCompactionTaskBasic(t *testing.T) {
 	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
 	assert.NoError(t, err)
 
-	task := NewSortCompactionTask(ctx, mockBinlogIO, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
+	task := NewSortCompactionTask(ctx, mockChunkManager, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
 
 	assert.NotNil(t, task)
 	assert.Equal(t, int64(123), task.GetPlanID())

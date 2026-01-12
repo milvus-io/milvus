@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -58,6 +59,8 @@ type Cache interface {
 	GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*collectionInfo, error)
 	// GetPartitionID get partition's identifier of specific collection.
 	GetPartitionID(ctx context.Context, database, collectionName string, partitionName string) (typeutil.UniqueID, error)
+	// GetPartitionName get partition's name by id
+	GetPartitionName(ctx context.Context, database, collectionName string, partitionID int64) (string, error)
 	// GetPartitions get all partitions' id of specific collection.
 	GetPartitions(ctx context.Context, database, collectionName string) (map[string]typeutil.UniqueID, error)
 	// GetPartitionInfo get partition's info.
@@ -374,6 +377,9 @@ func InitMetaCache(ctx context.Context, mixCoord types.MixCoordClient) error {
 		return err
 	}
 
+	// Register password verify function for /expr endpoint authentication
+	internalhttp.RegisterPasswordVerifyFunc(PasswordVerify)
+
 	return nil
 }
 
@@ -643,6 +649,21 @@ func (m *MetaCache) GetPartitionID(ctx context.Context, database, collectionName
 		return 0, err
 	}
 	return partInfo.partitionID, nil
+}
+
+func (m *MetaCache) GetPartitionName(ctx context.Context, database, collectionName string, partitionID int64) (string, error) {
+	partitions, err := m.GetPartitionInfos(ctx, database, collectionName)
+	if err != nil {
+		return "", err
+	}
+
+	for _, info := range partitions.partitionInfos {
+		if info.partitionID == partitionID {
+			return info.name, nil
+		}
+	}
+
+	return "", merr.WrapErrPartitionNotFound(partitionID)
 }
 
 func (m *MetaCache) GetPartitions(ctx context.Context, database, collectionName string) (map[string]typeutil.UniqueID, error) {

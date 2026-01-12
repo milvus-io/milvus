@@ -918,3 +918,200 @@ func TestCluster_DropProperties(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestCluster_CopySegment(t *testing.T) {
+	t.Run("create copy segment", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+
+		// Mock client
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+
+		// Test
+		req := &datapb.CopySegmentRequest{
+			TaskID:   123,
+			TaskSlot: 1,
+		}
+		err := cluster.CreateCopySegment(1, req)
+		assert.NoError(t, err)
+	})
+
+	t.Run("create copy segment - get client error", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+
+		// Mock client error
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(nil, errors.New("failed to get client"))
+
+		// Test
+		req := &datapb.CopySegmentRequest{
+			TaskID:   123,
+			TaskSlot: 1,
+		}
+		err := cluster.CreateCopySegment(1, req)
+		assert.Error(t, err)
+	})
+
+	t.Run("query copy segment - finished state", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+
+		// Mock client
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		// Mock response with Finished state
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Finished)
+		expectedResult := &datapb.QueryCopySegmentResponse{
+			State:  datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+			Reason: "",
+		}
+		payload, _ := proto.Marshal(expectedResult)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    payload,
+			Properties: properties,
+		}, nil)
+
+		// Test
+		req := &datapb.QueryCopySegmentRequest{
+			TaskID: 123,
+		}
+		result, err := cluster.QueryCopySegment(1, req)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskCompleted, result.State)
+	})
+
+	t.Run("query copy segment - in progress state", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+
+		// Mock client
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		// Mock response with InProgress state
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.InProgress)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    nil, // No payload for in-progress state
+			Properties: properties,
+		}, nil)
+
+		// Test
+		req := &datapb.QueryCopySegmentRequest{
+			TaskID: 123,
+		}
+		result, err := cluster.QueryCopySegment(1, req)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskInProgress, result.State)
+	})
+
+	t.Run("query copy segment - failed state", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+
+		// Mock client
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		// Mock response with Failed state
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Failed)
+		expectedResult := &datapb.QueryCopySegmentResponse{
+			State:  datapb.CopySegmentTaskState_CopySegmentTaskFailed,
+			Reason: "copy failed",
+		}
+		payload, _ := proto.Marshal(expectedResult)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    payload,
+			Properties: properties,
+		}, nil)
+
+		// Test
+		req := &datapb.QueryCopySegmentRequest{
+			TaskID: 123,
+		}
+		result, err := cluster.QueryCopySegment(1, req)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskFailed, result.State)
+		assert.Equal(t, "copy failed", result.Reason)
+	})
+
+	t.Run("query copy segment - init state", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+
+		// Mock client
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		// Mock response with Init state
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Init)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    nil,
+			Properties: properties,
+		}, nil)
+
+		// Test
+		req := &datapb.QueryCopySegmentRequest{
+			TaskID: 123,
+		}
+		result, err := cluster.QueryCopySegment(1, req)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskPending, result.State)
+	})
+
+	t.Run("query copy segment - get client error", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+
+		// Mock client error
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(nil, errors.New("failed to get client"))
+
+		// Test
+		req := &datapb.QueryCopySegmentRequest{
+			TaskID: 123,
+		}
+		result, err := cluster.QueryCopySegment(1, req)
+		assert.Error(t, err)
+		assert.Nil(t, result)
+	})
+
+	t.Run("drop copy segment", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+
+		// Mock client
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+		mockClient.EXPECT().DropTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+
+		// Test
+		err := cluster.DropCopySegment(1, 123)
+		assert.NoError(t, err)
+	})
+
+	t.Run("drop copy segment - get client error", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+
+		// Mock client error
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(nil, errors.New("failed to get client"))
+
+		// Test
+		err := cluster.DropCopySegment(1, 123)
+		assert.Error(t, err)
+	})
+}

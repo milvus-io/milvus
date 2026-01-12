@@ -343,6 +343,42 @@ var (
 			Help:      "the import tasks grouping by type and state",
 		}, []string{"task_type", "import_state"})
 
+	CopySegmentJobs = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "copy_segment_jobs",
+			Help:      "the copy segment jobs grouping by state",
+		}, []string{TaskStateLabel})
+
+	CopySegmentTasks = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "copy_segment_tasks",
+			Help:      "the copy segment tasks grouping by type and state",
+		}, []string{TaskStateLabel})
+
+	CopySegmentTaskLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "copy_segment_task_latency",
+			Help:      "latency of copy segment task by stage (pending, copying)",
+			Buckets:   longTaskBuckets,
+		}, []string{
+			stageLabelName,
+		})
+
+	CopySegmentJobLatency = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "copy_segment_job_latency",
+			Help:      "total latency of copy segment job from creation to completion",
+			Buckets:   longTaskBuckets,
+		})
+
 	DataCoordTaskExecuteLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -411,6 +447,10 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(IndexNodeNum)
 	registry.MustRegister(ImportJobs)
 	registry.MustRegister(ImportTasks)
+	registry.MustRegister(CopySegmentJobs)
+	registry.MustRegister(CopySegmentTasks)
+	registry.MustRegister(CopySegmentTaskLatency)
+	registry.MustRegister(CopySegmentJobLatency)
 	registry.MustRegister(GarbageCollectorFileScanDuration)
 	registry.MustRegister(GarbageCollectorRunCount)
 	registry.MustRegister(DataCoordTaskExecuteLatency)

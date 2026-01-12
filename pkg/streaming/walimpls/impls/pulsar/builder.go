@@ -31,7 +31,7 @@ func (b *builderImpl) Name() message.WALName {
 
 // Build build a wal instance.
 func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
-	options, err := b.getPulsarClientOptions()
+	options, tenant, err := b.getPulsarClientOptions()
 	if err != nil {
 		return nil, errors.Wrapf(err, "build pulsar client options failed")
 	}
@@ -40,16 +40,17 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 		return nil, err
 	}
 	return &openerImpl{
-		c: c,
+		tenant: tenant,
+		c:      c,
 	}, nil
 }
 
 // getPulsarClientOptions gets the pulsar client options from the config.
-func (b *builderImpl) getPulsarClientOptions() (pulsar.ClientOptions, error) {
+func (b *builderImpl) getPulsarClientOptions() (pulsar.ClientOptions, tenant, error) {
 	cfg := &paramtable.Get().PulsarCfg
 	auth, err := pulsar.NewAuthentication(cfg.AuthPlugin.GetValue(), cfg.AuthParams.GetValue())
 	if err != nil {
-		return pulsar.ClientOptions{}, errors.New("build authencation from config failed")
+		return pulsar.ClientOptions{}, tenant{}, errors.New("build authencation from config failed")
 	}
 	options := pulsar.ClientOptions{
 		URL:              cfg.Address.GetValue(),
@@ -61,5 +62,8 @@ func (b *builderImpl) getPulsarClientOptions() (pulsar.ClientOptions, error) {
 		// Enable client metrics if config.EnableClientMetrics is true, use pkg-defined registerer.
 		options.MetricsRegisterer = metrics.GetRegisterer()
 	}
-	return options, nil
+	return options, tenant{
+		namespace: cfg.Namespace.GetValue(),
+		tenant:    cfg.Tenant.GetValue(),
+	}, nil
 }

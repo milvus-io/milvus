@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -514,10 +516,6 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 	_, ok := wb.metaCache.GetSegmentByID(segmentID)
 	// new segment
 	if !ok {
-		storageVersion := storage.StorageV1
-		if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-			storageVersion = storage.StorageV2
-		}
 		segmentInfo := &datapb.SegmentInfo{
 			ID:             segmentID,
 			PartitionID:    partitionID,
@@ -525,7 +523,7 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 			InsertChannel:  wb.channelName,
 			StartPosition:  startPos,
 			State:          commonpb.SegmentState_Growing,
-			StorageVersion: storageVersion,
+			StorageVersion: storage.StorageV2,
 		}
 		// set manifest path when creating segment
 		if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
@@ -540,7 +538,7 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 		wb.metaCache.AddSegment(segmentInfo, func(_ *datapb.SegmentInfo) pkoracle.PkStat {
 			return pkoracle.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
 		}, metacache.NewBM25StatsFactory, metacache.SetStartPosRecorded(false))
-		log.Info("add growing segment", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName), zap.Int64("storage version", storageVersion))
+		log.Info("add growing segment", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName), zap.Int64("storage version", storage.StorageV2))
 	}
 }
 
@@ -622,7 +620,8 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithMetaWriter(wb.metaWriter).
 		WithMetaCache(wb.metaCache).
 		WithSchema(schema).
-		WithSyncPack(pack)
+		WithSyncPack(pack).
+		WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second))
 	return task, nil
 }
 

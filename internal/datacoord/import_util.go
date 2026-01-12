@@ -171,11 +171,6 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 		segmentLevel = datapb.SegmentLevel_L0
 	}
 
-	storageVersion := storage.StorageV1
-	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
-		storageVersion = storage.StorageV2
-	}
-
 	// alloc new segments
 	segments := make([]int64, 0)
 	addSegment := func(vchannel string, partitionID int64, size int64) error {
@@ -184,7 +179,7 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 		for size > 0 {
 			segmentInfo, err := AllocImportSegment(ctx, alloc, meta,
 				task.GetJobID(), task.GetTaskID(), task.GetCollectionID(),
-				partitionID, vchannel, job.GetDataTs(), segmentLevel, storageVersion)
+				partitionID, vchannel, job.GetDataTs(), segmentLevel, storage.StorageV2)
 			if err != nil {
 				return err
 			}
@@ -360,10 +355,6 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		return fileStat.GetImportFile()
 	})
 
-	storageVersion := storage.StorageV1
-	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
-		storageVersion = storage.StorageV2
-	}
 	req := &datapb.ImportRequest{
 		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
 		JobID:           task.GetJobID(),
@@ -379,7 +370,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		RequestSegments: requestSegments,
 		StorageConfig:   createStorageConfig(),
 		TaskSlot:        task.GetTaskSlot(),
-		StorageVersion:  storageVersion,
+		StorageVersion:  storage.StorageV2,
 		PluginContext:   GetReadPluginContext(job.GetOptions()),
 		UseLoonFfi:      Params.CommonCfg.UseLoonFFI.GetAsBool(),
 	}
@@ -856,17 +847,19 @@ func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
 }
 
 func createSortCompactionTask(ctx context.Context,
+	t ImportTask,
 	originSegment *SegmentInfo,
 	targetSegmentID int64,
 	meta *meta,
 	handler Handler,
 	alloc allocator.Allocator,
 ) (*datapb.CompactionTask, error) {
+	log := log.Ctx(ctx).With(WrapTaskLog(t)...)
 	if originSegment.GetNumOfRows() == 0 {
 		operator := UpdateStatusOperator(originSegment.GetID(), commonpb.SegmentState_Dropped)
 		err := meta.UpdateSegmentsInfo(ctx, operator)
 		if err != nil {
-			log.Ctx(ctx).Warn("import zero num row segment, but mark it dropped failed", zap.Error(err))
+			log.Warn("import zero num row segment, but mark it dropped failed", zap.Error(err))
 			return nil, err
 		}
 		return nil, nil
@@ -879,13 +872,13 @@ func createSortCompactionTask(ctx context.Context,
 
 	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
 	if err != nil {
-		log.Warn("failed to apply triggerSegmentSortCompaction, get collection ttl failed")
+		log.Warn("Failed to create sort compaction task because get collection ttl failed")
 		return nil, err
 	}
 
 	startID, _, err := alloc.AllocN(2)
 	if err != nil {
-		log.Warn("fFailed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
+		log.Warn("Failed to create sort compaction task because allocate id fail", zap.Error(err))
 		return nil, err
 	}
 
@@ -912,7 +905,7 @@ func createSortCompactionTask(ctx context.Context,
 		},
 	}
 
-	log.Ctx(ctx).Info("create sort compaction task success", zap.Int64("segmentID", originSegment.GetID()),
+	log.Info("create sort compaction task success", zap.Int64("segmentID", originSegment.GetID()),
 		zap.Int64("targetSegmentID", targetSegmentID), zap.Int64("num rows", originSegment.GetNumOfRows()))
 	return task, nil
 }

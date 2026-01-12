@@ -55,7 +55,7 @@ func NewPipeLine(
 
 	p := &pipeline{
 		collectionID:   collectionID,
-		StreamPipeline: base.NewPipelineWithStream(dispatcher, nodeCtxTtInterval, enableTtChecker, channel),
+		StreamPipeline: base.NewPipelineWithStream(dispatcher, nodeCtxTtInterval, enableTtChecker, channel, delegator),
 	}
 
 	filterNode := newFilterNode(collectionID, channel, manager, delegator, pipelineQueueLength)

@@ -20,8 +20,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -137,6 +135,9 @@ type Server struct {
 	// for balance streaming node request
 	// now only used for run analyzer and validate analyzer
 	nodeIdx atomic.Uint32
+
+	// load config watcher
+	loadConfigWatcher *LoadConfigWatcher
 }
 
 func NewQueryCoord(ctx context.Context) (*Server, error) {
@@ -552,6 +553,11 @@ func (s *Server) Stop() error {
 	// job scheduler -> checker controller -> task scheduler -> dist controller -> cluster -> session
 	// observers -> dist controller
 
+	if s.loadConfigWatcher != nil {
+		log.Info("stop load config watcher...")
+		s.loadConfigWatcher.Close()
+	}
+
 	if s.jobScheduler != nil {
 		log.Info("stop job scheduler...")
 		s.jobScheduler.Stop()
@@ -877,70 +883,15 @@ func (s *Server) updateBalanceConfig() bool {
 	return false
 }
 
-func (s *Server) applyLoadConfigChanges(ctx context.Context, newReplicaNum int32, newRGs []string) {
-	if newReplicaNum <= 0 && len(newRGs) == 0 {
-		log.Info("invalid cluster level load config, skip it", zap.Int32("replica_num", newReplicaNum), zap.Strings("resource_groups", newRGs))
-		return
-	}
-
-	// try to check load config changes after restart, and try to update replicas
-	collectionIDs := s.meta.GetAll(ctx)
-	collectionIDs = lo.Filter(collectionIDs, func(collectionID int64, _ int) bool {
-		collection := s.meta.GetCollection(ctx, collectionID)
-		if collection.UserSpecifiedReplicaMode {
-			log.Info("collection is user specified replica mode, skip update load config", zap.Int64("collectionID", collectionID))
-			return false
-		}
-		return true
-	})
-
-	if len(collectionIDs) == 0 {
-		log.Info("no collection to update load config, skip it")
-		return
-	}
-
-	log.Info("apply load config changes",
-		zap.Int64s("collectionIDs", collectionIDs),
-		zap.Int32("replicaNum", newReplicaNum),
-		zap.Strings("resourceGroups", newRGs))
-	err := s.updateLoadConfig(ctx, collectionIDs, newReplicaNum, newRGs)
-	if err != nil {
-		log.Warn("failed to update load config", zap.Error(err))
-	}
-}
-
 func (s *Server) watchLoadConfigChanges() {
-	// first apply load config change from params
-	replicaNum := paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsUint32()
-	rgs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
-	s.applyLoadConfigChanges(s.ctx, int32(replicaNum), rgs)
+	w := NewLoadConfigWatcher(s)
+	s.loadConfigWatcher = w
+	w.Trigger()
 
-	log := log.Ctx(s.ctx)
-	replicaNumHandler := config.NewHandler("watchReplicaNumberChanges", func(e *config.Event) {
-		log.Info("watch load config changes", zap.String("key", e.Key), zap.String("value", e.Value), zap.String("type", e.EventType))
-		replicaNum, err := strconv.ParseInt(e.Value, 10, 64)
-		if err != nil {
-			log.Warn("invalid cluster level load config, skip it", zap.String("key", e.Key), zap.String("value", e.Value))
-			return
-		}
-		rgs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
-
-		s.applyLoadConfigChanges(s.ctx, int32(replicaNum), rgs)
-	})
+	replicaNumHandler := config.NewHandler("watchReplicaNumberChanges", func(e *config.Event) { w.Trigger() })
 	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, replicaNumHandler)
 
-	rgHandler := config.NewHandler("watchResourceGroupChanges", func(e *config.Event) {
-		log.Info("watch load config changes", zap.String("key", e.Key), zap.String("value", e.Value), zap.String("type", e.EventType))
-		if len(e.Value) == 0 {
-			log.Warn("invalid cluster level load config, skip it", zap.String("key", e.Key), zap.String("value", e.Value))
-			return
-		}
-
-		rgs := strings.Split(e.Value, ",")
-		rgs = lo.Map(rgs, func(rg string, _ int) string { return strings.TrimSpace(rg) })
-		replicaNum := paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt64()
-		s.applyLoadConfigChanges(s.ctx, int32(replicaNum), rgs)
-	})
+	rgHandler := config.NewHandler("watchResourceGroupChanges", func(e *config.Event) { w.Trigger() })
 	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, rgHandler)
 }
 

@@ -275,6 +275,7 @@ func (b *streamBuilder) generateStreamMessage() []message.ImmutableMessage {
 		{op: b.createDelete, rate: 5},
 		{op: b.createTxn, rate: 5},
 		{op: b.createManualFlush, rate: 2},
+		{op: b.createFlushAll, rate: 2},
 		{op: b.createSchemaChange, rate: 1},
 		{op: b.createTruncateCollection, rate: 1},
 	}
@@ -564,6 +565,28 @@ func (b *streamBuilder) createManualFlush() message.ImmutableMessage {
 			IntoImmutableMessage(rmq.NewRmqID(b.messageID))
 	}
 	return nil
+}
+
+func (b *streamBuilder) createFlushAll() message.ImmutableMessage {
+	if rand.Int31n(3) < 1 {
+		return nil
+	}
+	for _, collection := range b.collectionIDs {
+		for partitionID := range collection {
+			for segmentID := range collection[partitionID] {
+				delete(collection[partitionID], segmentID)
+			}
+		}
+	}
+	b.nextMessage()
+	return message.NewFlushAllMessageBuilderV2().
+		WithVChannel(b.channel.Name).
+		WithHeader(&message.FlushAllMessageHeader{}).
+		WithBody(&message.FlushAllMessageBody{}).
+		MustBuildMutable().
+		WithTimeTick(b.timetick).
+		WithLastConfirmed(rmq.NewRmqID(b.lastConfirmedMessageID)).
+		IntoImmutableMessage(rmq.NewRmqID(b.messageID))
 }
 
 func (b *streamBuilder) createSchemaChange() message.ImmutableMessage {

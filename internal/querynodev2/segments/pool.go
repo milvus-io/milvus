@@ -62,6 +62,9 @@ var (
 	bfPool      atomic.Pointer[conc.Pool[any]]
 	bfApplyOnce sync.Once
 
+	bm25LoadPool atomic.Pointer[conc.Pool[any]]
+	bm25PoolOnce sync.Once
+
 	// intentionally leaked CGO tag names
 	cgoTagSQ      = C.CString("CGO_SQ")
 	cgoTagLoad    = C.CString("CGO_LOAD")
@@ -127,6 +130,18 @@ func initLoadPool() {
 
 		pt.Watch(pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.Key, config.NewHandler("qn.loadpool.middlepriority", ResizeLoadPool))
 		log.Info("init loadPool done", zap.Int("size", poolSize))
+	})
+}
+
+func initBM25LoadPool() {
+	bm25PoolOnce.Do(func() {
+		pt := paramtable.Get()
+		poolSize := float64(hardware.GetCPUNum()) * pt.CommonCfg.BM25LoadThreadCoreCoefficient.GetAsFloat()
+		pool := conc.NewPool[any](int(poolSize))
+		bm25LoadPool.Store(pool)
+
+		pt.Watch(pt.CommonCfg.BM25LoadThreadCoreCoefficient.Key, config.NewHandler("qn.bm25loadpool.bm25loadthreadcorecoefficient", ResizeBM25LoadPool))
+		log.Info("init BM25LoadPool done", zap.Int("size", int(poolSize)))
 	})
 }
 
@@ -202,6 +217,11 @@ func GetDeletePool() *conc.Pool[struct{}] {
 	return deletePool.Load()
 }
 
+func GetBM25LoadPool() *conc.Pool[any] {
+	initBM25LoadPool()
+	return bm25LoadPool.Load()
+}
+
 func ResizeSQPool(evt *config.Event) {
 	if evt.HasUpdated {
 		pt := paramtable.Get()
@@ -233,6 +253,14 @@ func ResizeBFApplyPool(evt *config.Event) {
 		pt := paramtable.Get()
 		newSize := hardware.GetCPUNum() * pt.QueryNodeCfg.BloomFilterApplyParallelFactor.GetAsInt()
 		resizePool(GetBFApplyPool(), newSize, "BFApplyPool")
+	}
+}
+
+func ResizeBM25LoadPool(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		newSize := float64(hardware.GetCPUNum()) * pt.CommonCfg.BM25LoadThreadCoreCoefficient.GetAsFloat()
+		resizePool(GetBM25LoadPool(), int(newSize), "BM25LoadPool")
 	}
 }
 

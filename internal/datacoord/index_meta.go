@@ -519,11 +519,16 @@ func (m *indexMeta) GetSegmentIndexState(collID, segmentID UniqueID, indexID Uni
 	}
 
 	m.fieldIndexLock.RLock()
-	fieldIndexes, ok := m.indexes[collID]
+	fieldIndexesMap, ok := m.indexes[collID]
 	if !ok {
 		state.FailReason = fmt.Sprintf("collection not exist with ID: %d", collID)
 		m.fieldIndexLock.RUnlock()
 		return state
+	}
+	// Copy the map to avoid data race after releasing the lock
+	fieldIndexes := make(map[UniqueID]*model.Index, len(fieldIndexesMap))
+	for id, index := range fieldIndexesMap {
+		fieldIndexes[id] = index
 	}
 	m.fieldIndexLock.RUnlock()
 
@@ -551,10 +556,15 @@ func (m *indexMeta) GetSegmentIndexState(collID, segmentID UniqueID, indexID Uni
 
 func (m *indexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs []UniqueID) []int64 {
 	m.fieldIndexLock.RLock()
-	fieldIndexes, ok := m.indexes[collectionID]
+	fieldIndexesMap, ok := m.indexes[collectionID]
 	if !ok {
 		m.fieldIndexLock.RUnlock()
 		return nil
+	}
+	// Copy the map to avoid data race after releasing the lock
+	fieldIndexes := make(map[UniqueID]*model.Index, len(fieldIndexesMap))
+	for id, index := range fieldIndexesMap {
+		fieldIndexes[id] = index
 	}
 	m.fieldIndexLock.RUnlock()
 
@@ -684,10 +694,15 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 
 func (m *indexMeta) IsUnIndexedSegment(collectionID UniqueID, segID UniqueID) bool {
 	m.fieldIndexLock.RLock()
-	fieldIndexes, ok := m.indexes[collectionID]
+	fieldIndexesMap, ok := m.indexes[collectionID]
 	if !ok {
 		m.fieldIndexLock.RUnlock()
 		return false
+	}
+	// Copy the map to avoid data race after releasing the lock
+	fieldIndexes := make(map[UniqueID]*model.Index, len(fieldIndexesMap))
+	for id, index := range fieldIndexesMap {
+		fieldIndexes[id] = index
 	}
 	m.fieldIndexLock.RUnlock()
 
@@ -1189,11 +1204,16 @@ func (m *indexMeta) GetIndexJSON(collectionID int64) string {
 
 func (m *indexMeta) GetSegmentIndexedFields(collectionID UniqueID, segmentID UniqueID) (bool, []*metricsinfo.IndexedField) {
 	m.fieldIndexLock.RLock()
-	fieldIndexes, ok := m.indexes[collectionID]
+	fieldIndexesMap, ok := m.indexes[collectionID]
 	if !ok {
 		// the segment should be unindexed status if the collection has no indexes
 		m.fieldIndexLock.RUnlock()
 		return false, []*metricsinfo.IndexedField{}
+	}
+	// Copy the map to avoid data race after releasing the lock
+	fieldIndexes := make(map[UniqueID]*model.Index, len(fieldIndexesMap))
+	for id, index := range fieldIndexesMap {
+		fieldIndexes[id] = index
 	}
 	m.fieldIndexLock.RUnlock()
 

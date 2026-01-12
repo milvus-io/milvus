@@ -170,7 +170,7 @@ func getPKsFromColumnBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.C
 	return pks, nil
 }
 
-// mergeRequestCost merge the costs of request, the cost may came from different worker in same channel
+// mergeRequestCost merge the costs of request, the cost may come from different worker in same channel
 // or different channel in same collection, for now we just choose the part with the highest response time
 func mergeRequestCost(requestCosts []*internalpb.CostAggregation) *internalpb.CostAggregation {
 	var result *internalpb.CostAggregation

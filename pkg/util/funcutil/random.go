@@ -19,14 +19,7 @@ package funcutil
 import (
 	"fmt"
 	"math/rand"
-	"time"
 )
-
-var r *rand.Rand
-
-func init() {
-	r = rand.New(rand.NewSource(time.Now().UnixNano()))
-}
 
 var letterRunes = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
@@ -34,7 +27,7 @@ var letterRunes = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 func RandomBytes(n int) []byte {
 	b := make([]byte, n)
 	for i := range b {
-		b[i] = letterRunes[r.Intn(len(letterRunes))]
+		b[i] = letterRunes[rand.Intn(len(letterRunes))]
 	}
 	return b
 }

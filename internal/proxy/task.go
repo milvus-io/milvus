@@ -80,6 +80,7 @@ const (
 	SearchIterBatchSizeKey = "search_iter_batch_size"
 	SearchIterLastBoundKey = "search_iter_last_bound"
 	SearchIterIdKey        = "search_iter_id"
+	QueryGroupByFieldsKey  = "group_by_fields"
 
 	InsertTaskName                = "InsertTask"
 	CreateCollectionTaskName      = "CreateCollectionTask"
@@ -616,6 +617,13 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg(msg)
 	}
 
+	if typeutil.IsVectorType(t.fieldSchema.DataType) {
+		vectorFields := len(typeutil.GetVectorFieldSchemas(t.oldSchema))
+		if vectorFields >= Params.ProxyCfg.MaxVectorFieldNum.GetAsInt() {
+			return fmt.Errorf("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
+		}
+	}
+
 	if _, ok := schemapb.DataType_name[int32(t.fieldSchema.DataType)]; !ok || t.fieldSchema.GetDataType() == schemapb.DataType_None {
 		return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", t.fieldSchema.GetDataType()))
 	}
@@ -729,6 +737,16 @@ func (t *dropCollectionTask) PreExecute(ctx context.Context) error {
 	// No need to check collection name
 	// Validation shall be preformed in `CreateCollection`
 	// also permit drop collection one with bad collection name
+	_, err := globalMetaCache.GetCollectionID(ctx, t.DropCollectionRequest.GetDbName(), t.GetCollectionName())
+	if err != nil {
+		if errors.Is(err, merr.ErrCollectionNotFound) || errors.Is(err, merr.ErrDatabaseNotFound) {
+			// make dropping collection idempotent.
+			log.Ctx(ctx).Warn("drop non-existent collection", zap.String("collection", t.DropCollectionRequest.GetCollectionName()), zap.String("database", t.DropCollectionRequest.GetDbName()))
+			return nil
+		}
+		return err
+	}
+
 	return nil
 }
 
@@ -1881,7 +1899,7 @@ func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
 	}
 	partID, err := globalMetaCache.GetPartitionID(ctx, t.GetDbName(), t.GetCollectionName(), t.GetPartitionName())
 	if err != nil {
-		if errors.Is(merr.ErrPartitionNotFound, err) {
+		if errors.Is(merr.ErrPartitionNotFound, err) || errors.Is(merr.ErrCollectionNotFound, err) || errors.Is(merr.ErrDatabaseNotFound, err) {
 			return nil
 		}
 		return err

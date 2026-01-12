@@ -551,7 +551,13 @@ class SegmentInternalInterface : public SegmentInterface {
      * @return All candidates offsets.
      */
     virtual std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetType& bitset) const = 0;
+    find_first(int64_t limit, const BitsetTypeView& bitset) const = 0;
+
+    void
+    FillTargetEntryDirectly(
+        tracer::TraceContext* trace_ctx,
+        const std::unique_ptr<proto::segcore::RetrieveResults>& results,
+        RetrieveResult& retrieveResult) const;
 
     void
     FillTargetEntry(
@@ -633,6 +639,16 @@ class SegmentInternalInterface : public SegmentInterface {
                    const int64_t* seg_offsets,
                    int64_t count,
                    void* output) const = 0;
+
+    virtual void
+    bulk_subscript(milvus::OpContext* op_ctx,
+                   FieldId field_id,
+                   DataType data_type,
+                   const int64_t* seg_offsets,
+                   int64_t count,
+                   void* data,
+                   TargetBitmap& valid_map,
+                   bool small_int_raw_type = false) const = 0;
 
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to field_offset
     virtual std::unique_ptr<DataArray>

@@ -47,6 +47,7 @@ const (
 	DefaultHighPriorityThreadCoreCoefficient   = 10
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
 	DefaultLowPriorityThreadCoreCoefficient    = 1
+	DefaultBM25LoadThreadCoreCoefficient       = 1
 
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
@@ -227,6 +228,7 @@ type commonConfig struct {
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
+	BM25LoadThreadCoreCoefficient       ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
 	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
@@ -259,6 +261,7 @@ type commonConfig struct {
 	DefaultRootPassword   ParamItem `refreshable:"false"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
 	EnablePublicPrivilege ParamItem `refreshable:"false"`
+	ExprEnabled           ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -283,7 +286,6 @@ type commonConfig struct {
 	MaxWLockConditionalWaitTime ParamItem `refreshable:"true"`
 
 	// storage v2
-	EnableStorageV2                      ParamItem `refreshable:"false"`
 	Stv2SplitSystemColumn                ParamItem `refreshable:"true"`
 	Stv2SystemColumnIncludePK            ParamItem `refreshable:"true"`
 	Stv2SystemColumnIncludePartitionKey  ParamItem `refreshable:"true"`
@@ -335,6 +337,8 @@ type commonConfig struct {
 	ClusterID              ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
+	QNFileResourceMode        ParamItem `refreshable:"true"`
+	DNFileResourceMode        ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -660,6 +664,16 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.LowPriorityThreadCoreCoefficient.Init(base.mgr)
 
+	p.BM25LoadThreadCoreCoefficient = ParamItem{
+		Key:          "common.threadCoreCoefficient.bm25Load",
+		Version:      "2.6.8",
+		DefaultValue: strconv.Itoa(DefaultBM25LoadThreadCoreCoefficient),
+		Doc: "This parameter specify how many times the number of threads " +
+			"is the number of cores in BM25 load pool",
+		Export: true,
+	}
+	p.BM25LoadThreadCoreCoefficient.Init(base.mgr)
+
 	p.DiskWriteMode = ParamItem{
 		Key:          "common.diskWriteMode",
 		Version:      "2.6.0",
@@ -811,6 +825,15 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	}
 	p.EnablePublicPrivilege.Init(base.mgr)
 
+	p.ExprEnabled = ParamItem{
+		Key:          "common.security.exprEnabled",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "Whether to enable the /expr endpoint for debugging. When enabled, only root user can access it via HTTP Basic Auth on Proxy nodes.",
+		Export:       true,
+	}
+	p.ExprEnabled.Init(base.mgr)
+
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",
 		Version:      "2.0.0",
@@ -947,14 +970,6 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	}
 	p.MaxWLockConditionalWaitTime.Init(base.mgr)
 
-	p.EnableStorageV2 = ParamItem{
-		Key:          "common.storage.enablev2",
-		Version:      "2.3.1",
-		DefaultValue: "true",
-		Export:       true,
-	}
-	p.EnableStorageV2.Init(base.mgr)
-
 	p.UseLoonFFI = ParamItem{
 		Key:          "common.storage.useLoonFFI",
 		Version:      "2.6.7",
@@ -1002,7 +1017,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	p.Stv2SplitByAvgSize = ParamItem{
 		Key:          "common.storage.stv2.splitByAvgSize.enabled",
 		Version:      "2.6.2",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "enable split by average size policy in storage v2",
 		Export:       true,
 	}
@@ -1298,6 +1313,24 @@ The default value is 1, which is enough for most cases.`,
 		Export:       false,
 	}
 	p.HybridSearchRequeryPolicy.Init(base.mgr)
+
+	p.QNFileResourceMode = ParamItem{
+		Key:          "common.fileResource.mode.queryNode",
+		Version:      "2.6.8",
+		DefaultValue: "sync",
+		Doc:          "File resource mode for query node, options: [sync, close]. Default is sync.",
+		Export:       true,
+	}
+	p.QNFileResourceMode.Init(base.mgr)
+
+	p.DNFileResourceMode = ParamItem{
+		Key:          "common.fileResource.mode.dataNode",
+		Version:      "2.6.8",
+		DefaultValue: "sync",
+		Doc:          "File resource mode for data node, options: [sync, ref, close]. Default is sync.",
+		Export:       true,
+	}
+	p.DNFileResourceMode.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -1848,42 +1881,44 @@ type proxyConfig struct {
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
-	TimeTickInterval               ParamItem `refreshable:"false"`
-	HealthCheckTimeout             ParamItem `refreshable:"true"`
-	MsgStreamTimeTickBufSize       ParamItem `refreshable:"true"`
-	MaxNameLength                  ParamItem `refreshable:"true"`
-	MaxUsernameLength              ParamItem `refreshable:"true"`
-	MinPasswordLength              ParamItem `refreshable:"true"`
-	MaxPasswordLength              ParamItem `refreshable:"true"`
-	MaxFieldNum                    ParamItem `refreshable:"true"`
-	MaxVectorFieldNum              ParamItem `refreshable:"true"`
-	MaxShardNum                    ParamItem `refreshable:"true"`
-	MaxDimension                   ParamItem `refreshable:"true"`
-	GinLogging                     ParamItem `refreshable:"false"`
-	GinLogSkipPaths                ParamItem `refreshable:"false"`
-	MaxUserNum                     ParamItem `refreshable:"true"`
-	MaxRoleNum                     ParamItem `refreshable:"true"`
-	NameValidationAllowedChars     ParamItem `refreshable:"true"`
-	RoleNameValidationAllowedChars ParamItem `refreshable:"true"`
-	MaxTaskNum                     ParamItem `refreshable:"false"`
-	DDLConcurrency                 ParamItem `refreshable:"true"`
-	DCLConcurrency                 ParamItem `refreshable:"true"`
-	ShardLeaderCacheInterval       ParamItem `refreshable:"false"`
-	ReplicaSelectionPolicy         ParamItem `refreshable:"false"`
-	CheckQueryNodeHealthInterval   ParamItem `refreshable:"false"`
-	CostMetricsExpireTime          ParamItem `refreshable:"false"`
-	CheckWorkloadRequestNum        ParamItem `refreshable:"false"`
-	WorkloadToleranceFactor        ParamItem `refreshable:"false"`
-	RetryTimesOnReplica            ParamItem `refreshable:"true"`
-	RetryTimesOnHealthCheck        ParamItem `refreshable:"true"`
-	PartitionNameRegexp            ParamItem `refreshable:"true"`
-	MustUsePartitionKey            ParamItem `refreshable:"true"`
-	SkipAutoIDCheck                ParamItem `refreshable:"true"`
-	SkipPartitionKeyCheck          ParamItem `refreshable:"true"`
-	MaxVarCharLength               ParamItem `refreshable:"false"`
-	MaxTextLength                  ParamItem `refreshable:"false"`
-	MaxResultEntries               ParamItem `refreshable:"true"`
-	EnableCachedServiceProvider    ParamItem `refreshable:"true"`
+	TimeTickInterval                ParamItem `refreshable:"false"`
+	HealthCheckTimeout              ParamItem `refreshable:"true"`
+	MsgStreamTimeTickBufSize        ParamItem `refreshable:"true"`
+	MaxNameLength                   ParamItem `refreshable:"true"`
+	MaxUsernameLength               ParamItem `refreshable:"true"`
+	MinPasswordLength               ParamItem `refreshable:"true"`
+	MaxPasswordLength               ParamItem `refreshable:"true"`
+	MaxFieldNum                     ParamItem `refreshable:"true"`
+	MaxVectorFieldNum               ParamItem `refreshable:"true"`
+	MaxShardNum                     ParamItem `refreshable:"true"`
+	MaxDimension                    ParamItem `refreshable:"true"`
+	GinLogging                      ParamItem `refreshable:"false"`
+	GinLogSkipPaths                 ParamItem `refreshable:"false"`
+	MaxUserNum                      ParamItem `refreshable:"true"`
+	MaxRoleNum                      ParamItem `refreshable:"true"`
+	NameValidationAllowedChars      ParamItem `refreshable:"true"`
+	RoleNameValidationAllowedChars  ParamItem `refreshable:"true"`
+	MaxTaskNum                      ParamItem `refreshable:"false"`
+	DDLConcurrency                  ParamItem `refreshable:"true"`
+	DCLConcurrency                  ParamItem `refreshable:"true"`
+	ShardLeaderCacheInterval        ParamItem `refreshable:"false"`
+	ReplicaSelectionPolicy          ParamItem `refreshable:"false"`
+	CheckQueryNodeHealthInterval    ParamItem `refreshable:"false"`
+	CostMetricsExpireTime           ParamItem `refreshable:"false"`
+	CheckWorkloadRequestNum         ParamItem `refreshable:"false"`
+	WorkloadToleranceFactor         ParamItem `refreshable:"false"`
+	RetryTimesOnReplica             ParamItem `refreshable:"true"`
+	RetryTimesOnHealthCheck         ParamItem `refreshable:"true"`
+	ReplicaBlacklistDuration        ParamItem `refreshable:"true"`
+	ReplicaBlacklistCleanupInterval ParamItem `refreshable:"true"`
+	PartitionNameRegexp             ParamItem `refreshable:"true"`
+	MustUsePartitionKey             ParamItem `refreshable:"true"`
+	SkipAutoIDCheck                 ParamItem `refreshable:"true"`
+	SkipPartitionKeyCheck           ParamItem `refreshable:"true"`
+	MaxVarCharLength                ParamItem `refreshable:"false"`
+	MaxTextLength                   ParamItem `refreshable:"false"`
+	MaxResultEntries                ParamItem `refreshable:"true"`
+	EnableCachedServiceProvider     ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -2274,6 +2309,22 @@ please adjust in embedded Milvus: false`,
 	}
 	p.RetryTimesOnHealthCheck.Init(base.mgr)
 
+	p.ReplicaBlacklistDuration = ParamItem{
+		Key:          "proxy.replicaBlacklistDuration",
+		Version:      "2.6.8",
+		DefaultValue: "30s",
+		Doc:          "The duration a replica is blacklisted after a query failure, in seconds",
+	}
+	p.ReplicaBlacklistDuration.Init(base.mgr)
+
+	p.ReplicaBlacklistCleanupInterval = ParamItem{
+		Key:          "proxy.replicaBlacklistCleanupInterval",
+		Version:      "2.6.8",
+		DefaultValue: "10s",
+		Doc:          "The interval to cleanup expired entries from the replica blacklist, in seconds",
+	}
+	p.ReplicaBlacklistCleanupInterval.Init(base.mgr)
+
 	p.PartitionNameRegexp = ParamItem{
 		Key:          "proxy.partitionNameRegexp",
 		Version:      "2.3.4",
@@ -2503,8 +2554,6 @@ type queryCoordConfig struct {
 	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
 	ResourceExhaustionCleanupInterval ParamItem `refreshable:"true"`
 
-	FileResourceMode ParamItem `refreshable:"false"`
-
 	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
 }
 
@@ -2516,13 +2565,6 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		DefaultValue: "5",
 	}
 	p.RetryNum.Init(base.mgr)
-
-	p.FileResourceMode = ParamItem{
-		Key:          "queryCoord.fileResource.mode",
-		Version:      "2.6.3",
-		DefaultValue: "sync",
-	}
-	p.FileResourceMode.Init(base.mgr)
 
 	p.RetryInterval = ParamItem{
 		Key:          "queryCoord.task.retryinterval",
@@ -3344,8 +3386,7 @@ type queryNodeConfig struct {
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
 
 	// Idf Oracle
-	IDFEnableDisk       ParamItem `refreshable:"true"`
-	IDFWriteConcurrenct ParamItem `refreshable:"true"`
+	IDFEnableDisk ParamItem `refreshable:"true"`
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
 }
@@ -3358,14 +3399,6 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		DefaultValue: "true",
 	}
 	p.IDFEnableDisk.Init(base.mgr)
-
-	p.IDFWriteConcurrenct = ParamItem{
-		Key:          "queryNode.idfOracle.writeConcurrency",
-		Version:      "2.6.0",
-		Export:       true,
-		DefaultValue: "4",
-	}
-	p.IDFWriteConcurrenct.Init(base.mgr)
 
 	p.SoPath = ParamItem{
 		Key:          "queryNode.soPath",
@@ -4645,6 +4678,7 @@ type dataCoordConfig struct {
 	GCRemoveConcurrent          ParamItem `refreshable:"false"`
 	GCScanIntervalInHour        ParamItem `refreshable:"false"`
 	GCSlowDownCPUUsageThreshold ParamItem `refreshable:"false"`
+	SnapshotPendingTimeout      ParamItem `refreshable:"true"`
 	EnableActiveStandby         ParamItem `refreshable:"false"`
 
 	BindIndexNodeMode    ParamItem `refreshable:"false"`
@@ -4674,6 +4708,10 @@ type dataCoordConfig struct {
 	ImportPreAllocIDExpansionFactor ParamItem `refreshable:"true"`
 	ImportFileNumPerSlot            ParamItem `refreshable:"true"`
 	ImportMemoryLimitPerSlot        ParamItem `refreshable:"true"`
+	MaxSegmentsPerCopyTask          ParamItem `refreshable:"true"`
+	CopySegmentCheckInterval        ParamItem `refreshable:"true"`
+	CopySegmentTaskRetention        ParamItem `refreshable:"true"`
+	CopySegmentJobTimeout           ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -4695,7 +4733,6 @@ type dataCoordConfig struct {
 	JSONStatsWriteBatchSize          ParamItem `refreshable:"true"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
-	FileResourceMode      ParamItem `refreshable:"false"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -4707,13 +4744,6 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.WatchTimeoutInterval.Init(base.mgr)
-
-	p.FileResourceMode = ParamItem{
-		Key:          "dataCoord.fileResource.mode",
-		Version:      "2.6.3",
-		DefaultValue: "sync",
-	}
-	p.FileResourceMode.Init(base.mgr)
 
 	p.LegacyVersionWithoutRPCWatch = ParamItem{
 		Key:          "dataCoord.channel.legacyVersionWithoutRPCWatch",
@@ -5429,6 +5459,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.GCRemoveConcurrent.Init(base.mgr)
 
+	p.SnapshotPendingTimeout = ParamItem{
+		Key:          "dataCoord.snapshot.pendingTimeout",
+		Version:      "2.6.7",
+		DefaultValue: "60",
+		Doc:          "Timeout in minutes for pending snapshots before GC cleanup",
+		Export:       true,
+	}
+	p.SnapshotPendingTimeout.Init(base.mgr)
+
 	p.EnableActiveStandby = ParamItem{
 		Key:          "dataCoord.enableActiveStandby",
 		Version:      "2.0.0",
@@ -5684,6 +5723,43 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		},
 	}
 	p.ImportMemoryLimitPerSlot.Init(base.mgr)
+
+	p.MaxSegmentsPerCopyTask = ParamItem{
+		Key:          "dataCoord.import.maxSegmentsPerCopyTask",
+		Version:      "2.5.0",
+		Doc:          "Maximum number of segments that can be grouped into a single copy task during snapshot restore.",
+		DefaultValue: "100",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MaxSegmentsPerCopyTask.Init(base.mgr)
+
+	p.CopySegmentCheckInterval = ParamItem{
+		Key:          "dataCoord.copySegmentCheckInterval",
+		Version:      "2.6.8",
+		Doc:          "The interval for copy segment job checker to monitor and drive job state transitions, measured in seconds.",
+		DefaultValue: "2",
+		PanicIfEmpty: false,
+	}
+	p.CopySegmentCheckInterval.Init(base.mgr)
+
+	p.CopySegmentTaskRetention = ParamItem{
+		Key:          "dataCoord.copySegmentTaskRetention",
+		Version:      "2.6.8",
+		Doc:          "The retention period in seconds for copy segment jobs and tasks in Completed or Failed state.",
+		DefaultValue: "10800",
+		PanicIfEmpty: false,
+	}
+	p.CopySegmentTaskRetention.Init(base.mgr)
+
+	p.CopySegmentJobTimeout = ParamItem{
+		Key:          "dataCoord.copySegmentJobTimeout",
+		Version:      "2.6.8",
+		Doc:          "The timeout in seconds for copy segment jobs. Jobs exceeding this duration will be marked as failed.",
+		DefaultValue: "86400",
+		PanicIfEmpty: false,
+	}
+	p.CopySegmentJobTimeout.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",
@@ -5943,6 +6019,7 @@ type dataNodeConfig struct {
 	ImportBaseBufferSize        ParamItem `refreshable:"true"`
 	ImportDeleteBufferSize      ParamItem `refreshable:"true"`
 	ImportMemoryLimitPercentage ParamItem `refreshable:"true"`
+	ImportMaxWriteRetryAttempts ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
@@ -5965,7 +6042,8 @@ type dataNodeConfig struct {
 	DeltalogFormat ParamItem `refreshable:"false"`
 
 	// index services config
-	BuildParallel ParamItem `refreshable:"false"`
+	BuildParallel               ParamItem `refreshable:"false"`
+	MaxVecIndexBuildConcurrency ParamItem `refreshable:"true"`
 
 	WorkerSlotUnit      ParamItem `refreshable:"true"`
 	StandaloneSlotRatio ParamItem `refreshable:"false"`
@@ -6295,6 +6373,14 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.ImportMemoryLimitPercentage.Init(base.mgr)
 
+	p.ImportMaxWriteRetryAttempts = ParamItem{
+		Key:          "dataNode.import.maxWriteRetryAttempts",
+		Version:      "2.6.9",
+		Doc:          "The maximum number of write retry attempts. 0 means unlimited.",
+		DefaultValue: "0",
+	}
+	p.ImportMaxWriteRetryAttempts.Init(base.mgr)
+
 	p.L0BatchMemoryRatio = ParamItem{
 		Key:          "dataNode.compaction.levelZeroBatchMemoryRatio",
 		Version:      "2.4.0",
@@ -6406,6 +6492,14 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.BuildParallel.Init(base.mgr)
 
+	p.MaxVecIndexBuildConcurrency = ParamItem{
+		Key:          "dataNode.index.maxVecIndexBuildConcurrency",
+		Version:      "2.6.9",
+		DefaultValue: "4",
+		Export:       false,
+	}
+	p.MaxVecIndexBuildConcurrency.Init(base.mgr)
+
 	p.WorkerSlotUnit = ParamItem{
 		Key:          "dataNode.workerSlotUnit",
 		Version:      "2.5.7",
@@ -6479,6 +6573,10 @@ type streamingConfig struct {
 	WALRecoveryMaxDirtyMessage           ParamItem `refreshable:"true"`
 	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
+
+	// Empty TimeTick Filtering configration
+	DelegatorEmptyTimeTickMaxFilterInterval ParamItem `refreshable:"true"`
+	FlushEmptyTimeTickMaxFilterInterval     ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -6834,6 +6932,29 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Export:       false,
 	}
 	p.WALRecoverySchemaExpirationTolerance.Init(base.mgr)
+
+	p.DelegatorEmptyTimeTickMaxFilterInterval = ParamItem{
+		Key:     "streaming.delegator.emptyTimeTick.maxFilterInterval",
+		Version: "2.6.9",
+		Doc: `The max filter interval for empty time tick of delegator, 1m by default.
+If the interval since last timetick is less than this config, the empty time tick will be filtered.`,
+		DefaultValue: "1m",
+		Export:       false,
+	}
+	p.DelegatorEmptyTimeTickMaxFilterInterval.Init(base.mgr)
+
+	p.FlushEmptyTimeTickMaxFilterInterval = ParamItem{
+		Key:     "streaming.flush.emptyTimeTick.maxFilterInterval",
+		Version: "2.6.9",
+		Doc: `The max filter interval for empty time tick of flush, 1s by default.
+If the interval since last timetick is less than this config, the empty time tick will be filtered.
+Because current flusher need the empty time tick to trigger the cp update,
+too huge threshold will block the GetFlushState operation,
+so we set 1 second here as a threshold.`,
+		DefaultValue: "1s",
+		Export:       false,
+	}
+	p.FlushEmptyTimeTickMaxFilterInterval.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.

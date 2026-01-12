@@ -79,6 +79,7 @@ type CompactionMeta interface {
 	GetAnalyzeMeta() *analyzeMeta
 	GetPartitionStatsMeta() *partitionStatsMeta
 	GetCompactionTaskMeta() *compactionTaskMeta
+	GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error)
 }
 
 var _ CompactionMeta = (*meta)(nil)
@@ -104,8 +105,11 @@ type meta struct {
 
 	// File Resource Meta
 	resourceMeta    map[string]*internalpb.FileResourceInfo // name -> info
+	resourceIDMap   map[int64]*internalpb.FileResourceInfo  // id -> info
 	resourceVersion uint64
 	resourceLock    lock.RWMutex
+	// Snapshot Meta
+	snapshotMeta *snapshotMeta
 }
 
 func (m *meta) GetIndexMeta() *indexMeta {
@@ -122,6 +126,10 @@ func (m *meta) GetPartitionStatsMeta() *partitionStatsMeta {
 
 func (m *meta) GetCompactionTaskMeta() *compactionTaskMeta {
 	return m.compactionTaskMeta
+}
+
+func (m *meta) GetSnapshotMeta() *snapshotMeta {
+	return m.snapshotMeta
 }
 
 type channelCPs struct {
@@ -196,6 +204,10 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// if err != nil {
 	// 	return nil, err
 	// }
+	spm, err := newSnapshotMeta(ctx, catalog, chunkManager)
+	if err != nil {
+		return nil, err
+	}
 
 	mt := &meta{
 		ctx:                ctx,
@@ -210,7 +222,9 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		compactionTaskMeta: ctm,
 		statsTaskMeta:      stm,
 		// externalCollectionTaskMeta: ectm,
-		resourceMeta: make(map[string]*internalpb.FileResourceInfo),
+		resourceMeta:  make(map[string]*internalpb.FileResourceInfo),
+		resourceIDMap: make(map[int64]*internalpb.FileResourceInfo),
+		snapshotMeta:  spm,
 	}
 	err = mt.reloadFromKV(ctx, broker)
 	if err != nil {
@@ -1056,6 +1070,12 @@ func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs
 		segment.Bm25Statslogs = mergeFieldBinlogs(segment.GetBm25Statslogs(), bm25logs)
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
+			UpdateMask: metastore.BinlogsUpdateMask{
+				WithoutBinlogs:       len(binlogs) == 0,
+				WithoutDeltalogs:     len(deltalogs) == 0,
+				WithoutStatslogs:     len(statslogs) == 0,
+				WithoutBm25Statslogs: len(bm25logs) == 0,
+			},
 		}
 		return true
 	}
@@ -1608,6 +1628,17 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 	defer m.segMu.Unlock()
 
 	m.segments.SetIsCompacting(segmentID, compacting)
+}
+
+// IsSegmentCompacting check if segment is compacting
+func (m *meta) IsSegmentCompacting(segmentID UniqueID) bool {
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
+	seg := m.segments.GetSegment(segmentID)
+	if seg == nil {
+		return false
+	}
+	return seg.isCompacting
 }
 
 // CheckAndSetSegmentsCompacting check all segments are not compacting
@@ -2448,6 +2479,7 @@ func (m *meta) reloadFileResourceMeta(ctx context.Context) error {
 	m.resourceMeta = make(map[string]*internalpb.FileResourceInfo)
 	for _, resource := range resources {
 		m.resourceMeta[resource.Name] = resource
+		m.resourceIDMap[resource.Id] = resource
 	}
 	m.resourceVersion = version
 	return nil
@@ -2468,6 +2500,7 @@ func (m *meta) AddFileResource(ctx context.Context, resource *internalpb.FileRes
 	}
 
 	m.resourceMeta[resource.Name] = resource
+	m.resourceIDMap[resource.Id] = resource
 	m.resourceVersion += 1
 	return nil
 }
@@ -2484,10 +2517,26 @@ func (m *meta) RemoveFileResource(ctx context.Context, name string) error {
 		}
 
 		delete(m.resourceMeta, name)
+		delete(m.resourceIDMap, resource.Id)
 		m.resourceVersion += 1
 	}
 
 	return nil
+}
+
+func (m *meta) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
+	m.resourceLock.RLock()
+	defer m.resourceLock.RUnlock()
+
+	resources := make([]*internalpb.FileResourceInfo, 0)
+	for _, resourceID := range resourceIDs {
+		if resource, ok := m.resourceIDMap[resourceID]; ok {
+			resources = append(resources, resource)
+		} else {
+			return nil, errors.Errorf("file resource %d not found", resourceID)
+		}
+	}
+	return resources, nil
 }
 
 // ListFileResource list file resources from meta

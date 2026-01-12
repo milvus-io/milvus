@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -688,7 +689,7 @@ func TestTranslateOutputFields(t *testing.T) {
 	schema := newSchemaInfo(collSchema)
 
 	// Test empty output fields
-	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{}, schema, false)
+	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{}, schema, false)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []string{}, outputFields)
 	assert.ElementsMatch(t, []string{}, userOutputFields)
@@ -696,7 +697,7 @@ func TestTranslateOutputFields(t *testing.T) {
 	assert.False(t, requestedPK)
 
 	// Test single field
-	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{idFieldName}, schema, false)
+	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{idFieldName}, schema, false)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []string{idFieldName}, outputFields)
 	assert.ElementsMatch(t, []string{idFieldName}, userOutputFields)
@@ -704,7 +705,7 @@ func TestTranslateOutputFields(t *testing.T) {
 	assert.True(t, requestedPK)
 
 	// Test multiple fields
-	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{idFieldName, tsFieldName}, schema, false)
+	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{idFieldName, tsFieldName}, schema, false)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []string{idFieldName, tsFieldName}, outputFields)
 	assert.ElementsMatch(t, []string{idFieldName, tsFieldName}, userOutputFields)
@@ -712,7 +713,7 @@ func TestTranslateOutputFields(t *testing.T) {
 	assert.True(t, requestedPK)
 
 	// Test with vector field
-	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{idFieldName, tsFieldName, floatVectorFieldName}, schema, false)
+	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{idFieldName, tsFieldName, floatVectorFieldName}, schema, false)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName}, outputFields)
 	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName}, userOutputFields)
@@ -720,7 +721,7 @@ func TestTranslateOutputFields(t *testing.T) {
 	assert.True(t, requestedPK)
 
 	// Test without id field
-	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{tsFieldName, floatVectorFieldName}, schema, false)
+	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{tsFieldName, floatVectorFieldName}, schema, false)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName}, outputFields)
 	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName}, userOutputFields)
@@ -728,7 +729,7 @@ func TestTranslateOutputFields(t *testing.T) {
 	assert.False(t, requestedPK)
 
 	// Test wildcard - should not include function output fields
-	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{"*"}, schema, false)
+	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"*"}, schema, false)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
 	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
@@ -736,23 +737,22 @@ func TestTranslateOutputFields(t *testing.T) {
 	assert.True(t, requestedPK)
 
 	// Test wildcard with spaces
-	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{" * "}, schema, false)
+	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{" * "}, schema, false)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
 	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
 	assert.ElementsMatch(t, []string{}, userDynamicFields)
 	assert.True(t, requestedPK)
 
-	// Test function output field - should error
-	_, _, _, _, err = translateOutputFields([]string{"*", sparseFloatVectorFieldName}, schema, false)
+	_, _, _, _, _, err = translateOutputFields([]string{"*", sparseFloatVectorFieldName}, schema, false)
 	assert.Error(t, err)
-	_, _, _, _, err = translateOutputFields([]string{sparseFloatVectorFieldName}, schema, false)
+	_, _, _, _, _, err = translateOutputFields([]string{sparseFloatVectorFieldName}, schema, false)
 	assert.Error(t, err)
-	_, _, _, _, err = translateOutputFields([]string{sparseFloatVectorFieldName}, schema, true)
+	_, _, _, _, _, err = translateOutputFields([]string{sparseFloatVectorFieldName}, schema, true)
 	assert.Error(t, err)
 
 	// Test with removePkField=true
-	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{}, schema, true)
+	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{}, schema, true)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []string{}, outputFields)
 	assert.ElementsMatch(t, []string{}, userOutputFields)
@@ -761,42 +761,42 @@ func TestTranslateOutputFields(t *testing.T) {
 
 	// if removePkField is true, pk field should be removed from output fields
 
-	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{"*"}, schema, true)
+	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"*"}, schema, true)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
 	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
 	assert.ElementsMatch(t, []string{}, userDynamicFields)
 	assert.True(t, requestedPK)
 
-	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{idFieldName, tsFieldName}, schema, true)
+	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{idFieldName, tsFieldName}, schema, true)
 	assert.Equal(t, nil, err)
 	assert.ElementsMatch(t, []string{tsFieldName}, outputFields)
 	assert.ElementsMatch(t, []string{tsFieldName}, userOutputFields)
 	assert.ElementsMatch(t, []string{}, userDynamicFields)
 	assert.True(t, requestedPK)
 
-	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{idFieldName, tsFieldName, floatVectorFieldName}, schema, true)
+	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{idFieldName, tsFieldName, floatVectorFieldName}, schema, true)
 	assert.Equal(t, nil, err)
 	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName}, outputFields)
 	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName}, userOutputFields)
 	assert.ElementsMatch(t, []string{}, userDynamicFields)
 	assert.True(t, requestedPK)
 
-	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{"*"}, schema, true)
+	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"*"}, schema, true)
 	assert.Equal(t, nil, err)
 	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
 	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
 	assert.ElementsMatch(t, []string{}, userDynamicFields)
 	assert.True(t, requestedPK)
 
-	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{"*", tsFieldName}, schema, true)
+	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"*", tsFieldName}, schema, true)
 	assert.Equal(t, nil, err)
 	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
 	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
 	assert.ElementsMatch(t, []string{}, userDynamicFields)
 	assert.True(t, requestedPK)
 
-	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{"*", floatVectorFieldName}, schema, true)
+	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"*", floatVectorFieldName}, schema, true)
 	assert.Equal(t, nil, err)
 	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
 	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
@@ -804,7 +804,7 @@ func TestTranslateOutputFields(t *testing.T) {
 	assert.True(t, requestedPK)
 
 	// Test non-existent field, dynamic field not enabled
-	_, _, _, _, err = translateOutputFields([]string{"A"}, schema, true)
+	_, _, _, _, _, err = translateOutputFields([]string{"A"}, schema, true)
 	assert.Error(t, err)
 
 	t.Run("enable dynamic schema", func(t *testing.T) {
@@ -823,14 +823,14 @@ func TestTranslateOutputFields(t *testing.T) {
 		}
 		schema := newSchemaInfo(collSchema)
 
-		outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{"A", idFieldName}, schema, true)
+		outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"A", idFieldName}, schema, true)
 		assert.NoError(t, err)
 		assert.ElementsMatch(t, []string{common.MetaFieldName}, outputFields)
 		assert.ElementsMatch(t, []string{"A"}, userOutputFields)
 		assert.ElementsMatch(t, []string{"A"}, userDynamicFields)
 		assert.True(t, requestedPK)
 
-		outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{"$meta[\"A\"]", idFieldName}, schema, true)
+		outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"$meta[\"A\"]", idFieldName}, schema, true)
 		assert.NoError(t, err)
 		assert.ElementsMatch(t, []string{common.MetaFieldName}, outputFields)
 		assert.ElementsMatch(t, []string{"$meta[\"A\"]"}, userOutputFields)
@@ -838,25 +838,25 @@ func TestTranslateOutputFields(t *testing.T) {
 		assert.True(t, requestedPK)
 
 		// Test invalid dynamic field expressions
-		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, `$meta["A"]["B"]`}, schema, true)
+		_, _, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, `$meta["A"]["B"]`}, schema, true)
 		assert.Error(t, err)
 
-		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta[\"\"]"}, schema, true)
+		_, _, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta[\"\"]"}, schema, true)
 		assert.Error(t, err)
 
-		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta[]"}, schema, true)
+		_, _, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta[]"}, schema, true)
 		assert.Error(t, err)
 
-		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta["}, schema, true)
+		_, _, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta["}, schema, true)
 		assert.Error(t, err)
 
-		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "[]"}, schema, true)
+		_, _, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "[]"}, schema, true)
 		assert.Error(t, err)
 
-		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "A > 1"}, schema, true)
+		_, _, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "A > 1"}, schema, true)
 		assert.Error(t, err)
 
-		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, ""}, schema, true)
+		_, _, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, ""}, schema, true)
 		assert.Error(t, err)
 	})
 }
@@ -900,14 +900,14 @@ func TestTranslateOutputFields_StructArrayField(t *testing.T) {
 	schema := newSchemaInfo(collSchema)
 
 	// Test struct array field
-	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{"sub_vector_field"}, schema, false)
+	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"sub_vector_field"}, schema, false)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []string{"sub_vector_field"}, outputFields)
 	assert.ElementsMatch(t, []string{"sub_vector_field"}, userOutputFields)
 	assert.ElementsMatch(t, []string{}, userDynamicFields)
 	assert.False(t, requestedPK)
 
-	outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{"struct_array_field", "sub_field"}, schema, false)
+	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"struct_array_field", "sub_field"}, schema, false)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []string{"sub_vector_field", "sub_field"}, outputFields)
 	assert.ElementsMatch(t, []string{"sub_vector_field", "sub_field"}, userOutputFields)
@@ -1183,6 +1183,32 @@ func TestAddFieldTask(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		oldSchemaWithVectors := constructCollectionSchemaByDataType(collectionName, fieldName2Type, int64Field, false)
+		for i := 0; i < Params.ProxyCfg.MaxVectorFieldNum.GetAsInt(); i++ {
+			oldSchemaWithVectors.Fields = append(oldSchemaWithVectors.Fields, &schemapb.FieldSchema{
+				Name:     fmt.Sprintf("vec_%d", i),
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "128"},
+				},
+			})
+		}
+		task.oldSchema = oldSchemaWithVectors
+		fSchema = &schemapb.FieldSchema{
+			Name:     "new_vec_field",
+			DataType: schemapb.DataType_FloatVector,
+			Nullable: true,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "dim", Value: "128"},
+			},
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "maximum vector field's number should be limited to")
 	})
 }
 
@@ -3127,7 +3153,16 @@ func Test_dropCollectionTask_PreExecute(t *testing.T) {
 	dct := &dropCollectionTask{DropCollectionRequest: &milvuspb.DropCollectionRequest{
 		Base:           &commonpb.MsgBase{},
 		CollectionName: "valid", // invalid
+
 	}}
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+		return 1, nil
+	}).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	mockRC := mocks.NewMockMixCoordClient(t)
+	dct.mixCoord = mockRC
 	ctx := context.Background()
 	err := dct.PreExecute(ctx)
 	assert.NoError(t, err)

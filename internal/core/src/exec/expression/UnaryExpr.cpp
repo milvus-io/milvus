@@ -215,7 +215,7 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             auto val_type = expr_->val_.val_case();
             auto val_type_inner = FromValCase(val_type);
             if (CanUseNgramIndex() && !has_offset_input_) {
-                auto res = ExecNgramMatch();
+                auto res = ExecNgramMatch(context);
                 // If nullopt is returned, it means the query cannot be
                 // optimized by ngram index. Forward it to the normal path.
                 if (res.has_value()) {
@@ -1303,7 +1303,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
         }
         return ExecTextMatch();
     } else if (CanUseNgramIndex()) {
-        auto res = ExecNgramMatch();
+        auto res = ExecNgramMatch(context);
         // If nullopt is returned, it means the query cannot be
         // optimized by ngram index. Forward it to the normal path.
         if (res.has_value()) {
@@ -1894,7 +1894,7 @@ PhyUnaryRangeFilterExpr::CanUseNgramIndex() const {
 }
 
 std::optional<VectorPtr>
-PhyUnaryRangeFilterExpr::ExecNgramMatch() {
+PhyUnaryRangeFilterExpr::ExecNgramMatch(EvalCtx& context) {
     if (!arg_inited_) {
         value_arg_.SetValue<std::string>(expr_->val_);
         arg_inited_ = true;
@@ -1911,7 +1911,15 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
         AssertInfo(index != nullptr,
                    "ngram index should not be null, field_id: {}",
                    field_id_.get());
-        auto res_opt = index->ExecuteQuery(literal, expr_->op_type_, this);
+
+        // Get pre_filter from previous expressions in the conjunction.
+        // This optimization reduces the number of rows that need post-filtering.
+        const auto& bitmap_input = context.get_bitmap_input();
+        const TargetBitmap* pre_filter =
+            bitmap_input.empty() ? nullptr : &bitmap_input;
+
+        auto res_opt =
+            index->ExecuteQuery(literal, expr_->op_type_, this, pre_filter);
         if (!res_opt.has_value()) {
             return std::nullopt;
         }

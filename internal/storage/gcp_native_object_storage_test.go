@@ -383,4 +383,141 @@ func TestGcpNativeReadFile(t *testing.T) {
 		err = reader.Close()
 		assert.NoError(t, err)
 	})
+
+	t.Run("test Copy", func(t *testing.T) {
+		testCopyRoot := "test_copy_gcp"
+
+		// Test successful copy
+		t.Run("copy file successfully", func(t *testing.T) {
+			srcKey := testCopyRoot + "/src/file1"
+			dstKey := testCopyRoot + "/dst/file1"
+			value := []byte("test data for gcp copy")
+
+			// Write source file
+			err := rcm.Write(ctx, srcKey, value)
+			require.NoError(t, err)
+			defer rcm.Remove(ctx, srcKey)
+			defer rcm.Remove(ctx, dstKey)
+
+			// Copy file
+			err = rcm.Copy(ctx, srcKey, dstKey)
+			assert.NoError(t, err)
+
+			// Verify destination file exists and has correct content
+			dstData, err := rcm.Read(ctx, dstKey)
+			assert.NoError(t, err)
+			assert.Equal(t, value, dstData)
+
+			// Verify source file still exists
+			srcData, err := rcm.Read(ctx, srcKey)
+			assert.NoError(t, err)
+			assert.Equal(t, value, srcData)
+		})
+
+		// Test copy with non-existent source
+		t.Run("copy non-existent source file", func(t *testing.T) {
+			srcKey := testCopyRoot + "/not_exist/file"
+			dstKey := testCopyRoot + "/dst/file"
+
+			err := rcm.Copy(ctx, srcKey, dstKey)
+			assert.Error(t, err)
+		})
+
+		// Test copy overwrite existing file
+		t.Run("copy and overwrite existing file", func(t *testing.T) {
+			srcKey := testCopyRoot + "/src3/file3"
+			dstKey := testCopyRoot + "/dst3/file3"
+			srcValue := []byte("new gcp content")
+			oldValue := []byte("old gcp content")
+
+			// Create destination with old content
+			err := rcm.Write(ctx, dstKey, oldValue)
+			require.NoError(t, err)
+			defer rcm.Remove(ctx, dstKey)
+
+			// Create source with new content
+			err = rcm.Write(ctx, srcKey, srcValue)
+			require.NoError(t, err)
+			defer rcm.Remove(ctx, srcKey)
+
+			// Copy (should overwrite)
+			err = rcm.Copy(ctx, srcKey, dstKey)
+			assert.NoError(t, err)
+
+			// Verify destination has new content
+			dstData, err := rcm.Read(ctx, dstKey)
+			assert.NoError(t, err)
+			assert.Equal(t, srcValue, dstData)
+		})
+
+		// Test copy large file
+		t.Run("copy large file", func(t *testing.T) {
+			srcKey := testCopyRoot + "/src4/large_file"
+			dstKey := testCopyRoot + "/dst4/large_file"
+
+			// Create 5MB file
+			largeData := make([]byte, 5*1024*1024)
+			for i := range largeData {
+				largeData[i] = byte(i % 256)
+			}
+
+			err := rcm.Write(ctx, srcKey, largeData)
+			require.NoError(t, err)
+			defer rcm.Remove(ctx, srcKey)
+			defer rcm.Remove(ctx, dstKey)
+
+			// Copy large file
+			err = rcm.Copy(ctx, srcKey, dstKey)
+			assert.NoError(t, err)
+
+			// Verify content
+			dstData, err := rcm.Read(ctx, dstKey)
+			assert.NoError(t, err)
+			assert.Equal(t, largeData, dstData)
+		})
+
+		// Test copy empty file
+		t.Run("copy empty file", func(t *testing.T) {
+			srcKey := testCopyRoot + "/src5/empty_file"
+			dstKey := testCopyRoot + "/dst5/empty_file"
+			emptyData := []byte{}
+
+			// Write empty file
+			err := rcm.Write(ctx, srcKey, emptyData)
+			require.NoError(t, err)
+			defer rcm.Remove(ctx, srcKey)
+			defer rcm.Remove(ctx, dstKey)
+
+			// Copy empty file
+			err = rcm.Copy(ctx, srcKey, dstKey)
+			assert.NoError(t, err)
+
+			// Verify destination exists and has size 0
+			size, err := rcm.Size(ctx, dstKey)
+			assert.NoError(t, err)
+			assert.Equal(t, int64(0), size)
+		})
+
+		// Test copy with nested path
+		t.Run("copy file with nested path", func(t *testing.T) {
+			srcKey := testCopyRoot + "/src6/file6"
+			dstKey := testCopyRoot + "/dst6/nested/deep/path/file6"
+			value := []byte("test data for nested path copy")
+
+			// Write source file
+			err := rcm.Write(ctx, srcKey, value)
+			require.NoError(t, err)
+			defer rcm.Remove(ctx, srcKey)
+			defer rcm.Remove(ctx, dstKey)
+
+			// Copy to nested path
+			err = rcm.Copy(ctx, srcKey, dstKey)
+			assert.NoError(t, err)
+
+			// Verify destination file exists and has correct content
+			dstData, err := rcm.Read(ctx, dstKey)
+			assert.NoError(t, err)
+			assert.Equal(t, value, dstData)
+		})
+	})
 }

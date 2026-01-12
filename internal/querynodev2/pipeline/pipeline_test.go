@@ -139,6 +139,7 @@ func (suite *PipelineTestSuite) TestBasic() {
 	suite.delegator.EXPECT().UpdateTSafe(in.EndTs).Run(func(ts uint64) {
 		close(done)
 	}).Return()
+	suite.delegator.EXPECT().GetLatestRequiredMVCCTimeTick().Return(0).Maybe()
 
 	// build pipleine
 	manager := &segments.Manager{

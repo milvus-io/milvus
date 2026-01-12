@@ -40,7 +40,6 @@ type NamespaceCompactorTestSuite struct {
 func (s *NamespaceCompactorTestSuite) SetupSuite() {
 	paramtable.Get().Init(paramtable.NewBaseTable())
 	paramtable.Get().Save("common.storageType", "local")
-	paramtable.Get().Save("common.storage.enableV2", "true")
 	initcore.InitStorageV2FileSystem(paramtable.Get())
 
 	s.binlogIO = mock_util.NewMockBinlogIO(s.T())

@@ -32,8 +32,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -94,6 +96,15 @@ func (mm *metaMemoryKV) CompareVersionAndSwap(ctx context.Context, key string, v
 
 func newMemoryMeta(t *testing.T) (*meta, error) {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+	return newMeta(context.TODO(), catalog, nil, broker)
+}
+
+func newMetaWithEtcd(t *testing.T, rootPath string) (*meta, error) {
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	catalogKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	catalog := datacoord.NewCatalog(catalogKV, "", rootPath)
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	return newMeta(context.TODO(), catalog, nil, broker)
@@ -973,6 +984,35 @@ func (s *mockMixCoord) ManualUpdateCurrentTarget(ctx context.Context, collection
 	panic("implement me")
 }
 
+// Snapshot related methods
+func (s *mockMixCoord) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnapshotRequest) (*datapb.DescribeSnapshotResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error) {
+	panic("implement me")
+}
+
 type mockHandler struct {
 	meta *meta
 }
@@ -1016,6 +1056,19 @@ func (h *mockHandler) GetCurrentSegmentsView(ctx context.Context, channel RWChan
 }
 
 func (h *mockHandler) ListLoadedSegments(ctx context.Context) ([]int64, error) {
+	return nil, nil
+}
+
+func (h *mockHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*SnapshotData, error) {
+	return &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Name:         "test_snapshot",
+			CollectionId: collectionID,
+		},
+	}, nil
+}
+
+func (h *mockHandler) GetDeltaLogFromCompactTo(ctx context.Context, segmentID UniqueID) ([]*datapb.FieldBinlog, error) {
 	return nil, nil
 }
 

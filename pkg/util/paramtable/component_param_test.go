@@ -222,6 +222,16 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.RetryTimesOnReplica.GetAsInt(), 5)
 		assert.EqualValues(t, Params.HealthCheckTimeout.GetAsInt64(), 3000)
 
+		// Test ReplicaBlacklistDuration default value
+		assert.Equal(t, 30*time.Second, Params.ReplicaBlacklistDuration.GetAsDurationByParse())
+		params.Save("proxy.replicaBlacklistDuration", "60s")
+		assert.Equal(t, 60*time.Second, Params.ReplicaBlacklistDuration.GetAsDurationByParse())
+
+		// Test ReplicaBlacklistCleanupInterval default value
+		assert.Equal(t, 10*time.Second, Params.ReplicaBlacklistCleanupInterval.GetAsDurationByParse())
+		params.Save("proxy.replicaBlacklistCleanupInterval", "30s")
+		assert.Equal(t, 30*time.Second, Params.ReplicaBlacklistCleanupInterval.GetAsDurationByParse())
+
 		params.Save("proxy.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 
@@ -594,6 +604,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 500*time.Second, Params.TaskCheckInterval.GetAsDuration(time.Second))
 		params.Save("datacoord.statsTaskTriggerCount", "3")
 		assert.Equal(t, 3, Params.SortCompactionTriggerCount.GetAsInt())
+
+		assert.Equal(t, 100, Params.MaxSegmentsPerCopyTask.GetAsInt())
+		params.Save("dataCoord.import.maxSegmentsPerCopyTask", "200")
+		assert.Equal(t, 200, Params.MaxSegmentsPerCopyTask.GetAsInt())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
@@ -648,12 +662,15 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 16*1024*1024, Params.ImportBaseBufferSize.GetAsInt())
 		assert.Equal(t, 16*1024*1024, Params.ImportDeleteBufferSize.GetAsInt())
 		assert.Equal(t, 10.0, Params.ImportMemoryLimitPercentage.GetAsFloat())
+		assert.Equal(t, 0, Params.ImportMaxWriteRetryAttempts.GetAsInt())
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 		assert.Equal(t, 16, Params.SlotCap.GetAsInt())
 
 		// compaction
 		assert.Equal(t, 10, Params.MaxCompactionConcurrency.GetAsInt())
+
+		assert.Equal(t, 4, Params.MaxVecIndexBuildConcurrency.GetAsInt())
 
 		// clustering compaction
 		params.Save("datanode.clusteringCompaction.memoryBufferRatio", "0.1")
@@ -701,6 +718,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10*time.Minute, params.StreamingCfg.FlushL0MaxLifetime.GetAsDurationByParse())
 		assert.Equal(t, 500000, params.StreamingCfg.FlushL0MaxRowNum.GetAsInt())
 		assert.Equal(t, int64(32*1024*1024), params.StreamingCfg.FlushL0MaxSize.GetAsSize())
+		assert.Equal(t, 1*time.Minute, params.StreamingCfg.DelegatorEmptyTimeTickMaxFilterInterval.GetAsDurationByParse())
+		assert.Equal(t, 1*time.Second, params.StreamingCfg.FlushEmptyTimeTickMaxFilterInterval.GetAsDurationByParse())
 
 		params.Save(params.StreamingCfg.WALBalancerTriggerInterval.Key, "50s")
 		params.Save(params.StreamingCfg.WALBalancerBackoffInitialInterval.Key, "50s")

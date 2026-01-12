@@ -24,6 +24,7 @@
 #include "segcore/ConcurrentVector.h"
 #include "segcore/Types.h"
 #include "common/Consts.h"
+#include "segcore/SegmentInterface.h"
 
 namespace milvus::segcore {
 
@@ -52,6 +53,19 @@ GetRawDataSizeOfDataArray(const DataArray* data,
 // modify bulk script implement to make process more clear
 std::unique_ptr<DataArray>
 CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta);
+
+void
+SetUpScalarFieldData(milvus::proto::schema::ScalarField*& scalar_array,
+                     DataType data_type,
+                     DataType element_type,
+                     int64_t count);
+
+void
+CreateScalarDataArray(DataArray& data_array,
+                      int64_t count,
+                      DataType data_type,
+                      DataType element_type,
+                      bool nullable);
 
 std::unique_ptr<DataArray>
 CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta);
@@ -191,4 +205,13 @@ TimestampToPhysicalMs(Timestamp timestamp) {
     return timestamp >> LOGICAL_BITS;
 }
 
+FieldDataPtr
+bulk_script_field_data(milvus::OpContext* op_ctx,
+                       FieldId fieldId,
+                       DataType dataType,
+                       const int64_t* seg_offsets,
+                       int64_t count,
+                       const segcore::SegmentInternalInterface* segment,
+                       TargetBitmap& valid_view,
+                       bool small_int_raw_type = false);
 }  // namespace milvus::segcore

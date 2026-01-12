@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <string>
@@ -219,6 +220,11 @@ class Driver : public std::enable_shared_from_this<Driver> {
     EnqueueInternal() {
     }
 
+    /// Invoked to initialize the operators from this driver once on its first
+    /// execution.
+    void
+    initializeOperators();
+
     static void
     Run(std::shared_ptr<Driver> self);
 
@@ -237,6 +243,8 @@ class Driver : public std::enable_shared_from_this<Driver> {
     std::vector<std::unique_ptr<Operator>> operators_;
 
     size_t current_operator_index_{0};
+
+    std::atomic_bool operatorsInitialized_{false};
 
     BlockingReason blocking_reason_{BlockingReason::kNotBlocked};
 

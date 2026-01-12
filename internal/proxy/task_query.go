@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
@@ -66,6 +67,7 @@ type queryTask struct {
 	translatedOutputFields []string
 	userOutputFields       []string
 	userDynamicFields      []string
+	userAggregates         []agg.AggregateBase
 
 	resultBuf *typeutil.ConcurrentSet[*internalpb.RetrieveResults]
 
@@ -81,8 +83,8 @@ type queryTask struct {
 	totalRelatedDataSize int64
 	mustUsePartitionKey  bool
 	resolvedTimezoneStr  string
-
-	storageCost segcore.StorageCost
+	storageCost          segcore.StorageCost
+	aggregationFieldMap  *agg.AggregationFieldMap
 }
 
 type queryParams struct {
@@ -91,8 +93,60 @@ type queryParams struct {
 	reduceType        reduce.IReduceType
 	isIterator        bool
 	collectionID      int64
+	groupByFields     []string
 	timezone          string
 	extractTimeFields []string
+}
+
+func isSupportedGroupByFieldType(dt schemapb.DataType) bool {
+	switch dt {
+	case schemapb.DataType_Int8,
+		schemapb.DataType_Int16,
+		schemapb.DataType_Int32,
+		schemapb.DataType_Int64,
+		schemapb.DataType_VarChar,
+		schemapb.DataType_Timestamptz:
+		return true
+	default:
+		return false
+	}
+}
+
+func validateGroupByFieldSchema(field *schemapb.FieldSchema) error {
+	if field == nil {
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("group by field schema is nil"))
+	}
+	if !isSupportedGroupByFieldType(field.GetDataType()) {
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(
+			"group by field %s has unsupported data type %s", field.GetName(), field.GetDataType().String(),
+		))
+	}
+	return nil
+}
+
+func translateGroupByFieldIds(groupByFieldNames []string, schema *schemapb.CollectionSchema) ([]UniqueID, error) {
+	if len(groupByFieldNames) == 0 {
+		return nil, nil
+	}
+
+	fieldNameToSchema := make(map[string]*schemapb.FieldSchema, len(schema.Fields))
+	for _, field := range schema.Fields {
+		fieldNameToSchema[field.Name] = field
+	}
+
+	groupByFieldIds := make([]UniqueID, 0, len(groupByFieldNames))
+	for _, groupByField := range groupByFieldNames {
+		groupByField = strings.TrimSpace(groupByField)
+		fieldSchema, found := fieldNameToSchema[groupByField]
+		if !found {
+			return nil, fmt.Errorf("field %s not exist", groupByField)
+		}
+		if err := validateGroupByFieldSchema(fieldSchema); err != nil {
+			return nil, err
+		}
+		groupByFieldIds = append(groupByFieldIds, fieldSchema.GetFieldID())
+	}
+	return groupByFieldIds, nil
 }
 
 // translateToOutputFieldIDs translates output fields name to output fields id.
@@ -254,12 +308,26 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		})
 	}
 
+	// parse group by fields
+	groupByFieldsStr, err := funcutil.GetAttrByKeyFromRepeatedKV(QueryGroupByFieldsKey, queryParamsPair)
+	var groupByFields []string
+	if err == nil {
+		splitFields := strings.Split(groupByFieldsStr, ",")
+		for _, field := range splitFields {
+			trimmed := strings.TrimSpace(field)
+			if trimmed != "" {
+				groupByFields = append(groupByFields, trimmed)
+			}
+		}
+	}
+
 	return &queryParams{
 		limit:             limit,
 		offset:            offset,
 		reduceType:        reduceType,
 		isIterator:        isIterator,
 		collectionID:      collectionID,
+		groupByFields:     groupByFields,
 		timezone:          timezone,
 		extractTimeFields: extractTimeFields,
 	}, nil
@@ -298,15 +366,6 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 
 func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv2.ParserVisitorArgs) error {
 	schema := t.schema
-
-	cntMatch := matchCountRule(t.request.GetOutputFields())
-	if cntMatch {
-		var err error
-		t.plan, err = createCntPlan(t.request.GetExpr(), schema.schemaHelper, t.request.GetExprTemplateValues())
-		t.userOutputFields = []string{"count(*)"}
-		return err
-	}
-
 	var err error
 	if t.plan == nil {
 		start := time.Now()
@@ -317,25 +376,55 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 		}
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "query", metrics.SuccessLabel).Observe(float64(time.Since(start).Milliseconds()))
 	}
-
-	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, _, err = translateOutputFields(t.request.OutputFields, t.schema, false)
+	// parse output fields names
+	originalOuputFields := t.request.GetOutputFields()
+	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, t.userAggregates, _, err = translateOutputFields(t.request.GetOutputFields(), t.schema, false)
 	if err != nil {
 		return err
 	}
 
-	outputFieldIDs, err := translateToOutputFieldIDs(t.translatedOutputFields, schema.CollectionSchema)
+	// parse aggregates
+	t.plan.GetQuery().Aggregates = agg.AggregatesToPB(t.userAggregates)
+	t.RetrieveRequest.Aggregates = t.plan.GetQuery().GetAggregates()
+	// parse group by field ids
+	groupByFieldsIDs, err := translateGroupByFieldIds(t.queryParams.groupByFields, t.schema.CollectionSchema)
 	if err != nil {
 		return err
 	}
-	outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
-	t.RetrieveRequest.OutputFieldsId = outputFieldIDs
-	t.plan.OutputFieldIds = outputFieldIDs
-	t.plan.DynamicFields = t.userDynamicFields
+	t.plan.GetQuery().GroupByFieldIds = groupByFieldsIDs
+	t.RetrieveRequest.GroupByFieldIds = groupByFieldsIDs
+
+	hasAgg := len(t.RetrieveRequest.GroupByFieldIds) > 0 || len(t.RetrieveRequest.Aggregates) > 0
+	// parse output field ids
+	if hasAgg {
+		emptyOutputFields := make([]UniqueID, 0)
+		t.RetrieveRequest.OutputFieldsId = emptyOutputFields
+		t.plan.OutputFieldIds = emptyOutputFields
+		t.aggregationFieldMap = agg.NewAggregationFieldMap(originalOuputFields, t.queryParams.groupByFields, t.userAggregates)
+	} else {
+		outputFieldIDs, err := translateToOutputFieldIDs(t.translatedOutputFields, schema.CollectionSchema)
+		if err != nil {
+			return err
+		}
+		outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
+		t.RetrieveRequest.OutputFieldsId = outputFieldIDs
+		t.plan.OutputFieldIds = outputFieldIDs
+		t.plan.DynamicFields = t.userDynamicFields
+	}
+
 	log.Ctx(ctx).Debug("translate output fields to field ids",
 		zap.Int64s("OutputFieldsID", t.OutputFieldsId),
 		zap.String("requestType", "query"))
-
 	return nil
+}
+
+func (t *queryTask) hasCountStar() bool {
+	for _, agg := range t.userAggregates {
+		if agg.Name() == "count" && agg.FieldID() == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *queryTask) CanSkipAllocTimestamp() bool {
@@ -472,9 +561,12 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err := t.createPlanArgs(ctx, &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr}); err != nil {
 		return err
 	}
-	t.plan.Node.(*planpb.PlanNode_Query).Query.Limit = t.RetrieveRequest.Limit
+	t.plan.GetQuery().Limit = t.RetrieveRequest.Limit
 
-	if planparserv2.IsAlwaysTruePlan(t.plan) && t.RetrieveRequest.Limit == typeutil.Unlimited {
+	// global agg only return one line as result which will not incur memory risks
+	globalAgg := len(t.userAggregates) > 0 && len(t.GetGroupByFieldIds()) == 0
+
+	if planparserv2.IsAlwaysTruePlan(t.plan) && t.RetrieveRequest.Limit == typeutil.Unlimited && !globalAgg {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("empty expression should be used with limit"))
 	}
 
@@ -501,12 +593,11 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 
 	// count with pagination
-	if t.plan.GetQuery().GetIsCount() && t.queryParams.limit != typeutil.Unlimited {
+	if t.hasCountStar() && t.queryParams.limit != typeutil.Unlimited {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed"))
 	}
 	t.plan.Namespace = t.request.Namespace
 
-	t.RetrieveRequest.IsCount = t.plan.GetQuery().GetIsCount()
 	t.RetrieveRequest.SerializedExprPlan, err = proto.Marshal(t.plan)
 	if err != nil {
 		return err
@@ -644,7 +735,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Observe(0.0)
 	tr.CtxRecord(ctx, "reduceResultStart")
 
-	reducer := createMilvusReducer(ctx, t.queryParams, t.RetrieveRequest, t.schema.CollectionSchema, t.plan, t.collectionName)
+	reducer := createMilvusReducer(ctx, t.queryParams, t.RetrieveRequest, t.schema.CollectionSchema, t.plan, t.collectionName, t.aggregationFieldMap)
 
 	t.result, err = reducer.Reduce(toReduceResults)
 	if err != nil {

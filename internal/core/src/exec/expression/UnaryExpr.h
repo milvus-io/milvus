@@ -885,7 +885,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     CanUseNgramIndex() const override;
 
     std::optional<VectorPtr>
-    ExecNgramMatch();
+    ExecNgramMatch(EvalCtx& context);
 
     std::pair<std::string, std::string>
     SplitAtFirstSlashDigit(std::string input);

@@ -978,14 +978,9 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
             output_fields=["id", "geo"],
         )
         assert len(results) == 1, f"Should be able to query {empty_wkt}"
-        if empty_wkt != "POINT EMPTY":
-            assert results[0]["geo"] == empty_wkt, (
-                f"Retrieved geometry should match inserted {empty_wkt}"
-            )
-        else:
-            assert results[0]["geo"] == "POINT (NaN NaN)", (
-                f"Retrieved geometry should match inserted {empty_wkt}"
-            )
+        assert results[0]["geo"] == empty_wkt, (
+            f"Retrieved geometry should match inserted {empty_wkt}"
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index_type", ["RTREE", "AUTOINDEX"])

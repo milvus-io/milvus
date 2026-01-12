@@ -112,6 +112,15 @@ service DataCoord {
   rpc AddFileResource(milvus.AddFileResourceRequest) returns (common.Status) {}
   rpc RemoveFileResource(milvus.RemoveFileResourceRequest) returns (common.Status) {}
   rpc ListFileResources(milvus.ListFileResourcesRequest) returns (milvus.ListFileResourcesResponse) {}
+  
+  // snapshot
+  rpc CreateSnapshot(CreateSnapshotRequest) returns(common.Status){}
+  rpc DropSnapshot(DropSnapshotRequest) returns(common.Status){}
+  rpc ListSnapshots(ListSnapshotsRequest) returns(ListSnapshotsResponse){}
+  rpc DescribeSnapshot(DescribeSnapshotRequest) returns(DescribeSnapshotResponse){}
+  rpc RestoreSnapshot(RestoreSnapshotRequest) returns(RestoreSnapshotResponse){}
+  rpc GetRestoreSnapshotState(GetRestoreSnapshotStateRequest) returns(GetRestoreSnapshotStateResponse){}
+  rpc ListRestoreSnapshotJobs(ListRestoreSnapshotJobsRequest) returns(ListRestoreSnapshotJobsResponse){}
 }
 
 service DataNode {
@@ -724,6 +733,7 @@ message CompactionPlan {
   string json_params = 22;
   int32 current_scalar_index_version = 23;
   repeated common.KeyValuePair plugin_context = 29;
+  repeated internal.FileResourceInfo file_resources = 30;
 }
 
 message CompactionSegment {
@@ -999,6 +1009,201 @@ message DropImportRequest {
   int64 taskID = 3;
 }
 
+// CopySegment related messages
+message CopySegmentSource {
+  // Source identity (avoid parsing from path)
+  int64 collection_id = 1;  // source collection ID
+  int64 partition_id = 2;   // source partition ID
+  int64 segment_id = 3;     // source segment ID
+
+  // Source binlogs (paths contain source IDs)
+  repeated FieldBinlog insert_binlogs = 4;  // insert log files
+  repeated FieldBinlog stats_binlogs = 5;   // stats log files
+  repeated FieldBinlog delta_binlogs = 6;   // delta log files
+
+  // Optional: vector/scalar index files to copy (if provided, copy index along with segment data)
+  repeated index.IndexFilePathInfo index_files = 7;  // vector/scalar index file info
+
+  // BM25 stats binlogs (for BM25 index)
+  repeated FieldBinlog bm25_binlogs = 8;  // bm25 stats log files
+
+  // Text index files (for text tokenization index)
+  map<int64, TextIndexStats> text_index_files = 9;  // text index files by field ID
+
+  // JSON key index files (for JSON index)
+  map<int64, JsonKeyStats> json_key_index_files = 10;  // json key index files by field ID
+}
+
+message CopySegmentTarget {
+  int64 collection_id = 1;  // target collection ID
+  int64 partition_id = 2;   // target partition ID
+  int64 segment_id = 3;     // target segment ID
+}
+
+message CopySegmentRequest {
+  string clusterID = 1;
+  int64 jobID = 2;
+  int64 taskID = 3;
+
+  // Copy mappings (sources[i] -> targets[i])
+  repeated CopySegmentSource sources = 4;  // source segments with full identity
+  repeated CopySegmentTarget targets = 5;  // target segments with full identity
+
+  index.StorageConfig storage_config = 6;
+  int64 task_slot = 7;
+}
+
+message QueryCopySegmentRequest {
+  string clusterID = 1;
+  int64 jobID = 2;
+  int64 taskID = 3;
+}
+
+message QueryCopySegmentResponse {
+  common.Status status = 1;
+  int64 taskID = 2;
+  CopySegmentTaskState state = 3;  // Task state
+  string reason = 4;
+  repeated CopySegmentResult segment_results = 5;  // Complete segment and index metadata
+  int64 slots = 6;
+}
+
+message DropCopySegmentRequest {
+  string clusterID = 1;
+  int64 jobID = 2;
+  int64 taskID = 3;
+}
+
+// VectorScalarIndexInfo contains metadata for copied vector/scalar indexes
+// Combines information from IndexTaskInfo for copy operations
+message VectorScalarIndexInfo {
+  int64 field_id = 1;
+  int64 index_id = 2;
+  int64 build_id = 3;
+  int64 version = 4;
+  repeated string index_file_paths = 5;    // Full paths to index files
+  int64 index_size = 6;                    // Total index size in bytes
+  int32 current_index_version = 7;         // Index engine version
+  int32 current_scalar_index_version = 8;  // Scalar index engine version
+}
+
+// CopySegmentResult contains the complete result of a copy segment operation
+// It extends ImportSegmentInfo with index metadata from copied indexes
+message CopySegmentResult {
+  // Basic segment info (same as ImportSegmentInfo)
+  int64 segment_id = 1;
+  int64 imported_rows = 2;
+  repeated FieldBinlog binlogs = 3;
+  repeated FieldBinlog statslogs = 4;
+  repeated FieldBinlog deltalogs = 5;
+  repeated FieldBinlog bm25logs = 6;
+
+  // Index metadata
+  // Vector/Scalar indexes - map<fieldID, VectorScalarIndexInfo>
+  map<int64, VectorScalarIndexInfo> index_infos = 7;
+
+  // Text indexes - map<fieldID, TextIndexStats>
+  map<int64, TextIndexStats> text_index_infos = 8;
+
+  // JSON Key indexes - map<int64, JsonKeyStats>
+  map<int64, JsonKeyStats> json_key_index_infos = 9;
+}
+
+// CopySegmentTask represents a copy segment task that copies segment data and optionally indexes
+// from source locations to target locations for snapshot restore or other purposes
+// Optimized for minimal etcd storage: heavy data (binlogs, schema, results) are not persisted
+message CopySegmentTask {
+  int64 task_id = 1;
+  int64 job_id = 2;
+  int64 collection_id = 3;
+
+  int64 node_id = 4;
+  int64 task_version = 5;
+  int64 task_slot = 6;
+
+  CopySegmentTaskState state = 7;
+  string reason = 8;
+  repeated CopySegmentIDMapping id_mappings = 9;
+  uint64 created_ts = 10;   // Unix timestamp in nanoseconds
+  uint64 complete_ts = 11;  // Unix timestamp in nanoseconds
+}
+
+// CopySegmentJobState defines the state machine for copy segment jobs
+enum CopySegmentJobState {
+  CopySegmentJobNone = 0;
+  CopySegmentJobPending = 1;   // Job created, waiting to start
+  CopySegmentJobExecuting = 2; // Executing copy segment tasks
+  CopySegmentJobCompleted = 3; // All done
+  CopySegmentJobFailed = 4;    // Failed
+}
+
+// CopySegmentTaskState defines the state machine for copy segment tasks
+enum CopySegmentTaskState {
+  CopySegmentTaskNone = 0;
+  CopySegmentTaskPending = 1;      // Task created, waiting to be scheduled
+  CopySegmentTaskInProgress = 2;   // Task is being executed on DataNode
+  CopySegmentTaskCompleted = 3;    // Task successfully completed, segment copied
+  CopySegmentTaskFailed = 4;       // Task failed, requires manual handling
+}
+
+// SnapshotState defines the state for snapshot 2PC commit
+enum SnapshotState {
+  SnapshotStateUnknown = 0;    // Default/unknown state
+  SnapshotStatePending = 1;    // S3 files are being written
+  SnapshotStateCommitted = 2;  // S3 write completed, snapshot is ready
+  SnapshotStateDeleting = 3;   // Marked for deletion, S3 cleanup in progress
+}
+
+// RestoreSnapshotState defines the state machine for restore snapshot jobs
+enum RestoreSnapshotState {
+  RestoreSnapshotNone = 0;
+  RestoreSnapshotPending = 1;   // Job created, waiting to start
+  RestoreSnapshotExecuting = 2; // Executing restore tasks
+  RestoreSnapshotCompleted = 3; // All done
+  RestoreSnapshotFailed = 4;    // Failed
+}
+
+// CopySegmentIDMapping defines lightweight ID-only mapping from source to target segment
+// Used in Job and Task storage to minimize etcd load
+message CopySegmentIDMapping {
+  int64 source_segment_id = 1;
+  int64 target_segment_id = 2;
+  int64 partition_id = 3;  // Cached for grouping, avoid repeated meta lookups
+}
+
+// CopySegmentJob represents a user-level copy segment job
+message CopySegmentJob {
+  int64 job_id = 1;
+  int64 db_id = 2;
+  int64 collection_id = 3;
+  string collection_name = 4;
+  // Job state machine: Pending -> Copying -> IndexBuilding -> Completed/Failed
+  CopySegmentJobState state = 5;
+  string reason = 6;
+
+  // Segment copy ID mappings (lightweight, ~48 bytes per segment)
+  repeated CopySegmentIDMapping id_mappings = 7;
+
+  // Timestamps
+  uint64 timeout_ts = 8;
+  uint64 cleanup_ts = 9;
+
+  // Timing
+  uint64 start_ts = 10;     // Unix timestamp in nanoseconds
+  uint64 complete_ts = 11;  // Unix timestamp in nanoseconds
+
+  // Options (e.g., "copy_index": "true")
+  repeated common.KeyValuePair options = 12;
+
+  // Statistics
+  int64 total_segments = 13;
+  int64 copied_segments = 14;
+  int64 total_rows = 15;
+
+  // Optional snapshot name for restore snapshot use case
+  string snapshot_name = 16;
+}
+
 message ImportJob {
   int64 jobID = 1;
   int64 dbID = 2;
@@ -1147,12 +1352,6 @@ message DropCompactionPlanRequest {
   int64 planID = 1;
 }
 
-message FileResourceInfo {
-  string name = 1;
-  string path = 2;
-  int64 resource_id = 3;
-}
-
 message CreateExternalCollectionResponse {
   common.Status status = 1;
 }
@@ -1184,3 +1383,161 @@ message DropExternalCollectionRequest {
 
 // Note: QueryExternalCollectionRequest and DropExternalCollectionRequest are kept
 // for internal use by the unified task system, but are not exposed as separate RPCs
+
+message CreateSnapshotRequest {
+  common.MsgBase base = 1;
+  string name = 2;  // user-defined snapshot name
+  string description = 3; // user-defined snapshot description
+  int64 collection_id= 4; // collection name
+}
+
+message DropSnapshotRequest {
+  common.MsgBase base = 1;
+  string name = 2; // snapshot name
+}
+
+message ListSnapshotsRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2; // collection id, if collection_id is 0, it will list all snapshots.
+  int64 partition_id = 3; // partition id, if partition_id is 0, it will list all snapshots.
+}
+
+// return all snapshots for the given collection or partition
+// Note: list snapshots is not a privilege check operation
+message ListSnapshotsResponse {
+  common.Status status = 1;
+  repeated string snapshots = 2;
+}
+
+message SegmentDescription {
+  int64 segment_id = 1; // segment id
+  int64 partition_id = 2; // partition id
+  SegmentLevel segment_level = 3; // segment level
+  string channel_name = 4; // channel name
+  repeated data.FieldBinlog binlogs = 5; // binlog files
+  repeated data.FieldBinlog deltalogs = 6; // deltalog files
+  repeated data.FieldBinlog statslogs = 7; // statslog files
+  repeated data.FieldBinlog bm25_statslogs = 8; // bm25 stats logs
+  map<int64, TextIndexStats> text_index_files = 9; // text index files
+  map<int64, JsonKeyStats> json_key_index_files = 10; // json key index files
+  repeated index.IndexFilePathInfo index_files = 11; // vector/scalar index files
+  int64 num_of_rows = 12; // number of rows
+  msg.MsgPosition start_position = 13; // start position
+  msg.MsgPosition dml_position = 14; // dml position
+  int64 storage_version = 15; // storage version
+  bool is_sorted = 16; // whether the segment is sorted by primary key
+  string manifest_path = 17; // StorageV2 manifest file path
+}
+
+message CollectionDescription {
+  schema.CollectionSchema schema = 1; // collection schema
+  int64 num_partitions = 2; // num of default physical partitions, only used in partition key mode and changes are not supported
+  int64 num_shards = 3; // num of shards
+  common.ConsistencyLevel consistency_level = 4; // consistency level
+  repeated common.KeyValuePair properties = 5; // properties
+  map<string, int64> partitions = 6; // partition name to id mapping
+  repeated string virtual_channel_names = 7; // virtual channel names for restore to preserve pchannel mapping
+}
+
+message SnapshotInfo {
+  string name = 1;  // user-defined snapshot name
+  int64 id = 2; // snapshot id
+  string description = 3; // user-defined snapshot description
+  int64 collection_id = 4; // collection id
+  repeated int64 partition_ids = 5; // partition ids
+  int64 create_ts = 6; // create timestamp, all stream data before this timestamp will be flushed to segment list.
+  string s3_location = 7; // s3 location of the snapshot meta file if snapshot is exported to s3.
+  SnapshotState state = 8; // snapshot state for 2PC commit (Pending/Committed)
+  int64 pending_start_time = 9; // timestamp when pending started, for GC timeout
+}
+
+// StorageV2SegmentManifest maps a segment ID to its StorageV2 manifest file path.
+// StorageV2 is Milvus's newer storage format that uses Lance/Arrow for better performance.
+message StorageV2SegmentManifest {
+  int64 segment_id = 1;
+  string manifest = 2;
+}
+
+// SnapshotMetadata is the root structure for snapshot metadata JSON file.
+// This file serves as the entry point for reading a snapshot, containing:
+//   - Snapshot identification and status information
+//   - Collection schema and properties
+//   - References to segment manifest files
+//   - Pre-computed ID lists for optimized loading
+//
+// File path: snapshots/{collection_id}/metadata/{snapshot_id}.json
+message SnapshotMetadata {
+  int32 format_version = 1;
+  SnapshotInfo snapshot_info = 2;
+  CollectionDescription collection = 3;
+  repeated index.IndexInfo indexes = 4;
+  repeated string manifest_list = 5;
+  repeated StorageV2SegmentManifest storagev2_manifest_list = 6;
+  repeated int64 segment_ids = 7;
+  repeated int64 index_ids = 8;
+}
+
+message RestoreSnapshotInfo {
+  int64 job_id = 1; // restore job ID
+  string snapshot_name = 2; // snapshot name
+  int64 collection_id = 3; // collection id
+  RestoreSnapshotState state = 4; // restore job state
+  int32 progress = 5; // progress percentage (0-100)
+  string reason = 6; // error reason if failed
+  uint64 time_cost = 7; // time cost in milliseconds
+}
+
+message DescribeSnapshotRequest {
+  common.MsgBase base = 1;
+  string name = 2; // snapshot name
+
+  bool include_collection_info = 3; // if include_collection_info is true, it will return collection info.
+}
+
+// return snapshot basic info and snapshot data info
+message DescribeSnapshotResponse {
+  common.Status status = 1;
+  SnapshotInfo snapshot_info = 2; // snapshot info, if snapshot_info is not nil, it will be used to describe the snapshot.
+
+  CollectionDescription collection_info = 3; // collection info, if include_collection_info is true, it will return collection info.
+  repeated index.IndexInfo index_infos = 4; // index infos, if include_collection_info is true, it will return index infos.
+}
+
+// restore a snapshot to a new collection (DataCoord-driven flow)
+// DataCoord creates the collection and partitions via RootCoord, then creates copy segment jobs
+message RestoreSnapshotRequest {
+  common.MsgBase base = 1;
+  string name = 2; // snapshot name
+  reserved 3; // previously: collection_id (removed, DataCoord creates collection)
+  reserved 4; // previously: create_indexes (handled by RootCoord DDL callback)
+  reserved 5; // previously: job_id (DataCoord allocates internally)
+  string db_name = 6; // target database name
+  string collection_name = 7; // target collection name (must not exist)
+}
+
+message RestoreSnapshotResponse {
+  common.Status status = 1;
+  int64 job_id = 2; // restore job ID for async tracking (deprecated, use ListRestoreJobs)
+  int64 collection_id = 3; // target collection ID
+}
+
+message GetRestoreSnapshotStateRequest {
+  common.MsgBase base = 1;
+  int64 job_id = 2; // restore job ID
+}
+
+message GetRestoreSnapshotStateResponse {
+  common.Status status = 1;
+  RestoreSnapshotInfo info = 2; // restore snapshot job info
+}
+
+message ListRestoreSnapshotJobsRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2; // filter by collection id, empty for all
+
+}
+
+message ListRestoreSnapshotJobsResponse {
+  common.Status status = 1;
+  repeated RestoreSnapshotInfo jobs = 2; // list of restore snapshot jobs
+}
