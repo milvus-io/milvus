@@ -459,6 +459,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// validate external collection
+	if err := validateExternalCollection(t.schema); err != nil {
+		return err
+	}
+
 	// validate auto id definition
 	if err := ValidateFieldAutoID(t.schema); err != nil {
 		return err
