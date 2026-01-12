@@ -5930,7 +5930,7 @@ func TestValidateCollectionTTL(t *testing.T) {
 		{"at_min_boundary", "-1", true, false},         // val <= -1
 		{"out_of_lower_boundary", "-2", true, true},    // val < -1
 		{"exceed_max", "3155760001", true, true},       // val > MaxTTLSeconds
-		{"at_max_boundary", "3155760000", true, false}, // val == MaxTTLSeconds (边界)
+		{"at_max_boundary", "3155760000", true, false}, // val == MaxTTLSeconds
 		{"valid_value", "3600", true, false},
 		{"min_valid", "1", true, false},
 		{"invalid_format", "abc", true, true},
