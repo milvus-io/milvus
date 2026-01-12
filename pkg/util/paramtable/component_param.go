@@ -6478,6 +6478,7 @@ type streamingConfig struct {
 	WALBalancerPolicyVChannelFairAntiAffinityWeight     ParamItem `refreshable:"true"`
 	WALBalancerPolicyVChannelFairRebalanceTolerance     ParamItem `refreshable:"true"`
 	WALBalancerPolicyVChannelFairRebalanceMaxStep       ParamItem `refreshable:"true"`
+	WALBalancerExpectedInitialStreamingNodeNum          ParamItem `refreshable:"true"`
 
 	// broadcaster
 	WALBroadcasterConcurrencyRatio       ParamItem `refreshable:"false"`
@@ -6676,6 +6677,17 @@ it also determine the depth of depth first search method that is used to find th
 		Export:       true,
 	}
 	p.WALBalancerPolicyVChannelFairRebalanceMaxStep.Init(base.mgr)
+
+	p.WALBalancerExpectedInitialStreamingNodeNum = ParamItem{
+		Key:     "streaming.walBalancer.expectedInitialStreamingNodeNum",
+		Version: "2.6.9",
+		Doc: `The expected initial streaming node number, 0 by default, means no expected initial streaming node number.
+When the milvus is upgrading from 2.5 -> 2.6.9, the mixcoord will check if the expected initial streaming node number is reached,
+then open the streaming service to continue the upgrade process.`,
+		DefaultValue: "0",
+		Export:       false,
+	}
+	p.WALBalancerExpectedInitialStreamingNodeNum.Init(base.mgr)
 
 	p.WALBroadcasterConcurrencyRatio = ParamItem{
 		Key:          "streaming.walBroadcaster.concurrencyRatio",
