@@ -138,19 +138,75 @@ CompileExpressions(const std::vector<expr::TypedExprPtr>& sources,
     return exprs;
 }
 
+static std::optional<std::string>
+ShouldFlatten(const expr::TypedExprPtr& expr,
+              const std::unordered_set<std::string>& flat_candidates = {}) {
+    if (auto call =
+            std::dynamic_pointer_cast<const expr::LogicalBinaryExpr>(expr)) {
+        if (call->op_type_ == expr::LogicalBinaryExpr::OpType::And ||
+            call->op_type_ == expr::LogicalBinaryExpr::OpType::Or) {
+            return call->name();
+        }
+    }
+    return std::nullopt;
+}
+
+static bool
+IsCall(const expr::TypedExprPtr& expr, const std::string& name) {
+    if (auto call =
+            std::dynamic_pointer_cast<const expr::LogicalBinaryExpr>(expr)) {
+        return call->name() == name;
+    }
+    return false;
+}
+
+static bool
+AllInputTypeEqual(const expr::TypedExprPtr& expr) {
+    const auto& inputs = expr->inputs();
+    for (int i = 1; i < inputs.size(); i++) {
+        if (inputs[0]->type() != inputs[i]->type()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void
+FlattenInput(const expr::TypedExprPtr& input,
+             const std::string& flatten_call,
+             std::vector<expr::TypedExprPtr>& flat) {
+    if (IsCall(input, flatten_call) && AllInputTypeEqual(input)) {
+        for (auto& child : input->inputs()) {
+            FlattenInput(child, flatten_call, flat);
+        }
+    } else {
+        flat.emplace_back(input);
+    }
+}
+
 std::vector<ExprPtr>
 CompileInputs(const expr::TypedExprPtr& expr,
               QueryContext* context,
               const std::unordered_set<std::string>& flatten_cadidates) {
     std::vector<ExprPtr> compiled_inputs;
+    auto flatten = ShouldFlatten(expr);
     for (auto& input : expr->inputs()) {
         if (dynamic_cast<const expr::InputTypeExpr*>(input.get())) {
             AssertInfo(
                 dynamic_cast<const expr::FieldAccessTypeExpr*>(expr.get()),
                 "An InputReference can only occur under a FieldReference");
         } else {
-            compiled_inputs.push_back(
-                CompileExpression(input, context, flatten_cadidates, false));
+            if (flatten.has_value()) {
+                std::vector<expr::TypedExprPtr> flat_exprs;
+                FlattenInput(input, flatten.value(), flat_exprs);
+                for (auto& input : flat_exprs) {
+                    compiled_inputs.push_back(CompileExpression(
+                        input, context, flatten_cadidates, false));
+                }
+            } else {
+                compiled_inputs.push_back(CompileExpression(
+                    input, context, flatten_cadidates, false));
+            }
         }
     }
     return compiled_inputs;
@@ -406,8 +462,11 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     std::vector<size_t> other_expr;
     std::vector<size_t> heavy_conjunct_expr;
     std::vector<size_t> light_conjunct_expr;
+    // Record all LIKE expression indices for potential batch ngram optimization
+    std::vector<size_t> like_indices;
 
     const auto& inputs = expr->GetInputsRef();
+    bool and_conjunction = expr->IsAnd();
     for (int i = 0; i < inputs.size(); i++) {
         auto input = inputs[i];
 
@@ -417,16 +476,18 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
                 numeric_expr.push_back(i);
                 continue;
             }
-            if (segment->HasIndex(column.field_id_)) {
+            if (segment->HasIndex(column.field_id_) && !IsLikeExpr(input)) {
                 indexed_expr.push_back(i);
                 continue;
             }
 
             if (IsStringDataType(column.data_type_)) {
-                auto is_like_expr = IsLikeExpr(input);
-                if (is_like_expr) {
-                    str_like_expr.push_back(i);
+                if (IsLikeExpr(input)) {
                     has_heavy_operation = true;
+                    str_like_expr.push_back(i);
+                    if (and_conjunction) {
+                        like_indices.push_back(i);
+                    }
                 } else {
                     string_expr.push_back(i);
                 }
@@ -434,10 +495,12 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
             }
 
             if (IsArrayDataType(column.data_type_)) {
-                auto is_like_expr = IsLikeExpr(input);
-                if (is_like_expr) {
-                    array_like_expr.push_back(i);
+                if (IsLikeExpr(input)) {
                     has_heavy_operation = true;
+                    array_like_expr.push_back(i);
+                    if (and_conjunction) {
+                        like_indices.push_back(i);
+                    }
                 } else {
                     array_expr.push_back(i);
                 }
@@ -445,9 +508,11 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
             }
 
             if (IsJsonDataType(column.data_type_)) {
-                auto is_like_expr = IsLikeExpr(input);
-                if (is_like_expr) {
+                if (IsLikeExpr(input)) {
                     json_like_expr.push_back(i);
+                    if (and_conjunction) {
+                        like_indices.push_back(i);
+                    }
                 } else {
                     json_expr.push_back(i);
                 }
@@ -458,8 +523,9 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
 
         if (input->name() == "PhyConjunctFilterExpr") {
             bool sub_expr_heavy = false;
-            auto expr = std::static_pointer_cast<PhyConjunctFilterExpr>(input);
-            ReorderConjunctExpr(expr, context, sub_expr_heavy);
+            auto sub_expr =
+                std::static_pointer_cast<PhyConjunctFilterExpr>(input);
+            ReorderConjunctExpr(sub_expr, context, sub_expr_heavy);
             has_heavy_operation |= sub_expr_heavy;
             if (sub_expr_heavy) {
                 heavy_conjunct_expr.push_back(i);
@@ -478,7 +544,6 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
         other_expr.push_back(i);
     }
 
-    reorder.reserve(inputs.size());
     // Final reorder sequence:
     // 1. Numeric column expressions (fastest to evaluate)
     // 2. Indexed column expressions (can use index for efficient filtering)
@@ -504,14 +569,23 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
         reorder.end(), array_like_expr.begin(), array_like_expr.end());
     reorder.insert(reorder.end(), json_expr.begin(), json_expr.end());
     reorder.insert(reorder.end(), json_like_expr.begin(), json_like_expr.end());
+
+    // Reserve position for like_conjunct (will be added to inputs_ at runtime)
+    bool has_batch_like = like_indices.size() > 1;
+    if (has_batch_like) {
+        reorder.push_back(
+            inputs.size());  // inputs.size() will be like_conjunct's index
+        expr->SetLikeIndices(std::move(like_indices));
+    }
     reorder.insert(
         reorder.end(), heavy_conjunct_expr.begin(), heavy_conjunct_expr.end());
     reorder.insert(reorder.end(), compare_expr.begin(), compare_expr.end());
 
-    AssertInfo(reorder.size() == inputs.size(),
-               "reorder size:{} but input size:{}",
+    size_t expected_size = inputs.size() + (has_batch_like ? 1 : 0);
+    AssertInfo(reorder.size() == expected_size,
+               "reorder size:{} but expected size:{}",
                reorder.size(),
-               inputs.size());
+               expected_size);
 
     expr->Reorder(reorder);
 }

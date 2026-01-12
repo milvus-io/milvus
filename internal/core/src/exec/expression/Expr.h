@@ -1157,32 +1157,44 @@ class SegmentExpr : public Expr {
         }
     }
 
-    // Specialized method for ngram post-filter: processes all data in batches
-    // - Starts from position 0
+    // Specialized method for ngram post-filter: processes data in a specific range
+    // - Starts from segment_offset (global offset across all chunks)
+    // - Processes exactly 'size' rows
     // - Does NOT modify segment state variables (current_data_chunk_, etc.)
     template <typename T, typename FUNC>
     int64_t
-    ProcessAllDataChunkBatched(FUNC func, TargetBitmapView res) {
+    ProcessDataChunkForRange(FUNC func,
+                             TargetBitmapView res,
+                             int64_t segment_offset,
+                             int64_t size) {
         static_assert(std::is_same_v<T, std::string_view> ||
                           std::is_same_v<T, Json> ||
                           std::is_same_v<T, ArrayView>,
-                      "ProcessAllDataChunkBatched only supports string_view, "
+                      "ProcessDataChunkForRange only supports string_view, "
                       "Json, and ArrayView types");
 
         AssertInfo(segment_->is_chunked(),
-                   "ProcessAllDataChunkBatched requires chunked segment");
+                   "ProcessDataChunkForRange requires chunked segment");
         AssertInfo(segment_->type() == SegmentType::Sealed,
-                   "ProcessAllDataChunkBatched requires sealed segment");
+                   "ProcessDataChunkForRange requires sealed segment");
 
         int64_t processed_size = 0;
+        int64_t remaining = size;
 
-        for (size_t chunk_id = 0; chunk_id < num_data_chunk_; chunk_id++) {
+        // Find starting chunk and offset
+        auto [start_chunk_id, start_chunk_offset] =
+            segment_->get_chunk_by_offset(field_id_, segment_offset);
+
+        for (size_t chunk_id = start_chunk_id;
+             chunk_id < num_data_chunk_ && remaining > 0;
+             chunk_id++) {
             int64_t chunk_size = segment_->chunk_size(field_id_, chunk_id);
-            int64_t chunk_offset = 0;
+            int64_t chunk_offset =
+                (chunk_id == start_chunk_id) ? start_chunk_offset : 0;
 
-            while (chunk_offset < chunk_size) {
-                int64_t batch_size =
-                    std::min(batch_size_, chunk_size - chunk_offset);
+            while (chunk_offset < chunk_size && remaining > 0) {
+                int64_t batch_size = std::min(
+                    {batch_size_, chunk_size - chunk_offset, remaining});
 
                 auto pw = segment_->get_batch_views<T>(
                     op_ctx_, field_id_, chunk_id, chunk_offset, batch_size);
@@ -1192,6 +1204,7 @@ class SegmentExpr : public Expr {
 
                 chunk_offset += batch_size;
                 processed_size += batch_size;
+                remaining -= batch_size;
             }
         }
 
@@ -1778,8 +1791,8 @@ class SegmentExpr : public Expr {
     std::shared_ptr<TargetBitmap> cached_match_res_{nullptr};
     int32_t consistency_level_{0};
 
-    // Cache for ngram match.
-    std::shared_ptr<TargetBitmap> cached_ngram_match_res_{nullptr};
+    // Cache for ngram Phase1 result (index query, before post-filter).
+    std::shared_ptr<TargetBitmap> cached_phase1_res_{nullptr};
 };
 
 bool

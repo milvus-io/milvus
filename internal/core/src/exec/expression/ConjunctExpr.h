@@ -17,6 +17,7 @@
 #pragma once
 
 #include <fmt/core.h>
+#include <set>
 
 #include "common/EasyAssert.h"
 #include "common/OpContext.h"
@@ -154,6 +155,13 @@ class PhyConjunctFilterExpr : public Expr {
         return input_order_;
     }
 
+    // Add a new expression to inputs and return its index
+    size_t
+    AddInput(std::shared_ptr<Expr> expr) {
+        inputs_.push_back(std::move(expr));
+        return inputs_.size() - 1;
+    }
+
     void
     SetNextExprBitmapInput(const ColumnVectorPtr& vec, EvalCtx& context) {
         TargetBitmapView last_res_bitmap(vec->GetRawData(), vec->size());
@@ -181,6 +189,16 @@ class PhyConjunctFilterExpr : public Expr {
         return !is_and_;
     }
 
+    void
+    SetLikeIndices(std::vector<size_t>&& indices) {
+        like_indices_ = std::move(indices);
+    }
+
+    const std::vector<size_t>&
+    GetLikeIndices() const {
+        return like_indices_;
+    }
+
  private:
     int64_t
     UpdateResult(ColumnVectorPtr& input_result,
@@ -198,6 +216,12 @@ class PhyConjunctFilterExpr : public Expr {
     // true if conjunction (and), false if disjunction (or).
     bool is_and_;
     std::vector<size_t> input_order_;
+    // Indices of LIKE expressions for potential batch ngram optimization (AND only)
+    std::vector<size_t> like_indices_;
+    // Flag to indicate if batch ngram optimization has been initialized
+    bool like_batch_initialized_{false};
+    // Indices of expressions executed via batch ngram (to skip in normal iteration)
+    std::set<size_t> batch_ngram_indices_;
 };
 }  //namespace exec
 }  // namespace milvus

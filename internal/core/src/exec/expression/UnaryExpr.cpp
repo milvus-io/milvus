@@ -1890,7 +1890,47 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
 
 bool
 PhyUnaryRangeFilterExpr::CanUseNgramIndex() const {
-    return pinned_ngram_index_.get() != nullptr && !has_offset_input_;
+    if (pinned_ngram_index_.get() == nullptr || has_offset_input_) {
+        return false;
+    }
+    auto literal = GetValueFromProto<std::string>(expr_->val_);
+    return pinned_ngram_index_.get()->CanHandleLiteral(literal,
+                                                       expr_->op_type_);
+}
+
+void
+PhyUnaryRangeFilterExpr::ExecuteNgramPhase1(TargetBitmap& candidates) {
+    if (!arg_inited_) {
+        value_arg_.SetValue<std::string>(expr_->val_);
+        arg_inited_ = true;
+    }
+
+    auto literal = value_arg_.GetValue<std::string>();
+    auto index = pinned_ngram_index_.get();
+    AssertInfo(index != nullptr,
+               "ngram index should not be null, field_id: {}",
+               field_id_.get());
+
+    index->ExecutePhase1(literal, expr_->op_type_, candidates);
+}
+
+void
+PhyUnaryRangeFilterExpr::ExecuteNgramPhase2(TargetBitmap& candidates,
+                                            int64_t segment_offset,
+                                            int64_t batch_size) {
+    if (!arg_inited_) {
+        value_arg_.SetValue<std::string>(expr_->val_);
+        arg_inited_ = true;
+    }
+
+    auto literal = value_arg_.GetValue<std::string>();
+    auto index = pinned_ngram_index_.get();
+    AssertInfo(index != nullptr,
+               "ngram index should not be null, field_id: {}",
+               field_id_.get());
+
+    index->ExecutePhase2(
+        literal, expr_->op_type_, this, candidates, segment_offset, batch_size);
 }
 
 std::optional<VectorPtr>
@@ -1906,38 +1946,57 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch(EvalCtx& context) {
         return std::nullopt;
     }
 
-    if (cached_ngram_match_res_ == nullptr) {
-        auto index = pinned_ngram_index_.get();
-        AssertInfo(index != nullptr,
-                   "ngram index should not be null, field_id: {}",
-                   field_id_.get());
+    auto index = pinned_ngram_index_.get();
+    AssertInfo(index != nullptr,
+               "ngram index should not be null, field_id: {}",
+               field_id_.get());
 
-        // Get pre_filter from previous expressions in the conjunction.
-        // This optimization reduces the number of rows that need post-filtering.
-        const auto& bitmap_input = context.get_bitmap_input();
-        const TargetBitmap* pre_filter =
-            bitmap_input.empty() ? nullptr : &bitmap_input;
-
-        auto res_opt =
-            index->ExecuteQuery(literal, expr_->op_type_, this, pre_filter);
-        if (!res_opt.has_value()) {
+    // Phase 1: Execute once for entire segment (no bitmap_input needed)
+    if (cached_phase1_res_ == nullptr) {
+        if (!index->CanHandleLiteral(literal, expr_->op_type_)) {
             return std::nullopt;
         }
-        cached_ngram_match_res_ =
-            std::make_shared<TargetBitmap>(std::move(res_opt.value()));
+
+        auto total_count = static_cast<size_t>(index->Count());
+        TargetBitmap candidates(total_count, true);
+        index->ExecutePhase1(literal, expr_->op_type_, candidates);
+        cached_phase1_res_ =
+            std::make_shared<TargetBitmap>(std::move(candidates));
         cached_index_chunk_valid_res_ =
             std::make_shared<TargetBitmap>(std::move(index->IsNotNull()));
     }
 
-    TargetBitmap result;
+    // Phase 2: Execute per batch with batch-level bitmap_input
+    TargetBitmap batch_candidates;
+    batch_candidates.append(
+        *cached_phase1_res_, current_data_global_pos_, real_batch_size);
+
+    // Apply batch-level pre_filter from previous expressions in conjunction
+    const auto& bitmap_input = context.get_bitmap_input();
+    if (!bitmap_input.empty()) {
+        AssertInfo(static_cast<int64_t>(bitmap_input.size()) == real_batch_size,
+                   "bitmap_input size {} != real_batch_size {}",
+                   bitmap_input.size(),
+                   real_batch_size);
+        batch_candidates &= bitmap_input;
+    }
+
+    // Execute Phase2 (post-filter) on this batch
+    if (!batch_candidates.none()) {
+        index->ExecutePhase2(literal,
+                             expr_->op_type_,
+                             this,
+                             batch_candidates,
+                             current_data_global_pos_,
+                             real_batch_size);
+    }
+
     TargetBitmap valid_result;
-    result.append(
-        *cached_ngram_match_res_, current_data_global_pos_, real_batch_size);
     valid_result.append(*cached_index_chunk_valid_res_,
                         current_data_global_pos_,
                         real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
+    return std::make_shared<ColumnVector>(std::move(batch_candidates),
                                           std::move(valid_result));
 }
 
