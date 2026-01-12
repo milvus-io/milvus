@@ -30,6 +30,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
@@ -1724,6 +1725,136 @@ func TestCreateCollectionTask(t *testing.T) {
 
 		err = task2.PreExecute(ctx)
 		assert.NoError(t, err)
+	})
+}
+
+func TestCreateCollectionTaskExternalCollection(t *testing.T) {
+	mix := NewMixCoordMock()
+	ctx := context.Background()
+	collectionName := "external_collection_" + funcutil.GenRandomStr()
+
+	buildExternalSchema := func() *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Name:           collectionName,
+			ExternalSource: "s3://bucket/prefix",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  1,
+					Name:     "text_field",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "64"},
+					},
+				},
+				{
+					FieldID:  2,
+					Name:     "vec_field",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "16"},
+					},
+				},
+			},
+		}
+	}
+
+	marshal := func(schema *schemapb.CollectionSchema) []byte {
+		bytes, err := proto.Marshal(schema)
+		require.NoError(t, err)
+		return bytes
+	}
+
+	task := &createCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+			CollectionName: collectionName,
+			Schema:         marshal(buildExternalSchema()),
+			ShardsNum:      common.DefaultShardsNum,
+		},
+		ctx:      ctx,
+		mixCoord: mix,
+	}
+
+	t.Run("valid external schema", func(t *testing.T) {
+		err := task.OnEnqueue()
+		require.NoError(t, err)
+		err = task.PreExecute(ctx)
+		require.NoError(t, err)
+	})
+
+	t.Run("dynamic field forbidden", func(t *testing.T) {
+		schema := buildExternalSchema()
+		schema.EnableDynamicField = true
+		task.CreateCollectionRequest.Schema = marshal(schema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("primary key forbidden", func(t *testing.T) {
+		schema := buildExternalSchema()
+		schema.Fields[0].IsPrimaryKey = true
+		task.CreateCollectionRequest.Schema = marshal(schema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("partition key forbidden", func(t *testing.T) {
+		schema := buildExternalSchema()
+		schema.Fields[0].IsPartitionKey = true
+		task.CreateCollectionRequest.Schema = marshal(schema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("clustering key forbidden", func(t *testing.T) {
+		schema := buildExternalSchema()
+		schema.Fields[0].IsClusteringKey = true
+		task.CreateCollectionRequest.Schema = marshal(schema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("auto id forbidden", func(t *testing.T) {
+		schema := buildExternalSchema()
+		schema.Fields[0].AutoID = true
+		task.CreateCollectionRequest.Schema = marshal(schema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("text match forbidden", func(t *testing.T) {
+		schema := buildExternalSchema()
+		schema.Fields[0].TypeParams = append(schema.Fields[0].TypeParams, &commonpb.KeyValuePair{
+			Key:   "enable_match",
+			Value: "true",
+		})
+		task.CreateCollectionRequest.Schema = marshal(schema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("struct field forbidden", func(t *testing.T) {
+		schema := buildExternalSchema()
+		schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID: 3,
+				Name:    "struct_array_field",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:     4,
+						Name:        "nested_array",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int64,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.MaxCapacityKey, Value: "10"},
+						},
+					},
+				},
+			},
+		}
+		task.CreateCollectionRequest.Schema = marshal(schema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
 	})
 }
 
