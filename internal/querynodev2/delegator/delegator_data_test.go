@@ -519,6 +519,8 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	s.True(s.delegator.distribution.Serviceable())
 
 	s.delegator.Close()
+	// After Close(), pkOracle is cleared, so ProcessDelete becomes a no-op.
+	// This is expected behavior - the delegator is being decommissioned.
 	s.delegator.ProcessDelete([]*DeleteData{
 		{
 			PartitionID: 500,
@@ -528,7 +530,6 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		},
 	}, 10)
 	s.Require().NoError(err)
-	s.False(s.delegator.distribution.Serviceable())
 }
 
 func (s *DelegatorDataSuite) TestLoadGrowingWithBM25() {

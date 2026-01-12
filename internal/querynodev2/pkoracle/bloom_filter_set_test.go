@@ -100,3 +100,91 @@ func TestHistoricalStat(t *testing.T) {
 		assert.True(t, ret[i])
 	}
 }
+
+func TestMemSize(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("empty bloom filter set", func(t *testing.T) {
+		bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
+		size := bfs.MemSize()
+		assert.Equal(t, int64(0), size)
+	})
+
+	t.Run("with current stat only", func(t *testing.T) {
+		batchSize := 100
+		pks := make([]storage.PrimaryKey, 0)
+		for i := 0; i < batchSize; i++ {
+			pk := storage.NewInt64PrimaryKey(int64(i))
+			pks = append(pks, pk)
+		}
+
+		bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
+		bfs.UpdateBloomFilter(pks)
+
+		size := bfs.MemSize()
+		assert.Greater(t, size, int64(0))
+		// Bloom filter size should be related to the configured BloomFilterSize
+		// Cap() returns bits, MemSize() converts to bytes
+		expectedSize := int64(bfs.currentStat.PkFilter.Cap() / 8)
+		assert.Equal(t, expectedSize, size)
+	})
+
+	t.Run("with historical stats", func(t *testing.T) {
+		batchSize := 100
+		pks := make([]storage.PrimaryKey, 0)
+		for i := 0; i < batchSize; i++ {
+			pk := storage.NewInt64PrimaryKey(int64(i))
+			pks = append(pks, pk)
+		}
+
+		bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
+		bfs.UpdateBloomFilter(pks)
+
+		currentSize := bfs.MemSize()
+
+		// Add historical stats (simulate compaction history)
+		bfs.AddHistoricalStats(bfs.currentStat)
+		bfs.AddHistoricalStats(bfs.currentStat)
+
+		totalSize := bfs.MemSize()
+		// Should be approximately 3x the single bloom filter size
+		// (1 current + 2 historical, all pointing to same underlying filter for this test)
+		assert.Equal(t, currentSize*3, totalSize)
+	})
+
+	t.Run("with nil current stat and historical stats", func(t *testing.T) {
+		batchSize := 100
+		pks := make([]storage.PrimaryKey, 0)
+		for i := 0; i < batchSize; i++ {
+			pk := storage.NewInt64PrimaryKey(int64(i))
+			pks = append(pks, pk)
+		}
+
+		bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
+		bfs.UpdateBloomFilter(pks)
+
+		singleSize := bfs.MemSize()
+
+		// Add historical stats and clear current
+		bfs.AddHistoricalStats(bfs.currentStat)
+		bfs.currentStat = nil
+
+		historicalSize := bfs.MemSize()
+		assert.Equal(t, singleSize, historicalSize)
+	})
+
+	t.Run("varchar primary key", func(t *testing.T) {
+		batchSize := 100
+		pks := make([]storage.PrimaryKey, 0)
+		for i := 0; i < batchSize; i++ {
+			pk := storage.NewVarCharPrimaryKey(strconv.FormatInt(int64(i), 10))
+			pks = append(pks, pk)
+		}
+
+		bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
+		bfs.UpdateBloomFilter(pks)
+
+		size := bfs.MemSize()
+		assert.Greater(t, size, int64(0))
+	})
+}
