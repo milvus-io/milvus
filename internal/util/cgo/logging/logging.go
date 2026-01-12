@@ -62,12 +62,11 @@ func goZapLogExt(sev C.int,
 			Message:     unsafe.Pointer(msg),
 			MessageLen:  int(msgLen),
 		})
-		metrics.LoggingCGOWriteTotal.Inc()
-		metrics.LoggingCGOWriteBytes.Add(float64(msgLen))
 		return
 	}
 	// otherwise, we perform a synchronous write, Write directly to the underlying buffered write syncer.
-	msgStr := C.GoStringN(msg, int(msgLen))
+	b := unsafe.Slice((*byte)(unsafe.Pointer(msg)), int(msgLen))
+	msgStr := unsafe.String(&b[0], len(b))
 	ent := zapcore.Entry{
 		Level:      lv,
 		Time:       time.Now(),
