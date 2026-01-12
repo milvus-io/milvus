@@ -5329,7 +5329,9 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 		}
 	}
 
-	if !skipPasswordVerify && !passwordVerify(ctx, req.Username, rawOldPassword, privilege.GetPrivilegeCache()) {
+	maintainerModeEnabled := Params.CommonCfg.MaintainerModeEnabled.GetAsBool()
+	// Skip password verification if maintainer mode is enabled OR current user is super user
+	if !maintainerModeEnabled && !skipPasswordVerify && !passwordVerify(ctx, req.Username, rawOldPassword, privilege.GetPrivilegeCache()) {
 		err := merr.WrapErrPrivilegeNotAuthenticated("old password not correct for %s", req.GetUsername())
 		return merr.Status(err), nil
 	}

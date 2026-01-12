@@ -967,6 +967,10 @@ common:
     lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
     authorizationEnabled: false
+    # maintainer mode for system maintenance. When enabled, bypasses RBAC and old password verification.
+    # This is a dangerous mode that should only be used for emergency password recovery.
+    # Default is false. Only enable this temporarily and disable immediately after use.
+    maintainerModeEnabled: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 
