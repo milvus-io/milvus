@@ -1,4 +1,4 @@
-// Licensed to the LF AI& Data foundation under one
+/// Licensed to the LF AI & Data foundation under one
 // or more contributor license agreements. See the NOTICE file
 // distributed with this work for additional information
 // regarding copyright ownership. The ASF licenses this file
@@ -14,21 +14,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+package logging
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+/*
+#cgo pkg-config: milvus_core
+#include <stdlib.h>
+#include "common/logging_c.h"
+*/
+import "C"
 
-void
-InitGoogleLoggingWithZapSink();
+// GlogSeverity describes the GLOG severity level.
+type GlogSeverity int
 
-void
-InitGoogleLoggingWithoutZapSink();
+const (
+	GlogInfo    GlogSeverity = 0
+	GlogWarning GlogSeverity = 1
+	GlogError   GlogSeverity = 2
+	GlogFatal   GlogSeverity = 3
+)
 
-void
-GoogleLoggingAtLevel(int severity, const char* msg);
-
-#ifdef __cplusplus
+// PrintGlogLog prints a log with the specified severity, file, line, and message using GLOG via cgo.
+func GoogleLoggingAtLevel(severity GlogSeverity, msg string) {
+	C.GoogleLoggingAtLevel(C.int(severity), C.CString(msg))
 }
-#endif
+
+func InitGoogleLoggingWithZapSink() {
+	C.InitGoogleLoggingWithZapSink()
+}
+
+func InitGoogleLogging() {
+	C.InitGoogleLoggingWithoutZapSink()
+}

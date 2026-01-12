@@ -19,6 +19,7 @@ package logging
 /*
 extern void goZapLogExt(int severity,
             char* file,
+            int file_len,
             int line,
             char* msg,
             int msg_len);
@@ -27,6 +28,7 @@ import "C"
 
 import (
 	"time"
+	"unsafe"
 
 	"go.uber.org/zap/zapcore"
 
@@ -39,6 +41,7 @@ const cgoLoggerName = "CGO"
 //export goZapLogExt
 func goZapLogExt(sev C.int,
 	file *C.char,
+	fileLen C.int,
 	line C.int,
 	msg *C.char,
 	msgLen C.int,
@@ -47,11 +50,30 @@ func goZapLogExt(sev C.int,
 	if !log.L().Core().Enabled(lv) {
 		return
 	}
+	core := log.L().Core()
+	if c, ok := core.(log.CEntryTextIOCore); ok {
+		// if async log is enabled, we use CEntry to write the log, avoid to copy the log message to the heap.
+		c.WriteWithCEntry(log.CEntry{
+			Time:        time.Now(),
+			Level:       lv,
+			Filename:    unsafe.Pointer(file),
+			FilenameLen: int(fileLen),
+			Line:        int(line),
+			Message:     unsafe.Pointer(msg),
+			MessageLen:  int(msgLen),
+		})
+		metrics.LoggingCGOWriteTotal.Inc()
+		metrics.LoggingCGOWriteBytes.Add(float64(msgLen))
+		return
+	}
+	// otherwise, we perform a synchronous write, Write directly to the underlying buffered write syncer.
+	b := unsafe.Slice((*byte)(unsafe.Pointer(msg)), int(msgLen))
+	msgStr := unsafe.String(&b[0], len(b))
 	ent := zapcore.Entry{
-		Level:      mapGlogSeverity(int(sev)),
+		Level:      lv,
 		Time:       time.Now(),
 		LoggerName: cgoLoggerName,
-		Message:    C.GoStringN(msg, msgLen),
+		Message:    msgStr,
 		Caller: zapcore.EntryCaller{
 			Defined: true,
 			File:    C.GoString(file),
