@@ -362,8 +362,8 @@ func validateCollectionTTL(props []*commonpb.KeyValuePair) (bool, error) {
 			if err != nil {
 				return true, merr.WrapErrParameterInvalidMsg("collection TTL is not a valid positive integer")
 			}
-			if val <= 0 || val > common.MaxTTLSeconds {
-				return true, merr.WrapErrParameterInvalidMsg("collection TTL is out of range, expect (0, 31557600000], got %d", val)
+			if val < -1 || val > common.MaxTTLSeconds {
+				return true, merr.WrapErrParameterInvalidMsg("collection TTL is out of range, expect [-1, 3155760000], got %d", val)
 			}
 			return true, nil
 		}
