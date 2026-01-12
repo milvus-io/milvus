@@ -1825,6 +1825,30 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         assert len(results[0]) > 0
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_search_struct_array_not_support_search_by_pk(self):
+        """
+        target: test searching with multiple vectors (EmbeddingList) in struct array does not supprt search by pk
+        method: search using EmbeddingList by pk
+        expected: search failed with error
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_search")
+
+        client = self._client()
+        # Create collection with data and index
+        self.create_collection_with_index(client, collection_name)
+
+        # Search using EmbeddingList
+        error = {ct.err_code: 999,
+                 ct.err_msg: "array of vector is not supported for search by IDs"}
+        self.search(client,
+                    collection_name,
+                    ids=[0, 1],
+                    anns_field="clips[clip_embedding1]",
+                    search_params={"metric_type": "MAX_SIM_COSINE"},
+                    limit=10,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("retrieval_ann_ratio", [1.0, 3.0, 5.0, 10.0])
     def test_search_with_retrieval_ann_ratio(self, retrieval_ann_ratio):
         """
