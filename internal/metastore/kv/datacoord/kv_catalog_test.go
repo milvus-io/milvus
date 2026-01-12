@@ -405,6 +405,28 @@ func Test_AlterSegments(t *testing.T) {
 		verifySavedKvsForSegment(t, savedKvs)
 	})
 
+	t.Run("save successfully with update mask", func(t *testing.T) {
+		var savedKvs map[string]string
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, m map[string]string) error {
+			savedKvs = m
+			return nil
+		})
+
+		catalog := NewCatalog(metakv, rootPath, "")
+		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segment1}, metastore.BinlogsIncrement{
+			Segment: segment1,
+			UpdateMask: metastore.BinlogsUpdateMask{
+				WithoutBinlogs:       true,
+				WithoutDeltalogs:     true,
+				WithoutStatslogs:     true,
+				WithoutBm25Statslogs: true,
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(savedKvs))
+	})
+
 	t.Run("save large ops successfully", func(t *testing.T) {
 		savedKvs := make(map[string]string)
 		opGroupCount := 0

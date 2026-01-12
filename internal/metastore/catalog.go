@@ -3,6 +3,8 @@ package metastore
 import (
 	"context"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -114,7 +116,51 @@ func (t AlterType) String() string {
 }
 
 type BinlogsIncrement struct {
-	Segment *datapb.SegmentInfo
+	Segment    *datapb.SegmentInfo
+	UpdateMask BinlogsUpdateMask
+}
+
+type BinlogsUpdateMask struct {
+	WithoutBinlogs       bool // if true, the binlogs will not be updated
+	WithoutDeltalogs     bool // if true, the deltalogs will not be updated
+	WithoutStatslogs     bool // if true, the statslogs will not be updated
+	WithoutBm25Statslogs bool // if true, the bm25 statslogs will not be updated
+}
+
+func (m *BinlogsIncrement) GetUpdateBinlogs() []*datapb.FieldBinlog {
+	if m.UpdateMask.WithoutBinlogs {
+		return nil
+	}
+	return m.cloneBinlogs(m.Segment.GetBinlogs())
+}
+
+func (m *BinlogsIncrement) GetUpdateDeltalogs() []*datapb.FieldBinlog {
+	if m.UpdateMask.WithoutDeltalogs {
+		return nil
+	}
+	return m.cloneBinlogs(m.Segment.GetDeltalogs())
+}
+
+func (m *BinlogsIncrement) GetUpdateStatslogs() []*datapb.FieldBinlog {
+	if m.UpdateMask.WithoutStatslogs {
+		return nil
+	}
+	return m.cloneBinlogs(m.Segment.GetStatslogs())
+}
+
+func (m *BinlogsIncrement) GetUpdateBm25Statslogs() []*datapb.FieldBinlog {
+	if m.UpdateMask.WithoutBm25Statslogs {
+		return nil
+	}
+	return m.cloneBinlogs(m.Segment.GetBm25Statslogs())
+}
+
+func (m *BinlogsIncrement) cloneBinlogs(binlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+	res := make([]*datapb.FieldBinlog, len(binlogs))
+	for i, binlog := range binlogs {
+		res[i] = proto.Clone(binlog).(*datapb.FieldBinlog)
+	}
+	return res
 }
 
 //go:generate mockery --name=DataCoordCatalog --with-expecter
