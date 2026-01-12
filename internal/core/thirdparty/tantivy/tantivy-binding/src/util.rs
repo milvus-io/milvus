@@ -16,7 +16,10 @@ pub fn c_ptr_to_str(ptr: *const c_char) -> Result<&'static str> {
 pub fn index_exist(path: &str) -> bool {
     let Ok(dir) = MmapDirectory::open(path) else {
         init_log();
-        info!("tantivy index_exist: failed to open directory: {}, (used for debug now)", path);
+        info!(
+            "tantivy index_exist: failed to open directory: {}, (used for debug now)",
+            path
+        );
         return false;
     };
     let exists = Index::exists(&dir).unwrap();
