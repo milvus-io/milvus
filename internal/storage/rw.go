@@ -39,8 +39,12 @@ import (
 )
 
 const (
+	// StorageV1 is milvus 2.0 legacy binlog format
 	StorageV1 int64 = 0
+	// StorageV2 is milvus-storage packed writer binlog format(parquet)
 	StorageV2 int64 = 2
+	// StorageV3 is loon manifest format
+	StorageV3 int64 = 3
 )
 
 type (
