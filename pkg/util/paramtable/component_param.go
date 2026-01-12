@@ -4632,6 +4632,10 @@ type dataCoordConfig struct {
 	SingleCompactionExpiredLogMaxSize ParamItem `refreshable:"true"`
 	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
 
+	StorageVersionCompactionEnabled           ParamItem `refreshable:"true"`
+	StorageVersionCompactionRateLimitTokens   ParamItem `refreshable:"true"`
+	StorageVersionCompactionRateLimitInterval ParamItem `refreshable:"true"`
+
 	ChannelCheckpointMaxLag ParamItem `refreshable:"true"`
 	SyncSegmentsInterval    ParamItem `refreshable:"false"`
 
@@ -5143,6 +5147,33 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.SingleCompactionDeltalogMaxNum.Init(base.mgr)
+
+	p.StorageVersionCompactionEnabled = ParamItem{
+		Key:          "dataCoord.compaction.storageVersion.enabled",
+		Version:      "2.6.9",
+		DefaultValue: "true",
+		Doc:          "Enable storage version compaction",
+		Export:       false,
+	}
+	p.StorageVersionCompactionEnabled.Init(base.mgr)
+
+	p.StorageVersionCompactionRateLimitTokens = ParamItem{
+		Key:          "dataCoord.compaction.storageVersion.rateLimitTokens",
+		Version:      "2.6.9",
+		DefaultValue: "3",
+		Doc:          "The storage version compaction tokens per period, applying rate limit",
+		Export:       false,
+	}
+	p.StorageVersionCompactionRateLimitTokens.Init(base.mgr)
+
+	p.StorageVersionCompactionRateLimitInterval = ParamItem{
+		Key:          "dataCoord.compaction.storageVersion.rateLimitInterval",
+		Version:      "2.6.9",
+		DefaultValue: "120",
+		Doc:          "The storage version compaction rate limit interval, in seconds",
+		Export:       false,
+	}
+	p.StorageVersionCompactionRateLimitInterval.Init(base.mgr)
 
 	p.GlobalCompactionInterval = ParamItem{
 		Key:          "dataCoord.compaction.global.interval",
