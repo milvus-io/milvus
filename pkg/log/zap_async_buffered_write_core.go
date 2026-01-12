@@ -18,7 +18,6 @@ package log
 
 import (
 	"fmt"
-	"strconv"
 	"time"
 	"unsafe"
 
@@ -46,7 +45,7 @@ func NewAsyncTextIOCore(cfg *Config, ws zapcore.WriteSyncer, enab zapcore.LevelE
 		notifier:            syncutil.NewAsyncTaskNotifier[struct{}](),
 		enc:                 enc,
 		bws:                 bws,
-		pending:             make(chan interface{}, cfg.AsyncWritePendingLength),
+		pending:             make(chan entryItem, cfg.AsyncWritePendingLength),
 		writeDroppedTimeout: cfg.AsyncWriteDroppedTimeout,
 		nonDroppableLevel:   nonDroppableLevel,
 		stopTimeout:         cfg.AsyncWriteStopTimeout,
@@ -63,7 +62,7 @@ type asyncTextIOCore struct {
 	notifier            *syncutil.AsyncTaskNotifier[struct{}]
 	enc                 zapcore.Encoder
 	bws                 *zapcore.BufferedWriteSyncer
-	pending             chan interface{} // the incoming new write requests
+	pending             chan entryItem // the incoming new write requests
 	writeDroppedTimeout time.Duration
 	nonDroppableLevel   zapcore.Level
 	stopTimeout         time.Duration
@@ -74,6 +73,7 @@ type asyncTextIOCore struct {
 type entryItem struct {
 	buf   *buffer.Buffer
 	level zapcore.Level
+	isCGO bool
 }
 
 // With returns a copy of the Core with the given fields added.
@@ -117,28 +117,58 @@ func (s *asyncTextIOCore) Write(ent zapcore.Entry, fields []zapcore.Field) error
 	if err != nil {
 		return err
 	}
-	entry := &entryItem{
+	entry := entryItem{
 		buf:   buf,
 		level: ent.Level,
+		isCGO: false,
+	}
+	s.write(entry)
+	return nil
+}
+
+// WriteWithCEntry writes the CEntry to the underlying buffered write syncer.
+// Use this method to avoid the memory copy of the log message to the heap.
+func (s *asyncTextIOCore) WriteWithCEntry(ent CEntry) {
+	buf, err := s.enc.EncodeEntry(zapcore.Entry{
+		Level:      ent.Level,
+		Time:       ent.Time,
+		LoggerName: "CGO",
+		Message:    unsafe.String((*byte)(ent.Message), ent.MessageLen),
+		Caller: zapcore.EntryCaller{
+			Defined: true,
+			File:    unsafe.String((*byte)(ent.Filename), ent.FilenameLen),
+			Line:    ent.Line,
+		},
+	}, nil)
+	if err != nil {
+		return
 	}
 
-	length := buf.Len()
+	entry := entryItem{
+		buf:   buf,
+		level: ent.Level,
+		isCGO: true,
+	}
+	s.write(entry)
+}
+
+func (s *asyncTextIOCore) write(ent entryItem) {
+	length := ent.buf.Len()
 	if length == 0 {
-		return nil
+		return
 	}
 	var writeDroppedTimeout <-chan time.Time
-	if ent.Level < s.nonDroppableLevel {
+	if ent.level < s.nonDroppableLevel {
 		writeDroppedTimeout = time.After(s.writeDroppedTimeout)
 	}
 	select {
-	case s.pending <- entry:
+	case s.pending <- ent:
 		metrics.LoggingPendingWriteTotal.Inc()
 	case <-writeDroppedTimeout:
 		metrics.LoggingDroppedWriteTotal.Inc()
 		// drop the entry if the write is dropped due to timeout
-		buf.Free()
+		ent.buf.Free()
 	}
-	return nil
 }
 
 type CEntryTextIOCore interface {
@@ -153,17 +183,6 @@ type CEntry struct {
 	Line        int
 	Message     unsafe.Pointer
 	MessageLen  int
-	ready       chan struct{}
-}
-
-func (s *asyncTextIOCore) WriteWithCEntry(ent CEntry) {
-	ent.ready = make(chan struct{})
-	select {
-	case s.pending <- ent:
-		<-ent.ready
-		return
-	case <-time.After(s.writeDroppedTimeout):
-	}
 }
 
 // Sync syncs the underlying buffered write syncer.
@@ -183,18 +202,13 @@ func (s *asyncTextIOCore) background() {
 		case <-s.notifier.Context().Done():
 			return
 		case ent := <-s.pending:
-			switch ent := ent.(type) {
-			case *entryItem:
-				s.consumeEntry(ent)
-			case CEntry:
-				s.consumeCEntry(ent)
-			}
+			s.consumeEntry(ent)
 		}
 	}
 }
 
 // consumeEntry write the entry to the underlying buffered write syncer and free the buffer.
-func (s *asyncTextIOCore) consumeEntry(ent *entryItem) {
+func (s *asyncTextIOCore) consumeEntry(ent entryItem) {
 	length := ent.buf.Len()
 	metrics.LoggingPendingWriteTotal.Dec()
 
@@ -204,6 +218,10 @@ func (s *asyncTextIOCore) consumeEntry(ent *entryItem) {
 	} else {
 		metrics.LoggingWriteTotal.Inc()
 		metrics.LoggingWriteBytes.Add(float64(length))
+		if ent.isCGO {
+			metrics.LoggingCGOWriteTotal.Inc()
+			metrics.LoggingCGOWriteBytes.Add(float64(length))
+		}
 	}
 	ent.buf.Free()
 	if ent.level > zapcore.ErrorLevel {
@@ -213,33 +231,10 @@ func (s *asyncTextIOCore) consumeEntry(ent *entryItem) {
 	}
 }
 
-func (s *asyncTextIOCore) consumeCEntry(ent CEntry) {
-	metrics.LoggingPendingWriteTotal.Dec()
-
-	s.bws.Write([]byte("["))
-	s.bws.Write([]byte(ent.Time.Format(defaultTimeFormat)))
-	s.bws.Write([]byte("] ["))
-	s.bws.Write([]byte(ent.Level.CapitalString()))
-	s.bws.Write([]byte("] [CGO] ["))
-	s.bws.Write(unsafe.Slice((*byte)(ent.Filename), ent.FilenameLen))
-	s.bws.Write([]byte(":"))
-	s.bws.Write([]byte(strconv.Itoa(ent.Line)))
-	s.bws.Write([]byte("] [\""))
-	s.bws.Write(unsafe.Slice((*byte)(ent.Message), (ent.MessageLen)))
-	s.bws.Write([]byte("\"]\n"))
-	close(ent.ready)
-
-	if ent.Level > zapcore.ErrorLevel {
-		if err := s.bws.Sync(); err != nil {
-			metrics.LoggingIOFailureTotal.Inc()
-		}
-	}
-}
-
 // getWriteBytes gets the bytes to write to the underlying buffered write syncer.
 // if the length of the write exceeds the max bytes per log, it will truncate the write and return the truncated bytes.
 // otherwise, it will return the original bytes.
-func (s *asyncTextIOCore) getWriteBytes(ent *entryItem) []byte {
+func (s *asyncTextIOCore) getWriteBytes(ent entryItem) []byte {
 	length := ent.buf.Len()
 	writes := ent.buf.Bytes()
 
@@ -278,12 +273,7 @@ func (s *asyncTextIOCore) flushAllPendingWrites(done chan struct{}) {
 	for {
 		select {
 		case ent := <-s.pending:
-			switch ent := ent.(type) {
-			case *entryItem:
-				s.consumeEntry(ent)
-			case CEntry:
-				s.consumeCEntry(ent)
-			}
+			s.consumeEntry(ent)
 		default:
 			return
 		}

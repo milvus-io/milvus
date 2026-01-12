@@ -95,7 +95,7 @@ func writeLogsWithConcurrency(logs []string) {
 	writeLogs := func(logs chan string) {
 		defer wg.Done()
 		for log := range logs {
-			GoogleLoggingAtLevel(GlogInfo, log)
+			GoogleLoggingAtLevel(glogInfo, log)
 		}
 	}
 	wg.Add(currency)

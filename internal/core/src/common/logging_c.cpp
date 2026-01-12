@@ -77,23 +77,9 @@ GoZapSink::send(google::LogSeverity severity,
                 const struct tm*,
                 const char* message,
                 size_t message_len) {
-    if (full_filename == nullptr || full_filename[0] == '\0') {
-        return;
-    }
-    int last_two_slash_index[] = {0, 0};
-    int idx = 0;
-    while (full_filename[idx] != '\0') {
-        if (full_filename[idx] == '/') {
-            last_two_slash_index[0] = last_two_slash_index[1];
-            last_two_slash_index[1] = idx;
-        }
-        idx++;
-    }
-
-    int from_index = last_two_slash_index[0] + 1;
     goZapLogExt(static_cast<int>(severity),
-                full_filename + from_index,
-                idx - from_index,
+                full_filename,
+                strlen(full_filename),
                 line,
                 message,
                 message_len);
