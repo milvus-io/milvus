@@ -20,7 +20,7 @@ inline int64_t
 get_barrier(const RecordType& record, Timestamp timestamp) {
     auto& vec = record.timestamps();
     int64_t beg = 0;
-    int64_t end = record.size();
+    int64_t end = record.row_count();
     while (beg < end) {
         auto mid = (beg + end) / 2;
         if (vec[mid] <= timestamp) {

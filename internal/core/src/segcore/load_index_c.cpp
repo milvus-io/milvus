@@ -201,6 +201,20 @@ ReleaseLoadingResource(CResourceUsage size) {
                                             size.disk_bytes));
 }
 
+void
+ChargeLoadedResource(CResourceUsage size) {
+    milvus::cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+        milvus::cachinglayer::ResourceUsage(size.memory_bytes,
+                                            size.disk_bytes));
+}
+
+void
+RefundLoadedResource(CResourceUsage size) {
+    milvus::cachinglayer::Manager::GetInstance().RefundLoadedResource(
+        milvus::cachinglayer::ResourceUsage(size.memory_bytes,
+                                            size.disk_bytes));
+}
+
 CStatus
 AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
     SCOPE_CGO_CALL_METRIC();
