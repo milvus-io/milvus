@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -374,6 +375,10 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoordClient, queryCo
 	}
 	globalMetaCache.InitPolicyInfo(resp.PolicyInfos, resp.UserRoles)
 	log.Info("success to init meta cache", zap.Strings("policy_infos", resp.PolicyInfos))
+
+	// Register password verify function for /expr endpoint authentication
+	internalhttp.RegisterPasswordVerifyFunc(PasswordVerify)
+
 	return nil
 }
 
