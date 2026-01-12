@@ -32,7 +32,8 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
       mmap_populate_(mmap_populate),
       mmap_dir_path_(field_data_info.mmap_dir_path),
       field_meta_(field_meta),
-      meta_(milvus::cachinglayer::StorageType::MEMORY,
+      meta_(use_mmap ? milvus::cachinglayer::StorageType::DISK
+                     : milvus::cachinglayer::StorageType::MEMORY,
             // For default-value fields, one logical chunk per caching cell.
             // Cell IDs are identical to chunk IDs.
             milvus::cachinglayer::CellIdMappingMode::IDENTICAL,
