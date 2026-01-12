@@ -402,7 +402,8 @@ func (s *Server) initMessageCallback() {
 		if err != nil {
 			return err
 		}
-		if channelAssignment.ReplicateConfiguration != nil {
+		replicateConfig := channelAssignment.ReplicateConfiguration
+		if replicateConfig != nil && len(replicateConfig.GetClusters()) > 1 {
 			return status.NewReplicateViolation("import in replicating cluster is not supported yet")
 		}
 		return nil
