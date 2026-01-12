@@ -199,9 +199,9 @@ CompileInputs(const expr::TypedExprPtr& expr,
             if (flatten.has_value()) {
                 std::vector<expr::TypedExprPtr> flat_exprs;
                 FlattenInput(input, flatten.value(), flat_exprs);
-                for (auto& input : flat_exprs) {
+                for (auto& flat_input : flat_exprs) {
                     compiled_inputs.push_back(CompileExpression(
-                        input, context, flatten_cadidates, false));
+                        flat_input, context, flatten_cadidates, false));
                 }
             } else {
                 compiled_inputs.push_back(CompileExpression(

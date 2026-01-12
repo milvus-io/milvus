@@ -394,6 +394,9 @@ void
 NgramInvertedIndex::ExecutePhase1(const std::string& literal,
                                   proto::plan::OpType op_type,
                                   TargetBitmap& candidates) {
+    tracer::AutoSpan span(
+        "NgramInvertedIndex::ExecutePhase1", tracer::GetRootSpan(), true);
+
     auto total_count = static_cast<size_t>(Count());
     AssertInfo(total_count > 0, "ExecutePhase1: total_count must be > 0");
     AssertInfo(!candidates.empty(),
@@ -432,8 +435,10 @@ NgramInvertedIndex::ExecutePhase1(const std::string& literal,
         literals_vec.push_back(literal);
     }
 
+    bool use_batch_strategy = ShouldUseBatchStrategy(candidates_hit_rate);
+
     // Choose strategy and execute, AND results into candidates
-    if (ShouldUseBatchStrategy(candidates_hit_rate)) {
+    if (use_batch_strategy) {
         // Batch strategy: query all ngram terms at once
         for (const auto& l : literals_vec) {
             TargetBitmap ngram_bitset{total_count};
@@ -447,6 +452,22 @@ NgramInvertedIndex::ExecutePhase1(const std::string& literal,
         AssertInfo(!sorted_terms.empty(),
                    "ngram_tokenize should not return empty for valid literal");
         ApplyIterativeNgramFilter(sorted_terms, total_count, candidates);
+    }
+
+    // Set tracing attributes
+    if (auto root_span = tracer::GetRootSpan()) {
+        size_t post_count = candidates.count();
+        double pre_hit_rate = 1.0 * pre_count / total_count;
+        double post_hit_rate = 1.0 * post_count / total_count;
+        root_span->SetAttribute("phase1_op_type", static_cast<int>(op_type));
+        root_span->SetAttribute("phase1_literal_length",
+                                static_cast<int>(literal.length()));
+        root_span->SetAttribute("phase1_total_count",
+                                static_cast<int>(total_count));
+        root_span->SetAttribute("phase1_pre_hit_rate", pre_hit_rate);
+        root_span->SetAttribute("phase1_post_hit_rate", post_hit_rate);
+        root_span->SetAttribute("phase1_use_batch_strategy",
+                                use_batch_strategy);
     }
 }
 
@@ -471,6 +492,8 @@ NgramInvertedIndex::ExecutePhase2(const std::string& literal,
                "candidates size {} != batch_size {}",
                candidates.size(),
                batch_size);
+
+    size_t pre_count = candidates.count();
 
     TargetBitmapView res(candidates);
 
@@ -598,14 +621,10 @@ NgramInvertedIndex::ExecutePhase2(const std::string& literal,
 }
 
 std::optional<TargetBitmap>
-NgramInvertedIndex::ExecuteQuery(const std::string& literal,
-                                 proto::plan::OpType op_type,
-                                 exec::SegmentExpr* segment,
-                                 const TargetBitmap* pre_filter) {
-    tracer::AutoSpan span(
-        "NgramInvertedIndex::ExecuteQuery", tracer::GetRootSpan(), true);
-
-    // Check if literal can be handled
+NgramInvertedIndex::ExecuteQueryForUT(const std::string& literal,
+                                      proto::plan::OpType op_type,
+                                      exec::SegmentExpr* segment,
+                                      const TargetBitmap* pre_filter) {
     if (!CanHandleLiteral(literal, op_type)) {
         return std::nullopt;
     }
@@ -619,14 +638,12 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
     TargetBitmap candidates(total_count, true);
     if (pre_filter != nullptr) {
         candidates &= *pre_filter;
-        // If pre_filter has no candidates, return empty result immediately
         if (candidates.none()) {
             return std::move(candidates);
         }
     }
 
-    // Phase 1: ngram index query with adaptive strategy
-    // ExecutePhase1 ANDs its result into candidates
+    // Phase 1: ngram index query
     ExecutePhase1(literal, op_type, candidates);
 
     if (candidates.none()) {

@@ -93,16 +93,11 @@ PhyLikeConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
     }
 
+    // For ngram like expression, the valid result is always true as result has all information
     TargetBitmap valid_result(real_batch_size, true);
-    MoveCursor();
+    current_pos_ += real_batch_size;
     result = std::make_shared<ColumnVector>(std::move(batch_candidates),
                                             std::move(valid_result));
 }
-
-void
-PhyLikeConjunctExpr::MoveCursor() {
-    current_pos_ += GetNextBatchSize();
-}
-
 }  // namespace exec
 }  // namespace milvus

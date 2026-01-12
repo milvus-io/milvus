@@ -55,11 +55,12 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
     void
     BuildWithJsonFieldData(const std::vector<FieldDataPtr>& datas);
 
+    // For unit tests only - combines Phase1 and Phase2 in one call
     std::optional<TargetBitmap>
-    ExecuteQuery(const std::string& literal,
-                 proto::plan::OpType op_type,
-                 exec::SegmentExpr* segment,
-                 const TargetBitmap* pre_filter = nullptr);
+    ExecuteQueryForUT(const std::string& literal,
+                      proto::plan::OpType op_type,
+                      exec::SegmentExpr* segment,
+                      const TargetBitmap* pre_filter = nullptr);
 
     // Check if literal can be handled by ngram index (length >= min_gram)
     bool
