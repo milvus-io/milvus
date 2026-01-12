@@ -863,17 +863,20 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	sd.AddExcludedSegments(droppedInfos)
 
 	if len(sealed) > 0 {
-		sd.pkOracle.Remove(
+		removed := sd.pkOracle.Remove(
 			pkoracle.WithSegmentIDs(lo.Map(sealed, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })...),
 			pkoracle.WithSegmentType(commonpb.SegmentState_Sealed),
 			pkoracle.WithWorkerID(targetNodeID),
 		)
+		// Refund resources for removed sealed segment candidates
+		sd.pkOracle.RefundRemoved(removed)
 	}
 	if len(growing) > 0 {
 		sd.pkOracle.Remove(
 			pkoracle.WithSegmentIDs(lo.Map(growing, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })...),
 			pkoracle.WithSegmentType(commonpb.SegmentState_Growing),
 		)
+		// leave the bloom filter sets in growing segment be closed by Release()
 	}
 
 	var releaseErr error

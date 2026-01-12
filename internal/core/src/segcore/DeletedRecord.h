@@ -144,7 +144,7 @@ class DeletedRecord {
                     deleted_mask_.set(row_id);
                 } else {
                     // need to add mask size firstly for growing segment
-                    deleted_mask_.resize(insert_record_->size());
+                    deleted_mask_.resize(insert_record_->row_count());
                     deleted_mask_.set(row_id);
                 }
                 removed_num++;
@@ -170,6 +170,13 @@ class DeletedRecord {
                 }
                 estimated_memory_size_ = new_estimated_size;
             }
+        } else {
+            // The resource usage of DeletedRecord for a Growing Segment is already counted in
+            // SegmentGrowingImpl::EstimateSegmentResourceUsage(), so there is no need to count it here.
+            // The reason we don't count it here is that we treat the Growing Segment as a single unit,
+            // we do not track memory separately for each field.
+            // If you intend to add this tracking here, first consider how to count the memory usage separately
+            // within the growing segment.
         }
 
         return max_timestamp;
@@ -245,7 +252,7 @@ class DeletedRecord {
             if constexpr (is_sealed) {
                 bitsize = sealed_row_count_;
             } else {
-                bitsize = insert_record_->size();
+                bitsize = insert_record_->row_count();
             }
             BitsetType bitmap(bitsize, false);
 
