@@ -14,6 +14,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build test
+// +build test
+
 package logging
 
 /*
@@ -22,6 +25,7 @@ package logging
 #include "common/logging_c.h"
 */
 import "C"
+import "unsafe"
 
 // GlogSeverity describes the GLOG severity level.
 type GlogSeverity int
@@ -33,9 +37,10 @@ const (
 	GlogFatal   GlogSeverity = 3
 )
 
-// PrintGlogLog prints a log with the specified severity, file, line, and message using GLOG via cgo.
 func GoogleLoggingAtLevel(severity GlogSeverity, msg string) {
-	C.GoogleLoggingAtLevel(C.int(severity), C.CString(msg))
+	cmsg := C.CString(msg)
+	defer C.free(unsafe.Pointer(cmsg))
+	C.GoogleLoggingAtLevel(C.int(severity), cmsg)
 }
 
 func InitGoogleLoggingWithZapSink() {

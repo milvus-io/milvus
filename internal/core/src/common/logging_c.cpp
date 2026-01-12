@@ -80,7 +80,7 @@ GoZapSink::send(google::LogSeverity severity,
     if (full_filename == nullptr || full_filename[0] == '\0') {
         return;
     }
-    int last_two_slash_index[] = {0, 0};
+    int last_two_slash_index[] = {-1, -1};
     int idx = 0;
     while (full_filename[idx] != '\0') {
         if (full_filename[idx] == '/') {

@@ -67,8 +67,7 @@ func goZapLogExt(sev C.int,
 		return
 	}
 	// otherwise, we perform a synchronous write, Write directly to the underlying buffered write syncer.
-	b := unsafe.Slice((*byte)(unsafe.Pointer(msg)), int(msgLen))
-	msgStr := unsafe.String(&b[0], len(b))
+	msgStr := C.GoStringN(msg, int(msgLen))
 	ent := zapcore.Entry{
 		Level:      lv,
 		Time:       time.Now(),

@@ -217,13 +217,16 @@ func (s *asyncTextIOCore) consumeCEntry(ent CEntry) {
 	metrics.LoggingPendingWriteTotal.Dec()
 
 	s.bws.Write([]byte("["))
-	s.bws.Write([]byte(ent.Time.Format(defaultTimeFormat)))
+	var buf [64]byte
+	tformat := ent.Time.AppendFormat(buf[:], defaultTimeFormat)
+	s.bws.Write(tformat)
 	s.bws.Write([]byte("] ["))
 	s.bws.Write([]byte(ent.Level.CapitalString()))
 	s.bws.Write([]byte("] [CGO] ["))
 	s.bws.Write(unsafe.Slice((*byte)(ent.Filename), ent.FilenameLen))
 	s.bws.Write([]byte(":"))
-	s.bws.Write([]byte(strconv.Itoa(ent.Line)))
+	lineNoFormat := strconv.AppendInt(buf[:], int64(ent.Line), 10)
+	s.bws.Write(lineNoFormat)
 	s.bws.Write([]byte("] [\""))
 	s.bws.Write(unsafe.Slice((*byte)(ent.Message), (ent.MessageLen)))
 	s.bws.Write([]byte("\"]\n"))
