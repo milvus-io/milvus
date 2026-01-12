@@ -140,16 +140,16 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     int processed_cursor = 0;
-    auto execute_sub_batch = [&bitmap_input,
-                              &processed_cursor]<FilterType filter_type =
-                                                     FilterType::sequential>(
-                                 const milvus::Json* data,
-                                 const bool* valid_data,
-                                 const int32_t* offsets,
-                                 const int size,
-                                 TargetBitmapView res,
-                                 TargetBitmapView valid_res,
-                                 const std::string& pointer) {
+    auto execute_sub_batch =
+        [&bitmap_input, &
+         processed_cursor ]<FilterType filter_type = FilterType::sequential>(
+            const milvus::Json* data,
+            const bool* valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res,
+            const std::string& pointer) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {

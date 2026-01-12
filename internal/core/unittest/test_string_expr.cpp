@@ -1718,8 +1718,7 @@ TEST(StringExpr, NotIsNotNullExpr) {
         // NOT (IS NOT NULL) should equal IS NULL
         // data[i] should be true if original was null, false if original was valid
         bool expected_data = !valid_data[i];
-        ASSERT_EQ(final[i], expected_data)
-            << "Data mismatch at index " << i;
+        ASSERT_EQ(final[i], expected_data) << "Data mismatch at index " << i;
     }
 }
 
@@ -1774,8 +1773,7 @@ TEST(StringExpr, NotIsNullExpr) {
         // NOT (IS NULL) should equal IS NOT NULL
         // data[i] should be true if original was valid, false if original was null
         bool expected_data = valid_data[i];
-        ASSERT_EQ(final[i], expected_data)
-            << "Data mismatch at index " << i;
+        ASSERT_EQ(final[i], expected_data) << "Data mismatch at index " << i;
     }
 }
 
@@ -1841,7 +1839,6 @@ TEST(StringExpr, IsNotNullAndNullCondition) {
         // (str IS NOT NULL) AND (int IS NOT NULL)
         // Both operands always have valid=true, so result is always valid
         bool expected_data = str_valid_data[i] && int_valid_data[i];
-        ASSERT_EQ(final[i], expected_data)
-            << "Data mismatch at index " << i;
+        ASSERT_EQ(final[i], expected_data) << "Data mismatch at index " << i;
     }
 }

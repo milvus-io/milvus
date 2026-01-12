@@ -513,14 +513,14 @@ TEST(ThreeValuedLogicOpTest, DeMorganOrToAnd) {
     // Test: NOT (A OR B) == NOT A AND NOT B
     // With all 9 combinations of A, B in {T, F, NULL}
 
-    std::vector<bool> a_data = {true, true,  true,  false, false,
-                                false, false, false, false};
-    std::vector<bool> a_valid = {true, true,  true,  true, true,
-                                 true, false, false, false};
-    std::vector<bool> b_data = {true, false, false, true, false,
-                                false, true,  false, false};
-    std::vector<bool> b_valid = {true, true, false, true, true,
-                                 false, true, true,  false};
+    std::vector<bool> a_data = {
+        true, true, true, false, false, false, false, false, false};
+    std::vector<bool> a_valid = {
+        true, true, true, true, true, true, false, false, false};
+    std::vector<bool> b_data = {
+        true, false, false, true, false, false, true, false, false};
+    std::vector<bool> b_valid = {
+        true, true, false, true, true, false, true, true, false};
 
     // Method 1: NOT (A OR B)
     auto left1 = CreateColumnVector(a_data, a_valid);
@@ -549,14 +549,14 @@ TEST(ThreeValuedLogicOpTest, DeMorganAndToOr) {
     // Test: NOT (A AND B) == NOT A OR NOT B
     // With all 9 combinations of A, B in {T, F, NULL}
 
-    std::vector<bool> a_data = {true, true,  true,  false, false,
-                                false, false, false, false};
-    std::vector<bool> a_valid = {true, true,  true,  true, true,
-                                 true, false, false, false};
-    std::vector<bool> b_data = {true, false, false, true, false,
-                                false, true,  false, false};
-    std::vector<bool> b_valid = {true, true, false, true, true,
-                                 false, true, true,  false};
+    std::vector<bool> a_data = {
+        true, true, true, false, false, false, false, false, false};
+    std::vector<bool> a_valid = {
+        true, true, true, true, true, true, false, false, false};
+    std::vector<bool> b_data = {
+        true, false, false, true, false, false, true, false, false};
+    std::vector<bool> b_valid = {
+        true, true, false, true, true, false, true, true, false};
 
     // Method 1: NOT (A AND B)
     auto left1 = CreateColumnVector(a_data, a_valid);
@@ -620,11 +620,12 @@ TEST(ThreeValuedLogicOpTest, LargeScaleAnd) {
         // OR (both are valid)
         bool left_definitely_false = l_valid && !l_data;
         bool right_definitely_false = r_valid && !r_data;
-        bool exp_valid =
-            left_definitely_false || right_definitely_false || (l_valid && r_valid);
+        bool exp_valid = left_definitely_false || right_definitely_false ||
+                         (l_valid && r_valid);
 
         EXPECT_EQ(result_data[i], exp_data) << "Data mismatch at index " << i;
-        EXPECT_EQ(result_valid[i], exp_valid) << "Valid mismatch at index " << i;
+        EXPECT_EQ(result_valid[i], exp_valid)
+            << "Valid mismatch at index " << i;
     }
 }
 
@@ -663,10 +664,11 @@ TEST(ThreeValuedLogicOpTest, LargeScaleOr) {
         // OR (both are valid)
         bool left_definitely_true = l_valid && l_data;
         bool right_definitely_true = r_valid && r_data;
-        bool exp_valid =
-            left_definitely_true || right_definitely_true || (l_valid && r_valid);
+        bool exp_valid = left_definitely_true || right_definitely_true ||
+                         (l_valid && r_valid);
 
         EXPECT_EQ(result_data[i], exp_data) << "Data mismatch at index " << i;
-        EXPECT_EQ(result_valid[i], exp_valid) << "Valid mismatch at index " << i;
+        EXPECT_EQ(result_valid[i], exp_valid)
+            << "Valid mismatch at index " << i;
     }
 }
