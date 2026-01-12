@@ -567,7 +567,11 @@ pub extern "C" fn tantivy_ngram_tokenize(
         literal_strs.push(cstr_to_str!(lit));
     }
 
-    unsafe { (*real).ngram_tokenize(&literal_strs, min_gram, max_gram).into() }
+    unsafe {
+        (*real)
+            .ngram_tokenize(&literal_strs, min_gram, max_gram)
+            .into()
+    }
 }
 
 #[no_mangle]
