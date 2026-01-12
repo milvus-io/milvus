@@ -108,8 +108,9 @@ type DataCoordTopology struct {
 
 // RootCoordTopology shows the whole metrics of root coordinator
 type RootCoordTopology struct {
-	Self        RootCoordInfos `json:"self"`
-	Connections ConnTopology   `json:"connections"`
+	Self             RootCoordInfos `json:"self"`
+	ConnectedProxies []ProxyInfos   `json:"connected_proxies"`
+	Connections      ConnTopology   `json:"connections"`
 }
 
 // ConnectionEdge contains connection's id, type and target type
