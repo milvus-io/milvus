@@ -41,30 +41,6 @@ PhyConjunctFilterExpr::ResolveType(const std::vector<DataType>& inputs) {
     return DataType::BOOL;
 }
 
-static bool
-AllTrue(ColumnVectorPtr& vec) {
-    TargetBitmapView data(vec->GetRawData(), vec->size());
-    return data.all();
-}
-
-static void
-AllSet(ColumnVectorPtr& vec) {
-    TargetBitmapView data(vec->GetRawData(), vec->size());
-    data.set();
-}
-
-static void
-AllReset(ColumnVectorPtr& vec) {
-    TargetBitmapView data(vec->GetRawData(), vec->size());
-    data.reset();
-}
-
-static bool
-AllFalse(ColumnVectorPtr& vec) {
-    TargetBitmapView data(vec->GetRawData(), vec->size());
-    return data.none();
-}
-
 int64_t
 PhyConjunctFilterExpr::UpdateResult(ColumnVectorPtr& input_result,
                                     EvalCtx& ctx,
@@ -88,7 +64,9 @@ PhyConjunctFilterExpr::UpdateResult(ColumnVectorPtr& input_result,
 
 bool
 PhyConjunctFilterExpr::CanSkipFollowingExprs(ColumnVectorPtr& vec) {
-    if ((is_and_ && AllFalse(vec)) || (!is_and_ && AllTrue(vec))) {
+    if ((is_and_ && common::ThreeValuedLogicOp::TrueCount(vec) == 0) ||
+        (!is_and_ &&
+         common::ThreeValuedLogicOp::TrueCount(vec) == vec->size())) {
         return true;
     }
     return false;

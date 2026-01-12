@@ -128,7 +128,15 @@ class ThreeValuedLogicOp {
         // left_data = left_data | right_data
         left_data.inplace_or(right_data, size);
     }
-};
 
+    static size_t
+    TrueCount(ColumnVectorPtr res) {
+        TargetBitmapView data(res->GetRawData(), res->size());
+        TargetBitmapView valid_data(res->GetValidRawData(), res->size());
+        TargetBitmap tmp(data);
+        tmp.inplace_and(valid_data, res->size());
+        return tmp.count();
+    }
+};
 }  // namespace common
 }  // namespace milvus
