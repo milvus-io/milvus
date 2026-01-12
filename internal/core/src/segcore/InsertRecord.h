@@ -75,7 +75,7 @@ class OffsetMap {
     clear() = 0;
 
     virtual size_t
-    size() const = 0;
+    memory_size() const = 0;
 };
 
 template <typename T>
@@ -203,7 +203,7 @@ class OffsetOrderedMap : public OffsetMap {
     }
 
     size_t
-    size() const override {
+    memory_size() const override {
         std::shared_lock<std::shared_mutex> lck(mtx_);
         return map_.get_allocator().total_allocated();
     }
@@ -383,7 +383,7 @@ class OffsetOrderedArray : public OffsetMap {
     }
 
     size_t
-    size() const override {
+    memory_size() const override {
         return sizeof(std::pair<T, int32_t>) * array_.capacity();
     }
 
@@ -592,8 +592,8 @@ class InsertRecordSealed {
         pk2offset_->seal();
         // update estimated memory size to caching layer
         cachinglayer::Manager::GetInstance().ChargeLoadedResource(
-            {static_cast<int64_t>(pk2offset_->size()), 0});
-        estimated_memory_size_ += pk2offset_->size();
+            {static_cast<int64_t>(pk2offset_->memory_size()), 0});
+        estimated_memory_size_ += pk2offset_->memory_size();
     }
 
     void
@@ -604,11 +604,11 @@ class InsertRecordSealed {
         timestamp_index_ = std::move(timestamp_index);
         AssertInfo(timestamps_.num_chunk() == 1,
                    "num chunk not equal to 1 for sealed segment");
-        size_t size =
-            timestamps.size() * sizeof(Timestamp) + timestamp_index_.size();
+        size_t memory_size = timestamps.size() * sizeof(Timestamp) +
+                             timestamp_index_.memory_size();
         cachinglayer::Manager::GetInstance().ChargeLoadedResource(
-            {static_cast<int64_t>(size), 0});
-        estimated_memory_size_ += size;
+            {static_cast<int64_t>(memory_size), 0});
+        estimated_memory_size_ += memory_size;
     }
 
     const ConcurrentVector<Timestamp>&
@@ -1061,7 +1061,7 @@ class InsertRecordGrowing {
     }
 
     int64_t
-    size() const {
+    row_count() const {
         return ack_responder_.GetAck();
     }
 
