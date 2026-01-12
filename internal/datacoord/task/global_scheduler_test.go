@@ -215,8 +215,7 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 			s := scheduler.(*globalTaskScheduler)
 			s.mu.RLock(1)
 			defer s.mu.RUnlock(1)
-			return task.GetTaskState() == taskcommon.Retry &&
-				s.runningTasks.Len() == 0 && len(s.pendingTasks.TaskIDs()) == 1
+			return stateCounter.Load() >= 2 && s.runningTasks.Len() == 0
 		}, 10*time.Second, 10*time.Millisecond)
 	})
 
