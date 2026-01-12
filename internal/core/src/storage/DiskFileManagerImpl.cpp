@@ -390,7 +390,7 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
                                   milvus::PriorityForLoad(priority));
                 // Wait for all futures to ensure all threads complete
                 auto chunk_codecs =
-                    storage::WaitAllFutures(index_chunks_futures);
+                    storage::WaitAllFutures(std::move(index_chunks_futures));
                 for (auto& chunk_codec : chunk_codecs) {
                     file_writer.Write(chunk_codec->PayloadData(),
                                       chunk_codec->PayloadSize());
