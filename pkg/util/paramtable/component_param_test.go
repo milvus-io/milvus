@@ -709,6 +709,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10*time.Minute, params.StreamingCfg.FlushL0MaxLifetime.GetAsDurationByParse())
 		assert.Equal(t, 500000, params.StreamingCfg.FlushL0MaxRowNum.GetAsInt())
 		assert.Equal(t, int64(32*1024*1024), params.StreamingCfg.FlushL0MaxSize.GetAsSize())
+		assert.Equal(t, 0, params.StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.GetAsInt())
 
 		params.Save(params.StreamingCfg.WALBalancerTriggerInterval.Key, "50s")
 		params.Save(params.StreamingCfg.WALBalancerBackoffInitialInterval.Key, "50s")
