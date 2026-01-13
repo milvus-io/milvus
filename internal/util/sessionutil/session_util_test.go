@@ -384,7 +384,11 @@ func (suite *SessionWithVersionSuite) SetupTest() {
 	s1 := NewSessionWithEtcd(ctx, suite.metaRoot, suite.client, WithResueNodeID(false))
 	s1.Version.Major, s1.Version.Minor, s1.Version.Patch = 0, 0, 0
 	s1.Init(suite.serverName, "s1", false, false)
+	assert.Panics(suite.T(), func() {
+		s1.GetRegisteredRevision()
+	})
 	s1.Register()
+	assert.Greater(suite.T(), s1.GetRegisteredRevision(), int64(0))
 
 	suite.sessions = append(suite.sessions, s1)
 
@@ -510,9 +514,13 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	// register session 1, will be active
 	ctx1 := context.Background()
 	s1 := NewSessionWithEtcd(ctx1, metaRoot, etcdCli, WithResueNodeID(false))
+
 	s1.Init("inittest", "testAddr", true, true)
 	s1.SetEnableActiveStandBy(true)
 	s1.Register()
+	assert.Panics(t, func() {
+		s1.GetRegisteredRevision()
+	})
 	wg.Add(1)
 	s1.ProcessActiveStandBy(func() error {
 		log.Debug("Session 1 become active")
@@ -520,6 +528,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 		return nil
 	})
 	wg.Wait()
+	assert.Greater(t, s1.GetRegisteredRevision(), int64(0))
 	assert.False(t, s1.isStandby.Load().(bool))
 
 	// register session 2, will be standby
