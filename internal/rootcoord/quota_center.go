@@ -176,6 +176,8 @@ type QuotaCenter struct {
 	// Key format: "collectionID-rateType"
 	prevRates map[string]float64
 
+	keyManager *KeyManager
+
 	stopOnce sync.Once
 	stopChan chan struct{}
 	wg       sync.WaitGroup
@@ -301,6 +303,10 @@ func (q *QuotaCenter) Start() {
 		defer q.wg.Done()
 		q.run()
 	}()
+}
+
+func (q *QuotaCenter) SetKeyManager(km *KeyManager) {
+	q.keyManager = km
 }
 
 func (q *QuotaCenter) watchQuotaAndLimit() {
@@ -629,7 +635,10 @@ func (q *QuotaCenter) calculateDBDDLRates() {
 						OpType:           ddl,
 						IncludeRateTypes: rateTypes,
 					})
-					dbLimiters.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToDDL, commonpb.ErrorCode_ForceDeny)
+					dbLimiters.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToDDL, &rlinternal.QuotaStateInfo{
+						ErrorCode: commonpb.ErrorCode_ForceDeny,
+						Reason:    "force deny DDL in database properties",
+					})
 				}
 			})
 		}
@@ -637,7 +646,7 @@ func (q *QuotaCenter) calculateDBDDLRates() {
 }
 
 // forceDenyWriting sets dml rates to 0 to reject all dml requests.
-func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster bool, dbIDs, collectionIDs []int64, col2partitionIDs map[int64][]int64) error {
+func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster bool, dbIDs, collectionIDs []int64, col2partitionIDs map[int64][]int64, denyReason string) error {
 	log := log.Ctx(context.TODO()).WithRateGroup("quotaCenter.forceDenyWriting", 1.0, 60.0)
 	var excludeRange typeutil.Set[internalpb.RateType]
 	if errorCode == commonpb.ErrorCode_DiskQuotaExhausted {
@@ -650,7 +659,10 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster boo
 			OpType:           dml,
 			ExcludeRateTypes: excludeRange,
 		})
-		clusterLimiters.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, errorCode)
+		clusterLimiters.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, &rlinternal.QuotaStateInfo{
+			ErrorCode: errorCode,
+			Reason:    denyReason,
+		})
 	}
 
 	for _, dbID := range dbIDs {
@@ -664,7 +676,10 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster boo
 			OpType:           dml,
 			ExcludeRateTypes: excludeRange,
 		})
-		dbLimiters.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, errorCode)
+		dbLimiters.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, &rlinternal.QuotaStateInfo{
+			ErrorCode: errorCode,
+			Reason:    denyReason,
+		})
 	}
 
 	for _, collectionID := range collectionIDs {
@@ -685,7 +700,10 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster boo
 			OpType:           dml,
 			ExcludeRateTypes: excludeRange,
 		})
-		collectionLimiter.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, errorCode)
+		collectionLimiter.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, &rlinternal.QuotaStateInfo{
+			ErrorCode: errorCode,
+			Reason:    denyReason,
+		})
 	}
 
 	for collectionID, partitionIDs := range col2partitionIDs {
@@ -708,7 +726,10 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster boo
 				OpType:           dml,
 				ExcludeRateTypes: excludeRange,
 			})
-			partitionLimiter.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, errorCode)
+			partitionLimiter.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, &rlinternal.QuotaStateInfo{
+				ErrorCode: errorCode,
+				Reason:    denyReason,
+			})
 		}
 	}
 
@@ -718,14 +739,15 @@ func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode, cluster boo
 			zap.Int64s("dbIDs", dbIDs),
 			zap.Int64s("collectionIDs", collectionIDs),
 			zap.Any("partitionIDs", col2partitionIDs),
-			zap.String("reason", errorCode.String()))
+			zap.String("errorCode", errorCode.String()),
+			zap.String("denyReason", denyReason))
 	}
 
 	return nil
 }
 
 // forceDenyReading sets dql rates to 0 to reject all dql requests.
-func (q *QuotaCenter) forceDenyReading(errorCode commonpb.ErrorCode, cluster bool, dbIDs []int64, mlog *log.MLogger) {
+func (q *QuotaCenter) forceDenyReading(errorCode commonpb.ErrorCode, cluster bool, dbIDs []int64, denyReason string, mlog *log.MLogger) {
 	if cluster {
 		var collectionIDs []int64
 		for dbID, collectionIDToPartIDs := range q.readableCollections {
@@ -735,14 +757,18 @@ func (q *QuotaCenter) forceDenyReading(errorCode commonpb.ErrorCode, cluster boo
 					RateScope: internalpb.RateScope_Collection,
 					OpType:    dql,
 				})
-				collectionLimiter.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToRead, errorCode)
+				collectionLimiter.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToRead, &rlinternal.QuotaStateInfo{
+					ErrorCode: errorCode,
+					Reason:    denyReason,
+				})
 				collectionIDs = append(collectionIDs, collectionID)
 			}
 		}
 
 		mlog.RatedWarn(10, "QuotaCenter force to deny reading",
 			zap.Int64s("collectionIDs", collectionIDs),
-			zap.String("reason", errorCode.String()))
+			zap.String("errorCode", errorCode.String()),
+			zap.String("denyReason", denyReason))
 	}
 
 	if len(dbIDs) > 0 {
@@ -756,10 +782,14 @@ func (q *QuotaCenter) forceDenyReading(errorCode commonpb.ErrorCode, cluster boo
 				RateScope: internalpb.RateScope_Database,
 				OpType:    dql,
 			})
-			dbLimiters.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToRead, errorCode)
+			dbLimiters.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToRead, &rlinternal.QuotaStateInfo{
+				ErrorCode: errorCode,
+				Reason:    denyReason,
+			})
 			mlog.RatedWarn(10, "QuotaCenter force to deny reading",
 				zap.Int64s("dbIDs", dbIDs),
-				zap.String("reason", errorCode.String()))
+				zap.String("errorCode", errorCode.String()),
+				zap.String("denyReason", denyReason))
 		}
 	}
 }
@@ -810,13 +840,13 @@ func (q *QuotaCenter) getDenyReadingDBs() map[int64]struct{} {
 func (q *QuotaCenter) calculateReadRates() error {
 	log := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
 	if Params.QuotaConfig.ForceDenyReading.GetAsBool() {
-		q.forceDenyReading(commonpb.ErrorCode_ForceDeny, true, []int64{}, log)
+		q.forceDenyReading(commonpb.ErrorCode_ForceDeny, true, []int64{}, "config force deny reading", log)
 		return nil
 	}
 
 	deniedDatabaseIDs := q.getDenyReadingDBs()
 	if len(deniedDatabaseIDs) != 0 {
-		q.forceDenyReading(commonpb.ErrorCode_ForceDeny, false, maps.Keys(deniedDatabaseIDs), log)
+		q.forceDenyReading(commonpb.ErrorCode_ForceDeny, false, maps.Keys(deniedDatabaseIDs), "force deny reading in database properties", log)
 	}
 	return nil
 }
@@ -846,13 +876,13 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	log := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
 	// check force deny writing of cluster level
 	if Params.QuotaConfig.ForceDenyWriting.GetAsBool() {
-		return q.forceDenyWriting(commonpb.ErrorCode_ForceDeny, true, nil, nil, nil)
+		return q.forceDenyWriting(commonpb.ErrorCode_ForceDeny, true, nil, nil, nil, "config force deny writing")
 	}
 
 	// check force deny writing of db level
 	dbIDs := q.getDenyWritingDBs()
 	if len(dbIDs) != 0 {
-		if err := q.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, maps.Keys(dbIDs), nil, nil); err != nil {
+		if err := q.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, maps.Keys(dbIDs), nil, nil, "force deny writing in database properties"); err != nil {
 			return err
 		}
 	}
@@ -955,13 +985,13 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	}
 
 	if len(ttCollections) > 0 {
-		if err = q.forceDenyWriting(commonpb.ErrorCode_TimeTickLongDelay, false, nil, ttCollections, nil); err != nil {
+		if err = q.forceDenyWriting(commonpb.ErrorCode_TimeTickLongDelay, false, nil, ttCollections, nil, "force deny writing for time tick delay"); err != nil {
 			log.Warn("fail to force deny writing for time tick delay", zap.Error(err))
 			return err
 		}
 	}
 	if len(memoryCollections) > 0 {
-		if err = q.forceDenyWriting(commonpb.ErrorCode_MemoryQuotaExhausted, false, nil, memoryCollections, nil); err != nil {
+		if err = q.forceDenyWriting(commonpb.ErrorCode_MemoryQuotaExhausted, false, nil, memoryCollections, nil, "force deny writing for memory quota exceeded"); err != nil {
 			log.Warn("fail to force deny writing for memory quota", zap.Error(err))
 			return err
 		}
@@ -1278,6 +1308,13 @@ func (q *QuotaCenter) calculateRates() error {
 		return err
 	}
 
+	// Check KMS key states and deny access for revoked databases
+	err = q.calculateEzStates()
+	if err != nil {
+		log.Warn("QuotaCenter calculateEzStates failed", zap.Error(err))
+		return err
+	}
+
 	err = q.calculateWriteRates()
 	if err != nil {
 		log.Warn("QuotaCenter calculateWriteRates failed", zap.Error(err))
@@ -1292,6 +1329,27 @@ func (q *QuotaCenter) calculateRates() error {
 	q.calculateDBDDLRates()
 
 	// log.Debug("QuotaCenter calculates rate done", zap.Any("rates", q.currentRates))
+	return nil
+}
+
+func (q *QuotaCenter) calculateEzStates() error {
+	mlog := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
+	if q.keyManager != nil {
+		revokedDBs, err := q.keyManager.GetRevokedDatabases()
+		if err != nil {
+			log.Warn("QuotaCenter calculateEzStates failed", zap.Error(err))
+			return err
+		}
+		if len(revokedDBs) > 0 {
+			// Deny writing for revoked databases
+			if err := q.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, revokedDBs, nil, nil, "kms key revoked or disabled"); err != nil {
+				return err
+			}
+
+			// Deny reading for revoked databases
+			q.forceDenyReading(commonpb.ErrorCode_ForceDeny, false, revokedDBs, "kms key revoked or disabled", mlog)
+		}
+	}
 	return nil
 }
 
@@ -1409,7 +1467,7 @@ func (q *QuotaCenter) checkDiskQuota(denyWritingDBs map[int64]struct{}) error {
 	total := q.dataCoordMetrics.TotalBinlogSize
 	if float64(total) >= totalDiskQuota {
 		log.RatedWarn(10, "cluster disk quota exceeded", zap.Int64("disk usage", total), zap.Float64("disk quota", totalDiskQuota))
-		err := q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, true, nil, nil, nil)
+		err := q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, true, nil, nil, nil, "cluster disk quota exceeded")
 		if err != nil {
 			log.Warn("fail to force deny writing", zap.Error(err))
 		}
@@ -1425,7 +1483,7 @@ func (q *QuotaCenter) checkDiskQuota(denyWritingDBs map[int64]struct{}) error {
 	}
 	if totalLoaded >= totalLoadedDiskQuota {
 		log.RatedWarn(10, "cluster loaded disk quota exceeded", zap.Float64("total loaded", totalLoaded), zap.Float64("total loaded disk quota", totalLoadedDiskQuota))
-		err := q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, true, nil, nil, nil)
+		err := q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, true, nil, nil, nil, "cluster loaded disk quota exceeded")
 		if err != nil {
 			log.Warn("fail to force deny writing", zap.Error(err))
 		}
@@ -1476,7 +1534,7 @@ func (q *QuotaCenter) checkDiskQuota(denyWritingDBs map[int64]struct{}) error {
 	}
 
 	dbIDs := q.checkDBDiskQuota(dbSizeInfo)
-	err := q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, false, dbIDs, collections, col2partitions)
+	err := q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, false, dbIDs, collections, col2partitions, "disk quota exceeded")
 	if err != nil {
 		log.Warn("fail to force deny writing", zap.Error(err))
 		return err
@@ -1544,17 +1602,20 @@ func (q *QuotaCenter) toRequestLimiter(limiter *rlinternal.RateLimiterNode) *pro
 	size := limiter.GetQuotaStates().Len()
 	states := make([]milvuspb.QuotaState, 0, size)
 	codes := make([]commonpb.ErrorCode, 0, size)
+	reasons := make([]string, 0, size)
 
-	limiter.GetQuotaStates().Range(func(state milvuspb.QuotaState, code commonpb.ErrorCode) bool {
+	limiter.GetQuotaStates().Range(func(state milvuspb.QuotaState, stateInfo *rlinternal.QuotaStateInfo) bool {
 		states = append(states, state)
-		codes = append(codes, code)
+		codes = append(codes, stateInfo.ErrorCode)
+		reasons = append(reasons, stateInfo.Reason)
 		return true
 	})
 
 	return &proxypb.Limiter{
-		Rates:  rates,
-		States: states,
-		Codes:  codes,
+		Rates:   rates,
+		States:  states,
+		Codes:   codes,
+		Reasons: reasons,
 	}
 }
 
@@ -1635,7 +1696,7 @@ func (q *QuotaCenter) recordMetrics() {
 	})
 
 	rlinternal.TraverseRateLimiterTree(q.rateLimiter.GetRootLimiters(), nil,
-		func(node *rlinternal.RateLimiterNode, state milvuspb.QuotaState, errCode commonpb.ErrorCode) bool {
+		func(node *rlinternal.RateLimiterNode, state milvuspb.QuotaState, errCode commonpb.ErrorCode, reason string) bool {
 			if errCode == commonpb.ErrorCode_MemoryQuotaExhausted ||
 				errCode == commonpb.ErrorCode_DiskQuotaExhausted ||
 				errCode == commonpb.ErrorCode_TimeTickLongDelay {
@@ -1675,6 +1736,11 @@ func (q *QuotaCenter) diskAllowance(collection UniqueID) float64 {
 	}
 	allowance = math.Min(allowance, totalDiskQuota-float64(q.totalBinlogSize))
 	return allowance
+}
+
+// GetDatabaseLimiters returns the rate limiter node for a specific database
+func (q *QuotaCenter) GetDatabaseLimiters(dbID int64) *rlinternal.RateLimiterNode {
+	return q.rateLimiter.GetDatabaseLimiters(dbID)
 }
 
 func (q *QuotaCenter) getQuotaMetrics() *internalpb.GetQuotaMetricsResponse {

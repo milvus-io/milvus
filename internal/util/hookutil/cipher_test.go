@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -80,7 +81,7 @@ func (s *CipherSuite) TestGetTestCipher() {
 
 func (s *CipherSuite) TestGetEzByCollProperties() {
 	collProperties := []*commonpb.KeyValuePair{
-		{Key: EncryptionEzIDKey, Value: "123"},
+		{Key: common.EncryptionEzIDKey, Value: "123"},
 	}
 	result := GetEzByCollProperties(collProperties, 456)
 	s.NotNil(result)
@@ -95,19 +96,19 @@ func (s *CipherSuite) TestTidyDBCipherProperties() {
 	InitTestCipher()
 	// Test with encryption enabled and root key already present
 	dbPropertiesWithRootKey := []*commonpb.KeyValuePair{
-		{Key: EncryptionEnabledKey, Value: "true"},
-		{Key: EncryptionRootKeyKey, Value: "existing-root-key"},
+		{Key: common.EncryptionEnabledKey, Value: "true"},
+		{Key: common.EncryptionRootKeyKey, Value: "existing-root-key"},
 	}
 	result, err := TidyDBCipherProperties(1, dbPropertiesWithRootKey)
 	s.NoError(err)
-	s.Equal(3, len(result))
+	s.Equal(2, len(result))
 	for _, kv := range result {
 		switch kv.Key {
-		case EncryptionEnabledKey:
-			s.Equal(kv.Value, "true")
-		case EncryptionEzIDKey:
+		case common.EncryptionEnabledKey:
+			s.Fail("unexpected key")
+		case common.EncryptionEzIDKey:
 			s.Equal(kv.Value, "1")
-		case EncryptionRootKeyKey:
+		case common.EncryptionRootKeyKey:
 			s.Equal(kv.Value, "existing-root-key")
 		default:
 			s.Fail("unexpected key")
@@ -118,7 +119,7 @@ func (s *CipherSuite) TestTidyDBCipherProperties() {
 	// Default rootkey is empty
 	InitTestCipher()
 	dbPropertiesWithoutRootKey := []*commonpb.KeyValuePair{
-		{Key: EncryptionEnabledKey, Value: "true"},
+		{Key: common.EncryptionEnabledKey, Value: "true"},
 	}
 	result, err = TidyDBCipherProperties(1, dbPropertiesWithoutRootKey)
 	s.Error(err)
@@ -134,23 +135,56 @@ func (s *CipherSuite) TestTidyDBCipherProperties() {
 
 func (s *CipherSuite) TestIsDBEncryptionEnabled() {
 	dbProperties := []*commonpb.KeyValuePair{
-		{Key: EncryptionEnabledKey, Value: "true"},
+		{Key: common.EncryptionEnabledKey, Value: "true"},
 	}
-	s.True(IsDBEncrypted(dbProperties))
+	s.False(IsDBEncrypted(dbProperties))
 
 	dbProperties = []*commonpb.KeyValuePair{}
 	s.False(IsDBEncrypted(dbProperties))
+
+	dbProperties = []*commonpb.KeyValuePair{
+		{Key: common.EncryptionEzIDKey, Value: "1"},
+		{Key: common.EncryptionRootKeyKey, Value: "abc"},
+	}
+	s.True(IsDBEncrypted(dbProperties))
 }
 
 func (s *CipherSuite) TestTidyDBCipherPropertiesError() {
 	// Reset cipher to nil to test error case
 	storeCipher(nil)
 	dbProperties := []*commonpb.KeyValuePair{
-		{Key: EncryptionEnabledKey, Value: "true"},
+		{Key: common.EncryptionEnabledKey, Value: "true"},
 	}
 	_, err := TidyDBCipherProperties(1, dbProperties)
 	s.Error(err)
 	s.Equal(ErrCipherPluginMissing, err)
+}
+
+func (s *CipherSuite) TestTidyDBCipherPropertiesInvalidValue() {
+	InitTestCipher()
+
+	// Test invalid cipher.enabled values
+	invalidValues := []string{"1", "0", "yes", "no", "enabled", "disabled", "on", "off", ""}
+	for _, invalidValue := range invalidValues {
+		props := []*commonpb.KeyValuePair{
+			{Key: common.EncryptionEnabledKey, Value: invalidValue},
+		}
+		_, err := TidyDBCipherProperties(1, props)
+		s.Error(err, "expected error for invalid value: %q", invalidValue)
+		s.Contains(err.Error(), "invalid value")
+		s.Contains(err.Error(), invalidValue)
+	}
+
+	// Test valid values should work (case-insensitive)
+	validValues := []string{"true", "false", "True", "False", "TRUE", "FALSE", "TrUe", "FaLsE"}
+	for _, validValue := range validValues {
+		props := []*commonpb.KeyValuePair{
+			{Key: common.EncryptionEnabledKey, Value: validValue},
+			{Key: common.EncryptionRootKeyKey, Value: "some-key"},
+		}
+		_, err := TidyDBCipherProperties(1, props)
+		s.NoError(err, "expected no error for valid value: %q", validValue)
+	}
 }
 
 func (s *CipherSuite) TestTestCipherInit() {
@@ -175,12 +209,12 @@ func (s *CipherSuite) TestContainsCipherProperty() {
 		keys     []string
 		expected bool
 	}{
-		{[]*commonpb.KeyValuePair{{Key: EncryptionEnabledKey, Value: "true"}}, nil, true},
-		{[]*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "123"}}, nil, true},
-		{[]*commonpb.KeyValuePair{{Key: EncryptionRootKeyKey, Value: "abc"}}, nil, true},
-		{nil, []string{EncryptionEnabledKey}, true},
-		{nil, []string{EncryptionEzIDKey}, true},
-		{nil, []string{EncryptionRootKeyKey}, true},
+		{[]*commonpb.KeyValuePair{{Key: common.EncryptionEnabledKey, Value: "true"}}, nil, true},
+		{[]*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "123"}}, nil, true},
+		{[]*commonpb.KeyValuePair{{Key: common.EncryptionRootKeyKey, Value: "abc"}}, nil, true},
+		{nil, []string{common.EncryptionEnabledKey}, true},
+		{nil, []string{common.EncryptionEzIDKey}, true},
+		{nil, []string{common.EncryptionRootKeyKey}, true},
 		{[]*commonpb.KeyValuePair{{Key: "key1", Value: "value1"}}, []string{"others"}, false},
 	}
 
@@ -234,11 +268,11 @@ func (s *CipherSuite) TestAsMessageConfig() {
 
 func (s *CipherSuite) TestGetStoragePluginContext() {
 	storeCipher(nil)
-	result := GetStoragePluginContext([]*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "1"}}, 2)
+	result := GetStoragePluginContext([]*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}}, 2)
 	s.Nil(result)
 
 	InitTestCipher()
-	properties := []*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "1"}}
+	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}}
 	result = GetStoragePluginContext(properties, 2)
 	s.NotNil(result)
 	s.Equal(1, len(result))
@@ -253,24 +287,13 @@ func (s *CipherSuite) TestGetStoragePluginContext() {
 	s.Nil(result)
 }
 
-func (s *CipherSuite) TestGetDBCipherProperties() {
-	props := GetDBCipherProperties(123, "test-kms-key")
-	s.Equal(3, len(props))
-	s.Equal(EncryptionEnabledKey, props[0].Key)
-	s.Equal("true", props[0].Value)
-	s.Equal(EncryptionEzIDKey, props[1].Key)
-	s.Equal("123", props[1].Value)
-	s.Equal(EncryptionRootKeyKey, props[2].Key)
-	s.Equal("test-kms-key", props[2].Value)
-}
-
 func (s *CipherSuite) TestRemoveEZByDBProperties() {
 	storeCipher(nil)
-	err := RemoveEZByDBProperties([]*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "1"}})
+	err := RemoveEZByDBProperties([]*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}})
 	s.NoError(err)
 
 	InitTestCipher()
-	err = RemoveEZByDBProperties([]*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "1"}})
+	err = RemoveEZByDBProperties([]*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}})
 	s.NoError(err)
 
 	err = RemoveEZByDBProperties([]*commonpb.KeyValuePair{{Key: "other", Value: "value"}})
@@ -282,55 +305,172 @@ func (s *CipherSuite) TestRemoveEZByDBProperties() {
 
 func (s *CipherSuite) TestCreateEZByDBProperties() {
 	storeCipher(nil)
-	err := CreateEZByDBProperties([]*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "1"}})
+	err := CreateEZByDBProperties([]*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}})
 	s.NoError(err)
 
 	InitTestCipher()
 	props := []*commonpb.KeyValuePair{
-		{Key: EncryptionEzIDKey, Value: "123"},
-		{Key: EncryptionRootKeyKey, Value: "test-root-key"},
+		{Key: common.EncryptionEzIDKey, Value: "123"},
+		{Key: common.EncryptionRootKeyKey, Value: "test-root-key"},
 	}
 	err = CreateEZByDBProperties(props)
 	s.NoError(err)
 
-	err = CreateEZByDBProperties([]*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "1"}})
+	err = CreateEZByDBProperties([]*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}})
 	s.NoError(err)
 
 	err = CreateEZByDBProperties([]*commonpb.KeyValuePair{})
 	s.NoError(err)
 }
 
-func (s *CipherSuite) TestGetEzPropByDBProperties() {
-	props := []*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "123"}}
-	result := getCollEzPropsByDBProps(props)
-	s.NotNil(result)
-	s.Equal(EncryptionEzIDKey, result.Key)
-	s.Equal("123", result.Value)
-
-	result = getCollEzPropsByDBProps([]*commonpb.KeyValuePair{{Key: "other", Value: "value"}})
-	s.Nil(result)
-
-	result = getCollEzPropsByDBProps([]*commonpb.KeyValuePair{})
-	s.Nil(result)
-}
-
 func (s *CipherSuite) TestGetEzByCollPropertiesInvalidValue() {
-	props := []*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "invalid"}}
+	props := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "invalid"}}
 	result := GetEzByCollProperties(props, 456)
 	s.NotNil(result)
 	s.Equal(int64(0), result.EzID)
 	s.Equal(int64(456), result.CollectionID)
 }
 
-func (s *CipherSuite) TestIsDBEncryptionEnabledCaseInsensitive() {
-	props := []*commonpb.KeyValuePair{{Key: EncryptionEnabledKey, Value: "True"}}
-	s.True(IsDBEncrypted(props))
+func (s *CipherSuite) TestTidyDBCipherPropertiesWithDefaultKey() {
+	InitTestCipher()
 
-	props = []*commonpb.KeyValuePair{{Key: EncryptionEnabledKey, Value: "TRUE"}}
-	s.True(IsDBEncrypted(props))
+	// Save original config and restore after test
+	originalDefaultKey := paramtable.GetCipherParams().DefaultRootKey.GetValue()
+	defer func() {
+		paramtable.GetCipherParams().Save("cipherPlugin.kms.defaultKey", originalDefaultKey)
+	}()
 
-	props = []*commonpb.KeyValuePair{{Key: EncryptionEnabledKey, Value: "false"}}
-	s.False(IsDBEncrypted(props))
+	// Test 1: defaultKey is empty, no cipher.enabled in request -> not encrypted
+	paramtable.GetCipherParams().Save("cipherPlugin.kms.defaultKey", "")
+	props := []*commonpb.KeyValuePair{
+		{Key: "other.key", Value: "other.value"},
+	}
+	result, err := TidyDBCipherProperties(100, props)
+	s.NoError(err)
+	s.Equal(1, len(result))
+	s.Equal("other.key", result[0].Key)
+	// Verify no cipher properties
+	for _, prop := range result {
+		s.NotEqual(common.EncryptionEnabledKey, prop.Key)
+		s.NotEqual(common.EncryptionEzIDKey, prop.Key)
+		s.NotEqual(common.EncryptionRootKeyKey, prop.Key)
+	}
+
+	// Test 2: defaultKey is empty, cipher.enabled=false -> not encrypted
+	props = []*commonpb.KeyValuePair{
+		{Key: common.EncryptionEnabledKey, Value: "false"},
+		{Key: "other.key", Value: "other.value"},
+	}
+	result, err = TidyDBCipherProperties(101, props)
+	s.NoError(err)
+	// Verify no cipher properties
+	s.False(IsDBEncrypted(result))
+	for _, prop := range result {
+		s.NotEqual(common.EncryptionEnabledKey, prop.Key)
+		s.NotEqual(common.EncryptionEzIDKey, prop.Key)
+		s.NotEqual(common.EncryptionRootKeyKey, prop.Key)
+	}
+
+	// Test 3: defaultKey is empty, cipher.enabled=true, user provides key -> encrypted with user key
+	props = []*commonpb.KeyValuePair{
+		{Key: common.EncryptionEnabledKey, Value: "true"},
+		{Key: common.EncryptionRootKeyKey, Value: "user-key"},
+		{Key: "other.key", Value: "other.value"},
+	}
+	result, err = TidyDBCipherProperties(102, props)
+	s.NoError(err)
+	// only has ezID and key
+	s.False(hasKeyValue(result, common.EncryptionEnabledKey, "true"))
+	s.True(hasKeyValue(result, common.EncryptionEzIDKey, "102"))
+	s.True(hasKeyValue(result, common.EncryptionRootKeyKey, "user-key"))
+	s.True(hasKeyValue(result, "other.key", "other.value"))
+
+	// Test 4: defaultKey is empty, cipher.enabled=true, no user key -> error
+	props = []*commonpb.KeyValuePair{
+		{Key: common.EncryptionEnabledKey, Value: "true"},
+	}
+	_, err = TidyDBCipherProperties(103, props)
+	s.Error(err)
+	s.Contains(err.Error(), "no key provided")
+
+	// Test 5: defaultKey is set, no cipher.enabled in request -> encrypted with defaultKey
+	paramtable.GetCipherParams().Save("cipherPlugin.kms.defaultKey", "default-kms-key")
+	props = []*commonpb.KeyValuePair{
+		{Key: "other.key", Value: "other.value"},
+	}
+	result, err = TidyDBCipherProperties(104, props)
+	s.NoError(err)
+	s.True(IsDBEncrypted(result))
+	s.False(hasKeyValue(result, common.EncryptionEnabledKey, "true"))
+	s.True(hasKeyValue(result, common.EncryptionEzIDKey, "104"))
+	s.True(hasKeyValue(result, common.EncryptionRootKeyKey, "default-kms-key"))
+	s.True(hasKeyValue(result, "other.key", "other.value"))
+
+	// Test 6: defaultKey is set, cipher.enabled=false -> not encrypted
+	props = []*commonpb.KeyValuePair{
+		{Key: common.EncryptionEnabledKey, Value: "false"},
+		{Key: "other.key", Value: "other.value"},
+	}
+	result, err = TidyDBCipherProperties(105, props)
+	s.NoError(err)
+	// Verify no cipher properties
+	s.False(IsDBEncrypted(result))
+	for _, prop := range result {
+		s.NotEqual(common.EncryptionEzIDKey, prop.Key)
+		s.NotEqual(common.EncryptionRootKeyKey, prop.Key)
+	}
+	s.True(hasKeyValue(result, "other.key", "other.value"))
+
+	// Test 7: defaultKey is set, cipher.enabled=true with user key -> encrypted with user key
+	props = []*commonpb.KeyValuePair{
+		{Key: common.EncryptionEnabledKey, Value: "true"},
+		{Key: common.EncryptionRootKeyKey, Value: "user-override-key"},
+		{Key: "other.key", Value: "other.value"},
+	}
+	result, err = TidyDBCipherProperties(106, props)
+	s.NoError(err)
+	s.True(IsDBEncrypted(result))
+	s.False(hasKeyValue(result, common.EncryptionEnabledKey, "true"))
+	s.True(hasKeyValue(result, common.EncryptionEzIDKey, "106"))
+	s.True(hasKeyValue(result, common.EncryptionRootKeyKey, "user-override-key"))
+	s.True(hasKeyValue(result, "other.key", "other.value"))
+
+	// Test 8: defaultKey is set, cipher.enabled=true without user key -> encrypted with defaultKey
+	props = []*commonpb.KeyValuePair{
+		{Key: common.EncryptionEnabledKey, Value: "true"},
+		{Key: "other.key", Value: "other.value"},
+	}
+	result, err = TidyDBCipherProperties(107, props)
+	s.NoError(err)
+	s.True(IsDBEncrypted(result))
+	s.False(hasKeyValue(result, common.EncryptionEnabledKey, "true"))
+	s.True(hasKeyValue(result, common.EncryptionEzIDKey, "107"))
+	s.True(hasKeyValue(result, common.EncryptionRootKeyKey, "default-kms-key"))
+	s.True(hasKeyValue(result, "other.key", "other.value"))
+
+	// Test 9: defaultKey is set, user provides key, no cipher.enabled -> encrypted with user key
+	// This tests that user key overrides defaultKey even when cipher.enabled is not specified
+	props = []*commonpb.KeyValuePair{
+		{Key: common.EncryptionRootKeyKey, Value: "user-custom-key"},
+		{Key: "other.key", Value: "other.value"},
+	}
+	result, err = TidyDBCipherProperties(108, props)
+	s.NoError(err)
+	s.True(IsDBEncrypted(result))
+	s.False(hasKeyValue(result, common.EncryptionEnabledKey, "true"))
+	s.True(hasKeyValue(result, common.EncryptionEzIDKey, "108"))
+	s.True(hasKeyValue(result, common.EncryptionRootKeyKey, "user-custom-key"))
+	s.True(hasKeyValue(result, "other.key", "other.value"))
+}
+
+// Helper function to check if a key-value pair exists in the result
+func hasKeyValue(props []*commonpb.KeyValuePair, key, value string) bool {
+	for _, prop := range props {
+		if prop.Key == key && prop.Value == value {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *CipherSuite) TestRegisterCallback() {
@@ -343,40 +483,6 @@ func (s *CipherSuite) TestRegisterCallback() {
 	ctx := context.Background()
 	err := reloadCipherConfig(ctx, "test.key", "old", "new")
 	s.NoError(err)
-}
-
-func (s *CipherSuite) TestTidyDBCipherPropertiesWithDefaultKey() {
-	initCipherOnce = sync.Once{}
-	storeCipher(nil)
-	InitTestCipher()
-
-	oldValue := paramtable.GetCipherParams().DefaultRootKey.GetValue()
-	defer paramtable.GetCipherParams().DefaultRootKey.SwapTempValue(oldValue)
-
-	paramtable.GetCipherParams().DefaultRootKey.SwapTempValue("default-test-key")
-
-	dbProperties := []*commonpb.KeyValuePair{
-		{Key: EncryptionEnabledKey, Value: "true"},
-	}
-	result, err := TidyDBCipherProperties(1, dbProperties)
-	s.NoError(err)
-	s.NotNil(result)
-	s.Equal(3, len(result))
-
-	foundEzID := false
-	foundRootKey := false
-	for _, kv := range result {
-		if kv.Key == EncryptionEzIDKey {
-			s.Equal("1", kv.Value)
-			foundEzID = true
-		}
-		if kv.Key == EncryptionRootKeyKey {
-			s.Equal("default-test-key", kv.Value)
-			foundRootKey = true
-		}
-	}
-	s.True(foundEzID)
-	s.True(foundRootKey)
 }
 
 func (s *CipherSuite) TestGetEzByCollPropertiesNotFound() {
@@ -402,22 +508,23 @@ func (s *CipherSuite) TestBackupEZ() {
 func (s *CipherSuite) TestBackupEZKFromDBProperties() {
 	storeCipher(nil)
 	props := []*commonpb.KeyValuePair{
-		{Key: EncryptionEnabledKey, Value: "true"},
-		{Key: EncryptionEzIDKey, Value: "123"},
+		{Key: common.EncryptionEzIDKey, Value: "123"},
+		{Key: common.EncryptionRootKeyKey, Value: "abc-key"},
 	}
 	_, err := BackupEZKFromDBProperties(props)
 	s.Error(err)
 	s.Equal(ErrCipherPluginMissing, err)
 
 	props = []*commonpb.KeyValuePair{
-		{Key: EncryptionEnabledKey, Value: "false"},
+		{Key: common.EncryptionRootKeyKey, Value: "abc-key"},
 	}
 	_, err = BackupEZKFromDBProperties(props)
 	s.Error(err)
 	s.Contains(err.Error(), "not an encryption zone")
 
 	props = []*commonpb.KeyValuePair{
-		{Key: EncryptionEnabledKey, Value: "true"},
+		{Key: common.EncryptionRootKeyKey, Value: "abc-key"},
+		{Key: common.EncryptionEzIDKey, Value: "fack"},
 	}
 	_, err = BackupEZKFromDBProperties(props)
 	s.Error(err)
@@ -469,7 +576,7 @@ func (s *CipherSuite) TestIsEncryptionEnabled() {
 
 func (s *CipherSuite) TestParseEzIDFromProperties() {
 	props := []*commonpb.KeyValuePair{
-		{Key: EncryptionEzIDKey, Value: "123"},
+		{Key: common.EncryptionEzIDKey, Value: "123"},
 	}
 	ezID, found := ParseEzIDFromProperties(props)
 	s.True(found)
@@ -483,7 +590,7 @@ func (s *CipherSuite) TestParseEzIDFromProperties() {
 	s.Equal(int64(0), ezID)
 
 	props = []*commonpb.KeyValuePair{
-		{Key: EncryptionEzIDKey, Value: "invalid"},
+		{Key: common.EncryptionEzIDKey, Value: "invalid"},
 	}
 	ezID, found = ParseEzIDFromProperties(props)
 	s.False(found)
