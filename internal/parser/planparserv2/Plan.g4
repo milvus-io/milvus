@@ -20,11 +20,8 @@ expr:
 	| PHRASEMATCH'('Identifier',' StringLiteral (',' expr)? ')'       			                            # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
 	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
-	| MATCH_ALL'(' Identifier ',' expr ')'                                                                  # MatchAll
-	| MATCH_ANY'(' Identifier ',' expr ')'                                                                  # MatchAny
-	| MATCH_LEAST'(' Identifier ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'                           # MatchLeast
-	| MATCH_MOST'(' Identifier ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'                            # MatchMost
-	| MATCH_EXACT'(' Identifier ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'                           # MatchExact
+	| op=(MATCH_ALL | MATCH_ANY) '(' Identifier ',' expr ')'                                                 # MatchSimple
+	| op=(MATCH_LEAST | MATCH_MOST | MATCH_EXACT) '(' Identifier ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'  # MatchThreshold
 	| expr POW expr											                                                # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                                                # Unary
 //	| '(' typeName ')' expr									                                                # Cast
@@ -35,13 +32,7 @@ expr:
 	| (JSONContains | ArrayContains)'('expr',' expr')'                                                      # JSONContains
 	| (JSONContainsAll | ArrayContainsAll)'('expr',' expr')'                                                # JSONContainsAll
 	| (JSONContainsAny | ArrayContainsAny)'('expr',' expr')'                                                # JSONContainsAny
-	| STEuqals'('Identifier','StringLiteral')'				                                                # STEuqals	
-	| STTouches'('Identifier','StringLiteral')'				             		                            # STTouches
-	| STOverlaps'('Identifier','StringLiteral')'						 		                            # STOverlaps
-	| STCrosses'('Identifier','StringLiteral')'									                            # STCrosses
-	| STContains'('Identifier','StringLiteral')'						 		                            # STContains
-	| STIntersects'('Identifier','StringLiteral')'								                            # STIntersects
-	| STWithin'('Identifier','StringLiteral')'									                            # STWithin
+	| op=(STEuqals | STTouches | STOverlaps | STCrosses | STContains | STIntersects | STWithin) '(' Identifier ',' StringLiteral ')'  # SpatialBinary
 	| STDWithin'('Identifier','StringLiteral',' expr')'                                                     # STDWithin
 	| STIsValid'('Identifier')'                                  			 	                            # STIsValid
 	| ArrayLength'('(Identifier | JSONIdentifier)')'                                                        # ArrayLength
@@ -61,15 +52,6 @@ expr:
 textMatchOption:
 	MINIMUM_SHOULD_MATCH ASSIGN IntegerConstant;
 
-// typeName: ty = (BOOL | INT8 | INT16 | INT32 | INT64 | FLOAT | DOUBLE);
-
-// BOOL: 'bool';
-// INT8: 'int8';
-// INT16: 'int16';
-// INT32: 'int32';
-// INT64: 'int64';
-// FLOAT: 'float';
-// DOUBLE: 'double';
 LBRACE: '{';
 RBRACE: '}';
 
@@ -80,20 +62,21 @@ GE: '>=';
 EQ: '==';
 NE: '!=';
 
-LIKE: 'like' | 'LIKE';
-EXISTS: 'exists' | 'EXISTS';
-TEXTMATCH: 'text_match'|'TEXT_MATCH';
-PHRASEMATCH: 'phrase_match'|'PHRASE_MATCH';
-RANDOMSAMPLE: 'random_sample' | 'RANDOM_SAMPLE';
-MATCH_ALL: 'match_all' | 'MATCH_ALL';
-MATCH_ANY: 'match_any' | 'MATCH_ANY';
-MATCH_LEAST: 'match_least' | 'MATCH_LEAST';
-MATCH_MOST: 'match_most' | 'MATCH_MOST';
-MATCH_EXACT: 'match_exact' | 'MATCH_EXACT';
-INTERVAL: 'interval' | 'INTERVAL';
-ISO: 'iso' | 'ISO';
-MINIMUM_SHOULD_MATCH: 'minimum_should_match' | 'MINIMUM_SHOULD_MATCH';
-THRESHOLD: 'threshold' | 'THRESHOLD';
+// Case-insensitive keywords using fragments
+LIKE: L I K E;
+EXISTS: E X I S T S;
+TEXTMATCH: T E X T '_' M A T C H;
+PHRASEMATCH: P H R A S E '_' M A T C H;
+RANDOMSAMPLE: R A N D O M '_' S A M P L E;
+MATCH_ALL: M A T C H '_' A L L;
+MATCH_ANY: M A T C H '_' A N Y;
+MATCH_LEAST: M A T C H '_' L E A S T;
+MATCH_MOST: M A T C H '_' M O S T;
+MATCH_EXACT: M A T C H '_' E X A C T;
+INTERVAL: I N T E R V A L;
+ISO: I S O;
+MINIMUM_SHOULD_MATCH: M I N I M U M '_' S H O U L D '_' M A T C H;
+THRESHOLD: T H R E S H O L D;
 ASSIGN: '=';
 
 ADD: '+';
@@ -108,39 +91,39 @@ BAND: '&';
 BOR: '|';
 BXOR: '^';
 
-AND: '&&' | 'and' | 'AND';
-OR: '||' | 'or' | 'OR';
+AND: '&&' | A N D;
+OR: '||' | O R;
 
-ISNULL: 'is null' | 'IS NULL';
-ISNOTNULL: 'is not null' | 'IS NOT NULL';
+ISNULL: I S ' ' N U L L;
+ISNOTNULL: I S ' ' N O T ' ' N U L L;
 
 BNOT: '~';
-NOT: '!' | 'not' | 'NOT';
+NOT: '!' | N O T;
 
-IN: 'in' | 'IN';
+IN: I N;
 EmptyArray: '[' (Whitespace | Newline)* ']';
 
-JSONContains: 'json_contains' | 'JSON_CONTAINS';
-JSONContainsAll: 'json_contains_all' | 'JSON_CONTAINS_ALL';
-JSONContainsAny: 'json_contains_any' | 'JSON_CONTAINS_ANY';
+JSONContains: J S O N '_' C O N T A I N S;
+JSONContainsAll: J S O N '_' C O N T A I N S '_' A L L;
+JSONContainsAny: J S O N '_' C O N T A I N S '_' A N Y;
 
-ArrayContains: 'array_contains' | 'ARRAY_CONTAINS';
-ArrayContainsAll: 'array_contains_all' | 'ARRAY_CONTAINS_ALL';
-ArrayContainsAny: 'array_contains_any' | 'ARRAY_CONTAINS_ANY';
-ArrayLength: 'array_length' | 'ARRAY_LENGTH';
-ElementFilter: 'element_filter' | 'ELEMENT_FILTER';
+ArrayContains: A R R A Y '_' C O N T A I N S;
+ArrayContainsAll: A R R A Y '_' C O N T A I N S '_' A L L;
+ArrayContainsAny: A R R A Y '_' C O N T A I N S '_' A N Y;
+ArrayLength: A R R A Y '_' L E N G T H;
+ElementFilter: E L E M E N T '_' F I L T E R;
 
-STEuqals:'st_equals' | 'ST_EQUALS';
-STTouches:'st_touches' | 'ST_TOUCHES';
-STOverlaps: 'st_overlaps' | 'ST_OVERLAPS';
-STCrosses: 'st_crosses' | 'ST_CROSSES';
-STContains: 'st_contains' | 'ST_CONTAINS';
-STIntersects : 'st_intersects' | 'ST_INTERSECTS';
-STWithin :'st_within' | 'ST_WITHIN';
-STDWithin: 'st_dwithin' | 'ST_DWITHIN';
-STIsValid: 'st_isvalid' | 'ST_ISVALID';
+STEuqals: S T '_' E Q U A L S;
+STTouches: S T '_' T O U C H E S;
+STOverlaps: S T '_' O V E R L A P S;
+STCrosses: S T '_' C R O S S E S;
+STContains: S T '_' C O N T A I N S;
+STIntersects: S T '_' I N T E R S E C T S;
+STWithin: S T '_' W I T H I N;
+STDWithin: S T '_' D W I T H I N;
+STIsValid: S T '_' I S V A L I D;
 
-BooleanConstant: 'true' | 'True' | 'TRUE' | 'false' | 'False' | 'FALSE';
+BooleanConstant: T R U E | F A L S E;
 
 IntegerConstant:
 	DecimalConstant
@@ -207,3 +190,31 @@ fragment EscapeSequence:
 Whitespace: [ \t]+ -> skip;
 
 Newline: ( '\r' '\n'? | '\n') -> skip;
+
+// Case-insensitive letter fragments
+fragment A: [aA];
+fragment B: [bB];
+fragment C: [cC];
+fragment D: [dD];
+fragment E: [eE];
+fragment F: [fF];
+fragment G: [gG];
+fragment H: [hH];
+fragment I: [iI];
+fragment J: [jJ];
+fragment K: [kK];
+fragment L: [lL];
+fragment M: [mM];
+fragment N: [nN];
+fragment O: [oO];
+fragment P: [pP];
+fragment Q: [qQ];
+fragment R: [rR];
+fragment S: [sS];
+fragment T: [tT];
+fragment U: [uU];
+fragment V: [vV];
+fragment W: [wW];
+fragment X: [xX];
+fragment Y: [yY];
+fragment Z: [zZ];

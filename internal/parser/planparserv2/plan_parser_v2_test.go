@@ -613,7 +613,7 @@ func TestExpr_PhraseMatch(t *testing.T) {
 	}
 	for i, exprStr := range unsupported {
 		_, err := ParseExpr(helper, exprStr, nil)
-		assert.True(t, strings.HasSuffix(err.Error(), errMsgs[i]), fmt.Sprintf("Error expected: %v, actual %v", errMsgs[i], err.Error()))
+		assert.True(t, strings.Contains(err.Error(), errMsgs[i]), fmt.Sprintf("Error expected: %v, actual %v", errMsgs[i], err.Error()))
 	}
 }
 
