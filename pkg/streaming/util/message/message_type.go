@@ -51,6 +51,12 @@ func (t MessageType) IsSelfControlled() bool {
 	return ok
 }
 
+// IsBroadcastToAll checks if the MessageType is broadcast to all.
+func (t MessageType) IsBroadcastToAll() bool {
+	_, ok := broadcastToAllMessageType[t]
+	return ok
+}
+
 // unmarshalMessageType unmarshal MessageType from string.
 func unmarshalMessageType(s string) MessageType {
 	i, err := strconv.ParseInt(s, 10, 32)
