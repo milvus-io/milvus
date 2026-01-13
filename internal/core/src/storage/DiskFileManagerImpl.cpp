@@ -529,7 +529,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
     auto FetchRawData = [&]() {
         auto field_datas = GetObjectData(rcm_.get(), batch_files);
         // Wait for all futures to ensure all threads complete
-        auto codecs = storage::WaitAllFutures(field_datas);
+        auto codecs = storage::WaitAllFutures(std::move(field_datas));
         int batch_size = batch_files.size();
         for (int i = 0; i < batch_size; i++) {
             auto field_data = field_datas[i]->GetFieldData();
