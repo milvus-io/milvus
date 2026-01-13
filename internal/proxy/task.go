@@ -427,7 +427,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := validateFunction(t.schema, disableCheck); err != nil {
+	if err := validateFunction(t.schema, "", disableCheck); err != nil {
 		return err
 	}
 
