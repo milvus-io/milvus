@@ -213,8 +213,8 @@ ChunkTranslator::get_cells(
                 read_single_column_batches(r->reader);
             chunk = create_chunk(field_meta_,
                                  array_vec,
-                                 filepath.string(),
                                  mmap_populate_,
+                                 filepath.string(),
                                  load_priority_);
         }
         cells.emplace_back(cid, std::move(chunk));

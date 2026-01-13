@@ -474,8 +474,9 @@ GroupChunkTranslator::load_group_chunk(
         chunks = create_group_chunk(field_ids,
                                     field_metas,
                                     array_vecs,
+                                    mmap_populate_,
                                     filepath.string(),
-                                    mmap_populate_);
+                                    load_priority_);
     }
     return std::make_unique<milvus::GroupChunk>(chunks);
 }
