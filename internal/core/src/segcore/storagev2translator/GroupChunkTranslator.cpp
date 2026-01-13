@@ -470,8 +470,11 @@ GroupChunkTranslator::load_group_chunk(
                           static_cast<uint8_t>(group_chunk_type_));
         }
         std::filesystem::create_directories(filepath.parent_path());
-        chunks = create_group_chunk(
-            field_ids, field_metas, array_vecs, filepath.string());
+        chunks = create_group_chunk(field_ids,
+                                    field_metas,
+                                    array_vecs,
+                                    filepath.string(),
+                                    load_priority_);
     }
     return std::make_unique<milvus::GroupChunk>(chunks);
 }
