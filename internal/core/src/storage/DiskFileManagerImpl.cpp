@@ -526,7 +526,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
     auto valid_data_path = index::GetValueFromConfig<std::string>(
         config, index::VALID_DATA_PATH_KEY);
     std::vector<uint8_t> valid_bitmap;
-    int64_t total_num_rows = 0;
+    uint64_t total_num_rows = 0;
     bool nullable = false;
 
     // get batch raw data from s3 and write batch data to disk file
@@ -558,8 +558,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
                     }
                     for (int64_t i = 0; i < rows; ++i) {
                         if (field_data->is_valid(i)) {
-                            auto bit_pos = total_num_rows + i;
-                            valid_bitmap[bit_pos / 8] |= (1 << (bit_pos % 8));
+                            set_bit(valid_bitmap, total_num_rows + i);
                         }
                     }
                     total_num_rows += rows;
@@ -627,19 +626,10 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
     }
 
     if (nullable && valid_data_path.has_value() && total_num_rows > 0) {
-        local_chunk_manager->CreateFile(valid_data_path.value());
-        int64_t valid_write_pos = 0;
-
-        local_chunk_manager->Write(valid_data_path.value(),
-                                   valid_write_pos,
-                                   &total_num_rows,
-                                   sizeof(size_t));
-        valid_write_pos += sizeof(size_t);
-
-        local_chunk_manager->Write(valid_data_path.value(),
-                                   valid_write_pos,
-                                   valid_bitmap.data(),
-                                   valid_bitmap.size());
+        write_valid_data_file(local_chunk_manager,
+                              valid_data_path.value(),
+                              valid_bitmap,
+                              total_num_rows);
     }
 
     return local_data_path;
@@ -743,6 +733,25 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
     }
 }
 
+void
+DiskFileManagerImpl::write_valid_data_file(
+    const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
+    const std::string& valid_data_path,
+    std::vector<uint8_t>& valid_bitmap,
+    uint64_t total_num_rows) {
+    local_chunk_manager->CreateFile(valid_data_path);
+    int64_t valid_write_pos = 0;
+
+    local_chunk_manager->Write(
+        valid_data_path, valid_write_pos, &total_num_rows, sizeof(uint64_t));
+    valid_write_pos += sizeof(uint64_t);
+
+    local_chunk_manager->Write(valid_data_path,
+                               valid_write_pos,
+                               valid_bitmap.data(),
+                               valid_bitmap.size());
+}
+
 template <typename T>
 std::string
 DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
@@ -833,8 +842,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
             auto rows = field_data->get_num_rows();
             for (int64_t i = 0; i < rows; ++i) {
                 if (field_data->is_valid(i)) {
-                    auto bit_pos = chunk_offset + i;
-                    valid_bitmap[bit_pos / 8] |= (1 << (bit_pos % 8));
+                    set_bit(valid_bitmap, chunk_offset + i);
                 }
             }
             chunk_offset += rows;
@@ -885,19 +893,10 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     }
 
     if (nullable && valid_data_path.has_value() && total_num_rows > 0) {
-        local_chunk_manager->CreateFile(valid_data_path.value());
-        int64_t valid_write_pos = 0;
-
-        local_chunk_manager->Write(valid_data_path.value(),
-                                   valid_write_pos,
-                                   &total_num_rows,
-                                   sizeof(size_t));
-        valid_write_pos += sizeof(size_t);
-
-        local_chunk_manager->Write(valid_data_path.value(),
-                                   valid_write_pos,
-                                   valid_bitmap.data(),
-                                   valid_bitmap.size());
+        write_valid_data_file(local_chunk_manager,
+                              valid_data_path.value(),
+                              valid_bitmap,
+                              total_num_rows);
     }
 
     return local_data_path;
