@@ -532,7 +532,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
         auto codecs = storage::WaitAllFutures(std::move(field_datas));
         int batch_size = batch_files.size();
         for (int i = 0; i < batch_size; i++) {
-            auto field_data = field_datas[i]->GetFieldData();
+            auto field_data = codecs[i]->GetFieldData();
             num_rows += uint32_t(field_data->get_num_rows());
             cache_raw_data_to_disk_common<DataType>(
                 field_data,
