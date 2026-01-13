@@ -1184,9 +1184,10 @@ FetchFieldData(ChunkManager* cm, const std::vector<std::string>& remote_files) {
     std::vector<std::string> batch_files;
     auto FetchRawData = [&]() {
         auto fds = GetObjectData(cm, batch_files);
-        for (size_t i = 0; i < batch_files.size(); ++i) {
-            auto data = fds[i].get()->GetFieldData();
-            field_datas.emplace_back(data);
+        // Wait for all futures and collect exceptions to ensure all threads complete
+        auto codecs = storage::WaitAllFutures(std::move(fds));
+        for (auto& codec : codecs) {
+            field_datas.emplace_back(codec->GetFieldData());
         }
     };
 
