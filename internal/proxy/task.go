@@ -1230,11 +1230,6 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			}
 		}
 
-		_, err = common.GetCollectionTTL(t.GetProperties(), -1)
-		if err != nil {
-			return merr.WrapErrParameterInvalidMsg("collection ttl properties value not valid, parse error: %s", err.Error())
-		}
-
 		enabled, _ := common.IsAllowInsertAutoID(t.Properties...)
 		if enabled {
 			primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(collSchema.CollectionSchema)
