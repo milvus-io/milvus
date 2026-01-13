@@ -353,7 +353,7 @@ func (s *StatsTaskCheckerSuite) checkBinlogIsSorted(ctx context.Context, binlogP
 }
 
 func (s *StatsTaskCheckerSuite) checkSegmentIsSorted(ctx context.Context, segment *datapb.SegmentInfo) {
-	if segment.GetStorageVersion() == storage.StorageV2 {
+	if segment.GetStorageVersion() == storage.StorageV2 || segment.GetStorageVersion() == storage.StorageV3 {
 		// TODO: check sorted segment in storage v2
 		return
 	}

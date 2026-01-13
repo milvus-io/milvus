@@ -47,6 +47,7 @@ const (
 	DefaultHighPriorityThreadCoreCoefficient   = 10
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
 	DefaultLowPriorityThreadCoreCoefficient    = 1
+	DefaultBM25LoadThreadCoreCoefficient       = 1
 
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
@@ -227,6 +228,7 @@ type commonConfig struct {
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
+	BM25LoadThreadCoreCoefficient       ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
 	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
@@ -259,6 +261,7 @@ type commonConfig struct {
 	DefaultRootPassword   ParamItem `refreshable:"false"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
 	EnablePublicPrivilege ParamItem `refreshable:"false"`
+	ExprEnabled           ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -661,6 +664,16 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.LowPriorityThreadCoreCoefficient.Init(base.mgr)
 
+	p.BM25LoadThreadCoreCoefficient = ParamItem{
+		Key:          "common.threadCoreCoefficient.bm25Load",
+		Version:      "2.6.8",
+		DefaultValue: strconv.Itoa(DefaultBM25LoadThreadCoreCoefficient),
+		Doc: "This parameter specify how many times the number of threads " +
+			"is the number of cores in BM25 load pool",
+		Export: true,
+	}
+	p.BM25LoadThreadCoreCoefficient.Init(base.mgr)
+
 	p.DiskWriteMode = ParamItem{
 		Key:          "common.diskWriteMode",
 		Version:      "2.6.0",
@@ -811,6 +824,15 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.EnablePublicPrivilege.Init(base.mgr)
+
+	p.ExprEnabled = ParamItem{
+		Key:          "common.security.exprEnabled",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "Whether to enable the /expr endpoint for debugging. When enabled, only root user can access it via HTTP Basic Auth on Proxy nodes.",
+		Export:       true,
+	}
+	p.ExprEnabled.Init(base.mgr)
 
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",
@@ -3364,8 +3386,7 @@ type queryNodeConfig struct {
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
 
 	// Idf Oracle
-	IDFEnableDisk       ParamItem `refreshable:"true"`
-	IDFWriteConcurrenct ParamItem `refreshable:"true"`
+	IDFEnableDisk ParamItem `refreshable:"true"`
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
 }
@@ -3378,14 +3399,6 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		DefaultValue: "true",
 	}
 	p.IDFEnableDisk.Init(base.mgr)
-
-	p.IDFWriteConcurrenct = ParamItem{
-		Key:          "queryNode.idfOracle.writeConcurrency",
-		Version:      "2.6.0",
-		Export:       true,
-		DefaultValue: "4",
-	}
-	p.IDFWriteConcurrenct.Init(base.mgr)
 
 	p.SoPath = ParamItem{
 		Key:          "queryNode.soPath",
@@ -4628,6 +4641,10 @@ type dataCoordConfig struct {
 	SingleCompactionExpiredLogMaxSize ParamItem `refreshable:"true"`
 	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
 
+	StorageVersionCompactionEnabled           ParamItem `refreshable:"true"`
+	StorageVersionCompactionRateLimitTokens   ParamItem `refreshable:"true"`
+	StorageVersionCompactionRateLimitInterval ParamItem `refreshable:"true"`
+
 	ChannelCheckpointMaxLag ParamItem `refreshable:"true"`
 	SyncSegmentsInterval    ParamItem `refreshable:"false"`
 
@@ -5144,6 +5161,33 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.SingleCompactionDeltalogMaxNum.Init(base.mgr)
+
+	p.StorageVersionCompactionEnabled = ParamItem{
+		Key:          "dataCoord.compaction.storageVersion.enabled",
+		Version:      "2.6.9",
+		DefaultValue: "true",
+		Doc:          "Enable storage version compaction",
+		Export:       false,
+	}
+	p.StorageVersionCompactionEnabled.Init(base.mgr)
+
+	p.StorageVersionCompactionRateLimitTokens = ParamItem{
+		Key:          "dataCoord.compaction.storageVersion.rateLimitTokens",
+		Version:      "2.6.9",
+		DefaultValue: "3",
+		Doc:          "The storage version compaction tokens per period, applying rate limit",
+		Export:       false,
+	}
+	p.StorageVersionCompactionRateLimitTokens.Init(base.mgr)
+
+	p.StorageVersionCompactionRateLimitInterval = ParamItem{
+		Key:          "dataCoord.compaction.storageVersion.rateLimitInterval",
+		Version:      "2.6.9",
+		DefaultValue: "120",
+		Doc:          "The storage version compaction rate limit interval, in seconds",
+		Export:       false,
+	}
+	p.StorageVersionCompactionRateLimitInterval.Init(base.mgr)
 
 	p.GlobalCompactionInterval = ParamItem{
 		Key:          "dataCoord.compaction.global.interval",
@@ -6525,6 +6569,7 @@ type streamingConfig struct {
 	WALBalancerPolicyVChannelFairAntiAffinityWeight     ParamItem `refreshable:"true"`
 	WALBalancerPolicyVChannelFairRebalanceTolerance     ParamItem `refreshable:"true"`
 	WALBalancerPolicyVChannelFairRebalanceMaxStep       ParamItem `refreshable:"true"`
+	WALBalancerExpectedInitialStreamingNodeNum          ParamItem `refreshable:"true"`
 
 	// broadcaster
 	WALBroadcasterConcurrencyRatio       ParamItem `refreshable:"false"`
@@ -6723,6 +6768,17 @@ it also determine the depth of depth first search method that is used to find th
 		Export:       true,
 	}
 	p.WALBalancerPolicyVChannelFairRebalanceMaxStep.Init(base.mgr)
+
+	p.WALBalancerExpectedInitialStreamingNodeNum = ParamItem{
+		Key:     "streaming.walBalancer.expectedInitialStreamingNodeNum",
+		Version: "2.6.9",
+		Doc: `The expected initial streaming node number, 0 by default, means no expected initial streaming node number.
+When the milvus is upgrading from 2.5 -> 2.6.9, the mixcoord will check if the expected initial streaming node number is reached,
+then open the streaming service to continue the upgrade process.`,
+		DefaultValue: "0",
+		Export:       false,
+	}
+	p.WALBalancerExpectedInitialStreamingNodeNum.Init(base.mgr)
 
 	p.WALBroadcasterConcurrencyRatio = ParamItem{
 		Key:          "streaming.walBroadcaster.concurrencyRatio",

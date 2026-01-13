@@ -222,6 +222,7 @@ func (t *updateExternalCollectionTask) SetJobInfo(ctx context.Context, resp *dat
 				commonpb.SegmentState_Flushed,
 				newSeg.GetLevel(),
 				newSeg.GetIsSorted(),
+				newSeg.GetStorageVersion(),
 				newSeg.GetNumOfRows(),
 			)
 

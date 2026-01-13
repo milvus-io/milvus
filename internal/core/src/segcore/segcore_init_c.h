@@ -60,6 +60,9 @@ SegcoreSetDenseVectorInterminIndexRefineQuantType(const char*);
 void
 SegcoreSetDenseVectorInterminIndexRefineWithQuantFlag(const bool);
 
+void
+SegcoreSetInterimIndexMemExpansionRate(const float);
+
 // return value must be freed by the caller
 char*
 SegcoreSetSimdType(const char*);

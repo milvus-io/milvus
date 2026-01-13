@@ -460,7 +460,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	})
 
 	getInsertFiles := func(fieldID int64, enableNull bool) ([]string, error) {
-		if st.req.GetStorageVersion() == storage.StorageV2 {
+		if st.req.GetStorageVersion() == storage.StorageV2 || st.req.GetStorageVersion() == storage.StorageV3 {
 			return []string{}, nil
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
@@ -605,7 +605,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	})
 
 	getInsertFiles := func(fieldID int64) ([]string, error) {
-		if st.req.GetStorageVersion() == storage.StorageV2 {
+		if st.req.GetStorageVersion() == storage.StorageV2 || st.req.GetStorageVersion() == storage.StorageV3 {
 			return []string{}, nil
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
@@ -739,7 +739,7 @@ func buildIndexParams(
 		Manifest:                         req.GetManifestPath(),
 	}
 
-	if req.GetStorageVersion() == storage.StorageV2 {
+	if req.GetStorageVersion() == storage.StorageV2 || req.GetStorageVersion() == storage.StorageV3 {
 		params.SegmentInsertFiles = util.GetSegmentInsertFiles(
 			req.GetInsertLogs(),
 			req.GetStorageConfig(),

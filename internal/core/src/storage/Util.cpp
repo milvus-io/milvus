@@ -1603,11 +1603,6 @@ CacheRawDataAndFillMissing(const MemFileManagerImplPtr& file_manager,
     // download field data
     auto field_datas = file_manager->CacheRawDataToMemory(config);
 
-    // check storage version
-    auto storage_version =
-        index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
-            .value_or(0);
-
     int64_t lack_binlog_rows =
         index::GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY)
             .value_or(0);

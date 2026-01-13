@@ -65,6 +65,8 @@ type Schema struct {
 	Fields             []*Field
 	EnableDynamicField bool
 	Functions          []*Function
+	ExternalSource     string // External data source (e.g., "s3://bucket/path")
+	ExternalSpec       string // External source config (JSON)
 
 	pkField *Field
 }
@@ -96,6 +98,18 @@ func (s *Schema) WithDynamicFieldEnabled(dynamicEnabled bool) *Schema {
 	return s
 }
 
+// WithExternalSource sets the external source for the schema (e.g., "s3://bucket/path").
+func (s *Schema) WithExternalSource(externalSource string) *Schema {
+	s.ExternalSource = externalSource
+	return s
+}
+
+// WithExternalSpec sets the external spec configuration (JSON format).
+func (s *Schema) WithExternalSpec(externalSpec string) *Schema {
+	s.ExternalSpec = externalSpec
+	return s
+}
+
 // WithField adds a field into schema and returns schema itself.
 func (s *Schema) WithField(f *Field) *Schema {
 	if f.PrimaryKey {
@@ -117,6 +131,8 @@ func (s *Schema) ProtoMessage() *schemapb.CollectionSchema {
 		Description:        s.Description,
 		AutoID:             s.AutoID,
 		EnableDynamicField: s.EnableDynamicField,
+		ExternalSource:     s.ExternalSource,
+		ExternalSpec:       s.ExternalSpec,
 	}
 	r.Fields = lo.FilterMap(s.Fields, func(field *Field, _ int) (*schemapb.FieldSchema, bool) {
 		if field.DataType == FieldTypeArray && field.ElementType == FieldTypeStruct {
@@ -162,6 +178,8 @@ func (s *Schema) ReadProto(p *schemapb.CollectionSchema) *Schema {
 	s.Description = p.GetDescription()
 	s.CollectionName = p.GetName()
 	s.EnableDynamicField = p.GetEnableDynamicField()
+	s.ExternalSource = p.GetExternalSource()
+	s.ExternalSpec = p.GetExternalSpec()
 	// fields
 	s.Fields = make([]*Field, 0, len(p.GetFields()))
 	for _, fp := range p.GetFields() {

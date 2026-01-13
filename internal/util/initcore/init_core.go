@@ -576,6 +576,9 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 	enableInterminIndex := C.bool(params.QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool())
 	C.SegcoreSetEnableInterminSegmentIndex(enableInterminIndex)
 
+	memExpansionRate := C.float(params.QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat())
+	C.SegcoreSetInterimIndexMemExpansionRate(memExpansionRate)
+
 	nlist := C.int64_t(params.QueryNodeCfg.InterimIndexNlist.GetAsInt64())
 	C.SegcoreSetNlist(nlist)
 

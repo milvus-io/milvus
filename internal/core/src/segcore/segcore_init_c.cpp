@@ -100,6 +100,13 @@ SegcoreSetDenseVectorInterminIndexRefineWithQuantFlag(const bool value) {
 }
 
 extern "C" void
+SegcoreSetInterimIndexMemExpansionRate(const float value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_interim_index_mem_expansion_rate(value);
+}
+
+extern "C" void
 SegcoreSetSubDim(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();

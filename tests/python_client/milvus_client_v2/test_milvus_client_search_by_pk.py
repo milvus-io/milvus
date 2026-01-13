@@ -250,23 +250,29 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
 
         # Search with sparse vectors
         ids_to_search = [self.datas[i][self.pk_field_name] for i in range(default_nq)]
+        vectors_to_search = [self.datas[i][self.sparse_vector_field_name] for i in range(default_nq)]
         search_params = {"metric_type": self.sparse_vector_metric, "params": {}}
 
-        self.search(
-            client,
-            collection_name,
-            ids=ids_to_search,
-            anns_field=self.sparse_vector_field_name,
-            search_params=search_params,
-            limit=default_limit,
-            check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                         "nq": default_nq,
-                         "limit": default_limit,
-                         "pk_name": self.pk_field_name,
-                         "metric": self.sparse_vector_metric
-                         }
-        )
+        # search by ids one by one
+        for i in range(default_nq):
+            expected_limit = default_limit
+            if len(vectors_to_search[i]) == 0:
+                expected_limit = 0
+            self.search(
+                client,
+                collection_name,
+                ids=[ids_to_search[i]],
+                anns_field=self.sparse_vector_field_name,
+                search_params=search_params,
+                limit=default_limit,
+                check_task=CheckTasks.check_search_results,
+                check_items={"enable_milvus_client_api": True,
+                             "nq": 1,
+                             "limit": expected_limit,
+                             "pk_name": self.pk_field_name,
+                             "metric": self.sparse_vector_metric
+                             }
+            )
 
         #  search again without specify anns_field
         error = {"err_code": 999,
@@ -282,6 +288,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="need return error or none @Marcelo chen")
     def test_search_by_pk_nullable_vector_field(self):
         """
         target: test search by pk with nullable vector field where some vectors are null

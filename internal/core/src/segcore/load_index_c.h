@@ -48,6 +48,12 @@ TryReserveLoadingResourceWithTimeout(CResourceUsage size,
 void
 ReleaseLoadingResource(CResourceUsage size);
 
+void
+ChargeLoadedResource(CResourceUsage size);
+
+void
+RefundLoadedResource(CResourceUsage size);
+
 CStatus
 AppendIndexInfo(CLoadIndexInfo c_load_index_info,
                 int64_t index_id,

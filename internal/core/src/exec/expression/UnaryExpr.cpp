@@ -1912,14 +1912,8 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch(EvalCtx& context) {
                    "ngram index should not be null, field_id: {}",
                    field_id_.get());
 
-        // Get pre_filter from previous expressions in the conjunction.
-        // This optimization reduces the number of rows that need post-filtering.
-        const auto& bitmap_input = context.get_bitmap_input();
-        const TargetBitmap* pre_filter =
-            bitmap_input.empty() ? nullptr : &bitmap_input;
-
         auto res_opt =
-            index->ExecuteQuery(literal, expr_->op_type_, this, pre_filter);
+            index->ExecuteQuery(literal, expr_->op_type_, this, nullptr);
         if (!res_opt.has_value()) {
             return std::nullopt;
         }
