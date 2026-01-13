@@ -307,7 +307,8 @@ func (_c *MockMsgHandler_HandleSchemaChange_Call) RunAndReturn(run func(context.
 func NewMockMsgHandler(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockMsgHandler {
+},
+) *MockMsgHandler {
 	mock := &MockMsgHandler{}
 	mock.Mock.Test(t)
 
