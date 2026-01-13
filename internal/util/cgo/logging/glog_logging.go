@@ -1,4 +1,4 @@
-// Licensed to the LF AI& Data foundation under one
+/// Licensed to the LF AI & Data foundation under one
 // or more contributor license agreements. See the NOTICE file
 // distributed with this work for additional information
 // regarding copyright ownership. The ASF licenses this file
@@ -14,21 +14,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+//go:build test
+// +build test
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+package logging
 
-void
-InitGoogleLoggingWithZapSink();
+/*
+#cgo pkg-config: milvus_core
+#include <stdlib.h>
+#include "common/logging_c.h"
+*/
+import "C"
+import "unsafe"
 
-void
-InitGoogleLoggingWithoutZapSink();
-
-void
-GoogleLoggingAtLevel(int severity, const char* msg);
-
-#ifdef __cplusplus
+func GoogleLoggingAtLevel(severity glogSeverity, msg string) {
+	cmsg := C.CString(msg)
+	defer C.free(unsafe.Pointer(cmsg))
+	C.GoogleLoggingAtLevel(C.int(severity), cmsg)
 }
-#endif
+
+func InitGoogleLoggingWithZapSink() {
+	C.InitGoogleLoggingWithZapSink()
+}
+
+func InitGoogleLogging() {
+	C.InitGoogleLoggingWithoutZapSink()
+}
