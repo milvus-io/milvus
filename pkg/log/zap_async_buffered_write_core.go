@@ -130,8 +130,8 @@ func (s *asyncTextIOCore) Write(ent zapcore.Entry, fields []zapcore.Field) error
 // Use this method to avoid the memory copy of the log message to the heap.
 func (s *asyncTextIOCore) WriteWithCEntry(ent CEntry) {
 	buf, err := s.enc.EncodeEntry(zapcore.Entry{
-		Time:       ent.Time,
 		Level:      ent.Level,
+		Time:       ent.Time,
 		LoggerName: "CGO",
 		Message:    unsafe.String((*byte)(ent.Message), ent.MessageLen),
 		Caller: zapcore.EntryCaller{
@@ -183,7 +183,6 @@ type CEntry struct {
 	Line        int
 	Message     unsafe.Pointer
 	MessageLen  int
-	ready       chan struct{}
 }
 
 // Sync syncs the underlying buffered write syncer.

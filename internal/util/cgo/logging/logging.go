@@ -33,10 +33,19 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
 )
 
 const cgoLoggerName = "CGO"
+
+const (
+	glogInfo    glogSeverity = 0
+	glogWarning glogSeverity = 1
+	glogError   glogSeverity = 2
+	glogFatal   glogSeverity = 3
+)
+
+// glogSeverity describes the GLOG severity level.
+type glogSeverity = int
 
 //export goZapLogExt
 func goZapLogExt(sev C.int,
@@ -64,6 +73,8 @@ func goZapLogExt(sev C.int,
 		})
 		return
 	}
+
+	// Currently, milvus will enable async log by default, so following code is never executed.
 	// otherwise, we perform a synchronous write, Write directly to the underlying buffered write syncer.
 	b := unsafe.Slice((*byte)(unsafe.Pointer(msg)), int(msgLen))
 	msgStr := unsafe.String(&b[0], len(b))
@@ -79,21 +90,19 @@ func goZapLogExt(sev C.int,
 		},
 	}
 	if ce := log.L().Core().Check(ent, nil); ce != nil {
-		metrics.LoggingCGOWriteTotal.Inc()
-		metrics.LoggingCGOWriteBytes.Add(float64(msgLen))
 		ce.Write()
 	}
 }
 
 func mapGlogSeverity(s int) zapcore.Level {
 	switch s {
-	case 0: // GLOG_INFO
+	case glogInfo: // GLOG_INFO
 		return zapcore.InfoLevel
-	case 1: // GLOG_WARNING
+	case glogWarning: // GLOG_WARNING
 		return zapcore.WarnLevel
-	case 2: // GLOG_ERROR
+	case glogError: // GLOG_ERROR
 		return zapcore.ErrorLevel
-	case 3: // GLOG_FATAL
+	case glogFatal: // GLOG_FATAL
 		// glog fatal will call std::abort,
 		// zap will call os.Exit(1),
 		// we don't want to double exit, so we use error level instead

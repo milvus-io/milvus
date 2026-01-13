@@ -27,17 +27,7 @@ package logging
 import "C"
 import "unsafe"
 
-// GlogSeverity describes the GLOG severity level.
-type GlogSeverity int
-
-const (
-	GlogInfo    GlogSeverity = 0
-	GlogWarning GlogSeverity = 1
-	GlogError   GlogSeverity = 2
-	GlogFatal   GlogSeverity = 3
-)
-
-func GoogleLoggingAtLevel(severity GlogSeverity, msg string) {
+func GoogleLoggingAtLevel(severity glogSeverity, msg string) {
 	cmsg := C.CString(msg)
 	defer C.free(unsafe.Pointer(cmsg))
 	C.GoogleLoggingAtLevel(C.int(severity), cmsg)
