@@ -1208,8 +1208,10 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
 
         auto codec_futures = storage::GetObjectData(
             rcm.get(), remote_files, milvus::PriorityForLoad(priority), false);
-        for (auto& codec_future : codec_futures) {
-            auto reader = codec_future.get()->GetReader();
+        // Wait for all futures to ensure all threads complete
+        auto codecs = storage::WaitAllFutures(std::move(codec_futures));
+        for (auto& codec : codecs) {
+            auto reader = codec->GetReader();
             channel->push(reader);
         }
         channel->close();
@@ -1228,8 +1230,10 @@ LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                        .GetRemoteChunkManager();
         auto codec_futures = storage::GetObjectData(
             rcm.get(), remote_files, milvus::PriorityForLoad(priority));
-        for (auto& codec_future : codec_futures) {
-            auto field_data = codec_future.get()->GetFieldData();
+        // Wait for all futures to ensure all threads complete
+        auto codecs = storage::WaitAllFutures(std::move(codec_futures));
+        for (auto& codec : codecs) {
+            auto field_data = codec->GetFieldData();
             channel->push(field_data);
         }
         channel->close();
