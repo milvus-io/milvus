@@ -45,6 +45,7 @@ type SessionInterface interface {
 
 	GetAddress() string
 	GetServerID() int64
+	GetRegisteredRevision() int64
 	IsTriggerKill() bool
 }
 
