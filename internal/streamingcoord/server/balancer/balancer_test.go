@@ -82,8 +82,15 @@ func TestBalancer(t *testing.T) {
 		},
 	}, nil)
 
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+
 	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
-	resource.InitForTest(resource.OptETCD(etcdClient), resource.OptStreamingCatalog(catalog), resource.OptStreamingManagerClient(streamingNodeManager))
+	resource.InitForTest(
+		resource.OptETCD(etcdClient),
+		resource.OptStreamingCatalog(catalog),
+		resource.OptStreamingManagerClient(streamingNodeManager),
+		resource.OptSession(s))
 	catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
@@ -300,7 +307,14 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 	})
 
 	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
-	resource.InitForTest(resource.OptETCD(etcdClient), resource.OptStreamingCatalog(catalog), resource.OptStreamingManagerClient(streamingNodeManager))
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(
+		resource.OptETCD(etcdClient),
+		resource.OptStreamingCatalog(catalog),
+		resource.OptStreamingManagerClient(streamingNodeManager),
+		resource.OptSession(s),
+	)
 	catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
