@@ -251,11 +251,12 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_Success(t *testing.T) {
 	mockRestoreData := mockey.Mock((*snapshotManager).RestoreData).To(func(
 		sm *snapshotManager,
 		ctx context.Context,
-		snapshotData *SnapshotData,
+		snapshotName string,
 		collectionID int64,
 		jobID int64,
 	) (int64, error) {
 		restoreDataCalled = true
+		assert.Equal(t, "test_snapshot", snapshotName)
 		assert.Equal(t, int64(200), collectionID)
 		assert.Equal(t, int64(12345), jobID) // Verify jobID is passed from header
 		return jobID, nil
@@ -305,55 +306,10 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_Success(t *testing.T) {
 
 	// Verify
 	assert.NoError(t, err)
-	assert.True(t, readSnapshotDataCalled)
+	// restoreSnapshotV2AckCallback no longer reads snapshot data directly.
+	assert.False(t, readSnapshotDataCalled)
 	assert.True(t, restoreDataCalled)
-	assert.True(t, getRestoreStateCalled)
-}
-
-func TestDDLCallbacks_RestoreSnapshotV2AckCallback_ReadSnapshotDataError(t *testing.T) {
-	ctx := context.Background()
-
-	expectedErr := errors.New("snapshot not found")
-
-	// Mock snapshotManager.ReadSnapshotData to return error
-	mockReadSnapshotData := mockey.Mock((*snapshotManager).ReadSnapshotData).To(func(
-		sm *snapshotManager,
-		ctx context.Context,
-		name string,
-	) (*SnapshotData, error) {
-		return nil, expectedErr
-	}).Build()
-	defer mockReadSnapshotData.UnPatch()
-
-	// Create DDLCallbacks
-	server := &Server{
-		snapshotManager: &snapshotManager{},
-	}
-	callbacks := &DDLCallbacks{Server: server}
-
-	// Create test broadcast result
-	broadcastMsg := message.NewRestoreSnapshotMessageBuilderV2().
-		WithHeader(&message.RestoreSnapshotMessageHeader{
-			SnapshotName: "test_snapshot",
-			CollectionId: 200,
-			JobId:        12345,
-		}).
-		WithBody(&message.RestoreSnapshotMessageBody{}).
-		WithBroadcast([]string{"control_channel"}).
-		MustBuildBroadcast()
-
-	typedMsg := message.MustAsBroadcastRestoreSnapshotMessageV2(broadcastMsg)
-
-	result := message.BroadcastResultRestoreSnapshotMessageV2{
-		Message: typedMsg,
-	}
-
-	// Execute
-	err := callbacks.restoreSnapshotV2AckCallback(ctx, result)
-
-	// Verify
-	assert.Error(t, err)
-	assert.Equal(t, expectedErr, err)
+	assert.False(t, getRestoreStateCalled)
 }
 
 func TestDDLCallbacks_RestoreSnapshotV2AckCallback_RestoreDataError(t *testing.T) {
@@ -361,99 +317,17 @@ func TestDDLCallbacks_RestoreSnapshotV2AckCallback_RestoreDataError(t *testing.T
 
 	expectedErr := errors.New("restore data error")
 
-	// Mock snapshotManager.ReadSnapshotData to return success
-	mockReadSnapshotData := mockey.Mock((*snapshotManager).ReadSnapshotData).To(func(
-		sm *snapshotManager,
-		ctx context.Context,
-		name string,
-	) (*SnapshotData, error) {
-		return &SnapshotData{
-			SnapshotInfo: &datapb.SnapshotInfo{Name: name},
-		}, nil
-	}).Build()
-	defer mockReadSnapshotData.UnPatch()
-
 	// Mock snapshotManager.RestoreData to return error
 	mockRestoreData := mockey.Mock((*snapshotManager).RestoreData).To(func(
 		sm *snapshotManager,
 		ctx context.Context,
-		snapshotData *SnapshotData,
+		snapshotName string,
 		collectionID int64,
 		jobID int64,
 	) (int64, error) {
 		return 0, expectedErr
 	}).Build()
 	defer mockRestoreData.UnPatch()
-
-	// Create DDLCallbacks
-	server := &Server{
-		snapshotManager: &snapshotManager{},
-	}
-	callbacks := &DDLCallbacks{Server: server}
-
-	// Create test broadcast result
-	broadcastMsg := message.NewRestoreSnapshotMessageBuilderV2().
-		WithHeader(&message.RestoreSnapshotMessageHeader{
-			SnapshotName: "test_snapshot",
-			CollectionId: 200,
-			JobId:        12345,
-		}).
-		WithBody(&message.RestoreSnapshotMessageBody{}).
-		WithBroadcast([]string{"control_channel"}).
-		MustBuildBroadcast()
-
-	typedMsg := message.MustAsBroadcastRestoreSnapshotMessageV2(broadcastMsg)
-
-	result := message.BroadcastResultRestoreSnapshotMessageV2{
-		Message: typedMsg,
-	}
-
-	// Execute
-	err := callbacks.restoreSnapshotV2AckCallback(ctx, result)
-
-	// Verify
-	assert.Error(t, err)
-	assert.Equal(t, expectedErr, err)
-}
-
-func TestDDLCallbacks_RestoreSnapshotV2AckCallback_GetRestoreStateError(t *testing.T) {
-	ctx := context.Background()
-
-	expectedErr := errors.New("get restore state error")
-
-	// Mock snapshotManager.ReadSnapshotData to return success
-	mockReadSnapshotData := mockey.Mock((*snapshotManager).ReadSnapshotData).To(func(
-		sm *snapshotManager,
-		ctx context.Context,
-		name string,
-	) (*SnapshotData, error) {
-		return &SnapshotData{
-			SnapshotInfo: &datapb.SnapshotInfo{Name: name},
-		}, nil
-	}).Build()
-	defer mockReadSnapshotData.UnPatch()
-
-	// Mock snapshotManager.RestoreData to return success
-	mockRestoreData := mockey.Mock((*snapshotManager).RestoreData).To(func(
-		sm *snapshotManager,
-		ctx context.Context,
-		snapshotData *SnapshotData,
-		collectionID int64,
-		jobID int64,
-	) (int64, error) {
-		return jobID, nil
-	}).Build()
-	defer mockRestoreData.UnPatch()
-
-	// Mock snapshotManager.GetRestoreState to return error
-	mockGetRestoreState := mockey.Mock((*snapshotManager).GetRestoreState).To(func(
-		sm *snapshotManager,
-		ctx context.Context,
-		jobID int64,
-	) (*datapb.RestoreSnapshotInfo, error) {
-		return nil, expectedErr
-	}).Build()
-	defer mockGetRestoreState.UnPatch()
 
 	// Create DDLCallbacks
 	server := &Server{

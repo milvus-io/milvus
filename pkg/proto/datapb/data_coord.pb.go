@@ -11885,7 +11885,7 @@ type RestoreSnapshotResponse struct {
 
 	Status       *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 	JobId        int64            `protobuf:"varint,2,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`                      // restore job ID for async tracking (deprecated, use ListRestoreJobs)
-	CollectionId int64            `protobuf:"varint,3,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"` // target collection ID
+	CollectionId int64            `protobuf:"varint,3,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"` // deprecated
 }
 
 func (x *RestoreSnapshotResponse) Reset() {

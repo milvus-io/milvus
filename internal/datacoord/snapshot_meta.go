@@ -13,9 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -53,13 +51,27 @@ import (
 // - Catalog operations are atomic via etcd transactions
 // - S3 operations use unique paths (collection_id/snapshot_id) to prevent conflicts
 
+// RefIndexLoadState represents the loading state of a SnapshotRefIndex.
+type RefIndexLoadState int
+
+const (
+	// RefIndexStatePending: Data not yet loaded from S3.
+	RefIndexStatePending RefIndexLoadState = iota
+	// RefIndexStateLoaded: Data successfully loaded from S3.
+	RefIndexStateLoaded
+	// RefIndexStateFailed: Loading from S3 failed.
+	// The background loader will retry loading periodically.
+	RefIndexStateFailed
+)
+
 // SnapshotRefIndex holds segment and index IDs loaded from S3.
-// Loading state is managed globally by snapshotMeta.refIndexLoadDone.
+// Loading state is managed per-snapshot to support retry on failure.
 //
 // CONCURRENCY: Protected by RWMutex since SetLoaded (async loader) and
 // ContainsSegment/ContainsIndex (GC) may run concurrently.
 type SnapshotRefIndex struct {
 	mu         sync.RWMutex
+	loadState  RefIndexLoadState
 	segmentIDs typeutil.UniqueSet
 	indexIDs   typeutil.UniqueSet
 }
@@ -74,16 +86,18 @@ func NewSnapshotRefIndex() *SnapshotRefIndex {
 // Used for newly created snapshots where data is already available.
 func NewLoadedSnapshotRefIndex(segmentIDs, indexIDs []int64) *SnapshotRefIndex {
 	return &SnapshotRefIndex{
+		loadState:  RefIndexStateLoaded,
 		segmentIDs: typeutil.NewUniqueSet(segmentIDs...),
 		indexIDs:   typeutil.NewUniqueSet(indexIDs...),
 	}
 }
 
-// SetLoaded sets the segment and index IDs.
+// SetLoaded sets the segment and index IDs and marks the RefIndex as loaded.
 // This is called by the async loader after reading data from S3.
 func (r *SnapshotRefIndex) SetLoaded(segmentIDs, indexIDs []int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.loadState = RefIndexStateLoaded
 	r.segmentIDs = typeutil.NewUniqueSet(segmentIDs...)
 	r.indexIDs = typeutil.NewUniqueSet(indexIDs...)
 }
@@ -102,6 +116,28 @@ func (r *SnapshotRefIndex) ContainsIndex(indexID UniqueID) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.indexIDs != nil && r.indexIDs.Contain(indexID)
+}
+
+// SetFailed marks the RefIndex as failed to load from S3.
+// GC should skip this snapshot, and the background loader will retry loading periodically.
+func (r *SnapshotRefIndex) SetFailed() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.loadState = RefIndexStateFailed
+}
+
+// IsLoaded returns true if data was successfully loaded from S3.
+func (r *SnapshotRefIndex) IsLoaded() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.loadState == RefIndexStateLoaded
+}
+
+// IsFailed returns true if loading from S3 failed.
+func (r *SnapshotRefIndex) IsFailed() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.loadState == RefIndexStateFailed
 }
 
 // snapshotMeta manages snapshot metadata both in memory and persistent storage.
@@ -132,9 +168,10 @@ type snapshotMeta struct {
 	// Uses RWMutex to allow concurrent reads (ListSnapshots) while blocking writes.
 	collectionIndexMu sync.RWMutex
 
-	// Global loading state for all RefIndexes from S3
-	// Closed when all RefIndexes are loaded, used by GC to skip if not loaded
-	refIndexLoadDone chan struct{}
+	// Background RefIndex loader goroutine control
+	loaderCtx    context.Context
+	loaderCancel context.CancelFunc
+	loaderWg     sync.WaitGroup
 
 	reader *SnapshotReader // Reads complete snapshot data from S3
 	writer *SnapshotWriter // Writes complete snapshot data to S3
@@ -159,23 +196,29 @@ type snapshotMeta struct {
 //   - *snapshotMeta: Initialized snapshot manager with populated cache
 //   - error: Error if catalog reload or S3 verification fails
 func newSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager) (*snapshotMeta, error) {
+	loaderCtx, loaderCancel := context.WithCancel(context.Background())
 	sm := &snapshotMeta{
 		catalog:                catalog,
 		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
 		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
 		snapshotName2ID:        typeutil.NewConcurrentMap[string, UniqueID](),
 		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
-		refIndexLoadDone:       make(chan struct{}),
+		loaderCtx:              loaderCtx,
+		loaderCancel:           loaderCancel,
 		reader:                 NewSnapshotReader(chunkManager),
 		writer:                 NewSnapshotWriter(chunkManager),
 	}
 
 	// Reload all snapshots from catalog to populate in-memory cache
-	// Note: reload() returns immediately, S3 data is loaded asynchronously in background
 	if err := sm.reload(ctx); err != nil {
+		loaderCancel()
 		log.Error("failed to reload snapshot meta from kv", zap.Error(err))
 		return nil, err
 	}
+
+	// Start background RefIndex loader goroutine
+	sm.loaderWg.Add(1)
+	go sm.refIndexLoaderLoop()
 
 	return sm, nil
 }
@@ -184,14 +227,13 @@ func newSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, ch
 //
 // This function is critical for recovering snapshot state after DataCoord restarts.
 // It reads snapshot metadata from catalog (etcd) and builds the in-memory cache placeholders.
-// The actual segment/index ID sets are loaded asynchronously from S3 in the background.
+// The actual segment/index ID sets are loaded by the background refIndexLoaderLoop.
 //
 // Process flow:
 //  1. List all snapshots from catalog (persistent storage)
 //  2. For each committed snapshot:
 //     a. Insert placeholder into in-memory cache (without S3 data)
 //     b. Build secondary indexes
-//  3. Start background goroutine to load S3 data asynchronously
 //
 // This design allows reload() to return quickly without waiting for S3 I/O,
 // significantly improving DataCoord startup time when there are many snapshots.
@@ -202,15 +244,12 @@ func newSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, ch
 // Returns:
 //   - error: Error if catalog list fails
 func (sm *snapshotMeta) reload(ctx context.Context) error {
-	// Step 1: List all snapshots from catalog
 	snapshots, err := sm.catalog.ListSnapshots(ctx)
 	if err != nil {
 		log.Info("failed to list snapshots from kv", zap.Error(err))
 		return err
 	}
 
-	// Step 2: Filter committed snapshots and insert into maps
-	committedSnapshots := make([]*datapb.SnapshotInfo, 0, len(snapshots))
 	for _, snapshot := range snapshots {
 		if snapshot.GetState() == datapb.SnapshotState_SnapshotStatePending ||
 			snapshot.GetState() == datapb.SnapshotState_SnapshotStateDeleting {
@@ -224,87 +263,93 @@ func (sm *snapshotMeta) reload(ctx context.Context) error {
 		// Insert snapshot info (immediately available from etcd)
 		sm.snapshotID2Info.Insert(snapshot.GetId(), snapshot)
 
-		// Create pending RefIndex (will be loaded from S3 asynchronously)
-		refIndex := NewSnapshotRefIndex()
-		sm.snapshotID2RefIndex.Insert(snapshot.GetId(), refIndex)
+		// Create pending RefIndex (will be loaded by background goroutine)
+		sm.snapshotID2RefIndex.Insert(snapshot.GetId(), NewSnapshotRefIndex())
 
 		// Build secondary indexes for O(1) lookup
 		sm.addToSecondaryIndexes(snapshot)
-		committedSnapshots = append(committedSnapshots, snapshot)
 
-		log.Info("loaded snapshot metadata from catalog (async mode)",
+		log.Info("loaded snapshot metadata from catalog",
 			zap.String("name", snapshot.GetName()),
 			zap.Int64("id", snapshot.GetId()))
-	}
-
-	// Step 3: Start async loading in background goroutine using conc pool
-	if len(committedSnapshots) > 0 {
-		go sm.asyncLoadRefIndexes(ctx, committedSnapshots)
-	} else {
-		// No snapshots to load, mark as loaded immediately
-		close(sm.refIndexLoadDone)
 	}
 
 	return nil
 }
 
-// asyncLoadRefIndexes loads SegmentIDs and IndexIDs from S3 in background using conc pool.
-// This is called after reload() to populate RefIndex data asynchronously.
-// After all snapshots are loaded, it closes refIndexLoadDone to signal GC that it's safe to query.
-func (sm *snapshotMeta) asyncLoadRefIndexes(ctx context.Context, snapshots []*datapb.SnapshotInfo) {
-	log.Info("starting async loading of snapshot IDs from S3", zap.Int("count", len(snapshots)))
+// refIndexLoaderLoop periodically loads unloaded RefIndexes in background.
+// It runs until loaderCtx is cancelled.
+func (sm *snapshotMeta) refIndexLoaderLoop() {
+	defer sm.loaderWg.Done()
 
-	// Use concurrent pool for parallel loading
-	pool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
-	defer pool.Release()
-
-	futures := make([]*conc.Future[any], 0, len(snapshots))
-	for _, snapshot := range snapshots {
-		snapshotCopy := snapshot // Capture for closure
-		future := pool.Submit(func() (any, error) {
-			// Get refIndex from cache
-			refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotCopy.GetId())
-			if !exists {
-				return nil, nil // Snapshot may have been deleted
-			}
-
-			// Load from S3 with retry for transient failures
-			var snapshotData *SnapshotData
-			err := retry.Do(ctx, func() error {
-				var readErr error
-				snapshotData, readErr = sm.reader.ReadSnapshot(ctx, snapshotCopy.GetS3Location(), false)
-				return readErr
-			}, retry.Attempts(3), retry.Sleep(time.Second))
-			if err != nil {
-				log.Error("async load failed for snapshot after retries",
-					zap.String("name", snapshotCopy.GetName()),
-					zap.Int64("id", snapshotCopy.GetId()),
-					zap.Error(err))
-				// Set empty data as fallback
-				refIndex.SetLoaded(nil, nil)
-				return nil, nil
-			}
-
-			// Set refIndex data
-			refIndex.SetLoaded(snapshotData.SegmentIDs, snapshotData.IndexIDs)
-
-			log.Info("async loaded snapshot IDs from S3",
-				zap.String("name", snapshotCopy.GetName()),
-				zap.Int64("id", snapshotCopy.GetId()),
-				zap.Int("segmentCount", len(snapshotData.SegmentIDs)),
-				zap.Int("indexCount", len(snapshotData.IndexIDs)))
-
-			return nil, nil
-		})
-		futures = append(futures, future)
+	// Note: SnapshotRefIndexLoadInterval is refreshable.
+	// Re-read it after each tick to apply updates without restarting DataCoord.
+	getInterval := func() time.Duration {
+		interval := paramtable.Get().DataCoordCfg.SnapshotRefIndexLoadInterval.GetAsDurationByParse()
+		if interval <= 0 {
+			log.Warn("invalid snapshot RefIndex load interval, fallback to 60s",
+				zap.Duration("interval", interval))
+			return 60 * time.Second
+		}
+		return interval
 	}
 
-	// Wait for all loading tasks
-	_ = conc.AwaitAll(futures...)
+	// Load immediately on startup.
+	sm.loadUnloadedRefIndexes()
 
-	// Close global loadDone to signal all RefIndexes are loaded
-	close(sm.refIndexLoadDone)
-	log.Info("async loading of all snapshots completed", zap.Int("count", len(snapshots)))
+	timer := time.NewTimer(getInterval())
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-sm.loaderCtx.Done():
+			log.Info("RefIndex loader goroutine stopped")
+			return
+		case <-timer.C:
+			sm.loadUnloadedRefIndexes()
+			// Reset using the latest refreshable interval.
+			timer.Reset(getInterval())
+		}
+	}
+}
+
+// loadUnloadedRefIndexes loads all RefIndexes that are Pending or Failed.
+func (sm *snapshotMeta) loadUnloadedRefIndexes() {
+	sm.snapshotID2RefIndex.Range(func(id UniqueID, refIndex *SnapshotRefIndex) bool {
+		if refIndex.IsLoaded() {
+			return true // Already loaded, skip
+		}
+
+		info, exists := sm.snapshotID2Info.Get(id)
+		if !exists {
+			return true // Snapshot deleted
+		}
+
+		snapshotData, err := sm.reader.ReadSnapshot(sm.loaderCtx, info.GetS3Location(), false)
+		if err != nil {
+			log.Warn("failed to load RefIndex from S3",
+				zap.String("name", info.GetName()),
+				zap.Int64("id", id),
+				zap.Error(err))
+			refIndex.SetFailed()
+		} else {
+			refIndex.SetLoaded(snapshotData.SegmentIDs, snapshotData.IndexIDs)
+			log.Info("loaded RefIndex from S3",
+				zap.String("name", info.GetName()),
+				zap.Int64("id", id))
+		}
+
+		return true
+	})
+}
+
+// Close stops the background RefIndex loader goroutine.
+// Should be called when snapshotMeta is no longer needed.
+func (sm *snapshotMeta) Close() {
+	if sm.loaderCancel != nil {
+		sm.loaderCancel()
+		sm.loaderWg.Wait()
+	}
 }
 
 // SaveSnapshot persists a new snapshot to both S3 and catalog using 2PC (Two-Phase Commit).
@@ -640,9 +685,9 @@ func (sm *snapshotMeta) getSnapshotByName(ctx context.Context, snapshotName stri
 // This is used for garbage collection safety: before deleting a segment, check if
 // any snapshots reference it. If snapshots exist, the segment cannot be deleted.
 //
-// IMPORTANT: Caller should check IsRefIndexLoaded() first. If RefIndexes are not
-// loaded, results may be incomplete (returns empty for snapshots whose data is
-// not available), which could lead to unsafe deletions.
+// IMPORTANT: Caller should check IsRefIndexLoadedForCollection(collectionID) first.
+// If RefIndexes are not loaded, results may be incomplete (returns empty for
+// snapshots whose data is not available), which could lead to unsafe deletions.
 //
 // The lookup is O(N) where N is the number of snapshots. Each ContainsSegment()
 // call is non-blocking and returns false if data is not yet loaded.
@@ -683,9 +728,9 @@ func (sm *snapshotMeta) GetSnapshotBySegment(ctx context.Context, collectionID, 
 // This is used for garbage collection safety: before deleting an index, check if
 // any snapshots reference it. If snapshots exist, the index cannot be deleted.
 //
-// IMPORTANT: Caller should check IsRefIndexLoaded() first. If RefIndexes are not
-// loaded, results may be incomplete (returns empty for snapshots whose data is
-// not available), which could lead to unsafe deletions.
+// IMPORTANT: Caller should check IsRefIndexLoadedForCollection(collectionID) first.
+// If RefIndexes are not loaded, results may be incomplete (returns empty for
+// snapshots whose data is not available), which could lead to unsafe deletions.
 //
 // The lookup is O(N) where N is the number of snapshots. Each ContainsIndex()
 // call is non-blocking and returns false if data is not yet loaded.
@@ -856,14 +901,36 @@ func (sm *snapshotMeta) removeFromSecondaryIndexes(snapshotInfo *datapb.Snapshot
 	}
 }
 
-// IsRefIndexLoaded returns true if all RefIndexes have been loaded from S3.
-// Used by GC to check if it's safe to query snapshot references.
-// If not loaded, GC should skip snapshot reference checks and try again in the next cycle.
-func (sm *snapshotMeta) IsRefIndexLoaded() bool {
-	select {
-	case <-sm.refIndexLoadDone:
-		return true
-	default:
-		return false
+// IsRefIndexLoadedForCollection checks if RefIndexes for a collection are loaded.
+// Used by GC to check if it's safe to query snapshot references for a specific collection.
+func (sm *snapshotMeta) IsRefIndexLoadedForCollection(collectionID int64) bool {
+	sm.collectionIndexMu.RLock()
+	snapshotIDs, ok := sm.collectionID2Snapshots.Get(collectionID)
+	if !ok {
+		sm.collectionIndexMu.RUnlock()
+		return true // No snapshots for this collection, consider as loaded
 	}
+
+	allLoaded := true
+	snapshotIDs.Range(func(snapshotID int64) bool {
+		refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotID)
+		// Safety first:
+		// - If snapshotInfo exists but refIndex is missing/not loaded, treat as not loaded to avoid unsafe GC.
+		// - If snapshotInfo doesn't exist (already deleted/cleaned), ignore this snapshotID.
+		if !exists {
+			if _, ok := sm.snapshotID2Info.Get(snapshotID); ok {
+				allLoaded = false
+				return false
+			}
+			return true
+		}
+
+		if !refIndex.IsLoaded() {
+			allLoaded = false
+			return false // Stop iteration
+		}
+		return true
+	})
+	sm.collectionIndexMu.RUnlock()
+	return allLoaded
 }

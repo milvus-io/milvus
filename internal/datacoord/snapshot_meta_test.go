@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
@@ -35,6 +36,32 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+// waitForRefIndexLoaded waits for a specific RefIndex to be loaded with timeout.
+func waitForRefIndexLoaded(sm *snapshotMeta, snapshotID int64, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotID)
+		if exists && refIndex.IsLoaded() {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
+}
+
+// waitForRefIndexFailed waits for a specific RefIndex to be marked as failed with timeout.
+func waitForRefIndexFailed(sm *snapshotMeta, snapshotID int64, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotID)
+		if exists && refIndex.IsFailed() {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
+}
 
 // --- Helper functions for test data creation ---
 
@@ -80,24 +107,24 @@ func createTestSnapshotMeta(t *testing.T) *snapshotMeta {
 	tempDir := t.TempDir()
 	tempChunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 
+	loaderCtx, loaderCancel := context.WithCancel(context.Background())
 	return &snapshotMeta{
 		catalog:                catalog,
 		snapshotID2Info:        typeutil.NewConcurrentMap[typeutil.UniqueID, *datapb.SnapshotInfo](),
 		snapshotID2RefIndex:    typeutil.NewConcurrentMap[typeutil.UniqueID, *SnapshotRefIndex](),
 		snapshotName2ID:        typeutil.NewConcurrentMap[string, typeutil.UniqueID](),
 		collectionID2Snapshots: typeutil.NewConcurrentMap[typeutil.UniqueID, typeutil.UniqueSet](),
-		refIndexLoadDone:       make(chan struct{}),
+		loaderCtx:              loaderCtx,
+		loaderCancel:           loaderCancel,
 		reader:                 NewSnapshotReader(tempChunkManager),
 		writer:                 NewSnapshotWriter(tempChunkManager),
 	}
 }
 
-// createTestSnapshotMetaLoaded creates a snapshotMeta with refIndexLoadDone already closed.
-// Use this for tests that don't call reload() and need the RefIndex to appear loaded.
+// createTestSnapshotMetaLoaded creates a snapshotMeta for tests that don't call reload().
+// Same as createTestSnapshotMeta since RefIndex state is now per-snapshot.
 func createTestSnapshotMetaLoaded(t *testing.T) *snapshotMeta {
-	sm := createTestSnapshotMeta(t)
-	close(sm.refIndexLoadDone)
-	return sm
+	return createTestSnapshotMeta(t)
 }
 
 // insertTestSnapshot inserts snapshot data into snapshotMeta for testing.
@@ -492,6 +519,7 @@ func TestNewSnapshotMeta_Success_WithMockey(t *testing.T) {
 	// Assert
 	assert.NoError(t, err)
 	assert.NotNil(t, sm)
+	defer sm.Close()
 	assert.Equal(t, mockCatalog, sm.catalog)
 	assert.NotNil(t, sm.snapshotID2Info)
 	assert.NotNil(t, sm.snapshotID2RefIndex)
@@ -561,14 +589,18 @@ func TestNewSnapshotMeta_ReaderError_AsyncLoading_WithMockey(t *testing.T) {
 	assert.True(t, exists)
 	assert.Equal(t, snapshotInfo.Name, info.Name)
 
-	// Wait for async loading to complete
-	<-sm.refIndexLoadDone
+	// Wait for background loader to process (will fail and mark as Failed)
+	assert.True(t, waitForRefIndexFailed(sm, snapshotInfo.Id, 2*time.Second))
 
-	// RefIndex is loaded with empty sets (due to reader error)
+	// RefIndex should be in Failed state (due to reader error)
 	refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotInfo.Id)
 	assert.True(t, exists)
-	// Should return false since reader error causes empty data
+	assert.True(t, refIndex.IsFailed())
+	// Should return false since loading failed
 	assert.False(t, refIndex.ContainsSegment(1001))
+
+	// Cleanup
+	sm.Close()
 }
 
 // --- reload Tests (Mockey-based) ---
@@ -608,14 +640,16 @@ func TestSnapshotMeta_Reload_Success_WithMockey(t *testing.T) {
 	assert.True(t, exists)
 	assert.Equal(t, snapshotData.SnapshotInfo, info)
 
-	// Verify refIndex exists and has loaded data
+	// Verify refIndex exists (in Pending state)
 	refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotData.SnapshotInfo.Id)
 	assert.True(t, exists)
+	assert.False(t, refIndex.IsLoaded()) // Not loaded yet
 
-	// Wait for async loading to complete
-	<-sm.refIndexLoadDone
+	// Manually trigger loading (simulates background goroutine)
+	sm.loadUnloadedRefIndexes()
 
 	// Verify segment and index IDs are correctly loaded
+	assert.True(t, refIndex.IsLoaded())
 	assert.True(t, refIndex.ContainsSegment(1001))
 	assert.True(t, refIndex.ContainsIndex(2001))
 }
@@ -725,8 +759,8 @@ func TestSnapshotMeta_Reload_Concurrent_MultipleSnapshots(t *testing.T) {
 		assert.Equal(t, snapshotInfo, info)
 	}
 
-	// Wait for async loading to complete
-	<-sm.refIndexLoadDone
+	// Manually trigger loading (simulates background goroutine)
+	sm.loadUnloadedRefIndexes()
 
 	// Verify segment and index IDs are correctly loaded
 	for _, snapshotInfo := range snapshotInfos {
@@ -797,8 +831,8 @@ func TestSnapshotMeta_Reload_Concurrent_PartialFailure(t *testing.T) {
 		assert.Equal(t, info, infoVal)
 	}
 
-	// Wait for async loading to complete
-	<-sm.refIndexLoadDone
+	// Manually trigger loading (simulates background goroutine)
+	sm.loadUnloadedRefIndexes()
 
 	// Verify successful snapshots are loaded
 	refIndex1, _ := sm.snapshotID2RefIndex.Get(1001)
@@ -807,8 +841,9 @@ func TestSnapshotMeta_Reload_Concurrent_PartialFailure(t *testing.T) {
 	refIndex3, _ := sm.snapshotID2RefIndex.Get(1003)
 	assert.True(t, refIndex3.ContainsSegment(10030))
 
-	// Verify failed snapshot has empty sets (loaded with nil data due to error)
+	// Verify failed snapshot is in Failed state
 	refIndex2, _ := sm.snapshotID2RefIndex.Get(1002)
+	assert.True(t, refIndex2.IsFailed())
 	assert.False(t, refIndex2.ContainsSegment(10020))
 }
 
@@ -1218,40 +1253,6 @@ func TestSnapshotRefIndex_EmptySets(t *testing.T) {
 	assert.False(t, refIndex.ContainsIndex(2001))
 }
 
-// --- IsRefIndexLoaded Tests ---
-
-func TestSnapshotMeta_IsRefIndexLoaded_NotLoaded(t *testing.T) {
-	// Test IsRefIndexLoaded returns false when refIndexLoadDone is not closed
-	sm := &snapshotMeta{
-		refIndexLoadDone: make(chan struct{}), // Not closed = not loaded
-	}
-
-	assert.False(t, sm.IsRefIndexLoaded())
-}
-
-func TestSnapshotMeta_IsRefIndexLoaded_Loaded(t *testing.T) {
-	// Test IsRefIndexLoaded returns true when refIndexLoadDone is closed
-	sm := createTestSnapshotMetaLoaded(t) // createTestSnapshotMetaLoaded closes the channel
-
-	assert.True(t, sm.IsRefIndexLoaded())
-}
-
-func TestSnapshotMeta_IsRefIndexLoaded_AfterAsyncLoadComplete(t *testing.T) {
-	// Test that IsRefIndexLoaded returns true after async loading completes
-	sm := &snapshotMeta{
-		refIndexLoadDone: make(chan struct{}),
-	}
-
-	// Initially not loaded
-	assert.False(t, sm.IsRefIndexLoaded())
-
-	// Simulate async loading completion
-	close(sm.refIndexLoadDone)
-
-	// Now should be loaded
-	assert.True(t, sm.IsRefIndexLoaded())
-}
-
 // --- Concurrent Operations Tests ---
 
 func TestSnapshotMeta_ConcurrentOperations(t *testing.T) {
@@ -1410,12 +1411,12 @@ func TestSnapshotMeta_Reload_LegacyFormat_NoPrecomputedIDs(t *testing.T) {
 	assert.True(t, exists)
 	assert.Equal(t, snapshotInfo, info)
 
-	// Verify refIndex exists
+	// Verify refIndex exists (in Pending state)
 	refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotInfo.Id)
 	assert.True(t, exists)
 
-	// Wait for async loading to complete
-	<-sm.refIndexLoadDone
+	// Manually trigger loading (simulates background goroutine)
+	sm.loadUnloadedRefIndexes()
 
 	// Legacy snapshots will have empty ID sets
 	assert.False(t, refIndex.ContainsSegment(1001))
@@ -1500,8 +1501,8 @@ func TestSnapshotMeta_Reload_MixedFormats(t *testing.T) {
 	_, exists = sm.snapshotID2Info.Get(1002)
 	assert.True(t, exists)
 
-	// Wait for async loading to complete
-	<-sm.refIndexLoadDone
+	// Manually trigger loading (simulates background goroutine)
+	sm.loadUnloadedRefIndexes()
 
 	// Verify each snapshot was read exactly once (no slow path fallback)
 	newRefIndex, _ := sm.snapshotID2RefIndex.Get(1001)
@@ -1588,8 +1589,8 @@ func TestSnapshotMeta_Reload_SkipPendingAndDeletingState_WithMockey(t *testing.T
 	_, exists = sm.snapshotID2Info.Get(deletingSnapshot.Id)
 	assert.False(t, exists, "Deleting snapshot should be skipped")
 
-	// Wait for async loading to complete
-	<-sm.refIndexLoadDone
+	// Manually trigger loading (simulates background goroutine)
+	sm.loadUnloadedRefIndexes()
 
 	// Verify refIndex for committed snapshot exists and can be accessed
 	refIndex, exists := sm.snapshotID2RefIndex.Get(committedSnapshot.Id)
@@ -1728,4 +1729,205 @@ func TestSnapshotMeta_CleanupDeletingSnapshot_CatalogError_WithMockey(t *testing
 	// Assert
 	assert.Error(t, err)
 	assert.Equal(t, expectedErr, err)
+}
+
+func TestSnapshotRefIndex_SetFailed(t *testing.T) {
+	// Test SetFailed marks RefIndex as failed
+	refIndex := NewSnapshotRefIndex()
+
+	// Initially not failed
+	assert.False(t, refIndex.IsFailed())
+
+	// Mark as failed
+	refIndex.SetFailed()
+
+	// Should now be failed
+	assert.True(t, refIndex.IsFailed())
+	assert.False(t, refIndex.IsLoaded())
+
+	// ContainsSegment/Index should return false for failed state
+	assert.False(t, refIndex.ContainsSegment(1001))
+	assert.False(t, refIndex.ContainsIndex(2001))
+}
+
+func TestSnapshotRefIndex_TransitionFromFailedToLoaded(t *testing.T) {
+	// Test that SetLoaded can recover from failed state
+	refIndex := NewSnapshotRefIndex()
+
+	// Set as failed first
+	refIndex.SetFailed()
+	assert.True(t, refIndex.IsFailed())
+
+	// Now set as loaded with data
+	refIndex.SetLoaded([]int64{1001, 1002}, []int64{2001})
+
+	// Should now be loaded, not failed
+	assert.False(t, refIndex.IsFailed())
+	assert.True(t, refIndex.IsLoaded())
+	assert.True(t, refIndex.ContainsSegment(1001))
+	assert.True(t, refIndex.ContainsIndex(2001))
+}
+
+func TestSnapshotMeta_Reload_PartialFailure_SetsFailed(t *testing.T) {
+	// Test that loadUnloadedRefIndexes sets RefIndex to failed state (not nil) when S3 read fails
+	ctx := context.Background()
+	sm := createTestSnapshotMeta(t)
+
+	snapshotInfo := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: 100,
+		Name:         "test_snapshot",
+		S3Location:   "s3://bucket/test",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+	}
+
+	// Mock catalog.ListSnapshots
+	mock1 := mockey.Mock((*kv_datacoord.Catalog).ListSnapshots).To(func(ctx context.Context) ([]*datapb.SnapshotInfo, error) {
+		return []*datapb.SnapshotInfo{snapshotInfo}, nil
+	}).Build()
+	defer mock1.UnPatch()
+
+	// Mock SnapshotReader.ReadSnapshot to always fail
+	mock2 := mockey.Mock((*SnapshotReader).ReadSnapshot).To(func(sr *SnapshotReader, ctx context.Context, metadataFilePath string, includeSegments bool) (*SnapshotData, error) {
+		return nil, errors.New("S3 read failed")
+	}).Build()
+	defer mock2.UnPatch()
+
+	// Trigger reload
+	err := sm.reload(ctx)
+	assert.NoError(t, err)
+
+	// Manually trigger loading (simulates background goroutine - should fail)
+	sm.loadUnloadedRefIndexes()
+
+	// Verify RefIndex is in failed state
+	refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotInfo.Id)
+	assert.True(t, exists)
+	assert.True(t, refIndex.IsFailed())
+	assert.False(t, refIndex.IsLoaded())
+}
+
+func TestSnapshotMeta_IsRefIndexLoadedForCollection_NoSnapshots(t *testing.T) {
+	// Test that IsRefIndexLoadedForCollection returns true when collection has no snapshots
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Collection 999 has no snapshots
+	assert.True(t, sm.IsRefIndexLoadedForCollection(999))
+}
+
+func TestSnapshotMeta_IsRefIndexLoadedForCollection_AllLoaded(t *testing.T) {
+	// Test that IsRefIndexLoadedForCollection returns true when all RefIndexes for collection are loaded
+	sm := createTestSnapshotMetaLoaded(t)
+
+	collectionID := int64(100)
+
+	// Add snapshots with loaded RefIndexes for collection 100
+	for i := int64(1); i <= 3; i++ {
+		snapshotInfo := &datapb.SnapshotInfo{
+			Id:           i,
+			CollectionId: collectionID,
+			Name:         fmt.Sprintf("test_snapshot_%d", i),
+		}
+		sm.snapshotID2Info.Insert(snapshotInfo.Id, snapshotInfo)
+		sm.snapshotID2RefIndex.Insert(snapshotInfo.Id, NewLoadedSnapshotRefIndex([]int64{i * 1000}, []int64{i * 2000}))
+		sm.addToSecondaryIndexes(snapshotInfo)
+	}
+
+	// IsRefIndexLoadedForCollection should return true
+	assert.True(t, sm.IsRefIndexLoadedForCollection(collectionID))
+}
+
+func TestSnapshotMeta_IsRefIndexLoadedForCollection_HasFailed(t *testing.T) {
+	// Test that IsRefIndexLoadedForCollection returns false when collection has failed RefIndex
+	sm := createTestSnapshotMetaLoaded(t)
+
+	collectionID := int64(100)
+
+	// Add a loaded RefIndex
+	snapshot1 := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: collectionID,
+		Name:         "snapshot1",
+	}
+	sm.snapshotID2Info.Insert(snapshot1.Id, snapshot1)
+	sm.snapshotID2RefIndex.Insert(snapshot1.Id, NewLoadedSnapshotRefIndex([]int64{1001}, nil))
+	sm.addToSecondaryIndexes(snapshot1)
+
+	// Add a failed RefIndex for same collection
+	snapshot2 := &datapb.SnapshotInfo{
+		Id:           2,
+		CollectionId: collectionID,
+		Name:         "snapshot2",
+	}
+	failedRefIndex := NewSnapshotRefIndex()
+	failedRefIndex.SetFailed()
+	sm.snapshotID2Info.Insert(snapshot2.Id, snapshot2)
+	sm.snapshotID2RefIndex.Insert(snapshot2.Id, failedRefIndex)
+	sm.addToSecondaryIndexes(snapshot2)
+
+	// IsRefIndexLoadedForCollection should return false
+	assert.False(t, sm.IsRefIndexLoadedForCollection(collectionID))
+}
+
+func TestSnapshotMeta_IsRefIndexLoadedForCollection_OtherCollectionFailed(t *testing.T) {
+	// Test that IsRefIndexLoadedForCollection returns true even if other collection has failed RefIndex
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Add loaded RefIndex for collection 100
+	snapshot1 := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: 100,
+		Name:         "snapshot1",
+	}
+	sm.snapshotID2Info.Insert(snapshot1.Id, snapshot1)
+	sm.snapshotID2RefIndex.Insert(snapshot1.Id, NewLoadedSnapshotRefIndex([]int64{1001}, nil))
+	sm.addToSecondaryIndexes(snapshot1)
+
+	// Add failed RefIndex for collection 200
+	snapshot2 := &datapb.SnapshotInfo{
+		Id:           2,
+		CollectionId: 200,
+		Name:         "snapshot2",
+	}
+	failedRefIndex := NewSnapshotRefIndex()
+	failedRefIndex.SetFailed()
+	sm.snapshotID2Info.Insert(snapshot2.Id, snapshot2)
+	sm.snapshotID2RefIndex.Insert(snapshot2.Id, failedRefIndex)
+	sm.addToSecondaryIndexes(snapshot2)
+
+	// Collection 100 should return true (its RefIndex is loaded)
+	assert.True(t, sm.IsRefIndexLoadedForCollection(100))
+
+	// Collection 200 should return false (its RefIndex is failed)
+	assert.False(t, sm.IsRefIndexLoadedForCollection(200))
+}
+
+func TestSnapshotMeta_IsRefIndexLoadedForCollection_MissingRefIndexWithSnapshotInfo(t *testing.T) {
+	// Safety: if snapshotInfo exists but refIndex is missing, treat as not loaded to avoid unsafe GC.
+	sm := createTestSnapshotMetaLoaded(t)
+
+	collectionID := int64(100)
+	snapshot := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: collectionID,
+		Name:         "snapshot_missing_refindex",
+	}
+	sm.snapshotID2Info.Insert(snapshot.Id, snapshot)
+	// Intentionally do NOT insert snapshotID2RefIndex.
+	sm.addToSecondaryIndexes(snapshot)
+
+	assert.False(t, sm.IsRefIndexLoadedForCollection(collectionID))
+}
+
+func TestSnapshotMeta_IsRefIndexLoadedForCollection_MissingRefIndexAndSnapshotInfo(t *testing.T) {
+	// If snapshotInfo is already deleted/cleaned, a stale snapshotID should not block GC forever.
+	sm := createTestSnapshotMetaLoaded(t)
+
+	collectionID := int64(100)
+	staleSnapshotID := int64(1)
+	set := typeutil.NewUniqueSet(staleSnapshotID)
+	sm.collectionID2Snapshots.Insert(collectionID, set)
+	// No snapshotID2Info and no snapshotID2RefIndex for staleSnapshotID.
+
+	assert.True(t, sm.IsRefIndexLoadedForCollection(collectionID))
 }
