@@ -25,6 +25,7 @@ type Field struct {
 	DefaultValue     *schemapb.ValueField
 	ElementType      schemapb.DataType
 	Nullable         bool
+	ExternalField    string
 }
 
 func (f *Field) Available() bool {
@@ -49,6 +50,7 @@ func (f *Field) Clone() *Field {
 		DefaultValue:     f.DefaultValue,
 		ElementType:      f.ElementType,
 		Nullable:         f.Nullable,
+		ExternalField:    f.ExternalField,
 	}
 }
 
@@ -80,7 +82,8 @@ func (f *Field) Equal(other Field) bool {
 		proto.Equal(f.DefaultValue, other.DefaultValue) &&
 		f.ElementType == other.ElementType &&
 		f.IsFunctionOutput == other.IsFunctionOutput &&
-		f.Nullable == other.Nullable
+		f.Nullable == other.Nullable &&
+		f.ExternalField == other.ExternalField
 }
 
 func CheckFieldsEqual(fieldsA, fieldsB []*Field) bool {
@@ -121,6 +124,7 @@ func MarshalFieldModel(field *Field) *schemapb.FieldSchema {
 		DefaultValue:     proto.Clone(field.DefaultValue).(*schemapb.ValueField),
 		ElementType:      field.ElementType,
 		Nullable:         field.Nullable,
+		ExternalField:    field.ExternalField,
 	}
 }
 
@@ -157,6 +161,7 @@ func UnmarshalFieldModel(fieldSchema *schemapb.FieldSchema) *Field {
 		DefaultValue:     fieldSchema.DefaultValue,
 		ElementType:      fieldSchema.ElementType,
 		Nullable:         fieldSchema.Nullable,
+		ExternalField:    fieldSchema.ExternalField,
 	}
 }
 

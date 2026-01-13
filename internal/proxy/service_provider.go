@@ -210,6 +210,8 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		Properties:         c.schema.CollectionSchema.Properties,
 		Functions:          c.schema.CollectionSchema.Functions,
 		DbName:             c.schema.CollectionSchema.DbName,
+		ExternalSource:     c.schema.CollectionSchema.ExternalSource,
+		ExternalSpec:       c.schema.CollectionSchema.ExternalSpec,
 	}
 
 	// Restore struct field names from internal format (structName[fieldName]) to original format
