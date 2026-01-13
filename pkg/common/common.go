@@ -189,6 +189,7 @@ const (
 	CollectionTTLConfigKey      = "collection.ttl.seconds"
 	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
 	CollectionDescription       = "collection.description"
+	MaxTTLSeconds               = 3155760000 // 100 years
 
 	// Note:
 	// Function output fields cannot be included in inserted data.
