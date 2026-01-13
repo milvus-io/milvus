@@ -49,6 +49,7 @@ func (s *ServerBuilder) Build() *Server {
 		resource.OptETCD(s.etcdClient),
 		resource.OptStreamingCatalog(streamingcoord.NewCataLog(s.metaKV)),
 		resource.OptMixCoordClient(s.mixCoordClient),
+		resource.OptSession(s.session),
 	)
 	return &Server{
 		logger:            resource.Resource().Logger().With(log.FieldComponent("server")),

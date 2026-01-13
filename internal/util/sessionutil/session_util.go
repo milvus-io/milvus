@@ -169,8 +169,9 @@ type Session struct {
 
 	metaRoot string
 
-	registered   atomic.Value
-	disconnected atomic.Value
+	registered         atomic.Value
+	registeredRevision atomic.Int64
+	disconnected       atomic.Value
 
 	isStandby           atomic.Value
 	enableActiveStandBy bool
@@ -280,6 +281,7 @@ func NewSessionWithEtcd(ctx context.Context, metaRoot string, client *clientv3.C
 		sessionRetryTimes: paramtable.Get().CommonCfg.SessionRetryTimes.GetAsInt64(),
 		reuseNodeID:       true,
 	}
+	session.registeredRevision.Store(-1)
 
 	// integration test create cluster with different nodeId in one process
 	if paramtable.Get().IntegrationTestCfg.IntegrationMode.GetAsBool() {
@@ -331,6 +333,14 @@ func (s *Session) Register() {
 	}
 	s.UpdateRegistered(true)
 	s.startKeepAliveLoop()
+}
+
+func (s *Session) GetRegisteredRevision() int64 {
+	revision := s.registeredRevision.Load()
+	if revision < 0 {
+		panic("registeredRevision is used before register")
+	}
+	return revision
 }
 
 // isCoordinator checks if the session needs to check the version.
@@ -502,6 +512,9 @@ func (s *Session) registerService() error {
 		}
 		if txnResp != nil && !txnResp.Succeeded {
 			return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", s.ServerName)
+		}
+		if !s.enableActiveStandBy {
+			s.registeredRevision.Store(txnResp.Header.GetRevision())
 		}
 		s.Logger().Info("put session key into etcd, service registered successfully", zap.String("key", completeKey), zap.String("value", string(sessionJSON)))
 		return nil
@@ -1036,12 +1049,13 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 			return false, -1, err
 		}
 		doRegistered := txnResp.Succeeded
+		revision := txnResp.Header.GetRevision()
 		if doRegistered {
-			log.Info(fmt.Sprintf("register ACTIVE %s", s.ServerName))
+			s.registeredRevision.Store(revision)
+			log.Info(fmt.Sprintf("register ACTIVE %s", s.ServerName), zap.Int64("revision", revision))
 		} else {
 			log.Info(fmt.Sprintf("ACTIVE %s has already been registered", s.ServerName))
 		}
-		revision := txnResp.Header.GetRevision()
 		return doRegistered, revision, nil
 	}
 	s.updateStandby(true)
