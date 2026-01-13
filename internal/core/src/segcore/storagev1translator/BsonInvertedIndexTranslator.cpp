@@ -85,7 +85,8 @@ BsonInvertedIndexTranslator::key() const {
 std::vector<std::pair<milvus::cachinglayer::cid_t,
                       std::unique_ptr<milvus::index::BsonInvertedIndex>>>
 BsonInvertedIndexTranslator::get_cells(
-    const std::vector<milvus::cachinglayer::cid_t>&) {
+    milvus::OpContext* ctx,
+    const std::vector<milvus::cachinglayer::cid_t>& cids) {
     auto index =
         std::make_unique<milvus::index::BsonInvertedIndex>(disk_file_manager_);
 

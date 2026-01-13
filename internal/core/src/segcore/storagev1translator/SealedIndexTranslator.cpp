@@ -96,7 +96,8 @@ SealedIndexTranslator::key() const {
 
 std::vector<std::pair<milvus::cachinglayer::cid_t,
                       std::unique_ptr<milvus::index::IndexBase>>>
-SealedIndexTranslator::get_cells(const std::vector<cid_t>& cids) {
+SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
+                                 const std::vector<cid_t>& cids) {
     std::unique_ptr<milvus::index::IndexBase> index =
         milvus::index::IndexFactory::GetInstance().CreateIndex(
             index_info_, file_manager_context_);
