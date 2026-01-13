@@ -1682,7 +1682,6 @@ def workflow_pr():
     if not pr_body:
         pr_body = ""
     pr_body += f"\n\nissue: #{issue_number}"
-    pr_body += "\n\nSigned-off-by: (Checked)"
 
     print_info("Creating PR in milvus-io/milvus...")
     try:
