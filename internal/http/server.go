@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/util/expr"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -116,9 +115,8 @@ func registerDefaults() {
 				return
 			}
 
-			// On Proxy node: require root user authentication via HTTP Basic Auth
-			if err := checkExprRootAuth(req); err != nil {
-				w.WriteHeader(http.StatusUnauthorized)
+			if err := CheckExprAuth(req.Context(), req); err != nil {
+				w.WriteHeader(HTTPStatusFromPrivilegeError(err))
 				fmt.Fprintf(w, `{"msg": "%s"}`, err.Error())
 				return
 			}
@@ -313,43 +311,4 @@ func getHTTPAddr() string {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.MetricsPort.Key, port)
 
 	return fmt.Sprintf(":%s", port)
-}
-
-// checkExprRootAuth verifies that the request is from the root user.
-// It supports HTTP Basic Auth and Bearer token formats.
-func checkExprRootAuth(req *http.Request) error {
-	// Try HTTP Basic Auth first
-	username, password, ok := req.BasicAuth()
-	if !ok {
-		// Try Bearer token format: "user:password"
-		auth := req.Header.Get("Authorization")
-		auth = strings.TrimPrefix(auth, "Bearer ")
-		parts := strings.SplitN(auth, ":", 2)
-		if len(parts) == 2 {
-			username, password = parts[0], parts[1]
-			ok = true
-		}
-	}
-
-	if !ok || username == "" || password == "" {
-		return merr.WrapErrParameterInvalidMsg("authentication required. Use HTTP Basic Auth with root credentials")
-	}
-
-	// Only root user can access /expr
-	if username != "root" {
-		log.Warn("non-root user attempted to access /expr", zap.String("username", username))
-		return merr.WrapErrParameterInvalidMsg("only root user can access /expr endpoint")
-	}
-
-	// Verify root password
-	if passwordVerifyFunc == nil {
-		return merr.WrapErrServiceInternalMsg("password verification not available")
-	}
-	if !passwordVerifyFunc(context.Background(), username, password) {
-		log.Warn("invalid root password for /expr access")
-		return merr.WrapErrParameterInvalidMsg("invalid root password")
-	}
-
-	log.Info("root user authenticated for /expr access")
-	return nil
 }
