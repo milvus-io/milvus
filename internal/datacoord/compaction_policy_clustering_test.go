@@ -225,6 +225,8 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionSkipExternal()
 		Schema: func() *schemapb.CollectionSchema {
 			schema := newTestScalarClusteringKeySchema()
 			schema.ExternalSource = "s3://external"
+			// External collections are identified by having ExternalField set on fields.
+			schema.Fields[0].ExternalField = "field1_col"
 			return schema
 		}(),
 	}, nil)

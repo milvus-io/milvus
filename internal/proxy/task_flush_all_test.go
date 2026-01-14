@@ -21,12 +21,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/util/uniquegenerator"
 )
@@ -233,32 +231,4 @@ func TestFlushAllTaskBaseTaskMethods(t *testing.T) {
 	time.Sleep(1 * time.Millisecond)
 	execDuration := task.GetDurationInExecuting()
 	assert.Greater(t, execDuration, time.Duration(0))
-}
-
-func TestFlushTask_ExternalCollection(t *testing.T) {
-	// Initialize globalMetaCache to avoid nil pointer dereference
-	globalMetaCache = &MetaCache{}
-
-	// Create external collection schema
-	externalSchema := &schemapb.CollectionSchema{
-		Name:           "external_col",
-		ExternalSource: "s3://bucket/path",
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-		},
-	}
-
-	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
-	defer m1.UnPatch()
-
-	task := &flushTask{
-		FlushRequest: &milvuspb.FlushRequest{
-			DbName:          "default",
-			CollectionNames: []string{"external_col"},
-		},
-	}
-
-	err := task.PreExecute(context.Background())
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "flush operation is not supported for external collection")
 }

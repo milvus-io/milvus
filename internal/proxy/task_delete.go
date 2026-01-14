@@ -288,12 +288,6 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		return ErrWithLog(log, "Failed to get collection schema", err)
 	}
 
-	// Check for external collection - delete is not supported
-	if typeutil.IsExternalCollection(dr.schema.CollectionSchema) {
-		return merr.WrapErrParameterInvalidMsg(
-			"delete operation is not supported for external collection %s", collName)
-	}
-
 	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, dr.req.GetDbName(), collName, dr.collectionID)
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection info", err)

@@ -280,6 +280,14 @@ func (s *SingleCompactionPolicySuite) TestTriggerOneCollectionSkipExternal() {
 		ID: collID,
 		Schema: &schemapb.CollectionSchema{
 			ExternalSource: "s3://external",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:       1,
+					Name:          "external_pk",
+					DataType:      schemapb.DataType_Int64,
+					ExternalField: "pk_col",
+				},
+			},
 		},
 	}
 	mockHandler := NewNMockHandler(s.T())

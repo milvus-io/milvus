@@ -2418,6 +2418,14 @@ func TestIsCollectionAutoCompactionEnabledExternal(t *testing.T) {
 		ID: 1,
 		Schema: &schemapb.CollectionSchema{
 			ExternalSource: "s3://external",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:       1,
+					Name:          "external_pk",
+					DataType:      schemapb.DataType_Int64,
+					ExternalField: "pk_col",
+				},
+			},
 		},
 	}
 	assert.False(t, isCollectionAutoCompactionEnabled(coll))

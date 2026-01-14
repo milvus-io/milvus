@@ -1058,12 +1058,6 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// Check for external collection - upsert is not supported
-	if typeutil.IsExternalCollection(colInfo.schema.CollectionSchema) {
-		return merr.WrapErrParameterInvalidMsg(
-			"upsert operation is not supported for external collection %s", collectionName)
-	}
-
 	if it.schemaTimestamp != 0 {
 		if it.schemaTimestamp != colInfo.updateTimestamp {
 			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)

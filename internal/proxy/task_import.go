@@ -108,11 +108,6 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	}
 	it.schema = schema
 
-	// Check for external collection - import is not supported
-	if typeutil.IsExternalCollection(schema.CollectionSchema) {
-		return merr.WrapErrParameterInvalidMsg(
-			"import operation is not supported for external collection %s", req.GetCollectionName())
-	}
 	channels, err := node.chMgr.getVChannels(collectionID)
 	if err != nil {
 		return err

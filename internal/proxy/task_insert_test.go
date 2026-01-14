@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -728,41 +727,4 @@ func TestInsertTask_Namespace(t *testing.T) {
 		err = it.PreExecute(context.Background())
 		assert.Error(t, err)
 	})
-}
-
-func TestInsertTask_ExternalCollection(t *testing.T) {
-	// Initialize globalMetaCache to avoid nil pointer dereference
-	globalMetaCache = &MetaCache{}
-
-	// Create external collection schema
-	externalSchema := &schemapb.CollectionSchema{
-		Name:           "external_col",
-		ExternalSource: "s3://bucket/path",
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-		},
-	}
-
-	m1 := mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{dbID: 0}, nil).Build()
-	m2 := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1), nil).Build()
-	m3 := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
-		schema: newSchemaInfo(externalSchema),
-	}, nil).Build()
-	defer m1.UnPatch()
-	defer m2.UnPatch()
-	defer m3.UnPatch()
-
-	it := insertTask{
-		ctx: context.Background(),
-		insertMsg: &msgstream.InsertMsg{
-			InsertRequest: &msgpb.InsertRequest{
-				DbName:         "default",
-				CollectionName: "external_col",
-			},
-		},
-	}
-
-	err := it.PreExecute(context.Background())
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "insert operation is not supported for external collection")
 }

@@ -105,9 +105,10 @@ func (s *statsInspectorSuite) SetupTest() {
 			ExternalSource: "s3://external",
 			Fields: []*schemapb.FieldSchema{
 				{
-					FieldID:  200,
-					Name:     "pk",
-					DataType: schemapb.DataType_Int64,
+					FieldID:       200,
+					Name:          "pk",
+					DataType:      schemapb.DataType_Int64,
+					ExternalField: "pk_col",
 				},
 				{
 					FieldID:  201,

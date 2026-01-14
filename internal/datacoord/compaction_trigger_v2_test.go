@@ -169,6 +169,14 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerSkipExternal() {
 		ID: 1,
 		Schema: &schemapb.CollectionSchema{
 			ExternalSource: "s3://external",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:       1,
+					Name:          "external_pk",
+					DataType:      schemapb.DataType_Int64,
+					ExternalField: "pk_col",
+				},
+			},
 		},
 	}, nil)
 	s.triggerManager.handler = handler

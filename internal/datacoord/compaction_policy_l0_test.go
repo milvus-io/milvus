@@ -208,6 +208,14 @@ func (s *L0CompactionPolicySuite) TestTriggerSkipExternalCollection() {
 	}()
 	s.collection.Schema = &schemapb.CollectionSchema{
 		ExternalSource: "s3://foo",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:       1,
+				Name:          "external_pk",
+				DataType:      schemapb.DataType_Int64,
+				ExternalField: "pk_col",
+			},
+		},
 	}
 
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil).Maybe()
