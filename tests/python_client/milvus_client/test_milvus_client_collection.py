@@ -1,5 +1,6 @@
 import pytest
 import numpy
+import time
 
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
@@ -4952,3 +4953,434 @@ class TestMilvusClientCollectionMmap(TestMilvusClientV2Base):
 
 
 
+@pytest.mark.xdist_group("TestMilvusClientTruncateCollection")
+class TestMilvusClientTruncateCollection(TestMilvusClientV2Base):
+    """
+    #########################################################
+    Init collection  so all the tests can use the same collection
+    This aims to save time for the tests
+    #########################################################
+    """
+    schema = None
+    COLLECTION_NAME = "truncate_collection" + cf.gen_unique_str("_")
+    COLLECTION_NAME_STRONG = "truncate_collection_strong"
+    COLLECTION_NAME_BOUNDED = "truncate_collection_bounded"
+    COLLECTION_NAME_SESSION = "truncate_collection_session"
+    COLLECTION_NAME_EVENTUALLY = "truncate_collection_eventually"
+    COLLECTION_NAME_ADD_FIELD = "truncate_collection_add_field"
+    COLLECTION_NAME_ADD_INDEX = "truncate_collection_add_index"
+    COLLECTIONS = [(COLLECTION_NAME, "Strong"), 
+                   (COLLECTION_NAME_STRONG, "Strong"), 
+                   (COLLECTION_NAME_BOUNDED, "Bounded"), 
+                   (COLLECTION_NAME_SESSION, "Session"), 
+                   (COLLECTION_NAME_EVENTUALLY, "Eventually"),
+                   (COLLECTION_NAME_ADD_FIELD, "Strong"),
+                   (COLLECTION_NAME_ADD_INDEX, "Strong")]
+
+    @pytest.fixture(scope="module", autouse=True)
+    def prepare_truncate_collection(self, request):
+        """
+        Ensure the shared highlighter collection exists before any tests in this module,
+        and drop it after all tests in this module complete.
+        """
+        client = self._client()
+        for collection_name, _ in self.COLLECTIONS:
+            if client.has_collection(collection_name):
+                client.drop_collection(collection_name)
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=True)
+        schema.add_field(default_primary_key_field_name, datatype=DataType.INT64, is_primary=True)
+        schema.add_field(default_vector_field_name, datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+        # Share schema across tests in this class
+        type(self).schema = schema
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        
+        for collection_name, consistency_level in self.COLLECTIONS:
+            client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params, consistency_level=consistency_level)
+
+        def teardown():
+            for collection_name, _ in self.COLLECTIONS:
+                try:
+                    if self.has_collection(self._client(), collection_name):
+                        self.drop_collection(self._client(), collection_name)
+                except Exception:
+                    pass
+        request.addfinalizer(teardown)
+
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_truncate_collection(self):
+        """
+        target: test truncate collection with strong consistency level
+        method: insert data and query count(*) as well as segment count
+        expected: the collection is truncated
+        """
+        client = self._client()
+        collection_name = self.COLLECTION_NAME
+        
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=self.schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        result = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0].get("count(*)", -1) == default_nb
+        seg = self.list_persistent_segments(client, collection_name)
+        assert len(seg[0]) == 1
+
+        self.truncate_collection(client, collection_name)
+        result = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0].get("count(*)", -1) == 0
+        seg = self.list_persistent_segments(client, collection_name)
+        assert len(seg[0]) == 0
+
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_truncate_alias_collection(self):
+        """
+        target: test truncate collection with alias
+        method: truncate collection with alias
+        expected: the collection is truncated
+        """
+        client = self._client()
+        collection_name = self.COLLECTION_NAME_STRONG
+        alias = "alias_collection"
+        self.create_alias(client, collection_name, alias)
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=self.schema)
+        self.insert(client, alias, rows)
+
+        self.truncate_collection(client, alias)
+        self.drop_alias(client, alias)
+        result = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0].get("count(*)", -1) == 0
+        seg = self.list_persistent_segments(client, collection_name)
+        assert len(seg[0]) == 0
+
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_truncate_empty_collection(self):
+        """
+        target: test truncate on empty collection
+        method: truncate on empty collection
+        expected: the collection is truncated
+        """
+        client = self._client()
+        collection_name = self.COLLECTION_NAME_EVENTUALLY
+        self.truncate_collection(client, collection_name)
+        result = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0].get("count(*)", -1) == 0
+        seg = self.list_persistent_segments(client, collection_name)
+        assert len(seg[0]) == 0
+
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_truncate_released_collection(self):
+        """
+        target: test truncate released collection
+        method: truncate released collection
+        expected: the collection is truncated
+        """
+        # insert data
+        client = self._client()
+        collection_name = self.COLLECTION_NAME
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=self.schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # query data to make sure the collection is not empty
+        result = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0].get("count(*)", -1) == default_nb
+        seg = self.list_persistent_segments(client, collection_name)
+        assert len(seg[0]) == 1
+
+        # release collection
+        self.release_collection(client, collection_name)
+
+        # truncate released collection
+        self.truncate_collection(client, collection_name)
+
+        # load collection and query data to make sure the collection is truncated
+        self.load_collection(client, collection_name)
+        result = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0].get("count(*)", -1) == 0
+        seg = self.list_persistent_segments(client, collection_name)
+        assert len(seg[0]) == 0
+
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_truncate_collection_add_collection_field(self):
+        """
+        target: test truncate collection with add collection field
+        method: truncate collection with add collection field
+        expected: the collection is truncated
+        """
+        add_field_name = "add_field_int64"
+        add_field_default_value = 100
+        client = self._client()
+        collection_name = self.COLLECTION_NAME_ADD_FIELD
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=self.schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        result = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0].get("count(*)", -1) == default_nb
+        seg = self.list_persistent_segments(client, collection_name)
+        assert len(seg[0]) == 1
+        self.truncate_collection(client, collection_name)
+
+        self.add_collection_field(client, collection_name, add_field_name, DataType.INT64, nullable=True, default_value=add_field_default_value)
+        result = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0].get("count(*)", -1) == 0
+        seg = self.list_persistent_segments(client, collection_name)
+        assert len(seg[0]) == 0
+
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=self.schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        result = self.query(client, collection_name, filter=default_search_exp, output_fields=[add_field_name])
+        assert result[0][0].get(add_field_name, None) == add_field_default_value
+        seg = self.list_persistent_segments(client, collection_name)
+        assert len(seg[0]) == 1
+
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_truncate_collection_bounded(self):
+        """
+        target: test truncate collection with bounded consistency level
+        method: truncate collection with bounded consistency level
+        expected: the collection is truncated
+        """
+        client = self._client()
+        collection_name = self.COLLECTION_NAME_BOUNDED
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=self.schema)
+        self.insert(client, collection_name, rows)
+
+        self.truncate_collection(client, collection_name)
+        self.flush(client, collection_name)
+        result = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0].get("count(*)", -1) == 0
+        seg = self.list_persistent_segments(client, collection_name)
+        assert len(seg[0]) == 0
+
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_truncate_collection_session(self):
+        """
+        target: test truncate collection with session consistency level
+        method: truncate collection with session consistency level
+        expected: the collection is truncated
+        """
+        client = self._client()
+        collection_name = self.COLLECTION_NAME_SESSION
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=self.schema)
+        self.insert(client, collection_name, rows)
+
+        self.truncate_collection(client, collection_name)
+        self.flush(client, collection_name)
+        result = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0].get("count(*)", -1) == 0
+        seg = self.list_persistent_segments(client, collection_name)
+        assert len(seg[0]) == 0
+    
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_truncate_collection_eventually(self):
+        """
+        target: test truncate collection with eventually consistency level
+        method: truncate collection with eventually consistency level
+        expected: the collection is truncated
+        """
+        client = self._client()
+        collection_name = self.COLLECTION_NAME_EVENTUALLY
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=self.schema)
+        self.insert(client, collection_name, rows)
+
+        self.truncate_collection(client, collection_name)
+        self.flush(client, collection_name)
+        result = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0].get("count(*)", -1) == 0
+        seg = self.list_persistent_segments(client, collection_name)
+        assert len(seg[0]) == 0
+
+    
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_truncate_collection_add_more_index(self):
+        """
+        target: test add index and then truncate collection
+        method: truncate collection with add more index
+        expected: the collection is truncated with correct index
+        """
+        add_field_name = "add_timestamptz"
+        client = self._client()
+        collection_name = self.COLLECTION_NAME_ADD_INDEX
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=self.schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        
+        self.add_collection_field(client, collection_name, add_field_name, DataType.TIMESTAMPTZ, nullable=True, default_value="2026-01-01T00:00:00Z")
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(add_field_name, index_type="AUTOINDEX")
+        self.create_index(client, collection_name, index_params)
+
+        self.truncate_collection(client, collection_name)
+        result = self.describe_index(client, collection_name, index_name=add_field_name)
+        assert result[0] != []
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_truncate_collection_insert_parallel(self):
+        """
+        target: test truncate collection with parallel insert operations
+        method: insert data and truncate collection at the same time in parallel
+        expected: the collection is truncated regardless of timing
+        """
+        import threading
+
+        client_1 = self._client()
+        client_2 = self._client(alias="client2_alias")
+        collection_name = self.COLLECTION_NAME_STRONG
+
+        # Function to insert data
+        def insert_data():
+            try:
+                rows = cf.gen_row_data_by_schema(nb=default_nb, schema=self.schema)
+                self.insert(client_1, collection_name, rows)
+            except Exception as e:
+                log.debug(f"Insert operation failed: {e}")
+
+        # Function to truncate collection
+        def truncate_collection():
+            try:
+                self.truncate_collection(client_2, collection_name)
+            except Exception as e:
+                log.debug(f"Truncate operation failed: {e}")
+
+        # Create threads for parallel execution
+        insert_thread = threading.Thread(target=insert_data)
+        truncate_thread = threading.Thread(target=truncate_collection)
+
+        # Start both threads simultaneously
+        insert_thread.start()
+        time.sleep(1) # sleep time less than 1s will result in successful after truncate i.e. truncate will not win
+        truncate_thread.start()
+
+        # Wait for both threads to complete
+        insert_thread.join()
+        truncate_thread.join()
+
+        # Verify the collection is truncated (truncate should win due to consistency)
+        result = self.query(client_1, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0].get("count(*)", -1) == 0
+        seg = self.list_persistent_segments(client_2, collection_name)
+        assert len(seg[0]) == 0
+
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_truncate_collection_query_parallel(self):
+        """
+        target: test truncate collection with parallel query operations
+        method: insert data first, then query and truncate collection at the same time in parallel
+        expected: the collection is truncated regardless of timing
+        """
+        import threading
+
+        client_1 = self._client()
+        client_2 = self._client(alias="client2_alias")
+        collection_name = self.COLLECTION_NAME
+
+        # Step 1: Insert data first
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=self.schema)
+        self.insert(client_1, collection_name, rows)
+        self.flush(client_1, collection_name)
+
+        # Verify data was inserted
+        result = self.query(client_1, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0].get("count(*)", -1) == default_nb
+
+        # Shared variables to store results
+        query_result = [None]
+        after_truncate_result = [None]
+
+        # Function to query collection
+        def query_collection(result_container):
+            try:
+                result = self.query(client_1, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+                log.debug(f"Query result during parallel execution: {result[0][0].get('count(*)', -1)}")
+                result_container[0] = result
+            except Exception as e:
+                log.debug(f"Query operation failed: {e}")
+                result_container[0] = None
+
+        # Function to truncate collection
+        def truncate_collection():
+            try:
+                self.truncate_collection(client_2, collection_name)
+            except Exception as e:
+                log.debug(f"Truncate operation failed: {e}")
+
+        # Create threads for parallel execution
+        query_thread = threading.Thread(target=query_collection, args=(query_result,))
+        truncate_thread = threading.Thread(target=truncate_collection)
+        query_after_truncate_thread = threading.Thread(target=query_collection, args=(after_truncate_result,))
+
+        # Start both threads simultaneously
+        query_thread.start()
+        truncate_thread.start() 
+        time.sleep(1) # sleep 1s to allow truncate to delete data
+        query_after_truncate_thread.start()
+
+        # Wait for all threads to complete
+        query_thread.join()
+        truncate_thread.join()
+        query_after_truncate_thread.join()
+
+        # Verify the collection is truncated (truncate should win due to consistency)
+        assert query_result[0][0][0].get("count(*)", -1) == default_nb
+        assert after_truncate_result[0][0][0].get("count(*)", -1) == 0
+
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_truncate_collection_after_compaction(self):
+        """
+        target: test truncate collection after compaction
+        method: insert data first, then compact and truncate collection
+        expected: the collection is truncated after compaction
+        """
+        client = self._client()
+        collection_name = self.COLLECTION_NAME_BOUNDED
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=self.schema)
+        self.insert(client, collection_name, rows)
+        self.compact(client, collection_name)
+        self.truncate_collection(client, collection_name)
+        result = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0].get("count(*)", -1) == 0
+        seg = self.list_persistent_segments(client, collection_name)
+        assert len(seg[0]) == 0
+
+
+    @pytest.mark.tags(CaseLabel.ClusterOnly)
+    def test_milvus_client_truncate_collection_replica(self):
+        """
+        target: test truncate collection with replica
+        method: insert data first, then truncate collection
+        expected: the collection is truncated with correct replica
+        """
+        # insert data and then release collection
+        client = self._client()
+        collection_name = self.COLLECTION_NAME_STRONG
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=self.schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.release_collection(client, collection_name)
+
+        # load collection with replica number 2
+        self.load_collection(client, collection_name, replica_number=2)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded
+
+        # truncate collection
+        self.truncate_collection(client, collection_name)
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+        result = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0].get("count(*)", -1) == 0
+        seg = self.list_persistent_segments(client, collection_name)
+        assert len(seg[0]) == 0
