@@ -1948,6 +1948,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		log.Warn("failed to create schema helper", zap.String("name", schema.GetName()), zap.Error(err))
 		return nil, err
 	}
+	indexedFields := make(map[int64]struct{})
 	ctx := context.Background()
 
 	// PART 1: calculate size of indexes
@@ -1958,6 +1959,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			if err != nil {
 				return nil, err
 			}
+			indexedFields[fieldID] = struct{}{}
 
 			isVectorType := typeutil.IsVectorType(fieldSchema.GetDataType())
 
@@ -2036,6 +2038,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		mmapEnabled := true
 		isVectorType := true
 		needWarmup := false
+		hasIndex := true
 
 		for _, fieldID := range fieldIDs {
 			// get field schema from fieldID
@@ -2043,6 +2046,9 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			if err != nil {
 				log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
 				return nil, err
+			}
+			if _, ok := indexedFields[fieldID]; !ok {
+				hasIndex = false
 			}
 
 			// missing mapping, shall be "0" group for storage v2
@@ -2070,10 +2076,12 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			continue
 		}
 
-		if !multiplyFactor.TieredEvictionEnabled || needWarmup {
-			interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && supportInterimIndexDataType
-			if interimIndexEnable {
-				segMemoryLoadingSize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
+		if !hasIndex {
+			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+				interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && supportInterimIndexDataType
+				if interimIndexEnable {
+					segMemoryLoadingSize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
+				}
 			}
 		}
 
