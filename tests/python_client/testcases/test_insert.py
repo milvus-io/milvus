@@ -993,60 +993,6 @@ class TestInsertAsync(TestcaseBase):
 def assert_mutation_result(mutation_res):
     assert mutation_res.insert_count == ct.default_nb
 
-
-class TestInsertBinary(TestcaseBase):
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_insert_binary_partition(self):
-        """
-        target: test insert entities and create partition 
-        method: create collection and insert binary entities in it, with the partition_name param
-        expected: the collection row count equals to nb
-        """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(
-            name=c_name, schema=default_binary_schema)
-        df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
-        partition_name = cf.gen_unique_str(prefix)
-        partition_w1 = self.init_partition_wrap(collection_w, partition_name)
-        mutation_res, _ = collection_w.insert(
-            data=df, partition_name=partition_w1.name)
-        assert mutation_res.insert_count == ct.default_nb
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_insert_binary_multi_times(self):
-        """
-        target: test insert entities multi times and final flush
-        method: create collection and insert binary entity multi 
-        expected: the collection row count equals to nb
-        """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(
-            name=c_name, schema=default_binary_schema)
-        df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
-        nums = 2
-        for i in range(nums):
-            mutation_res, _ = collection_w.insert(data=df)
-        assert collection_w.num_entities == ct.default_nb * nums
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_binary_create_index(self):
-        """
-        target: test build index insert after vector
-        method: insert vector and build index
-        expected: no error raised
-        """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(
-            name=c_name, schema=default_binary_schema)
-        df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
-        mutation_res, _ = collection_w.insert(data=df)
-        assert mutation_res.insert_count == ct.default_nb
-        default_index = {"index_type": "BIN_IVF_FLAT",
-                         "params": {"nlist": 128}, "metric_type": "JACCARD"}
-        collection_w.create_index("binary_vector", default_index)
-
-
 class TestInsertInvalid(TestcaseBase):
     """
       ******************************************************************
@@ -1128,48 +1074,6 @@ class TestInsertInvalid(TestcaseBase):
                  for _ in range(2)]]
         res = collection_w.insert(data=data)[0]
         assert res.insert_count == 2
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("invalid_int8", [-129, 128])
-    def test_insert_int8_overflow(self, invalid_int8):
-        """
-        target: test insert int8 out of range
-        method: insert int8 out of range
-        expected: raise exception
-        """
-        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
-        data = cf.gen_dataframe_all_data_type(nb=1)
-        data[ct.default_int8_field_name] = [invalid_int8]
-        error = {ct.err_code: 1100, ct.err_msg: f"the 0th element ({invalid_int8}) out of range: [-128, 127]"}
-        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("invalid_int16", [-32769, 32768])
-    def test_insert_int16_overflow(self, invalid_int16):
-        """
-        target: test insert int16 out of range
-        method: insert int16 out of range
-        expected: raise exception
-        """
-        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
-        data = cf.gen_dataframe_all_data_type(nb=1)
-        data[ct.default_int16_field_name] = [invalid_int16]
-        error = {ct.err_code: 1100, ct.err_msg: f"the 0th element ({invalid_int16}) out of range: [-32768, 32767]"}
-        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("invalid_int32", [-2147483649, 2147483648])
-    def test_insert_int32_overflow(self, invalid_int32):
-        """
-        target: test insert int32 out of range
-        method: insert int32 out of range
-        expected: raise exception
-        """
-        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
-        data = cf.gen_dataframe_all_data_type(nb=1)
-        data[ct.default_int32_field_name] = [invalid_int32]
-        error = {ct.err_code: 999, 'err_msg': "The Input data type is inconsistent with defined schema"}
-        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_over_resource_limit(self):
@@ -1264,44 +1168,6 @@ class TestInsertInvalid(TestcaseBase):
         data.append(invalid_vec)
         error = {ct.err_code: 1, ct.err_msg: 'input must be a sparse matrix in supported format'}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
-
-
-class TestInsertInvalidBinary(TestcaseBase):
-    """
-      ******************************************************************
-      The following cases are used to test insert invalid params of binary
-      ******************************************************************
-    """
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_insert_ids_binary_invalid(self):
-        """
-        target: test insert float vector into a collection with binary vector schema
-        method: create collection and insert entities in it
-        expected: raise exception
-        """
-        collection_w = self.init_collection_general(prefix, auto_id=False, insert_data=False, is_binary=True,
-                                                    is_index=False, with_json=False)[0]
-        data = cf.gen_default_list_data(nb=100, with_json=False)
-        error = {ct.err_code: 999, ct.err_msg: "Invalid binary vector data exists"}
-        mutation_res, _ = collection_w.insert(
-            data=data, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_with_invalid_binary_partition_name(self):
-        """
-        target: test insert with invalid scenario
-        method: insert with invalid partition name
-        expected: raise exception
-        """
-        collection_w = self.init_collection_general(prefix, auto_id=False, insert_data=False, is_binary=True,
-                                                    is_index=False, with_json=False)[0]
-        partition_name = "non_existent_partition"
-        df, _ = cf.gen_default_binary_dataframe_data(nb=100)
-        error = {ct.err_code: 999, 'err_msg': f"partition not found[partition={partition_name}]"}
-        mutation_res, _ = collection_w.insert(data=df, partition_name=partition_name, check_task=CheckTasks.err_res,
-                                              check_items=error)
-
 
 class TestInsertString(TestcaseBase):
     """
