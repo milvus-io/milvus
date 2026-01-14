@@ -307,4 +307,231 @@ AssembleGroupByValues(
     }
 }
 
+void
+AssembleOrderByValues(
+    std::unique_ptr<milvus::proto::schema::SearchResultData>& search_result,
+    const std::vector<std::vector<OrderByValueType>>& order_by_vals_list,
+    milvus::query::Plan* plan) {
+    auto order_by_fields = plan->plan_node_->search_info_.order_by_fields_;
+    if (!order_by_fields.has_value() || order_by_fields.value().empty()) {
+        return;
+    }
+
+    // Use the first order_by field (since OrderByFieldValue is a single FieldData)
+    const auto& first_order_by_field = order_by_fields.value()[0];
+    auto order_by_field_id = first_order_by_field.field_id_;
+    auto order_by_field = plan->schema_->operator[](order_by_field_id);
+    auto order_by_data_type = order_by_field.get_data_type();
+
+    // Extract values for the first order_by field from order_by_vals_list
+    std::vector<OrderByValueType> first_field_vals;
+    first_field_vals.reserve(order_by_vals_list.size());
+    for (const auto& order_by_vals : order_by_vals_list) {
+        if (!order_by_vals.empty()) {
+            first_field_vals.push_back(order_by_vals[0]);
+        } else {
+            first_field_vals.push_back(std::nullopt);
+        }
+    }
+
+    auto valid_data =
+        std::make_unique<google::protobuf::RepeatedField<bool>>();
+    valid_data->Resize(first_field_vals.size(), true);
+    auto order_by_res_values =
+        std::make_unique<milvus::proto::schema::ScalarField>();
+    auto mutable_order_by_field_value =
+        search_result->mutable_order_by_field_value();
+    int order_by_val_size = first_field_vals.size();
+
+    switch (order_by_data_type) {
+        case DataType::INT8: {
+            mutable_order_by_field_value->set_type(
+                milvus::proto::schema::DataType::Int8);
+            auto field_data = order_by_res_values->mutable_int_data();
+            field_data->mutable_data()->Resize(order_by_val_size, 0);
+            for (std::size_t idx = 0; idx < order_by_val_size; idx++) {
+                if (first_field_vals[idx].has_value()) {
+                    int8_t val =
+                        std::get<int8_t>(first_field_vals[idx].value());
+                    field_data->mutable_data()->Set(idx, val);
+                } else {
+                    valid_data->Set(idx, false);
+                }
+            }
+            break;
+        }
+        case DataType::INT16: {
+            mutable_order_by_field_value->set_type(
+                milvus::proto::schema::DataType::Int16);
+            auto field_data = order_by_res_values->mutable_int_data();
+            field_data->mutable_data()->Resize(order_by_val_size, 0);
+            for (std::size_t idx = 0; idx < order_by_val_size; idx++) {
+                if (first_field_vals[idx].has_value()) {
+                    int16_t val =
+                        std::get<int16_t>(first_field_vals[idx].value());
+                    field_data->mutable_data()->Set(idx, val);
+                } else {
+                    valid_data->Set(idx, false);
+                }
+            }
+            break;
+        }
+        case DataType::INT32: {
+            mutable_order_by_field_value->set_type(
+                milvus::proto::schema::DataType::Int32);
+            auto field_data = order_by_res_values->mutable_int_data();
+            field_data->mutable_data()->Resize(order_by_val_size, 0);
+            for (std::size_t idx = 0; idx < order_by_val_size; idx++) {
+                if (first_field_vals[idx].has_value()) {
+                    int32_t val =
+                        std::get<int32_t>(first_field_vals[idx].value());
+                    field_data->mutable_data()->Set(idx, val);
+                } else {
+                    valid_data->Set(idx, false);
+                }
+            }
+            break;
+        }
+        case DataType::INT64: {
+            mutable_order_by_field_value->set_type(
+                milvus::proto::schema::DataType::Int64);
+            auto field_data = order_by_res_values->mutable_long_data();
+            field_data->mutable_data()->Resize(order_by_val_size, 0);
+            for (std::size_t idx = 0; idx < order_by_val_size; idx++) {
+                if (first_field_vals[idx].has_value()) {
+                    int64_t val =
+                        std::get<int64_t>(first_field_vals[idx].value());
+                    field_data->mutable_data()->Set(idx, val);
+                } else {
+                    valid_data->Set(idx, false);
+                }
+            }
+            break;
+        }
+        case DataType::TIMESTAMPTZ: {
+            mutable_order_by_field_value->set_type(
+                milvus::proto::schema::DataType::Timestamptz);
+            auto field_data =
+                order_by_res_values->mutable_timestamptz_data();
+            field_data->mutable_data()->Resize(order_by_val_size, 0);
+            for (std::size_t idx = 0; idx < order_by_val_size; idx++) {
+                if (first_field_vals[idx].has_value()) {
+                    int64_t val =
+                        std::get<int64_t>(first_field_vals[idx].value());
+                    field_data->mutable_data()->Set(idx, val);
+                } else {
+                    valid_data->Set(idx, false);
+                }
+            }
+            break;
+        }
+        case DataType::BOOL: {
+            mutable_order_by_field_value->set_type(
+                milvus::proto::schema::DataType::Bool);
+            auto field_data = order_by_res_values->mutable_bool_data();
+            field_data->mutable_data()->Resize(order_by_val_size, 0);
+            for (std::size_t idx = 0; idx < order_by_val_size; idx++) {
+                if (first_field_vals[idx].has_value()) {
+                    bool val = std::get<bool>(first_field_vals[idx].value());
+                    field_data->mutable_data()->Set(idx, val);
+                } else {
+                    valid_data->Set(idx, false);
+                }
+            }
+            break;
+        }
+        case DataType::VARCHAR: {
+            mutable_order_by_field_value->set_type(
+                milvus::proto::schema::DataType::VarChar);
+            auto field_data = order_by_res_values->mutable_string_data();
+            for (std::size_t idx = 0; idx < order_by_val_size; idx++) {
+                if (first_field_vals[idx].has_value()) {
+                    std::string val =
+                        std::get<std::string>(first_field_vals[idx].value());
+                    *(field_data->mutable_data()->Add()) = val;
+                } else {
+                    valid_data->Set(idx, false);
+                }
+            }
+            break;
+        }
+        case DataType::FLOAT: {
+            mutable_order_by_field_value->set_type(
+                milvus::proto::schema::DataType::Float);
+            auto field_data = order_by_res_values->mutable_float_data();
+            field_data->mutable_data()->Resize(order_by_val_size, 0);
+            for (std::size_t idx = 0; idx < order_by_val_size; idx++) {
+                if (first_field_vals[idx].has_value()) {
+                    float val = std::get<float>(first_field_vals[idx].value());
+                    field_data->mutable_data()->Set(idx, val);
+                } else {
+                    valid_data->Set(idx, false);
+                }
+            }
+            break;
+        }
+        case DataType::DOUBLE: {
+            mutable_order_by_field_value->set_type(
+                milvus::proto::schema::DataType::Double);
+            auto field_data = order_by_res_values->mutable_double_data();
+            field_data->mutable_data()->Resize(order_by_val_size, 0);
+            for (std::size_t idx = 0; idx < order_by_val_size; idx++) {
+                if (first_field_vals[idx].has_value()) {
+                    double val = std::get<double>(first_field_vals[idx].value());
+                    field_data->mutable_data()->Set(idx, val);
+                } else {
+                    valid_data->Set(idx, false);
+                }
+            }
+            break;
+        }
+        case DataType::JSON: {
+            // For JSON, use the json_path from the first order_by field
+            auto json_path = first_order_by_field.json_path_;
+            if (!json_path.has_value()) {
+                // If no json_path, treat as string
+                mutable_order_by_field_value->set_type(
+                    milvus::proto::schema::DataType::VarChar);
+                auto field_data = order_by_res_values->mutable_string_data();
+                for (std::size_t idx = 0; idx < order_by_val_size; idx++) {
+                    if (first_field_vals[idx].has_value()) {
+                        std::string val = std::get<std::string>(
+                            first_field_vals[idx].value());
+                        *(field_data->mutable_data()->Add()) = val;
+                    } else {
+                        valid_data->Set(idx, false);
+                    }
+                }
+            } else {
+                // JSON with path - determine type from the actual values
+                // For simplicity, assume string type for JSON paths
+                mutable_order_by_field_value->set_type(
+                    milvus::proto::schema::DataType::VarChar);
+                auto field_data = order_by_res_values->mutable_string_data();
+                for (std::size_t idx = 0; idx < order_by_val_size; idx++) {
+                    if (first_field_vals[idx].has_value()) {
+                        std::string val = std::get<std::string>(
+                            first_field_vals[idx].value());
+                        *(field_data->mutable_data()->Add()) = val;
+                    } else {
+                        valid_data->Set(idx, false);
+                    }
+                }
+            }
+            break;
+        }
+        default: {
+            ThrowInfo(
+                DataTypeInvalid,
+                fmt::format("unsupported datatype for order_by operations ",
+                            order_by_data_type));
+        }
+    }
+
+    mutable_order_by_field_value->mutable_valid_data()->MergeFrom(
+        *valid_data);
+    mutable_order_by_field_value->mutable_scalars()->MergeFrom(
+        *order_by_res_values.get());
+}
+
 }  // namespace milvus::segcore

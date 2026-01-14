@@ -125,6 +125,29 @@ ProtoParser::ParseSearchInfo(const planpb::VectorANNS& anns_proto) {
         search_info.strict_cast_ = query_info_proto.strict_cast();
     }
 
+    // Parse order_by_fields
+    if (query_info_proto.order_by_fields_size() > 0) {
+        std::vector<plan::OrderByField> order_by_fields;
+        order_by_fields.reserve(query_info_proto.order_by_fields_size());
+
+        for (const auto& order_by_field_proto :
+             query_info_proto.order_by_fields()) {
+            auto field_id = FieldId(order_by_field_proto.field_id());
+            bool ascending = order_by_field_proto.ascending();
+            std::optional<std::string> json_path = std::nullopt;
+
+            if (!order_by_field_proto.json_path().empty()) {
+                json_path = order_by_field_proto.json_path();
+            }
+
+            order_by_fields.emplace_back(field_id, ascending, json_path);
+        }
+
+        if (!order_by_fields.empty()) {
+            search_info.order_by_fields_ = std::move(order_by_fields);
+        }
+    }
+
     if (query_info_proto.has_search_iterator_v2_info()) {
         auto& iterator_v2_info_proto =
             query_info_proto.search_iterator_v2_info();
@@ -478,6 +501,18 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     if (plan_node->search_info_.group_by_field_id_ != std::nullopt) {
         plannode = std::make_shared<milvus::plan::SearchGroupByNode>(
             milvus::plan::GetNextPlanNodeId(), sources);
+        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+    }
+
+    // Add SearchOrderByNode if order_by fields are specified
+    if (plan_node->search_info_.order_by_fields_.has_value() &&
+        !plan_node->search_info_.order_by_fields_.value().empty()) {
+        plannode = std::make_shared<milvus::plan::SearchOrderByNode>(
+            milvus::plan::GetNextPlanNodeId(),
+            std::vector<plan::OrderByField>(
+                plan_node->search_info_.order_by_fields_.value().begin(),
+                plan_node->search_info_.order_by_fields_.value().end()),
+            sources);
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
     }
 

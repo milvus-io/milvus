@@ -23,4 +23,10 @@ AssembleGroupByValues(
     const std::vector<GroupByValueType>& group_by_vals,
     milvus::query::Plan* plan);
 
+void
+AssembleOrderByValues(
+    std::unique_ptr<milvus::proto::schema::SearchResultData>& search_result,
+    const std::vector<std::vector<OrderByValueType>>& order_by_vals_list,
+    milvus::query::Plan* plan);
+
 }
