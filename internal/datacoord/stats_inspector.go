@@ -27,18 +27,21 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type StatsInspector interface {
 	Start()
 	Stop()
-	SubmitStatsTask(originSegmentID, targetSegmentID int64, subJobType indexpb.StatsSubJob, canRecycle bool) error
+	SubmitStatsTask(originSegmentID, targetSegmentID int64, subJobType indexpb.StatsSubJob, canRecycle bool, resources []*internalpb.FileResourceInfo) error
 	GetStatsTask(originSegmentID int64, subJobType indexpb.StatsSubJob) *indexpb.StatsTask
 	DropStatsTask(originSegmentID int64, subJobType indexpb.StatsSubJob) error
 }
@@ -204,8 +207,18 @@ func (si *statsInspector) triggerTextStatsTask() {
 			return seg.GetIsSorted() && needDoTextIndex(seg, needTriggerFieldIDs)
 		}))
 
+		resources := []*internalpb.FileResourceInfo{}
+		var err error
+		if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) && len(collection.Schema.GetFileResourceIds()) > 0 {
+			resources, err = si.mt.GetFileResources(si.ctx, collection.Schema.GetFileResourceIds()...)
+			if err != nil {
+				log.Warn("get file resources for collection failed, wait for retry", zap.Int64("collectionID", collection.ID), zap.Error(err))
+				continue
+			}
+		}
+
 		for _, segment := range segments {
-			if err := si.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_TextIndexJob, true); err != nil {
+			if err := si.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_TextIndexJob, true, resources); err != nil {
 				log.Warn("create stats task with text index for segment failed, wait for retry",
 					zap.Int64("segmentID", segment.GetID()), zap.Error(err))
 				continue
@@ -235,7 +248,7 @@ func (si *statsInspector) triggerJsonKeyIndexStatsTask(lastJSONStatsLastTrigger 
 			if maxJSONStatsTaskCount >= Params.DataCoordCfg.JSONStatsTriggerCount.GetAsInt() {
 				break
 			}
-			if err := si.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob, true); err != nil {
+			if err := si.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob, true, nil); err != nil {
 				log.Warn("create stats task with json key index for segment failed, wait for retry:",
 					zap.Int64("segmentID", segment.GetID()), zap.Error(err))
 				continue
@@ -261,7 +274,7 @@ func (si *statsInspector) triggerBM25StatsTask() {
 		}))
 
 		for _, segment := range segments {
-			if err := si.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_BM25Job, true); err != nil {
+			if err := si.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_BM25Job, true, nil); err != nil {
 				log.Warn("create stats task with bm25 for segment failed, wait for retry",
 					zap.Int64("segmentID", segment.GetID()), zap.Error(err))
 				continue
@@ -301,6 +314,7 @@ func (si *statsInspector) cleanupStatsTasksLoop() {
 
 func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64,
 	subJobType indexpb.StatsSubJob, canRecycle bool,
+	resources []*internalpb.FileResourceInfo,
 ) error {
 	originSegment := si.mt.GetHealthySegment(si.ctx, originSegmentID)
 	if originSegment == nil {
@@ -329,6 +343,7 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 		TargetSegmentID: targetSegmentID,
 		SubJobType:      subJobType,
 		CanRecycle:      canRecycle,
+		FileResources:   resources,
 	}
 	if err = si.mt.statsTaskMeta.AddStatsTask(t); err != nil {
 		if errors.Is(err, merr.ErrTaskDuplicate) {

@@ -46,7 +46,7 @@ class TimestampIndex {
                       std::pair<int64_t, int64_t> active_range);
 
     size_t
-    size() const {
+    memory_size() const {
         return sizeof(*this) + lengths_.size() * sizeof(int64_t) +
                start_locs_.size() * sizeof(int64_t) +
                timestamp_barriers_.size() * sizeof(Timestamp);

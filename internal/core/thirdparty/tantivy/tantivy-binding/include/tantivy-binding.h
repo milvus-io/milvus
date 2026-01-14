@@ -302,7 +302,8 @@ RustResult tantivy_phrase_match_query(void *ptr, const char *query, uint32_t slo
 
 RustResult tantivy_register_tokenizer(void *ptr,
                                       const char *tokenizer_name,
-                                      const char *analyzer_params);
+                                      const char *analyzer_params,
+                                      const char *analyzer_extra_info);
 
 RustResult tantivy_create_index(const char *field_name,
                                 TantivyDataType data_type,
@@ -479,8 +480,9 @@ RustResult tantivy_index_add_array_keywords_by_single_segment_writer(void *ptr,
 RustResult tantivy_create_text_writer(const char *field_name,
                                       const char *path,
                                       uint32_t tantivy_index_version,
-                                      const char *tokenizer_name,
+                                      const char *analyzer_name,
                                       const char *analyzer_params,
+                                      const char *analyzer_extra_info,
                                       uintptr_t num_threads,
                                       uintptr_t overall_memory_budget_in_bytes,
                                       bool in_ram);

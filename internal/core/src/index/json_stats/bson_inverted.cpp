@@ -29,36 +29,36 @@ namespace milvus::index {
 
 BsonInvertedIndex::BsonInvertedIndex(const std::string& path,
                                      int64_t field_id,
-                                     bool is_load,
                                      const storage::FileManagerContext& ctx,
                                      int64_t tantivy_index_version)
-    : is_load_(is_load),
+    : is_load_(false),
       field_id_(field_id),
       tantivy_index_version_(tantivy_index_version) {
     disk_file_manager_ =
         std::make_shared<milvus::storage::DiskFileManagerImpl>(ctx);
-    if (is_load_) {
-        auto prefix = disk_file_manager_->GetLocalJsonStatsSharedIndexPrefix();
-        path_ = prefix;
-        LOG_INFO("bson inverted index load path:{}", path_);
-    } else {
-        path_ = path;
-        LOG_INFO("bson inverted index build path:{}", path_);
-    }
+    path_ = path;
+    LOG_INFO("bson inverted index build path:{}", path_);
+}
+
+BsonInvertedIndex::BsonInvertedIndex(
+    std::shared_ptr<milvus::storage::DiskFileManagerImpl> disk_file_manager)
+    : is_load_(true) {
+    disk_file_manager_ = disk_file_manager;
+    field_id_ = disk_file_manager->GetFieldDataMeta().field_id;
+    path_ = disk_file_manager_->GetLocalJsonStatsSharedIndexPrefix();
+    LOG_INFO("bson inverted index load path:{}", path_);
 }
 
 BsonInvertedIndex::~BsonInvertedIndex() {
     if (wrapper_) {
         wrapper_->free();
     }
-    if (!is_load_) {
-        auto local_chunk_manager =
-            milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                .GetChunkManager();
-        auto prefix = path_;
-        LOG_INFO("bson inverted index remove path:{}", path_);
-        local_chunk_manager->RemoveDir(prefix);
-    }
+    auto local_chunk_manager =
+        milvus::storage::LocalChunkManagerSingleton::GetInstance()
+            .GetChunkManager();
+    auto prefix = path_;
+    LOG_INFO("bson inverted index remove path:{}", path_);
+    local_chunk_manager->RemoveDir(prefix);
 }
 
 void
@@ -124,13 +124,14 @@ BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
                    path_);
         wrapper_ = std::make_shared<TantivyIndexWrapper>(
             path_.c_str(), load_in_mmap, milvus::index::SetBitsetUnused);
-
         if (!load_in_mmap) {
+            // the index is loaded in ram, so we can remove files in advance
             disk_file_manager_->RemoveJsonStatsSharedIndexFiles();
         }
+        load_in_mmap_ = load_in_mmap;
         LOG_INFO(
-            "load json shared key index done for field id:{} with "
-            "dir:{},load_in_mmap:{}",
+            "load json shared key index done for field id:{} with dir:{}, "
+            "load_in_mmap:{}",
             field_id_,
             path_,
             load_in_mmap);

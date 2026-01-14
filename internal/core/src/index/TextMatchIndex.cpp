@@ -22,7 +22,7 @@
 namespace milvus::index {
 TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
                                const char* unique_id,
-                               const char* tokenizer_name,
+                               const char* analyzer_name,
                                const char* analyzer_params)
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
@@ -33,7 +33,7 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
         "",
         TANTIVY_INDEX_LATEST_VERSION /* Growing segment has no reason to use old version index*/
         ,
-        tokenizer_name,
+        analyzer_name,
         analyzer_params);
     set_is_growing(true);
 }
@@ -41,7 +41,7 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
 TextMatchIndex::TextMatchIndex(const std::string& path,
                                const char* unique_id,
                                uint32_t tantivy_index_version,
-                               const char* tokenizer_name,
+                               const char* analyzer_name,
                                const char* analyzer_params)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
@@ -54,14 +54,15 @@ TextMatchIndex::TextMatchIndex(const std::string& path,
                                                      false,
                                                      path_.c_str(),
                                                      tantivy_index_version,
-                                                     tokenizer_name,
+                                                     analyzer_name,
                                                      analyzer_params);
 }
 
 TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
                                uint32_t tantivy_index_version,
-                               const char* tokenizer_name,
-                               const char* analyzer_params)
+                               const char* analyzer_name,
+                               const char* analyzer_params,
+                               const char* analyzer_extra_info)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
     schema_ = ctx.fieldDataMeta.field_schema;
@@ -78,8 +79,9 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
                                                      false,
                                                      path_.c_str(),
                                                      tantivy_index_version,
-                                                     tokenizer_name,
-                                                     analyzer_params);
+                                                     analyzer_name,
+                                                     analyzer_params,
+                                                     analyzer_extra_info);
 }
 
 TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx)
@@ -296,9 +298,9 @@ TextMatchIndex::CreateReader(SetBitsetFn set_bitset) {
 }
 
 void
-TextMatchIndex::RegisterTokenizer(const char* tokenizer_name,
-                                  const char* analyzer_params) {
-    wrapper_->register_tokenizer(tokenizer_name, analyzer_params);
+TextMatchIndex::RegisterAnalyzer(const char* analyzer_name,
+                                 const char* analyzer_params) {
+    wrapper_->register_tokenizer(analyzer_name, analyzer_params);
 }
 
 TargetBitmap

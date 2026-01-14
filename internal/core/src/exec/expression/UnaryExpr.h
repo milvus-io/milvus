@@ -33,6 +33,8 @@
 #include "common/RegexQuery.h"
 #include "exec/expression/Utils.h"
 #include "common/bson_view.h"
+#include "index/json_stats/bson_inverted.h"
+#include "cachinglayer/CacheSlot.h"
 
 namespace milvus {
 namespace exec {
@@ -883,7 +885,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     CanUseNgramIndex() const override;
 
     std::optional<VectorPtr>
-    ExecNgramMatch();
+    ExecNgramMatch(EvalCtx& context);
 
     std::pair<std::string, std::string>
     SplitAtFirstSlashDigit(std::string input);
@@ -894,7 +896,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     bool arg_inited_{false};
     SingleElement value_arg_;
     PinWrapper<index::NgramInvertedIndex*> pinned_ngram_index_{nullptr};
-    PinWrapper<index::JsonKeyStats*> pinned_json_stats_{nullptr};
+    PinWrapper<index::BsonInvertedIndex*> bson_index_{nullptr};
 };
 }  // namespace exec
 }  // namespace milvus

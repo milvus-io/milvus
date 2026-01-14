@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -81,6 +80,7 @@ const (
 	SearchIterBatchSizeKey = "search_iter_batch_size"
 	SearchIterLastBoundKey = "search_iter_last_bound"
 	SearchIterIdKey        = "search_iter_id"
+	QueryGroupByFieldsKey  = "group_by_fields"
 
 	InsertTaskName                = "InsertTask"
 	CreateCollectionTaskName      = "CreateCollectionTask"
@@ -355,6 +355,57 @@ func (t *createCollectionTask) validateClusteringKey(ctx context.Context) error 
 	return nil
 }
 
+func validateCollectionTTL(props []*commonpb.KeyValuePair) (bool, error) {
+	for _, pair := range props {
+		if pair.Key == common.CollectionTTLConfigKey {
+			val, err := strconv.Atoi(pair.Value)
+			if err != nil {
+				return true, merr.WrapErrParameterInvalidMsg("collection TTL is not a valid positive integer")
+			}
+			if val < -1 || val > common.MaxTTLSeconds {
+				return true, merr.WrapErrParameterInvalidMsg("collection TTL is out of range, expect [-1, 3155760000], got %d", val)
+			}
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func validateTTLField(props []*commonpb.KeyValuePair, fields []*schemapb.FieldSchema) (bool, error) {
+	for _, pair := range props {
+		if pair.Key == common.CollectionTTLFieldKey {
+			fieldName := pair.Value
+			for _, field := range fields {
+				if field.Name == fieldName {
+					if field.DataType != schemapb.DataType_Timestamptz {
+						return true, merr.WrapErrParameterInvalidMsg("ttl field must be timestamptz, field name = %s", fieldName)
+					}
+					return true, nil
+				}
+			}
+			return true, merr.WrapErrParameterInvalidMsg("ttl field name %s not found in schema", fieldName)
+		}
+	}
+	return false, nil
+}
+
+func (t *createCollectionTask) validateTTL() error {
+	hasCollectionTTL, err := validateCollectionTTL(t.GetProperties())
+	if err != nil {
+		return err
+	}
+
+	hasTTLField, err := validateTTLField(t.GetProperties(), t.schema.Fields)
+	if err != nil {
+		return err
+	}
+
+	if hasCollectionTTL && hasTTLField {
+		return merr.WrapErrParameterInvalidMsg("collection TTL and ttl field cannot be set at the same time")
+	}
+	return nil
+}
+
 func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_CreateCollection
 	t.Base.SourceID = paramtable.GetNodeID()
@@ -367,11 +418,16 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema.AutoID = false
 	t.schema.DbName = t.GetDbName()
 
+	isExternalCollection := typeutil.IsExternalCollection(t.schema)
+	if err := typeutil.ValidateExternalCollectionSchema(t.schema); err != nil {
+		return err
+	}
+
 	disableCheck, err := common.IsDisableFuncRuntimeCheck(t.GetProperties()...)
 	if err != nil {
 		return err
 	}
-	if err := validateFunction(t.schema, disableCheck); err != nil {
+	if err := validateFunction(t.schema, "", disableCheck); err != nil {
 		return err
 	}
 
@@ -398,9 +454,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// validate primary key definition
-	if err := validatePrimaryKey(t.schema); err != nil {
-		return err
+	// validate primary key definition when needed
+	if !isExternalCollection {
+		if err := validatePrimaryKey(t.schema); err != nil {
+			return err
+		}
 	}
 
 	// validate dynamic field
@@ -432,6 +490,12 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.GetProperties())
 	if exist && !timestamptz.IsTimezoneValid(tz) {
 		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
+	}
+
+	// Validate collection ttl
+	_, err = common.GetCollectionTTL(t.GetProperties())
+	if err != nil {
+		return merr.WrapErrParameterInvalidMsg("collection ttl property value not valid, parse error: %s", err.Error())
 	}
 
 	// validate clustering key
@@ -468,6 +532,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 
 	if err := validateLoadFieldsList(t.schema); err != nil {
+		return err
+	}
+
+	if err := t.validateTTL(); err != nil {
 		return err
 	}
 
@@ -557,6 +625,13 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 	if len(fieldList) >= Params.ProxyCfg.MaxFieldNum.GetAsInt() {
 		msg := fmt.Sprintf("The number of fields has reached the maximum value %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
 		return merr.WrapErrParameterInvalidMsg(msg)
+	}
+
+	if typeutil.IsVectorType(t.fieldSchema.DataType) {
+		vectorFields := len(typeutil.GetVectorFieldSchemas(t.oldSchema))
+		if vectorFields >= Params.ProxyCfg.MaxVectorFieldNum.GetAsInt() {
+			return fmt.Errorf("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
+		}
 	}
 
 	if _, ok := schemapb.DataType_name[int32(t.fieldSchema.DataType)]; !ok || t.fieldSchema.GetDataType() == schemapb.DataType_None {
@@ -672,6 +747,16 @@ func (t *dropCollectionTask) PreExecute(ctx context.Context) error {
 	// No need to check collection name
 	// Validation shall be preformed in `CreateCollection`
 	// also permit drop collection one with bad collection name
+	_, err := globalMetaCache.GetCollectionID(ctx, t.DropCollectionRequest.GetDbName(), t.GetCollectionName())
+	if err != nil {
+		if errors.Is(err, merr.ErrCollectionNotFound) || errors.Is(err, merr.ErrDatabaseNotFound) {
+			// make dropping collection idempotent.
+			log.Ctx(ctx).Warn("drop non-existent collection", zap.String("collection", t.DropCollectionRequest.GetCollectionName()), zap.String("database", t.DropCollectionRequest.GetDbName()))
+			return nil
+		}
+		return err
+	}
+
 	return nil
 }
 
@@ -929,6 +1014,8 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result.Schema.Description = result.Schema.Description
 	t.result.Schema.AutoID = result.Schema.AutoID
 	t.result.Schema.EnableDynamicField = result.Schema.EnableDynamicField
+	t.result.Schema.ExternalSource = result.Schema.ExternalSource
+	t.result.Schema.ExternalSpec = result.Schema.ExternalSpec
 	t.result.CollectionID = result.CollectionID
 	t.result.VirtualChannelNames = result.VirtualChannelNames
 	t.result.PhysicalChannelNames = result.PhysicalChannelNames
@@ -960,6 +1047,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 			ElementType:      field.ElementType,
 			Nullable:         field.Nullable,
 			IsFunctionOutput: field.IsFunctionOutput,
+			ExternalField:    field.GetExternalField(),
 		}
 	}
 
@@ -1212,6 +1300,24 @@ func hasMmapProp(props ...*commonpb.KeyValuePair) bool {
 	return false
 }
 
+func hasTTLProp(props ...*commonpb.KeyValuePair) bool {
+	for _, p := range props {
+		if p.GetKey() == common.CollectionTTLConfigKey {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTTLFieldProp(props ...*commonpb.KeyValuePair) bool {
+	for _, p := range props {
+		if p.GetKey() == common.CollectionTTLFieldKey {
+			return true
+		}
+	}
+	return false
+}
+
 func hasLazyLoadProp(props ...*commonpb.KeyValuePair) bool {
 	for _, p := range props {
 		if p.GetKey() == common.LazyLoadEnableKey {
@@ -1298,6 +1404,24 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		if exist && !timestamptz.IsTimezoneValid(userDefinedTimezone) {
 			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", userDefinedTimezone)
 		}
+
+		hasTTL, err := validateCollectionTTL(t.GetProperties())
+		if err != nil {
+			return err
+		}
+		hasTTLField, err := validateTTLField(t.GetProperties(), collSchema.GetFields())
+		if err != nil {
+			return err
+		}
+		if hasTTL && hasTTLField {
+			return merr.WrapErrParameterInvalidMsg("collection TTL and ttl field cannot be set at the same time")
+		}
+		if hasTTL && hasTTLFieldProp(collSchema.GetProperties()...) {
+			return merr.WrapErrParameterInvalidMsg("ttl field is already exists, cannot be set collection TTL")
+		}
+		if hasTTLField && hasTTLProp(collSchema.GetProperties()...) {
+			return merr.WrapErrParameterInvalidMsg("collection TTL is already set, cannot be set ttl field")
+		}
 	} else if len(t.GetDeleteKeys()) > 0 {
 		key := hasPropInDeletekeys(t.DeleteKeys)
 		if key != "" {
@@ -1366,26 +1490,6 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 				"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
 		}
 	}
-
-	_, ok := common.IsReplicateEnabled(t.Properties)
-	if ok {
-		return merr.WrapErrParameterInvalidMsg("can't set the replicate.id property")
-	}
-	endTS, ok := common.GetReplicateEndTS(t.Properties)
-	if ok && collBasicInfo.replicateID != "" {
-		allocResp, err := t.mixCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
-			Count:          1,
-			BlockTimestamp: endTS,
-		})
-		if err = merr.CheckRPCCall(allocResp, err); err != nil {
-			return merr.WrapErrServiceInternal("alloc timestamp failed", err.Error())
-		}
-		if allocResp.GetTimestamp() <= endTS {
-			return merr.WrapErrServiceInternal("alter collection: alloc timestamp failed, timestamp is not greater than endTS",
-				fmt.Sprintf("timestamp = %d, endTS = %d", allocResp.GetTimestamp(), endTS))
-		}
-	}
-
 	return nil
 }
 
@@ -1803,7 +1907,7 @@ func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
 	}
 	partID, err := globalMetaCache.GetPartitionID(ctx, t.GetDbName(), t.GetCollectionName(), t.GetPartitionName())
 	if err != nil {
-		if errors.Is(merr.ErrPartitionNotFound, err) {
+		if errors.Is(merr.ErrPartitionNotFound, err) || errors.Is(merr.ErrCollectionNotFound, err) || errors.Is(merr.ErrDatabaseNotFound, err) {
 			return nil
 		}
 		return err

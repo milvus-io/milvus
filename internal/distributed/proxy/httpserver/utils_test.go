@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -646,6 +647,25 @@ func TestAnyToColumns(t *testing.T) {
 		_, err = anyToColumns(req.Data, nil, coll, true, false)
 		assert.Error(t, err)
 		assert.Equal(t, true, strings.HasPrefix(err.Error(), "no need to pass pk field"))
+	})
+
+	t.Run("insert,autoid==true,allow_insert_auto_id=true", func(t *testing.T) {
+		body := []byte("{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}")
+		req := InsertReq{}
+		coll := generateCollectionSchema(schemapb.DataType_Int64, true, true)
+		coll.Properties = append(coll.Properties, &commonpb.KeyValuePair{
+			Key:   common.AllowInsertAutoIDKey,
+			Value: "true",
+		})
+		var err error
+		err, req.Data, _ = checkAndSetData(body, coll, false)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, int64(0), req.Data[0]["id"])
+		assert.Equal(t, int64(1), req.Data[0]["book_id"])
+		assert.Equal(t, int64(2), req.Data[0]["word_count"])
+		t.Log(req.Data)
+		_, err = anyToColumns(req.Data, nil, coll, true, false)
+		assert.NoError(t, err)
 	})
 
 	t.Run("pass more field", func(t *testing.T) {
@@ -2733,4 +2753,43 @@ func TestGenFunctionScore(t *testing.T) {
 		_, err := genFunctionScore(context.Background(), &fScore)
 		assert.NoError(t, err)
 	}
+}
+
+func TestParseUsernamePassword(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("token with credential separator", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("GET", "/", nil)
+		c.Request.Header.Set("Authorization", "Bearer testuser:testpass")
+
+		username, password, ok := ParseUsernamePassword(c)
+		assert.True(t, ok)
+		assert.Equal(t, "testuser", username)
+		assert.Equal(t, "testpass", password)
+	})
+
+	t.Run("token without credential separator", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("GET", "/", nil)
+		c.Request.Header.Set("Authorization", "Bearer tokenonly")
+
+		username, password, ok := ParseUsernamePassword(c)
+		assert.False(t, ok)
+		assert.Equal(t, "", username)
+		assert.Equal(t, "", password)
+	})
+
+	t.Run("empty authorization header", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("GET", "/", nil)
+
+		username, password, ok := ParseUsernamePassword(c)
+		assert.False(t, ok)
+		assert.Equal(t, "", username)
+		assert.Equal(t, "", password)
+	})
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -53,8 +54,9 @@ type TaskStatsSuite struct {
 	clusterID    string
 	schema       *schemapb.CollectionSchema
 
-	mockBinlogIO *mock_util.MockBinlogIO
-	segWriter    *compactor.SegmentWriter
+	mockBinlogIO     *mock_util.MockBinlogIO
+	mockChunkManager *mocks.ChunkManager
+	segWriter        *compactor.SegmentWriter
 }
 
 func (s *TaskStatsSuite) SetupSuite() {
@@ -66,6 +68,7 @@ func (s *TaskStatsSuite) SetupSuite() {
 func (s *TaskStatsSuite) SetupSubTest() {
 	paramtable.Init()
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
+	s.mockChunkManager = mocks.NewChunkManager(s.T())
 }
 
 func (s *TaskStatsSuite) GenSegmentWriterWithBM25(magic int64) {
@@ -119,7 +122,9 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			StorageConfig: &indexpb.StorageConfig{
 				RootPath: "root_path",
 			},
-		}, manager, s.mockBinlogIO)
+		}, manager, s.mockChunkManager)
+		task.binlogIO = s.mockBinlogIO
+
 		err = task.PreExecute(ctx)
 		s.Require().NoError(err)
 		binlog, err := task.sort(ctx)
@@ -169,7 +174,9 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			StorageConfig: &indexpb.StorageConfig{
 				RootPath: "root_path",
 			},
-		}, manager, s.mockBinlogIO)
+		}, manager, s.mockChunkManager)
+		task.binlogIO = s.mockBinlogIO
+
 		err = task.PreExecute(ctx)
 		s.Require().NoError(err)
 		_, err = task.sort(ctx)

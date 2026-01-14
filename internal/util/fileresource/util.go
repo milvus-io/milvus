@@ -18,13 +18,19 @@
 
 package fileresource
 
+const (
+	SyncModeStr  string = "sync"
+	RefModeStr   string = "ref"
+	CloseModeStr string = "close"
+)
+
 func ParseMode(value string) Mode {
 	switch value {
-	case "close":
+	case CloseModeStr:
 		return CloseMode
-	case "sync":
+	case SyncModeStr:
 		return SyncMode
-	case "ref":
+	case RefModeStr:
 		return RefMode
 	default:
 		return CloseMode
@@ -32,5 +38,9 @@ func ParseMode(value string) Mode {
 }
 
 func IsSyncMode(value string) bool {
-	return value == "sync"
+	return value == SyncModeStr
+}
+
+func IsRefMode(value string) bool {
+	return value == RefModeStr
 }

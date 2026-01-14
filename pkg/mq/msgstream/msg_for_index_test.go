@@ -31,12 +31,11 @@ func TestCreateIndex(t *testing.T) {
 	var msg TsMsg = &CreateIndexMsg{
 		CreateIndexRequest: &milvuspb.CreateIndexRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_CreateIndex,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_CreateIndex,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			DbName: "unit_db",
 		},
@@ -67,12 +66,11 @@ func TestDropIndex(t *testing.T) {
 	var msg TsMsg = &DropIndexMsg{
 		DropIndexRequest: &milvuspb.DropIndexRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_DropIndex,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_DropIndex,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			DbName:         "unit_db",
 			CollectionName: "col1",

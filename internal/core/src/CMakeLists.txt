@@ -32,6 +32,7 @@ include_directories(
     ${KNOWHERE_INCLUDE_DIR}
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
+    ${BSONCXX_INCLUDE_DIR}
     ${CONAN_INCLUDE_DIRS}
     ${MILVUS_COMMON_INCLUDE_DIR}
     ${MILVUS_STORAGE_INCLUDE_DIR}
@@ -51,6 +52,7 @@ add_subdirectory( exec )
 add_subdirectory( bitset )
 add_subdirectory( futures )
 add_subdirectory( rescores )
+add_subdirectory( plan )
 
 milvus_add_pkg_config("milvus_core")
 
@@ -69,15 +71,17 @@ add_library(milvus_core SHARED
     $<TARGET_OBJECTS:milvus_bitset>
     $<TARGET_OBJECTS:milvus_futures>
     $<TARGET_OBJECTS:milvus_rescores>
+    $<TARGET_OBJECTS:milvus_plan>
 )
 
-set(LINK_TARGETS 
+set(LINK_TARGETS
     boost_bitset_ext
     simdjson
     tantivy_binding
     knowhere
     milvus-storage
     milvus-common
+    bsoncxx
     ${OpenMP_CXX_FLAGS}
     ${CONAN_LIBS}
     )

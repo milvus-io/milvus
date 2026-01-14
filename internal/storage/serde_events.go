@@ -509,6 +509,9 @@ type CompositeBinlogRecordWriter struct {
 
 	flushedUncompressed uint64
 	options             []StreamWriterOption
+
+	ttlFieldID     int64
+	ttlFieldValues []int64
 }
 
 var _ BinlogRecordWriter = (*CompositeBinlogRecordWriter)(nil)
@@ -528,6 +531,29 @@ func (c *CompositeBinlogRecordWriter) Write(r Record) error {
 		}
 		if ts > c.tsTo {
 			c.tsTo = ts
+		}
+	}
+
+	// not system column
+	if c.ttlFieldID >= common.StartOfUserFieldID {
+		// Defensive check to prevent panic
+		ttlColumn := r.Column(c.ttlFieldID)
+		if ttlColumn == nil {
+			return merr.WrapErrServiceInternal("ttl field not found")
+		}
+		ttlArray, ok := ttlColumn.(*array.Int64)
+		if !ok {
+			return merr.WrapErrServiceInternal("ttl field is not int64")
+		}
+		for i := 0; i < rows; i++ {
+			if ttlArray.IsNull(i) {
+				continue
+			}
+			ttlValue := ttlArray.Value(i)
+			if ttlValue <= 0 {
+				continue
+			}
+			c.ttlFieldValues = append(c.ttlFieldValues, ttlValue)
 		}
 	}
 
@@ -693,13 +719,18 @@ func (c *CompositeBinlogRecordWriter) writeStats() error {
 	return nil
 }
 
+func (c *CompositeBinlogRecordWriter) GetExpirQuantiles() []int64 {
+	return calculateExpirQuantiles(c.ttlFieldID, c.rowNum, c.ttlFieldValues)
+}
+
 func (c *CompositeBinlogRecordWriter) GetLogs() (
 	fieldBinlogs map[FieldID]*datapb.FieldBinlog,
 	statsLog *datapb.FieldBinlog,
 	bm25StatsLog map[FieldID]*datapb.FieldBinlog,
 	manifest string,
+	expirQuantiles []int64,
 ) {
-	return c.fieldBinlogs, c.statsLog, c.bm25StatsLog, ""
+	return c.fieldBinlogs, c.statsLog, c.bm25StatsLog, "", c.GetExpirQuantiles()
 }
 
 func (c *CompositeBinlogRecordWriter) GetRowNum() int64 {
@@ -711,18 +742,20 @@ func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueI
 	options ...StreamWriterOption,
 ) (*CompositeBinlogRecordWriter, error) {
 	writer := &CompositeBinlogRecordWriter{
-		collectionID: collectionID,
-		partitionID:  partitionID,
-		segmentID:    segmentID,
-		schema:       schema,
-		BlobsWriter:  blobsWriter,
-		allocator:    allocator,
-		chunkSize:    chunkSize,
-		rootPath:     rootPath,
-		maxRowNum:    maxRowNum,
-		options:      options,
-		tsFrom:       math.MaxUint64,
-		tsTo:         0,
+		collectionID:   collectionID,
+		partitionID:    partitionID,
+		segmentID:      segmentID,
+		schema:         schema,
+		BlobsWriter:    blobsWriter,
+		allocator:      allocator,
+		chunkSize:      chunkSize,
+		rootPath:       rootPath,
+		maxRowNum:      maxRowNum,
+		options:        options,
+		tsFrom:         math.MaxUint64,
+		tsTo:           0,
+		ttlFieldID:     getTTLFieldID(schema),
+		ttlFieldValues: make([]int64, 0),
 	}
 
 	// Create stats collectors

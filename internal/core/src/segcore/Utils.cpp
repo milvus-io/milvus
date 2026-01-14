@@ -279,6 +279,31 @@ CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta) {
     }
 
     auto scalar_array = data_array->mutable_scalars();
+    SetUpScalarFieldData(
+        scalar_array, data_type, field_meta.get_element_type(), count);
+    return data_array;
+}
+
+void
+CreateScalarDataArray(DataArray& data_array,
+                      int64_t count,
+                      DataType data_type,
+                      DataType element_type,
+                      bool nullable) {
+    data_array.set_type(
+        static_cast<milvus::proto::schema::DataType>(data_type));
+    if (nullable) {
+        data_array.mutable_valid_data()->Resize(count, false);
+    }
+    auto scalar_array = data_array.mutable_scalars();
+    SetUpScalarFieldData(scalar_array, data_type, element_type, count);
+}
+
+void
+SetUpScalarFieldData(milvus::proto::schema::ScalarField*& scalar_array,
+                     DataType data_type,
+                     DataType element_type,
+                     int64_t count) {
     switch (data_type) {
         case DataType::BOOL: {
             auto obj = scalar_array->mutable_bool_data();
@@ -349,8 +374,8 @@ CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta) {
         case DataType::ARRAY: {
             auto obj = scalar_array->mutable_array_data();
             obj->mutable_data()->Reserve(count);
-            obj->set_element_type(static_cast<milvus::proto::schema::DataType>(
-                field_meta.get_element_type()));
+            obj->set_element_type(
+                static_cast<milvus::proto::schema::DataType>(element_type));
             for (int i = 0; i < count; i++) {
                 *(obj->mutable_data()->Add()) = proto::schema::ScalarField();
             }
@@ -361,8 +386,6 @@ CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta) {
                       fmt::format("unsupported datatype {}", data_type));
         }
     }
-
-    return data_array;
 }
 
 std::unique_ptr<DataArray>
@@ -465,6 +488,11 @@ CreateScalarDataArrayFrom(const void* data_raw,
         auto valid_data_ = reinterpret_cast<const bool*>(valid_data);
         auto obj = data_array->mutable_valid_data();
         obj->Add(valid_data_, valid_data_ + count);
+    } else {
+        FixedVector<bool> always_valid(count, true);
+        auto obj = data_array->mutable_valid_data();
+        obj->Add(reinterpret_cast<const bool*>(always_valid.data()),
+                 reinterpret_cast<const bool*>(always_valid.data()) + count);
     }
 
     auto scalar_array = data_array->mutable_scalars();
@@ -1180,8 +1208,10 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
 
         auto codec_futures = storage::GetObjectData(
             rcm.get(), remote_files, milvus::PriorityForLoad(priority), false);
-        for (auto& codec_future : codec_futures) {
-            auto reader = codec_future.get()->GetReader();
+        // Wait for all futures to ensure all threads complete
+        auto codecs = storage::WaitAllFutures(std::move(codec_futures));
+        for (auto& codec : codecs) {
+            auto reader = codec->GetReader();
             channel->push(reader);
         }
         channel->close();
@@ -1200,8 +1230,10 @@ LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                        .GetRemoteChunkManager();
         auto codec_futures = storage::GetObjectData(
             rcm.get(), remote_files, milvus::PriorityForLoad(priority));
-        for (auto& codec_future : codec_futures) {
-            auto field_data = codec_future.get()->GetFieldData();
+        // Wait for all futures to ensure all threads complete
+        auto codecs = storage::WaitAllFutures(std::move(codec_futures));
+        for (auto& codec : codecs) {
+            auto field_data = codec->GetFieldData();
             channel->push(field_data);
         }
         channel->close();
@@ -1367,4 +1399,132 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
             std::move(translator));
 }
 
+FieldDataPtr
+bulk_script_field_data(milvus::OpContext* op_ctx,
+                       FieldId fieldId,
+                       DataType dataType,
+                       const int64_t* seg_offsets,
+                       int64_t count,
+                       const segcore::SegmentInternalInterface* segment,
+                       TargetBitmap& valid_view,
+                       bool small_int_raw_type) {
+    FieldDataPtr ret = nullptr;
+    switch (dataType) {
+        case milvus::DataType::BOOL: {
+            FixedVector<bool> vec(count);
+            segment->bulk_subscript(op_ctx,
+                                    fieldId,
+                                    dataType,
+                                    seg_offsets,
+                                    count,
+                                    vec.data(),
+                                    valid_view);
+            ret = std::make_shared<FieldDataImpl<bool, true>>(
+                1, dataType, false, std::move(vec));
+            break;
+        }
+        case milvus::DataType::INT8: {
+            FixedVector<int8_t> vec(count);
+            segment->bulk_subscript(op_ctx,
+                                    fieldId,
+                                    dataType,
+                                    seg_offsets,
+                                    count,
+                                    vec.data(),
+                                    valid_view,
+                                    small_int_raw_type);
+            ret = std::make_shared<FieldDataImpl<int8_t, true>>(
+                1, dataType, false, std::move(vec));
+            break;
+        }
+        case milvus::DataType::INT16: {
+            FixedVector<int16_t> vec(count);
+            segment->bulk_subscript(op_ctx,
+                                    fieldId,
+                                    dataType,
+                                    seg_offsets,
+                                    count,
+                                    vec.data(),
+                                    valid_view,
+                                    small_int_raw_type);
+            ret = std::make_shared<FieldDataImpl<int16_t, true>>(
+                1, dataType, false, std::move(vec));
+            break;
+        }
+        case milvus::DataType::INT32: {
+            FixedVector<int32_t> vec(count);
+            segment->bulk_subscript(op_ctx,
+                                    fieldId,
+                                    dataType,
+                                    seg_offsets,
+                                    count,
+                                    vec.data(),
+                                    valid_view);
+            ret = std::make_shared<FieldDataImpl<int32_t, true>>(
+                1, dataType, false, std::move(vec));
+            break;
+        }
+        case milvus::DataType::TIMESTAMPTZ:
+        case milvus::DataType::INT64: {
+            FixedVector<int64_t> vec(count);
+            segment->bulk_subscript(op_ctx,
+                                    fieldId,
+                                    dataType,
+                                    seg_offsets,
+                                    count,
+                                    vec.data(),
+                                    valid_view);
+            ret = std::make_shared<FieldDataImpl<int64_t, true>>(
+                1, dataType, false, std::move(vec));
+            break;
+        }
+        case milvus::DataType::FLOAT: {
+            FixedVector<float> vec(count);
+            segment->bulk_subscript(op_ctx,
+                                    fieldId,
+                                    dataType,
+                                    seg_offsets,
+                                    count,
+                                    vec.data(),
+                                    valid_view);
+            ret = std::make_shared<FieldDataImpl<float, true>>(
+                1, dataType, false, std::move(vec));
+            break;
+        }
+        case milvus::DataType::DOUBLE: {
+            FixedVector<double> vec(count);
+            segment->bulk_subscript(op_ctx,
+                                    fieldId,
+                                    dataType,
+                                    seg_offsets,
+                                    count,
+                                    vec.data(),
+                                    valid_view);
+            ret = std::make_shared<FieldDataImpl<double, true>>(
+                1, dataType, false, std::move(vec));
+            break;
+        }
+        case milvus::DataType::STRING:
+        case milvus::DataType::VARCHAR:
+        case milvus::DataType::TEXT: {
+            FixedVector<std::string> vec(count);
+            segment->bulk_subscript(op_ctx,
+                                    fieldId,
+                                    dataType,
+                                    seg_offsets,
+                                    count,
+                                    vec.data(),
+                                    valid_view);
+            ret = std::make_shared<FieldDataImpl<std::string, true>>(
+                1, dataType, false, std::move(vec));
+            break;
+        }
+        default: {
+            ThrowInfo(DataTypeInvalid,
+                      fmt::format("unsupported data type {}", dataType));
+        }
+    }
+
+    return std::move(ret);
+}
 }  // namespace milvus::segcore

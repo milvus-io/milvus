@@ -217,10 +217,11 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 			PartitionIDs:     partitionIDs,
 			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
 		},
-		request:  queryReq,
-		plan:     plan,
-		mixCoord: t.node.(*Proxy).mixCoord,
-		lb:       t.node.(*Proxy).lbPolicy,
+		request:        queryReq,
+		plan:           plan,
+		mixCoord:       t.node.(*Proxy).mixCoord,
+		lb:             t.node.(*Proxy).lbPolicy,
+		shardclientMgr: t.node.(*Proxy).shardMgr,
 	}
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-retrieveByPKs")
@@ -871,8 +872,16 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	// set upsertTask.insertRequest.rowIDs
 	tr := timerecord.NewTimeRecorder("applyPK")
 	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
-	rowIDBegin, rowIDEnd, _ := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
+	rowIDBegin, rowIDEnd, allocateErr := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
 	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	if allocateErr != nil {
+		log.Ctx(ctx).Warn("failed to allocate auto id for upsert",
+			zap.String("collectionName", collectionName),
+			zap.Int64("collectionID", it.upsertMsg.InsertMsg.CollectionID),
+			zap.Uint32("rowNums", rowNums),
+			zap.Error(allocateErr))
+		return allocateErr
+	}
 
 	it.upsertMsg.InsertMsg.RowIDs = make([]UniqueID, rowNums)
 	it.rowIDs = make([]UniqueID, rowNums)
@@ -1033,15 +1042,6 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 			IdField: nil,
 		},
 		Timestamp: it.EndTs(),
-	}
-
-	replicateID, err := GetReplicateID(ctx, it.req.GetDbName(), collectionName)
-	if err != nil {
-		log.Warn("get replicate info failed", zap.String("collectionName", collectionName), zap.Error(err))
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
-	}
-	if replicateID != "" {
-		return merr.WrapErrCollectionReplicateMode("upsert")
 	}
 
 	// check collection exists

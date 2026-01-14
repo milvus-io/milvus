@@ -175,7 +175,8 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     }
     config[INDEX_NUM_ROWS_KEY] = info->num_rows();
     config[STORAGE_VERSION_KEY] = info->storage_version();
-    if (info->storage_version() == STORAGE_V2) {
+    if (info->storage_version() == STORAGE_V2 ||
+        info->storage_version() == STORAGE_V3) {
         config[SEGMENT_INSERT_FILES_KEY] =
             get_segment_insert_files(info->segment_insert_files());
         config[SEGMENT_MANIFEST_KEY] = info->manifest();
@@ -492,11 +493,14 @@ BuildTextIndex(ProtoLayoutInterface result,
 
         auto field_schema =
             FieldMeta::ParseFrom(build_index_info->field_schema());
+
         auto index = std::make_unique<index::TextMatchIndex>(
             fileManagerContext,
             tantivy_index_version,
             "milvus_tokenizer",
-            field_schema.get_analyzer_params().c_str());
+            field_schema.get_analyzer_params().c_str(),
+            build_index_info->analyzer_extra_info().c_str());
+
         index->Build(config);
         auto create_index_result = index->Upload(config);
         create_index_result->SerializeAt(

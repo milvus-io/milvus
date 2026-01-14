@@ -233,6 +233,14 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
                         r = r.to_dict()
                         assert any([token in r["entity"][field] for token in top_10_tokens])
 
+            # verify Text Match support search by pk
+            collection_w.search(ids=[1, 2],
+                                anns_field=ann_field,
+                                param={},limit=100,
+                                expr=expr, output_fields=["id", field],
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": 2, "limit": 100})
+
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])

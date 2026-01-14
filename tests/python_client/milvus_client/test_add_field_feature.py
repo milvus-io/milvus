@@ -106,14 +106,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows_new)
         # 5. compact
         compact_id = self.compact(client, collection_name)[0]
-        start = time.time()
-        while True:
-            time.sleep(1)
-            res = self.get_compaction_state(client, compact_id)[0]
-            if res == "Completed":
-                break
-            if time.time() - start > cost:
-                raise Exception(1, f"Compact after index cost more than {cost}s")
+        self.wait_for_compaction_ready(client, compact_id, timeout=300)
         self.wait_for_index_ready(client, collection_name, default_vector_field_name)
         self.release_collection(client, collection_name)
         time.sleep(10)
@@ -472,7 +465,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         dim, field_name = 8, default_new_field_name
-        error = {ct.err_code: 1100, ct.err_msg: f"not support to add vector field, "
+        error = {ct.err_code: 1100, ct.err_msg: f"vector field must have dimension specified, "
                                                 f"field name = {field_name}: invalid parameter"}
         self.create_collection(client, collection_name, dim)
         collections = self.list_collections(client)[0]

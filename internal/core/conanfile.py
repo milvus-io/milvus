@@ -43,7 +43,6 @@ class MilvusConan(ConanFile):
         "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
         "xxhash/0.8.3#199e63ab9800302c232d030b27accec0",
         "unordered_dense/4.4.0#6a855c992618cc4c63019109a2e47298",
-        "mongo-cxx-driver/3.11.0#ae206de0e90fb8cb2fb95465fb8b2f01",
         "geos/3.12.0#0b177c90c25a8ca210578fb9e2899c37",
         "icu/74.2#cd1937b9561b8950a2ae6311284c5813",
         "libavrocpp/1.12.1@milvus/dev",

@@ -454,6 +454,26 @@
                 "MessageType": "MessageTypeFlushAll",
                 "Version": 2
             }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.CreateSnapshotMessageHeader",
+                "BodyType": "messagespb.CreateSnapshotMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeCreateSnapshot",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropSnapshotMessageHeader",
+                "BodyType": "messagespb.DropSnapshotMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropSnapshot",
+                "Version": 2
+            }
         }
     ]
 }

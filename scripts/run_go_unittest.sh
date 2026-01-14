@@ -139,7 +139,7 @@ go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/root
 
 function test_datacoord()
 {
-go test -v -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/datacoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/datacoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_querycoord()

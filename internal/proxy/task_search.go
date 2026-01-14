@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
@@ -186,10 +187,15 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
+	var aggs []agg.AggregateBase
+	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, aggs, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
 	if err != nil {
 		log.Warn("translate output fields failed", zap.Error(err), zap.Any("schema", t.schema))
 		return err
+	}
+	if len(aggs) > 0 {
+		log.Warn("aggregates are not supported in search request", zap.Strings("aggregates", lo.Map(aggs, func(agg agg.AggregateBase, _ int) string { return agg.OriginalName() })))
+		return errors.New("aggregates are not supported in search request")
 	}
 	log.Debug("translate output fields",
 		zap.Strings("output fields", t.translatedOutputFields))
@@ -602,7 +608,7 @@ func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter,
 		if err != nil {
 			return err
 		}
-		err = h.addTaskWithSearchText(fieldId, fieldName, analyzerName, texts)
+		err = h.addTaskWithSearchText(t.schema, fieldId, fieldName, analyzerName, texts)
 		if err != nil {
 			return err
 		}
@@ -618,6 +624,13 @@ func (t *searchTask) addHighlightTask(highlighter *commonpb.Highlighter, metricT
 	switch highlighter.GetType() {
 	case commonpb.HighlightType_Lexical:
 		return t.createLexicalHighlighter(highlighter, metricType, annsField, placeholder, analyzerName)
+	case commonpb.HighlightType_Semantic:
+		h, err := newSemanticHighlighter(t, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()})
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg("Create SemanticHighlight failed: %v ", err)
+		}
+		t.highlighter = h
+		return nil
 	default:
 		return merr.WrapErrParameterInvalidMsg("unsupported highlight type: %v", highlighter.GetType())
 	}

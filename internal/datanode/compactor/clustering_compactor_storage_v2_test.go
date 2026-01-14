@@ -53,13 +53,10 @@ type ClusteringCompactionTaskStorageV2Suite struct {
 
 func (s *ClusteringCompactionTaskStorageV2Suite) SetupTest() {
 	s.setupTest()
-	paramtable.Get().Save("common.storage.enableV2", "true")
 	s.task.compactionParams = compaction.GenParams()
 }
 
 func (s *ClusteringCompactionTaskStorageV2Suite) TearDownTest() {
-	paramtable.Get().Reset(paramtable.Get().CommonCfg.EntityExpirationTTL.Key)
-	paramtable.Get().Reset("common.storage.enableV2")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "insert_log")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "delta_log")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "stats_log")
@@ -138,80 +135,6 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2To
 	s.Equal(totalRowNum, statsRowNum)
 	s.EqualValues(10239,
 		lo.SumBy(compactionResultV2.GetSegments(), func(seg *datapb.CompactionSegment) int64 {
-			return seg.GetNumOfRows()
-		}),
-	)
-}
-
-func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2ToV1Format() {
-	paramtable.Get().Save("common.storage.enableV2", "false")
-	s.task.compactionParams = compaction.GenParams()
-
-	var segmentID int64 = 1001
-
-	fBinlogs, deltalogs, _, _, _, _, err := s.initStorageV2Segments(10240, segmentID)
-	s.NoError(err)
-
-	dblobs, err := getInt64DeltaBlobs(
-		1,
-		[]int64{100},
-		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)},
-	)
-	s.Require().NoError(err)
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{deltalogs.GetBinlogs()[0].GetLogPath()}).
-		Return([][]byte{dblobs.GetValue()}, nil).Once()
-
-	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
-		{
-			CollectionID:   1,
-			SegmentID:      segmentID,
-			FieldBinlogs:   storage.SortFieldBinlogs(fBinlogs),
-			Deltalogs:      []*datapb.FieldBinlog{deltalogs},
-			StorageVersion: storage.StorageV2,
-		},
-	}
-
-	s.task.plan.Schema = genCollectionSchema()
-	s.task.plan.ClusteringKeyField = 100
-	s.task.plan.PreferSegmentRows = 2048
-	s.task.plan.MaxSegmentRows = 2048
-	s.task.plan.MaxSize = 1024 * 1024 * 1024 // max segment size = 1GB, we won't touch this value
-	s.task.plan.PreAllocatedSegmentIDs = &datapb.IDRange{
-		Begin: 1,
-		End:   101,
-	}
-	s.task.plan.PreAllocatedLogIDs = &datapb.IDRange{
-		Begin: 200,
-		End:   2000,
-	}
-
-	compactionResult, err := s.task.Compact()
-	s.Require().NoError(err)
-	s.Equal(5, len(s.task.clusterBuffers))
-	s.Equal(5, len(compactionResult.GetSegments()))
-	totalBinlogNum := 0
-	totalRowNum := int64(0)
-	for _, fb := range compactionResult.GetSegments()[0].GetInsertLogs() {
-		for _, b := range fb.GetBinlogs() {
-			totalBinlogNum++
-			if fb.GetFieldID() == 100 {
-				totalRowNum += b.GetEntriesNum()
-			}
-		}
-	}
-	statsBinlogNum := 0
-	statsRowNum := int64(0)
-	for _, sb := range compactionResult.GetSegments()[0].GetField2StatslogPaths() {
-		for _, b := range sb.GetBinlogs() {
-			statsBinlogNum++
-			statsRowNum += b.GetEntriesNum()
-		}
-	}
-	s.Equal(1, totalBinlogNum/len(s.plan.Schema.GetFields()))
-	s.Equal(1, statsBinlogNum)
-	s.Equal(totalRowNum, statsRowNum)
-	s.EqualValues(10239,
-		lo.SumBy(compactionResult.GetSegments(), func(seg *datapb.CompactionSegment) int64 {
 			return seg.GetNumOfRows()
 		}),
 	)

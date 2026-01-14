@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -94,9 +93,7 @@ func (q *channelQueryView) Serviceable() bool {
 	// Note: after we support channel level target(data view), we can remove this flag
 	viewReady := q.syncedByCoord
 
-	// if partial result is enabled, we can skip the viewReady check
-	enablePartialResult := paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.GetAsFloat() < 1.0
-	return dataReady && (viewReady || enablePartialResult)
+	return dataReady && viewReady
 }
 
 func (q *channelQueryView) GetLoadedRatio() float64 {
@@ -193,8 +190,8 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 	sealed, growing = current.Get(partitions...)
 	version = current.version
 	sealedRowCount = d.queryView.sealedSegmentRowCount
-	if d.queryView.GetLoadedRatio() == 1.0 {
-		// if query view is fully loaded, we can use current target version to filter segments
+	if d.queryView.Serviceable() {
+		// if query view is serviceable, we can use current target version to filter segments
 		targetVersion := current.GetTargetVersion()
 		filterReadable := d.readableFilter(targetVersion)
 		sealed, growing = d.filterSegments(sealed, growing, filterReadable)

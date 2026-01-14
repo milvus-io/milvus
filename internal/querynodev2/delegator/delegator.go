@@ -99,6 +99,7 @@ type ShardDelegator interface {
 	TryCleanExcludedSegments(ts uint64)
 
 	// tsafe
+	GetLatestRequiredMVCCTimeTick() uint64
 	UpdateTSafe(ts uint64)
 	GetTSafe() uint64
 
@@ -108,6 +109,7 @@ type ShardDelegator interface {
 
 	// control
 	Serviceable() bool
+	CatchingUpStreamingData() bool
 	Start()
 	Close()
 }
@@ -165,6 +167,13 @@ type shardDelegator struct {
 	// schema version
 	schemaChangeMutex sync.RWMutex
 	schemaVersion     uint64
+
+	// streaming data catch-up state
+	catchingUpStreamingData *atomic.Bool
+
+	// latest required mvcc timestamp for the delegator
+	// for slow down the delegator consumption and reduce the timetick dispatch frequency.
+	latestRequiredMVCCTimeTick *atomic.Uint64
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -701,6 +710,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 	}
 
 	// wait tsafe
+	sd.updateLatestRequiredMVCCTimestamp(req.Req.GuaranteeTimestamp)
 	_, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
 	if err != nil {
 		log.Warn("delegator GetStatistics failed to wait tsafe", zap.Error(err))
@@ -922,6 +932,12 @@ func (sd *shardDelegator) speedupGuranteeTS(
 	mvccTS uint64,
 	isIterator bool,
 ) uint64 {
+	// because the mvcc speed up will make the guarantee timestamp smaller.
+	// and the update latest required mvcc timestamp and mvcc speed up are executed concurrently.
+	// so we update the latest required mvcc timestamp first, then the mvcc speed up will not affect the latest required mvcc timestamp.
+	// to make the new incoming mvcc can be seen by the timetick_slowdowner.
+	sd.updateLatestRequiredMVCCTimestamp(guaranteeTS)
+
 	// when 1. streaming service is disable,
 	// 2. consistency level is not strong,
 	// 3. cannot speed iterator, because current client of milvus doesn't support shard level mvcc.
@@ -940,6 +956,7 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "Delegator-waitTSafe")
 	defer sp.End()
 	log := sd.getLogger(ctx)
+
 	// already safe to search
 	latestTSafe := sd.latestTsafe.Load()
 	if latestTSafe >= ts {
@@ -994,18 +1011,72 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 	}
 }
 
+// GetLatestRequiredMVCCTimeTick returns the latest required mvcc timestamp for the delegator.
+func (sd *shardDelegator) GetLatestRequiredMVCCTimeTick() uint64 {
+	if sd.catchingUpStreamingData.Load() {
+		// delegator need to catch up the streaming data when startup,
+		// If the empty timetick is filtered, the load operation will be blocked.
+		// We want the delegator to catch up the streaming data, and load done as soon as possible,
+		// so we always return the current time as the latest required mvcc timestamp.
+		return tsoutil.GetCurrentTime()
+	}
+	return sd.latestRequiredMVCCTimeTick.Load()
+}
+
+// updateLatestRequiredMVCCTimestamp updates the latest required mvcc timestamp for the delegator.
+func (sd *shardDelegator) updateLatestRequiredMVCCTimestamp(ts uint64) {
+	for {
+		previousTs := sd.latestRequiredMVCCTimeTick.Load()
+		if ts <= previousTs {
+			return
+		}
+		if sd.latestRequiredMVCCTimeTick.CompareAndSwap(previousTs, ts) {
+			return
+		}
+	}
+}
+
 // updateTSafe read current tsafe value from tsafeManager.
 func (sd *shardDelegator) UpdateTSafe(tsafe uint64) {
+	log := sd.getLogger(context.Background()).WithRateGroup(fmt.Sprintf("UpdateTSafe-%s", sd.vchannelName), 1, 60)
 	sd.tsCond.L.Lock()
+	log.RatedInfo(10, "update tsafe",
+		zap.Int64("collectionID", sd.collectionID),
+		zap.String("vchannel", sd.vchannelName),
+		zap.Time("tsafe", tsoutil.PhysicalTime(tsafe)),
+		zap.Time("latestTSafe", tsoutil.PhysicalTime(sd.latestTsafe.Load())))
 	if tsafe > sd.latestTsafe.Load() {
 		sd.latestTsafe.Store(tsafe)
 		sd.tsCond.Broadcast()
+
+		// Check if caught up with streaming data
+		if sd.catchingUpStreamingData.Load() {
+			lagThreshold := paramtable.Get().QueryNodeCfg.CatchUpStreamingDataTsLag.GetAsDurationByParse()
+			if lagThreshold > 0 {
+				tsafeTime := tsoutil.PhysicalTime(tsafe)
+				lag := time.Since(tsafeTime)
+				caughtUp := lag <= lagThreshold
+				log.RatedInfo(10, "delegator catching up streaming data progress",
+					zap.String("channel", sd.vchannelName),
+					zap.Duration("lag", lag),
+					zap.Duration("threshold", lagThreshold),
+					zap.Bool("caughtUp", caughtUp))
+				if caughtUp {
+					sd.catchingUpStreamingData.Store(false)
+				}
+			}
+		}
 	}
 	sd.tsCond.L.Unlock()
 }
 
 func (sd *shardDelegator) GetTSafe() uint64 {
 	return sd.latestTsafe.Load()
+}
+
+// CatchingUpStreamingData returns true if delegator is still catching up with streaming data.
+func (sd *shardDelegator) CatchingUpStreamingData() bool {
+	return sd.catchingUpStreamingData.Load()
 }
 
 func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema, schVersion uint64) error {
@@ -1074,6 +1145,9 @@ func (sd *shardDelegator) Close() {
 	// broadcast to all waitTsafe goroutine to quit
 	sd.tsCond.Broadcast()
 	sd.lifetime.Wait()
+
+	// Remove all candidates and refund bloom filter resources
+	sd.pkOracle.RemoveAndRefundAll()
 
 	// clean idf oracle
 	if sd.idfOracle != nil {
@@ -1179,17 +1253,19 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		distribution:   NewDistribution(channel, queryView),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{fmt.Sprint(paramtable.GetNodeID()), channel}),
-		pkOracle:         pkoracle.NewPkOracle(),
-		latestTsafe:      atomic.NewUint64(startTs),
-		loader:           loader,
-		queryHook:        queryHook,
-		chunkManager:     chunkManager,
-		partitionStats:   make(map[UniqueID]*storage.PartitionStatsSnapshot),
-		excludedSegments: excludedSegments,
-		functionRunners:  make(map[int64]function.FunctionRunner),
-		analyzerRunners:  make(map[UniqueID]function.Analyzer),
-		isBM25Field:      make(map[int64]bool),
-		l0ForwardPolicy:  policy,
+		pkOracle:                   pkoracle.NewPkOracle(),
+		latestTsafe:                atomic.NewUint64(startTs),
+		loader:                     loader,
+		queryHook:                  queryHook,
+		chunkManager:               chunkManager,
+		partitionStats:             make(map[UniqueID]*storage.PartitionStatsSnapshot),
+		excludedSegments:           excludedSegments,
+		functionRunners:            make(map[int64]function.FunctionRunner),
+		analyzerRunners:            make(map[UniqueID]function.Analyzer),
+		isBM25Field:                make(map[int64]bool),
+		l0ForwardPolicy:            policy,
+		catchingUpStreamingData:    atomic.NewBool(true),
+		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 
 	for _, tf := range collection.Schema().GetFunctions() {

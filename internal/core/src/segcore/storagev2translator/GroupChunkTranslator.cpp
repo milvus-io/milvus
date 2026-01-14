@@ -50,6 +50,7 @@ GroupChunkTranslator::GroupChunkTranslator(
     FieldDataInfo column_group_info,
     std::vector<std::string> insert_files,
     bool use_mmap,
+    bool mmap_populate,
     int64_t num_fields,
     milvus::proto::common::LoadPriority load_priority)
     : segment_id_(segment_id),
@@ -74,6 +75,7 @@ GroupChunkTranslator::GroupChunkTranslator(
       column_group_info_(column_group_info),
       insert_files_(insert_files),
       use_mmap_(use_mmap),
+      mmap_populate_(mmap_populate),
       load_priority_(load_priority),
       meta_(num_fields,
             use_mmap ? milvus::cachinglayer::StorageType::DISK
@@ -435,7 +437,8 @@ GroupChunkTranslator::load_group_chunk(
 
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
     if (!use_mmap_) {
-        chunks = create_group_chunk(field_ids, field_metas, array_vecs);
+        chunks = create_group_chunk(
+            field_ids, field_metas, array_vecs, mmap_populate_);
     } else {
         std::filesystem::path filepath;
         switch (group_chunk_type_) {
@@ -462,8 +465,12 @@ GroupChunkTranslator::load_group_chunk(
                           static_cast<uint8_t>(group_chunk_type_));
         }
         std::filesystem::create_directories(filepath.parent_path());
-        chunks = create_group_chunk(
-            field_ids, field_metas, array_vecs, filepath.string());
+        chunks = create_group_chunk(field_ids,
+                                    field_metas,
+                                    array_vecs,
+                                    mmap_populate_,
+                                    filepath.string(),
+                                    load_priority_);
     }
     return std::make_unique<milvus::GroupChunk>(chunks);
 }

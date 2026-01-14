@@ -81,7 +81,6 @@ const (
 	TimestampTypeKey    = "timestamp"
 	ChannelTypeKey      = "vchannel"
 	CollectionIDTypeKey = "collection_id"
-	ReplicateIDTypeKey  = "replicate_id"
 )
 
 // GetMsgType gets the message type from message.

@@ -31,10 +31,17 @@ type PkOracle interface {
 	BatchGet(pks []storage.PrimaryKey, filters ...CandidateFilter) map[int64][]bool
 	// RegisterCandidate adds candidate into pkOracle.
 	Register(candidate Candidate, workerID int64) error
-	// RemoveCandidate removes candidate
-	Remove(filters ...CandidateFilter) error
+	// RemoveCandidate removes candidate and returns the removed candidates.
+	Remove(filters ...CandidateFilter) []Candidate
 	// CheckCandidate checks whether candidate with provided key exists.
 	Exists(candidate Candidate, workerID int64) bool
+	// Range iterates over all candidates without removing them.
+	Range(fn func(candidate Candidate) bool)
+	// RefundRemoved refunds resources for BloomFilterSet candidates.
+	RefundRemoved(candidates []Candidate)
+	// RemoveAndRefundAll removes all candidates and refunds resources for BloomFilterSet candidates.
+	// Used during shutdown to clean up and refund resources.
+	RemoveAndRefundAll()
 }
 
 var _ PkOracle = (*pkOracle)(nil)
@@ -97,24 +104,55 @@ func (pko *pkOracle) Register(candidate Candidate, workerID int64) error {
 	return nil
 }
 
-// Remove removes candidate from pko.
-func (pko *pkOracle) Remove(filters ...CandidateFilter) error {
+// Remove removes candidate from pko and returns the removed candidates.
+func (pko *pkOracle) Remove(filters ...CandidateFilter) []Candidate {
+	var removed []Candidate
 	pko.candidates.Range(func(key string, candidate candidateWithWorker) bool {
 		for _, filter := range filters {
 			if !filter(candidate) {
 				return true
 			}
 		}
-		pko.candidates.GetAndRemove(pko.candidateKey(candidate, candidate.workerID))
+		if _, ok := pko.candidates.GetAndRemove(pko.candidateKey(candidate, candidate.workerID)); ok {
+			removed = append(removed, candidate.Candidate)
+		}
 		return true
 	})
 
-	return nil
+	return removed
 }
 
 func (pko *pkOracle) Exists(candidate Candidate, workerID int64) bool {
 	_, ok := pko.candidates.Get(pko.candidateKey(candidate, workerID))
 	return ok
+}
+
+// Range iterates over all candidates without removing them.
+func (pko *pkOracle) Range(fn func(candidate Candidate) bool) {
+	pko.candidates.Range(func(key string, candidate candidateWithWorker) bool {
+		return fn(candidate.Candidate)
+	})
+}
+
+// RefundRemoved refunds resources for BloomFilterSet candidates.
+// For candidates that are not BloomFilterSet (e.g., LocalSegment), this is a no-op.
+func (pko *pkOracle) RefundRemoved(candidates []Candidate) {
+	for _, candidate := range candidates {
+		if bfs, ok := candidate.(*BloomFilterSet); ok {
+			bfs.Refund()
+		}
+	}
+}
+
+// RemoveAndRefundAll removes all candidates and refunds resources for BloomFilterSet candidates.
+// Used during shutdown to clean up and refund resources.
+func (pko *pkOracle) RemoveAndRefundAll() {
+	removed := pko.Remove()
+	for _, candidate := range removed {
+		if bfs, ok := candidate.(*BloomFilterSet); ok {
+			bfs.Refund()
+		}
+	}
 }
 
 // NewPkOracle returns pkOracle as PkOracle interface.

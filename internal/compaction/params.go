@@ -35,9 +35,9 @@ type Params struct {
 }
 
 func GenParams() Params {
-	storageVersion := storage.StorageV1
-	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-		storageVersion = storage.StorageV2
+	storageVersion := storage.StorageV2
+	if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
+		storageVersion = storage.StorageV3
 	}
 	return Params{
 		StorageVersion:            storageVersion,

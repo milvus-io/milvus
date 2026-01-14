@@ -43,6 +43,7 @@ class GroupChunkTranslator
         FieldDataInfo column_group_info,
         std::vector<std::string> insert_files,
         bool use_mmap,
+        bool mmap_populate,
         int64_t num_fields,
         milvus::proto::common::LoadPriority load_priority);
 
@@ -119,6 +120,7 @@ class GroupChunkTranslator
     GroupCTMeta meta_;
     int64_t timestamp_offet_;
     bool use_mmap_;
+    bool mmap_populate_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
     std::vector<std::shared_ptr<parquet::FileMetaData>> parquet_file_metadata_;

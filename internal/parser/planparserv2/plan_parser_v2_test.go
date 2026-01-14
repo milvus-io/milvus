@@ -648,6 +648,12 @@ func TestExpr_IsNull(t *testing.T) {
 
 	unsupported := []string{
 		`not_exist is null`,
+		`FloatVectorField is null`,
+		`BinaryVectorField is null`,
+		`Float16VectorField is null`,
+		`BFloat16VectorField is null`,
+		`SparseFloatVectorField is null`,
+		`Int8VectorField is null`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
@@ -669,6 +675,12 @@ func TestExpr_IsNotNull(t *testing.T) {
 
 	unsupported := []string{
 		`not_exist is not null`,
+		`FloatVectorField is not null`,
+		`BinaryVectorField is not null`,
+		`Float16VectorField is not null`,
+		`BFloat16VectorField is not null`,
+		`SparseFloatVectorField is not null`,
+		`Int8VectorField is not null`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)

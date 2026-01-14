@@ -39,17 +39,16 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -61,7 +60,6 @@ type distribution struct {
 
 type TaskSuite struct {
 	suite.Suite
-	testutils.EmbedEtcdUtil
 
 	// Data
 	collection      int64
@@ -147,15 +145,7 @@ func (suite *TaskSuite) SetupTest() {
 
 	config := GenerateEtcdConfig()
 	suite.ctx = context.Background()
-	cli, err := etcd.GetEtcdClient(
-		config.UseEmbedEtcd.GetAsBool(),
-		config.EtcdUseSSL.GetAsBool(),
-		config.Endpoints.GetAsStrings(),
-		config.EtcdTLSCert.GetValue(),
-		config.EtcdTLSKey.GetValue(),
-		config.EtcdTLSCACert.GetValue(),
-		config.EtcdTLSMinVersion.GetValue())
-	suite.Require().NoError(err)
+	cli, _ := kvfactory.GetEtcdAndPath()
 
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 	suite.store = querycoord.NewCatalog(suite.kv)
@@ -197,7 +187,8 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 		"TestLeaderTaskSet",
 		"TestLeaderTaskRemove",
 		"TestNoExecutor",
-		"TestTaskStaleByRONode":
+		"TestTaskStaleByRONode",
+		"TestLeaderTaskStaleByRONode":
 		suite.meta.PutCollection(suite.ctx, &meta.Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
 				CollectionID:  suite.collection,
@@ -2068,6 +2059,156 @@ func (suite *TaskSuite) TestExecutor_MoveSegmentTask() {
 	executor.executeSegmentAction(moveTask, 1)
 	suite.True(moveTask.actions[1].IsFinished(suite.dist))
 	suite.ErrorContains(moveTask.Err(), "shard leader changed")
+}
+
+func (suite *TaskSuite) TestLeaderTaskStaleByRONode() {
+	ctx := context.Background()
+	leaderNode := int64(1)
+	workerNode := int64(3)
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
+	}
+
+	// Test case 1: LeaderAction should NOT be stale when worker node is RO but leader is RW
+	// This is the fix for issue #46737: the checkStale should use leaderID instead of Node() for LeaderAction
+	suite.Run("WorkerRONodeLeaderRW", func() {
+		// Create replica with worker node (node 3) as RO node, leader node (node 1) as RW
+		replicaWithRONode := meta.NewReplica(&querypb.Replica{
+			ID:            suite.replica.GetID(),
+			CollectionID:  suite.collection,
+			Nodes:         []int64{1, 2}, // RW nodes (leader is RW)
+			RoNodes:       []int64{3},    // RO nodes (worker is RO)
+			ResourceGroup: meta.DefaultResourceGroupName,
+		}, typeutil.NewUniqueSet(1, 2))
+		suite.meta.ReplicaManager.Put(suite.ctx, replicaWithRONode)
+
+		// Set up channel distribution
+		suite.dist.ChannelDistManager.Update(leaderNode, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID: suite.collection,
+				ChannelName:  channel.ChannelName,
+			},
+			Node:    leaderNode,
+			Version: 1,
+			View:    &meta.LeaderView{ID: leaderNode, CollectionID: suite.collection, Channel: channel.ChannelName, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+		})
+
+		// Create a LeaderAction that syncs segment from worker (RO node) to leader (RW node)
+		// leaderID=1 (RW), workerID=3 (RO)
+		// Before fix: checkStale used action.Node() which returns workerNode (3, RO), causing false stale
+		// After fix: checkStale uses leaderID (1, RW), task should NOT be stale
+		task := NewLeaderSegmentTask(
+			ctx,
+			WrapIDSource(0),
+			suite.collection,
+			replicaWithRONode,
+			leaderNode,
+			NewLeaderAction(leaderNode, workerNode, ActionTypeGrow, channel.GetChannelName(), suite.loadSegments[0], 0),
+		)
+
+		// Add task should succeed because leader node is RW
+		err := suite.scheduler.Add(task)
+		suite.NoError(err)
+
+		// Task should NOT be stale because we check leader node status, not worker node
+		suite.Equal(TaskStatusStarted, task.Status())
+		suite.NoError(task.Err())
+
+		// Clean up
+		suite.scheduler.remove(task)
+		suite.meta.ReplicaManager.Put(suite.ctx, utils.CreateTestReplica(suite.replica.GetID(), suite.collection, []int64{1, 2, 3}))
+	})
+
+	// Test case 2: LeaderAction should be stale when leader node becomes RO
+	suite.Run("LeaderRONode", func() {
+		// Set up channel distribution with leader on node 1
+		suite.dist.ChannelDistManager.Update(leaderNode, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID: suite.collection,
+				ChannelName:  channel.ChannelName,
+			},
+			Node:    leaderNode,
+			Version: 1,
+			View:    &meta.LeaderView{ID: leaderNode, CollectionID: suite.collection, Channel: channel.ChannelName, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+		})
+
+		// Create task with original replica (all RW nodes)
+		task := NewLeaderSegmentTask(
+			ctx,
+			WrapIDSource(0),
+			suite.collection,
+			suite.replica,
+			leaderNode,
+			NewLeaderAction(leaderNode, workerNode, ActionTypeGrow, channel.GetChannelName(), suite.loadSegments[0], 0),
+		)
+
+		// Add task should succeed
+		err := suite.scheduler.Add(task)
+		suite.NoError(err)
+
+		// Now change replica to make leader node (node 1) as RO node
+		replicaWithLeaderRO := meta.NewReplica(&querypb.Replica{
+			ID:            suite.replica.GetID(),
+			CollectionID:  suite.collection,
+			Nodes:         []int64{2, 3}, // RW nodes
+			RoNodes:       []int64{1},    // Leader becomes RO
+			ResourceGroup: meta.DefaultResourceGroupName,
+		}, typeutil.NewUniqueSet(2, 3))
+		suite.meta.ReplicaManager.Put(suite.ctx, replicaWithLeaderRO)
+
+		// Dispatch will trigger promote which calls checkStale
+		suite.dispatchAndWait(leaderNode)
+
+		// Task should be canceled because leader node is RO
+		suite.Equal(TaskStatusCanceled, task.Status())
+		suite.ErrorContains(task.Err(), "node becomes ro node")
+
+		// Restore original replica
+		suite.meta.ReplicaManager.Put(suite.ctx, utils.CreateTestReplica(suite.replica.GetID(), suite.collection, []int64{1, 2, 3}))
+	})
+
+	// Test case 3: LeaderAction with Reduce type should NOT be affected by RO node
+	suite.Run("LeaderReduceActionNotAffected", func() {
+		// Create replica with leader node as RO
+		replicaWithLeaderRO := meta.NewReplica(&querypb.Replica{
+			ID:            suite.replica.GetID(),
+			CollectionID:  suite.collection,
+			Nodes:         []int64{2, 3}, // RW nodes
+			RoNodes:       []int64{1},    // Leader is RO
+			ResourceGroup: meta.DefaultResourceGroupName,
+		}, typeutil.NewUniqueSet(2, 3))
+		suite.meta.ReplicaManager.Put(suite.ctx, replicaWithLeaderRO)
+
+		// Set up channel distribution
+		suite.dist.ChannelDistManager.Update(leaderNode, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID: suite.collection,
+				ChannelName:  channel.ChannelName,
+			},
+			Node:    leaderNode,
+			Version: 1,
+			View:    &meta.LeaderView{ID: leaderNode, CollectionID: suite.collection, Channel: channel.ChannelName, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+		})
+
+		// Create LeaderAction with Reduce type
+		task := NewLeaderSegmentTask(
+			ctx,
+			WrapIDSource(0),
+			suite.collection,
+			replicaWithLeaderRO,
+			leaderNode,
+			NewLeaderAction(leaderNode, workerNode, ActionTypeReduce, channel.GetChannelName(), suite.releaseSegments[0], 0),
+		)
+
+		// Add task should succeed because Reduce action is not affected by RO node check
+		err := suite.scheduler.Add(task)
+		suite.NoError(err)
+
+		// Clean up
+		suite.scheduler.remove(task)
+		suite.meta.ReplicaManager.Put(suite.ctx, utils.CreateTestReplica(suite.replica.GetID(), suite.collection, []int64{1, 2, 3}))
+	})
 }
 
 func (suite *TaskSuite) TestTaskStaleByRONode() {

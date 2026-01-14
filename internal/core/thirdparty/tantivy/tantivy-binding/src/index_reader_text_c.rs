@@ -44,12 +44,15 @@ pub extern "C" fn tantivy_register_tokenizer(
     ptr: *mut c_void,
     tokenizer_name: *const c_char,
     analyzer_params: *const c_char,
+    analyzer_extra_info: *const c_char,
 ) -> RustResult {
     init_log();
     let real = ptr as *mut IndexReaderWrapper;
     let tokenizer_name = cstr_to_str!(tokenizer_name);
     let params = cstr_to_str!(analyzer_params);
-    let analyzer = create_analyzer(params, "");
+
+    let extra_info_str = cstr_to_str!(analyzer_extra_info);
+    let analyzer = create_analyzer(params, extra_info_str);
     match analyzer {
         Ok(text_analyzer) => unsafe {
             (*real).register_tokenizer(String::from(tokenizer_name), text_analyzer);

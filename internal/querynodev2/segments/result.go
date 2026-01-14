@@ -369,17 +369,6 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		log.Debug("skip duplicated query result while reducing internal.RetrieveResults", zap.Int64("dupCount", skipDupCnt))
 	}
 
-	requestCosts := lo.FilterMap(retrieveResults, func(result *internalpb.RetrieveResults, _ int) (*internalpb.CostAggregation, bool) {
-		// delegator node won't be used to load sealed segment if stream node is enabled
-		// and if growing segment doesn't exists, delegator won't produce any cost metrics
-		// so we deprecate the EnableWorkerSQCostMetrics param
-		return result.GetCostAggregation(), true
-	})
-	ret.CostAggregation = mergeRequestCost(requestCosts)
-	if ret.CostAggregation == nil {
-		ret.CostAggregation = &internalpb.CostAggregation{}
-	}
-	ret.CostAggregation.TotalRelatedDataSize = relatedDataSize
 	return ret, nil
 }
 

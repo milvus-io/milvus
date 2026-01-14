@@ -20,6 +20,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -1932,7 +1934,8 @@ func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {
 	searchReq.Req.MetricType = metric.IP
 
 	sd := &shardDelegator{
-		isBM25Field: map[int64]bool{101: true},
+		isBM25Field:                map[int64]bool{101: true},
+		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 
 	_, err := sd.search(context.Background(), searchReq, []SnapshotItem{}, []SegmentEntry{}, map[int64]int64{})
@@ -2038,5 +2041,90 @@ func TestNewRowCountBasedEvaluator_PartialResultAcceptance(t *testing.T) {
 		shouldReturn, accessedRatio = evaluator("Query", successSegments, failureSegments, testErrors)
 		assert.True(t, shouldReturn) // 0.9 > 0.7, should return partial
 		assert.Equal(t, 0.9, accessedRatio)
+	})
+}
+
+func TestDelegatorCatchingUpStreamingData(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("initial state is catching up", func(t *testing.T) {
+		// Create a minimal delegator to test CatchingUpStreamingData
+		sd := &shardDelegator{
+			catchingUpStreamingData:    atomic.NewBool(true),
+			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
+		}
+		assert.True(t, sd.CatchingUpStreamingData())
+	})
+
+	t.Run("state changes to caught up when lag is small", func(t *testing.T) {
+		// Mock the config to return 5 seconds threshold
+		mockParam := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsDurationByParse")).Return(5 * time.Second).Build()
+		defer mockParam.UnPatch()
+
+		sd := &shardDelegator{
+			vchannelName:               "test-channel",
+			latestTsafe:                atomic.NewUint64(0),
+			catchingUpStreamingData:    atomic.NewBool(true),
+			tsCond:                     sync.NewCond(&sync.Mutex{}),
+			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
+		}
+
+		// Initially catching up
+		assert.True(t, sd.CatchingUpStreamingData())
+
+		// Update tsafe with a recent timestamp (lag < 5s)
+		recentTs := tsoutil.ComposeTSByTime(time.Now(), 0)
+		sd.UpdateTSafe(recentTs)
+
+		// Should now be caught up
+		assert.False(t, sd.CatchingUpStreamingData())
+	})
+
+	t.Run("state remains catching up when lag is large", func(t *testing.T) {
+		// Mock the config to return 5 seconds threshold
+		mockParam := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsDurationByParse")).Return(5 * time.Second).Build()
+		defer mockParam.UnPatch()
+
+		sd := &shardDelegator{
+			vchannelName:               "test-channel",
+			latestTsafe:                atomic.NewUint64(0),
+			catchingUpStreamingData:    atomic.NewBool(true),
+			tsCond:                     sync.NewCond(&sync.Mutex{}),
+			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
+		}
+
+		// Initially catching up
+		assert.True(t, sd.CatchingUpStreamingData())
+
+		// Update tsafe with an old timestamp (lag > 5s)
+		oldTs := tsoutil.ComposeTSByTime(time.Now().Add(-10*time.Second), 0)
+		sd.UpdateTSafe(oldTs)
+
+		// Should still be catching up
+		assert.True(t, sd.CatchingUpStreamingData())
+	})
+
+	t.Run("threshold disabled when set to 0", func(t *testing.T) {
+		// Mock the config to return 0 (disabled)
+		mockParam := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsDurationByParse")).Return(0 * time.Second).Build()
+		defer mockParam.UnPatch()
+
+		sd := &shardDelegator{
+			vchannelName:               "test-channel",
+			latestTsafe:                atomic.NewUint64(0),
+			catchingUpStreamingData:    atomic.NewBool(true),
+			tsCond:                     sync.NewCond(&sync.Mutex{}),
+			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
+		}
+
+		// Initially catching up
+		assert.True(t, sd.CatchingUpStreamingData())
+
+		// Update tsafe with a recent timestamp
+		recentTs := tsoutil.ComposeTSByTime(time.Now(), 0)
+		sd.UpdateTSafe(recentTs)
+
+		// Should still be catching up (threshold disabled)
+		assert.True(t, sd.CatchingUpStreamingData())
 	})
 }

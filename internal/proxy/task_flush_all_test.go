@@ -26,14 +26,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/uniquegenerator"
 )
 
-func createTestFlushAllTask(t *testing.T) (*flushAllTask, *mocks.MockMixCoordClient, *msgstream.MockMsgStream, context.Context) {
+func createTestFlushAllTask(t *testing.T) (*flushAllTask, *mocks.MockMixCoordClient, context.Context) {
 	ctx := context.Background()
 	mixCoord := mocks.NewMockMixCoordClient(t)
-	replicateMsgStream := msgstream.NewMockMsgStream(t)
 
 	task := &flushAllTask{
 		baseTask:  baseTask{},
@@ -50,22 +48,20 @@ func createTestFlushAllTask(t *testing.T) (*flushAllTask, *mocks.MockMixCoordCli
 		mixCoord: mixCoord,
 	}
 
-	return task, mixCoord, replicateMsgStream, ctx
+	return task, mixCoord, ctx
 }
 
 func TestFlushAllTaskTraceCtx(t *testing.T) {
-	task, mixCoord, replicateMsgStream, ctx := createTestFlushAllTask(t)
+	task, mixCoord, ctx := createTestFlushAllTask(t)
 	defer mixCoord.AssertExpectations(t)
-	defer replicateMsgStream.AssertExpectations(t)
 
 	traceCtx := task.TraceCtx()
 	assert.Equal(t, ctx, traceCtx)
 }
 
 func TestFlushAllTaskID(t *testing.T) {
-	task, mixCoord, replicateMsgStream, _ := createTestFlushAllTask(t)
+	task, mixCoord, _ := createTestFlushAllTask(t)
 	defer mixCoord.AssertExpectations(t)
-	defer replicateMsgStream.AssertExpectations(t)
 
 	// Test getting ID
 	originalID := task.ID()
@@ -78,27 +74,24 @@ func TestFlushAllTaskID(t *testing.T) {
 }
 
 func TestFlushAllTaskName(t *testing.T) {
-	task, mixCoord, replicateMsgStream, _ := createTestFlushAllTask(t)
+	task, mixCoord, _ := createTestFlushAllTask(t)
 	defer mixCoord.AssertExpectations(t)
-	defer replicateMsgStream.AssertExpectations(t)
 
 	name := task.Name()
 	assert.Equal(t, FlushAllTaskName, name)
 }
 
 func TestFlushAllTaskType(t *testing.T) {
-	task, mixCoord, replicateMsgStream, _ := createTestFlushAllTask(t)
+	task, mixCoord, _ := createTestFlushAllTask(t)
 	defer mixCoord.AssertExpectations(t)
-	defer replicateMsgStream.AssertExpectations(t)
 
 	msgType := task.Type()
 	assert.Equal(t, commonpb.MsgType_Flush, msgType)
 }
 
 func TestFlushAllTaskTimestampMethods(t *testing.T) {
-	task, mixCoord, replicateMsgStream, _ := createTestFlushAllTask(t)
+	task, mixCoord, _ := createTestFlushAllTask(t)
 	defer mixCoord.AssertExpectations(t)
-	defer replicateMsgStream.AssertExpectations(t)
 
 	originalTs := task.BeginTs()
 	assert.Equal(t, originalTs, task.EndTs())
@@ -129,8 +122,7 @@ func TestFlushAllTaskOnEnqueue(t *testing.T) {
 	assert.Equal(t, commonpb.MsgType_Flush, task.Base.MsgType)
 
 	// Test with existing Base
-	task, _, replicateMsgStream, _ := createTestFlushAllTask(t)
-	defer replicateMsgStream.AssertExpectations(t)
+	task, _, _ = createTestFlushAllTask(t)
 
 	err = task.OnEnqueue()
 	assert.NoError(t, err)
@@ -138,18 +130,16 @@ func TestFlushAllTaskOnEnqueue(t *testing.T) {
 }
 
 func TestFlushAllTaskPreExecute(t *testing.T) {
-	task, mixCoord, replicateMsgStream, ctx := createTestFlushAllTask(t)
+	task, mixCoord, ctx := createTestFlushAllTask(t)
 	defer mixCoord.AssertExpectations(t)
-	defer replicateMsgStream.AssertExpectations(t)
 
 	err := task.PreExecute(ctx)
 	assert.NoError(t, err)
 }
 
 func TestFlushAllTaskPostExecute(t *testing.T) {
-	task, mixCoord, replicateMsgStream, ctx := createTestFlushAllTask(t)
+	task, mixCoord, ctx := createTestFlushAllTask(t)
 	defer mixCoord.AssertExpectations(t)
-	defer replicateMsgStream.AssertExpectations(t)
 
 	err := task.PostExecute(ctx)
 	assert.NoError(t, err)
@@ -159,9 +149,8 @@ func TestFlushAllTaskImplementsTaskInterface(t *testing.T) {
 	// Verify that flushAllTask implements the task interface
 	var _ task = (*flushAllTask)(nil)
 
-	task, mixCoord, replicateMsgStream, _ := createTestFlushAllTask(t)
+	task, mixCoord, _ := createTestFlushAllTask(t)
 	defer mixCoord.AssertExpectations(t)
-	defer replicateMsgStream.AssertExpectations(t)
 
 	// Test all interface methods are accessible
 	assert.NotNil(t, task.TraceCtx)

@@ -4976,3 +4976,145 @@ func TestSchemaHelper_CanRetrieveRawFieldData(t *testing.T) {
 	}
 	assert.False(t, helper.CanRetrieveRawFieldData(orphanField))
 }
+
+func TestIsExternalCollection(t *testing.T) {
+	// nil schema
+	assert.False(t, IsExternalCollection(nil))
+
+	// empty schema with no fields
+	schema := &schemapb.CollectionSchema{}
+	assert.False(t, IsExternalCollection(schema))
+
+	// schema with fields but no ExternalField set
+	schema.Fields = []*schemapb.FieldSchema{
+		{Name: "field1", ExternalField: ""},
+	}
+	assert.False(t, IsExternalCollection(schema))
+
+	// schema with ExternalSource but no ExternalField set
+	schema.ExternalSource = "s3://bucket/path"
+	assert.False(t, IsExternalCollection(schema))
+
+	// schema with ExternalField set (empty ExternalSource is allowed)
+	schema.ExternalSource = ""
+	schema.Fields = []*schemapb.FieldSchema{
+		{Name: "field1", ExternalField: "ext_field1"},
+	}
+	assert.True(t, IsExternalCollection(schema))
+
+	// schema with both ExternalSource and ExternalField set
+	schema.ExternalSource = "s3://bucket/path"
+	assert.True(t, IsExternalCollection(schema))
+}
+
+func TestValidateExternalCollectionSchema(t *testing.T) {
+	buildSchema := func() *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Name:           "external",
+			ExternalSource: "s3://bucket/path",
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "text",
+					DataType:      schemapb.DataType_VarChar,
+					ExternalField: "text_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "32"},
+					},
+				},
+				{
+					Name:          "vec",
+					DataType:      schemapb.DataType_FloatVector,
+					ExternalField: "vec_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "16"},
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("non external schema skipped", func(t *testing.T) {
+		// A non-external schema has no ExternalField set on any field
+		schema := &schemapb.CollectionSchema{
+			Name: "regular_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "32"},
+					},
+				},
+			},
+		}
+		assert.NoError(t, ValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("functions disabled", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Functions = []*schemapb.FunctionSchema{{Name: "test_func"}}
+		err := ValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "does not support functions")
+	})
+
+	t.Run("dynamic field disabled", func(t *testing.T) {
+		schema := buildSchema()
+		schema.EnableDynamicField = true
+		assert.Error(t, ValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("struct fields disabled", func(t *testing.T) {
+		schema := buildSchema()
+		schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
+			{Name: "struct_field", Fields: []*schemapb.FieldSchema{{Name: "nested", DataType: schemapb.DataType_Array}}},
+		}
+		assert.Error(t, ValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("primary key disabled", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[0].IsPrimaryKey = true
+		assert.Error(t, ValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("partition key disabled", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[0].IsPartitionKey = true
+		assert.Error(t, ValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("clustering key disabled", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[0].IsClusteringKey = true
+		assert.Error(t, ValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("auto id disabled", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[0].AutoID = true
+		assert.Error(t, ValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("text match disabled", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[0].TypeParams = append(schema.Fields[0].TypeParams, &commonpb.KeyValuePair{
+			Key:   "enable_match",
+			Value: "true",
+		})
+		assert.Error(t, ValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("external_field mapping required", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[0].ExternalField = ""
+		err := ValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "must have external_field mapping")
+	})
+
+	t.Run("valid schema passes", func(t *testing.T) {
+		err := ValidateExternalCollectionSchema(buildSchema())
+		assert.NoError(t, err)
+	})
+}

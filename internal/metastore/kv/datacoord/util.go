@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -225,6 +226,9 @@ func CloneSegmentWithExcludeBinlogs(segment *datapb.SegmentInfo) (*datapb.Segmen
 }
 
 func marshalSegmentInfo(segment *datapb.SegmentInfo) (string, error) {
+	// Compress TextStatsLogs paths to filenames before marshaling to save etcd space
+	metautil.ExtractTextLogFilenames(segment.GetTextStatsLogs())
+
 	segBytes, err := proto.Marshal(segment)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal segment: %d, err: %w", segment.ID, err)
@@ -345,6 +349,14 @@ func buildPreImportTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", PreImportTaskPrefix, taskID)
 }
 
+func buildCopySegmentJobKey(jobID int64) string {
+	return fmt.Sprintf("%s/%d", CopySegmentJobPrefix, jobID)
+}
+
+func buildCopySegmentTaskKey(taskID int64) string {
+	return fmt.Sprintf("%s/%d", CopySegmentTaskPrefix, taskID)
+}
+
 func buildAnalyzeTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", AnalyzeTaskPrefix, taskID)
 }
@@ -355,4 +367,8 @@ func buildStatsTaskKey(taskID int64) string {
 
 func buildUpdateExternalCollectionTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", UpdateExternalCollectionTaskPrefix, taskID)
+}
+
+func buildSnapshotKey(collectionID int64, snapshotID int64) string {
+	return fmt.Sprintf("%s/%d/%d", SnapshotPrefix, collectionID, snapshotID)
 }

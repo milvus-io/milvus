@@ -162,23 +162,27 @@ func isNotCollectionLevelLimitRequest(rt internalpb.RateType) bool {
 func (m *SimpleLimiter) GetQuotaStates() ([]milvuspb.QuotaState, []string) {
 	m.quotaStatesMu.RLock()
 	defer m.quotaStatesMu.RUnlock()
-	serviceStates := make(map[milvuspb.QuotaState]typeutil.Set[commonpb.ErrorCode])
+	type stateReasonKey struct {
+		ErrorCode commonpb.ErrorCode
+		Reason    string
+	}
+	serviceStates := make(map[milvuspb.QuotaState]typeutil.Set[stateReasonKey])
 
 	rlinternal.TraverseRateLimiterTree(m.rateLimiter.GetRootLimiters(), nil,
-		func(node *rlinternal.RateLimiterNode, state milvuspb.QuotaState, errCode commonpb.ErrorCode) bool {
+		func(node *rlinternal.RateLimiterNode, state milvuspb.QuotaState, errCode commonpb.ErrorCode, reason string) bool {
 			if serviceStates[state] == nil {
-				serviceStates[state] = typeutil.NewSet[commonpb.ErrorCode]()
+				serviceStates[state] = typeutil.NewSet[stateReasonKey]()
 			}
-			serviceStates[state].Insert(errCode)
+			serviceStates[state].Insert(stateReasonKey{ErrorCode: errCode, Reason: reason})
 			return true
 		})
 
 	states := make([]milvuspb.QuotaState, 0)
 	reasons := make([]string, 0)
-	for state, errCodes := range serviceStates {
-		for errCode := range errCodes {
+	for state, stateReasonKeys := range serviceStates {
+		for key := range stateReasonKeys {
 			states = append(states, state)
-			reasons = append(reasons, ratelimitutil.GetQuotaErrorString(errCode))
+			reasons = append(reasons, ratelimitutil.GetQuotaErrorStringWithReason(key.ErrorCode, key.Reason))
 		}
 	}
 
@@ -285,11 +289,19 @@ func (m *SimpleLimiter) updateLimiterNode(req *proxypb.Limiter, node *rlinternal
 		limit.SetLimit(ratelimitutil.Limit(rate.GetR()))
 		setRateGaugeByRateType(rate.GetRt(), paramtable.GetNodeID(), sourceID, rate.GetR())
 	}
-	quotaStates := typeutil.NewConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode]()
+	quotaStates := typeutil.NewConcurrentMap[milvuspb.QuotaState, *rlinternal.QuotaStateInfo]()
 	states := req.GetStates()
 	codes := req.GetCodes()
+	reasons := req.GetReasons()
 	for i, state := range states {
-		quotaStates.Insert(state, codes[i])
+		reason := ""
+		if i < len(reasons) {
+			reason = reasons[i]
+		}
+		quotaStates.Insert(state, &rlinternal.QuotaStateInfo{
+			ErrorCode: codes[i],
+			Reason:    reason,
+		})
 	}
 	node.SetQuotaStates(quotaStates)
 	return nil

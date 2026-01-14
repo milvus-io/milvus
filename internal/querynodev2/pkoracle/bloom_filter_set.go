@@ -16,6 +16,13 @@
 
 package pkoracle
 
+/*
+#cgo pkg-config: milvus_core
+
+#include "segcore/load_index_c.h"
+*/
+import "C"
+
 import (
 	"sync"
 
@@ -40,6 +47,10 @@ type BloomFilterSet struct {
 	segType      commonpb.SegmentState
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
+
+	// Resource tracking
+	trackedSize     int64 // memory size that was charged
+	resourceCharged bool  // tracks whether memory resources were charged for this bloom filter set
 }
 
 // MayPkExist returns whether any bloom filters returns positive.
@@ -138,6 +149,103 @@ func (s *BloomFilterSet) AddHistoricalStats(stats *storage.PkStatistics) {
 	defer s.statsMutex.Unlock()
 
 	s.historyStats = append(s.historyStats, stats)
+}
+
+// MemSize returns the total memory size of all bloom filters in bytes.
+// This includes both currentStat and all historyStats.
+func (s *BloomFilterSet) MemSize() int64 {
+	s.statsMutex.RLock()
+	defer s.statsMutex.RUnlock()
+
+	var size int64
+	if s.currentStat != nil && s.currentStat.PkFilter != nil {
+		size += int64(s.currentStat.PkFilter.Cap() / 8) // Cap returns bits, convert to bytes
+	}
+	for _, stats := range s.historyStats {
+		if stats != nil && stats.PkFilter != nil {
+			size += int64(stats.PkFilter.Cap() / 8)
+		}
+	}
+	return size
+}
+
+// Charge charges memory resource for this bloom filter set via caching layer.
+// Safe to call multiple times - only charges once.
+func (s *BloomFilterSet) Charge() {
+	s.statsMutex.Lock()
+	defer s.statsMutex.Unlock()
+
+	if s.resourceCharged {
+		return // Already charged
+	}
+
+	size := s.memSizeLocked()
+	if size > 0 {
+		C.ChargeLoadedResource(C.CResourceUsage{
+			memory_bytes: C.int64_t(size),
+			disk_bytes:   0,
+		})
+		s.trackedSize = size
+		s.resourceCharged = true
+		log.Debug("charged bloom filter resource",
+			zap.Int64("segmentID", s.segmentID),
+			zap.Int64("size", size))
+	}
+}
+
+// Refund refunds any charged resources. Safe to call multiple times.
+func (s *BloomFilterSet) Refund() {
+	s.statsMutex.Lock()
+	defer s.statsMutex.Unlock()
+
+	if !s.resourceCharged || s.trackedSize <= 0 {
+		return
+	}
+
+	C.RefundLoadedResource(C.CResourceUsage{
+		memory_bytes: C.int64_t(s.trackedSize),
+		disk_bytes:   0,
+	})
+	log.Debug("refunded bloom filter resource",
+		zap.Int64("segmentID", s.segmentID),
+		zap.Int64("size", s.trackedSize))
+	s.trackedSize = 0
+	s.resourceCharged = false
+}
+
+// IsResourceCharged returns whether memory resources have been charged for this bloom filter set.
+func (s *BloomFilterSet) IsResourceCharged() bool {
+	s.statsMutex.RLock()
+	defer s.statsMutex.RUnlock()
+	return s.resourceCharged
+}
+
+// SetResourceCharged sets the resourceCharged flag and trackedSize for testing purposes.
+// This allows tests to simulate charged state without calling the actual C code.
+func (s *BloomFilterSet) SetResourceCharged(charged bool) {
+	s.statsMutex.Lock()
+	defer s.statsMutex.Unlock()
+	s.resourceCharged = charged
+	if charged {
+		s.trackedSize = s.memSizeLocked()
+	} else {
+		s.trackedSize = 0
+	}
+}
+
+// memSizeLocked returns the total memory size without acquiring the lock.
+// Caller must hold statsMutex.
+func (s *BloomFilterSet) memSizeLocked() int64 {
+	var size int64
+	if s.currentStat != nil && s.currentStat.PkFilter != nil {
+		size += int64(s.currentStat.PkFilter.Cap() / 8)
+	}
+	for _, stats := range s.historyStats {
+		if stats != nil && stats.PkFilter != nil {
+			size += int64(stats.PkFilter.Cap() / 8)
+		}
+	}
+	return size
 }
 
 // NewBloomFilterSet returns a new BloomFilterSet.

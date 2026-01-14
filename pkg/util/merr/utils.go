@@ -322,10 +322,6 @@ func WrapErrAsInputErrorWhen(err error, targets ...milvusError) error {
 	return err
 }
 
-func WrapErrCollectionReplicateMode(operation string) error {
-	return wrapFields(ErrCollectionReplicateMode, value("operation", operation))
-}
-
 func GetErrorType(err error) ErrorType {
 	if merr, ok := err.(milvusError); ok {
 		return merr.errType
@@ -1144,6 +1140,12 @@ func WrapErrInconsistentRequery(msg ...string) error {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
+}
+
+func WrapErrKMSKeyRevoked(dbID int64, reason string) error {
+	return wrapFields(ErrKMSKeyRevoked,
+		value("dbID", dbID),
+		value("reason", reason))
 }
 
 func WrapErrCompactionReadDeltaLogErr(msg ...string) error {

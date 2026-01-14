@@ -13,7 +13,7 @@ from prettytable import PrettyTable
 import functools
 from collections import Counter
 from time import sleep
-from pymilvus import AnnSearchRequest, RRFRanker, MilvusClient, DataType, CollectionSchema, connections
+from pymilvus import AnnSearchRequest, RRFRanker, MilvusClient, DataType, CollectionSchema, connections, LexicalHighlighter
 from pymilvus.milvus_client.index import IndexParams
 from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
 from pymilvus.client.embedding_list import EmbeddingList
@@ -53,37 +53,44 @@ class Singleton(type):
 class EventRecords(metaclass=Singleton):
 
     def __init__(self):
-        self.file_name = f"/tmp/ci_logs/event_records_{uuid.uuid4()}.parquet"
-        self.created_file = False
+        self.file_name = f"/tmp/ci_logs/event_records_{uuid.uuid4()}.jsonl"
 
     def insert(self, event_name, event_status, ts=None):
         log.info(f"insert event: {event_name}, {event_status}")
         insert_ts = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S.%f') if ts is None else ts
         data = {
-            "event_name": [event_name],
-            "event_status": [event_status],
-            "event_ts": [insert_ts]
+            "event_name": event_name,
+            "event_status": event_status,
+            "event_ts": insert_ts
         }
-        df = pd.DataFrame(data)
-        if not self.created_file:
-            with event_lock:
-                df.to_parquet(self.file_name, engine='fastparquet')
-                self.created_file = True
-        else:
-            with event_lock:
-                df.to_parquet(self.file_name, engine='fastparquet', append=True)
+        with event_lock:
+            with open(self.file_name, 'a') as f:
+                f.write(json.dumps(data) + '\n')
 
     def get_records_df(self):
-        df = pd.read_parquet(self.file_name)
-        return df
+        with event_lock:
+            try:
+                records = []
+                with open(self.file_name, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            records.append(json.loads(line))
+                if not records:
+                    return pd.DataFrame(columns=["event_name", "event_status", "event_ts"])
+                return pd.DataFrame(records)
+            except FileNotFoundError:
+                return pd.DataFrame(columns=["event_name", "event_status", "event_ts"])
+            except Exception as e:
+                log.warning(f"EventRecords read error: {e}")
+                return pd.DataFrame(columns=["event_name", "event_status", "event_ts"])
 
 
 class RequestRecords(metaclass=Singleton):
 
     def __init__(self):
-        self.file_name = f"/tmp/ci_logs/request_records_{uuid.uuid4()}.parquet"
+        self.file_name = f"/tmp/ci_logs/request_records_{uuid.uuid4()}.jsonl"
         self.buffer = []
-        self.created_file = False
 
     def insert(self, operation_name, collection_name, start_time, time_cost, result):
         data = {
@@ -93,38 +100,45 @@ class RequestRecords(metaclass=Singleton):
             "time_cost": time_cost,
             "result": result
         }
-        self.buffer.append(data)
-        if len(self.buffer) > 100:
-            df = pd.DataFrame(self.buffer)
-            if not self.created_file:
-                with request_lock:
-                    df.to_parquet(self.file_name, engine='fastparquet')
-                    self.created_file = True
-            else:
-                with request_lock:
-                    df.to_parquet(self.file_name, engine='fastparquet', append=True)
-            self.buffer = []
+        with request_lock:
+            self.buffer.append(data)
+            if len(self.buffer) >= 100:
+                self._flush_buffer()
 
-    def sink(self):
-        if len(self.buffer) == 0:
+    def _flush_buffer(self):
+        """将 buffer 写入文件（调用时需持有 request_lock）"""
+        if not self.buffer:
             return
         try:
-            df = pd.DataFrame(self.buffer)
+            with open(self.file_name, 'a') as f:
+                for record in self.buffer:
+                    f.write(json.dumps(record) + '\n')
+            self.buffer = []
         except Exception as e:
-            log.error(f"convert buffer {self.buffer} to dataframe error: {e}")
-            return
-        if not self.created_file:
-            with request_lock:
-                df.to_parquet(self.file_name, engine='fastparquet')
-                self.created_file = True
-        else:
-            with request_lock:
-                df.to_parquet(self.file_name, engine='fastparquet', append=True)
+            log.error(f"RequestRecords flush error: {e}")
+
+    def sink(self):
+        with request_lock:
+            self._flush_buffer()
 
     def get_records_df(self):
         self.sink()
-        df = pd.read_parquet(self.file_name)
-        return df
+        with request_lock:
+            try:
+                records = []
+                with open(self.file_name, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            records.append(json.loads(line))
+                if not records:
+                    return pd.DataFrame(columns=["operation_name", "collection_name", "start_time", "time_cost", "result"])
+                return pd.DataFrame(records)
+            except FileNotFoundError:
+                return pd.DataFrame(columns=["operation_name", "collection_name", "start_time", "time_cost", "result"])
+            except Exception as e:
+                log.warning(f"RequestRecords read error: {e}")
+                return pd.DataFrame(columns=["operation_name", "collection_name", "start_time", "time_cost", "result"])
 
 
 class ResultAnalyzer:
@@ -1048,6 +1062,14 @@ class FullTextSearchChecker(Checker):
     @trace()
     def full_text_search(self):
         bm25_anns_field = random.choice(self.bm25_sparse_field_names)
+        # Create highlighter for full text search results
+        highlighter = LexicalHighlighter(
+            pre_tags=["<em>"],
+            post_tags=["</em>"],
+            highlight_search_text=True,
+            fragment_offset=10,
+            fragment_size=50
+        )
         try:
             res = self.milvus_client.search(
                 collection_name=self.c_name,
@@ -1056,7 +1078,8 @@ class FullTextSearchChecker(Checker):
                 search_params=constants.DEFAULT_BM25_SEARCH_PARAM,
                 limit=5,
                 partition_names=self.p_names,
-                timeout=search_timeout
+                timeout=search_timeout,
+                highlighter=highlighter
             )
             return res, True
         except Exception as e:
@@ -1272,7 +1295,6 @@ class InsertChecker(Checker):
         self.scale = 1 * 10 ** 6
         self.start_time_stamp = int(time.time() * self.scale)  # us
         self.term_expr = f'{self.int64_field_name} >= {self.start_time_stamp}'
-        self.file_name = f"/tmp/ci_logs/insert_data_{uuid.uuid4()}.parquet"
 
     @trace()
     def insert_entities(self):
@@ -1359,7 +1381,6 @@ class InsertFreshnessChecker(Checker):
         self.scale = 1 * 10 ** 6
         self.start_time_stamp = int(time.time() * self.scale)  # us
         self.term_expr = f'{self.int64_field_name} >= {self.start_time_stamp}'
-        self.file_name = f"/tmp/ci_logs/insert_data_{uuid.uuid4()}.parquet"
 
     def insert_entities(self):
         data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
@@ -1908,34 +1929,52 @@ class QueryChecker(Checker):
 
 
 class TextMatchChecker(Checker):
-    """check text match query operations in a dependent thread"""
+    """check text match search operations with highlighter in a dependent thread"""
 
     def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
         if collection_name is None:
-            collection_name = cf.gen_unique_str("QueryChecker_")
+            collection_name = cf.gen_unique_str("TextMatchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
         self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
-        self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)  # do load before query
+        self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)
         self.insert_data()
         key_word = self.word_freq.most_common(1)[0][0]
-        text_match_field_name = random.choice(self.text_match_field_name_list)
-        self.term_expr = f"TEXT_MATCH({text_match_field_name}, '{key_word}')"
+        self.text_match_field_name = random.choice(self.text_match_field_name_list)
+        self.key_word = key_word
+        self.term_expr = f"TEXT_MATCH({self.text_match_field_name}, '{key_word}')"
 
     @trace()
     def text_match(self):
+        # Create highlighter with query for text match
+        highlighter = LexicalHighlighter(
+            pre_tags=["<em>"],
+            post_tags=["</em>"],
+            highlight_search_text=False,
+            highlight_query=[{"type": "TextMatch", "field": self.text_match_field_name, "text": self.key_word}]
+        )
         try:
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout)
+            res = self.milvus_client.search(
+                collection_name=self.c_name,
+                data=cf.gen_vectors(1, self.dim),
+                anns_field=self.float_vector_field_name,
+                search_params=constants.DEFAULT_SEARCH_PARAM,
+                filter=self.term_expr,
+                limit=5,
+                output_fields=[self.text_match_field_name],
+                timeout=search_timeout,
+                highlighter=highlighter
+            )
             return res, True
         except Exception as e:
-            log.info(f"text_match error: {e}")
             return str(e), False
 
     @exception_handler()
     def run_task(self):
         key_word = self.word_freq.most_common(1)[0][0]
-        text_match_field_name = random.choice(self.text_match_field_name_list)
-        self.term_expr = f"TEXT_MATCH({text_match_field_name}, '{key_word}')"
+        self.text_match_field_name = random.choice(self.text_match_field_name_list)
+        self.key_word = key_word
+        self.term_expr = f"TEXT_MATCH({self.text_match_field_name}, '{key_word}')"
         res, result = self.text_match()
         return res, result
 

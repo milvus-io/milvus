@@ -17834,3 +17834,122 @@ TEST(ExprTest, TestCancellationHelper) {
     ASSERT_THROW(milvus::exec::checkCancellation(query_context.get()),
                  folly::FutureCancellation);
 }
+
+// Test for issue #46588: BinaryRangeExpr with mixed int64/float types for JSON fields
+// When lower_val is int64 and upper_val is float (or vice versa), the code should
+// handle the type mismatch correctly without assertion failures.
+TEST(ExprTest, TestBinaryRangeExprMixedTypesForJSON) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 100;
+    auto raw_data = DataGen(schema, N);
+    seg->PreInsert(N);
+    seg->Insert(0,
+                N,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+
+    // Test case 1: lower_val is int64, upper_val is float
+    // Expression: 100 < json["value"] < 500.5
+    {
+        proto::plan::GenericValue lower_val;
+        lower_val.set_int64_val(100);  // int64 type
+        proto::plan::GenericValue upper_val;
+        upper_val.set_float_val(500.5);  // float type
+
+        auto expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+            expr::ColumnInfo(json_fid, DataType::JSON, {"value"}),
+            lower_val,
+            upper_val,
+            false,  // lower_inclusive
+            false   // upper_inclusive
+        );
+
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+
+        // Should not throw - the fix handles mixed types correctly
+        ASSERT_NO_THROW({
+            auto result = milvus::query::ExecuteQueryExpr(
+                plan, seg_promote, N, MAX_TIMESTAMP);
+        });
+    }
+
+    // Test case 2: lower_val is float, upper_val is int64
+    // Expression: 100.5 < json["value"] < 500
+    {
+        proto::plan::GenericValue lower_val;
+        lower_val.set_float_val(100.5);  // float type
+        proto::plan::GenericValue upper_val;
+        upper_val.set_int64_val(500);  // int64 type
+
+        auto expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+            expr::ColumnInfo(json_fid, DataType::JSON, {"value"}),
+            lower_val,
+            upper_val,
+            false,  // lower_inclusive
+            false   // upper_inclusive
+        );
+
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+
+        // Should not throw - the fix handles mixed types correctly
+        ASSERT_NO_THROW({
+            auto result = milvus::query::ExecuteQueryExpr(
+                plan, seg_promote, N, MAX_TIMESTAMP);
+        });
+    }
+
+    // Test case 3: both are int64 (baseline test)
+    {
+        proto::plan::GenericValue lower_val;
+        lower_val.set_int64_val(100);
+        proto::plan::GenericValue upper_val;
+        upper_val.set_int64_val(500);
+
+        auto expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+            expr::ColumnInfo(json_fid, DataType::JSON, {"value"}),
+            lower_val,
+            upper_val,
+            false,
+            false);
+
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+
+        ASSERT_NO_THROW({
+            auto result = milvus::query::ExecuteQueryExpr(
+                plan, seg_promote, N, MAX_TIMESTAMP);
+        });
+    }
+
+    // Test case 4: both are float (baseline test)
+    {
+        proto::plan::GenericValue lower_val;
+        lower_val.set_float_val(100.5);
+        proto::plan::GenericValue upper_val;
+        upper_val.set_float_val(500.5);
+
+        auto expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+            expr::ColumnInfo(json_fid, DataType::JSON, {"value"}),
+            lower_val,
+            upper_val,
+            false,
+            false);
+
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+
+        ASSERT_NO_THROW({
+            auto result = milvus::query::ExecuteQueryExpr(
+                plan, seg_promote, N, MAX_TIMESTAMP);
+        });
+    }
+}

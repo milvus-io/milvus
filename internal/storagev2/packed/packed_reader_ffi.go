@@ -177,9 +177,6 @@ func (r *FFIPackedReader) Schema() *arrow.Schema {
 
 // Retain increases the reference count
 func (r *FFIPackedReader) Retain() {
-	// if r.recordReader != nil {
-	// r.recordReader.Retain()
-	// }
 }
 
 // Release decreases the reference count

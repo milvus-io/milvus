@@ -1273,46 +1273,37 @@ class SegmentExpr : public Expr {
         return processed_size;
     }
 
-    // If process_all_chunks is true, all chunks will be processed and no inner state will be changed.
     template <typename T,
               bool NeedSegmentOffsets = false,
               typename FUNC,
               typename... ValTypes>
     int64_t
-    ProcessMultipleChunksCommon(
+    ProcessDataChunksForMultipleChunk(
         FUNC func,
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        bool process_all_chunks,
         const ValTypes&... values) {
         int64_t processed_size = 0;
-
-        size_t start_chunk = process_all_chunks ? 0 : current_data_chunk_;
 
         // prefetch chunks to reduce cache miss latency
         if (!prefetched_) {
             std::vector<int64_t> pf_chunk_ids;
-            pf_chunk_ids.reserve(num_data_chunk_ - start_chunk);
-            for (size_t i = start_chunk; i < num_data_chunk_; i++) {
+            pf_chunk_ids.reserve(num_data_chunk_ - current_data_chunk_);
+            for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
                 pf_chunk_ids.push_back(i);
             }
             segment_->prefetch_chunks(op_ctx_, field_id_, pf_chunk_ids);
             prefetched_ = true;
         }
 
-        for (size_t i = start_chunk; i < num_data_chunk_; i++) {
+        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
-                process_all_chunks
-                    ? 0
-                    : (i == current_data_chunk_ ? current_data_chunk_pos_ : 0);
+                i == current_data_chunk_ ? current_data_chunk_pos_ : 0;
 
             // if segment is chunked, type won't be growing
             int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
-            // process a whole chunk if process_all_chunks is true
-            if (!process_all_chunks) {
-                size = std::min(size, batch_size_ - processed_size);
-            }
+            size = std::min(size, batch_size_ - processed_size);
 
             if (size == 0)
                 continue;  //do not go empty-loop at the bound of the chunk
@@ -1441,7 +1432,7 @@ class SegmentExpr : public Expr {
 
             processed_size += size;
 
-            if (!process_all_chunks && processed_size >= batch_size_) {
+            if (processed_size >= batch_size_) {
                 current_data_chunk_ = i;
                 current_data_chunk_pos_ = data_pos + size;
                 break;
@@ -1449,33 +1440,6 @@ class SegmentExpr : public Expr {
         }
 
         return processed_size;
-    }
-
-    template <typename T,
-              bool NeedSegmentOffsets = false,
-              typename FUNC,
-              typename... ValTypes>
-    int64_t
-    ProcessDataChunksForMultipleChunk(
-        FUNC func,
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
-        return ProcessMultipleChunksCommon<T, NeedSegmentOffsets>(
-            func, skip_func, res, valid_res, false, values...);
-    }
-
-    template <typename T, typename FUNC, typename... ValTypes>
-    int64_t
-    ProcessAllChunksForMultipleChunk(
-        FUNC func,
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
-        return ProcessMultipleChunksCommon<T>(
-            func, skip_func, res, valid_res, true, values...);
     }
 
     template <typename T,
@@ -1498,20 +1462,45 @@ class SegmentExpr : public Expr {
         }
     }
 
-    template <typename T, typename FUNC, typename... ValTypes>
+    // Specialized method for ngram post-filter: processes all data in batches
+    // - Starts from position 0
+    // - Does NOT modify segment state variables (current_data_chunk_, etc.)
+    template <typename T, typename FUNC>
     int64_t
-    ProcessAllDataChunk(
-        FUNC func,
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
-        if (segment_->is_chunked()) {
-            return ProcessAllChunksForMultipleChunk<T>(
-                func, skip_func, res, valid_res, values...);
-        } else {
-            ThrowInfo(ErrorCode::Unsupported, "unreachable");
+    ProcessAllDataChunkBatched(FUNC func, TargetBitmapView res) {
+        static_assert(std::is_same_v<T, std::string_view> ||
+                          std::is_same_v<T, Json> ||
+                          std::is_same_v<T, ArrayView>,
+                      "ProcessAllDataChunkBatched only supports string_view, "
+                      "Json, and ArrayView types");
+
+        AssertInfo(segment_->is_chunked(),
+                   "ProcessAllDataChunkBatched requires chunked segment");
+        AssertInfo(segment_->type() == SegmentType::Sealed,
+                   "ProcessAllDataChunkBatched requires sealed segment");
+
+        int64_t processed_size = 0;
+
+        for (size_t chunk_id = 0; chunk_id < num_data_chunk_; chunk_id++) {
+            int64_t chunk_size = segment_->chunk_size(field_id_, chunk_id);
+            int64_t chunk_offset = 0;
+
+            while (chunk_offset < chunk_size) {
+                int64_t batch_size =
+                    std::min(batch_size_, chunk_size - chunk_offset);
+
+                auto pw = segment_->get_batch_views<T>(
+                    op_ctx_, field_id_, chunk_id, chunk_offset, batch_size);
+                auto data_vec = std::move(pw.get().first);
+
+                func(data_vec.data(), batch_size, res + processed_size);
+
+                chunk_offset += batch_size;
+                processed_size += batch_size;
+            }
         }
+
+        return processed_size;
     }
 
     template <typename T, typename FUNC, typename... ValTypes>
@@ -1813,8 +1802,11 @@ class SegmentExpr : public Expr {
     template <typename T>
     TargetBitmap
     ProcessIndexChunksForValid() {
-        using IndexInnerType = std::
-            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
+        using IndexInnerType =
+            std::conditional_t<std::is_same_v<T, std::string_view> ||
+                                   std::is_same_v<T, milvus::Json>,
+                               std::string,
+                               T>;
         using Index = index::ScalarIndex<IndexInnerType>;
 
         AssertInfo(num_index_chunk_ == 1,
@@ -1823,9 +1815,35 @@ class SegmentExpr : public Expr {
 
         // Cache valid result (execute only once)
         if (cached_index_chunk_id_ != 0) {
-            auto scalar_index =
-                dynamic_cast<const Index*>(pinned_index_[0].get());
-            auto* index_ptr = const_cast<Index*>(scalar_index);
+            Index* index_ptr = nullptr;
+            PinWrapper<const index::IndexBase*> json_pw;
+            // Executor for JsonFlatIndex. Must outlive index_ptr. Only used for JSON type.
+            std::shared_ptr<index::JsonFlatIndexQueryExecutor<IndexInnerType>>
+                executor;
+
+            if (field_type_ == DataType::JSON) {
+                auto pointer = milvus::Json::pointer(nested_path_);
+                json_pw = pinned_index_[0];
+                auto json_flat_index =
+                    dynamic_cast<const index::JsonFlatIndex*>(json_pw.get());
+
+                if (json_flat_index) {
+                    auto index_path = json_flat_index->GetNestedPath();
+                    executor = json_flat_index
+                                   ->template create_executor<IndexInnerType>(
+                                       pointer.substr(index_path.size()));
+                    index_ptr = executor.get();
+                } else {
+                    auto json_index =
+                        const_cast<index::IndexBase*>(json_pw.get());
+                    index_ptr = dynamic_cast<Index*>(json_index);
+                }
+            } else {
+                auto scalar_index =
+                    dynamic_cast<const Index*>(pinned_index_[0].get());
+                index_ptr = const_cast<Index*>(scalar_index);
+            }
+
             cached_index_chunk_valid_res_ =
                 std::make_shared<TargetBitmap>(index_ptr->IsNotNull());
             cached_index_chunk_id_ = 0;
@@ -1984,7 +2002,9 @@ class SegmentExpr : public Expr {
     bool
     HasJsonStats(FieldId field_id) const {
         return segment_->type() == SegmentType::Sealed &&
-               segment_->GetJsonStats(op_ctx_, field_id).get() != nullptr;
+               static_cast<const segcore::SegmentSealed*>(segment_)
+                       ->GetJsonStats(op_ctx_, field_id)
+                       .get() != nullptr;
     }
 
     bool

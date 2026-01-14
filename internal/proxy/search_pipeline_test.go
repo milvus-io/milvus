@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/util/function/highlight"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -360,6 +361,276 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 		},
 	})
 	s.NoError(err)
+}
+
+func (s *SearchPipelineSuite) TestSemanticHighlightOp() {
+	ctx := context.Background()
+
+	// Mock SemanticHighlight methods
+	mockProcess := mockey.Mock((*highlight.SemanticHighlight).Process).To(
+		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, [][]float32, error) {
+			return [][]string{
+					{"<em>highlighted</em> text 1"},
+					{"<em>highlighted</em> text 2"},
+					{"<em>highlighted</em> text 3"},
+				}, [][]float32{
+					{0.9},
+					{0.8},
+					{0.7},
+				}, nil
+		}).Build()
+	defer mockProcess.UnPatch()
+
+	mockFieldIDs := mockey.Mock((*highlight.SemanticHighlight).FieldIDs).To(func(h *highlight.SemanticHighlight) []int64 {
+		return []int64{101}
+	}).Build()
+	defer mockFieldIDs.UnPatch()
+
+	mockGetFieldName := mockey.Mock((*highlight.SemanticHighlight).GetFieldName).To(func(h *highlight.SemanticHighlight, id int64) string {
+		return testVarCharField
+	}).Build()
+	defer mockGetFieldName.UnPatch()
+
+	// Create operator
+	op := &semanticHighlightOperator{
+		highlight: &highlight.SemanticHighlight{},
+	}
+
+	// Create search results with text data
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   101,
+					FieldName: testVarCharField,
+					Type:      schemapb.DataType_VarChar,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{
+									Data: []string{"text 1", "text 2", "text 3"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Run the operator
+	results, err := op.run(ctx, s.span, searchResults)
+	s.NoError(err)
+	s.NotNil(results)
+	s.Len(results, 1)
+
+	// Verify results
+	result := results[0].(*milvuspb.SearchResults)
+	s.NotNil(result.Results.HighlightResults)
+	s.Len(result.Results.HighlightResults, 1)
+
+	highlightResult := result.Results.HighlightResults[0]
+	s.Equal(testVarCharField, highlightResult.FieldName)
+	s.Len(highlightResult.Datas, 3)
+	s.Equal([]string{"<em>highlighted</em> text 1"}, highlightResult.Datas[0].Fragments)
+	s.Equal([]string{"<em>highlighted</em> text 2"}, highlightResult.Datas[1].Fragments)
+	s.Equal([]string{"<em>highlighted</em> text 3"}, highlightResult.Datas[2].Fragments)
+}
+
+func (s *SearchPipelineSuite) TestSemanticHighlightOpMissingField() {
+	ctx := context.Background()
+
+	// Mock FieldIDs to return field 999 (not in results)
+	mockFieldIDs := mockey.Mock((*highlight.SemanticHighlight).FieldIDs).Return([]int64{999}).Build()
+	defer mockFieldIDs.UnPatch()
+
+	op := &semanticHighlightOperator{
+		highlight: &highlight.SemanticHighlight{},
+	}
+
+	// Create search results without the expected field
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       1,
+			Topks:      []int64{1},
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   101,
+					FieldName: testVarCharField,
+					Type:      schemapb.DataType_VarChar,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{
+									Data: []string{"text 1"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Run the operator and expect error
+	_, err := op.run(ctx, s.span, searchResults)
+	s.Error(err)
+	s.Contains(err.Error(), "text field not in output field")
+}
+
+func (s *SearchPipelineSuite) TestSemanticHighlightOpMultipleFields() {
+	ctx := context.Background()
+
+	// Use a counter to return different results for different calls
+	callCount := 0
+	mockProcess := mockey.Mock((*highlight.SemanticHighlight).Process).To(
+		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, [][]float32, error) {
+			callCount++
+			return [][]string{
+					{fmt.Sprintf("<em>highlighted</em> text field%d-1", callCount)},
+					{fmt.Sprintf("<em>highlighted</em> text field%d-2", callCount)},
+				}, [][]float32{
+					{0.9},
+					{0.8},
+				}, nil
+		}).Build()
+	defer mockProcess.UnPatch()
+
+	mockFieldIDs := mockey.Mock((*highlight.SemanticHighlight).FieldIDs).Return([]int64{101, 102}).Build()
+	defer mockFieldIDs.UnPatch()
+
+	mockGetFieldName := mockey.Mock((*highlight.SemanticHighlight).GetFieldName).To(func(h *highlight.SemanticHighlight, id int64) string {
+		if id == 101 {
+			return "field1"
+		}
+		return "field2"
+	}).Build()
+	defer mockGetFieldName.UnPatch()
+
+	op := &semanticHighlightOperator{
+		highlight: &highlight.SemanticHighlight{},
+	}
+
+	// Create search results with multiple text fields
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       2,
+			Topks:      []int64{2},
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   101,
+					FieldName: "field1",
+					Type:      schemapb.DataType_VarChar,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{
+									Data: []string{"text 1", "text 2"},
+								},
+							},
+						},
+					},
+				},
+				{
+					FieldId:   102,
+					FieldName: "field2",
+					Type:      schemapb.DataType_VarChar,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{
+									Data: []string{"another text 1", "another text 2"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Run the operator
+	results, err := op.run(ctx, s.span, searchResults)
+	s.NoError(err)
+	s.NotNil(results)
+
+	// Verify results
+	result := results[0].(*milvuspb.SearchResults)
+	s.NotNil(result.Results.HighlightResults)
+	s.Len(result.Results.HighlightResults, 2)
+
+	// Verify first field
+	s.Equal("field1", result.Results.HighlightResults[0].FieldName)
+	s.Len(result.Results.HighlightResults[0].Datas, 2)
+
+	// Verify second field
+	s.Equal("field2", result.Results.HighlightResults[1].FieldName)
+	s.Len(result.Results.HighlightResults[1].Datas, 2)
+}
+
+func (s *SearchPipelineSuite) TestSemanticHighlightOpEmptyResults() {
+	ctx := context.Background()
+
+	// Mock Process to return empty results
+	mockProcess := mockey.Mock((*highlight.SemanticHighlight).Process).To(
+		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, [][]float32, error) {
+			return [][]string{}, [][]float32{}, nil
+		}).Build()
+	defer mockProcess.UnPatch()
+
+	mockFieldIDs := mockey.Mock((*highlight.SemanticHighlight).FieldIDs).Return([]int64{101}).Build()
+	defer mockFieldIDs.UnPatch()
+
+	mockGetFieldName := mockey.Mock((*highlight.SemanticHighlight).GetFieldName).To(func(h *highlight.SemanticHighlight, id int64) string {
+		return testVarCharField
+	}).Build()
+	defer mockGetFieldName.UnPatch()
+
+	op := &semanticHighlightOperator{
+		highlight: &highlight.SemanticHighlight{},
+	}
+
+	// Create empty search results
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       0,
+			Topks:      []int64{0},
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   101,
+					FieldName: testVarCharField,
+					Type:      schemapb.DataType_VarChar,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{
+									Data: []string{},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Run the operator
+	results, err := op.run(ctx, s.span, searchResults)
+	s.NoError(err)
+	s.NotNil(results)
+
+	// Verify results
+	result := results[0].(*milvuspb.SearchResults)
+	s.NotNil(result.Results.HighlightResults)
+	s.Len(result.Results.HighlightResults, 1)
+	s.Equal(testVarCharField, result.Results.HighlightResults[0].FieldName)
+	s.Len(result.Results.HighlightResults[0].Datas, 0)
 }
 
 func (s *SearchPipelineSuite) TestSearchPipeline() {

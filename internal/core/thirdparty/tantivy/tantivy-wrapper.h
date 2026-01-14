@@ -18,8 +18,8 @@
 namespace milvus::tantivy {
 using Map = std::map<std::string, std::string>;
 
-static constexpr const char* DEFAULT_TOKENIZER_NAME = "milvus_tokenizer";
-static const char* DEFAULT_analyzer_params = "{}";
+static constexpr const char* DEFAULT_ANALYZER_NAME = "milvus_tokenizer";
+static const char* DEFAULT_ANALYZER_PARAMS = "{}";
 static constexpr uintptr_t DEFAULT_NUM_THREADS =
     1;  // Every field with index writer will generate a thread, make huge thread amount, wait for refactoring.
 static constexpr uintptr_t DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES =
@@ -134,8 +134,9 @@ struct TantivyIndexWrapper {
                         bool in_ram,
                         const char* path,
                         uint32_t tantivy_index_version,
-                        const char* tokenizer_name = DEFAULT_TOKENIZER_NAME,
-                        const char* analyzer_params = DEFAULT_analyzer_params,
+                        const char* analyzer_name = DEFAULT_ANALYZER_NAME,
+                        const char* analyzer_params = DEFAULT_ANALYZER_PARAMS,
+                        const char* analyzer_extra_info = "",
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
@@ -143,8 +144,9 @@ struct TantivyIndexWrapper {
             tantivy_create_text_writer(field_name,
                                        path,
                                        tantivy_index_version,
-                                       tokenizer_name,
+                                       analyzer_name,
                                        analyzer_params,
+                                       analyzer_extra_info,
                                        num_threads,
                                        overall_memory_budget_in_bytes,
                                        in_ram));
@@ -226,11 +228,19 @@ struct TantivyIndexWrapper {
     }
 
     void
+    set_analyzer_extra_info(std::string analyzer_extra_info) {
+        analyzer_extra_info_ = analyzer_extra_info;
+    }
+
+    void
     register_tokenizer(const char* tokenizer_name,
                        const char* analyzer_params) {
         if (reader_ != nullptr) {
-            auto res = RustResultWrapper(tantivy_register_tokenizer(
-                reader_, tokenizer_name, analyzer_params));
+            auto res = RustResultWrapper(
+                tantivy_register_tokenizer(reader_,
+                                           tokenizer_name,
+                                           analyzer_params,
+                                           analyzer_extra_info_.c_str()));
             AssertInfo(res.result_->success,
                        "failed to register tokenizer: {}",
                        res.result_->error);
@@ -1198,5 +1208,6 @@ struct TantivyIndexWrapper {
     IndexReader reader_ = nullptr;
     std::string path_;
     bool load_in_mmap_ = true;
+    std::string analyzer_extra_info_ = "";
 };
 }  // namespace milvus::tantivy

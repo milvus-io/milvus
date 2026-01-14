@@ -355,7 +355,7 @@ func (c *importChecker) checkSortingJob(job ImportJob) {
 		sortSegmentIDs := task.(*importTask).GetSortedSegmentIDs()
 		taskCnt += len(originSegmentIDs)
 		for i, originSegmentID := range originSegmentIDs {
-			taskLogFields := WrapTaskLog(task, zap.Int64("origin", originSegmentID), zap.Int64("target", sortSegmentIDs[i]))
+			logger := log.With(WrapTaskLog(task, zap.Int64("origin", originSegmentID), zap.Int64("target", sortSegmentIDs[i]))...)
 			originSegment := c.meta.GetHealthySegment(c.ctx, originSegmentID)
 			targetSegment := c.meta.GetHealthySegment(c.ctx, sortSegmentIDs[i])
 			if originSegment == nil {
@@ -363,26 +363,31 @@ func (c *importChecker) checkSortingJob(job ImportJob) {
 				doneCnt++
 				continue
 			}
-			if targetSegment == nil {
-				compactionTask, err := createSortCompactionTask(c.ctx, originSegment, sortSegmentIDs[i], c.meta, c.handler, c.alloc)
+			if targetSegment != nil {
+				// sort compaction is already done
+				doneCnt++
+				continue
+			}
+			// if not compacting, trigger sort compaction task
+			isCompacting := c.meta.IsSegmentCompacting(originSegmentID)
+			if !isCompacting {
+				compactionTask, err := createSortCompactionTask(c.ctx, task, originSegment, sortSegmentIDs[i], c.meta, c.handler, c.alloc)
 				if err != nil {
-					log.Warn("create sort compaction task failed", zap.Int64("segmentID", originSegmentID), zap.Error(err))
+					logger.Warn("create sort compaction task failed", zap.Error(err))
 					continue
 				}
 				if compactionTask == nil {
-					log.Info("maybe it no need to create sort compaction task", zap.Int64("segmentID", originSegmentID))
+					logger.Info("maybe it no need to create sort compaction task")
 					doneCnt++
 					continue
 				}
-				log.Info("create sort compaction task success", taskLogFields...)
 				err = c.ci.enqueueCompaction(compactionTask)
 				if err != nil {
-					log.Warn("sort compaction task enqueue failed", zap.Error(err))
+					logger.Warn("sort compaction task enqueue failed", zap.Error(err))
 					continue
 				}
-				continue
+				logger.Info("create sort compaction task and enqueue success")
 			}
-			doneCnt++
 		}
 	}
 

@@ -20,25 +20,21 @@ import (
 	"context"
 	"math/rand"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	mock1 "github.com/stretchr/testify/mock"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/mock"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -46,19 +42,6 @@ import (
 var mockErr = errors.New("mock grpc err")
 
 func TestMain(m *testing.M) {
-	// init embed etcd
-	embedetcdServer, tempDir, err := etcd.StartTestEmbedEtcdServer()
-	if err != nil {
-		log.Fatal("failed to start embed etcd server", zap.Error(err))
-	}
-	defer os.RemoveAll(tempDir)
-	defer embedetcdServer.Close()
-
-	addrs := etcd.GetEmbedEtcdEndpoints(embedetcdServer)
-
-	paramtable.Init()
-	paramtable.Get().Save(Params.EtcdCfg.Endpoints.Key, strings.Join(addrs, ","))
-
 	rand.Seed(time.Now().UnixNano())
 	os.Exit(m.Run())
 }
@@ -2714,5 +2697,123 @@ func TestClient_TruncateCollection(t *testing.T) {
 	defer cancel()
 	time.Sleep(20 * time.Millisecond)
 	_, err = client.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestClient_GetRestoreSnapshotState(t *testing.T) {
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockmix := MixCoordClient{
+		DataCoordClient: mockDC,
+	}
+	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().GetNodeID().Return(1)
+	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		return f(mockmix)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success
+	mockDC.EXPECT().GetRestoreSnapshotState(mock1.Anything, mock1.Anything).Return(&datapb.GetRestoreSnapshotStateResponse{
+		Status: merr.Success(),
+		Info: &datapb.RestoreSnapshotInfo{
+			JobId:    1,
+			State:    datapb.RestoreSnapshotState_RestoreSnapshotExecuting,
+			Progress: 50,
+		},
+	}, nil)
+	resp, err := client.GetRestoreSnapshotState(ctx, &datapb.GetRestoreSnapshotStateRequest{})
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), resp.GetInfo().GetJobId())
+	assert.Equal(t, datapb.RestoreSnapshotState_RestoreSnapshotExecuting, resp.GetInfo().GetState())
+
+	// test return error status
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetRestoreSnapshotState(mock1.Anything, mock1.Anything).Return(&datapb.GetRestoreSnapshotStateResponse{
+		Status: merr.Status(merr.ErrServiceNotReady),
+	}, nil)
+
+	rsp, err := client.GetRestoreSnapshotState(ctx, &datapb.GetRestoreSnapshotStateRequest{})
+	assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+	assert.Nil(t, err)
+
+	// test return error
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().GetRestoreSnapshotState(mock1.Anything, mock1.Anything).Return(&datapb.GetRestoreSnapshotStateResponse{
+		Status: merr.Success(),
+	}, mockErr)
+
+	_, err = client.GetRestoreSnapshotState(ctx, &datapb.GetRestoreSnapshotStateRequest{})
+	assert.NotNil(t, err)
+
+	// test ctx done
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer cancel()
+	time.Sleep(20 * time.Millisecond)
+	_, err = client.GetRestoreSnapshotState(ctx, &datapb.GetRestoreSnapshotStateRequest{})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestClient_ListRestoreSnapshotJobs(t *testing.T) {
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockmix := MixCoordClient{
+		DataCoordClient: mockDC,
+	}
+	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().GetNodeID().Return(1)
+	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		return f(mockmix)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success
+	mockDC.EXPECT().ListRestoreSnapshotJobs(mock1.Anything, mock1.Anything).Return(&datapb.ListRestoreSnapshotJobsResponse{
+		Status: merr.Success(),
+		Jobs: []*datapb.RestoreSnapshotInfo{
+			{JobId: 1, State: datapb.RestoreSnapshotState_RestoreSnapshotCompleted},
+			{JobId: 2, State: datapb.RestoreSnapshotState_RestoreSnapshotExecuting},
+		},
+	}, nil)
+	resp, err := client.ListRestoreSnapshotJobs(ctx, &datapb.ListRestoreSnapshotJobsRequest{})
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(resp.GetJobs()))
+
+	// test return error status
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().ListRestoreSnapshotJobs(mock1.Anything, mock1.Anything).Return(&datapb.ListRestoreSnapshotJobsResponse{
+		Status: merr.Status(merr.ErrServiceNotReady),
+	}, nil)
+
+	rsp, err := client.ListRestoreSnapshotJobs(ctx, &datapb.ListRestoreSnapshotJobsRequest{})
+	assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+	assert.Nil(t, err)
+
+	// test return error
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().ListRestoreSnapshotJobs(mock1.Anything, mock1.Anything).Return(&datapb.ListRestoreSnapshotJobsResponse{
+		Status: merr.Success(),
+	}, mockErr)
+
+	_, err = client.ListRestoreSnapshotJobs(ctx, &datapb.ListRestoreSnapshotJobsRequest{})
+	assert.NotNil(t, err)
+
+	// test ctx done
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer cancel()
+	time.Sleep(20 * time.Millisecond)
+	_, err = client.ListRestoreSnapshotJobs(ctx, &datapb.ListRestoreSnapshotJobsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }

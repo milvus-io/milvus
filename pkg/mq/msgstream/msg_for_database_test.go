@@ -31,12 +31,11 @@ func TestCreateDatabase(t *testing.T) {
 	var msg TsMsg = &CreateDatabaseMsg{
 		CreateDatabaseRequest: &milvuspb.CreateDatabaseRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_CreateDatabase,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_CreateDatabase,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			DbName: "unit_db",
 		},
@@ -68,12 +67,11 @@ func TestDropDatabase(t *testing.T) {
 	var msg TsMsg = &DropDatabaseMsg{
 		DropDatabaseRequest: &milvuspb.DropDatabaseRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_DropDatabase,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_DropDatabase,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			DbName: "unit_db",
 		},
@@ -105,12 +103,11 @@ func TestAlterDatabase(t *testing.T) {
 	var msg TsMsg = &AlterDatabaseMsg{
 		AlterDatabaseRequest: &milvuspb.AlterDatabaseRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_AlterDatabase,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_AlterDatabase,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			DbName: "unit_db",
 			Properties: []*commonpb.KeyValuePair{

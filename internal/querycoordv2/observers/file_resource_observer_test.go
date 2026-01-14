@@ -210,7 +210,7 @@ func (suite *FileResourceObserverSuite) TestSync_NodeSyncError() {
 
 func (suite *FileResourceObserverSuite) TestStart_SyncModeEnabled() {
 	// Mock paramtable to enable sync mode
-	paramtable.Get().QueryCoordCfg.FileResourceMode.SwapTempValue("sync")
+	paramtable.Get().CommonCfg.QNFileResourceMode.SwapTempValue("sync")
 
 	// Start observer - real nodeManager starts with empty node list
 	suite.observer.Start()
@@ -224,7 +224,7 @@ func (suite *FileResourceObserverSuite) TestStart_SyncModeEnabled() {
 
 func (suite *FileResourceObserverSuite) TestStart_SyncModeDisabled() {
 	// Mock paramtable to disable sync mode
-	paramtable.Get().QueryCoordCfg.FileResourceMode.SwapTempValue("async")
+	paramtable.Get().CommonCfg.QNFileResourceMode.SwapTempValue("close")
 
 	// Start observer - no mocks should be called
 	suite.observer.Start()

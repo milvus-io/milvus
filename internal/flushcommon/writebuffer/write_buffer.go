@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -514,9 +516,15 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 	_, ok := wb.metaCache.GetSegmentByID(segmentID)
 	// new segment
 	if !ok {
-		storageVersion := storage.StorageV1
-		if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-			storageVersion = storage.StorageV2
+		storageVersion := storage.StorageV2
+		manifestPath := ""
+		if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
+			storageVersion = storage.StorageV3
+			// set manifest path when creating segment
+			k := metautil.JoinIDPath(wb.collectionID, partitionID, segmentID)
+			basePath := path.Join(paramtable.Get().ServiceParam.MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath, k)
+			// -1 for first write
+			manifestPath = packed.MarshalManifestPath(basePath, -1)
 		}
 		segmentInfo := &datapb.SegmentInfo{
 			ID:             segmentID,
@@ -526,16 +534,7 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 			StartPosition:  startPos,
 			State:          commonpb.SegmentState_Growing,
 			StorageVersion: storageVersion,
-		}
-		// set manifest path when creating segment
-		if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
-			k := metautil.JoinIDPath(wb.collectionID, partitionID, segmentID)
-			basePath := path.Join(paramtable.Get().ServiceParam.MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath, k)
-			if paramtable.Get().CommonCfg.StorageType.GetValue() != "local" {
-				basePath = path.Join(paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue(), basePath)
-			}
-			// -1 for first write
-			segmentInfo.ManifestPath = packed.MarshalManifestPath(basePath, -1)
+			ManifestPath:   manifestPath,
 		}
 		wb.metaCache.AddSegment(segmentInfo, func(_ *datapb.SegmentInfo) pkoracle.PkStat {
 			return pkoracle.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
@@ -622,7 +621,8 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithMetaWriter(wb.metaWriter).
 		WithMetaCache(wb.metaCache).
 		WithSchema(schema).
-		WithSyncPack(pack)
+		WithSyncPack(pack).
+		WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second))
 	return task, nil
 }
 

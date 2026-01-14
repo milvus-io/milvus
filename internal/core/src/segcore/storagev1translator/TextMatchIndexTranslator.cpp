@@ -99,8 +99,8 @@ TextMatchIndexTranslator::get_cells(
             },
             milvus::ScopedTimer::LogLevel::Info);
         index->Load(config_);
-        index->RegisterTokenizer("milvus_tokenizer",
-                                 load_info_.analyzer_params.c_str());
+        index->RegisterAnalyzer("milvus_tokenizer",
+                                load_info_.analyzer_params.c_str());
     }
 
     LOG_INFO("load text match index success for field:{} of segment:{}",

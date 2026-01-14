@@ -18,10 +18,10 @@
 
 #include "ConfigKnowhere.h"
 #include "common/EasyAssert.h"
-#include "glog/logging.h"
 #include "log/Log.h"
 #include "knowhere/comp/knowhere_config.h"
 #include "knowhere/version.h"
+#include "common/logging_c.h"
 
 namespace milvus::config {
 
@@ -33,9 +33,7 @@ KnowhereInitImpl(const char* conf_file) {
         knowhere::KnowhereConfig::SetBlasThreshold(16384);
         knowhere::KnowhereConfig::SetEarlyStopThreshold(0);
         knowhere::KnowhereConfig::ShowVersion();
-        if (!google::IsGoogleLoggingInitialized()) {
-            google::InitGoogleLogging("milvus");
-        }
+        InitGoogleLoggingWithZapSink();
 
 #ifdef EMBEDDED_MILVUS
         // always disable all logs for embedded milvus

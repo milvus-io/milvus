@@ -606,6 +606,115 @@ func TestLocalCM(t *testing.T) {
 		assert.Equal(t, 1, len(mods))
 		assert.Contains(t, dirs, filepath.Dir(key4))
 	})
+
+	t.Run("test Copy", func(t *testing.T) {
+		testCopyRoot := "test_copy"
+
+		testCM := NewLocalChunkManager(objectstorage.RootPath(localPath))
+		defer testCM.RemoveWithPrefix(ctx, testCM.RootPath())
+
+		// Test successful copy
+		t.Run("copy file successfully", func(t *testing.T) {
+			srcKey := path.Join(localPath, testCopyRoot, "src", "file1")
+			dstKey := path.Join(localPath, testCopyRoot, "dst", "file1")
+			value := []byte("test data for copy")
+
+			// Write source file
+			err := testCM.Write(ctx, srcKey, value)
+			require.NoError(t, err)
+
+			// Copy file
+			err = testCM.Copy(ctx, srcKey, dstKey)
+			assert.NoError(t, err)
+
+			// Verify destination file exists and has correct content
+			dstData, err := testCM.Read(ctx, dstKey)
+			assert.NoError(t, err)
+			assert.Equal(t, value, dstData)
+
+			// Verify source file still exists
+			srcData, err := testCM.Read(ctx, srcKey)
+			assert.NoError(t, err)
+			assert.Equal(t, value, srcData)
+		})
+
+		// Test copy with nested directory creation
+		t.Run("copy file with nested directory", func(t *testing.T) {
+			srcKey := path.Join(localPath, testCopyRoot, "src2", "file2")
+			dstKey := path.Join(localPath, testCopyRoot, "dst", "nested", "deep", "file2")
+			value := []byte("test data for nested copy")
+
+			err := testCM.Write(ctx, srcKey, value)
+			require.NoError(t, err)
+
+			// Copy to nested destination
+			err = testCM.Copy(ctx, srcKey, dstKey)
+			assert.NoError(t, err)
+
+			// Verify copied content
+			dstData, err := testCM.Read(ctx, dstKey)
+			assert.NoError(t, err)
+			assert.Equal(t, value, dstData)
+		})
+
+		// Test copy with non-existent source
+		t.Run("copy non-existent source file", func(t *testing.T) {
+			srcKey := path.Join(localPath, testCopyRoot, "not_exist", "file")
+			dstKey := path.Join(localPath, testCopyRoot, "dst", "file")
+
+			err := testCM.Copy(ctx, srcKey, dstKey)
+			assert.Error(t, err)
+		})
+
+		// Test copy overwrite existing file
+		t.Run("copy and overwrite existing file", func(t *testing.T) {
+			srcKey := path.Join(localPath, testCopyRoot, "src3", "file3")
+			dstKey := path.Join(localPath, testCopyRoot, "dst3", "file3")
+			srcValue := []byte("new content")
+			oldValue := []byte("old content")
+
+			// Create destination with old content
+			err := testCM.Write(ctx, dstKey, oldValue)
+			require.NoError(t, err)
+
+			// Create source with new content
+			err = testCM.Write(ctx, srcKey, srcValue)
+			require.NoError(t, err)
+
+			// Copy (should overwrite)
+			err = testCM.Copy(ctx, srcKey, dstKey)
+			assert.NoError(t, err)
+
+			// Verify destination has new content
+			dstData, err := testCM.Read(ctx, dstKey)
+			assert.NoError(t, err)
+			assert.Equal(t, srcValue, dstData)
+		})
+
+		// Test copy large file
+		t.Run("copy large file", func(t *testing.T) {
+			srcKey := path.Join(localPath, testCopyRoot, "src4", "large_file")
+			dstKey := path.Join(localPath, testCopyRoot, "dst4", "large_file")
+
+			// Create 1MB file
+			largeData := make([]byte, 1024*1024)
+			for i := range largeData {
+				largeData[i] = byte(i % 256)
+			}
+
+			err := testCM.Write(ctx, srcKey, largeData)
+			require.NoError(t, err)
+
+			// Copy large file
+			err = testCM.Copy(ctx, srcKey, dstKey)
+			assert.NoError(t, err)
+
+			// Verify content
+			dstData, err := testCM.Read(ctx, dstKey)
+			assert.NoError(t, err)
+			assert.Equal(t, largeData, dstData)
+		})
+	})
 }
 
 func readAllChunkWithPrefix(ctx context.Context, manager ChunkManager, prefix string) ([]string, [][]byte, error) {

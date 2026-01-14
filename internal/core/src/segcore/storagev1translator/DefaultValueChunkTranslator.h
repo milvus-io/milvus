@@ -13,11 +13,13 @@
 
 #include <string>
 #include <vector>
+#include <optional>
 
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 #include "common/Chunk.h"
 #include "common/FieldMeta.h"
+#include "common/ChunkWriter.h"
 #include "mmap/Types.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
 
@@ -30,7 +32,8 @@ class DefaultValueChunkTranslator
     DefaultValueChunkTranslator(int64_t segment_id,
                                 FieldMeta field_meta,
                                 FieldDataInfo field_data_info,
-                                bool use_mmap);
+                                bool use_mmap,
+                                bool mmap_populate);
 
     ~DefaultValueChunkTranslator() override;
 
@@ -58,10 +61,29 @@ class DefaultValueChunkTranslator
         return 0;
     }
 
+    int64_t
+    value_size() const;
+
+    // preferred bytes per cell when splitting default-value column
+    static constexpr int64_t kTargetCellBytes = 64 * 1024;  // 64KB
+
  private:
+    // total rows of this field in the segment
+    int64_t total_rows_{0};
+
+    // Number of rows in the primary cell (all full-sized cells).
+    // The last cell may contain fewer rows.
+    int64_t primary_cell_rows_{0};
+
+    // Shared chunk buffers for default-value cells. All cells with the same
+    // row count will share the same underlying memory via these buffers.
+    std::optional<milvus::ChunkBuffer> primary_buffer_;
+
     int64_t segment_id_;
     std::string key_;
     bool use_mmap_;
+    bool mmap_populate_;
+    std::string mmap_dir_path_;
     CTMeta meta_;
     milvus::FieldMeta field_meta_;
 };

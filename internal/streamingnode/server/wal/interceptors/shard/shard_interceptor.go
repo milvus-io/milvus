@@ -57,7 +57,7 @@ func (impl *shardInterceptor) Name() string {
 // DoAppend assigns segment for every partition in the message.
 func (impl *shardInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (msgID message.MessageID, err error) {
 	op, ok := impl.ops[msg.MessageType()]
-	if ok && !funcutil.IsControlChannel(msg.VChannel()) {
+	if ok && (!funcutil.IsControlChannel(msg.VChannel()) || msg.MessageType().IsBroadcastToAll()) {
 		// If the message type is registered in the interceptor, use the registered operation.
 		// control channel message is only used to determine the DDL/DCL order,
 		// perform no effect on the shard manager, so skip it.
@@ -172,9 +172,6 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			// 2. partition is fenced.
 			// 3. segment is not ready.
 			// we just redo it to refresh a new latest timetick.
-			if impl.shardManager.Logger().Level().Enabled(zap.DebugLevel) {
-				impl.shardManager.Logger().Debug("segment assign interceptor redo insert message", zap.Object("message", msg), zap.Error(err))
-			}
 			return nil, redo.ErrRedo
 		}
 		if errors.IsAny(err, shards.ErrTooLargeInsert, shards.ErrPartitionNotFound, shards.ErrCollectionNotFound) {

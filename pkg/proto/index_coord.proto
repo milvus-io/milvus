@@ -137,6 +137,11 @@ message CreateIndexRequest {
     bool is_auto_index = 7;
     repeated common.KeyValuePair user_index_params = 8;
     bool user_autoindex_metric_type_specified = 9;
+
+    // For snapshot restore: preserve index ID from snapshot
+    // When true, DataCoord will not allocate a new index ID, using the provided index_id directly
+    bool preserve_index_id = 10;
+    int64 index_id = 11;
 }
 
 message AlterIndexRequest {
@@ -323,6 +328,7 @@ message StatsTask {
     int64 target_segmentID = 10;
     index.StatsSubJob subJobType = 11;
     bool canRecycle = 12;
+    repeated internal.FileResourceInfo file_resources = 13;
 }
 
 message UpdateExternalCollectionTask {

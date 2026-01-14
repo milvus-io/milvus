@@ -116,6 +116,100 @@ func (_c *MockCluster_CreateCompaction_Call) RunAndReturn(run func(int64, *datap
 	return _c
 }
 
+// CreateCopySegment provides a mock function with given fields: nodeID, in
+func (_m *MockCluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest) error {
+	ret := _m.Called(nodeID, in)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateCopySegment")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *datapb.CopySegmentRequest) error); ok {
+		r0 = rf(nodeID, in)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCluster_CreateCopySegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateCopySegment'
+type MockCluster_CreateCopySegment_Call struct {
+	*mock.Call
+}
+
+// CreateCopySegment is a helper method to define mock.On call
+//   - nodeID int64
+//   - in *datapb.CopySegmentRequest
+func (_e *MockCluster_Expecter) CreateCopySegment(nodeID interface{}, in interface{}) *MockCluster_CreateCopySegment_Call {
+	return &MockCluster_CreateCopySegment_Call{Call: _e.mock.On("CreateCopySegment", nodeID, in)}
+}
+
+func (_c *MockCluster_CreateCopySegment_Call) Run(run func(nodeID int64, in *datapb.CopySegmentRequest)) *MockCluster_CreateCopySegment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*datapb.CopySegmentRequest))
+	})
+	return _c
+}
+
+func (_c *MockCluster_CreateCopySegment_Call) Return(_a0 error) *MockCluster_CreateCopySegment_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCluster_CreateCopySegment_Call) RunAndReturn(run func(int64, *datapb.CopySegmentRequest) error) *MockCluster_CreateCopySegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateExternalCollectionTask provides a mock function with given fields: nodeID, req
+func (_m *MockCluster) CreateExternalCollectionTask(nodeID int64, req *datapb.UpdateExternalCollectionRequest) error {
+	ret := _m.Called(nodeID, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateExternalCollectionTask")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *datapb.UpdateExternalCollectionRequest) error); ok {
+		r0 = rf(nodeID, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCluster_CreateExternalCollectionTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateExternalCollectionTask'
+type MockCluster_CreateExternalCollectionTask_Call struct {
+	*mock.Call
+}
+
+// CreateExternalCollectionTask is a helper method to define mock.On call
+//   - nodeID int64
+//   - req *datapb.UpdateExternalCollectionRequest
+func (_e *MockCluster_Expecter) CreateExternalCollectionTask(nodeID interface{}, req interface{}) *MockCluster_CreateExternalCollectionTask_Call {
+	return &MockCluster_CreateExternalCollectionTask_Call{Call: _e.mock.On("CreateExternalCollectionTask", nodeID, req)}
+}
+
+func (_c *MockCluster_CreateExternalCollectionTask_Call) Run(run func(nodeID int64, req *datapb.UpdateExternalCollectionRequest)) *MockCluster_CreateExternalCollectionTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*datapb.UpdateExternalCollectionRequest))
+	})
+	return _c
+}
+
+func (_c *MockCluster_CreateExternalCollectionTask_Call) Return(_a0 error) *MockCluster_CreateExternalCollectionTask_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCluster_CreateExternalCollectionTask_Call) RunAndReturn(run func(int64, *datapb.UpdateExternalCollectionRequest) error) *MockCluster_CreateExternalCollectionTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateImport provides a mock function with given fields: nodeID, in, taskSlot
 func (_m *MockCluster) CreateImport(nodeID int64, in *datapb.ImportRequest, taskSlot int64) error {
 	ret := _m.Called(nodeID, in, taskSlot)
@@ -400,6 +494,100 @@ func (_c *MockCluster_DropCompaction_Call) RunAndReturn(run func(int64, int64) e
 	return _c
 }
 
+// DropCopySegment provides a mock function with given fields: nodeID, taskID
+func (_m *MockCluster) DropCopySegment(nodeID int64, taskID int64) error {
+	ret := _m.Called(nodeID, taskID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropCopySegment")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, int64) error); ok {
+		r0 = rf(nodeID, taskID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCluster_DropCopySegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropCopySegment'
+type MockCluster_DropCopySegment_Call struct {
+	*mock.Call
+}
+
+// DropCopySegment is a helper method to define mock.On call
+//   - nodeID int64
+//   - taskID int64
+func (_e *MockCluster_Expecter) DropCopySegment(nodeID interface{}, taskID interface{}) *MockCluster_DropCopySegment_Call {
+	return &MockCluster_DropCopySegment_Call{Call: _e.mock.On("DropCopySegment", nodeID, taskID)}
+}
+
+func (_c *MockCluster_DropCopySegment_Call) Run(run func(nodeID int64, taskID int64)) *MockCluster_DropCopySegment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockCluster_DropCopySegment_Call) Return(_a0 error) *MockCluster_DropCopySegment_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCluster_DropCopySegment_Call) RunAndReturn(run func(int64, int64) error) *MockCluster_DropCopySegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropExternalCollectionTask provides a mock function with given fields: nodeID, taskID
+func (_m *MockCluster) DropExternalCollectionTask(nodeID int64, taskID int64) error {
+	ret := _m.Called(nodeID, taskID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropExternalCollectionTask")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, int64) error); ok {
+		r0 = rf(nodeID, taskID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCluster_DropExternalCollectionTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropExternalCollectionTask'
+type MockCluster_DropExternalCollectionTask_Call struct {
+	*mock.Call
+}
+
+// DropExternalCollectionTask is a helper method to define mock.On call
+//   - nodeID int64
+//   - taskID int64
+func (_e *MockCluster_Expecter) DropExternalCollectionTask(nodeID interface{}, taskID interface{}) *MockCluster_DropExternalCollectionTask_Call {
+	return &MockCluster_DropExternalCollectionTask_Call{Call: _e.mock.On("DropExternalCollectionTask", nodeID, taskID)}
+}
+
+func (_c *MockCluster_DropExternalCollectionTask_Call) Run(run func(nodeID int64, taskID int64)) *MockCluster_DropExternalCollectionTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockCluster_DropExternalCollectionTask_Call) Return(_a0 error) *MockCluster_DropExternalCollectionTask_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCluster_DropExternalCollectionTask_Call) RunAndReturn(run func(int64, int64) error) *MockCluster_DropExternalCollectionTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropImport provides a mock function with given fields: nodeID, taskID
 func (_m *MockCluster) DropImport(nodeID int64, taskID int64) error {
 	ret := _m.Called(nodeID, taskID)
@@ -655,6 +843,124 @@ func (_c *MockCluster_QueryCompaction_Call) Return(_a0 *datapb.CompactionPlanRes
 }
 
 func (_c *MockCluster_QueryCompaction_Call) RunAndReturn(run func(int64, *datapb.CompactionStateRequest) (*datapb.CompactionPlanResult, error)) *MockCluster_QueryCompaction_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryCopySegment provides a mock function with given fields: nodeID, in
+func (_m *MockCluster) QueryCopySegment(nodeID int64, in *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error) {
+	ret := _m.Called(nodeID, in)
+
+	if len(ret) == 0 {
+		panic("no return value specified for QueryCopySegment")
+	}
+
+	var r0 *datapb.QueryCopySegmentResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(int64, *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error)); ok {
+		return rf(nodeID, in)
+	}
+	if rf, ok := ret.Get(0).(func(int64, *datapb.QueryCopySegmentRequest) *datapb.QueryCopySegmentResponse); ok {
+		r0 = rf(nodeID, in)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.QueryCopySegmentResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int64, *datapb.QueryCopySegmentRequest) error); ok {
+		r1 = rf(nodeID, in)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCluster_QueryCopySegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryCopySegment'
+type MockCluster_QueryCopySegment_Call struct {
+	*mock.Call
+}
+
+// QueryCopySegment is a helper method to define mock.On call
+//   - nodeID int64
+//   - in *datapb.QueryCopySegmentRequest
+func (_e *MockCluster_Expecter) QueryCopySegment(nodeID interface{}, in interface{}) *MockCluster_QueryCopySegment_Call {
+	return &MockCluster_QueryCopySegment_Call{Call: _e.mock.On("QueryCopySegment", nodeID, in)}
+}
+
+func (_c *MockCluster_QueryCopySegment_Call) Run(run func(nodeID int64, in *datapb.QueryCopySegmentRequest)) *MockCluster_QueryCopySegment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*datapb.QueryCopySegmentRequest))
+	})
+	return _c
+}
+
+func (_c *MockCluster_QueryCopySegment_Call) Return(_a0 *datapb.QueryCopySegmentResponse, _a1 error) *MockCluster_QueryCopySegment_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCluster_QueryCopySegment_Call) RunAndReturn(run func(int64, *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error)) *MockCluster_QueryCopySegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryExternalCollectionTask provides a mock function with given fields: nodeID, taskID
+func (_m *MockCluster) QueryExternalCollectionTask(nodeID int64, taskID int64) (*datapb.UpdateExternalCollectionResponse, error) {
+	ret := _m.Called(nodeID, taskID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for QueryExternalCollectionTask")
+	}
+
+	var r0 *datapb.UpdateExternalCollectionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(int64, int64) (*datapb.UpdateExternalCollectionResponse, error)); ok {
+		return rf(nodeID, taskID)
+	}
+	if rf, ok := ret.Get(0).(func(int64, int64) *datapb.UpdateExternalCollectionResponse); ok {
+		r0 = rf(nodeID, taskID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.UpdateExternalCollectionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int64, int64) error); ok {
+		r1 = rf(nodeID, taskID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCluster_QueryExternalCollectionTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryExternalCollectionTask'
+type MockCluster_QueryExternalCollectionTask_Call struct {
+	*mock.Call
+}
+
+// QueryExternalCollectionTask is a helper method to define mock.On call
+//   - nodeID int64
+//   - taskID int64
+func (_e *MockCluster_Expecter) QueryExternalCollectionTask(nodeID interface{}, taskID interface{}) *MockCluster_QueryExternalCollectionTask_Call {
+	return &MockCluster_QueryExternalCollectionTask_Call{Call: _e.mock.On("QueryExternalCollectionTask", nodeID, taskID)}
+}
+
+func (_c *MockCluster_QueryExternalCollectionTask_Call) Run(run func(nodeID int64, taskID int64)) *MockCluster_QueryExternalCollectionTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockCluster_QueryExternalCollectionTask_Call) Return(_a0 *datapb.UpdateExternalCollectionResponse, _a1 error) *MockCluster_QueryExternalCollectionTask_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCluster_QueryExternalCollectionTask_Call) RunAndReturn(run func(int64, int64) (*datapb.UpdateExternalCollectionResponse, error)) *MockCluster_QueryExternalCollectionTask_Call {
 	_c.Call.Return(run)
 	return _c
 }

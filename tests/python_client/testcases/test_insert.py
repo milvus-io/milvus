@@ -63,19 +63,6 @@ class TestInsertParams(TestcaseBase):
         assert mutation_res.primary_keys == data[0].tolist()
         assert collection_w.num_entities == ct.default_nb
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_non_data_type(self):
-        """
-        target: test insert with non-dataframe, non-list data
-        method: insert with data (non-dataframe and non-list type)
-        expected: raise exception
-        """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name)
-        error = {ct.err_code: 999,
-                 ct.err_msg: "The type of data should be List, pd.DataFrame or Dict"}
-        collection_w.insert(data=None,
-                            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("data", [pd.DataFrame()])
@@ -231,23 +218,6 @@ class TestInsertParams(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb=20, dim=dim)
         error = {ct.err_code: 999,
                  ct.err_msg: f'Collection field dim is {ct.default_dim}, but entities field dim is {dim}'}
-        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_binary_dim_not_match(self):
-        """
-        target: test insert binary with dim not match
-        method: insert binary data dim not equal to schema
-        expected: raise exception
-        """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(
-            name=c_name, schema=default_binary_schema)
-        dim = 120
-        df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb, dim=dim)
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f'the dim ({dim}) of field data(binary_vector) is not equal to schema dim '
-                             f'({ct.default_dim}): invalid parameter[expected={ct.default_dim}][actual={dim}]'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)

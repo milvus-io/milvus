@@ -85,7 +85,7 @@ func (m *FileResourceManager) syncLoop() {
 }
 
 func (m *FileResourceManager) Start() {
-	if fileresource.IsSyncMode(paramtable.Get().DataCoordCfg.FileResourceMode.GetValue()) {
+	if fileresource.IsSyncMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) {
 		m.once.Do(func() {
 			m.notifyCh = make(chan struct{}, 1)
 			m.wg.Add(1)

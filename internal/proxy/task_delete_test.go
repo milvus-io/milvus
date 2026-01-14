@@ -455,34 +455,9 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).
 			Return(s.collectionID, nil)
-		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).
 			Return(nil, errors.New("mock GetCollectionSchema err"))
 
-		globalMetaCache = s.mockCache
-		s.Error(dr.Init(context.Background()))
-	})
-	s.Run("deny delete in the replicate mode", func() {
-		dr := deleteRunner{req: &milvuspb.DeleteRequest{
-			CollectionName: s.collectionName,
-		}}
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
-		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.collectionID, nil)
-		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			Return(&collectionInfo{replicateID: "local-mac"}, nil)
-
-		globalMetaCache = s.mockCache
-		s.Error(dr.Init(context.Background()))
-	})
-
-	s.Run("fail get replicateID", func() {
-		dr := deleteRunner{req: &milvuspb.DeleteRequest{
-			CollectionName: s.collectionName,
-		}}
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
-		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).
-			Return(s.collectionID, nil)
-		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mock getCollectionInfo err"))
 		globalMetaCache = s.mockCache
 		s.Error(dr.Init(context.Background()))
 	})

@@ -520,14 +520,14 @@ queryNode:
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
   mmap:
     vectorField: true # Enable mmap for loading vector data
-    vectorIndex: true # Enable mmap for loading vector index
-    scalarField: true # Enable mmap for loading scalar data
-    scalarIndex: true # Enable mmap for loading scalar index
+    vectorIndex: false # Enable mmap for loading vector index
+    scalarField: false # Enable mmap for loading scalar data
+    scalarIndex: false # Enable mmap for loading scalar index
     jsonShredding: true # Enable mmap for loading json stats
     # Enable memory mapping (mmap) to optimize the handling of growing raw data.
     # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized.
     # However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.
-    growingMmapEnabled: true
+    growingMmapEnabled: false
     fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
     maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
   lazyload:
@@ -582,7 +582,6 @@ queryNode:
     size: 10 # the size for worker querynode client pool
   idfOracle:
     enableDisk: true
-    writeConcurrency: 4
   ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
   port: 21123 # TCP port of queryNode
   grpc:
@@ -717,6 +716,8 @@ dataCoord:
     dropTolerance: 10800 # The retention duration of the binlog files of the deleted segments before they are cleared, unit: second.
     scanInterval: 168 # orphan file (file on oss but has not been registered on meta) on object storage garbage collection scanning interval in hours
     slowDownCPUUsageThreshold: 0.6 # The CPU usage threshold at which the garbage collection will be slowed down
+  snapshot:
+    pendingTimeout: 60 # Timeout in minutes for pending snapshots before GC cleanup
   enableActiveStandby: false
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout
   autoBalance: true # Enable auto balance
@@ -733,6 +734,7 @@ dataCoord:
     waitForIndex: true # Indicates whether the import operation waits for the completion of index building.
     fileNumPerSlot: 1 # The files number per slot for pre-import/import task.
     memoryLimitPerSlot: 160 # The memory limit (in MB) of buffer size per slot for pre-import/import task.
+    maxSegmentsPerCopyTask: 100 # Maximum number of segments that can be grouped into a single copy task during snapshot restore.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   slot:
     clusteringCompactionUsage: 65535 # slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.
@@ -841,7 +843,6 @@ msgChannel:
     # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
     # It is recommended to change this parameter before starting Milvus for the first time.
     rootCoordDml: rootcoord-dml
-    replicateMsg: replicate-msg
     # Sub-name prefix of the message channel where the query node publishes time tick messages.
     # The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.queryTimeTick}
     # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
@@ -917,12 +918,12 @@ internaltls:
 common:
   defaultPartitionName: _default # Name of the default partition when a collection is created
   defaultIndexName: _default_idx # Name of the index when it is created with name unspecified
-  entityExpiration: -1 # Entity expiration in seconds, CAUTION -1 means never expire
   indexSliceSize: 16 # Index slice size in MB
   threadCoreCoefficient:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool
     middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
     lowPriority: 1 # This parameter specify how many times the number of threads is the number of cores in low priority pool
+    bm25Load: 1 # This parameter specify how many times the number of threads is the number of cores in BM25 load pool
   buildIndexThreadPoolRatio: 0.75
   DiskIndex:
     MaxDegree: 56
@@ -974,6 +975,7 @@ common:
     defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
+    exprEnabled: false # Whether to enable the /expr endpoint for debugging. When enabled, only root user can access it via HTTP Basic Auth on Proxy nodes.
     rbac:
       overrideBuiltInPrivilegeGroups:
         enabled: false # Whether to override build-in privilege groups
@@ -1015,25 +1017,19 @@ common:
       warn: 1000 # minimum milliseconds for printing durations in warn level
     maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
   storage:
-    enablev2: true
     stv2:
       splitSystemColumn:
         enabled: true # enable split system column policy in storage v2
         includePK: true # whether split system column policy include pk field
       splitByAvgSize:
-        enabled: false # enable split by average size policy in storage v2
+        enabled: true # enable split by average size policy in storage v2
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
     useLoonFFI: false
-  # Whether to disable the internal time messaging mechanism for the system.
-  # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches.
-  # This helps Milvus-CDC synchronize incremental data
-  ttMsgEnabled: true
   traceLogMode: 0 # trace request info
   bloomFilterSize: 100000 # bloom filter initial size
   bloomFilterType: BlockedBloomFilter # bloom filter type, support BasicBloomFilter and BlockedBloomFilter
   maxBloomFalsePositive: 0.001 # max false positive rate for bloom filter
   bloomFilterApplyBatchSize: 1000 # batch size when to apply pk to bloom filter
-  collectionReplicateEnable: false # Whether to enable collection replication.
   usePartitionKeyAsClusteringKey: false # if true, do clustering compaction and segment prune on partition key field
   useVectorAsClusteringKey: false # if true, do clustering compaction and segment prune on vector field
   enableVectorClusteringKey: false # if true, enable vector clustering key and vector clustering compaction
@@ -1047,6 +1043,10 @@ common:
   enablePosixMode: false # Specifies whether to run in POSIX mode for enhanced file system compatibility
   usingJSONShreddingForQuery: true # Indicates whether to use json stats when query
   clusterID: 0 # cluster id
+  fileResource:
+    mode:
+      queryNode: sync # File resource mode for query node, options: [sync, close]. Default is sync.
+      dataNode: sync # File resource mode for data node, options: [sync, ref, close]. Default is sync.
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

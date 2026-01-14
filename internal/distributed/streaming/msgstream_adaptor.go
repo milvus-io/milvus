@@ -129,7 +129,3 @@ func (m *delegatorMsgstreamAdaptor) GetLatestMsgID(channel string) (msgstream.Me
 func (m *delegatorMsgstreamAdaptor) CheckTopicValid(channel string) error {
 	panic("should never be called")
 }
-
-func (m *delegatorMsgstreamAdaptor) ForceEnableProduce(can bool) {
-	panic("should never be called")
-}

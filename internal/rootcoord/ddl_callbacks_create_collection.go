@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -63,6 +64,10 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 	defer broadcaster.Close()
 
 	// prepare and validate the creation collection message.
+	preserveFieldID, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(util.PreserveFieldIdsKey, req.GetProperties())
+	if !exist {
+		preserveFieldID = "false"
+	}
 	createCollectionTask := createCollectionTask{
 		Core:   c,
 		Req:    req,
@@ -72,6 +77,7 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 			CollectionName:   req.GetCollectionName(),
 			CollectionSchema: schema,
 		},
+		preserveFieldID: preserveFieldID == "true",
 	}
 	if err := createCollectionTask.Prepare(ctx); err != nil {
 		return err
@@ -110,11 +116,12 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 	if err := c.meta.AddCollection(ctx, newCollInfo); err != nil {
 		return errors.Wrap(err, "failed to add collection to meta table")
 	}
+
 	return c.ExpireCaches(ctx, ce.NewBuilder().WithLegacyProxyCollectionMetaCache(
 		ce.OptLPCMDBName(body.DbName),
 		ce.OptLPCMCollectionName(body.CollectionName),
 		ce.OptLPCMCollectionID(header.CollectionId),
-		ce.OptLPCMMsgType(commonpb.MsgType_DropCollection)))
+		ce.OptLPCMMsgType(commonpb.MsgType_CreateCollection)))
 }
 
 func (c *DDLCallback) createCollectionShard(ctx context.Context, header *message.CreateCollectionMessageHeader, body *message.CreateCollectionRequest, vchannel string, appendResult *message.AppendResult) error {
@@ -205,6 +212,8 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 		SchemaVersion:        0,
 		ShardInfos:           shardInfos,
 		FileResourceIds:      body.CollectionSchema.GetFileResourceIds(),
+		ExternalSource:       body.CollectionSchema.ExternalSource,
+		ExternalSpec:         body.CollectionSchema.ExternalSpec,
 	}
 }
 

@@ -950,15 +950,12 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
 		zap.Strings("shards", req.GetDmlChannels()),
 	)
-
 	log.Debug("received query request",
 		zap.Int64s("outputFields", req.GetReq().GetOutputFieldsId()),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()), // should be empty
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()),
-		zap.Bool("isCount", req.GetReq().GetIsCount()),
 	)
-	tr := timerecord.NewTimeRecorderWithTrace(ctx, "QueryRequest")
 
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return &internalpb.RetrieveResults{
@@ -966,9 +963,6 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		}, nil
 	}
 	defer node.lifetime.Done()
-
-	toMergeResults := make([]*internalpb.RetrieveResults, len(req.GetDmlChannels()))
-	runningGp, runningCtx := errgroup.WithContext(ctx)
 	if !node.manager.Collection.Ref(req.GetReq().GetCollectionID(), 1) {
 		err := merr.WrapErrCollectionNotLoaded(req.GetReq().GetCollectionID())
 		log.Warn("failed to query collection", zap.Error(err))
@@ -979,59 +973,24 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	defer func() {
 		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
 	}()
-
-	for i, ch := range req.GetDmlChannels() {
-		ch := ch
-		req := &querypb.QueryRequest{
-			Req:         req.Req,
-			DmlChannels: []string{ch},
-			SegmentIDs:  req.SegmentIDs,
-			Scope:       req.Scope,
-		}
-
-		idx := i
-		runningGp.Go(func() error {
-			ret, err := node.queryChannel(runningCtx, req, ch)
-			if err == nil {
-				err = merr.Error(ret.GetStatus())
-			}
-			if err != nil {
-				return err
-			}
-			toMergeResults[idx] = ret
-			return nil
-		})
-	}
-	if err := runningGp.Wait(); err != nil {
+	if len(req.GetDmlChannels()) != 1 {
 		return &internalpb.RetrieveResults{
-			Status: merr.Status(err),
+			Status: merr.Status(merr.WrapErrParameterInvalidMsg("query request to querynode should "+
+				"only target at one channel, but got:%d", len(req.GetDmlChannels()))),
 		}, nil
 	}
-
-	tr.RecordSpan()
-	reducer := segments.CreateInternalReducer(req, node.manager.Collection.Get(req.GetReq().GetCollectionID()).Schema())
-	ret, err := reducer.Reduce(ctx, toMergeResults)
+	tr := timerecord.NewTimeRecorderWithTrace(ctx, "QueryRequest")
+	defer tr.CtxElapse(ctx, fmt.Sprintf("do query with channel done, vChannel = %s, segmentIDs = %v",
+		req.GetDmlChannels()[0],
+		req.GetSegmentIDs(),
+	))
+	res, err := node.queryChannel(ctx, req, req.GetDmlChannels()[0])
 	if err != nil {
 		return &internalpb.RetrieveResults{
 			Status: merr.Status(err),
 		}, nil
 	}
-	reduceLatency := tr.RecordSpan()
-	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()),
-		metrics.QueryLabel, metrics.ReduceShards, metrics.BatchReduce).
-		Observe(float64(reduceLatency.Milliseconds()))
-
-	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
-	relatedDataSize := lo.Reduce(toMergeResults, func(acc int64, result *internalpb.RetrieveResults, _ int) int64 {
-		return acc + result.GetCostAggregation().GetTotalRelatedDataSize()
-	}, 0)
-
-	if ret.CostAggregation == nil {
-		ret.CostAggregation = &internalpb.CostAggregation{}
-	}
-	ret.CostAggregation.ResponseTime = tr.ElapseSpan().Milliseconds()
-	ret.CostAggregation.TotalRelatedDataSize = relatedDataSize
-	return ret, nil
+	return res, nil
 }
 
 func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryNode_QueryStreamServer) error {
@@ -1047,7 +1006,6 @@ func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryN
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()),
-		zap.Bool("isCount", req.GetReq().GetIsCount()),
 	)
 
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
@@ -1304,7 +1262,8 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			PartitionStatsVersions: delegator.GetPartitionStatsVersions(ctx),
 			TargetVersion:          queryView.GetVersion(),
 			Status: &querypb.LeaderViewStatus{
-				Serviceable: queryView.Serviceable(),
+				Serviceable:             queryView.Serviceable(),
+				CatchingUpStreamingData: delegator.CatchingUpStreamingData(),
 			},
 		})
 		return true
@@ -1562,7 +1521,7 @@ func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatch
 }
 
 func (node *QueryNode) runAnalyzer(req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
-	tokenizer, err := analyzer.NewAnalyzer(req.GetAnalyzerParams())
+	tokenizer, err := analyzer.NewAnalyzer(req.GetAnalyzerParams(), "")
 	if err != nil {
 		return nil, err
 	}
@@ -1649,7 +1608,7 @@ func (node *QueryNode) ValidateAnalyzer(ctx context.Context, req *querypb.Valida
 	resourceSet := typeutil.NewSet[int64]()
 
 	for _, info := range req.AnalyzerInfos {
-		ids, err := analyzer.ValidateAnalyzer(info.GetParams())
+		ids, err := analyzer.ValidateAnalyzer(info.GetParams(), "")
 		if err != nil {
 			if info.GetName() != "" {
 				return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %s, name: %s, error: %v", info.GetField(), info.GetName(), err))}, nil
@@ -1766,7 +1725,7 @@ func (node *QueryNode) SyncFileResource(ctx context.Context, req *internalpb.Syn
 	}
 	defer node.lifetime.Done()
 
-	err := fileresource.Sync(req.GetResources())
+	err := fileresource.Sync(req.GetVersion(), req.GetResources())
 	if err != nil {
 		return merr.Status(err), nil
 	}

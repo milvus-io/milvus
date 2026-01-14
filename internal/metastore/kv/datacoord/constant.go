@@ -28,6 +28,8 @@ const (
 	ImportJobPrefix                    = MetaPrefix + "/import-job"
 	ImportTaskPrefix                   = MetaPrefix + "/import-task"
 	PreImportTaskPrefix                = MetaPrefix + "/preimport-task"
+	CopySegmentJobPrefix               = MetaPrefix + "/copy-segment-job"
+	CopySegmentTaskPrefix              = MetaPrefix + "/copy-segment-task"
 	CompactionTaskPrefix               = MetaPrefix + "/compaction-task"
 	AnalyzeTaskPrefix                  = MetaPrefix + "/analyze-task"
 	PartitionStatsInfoPrefix           = MetaPrefix + "/partition-stats"
@@ -36,6 +38,7 @@ const (
 	UpdateExternalCollectionTaskPrefix = MetaPrefix + "/update-external-collection-task"
 	FileResourceMetaPrefix             = MetaPrefix + "/file_resource_info"
 	FileResourceVersionKey             = MetaPrefix + "/file_resource_version"
+	SnapshotPrefix                     = MetaPrefix + "/snapshot"
 
 	NonRemoveFlagTomestone = "non-removed"
 	RemoveFlagTomestone    = "removed"
