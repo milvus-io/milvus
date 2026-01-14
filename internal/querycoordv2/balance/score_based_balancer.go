@@ -82,6 +82,12 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 
 	// calculate each node's score
 	nodeItemsMap := b.convertToNodeItemsBySegment(br, collectionID, nodes)
+
+	return b.assignSegmentWithNodeItems(br, segments, nodeItemsMap, balanceBatchSize, forceAssign)
+}
+
+// assignSegmentWithNodeItems assigns segments with precomputed node items to avoid redundant calculation
+func (b *ScoreBasedBalancer) assignSegmentWithNodeItems(br *balanceReport, segments []*meta.Segment, nodeItemsMap map[int64]*nodeItem, balanceBatchSize int, forceAssign bool) []SegmentAssignPlan {
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
@@ -183,6 +189,12 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 
 	// calculate each node's score
 	nodeItemsMap := b.convertToNodeItemsByChannel(br, collectionID, nodes)
+
+	return b.assignChannelWithNodeItems(br, collectionID, channels, nodeItemsMap, balanceBatchSize, forceAssign)
+}
+
+// assignChannelWithNodeItems assigns channels with precomputed node items to avoid redundant calculation
+func (b *ScoreBasedBalancer) assignChannelWithNodeItems(br *balanceReport, collectionID int64, channels []*meta.DmChannel, nodeItemsMap map[int64]*nodeItem, balanceBatchSize int, forceAssign bool) []ChannelAssignPlan {
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
@@ -639,7 +651,24 @@ func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceRepo
 		return nil
 	}
 
-	segmentPlans := b.assignSegment(br, replica.GetCollectionID(), segmentsToMove, onlineNodes, false)
+	// Filter nodes for assignment
+	filteredNodes := lo.Filter(onlineNodes, func(node int64, _ int) bool {
+		info := b.nodeManager.Get(node)
+		normalNode := info != nil && info.GetState() == session.NodeStateNormal
+		if !normalNode {
+			br.AddRecord(StrRecord(fmt.Sprintf("segment balance skip abnormal node: %d", node)))
+		}
+		return normalNode && !b.nodeManager.IsResourceExhausted(node)
+	})
+
+	// Filter nodeItemsMap to only include filtered nodes
+	filteredNodeItemsMap := lo.PickByKeys(nodeItemsMap, filteredNodes)
+
+	// genSegmentPlan is always non-forceAssign (false), so use configured batch size
+	balanceBatchSize := paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
+
+	// Pass the filtered nodeItemsMap
+	segmentPlans := b.assignSegmentWithNodeItems(br, segmentsToMove, filteredNodeItemsMap, balanceBatchSize, false)
 	for i := range segmentPlans {
 		segmentPlans[i].From = segmentPlans[i].Segment.Node
 		segmentPlans[i].Replica = replica
@@ -703,7 +732,25 @@ func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceRepo
 		return nil
 	}
 
-	channelPlans := b.assignChannel(br, replica.GetCollectionID(), channelsToMove, onlineNodes, false)
+	// Filter nodes for assignment
+	filteredNodes := filterSQNIfStreamingServiceEnabled(onlineNodes)
+	filteredNodes = lo.Filter(filteredNodes, func(node int64, _ int) bool {
+		info := b.nodeManager.Get(node)
+		normalNode := info != nil && info.GetState() == session.NodeStateNormal
+		if !normalNode {
+			br.AddRecord(StrRecord(fmt.Sprintf("channel balance skip abnormal node: %d", node)))
+		}
+		return normalNode && !b.nodeManager.IsResourceExhausted(node)
+	})
+
+	// Filter nodeItemsMap to only include filtered nodes
+	filteredNodeItemsMap := lo.PickByKeys(nodeItemsMap, filteredNodes)
+
+	// genChannelPlan is always non-forceAssign (false), so use configured batch size
+	balanceBatchSize := paramtable.Get().QueryCoordCfg.BalanceChannelBatchSize.GetAsInt()
+
+	// Pass the filtered nodeItemsMap
+	channelPlans := b.assignChannelWithNodeItems(br, replica.GetCollectionID(), channelsToMove, filteredNodeItemsMap, balanceBatchSize, false)
 	for i := range channelPlans {
 		channelPlans[i].From = channelPlans[i].Channel.Node
 		channelPlans[i].Replica = replica
