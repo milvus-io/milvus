@@ -1,6 +1,7 @@
 import pytest
 import numpy
 import time
+import threading
 
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
@@ -5232,8 +5233,6 @@ class TestMilvusClientTruncateCollection(TestMilvusClientV2Base):
         method: insert data and truncate collection at the same time in parallel
         expected: the collection is truncated regardless of timing
         """
-        import threading
-
         client_1 = self._client()
         client_2 = self._client(alias="client2_alias")
         collection_name = self.COLLECTION_NAME_STRONG
@@ -5280,8 +5279,6 @@ class TestMilvusClientTruncateCollection(TestMilvusClientV2Base):
         method: insert data first, then query and truncate collection at the same time in parallel
         expected: the collection is truncated regardless of timing
         """
-        import threading
-
         client_1 = self._client()
         client_2 = self._client(alias="client2_alias")
         collection_name = self.COLLECTION_NAME
