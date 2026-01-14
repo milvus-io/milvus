@@ -40,6 +40,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+func setPreferIPv6ForTest(t *testing.T, prefer bool) {
+	original := PreferIPv6LocalIP.Load()
+	PreferIPv6LocalIP.Store(prefer)
+	t.Cleanup(func() {
+		PreferIPv6LocalIP.Store(original)
+	})
+}
+
 func Test_CheckGrpcReady(t *testing.T) {
 	errChan := make(chan error)
 
@@ -56,6 +64,7 @@ func Test_CheckGrpcReady(t *testing.T) {
 }
 
 func Test_GetValidLocalIPNoValid(t *testing.T) {
+	setPreferIPv6ForTest(t, false)
 	addrs := make([]net.Addr, 0, 1)
 	addrs = append(addrs, &net.IPNet{IP: net.IPv4(127, 1, 1, 1), Mask: net.IPv4Mask(255, 255, 255, 255)})
 	ip := GetValidLocalIP(addrs)
@@ -63,6 +72,7 @@ func Test_GetValidLocalIPNoValid(t *testing.T) {
 }
 
 func Test_GetValidLocalIPIPv4(t *testing.T) {
+	setPreferIPv6ForTest(t, false)
 	addrs := make([]net.Addr, 0, 1)
 	addrs = append(addrs, &net.IPNet{IP: net.IPv4(100, 1, 1, 1), Mask: net.IPv4Mask(255, 255, 255, 255)})
 	ip := GetValidLocalIP(addrs)
@@ -70,13 +80,33 @@ func Test_GetValidLocalIPIPv4(t *testing.T) {
 }
 
 func Test_GetValidLocalIPIPv6(t *testing.T) {
+	setPreferIPv6ForTest(t, false)
 	addrs := make([]net.Addr, 0, 1)
 	addrs = append(addrs, &net.IPNet{IP: net.IP{8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Mask: net.IPMask{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}})
 	ip := GetValidLocalIP(addrs)
 	assert.Equal(t, "[800::]", ip)
 }
 
+func Test_GetValidLocalIPIPv6ULA(t *testing.T) {
+	setPreferIPv6ForTest(t, false)
+	addrs := []net.Addr{
+		&net.IPNet{IP: net.ParseIP("fd12::1"), Mask: net.CIDRMask(64, 128)},
+	}
+	ip := GetValidLocalIP(addrs)
+	assert.Equal(t, "[fd12::1]", ip)
+}
+
+func Test_GetValidLocalIPIPv6LinkLocal(t *testing.T) {
+	setPreferIPv6ForTest(t, false)
+	addrs := []net.Addr{
+		&net.IPNet{IP: net.ParseIP("fe80::1"), Mask: net.CIDRMask(64, 128)},
+	}
+	ip := GetValidLocalIP(addrs)
+	assert.Equal(t, "[fe80::1]", ip)
+}
+
 func Test_GetValidLocalIPIPv4Priority(t *testing.T) {
+	setPreferIPv6ForTest(t, false)
 	addrs := make([]net.Addr, 0, 1)
 	addrs = append(addrs, &net.IPNet{IP: net.IP{8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, Mask: net.IPMask{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}})
 	addrs = append(addrs, &net.IPNet{IP: net.IPv4(100, 1, 1, 1), Mask: net.IPv4Mask(255, 255, 255, 255)})
@@ -84,7 +114,18 @@ func Test_GetValidLocalIPIPv4Priority(t *testing.T) {
 	assert.Equal(t, "100.1.1.1", ip)
 }
 
+func Test_GetValidLocalIPPreferIPv6(t *testing.T) {
+	setPreferIPv6ForTest(t, true)
+	addrs := []net.Addr{
+		&net.IPNet{IP: net.IPv4(100, 1, 1, 1), Mask: net.IPv4Mask(255, 255, 255, 255)},
+		&net.IPNet{IP: net.ParseIP("fd12::1"), Mask: net.CIDRMask(64, 128)},
+	}
+	ip := GetValidLocalIP(addrs)
+	assert.Equal(t, "[fd12::1]", ip)
+}
+
 func Test_GetLocalIP(t *testing.T) {
+	setPreferIPv6ForTest(t, false)
 	ip := GetLocalIP()
 	assert.NotNil(t, ip)
 	assert.NotZero(t, len(ip))
@@ -1000,5 +1041,290 @@ func TestString2KeyValuePair(t *testing.T) {
 		kvs, err := String2KeyValuePair("{}")
 		assert.NoError(t, err)
 		assert.Len(t, kvs, 0)
+	})
+}
+
+func Test_PrivatePublicAddresses(t *testing.T) {
+	t.Run("isIPv4Private", func(t *testing.T) {
+		// Test private IPv4 addresses
+		assert.True(t, isIPv4Private(net.IPv4(10, 0, 0, 1)))
+		assert.True(t, isIPv4Private(net.IPv4(10, 255, 255, 255)))
+		assert.True(t, isIPv4Private(net.IPv4(172, 16, 0, 1)))
+		assert.True(t, isIPv4Private(net.IPv4(172, 31, 255, 255)))
+		assert.True(t, isIPv4Private(net.IPv4(192, 168, 1, 1)))
+		assert.True(t, isIPv4Private(net.IPv4(192, 168, 255, 255)))
+
+		// Test public IPv4 addresses
+		assert.False(t, isIPv4Private(net.IPv4(8, 8, 8, 8)))
+		assert.False(t, isIPv4Private(net.IPv4(1, 1, 1, 1)))
+		assert.False(t, isIPv4Private(net.IPv4(172, 15, 0, 1)))  // Just outside private range
+		assert.False(t, isIPv4Private(net.IPv4(172, 32, 0, 1)))  // Just outside private range
+		assert.False(t, isIPv4Private(net.IPv4(192, 167, 1, 1))) // Just outside private range
+		assert.False(t, isIPv4Private(net.IPv4(192, 169, 1, 1))) // Just outside private range
+
+		// Test IPv6 addresses (should return false)
+		assert.False(t, isIPv4Private(net.ParseIP("2001:db8::1")))
+		assert.False(t, isIPv4Private(net.ParseIP("fd12::1")))
+	})
+
+	t.Run("isIPv6Private", func(t *testing.T) {
+		// Test IPv6 private addresses (ULA)
+		assert.True(t, isIPv6Private(net.ParseIP("fd12::1")))
+		assert.True(t, isIPv6Private(net.ParseIP("fc00::1")))
+		assert.True(t, isIPv6Private(net.ParseIP("fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")))
+
+		// Test IPv6 public addresses
+		assert.False(t, isIPv6Private(net.ParseIP("2001:db8::1")))
+		assert.False(t, isIPv6Private(net.ParseIP("2001:4860:4860::8888"))) // Google DNS
+		assert.False(t, isIPv6Private(net.ParseIP("2606:4700:4700::1111"))) // Cloudflare DNS
+
+		// Test IPv6 link-local (not considered private in our definition)
+		assert.False(t, isIPv6Private(net.ParseIP("fe80::1")))
+
+		// Test IPv4 addresses (should return false)
+		assert.False(t, isIPv6Private(net.IPv4(192, 168, 1, 1)))
+		assert.False(t, isIPv6Private(net.IPv4(8, 8, 8, 8)))
+	})
+
+	t.Run("categorizeLocalIP_IPv4", func(t *testing.T) {
+		// Test IPv4 private address categorization
+		category, valid := categorizeLocalIP(net.IPv4(192, 168, 1, 1))
+		assert.True(t, valid)
+		assert.Equal(t, ipCategoryIPv4Private, category)
+
+		// Test IPv4 public address categorization
+		category, valid = categorizeLocalIP(net.IPv4(8, 8, 8, 8))
+		assert.True(t, valid)
+		assert.Equal(t, ipCategoryIPv4Public, category)
+
+		// Test invalid addresses
+		_, valid = categorizeLocalIP(net.IPv4(127, 0, 0, 1)) // loopback
+		assert.False(t, valid)
+
+		_, valid = categorizeLocalIP(net.IPv4(224, 0, 0, 1)) // multicast
+		assert.False(t, valid)
+	})
+
+	t.Run("categorizeLocalIP_IPv6", func(t *testing.T) {
+		// Test IPv6 private address categorization (ULA)
+		category, valid := categorizeLocalIP(net.ParseIP("fd12::1"))
+		assert.True(t, valid)
+		assert.Equal(t, ipCategoryIPv6Private, category)
+
+		// Test IPv6 public address categorization
+		category, valid = categorizeLocalIP(net.ParseIP("2001:db8::1"))
+		assert.True(t, valid)
+		assert.Equal(t, ipCategoryIPv6Public, category)
+
+		// Test IPv6 link-local address categorization
+		category, valid = categorizeLocalIP(net.ParseIP("fe80::1"))
+		assert.True(t, valid)
+		assert.Equal(t, ipCategoryIPv6LinkLocal, category)
+
+		// Test invalid IPv6 addresses
+		_, valid = categorizeLocalIP(net.ParseIP("::1")) // loopback
+		assert.False(t, valid)
+
+		_, valid = categorizeLocalIP(net.ParseIP("ff02::1")) // multicast
+		assert.False(t, valid)
+	})
+}
+
+func Test_GetValidLocalIPSimplified(t *testing.T) {
+	t.Run("default_behavior_private_first_ipv4_first", func(t *testing.T) {
+		setPreferIPv6ForTest(t, false)
+
+		addrs := []net.Addr{
+			&net.IPNet{IP: net.IPv4(8, 8, 8, 8), Mask: net.IPv4Mask(255, 255, 255, 0)},     // Public IPv4
+			&net.IPNet{IP: net.IPv4(192, 168, 1, 1), Mask: net.IPv4Mask(255, 255, 255, 0)}, // Private IPv4
+			&net.IPNet{IP: net.ParseIP("2001:db8::1"), Mask: net.CIDRMask(64, 128)},        // Public IPv6
+			&net.IPNet{IP: net.ParseIP("fd12::1"), Mask: net.CIDRMask(64, 128)},            // Private IPv6
+		}
+		ip := GetValidLocalIP(addrs)
+		// Should prefer private IPv4 first
+		assert.Equal(t, "192.168.1.1", ip)
+	})
+
+	t.Run("ipv6_preferred_private_first", func(t *testing.T) {
+		setPreferIPv6ForTest(t, true)
+
+		addrs := []net.Addr{
+			&net.IPNet{IP: net.IPv4(8, 8, 8, 8), Mask: net.IPv4Mask(255, 255, 255, 0)},     // Public IPv4
+			&net.IPNet{IP: net.IPv4(192, 168, 1, 1), Mask: net.IPv4Mask(255, 255, 255, 0)}, // Private IPv4
+			&net.IPNet{IP: net.ParseIP("2001:db8::1"), Mask: net.CIDRMask(64, 128)},        // Public IPv6
+			&net.IPNet{IP: net.ParseIP("fd12::1"), Mask: net.CIDRMask(64, 128)},            // Private IPv6
+		}
+		ip := GetValidLocalIP(addrs)
+		// Should prefer private IPv6 first when IPv6 is preferred
+		assert.Equal(t, "[fd12::1]", ip)
+	})
+
+	t.Run("only_public_addresses_available", func(t *testing.T) {
+		setPreferIPv6ForTest(t, false)
+
+		addrs := []net.Addr{
+			&net.IPNet{IP: net.IPv4(8, 8, 8, 8), Mask: net.IPv4Mask(255, 255, 255, 0)}, // Public IPv4
+			&net.IPNet{IP: net.ParseIP("2001:db8::1"), Mask: net.CIDRMask(64, 128)},    // Public IPv6
+		}
+		ip := GetValidLocalIP(addrs)
+		// Should fallback to public IPv4 when no private available
+		assert.Equal(t, "8.8.8.8", ip)
+	})
+
+	t.Run("only_ipv6_addresses_available", func(t *testing.T) {
+		setPreferIPv6ForTest(t, false)
+
+		addrs := []net.Addr{
+			&net.IPNet{IP: net.ParseIP("fd12::1"), Mask: net.CIDRMask(64, 128)},     // Private IPv6
+			&net.IPNet{IP: net.ParseIP("2001:db8::1"), Mask: net.CIDRMask(64, 128)}, // Public IPv6
+		}
+		ip := GetValidLocalIP(addrs)
+		// Should prefer private IPv6 even when IPv4 is preferred but not available
+		assert.Equal(t, "[fd12::1]", ip)
+	})
+}
+
+func Test_GetValidLocalIPEdgeCases(t *testing.T) {
+	t.Run("empty_address_list", func(t *testing.T) {
+		setPreferIPv6ForTest(t, false)
+
+		addrs := []net.Addr{}
+		ip := GetValidLocalIP(addrs)
+		assert.Equal(t, "", ip)
+	})
+
+	t.Run("nil_address_list", func(t *testing.T) {
+		setPreferIPv6ForTest(t, false)
+
+		ip := GetValidLocalIP(nil)
+		assert.Equal(t, "", ip)
+	})
+
+	t.Run("only_loopback_ipv4", func(t *testing.T) {
+		setPreferIPv6ForTest(t, false)
+
+		addrs := []net.Addr{
+			&net.IPNet{IP: net.IPv4(127, 0, 0, 1), Mask: net.IPv4Mask(255, 0, 0, 0)},
+		}
+		ip := GetValidLocalIP(addrs)
+		// Loopback should be filtered out
+		assert.Equal(t, "", ip)
+	})
+
+	t.Run("only_loopback_ipv6", func(t *testing.T) {
+		setPreferIPv6ForTest(t, false)
+
+		addrs := []net.Addr{
+			&net.IPNet{IP: net.ParseIP("::1"), Mask: net.CIDRMask(128, 128)},
+		}
+		ip := GetValidLocalIP(addrs)
+		// Loopback should be filtered out
+		assert.Equal(t, "", ip)
+	})
+
+	t.Run("only_multicast", func(t *testing.T) {
+		setPreferIPv6ForTest(t, false)
+
+		addrs := []net.Addr{
+			&net.IPNet{IP: net.ParseIP("224.0.0.1"), Mask: net.IPv4Mask(240, 0, 0, 0)},
+			&net.IPNet{IP: net.ParseIP("ff02::1"), Mask: net.CIDRMask(8, 128)},
+		}
+		ip := GetValidLocalIP(addrs)
+		// Multicast should be filtered out
+		assert.Equal(t, "", ip)
+	})
+
+	t.Run("ipv4_mapped_ipv6_treated_as_ipv4", func(t *testing.T) {
+		setPreferIPv6ForTest(t, false)
+
+		// IPv4-mapped IPv6 address (::ffff:192.168.1.1)
+		ipv4Mapped := net.ParseIP("::ffff:192.168.1.1")
+		addrs := []net.Addr{
+			&net.IPNet{IP: ipv4Mapped, Mask: net.CIDRMask(128, 128)},
+		}
+		ip := GetValidLocalIP(addrs)
+		// IPv4-mapped IPv6 should be treated as IPv4 (no brackets)
+		assert.Equal(t, "192.168.1.1", ip)
+	})
+
+	t.Run("mixed_invalid_and_valid", func(t *testing.T) {
+		setPreferIPv6ForTest(t, false)
+
+		addrs := []net.Addr{
+			&net.IPNet{IP: net.IPv4(127, 0, 0, 1), Mask: net.IPv4Mask(255, 0, 0, 0)},         // Loopback - filtered
+			&net.IPNet{IP: net.ParseIP("::1"), Mask: net.CIDRMask(128, 128)},                 // Loopback - filtered
+			&net.IPNet{IP: net.ParseIP("224.0.0.1"), Mask: net.IPv4Mask(240, 0, 0, 0)},       // Multicast - filtered
+			&net.IPNet{IP: net.IPv4(192, 168, 1, 100), Mask: net.IPv4Mask(255, 255, 255, 0)}, // Valid private IPv4
+		}
+		ip := GetValidLocalIP(addrs)
+		assert.Equal(t, "192.168.1.100", ip)
+	})
+
+	t.Run("non_ipnet_addr_type", func(t *testing.T) {
+		setPreferIPv6ForTest(t, false)
+
+		// Use a different Addr type that's not *net.IPNet
+		addrs := []net.Addr{
+			&net.TCPAddr{IP: net.IPv4(192, 168, 1, 1), Port: 8080},
+		}
+		ip := GetValidLocalIP(addrs)
+		// Non-IPNet types should be skipped
+		assert.Equal(t, "", ip)
+	})
+
+	t.Run("link_local_ipv6_lowest_priority", func(t *testing.T) {
+		setPreferIPv6ForTest(t, false)
+
+		addrs := []net.Addr{
+			&net.IPNet{IP: net.ParseIP("fe80::1"), Mask: net.CIDRMask(64, 128)}, // Link-local IPv6
+		}
+		ip := GetValidLocalIP(addrs)
+		// Link-local should be selected when it's the only option
+		assert.Equal(t, "[fe80::1]", ip)
+	})
+
+	t.Run("link_local_vs_public_ipv6", func(t *testing.T) {
+		setPreferIPv6ForTest(t, true)
+
+		addrs := []net.Addr{
+			&net.IPNet{IP: net.ParseIP("fe80::1"), Mask: net.CIDRMask(64, 128)},     // Link-local IPv6
+			&net.IPNet{IP: net.ParseIP("2001:db8::1"), Mask: net.CIDRMask(64, 128)}, // Public IPv6
+		}
+		ip := GetValidLocalIP(addrs)
+		// Public IPv6 should be preferred over link-local
+		assert.Equal(t, "[2001:db8::1]", ip)
+	})
+}
+
+func Test_FormatLocalIP(t *testing.T) {
+	t.Run("ipv4_no_brackets", func(t *testing.T) {
+		ip := net.IPv4(192, 168, 1, 1)
+		result := formatLocalIP(ip)
+		assert.Equal(t, "192.168.1.1", result)
+	})
+
+	t.Run("ipv6_with_brackets", func(t *testing.T) {
+		ip := net.ParseIP("2001:db8::1")
+		result := formatLocalIP(ip)
+		assert.Equal(t, "[2001:db8::1]", result)
+	})
+
+	t.Run("ipv6_ula_with_brackets", func(t *testing.T) {
+		ip := net.ParseIP("fd12::1")
+		result := formatLocalIP(ip)
+		assert.Equal(t, "[fd12::1]", result)
+	})
+
+	t.Run("ipv6_link_local_with_brackets", func(t *testing.T) {
+		ip := net.ParseIP("fe80::1")
+		result := formatLocalIP(ip)
+		assert.Equal(t, "[fe80::1]", result)
+	})
+
+	t.Run("ipv4_mapped_ipv6_no_brackets", func(t *testing.T) {
+		// IPv4-mapped IPv6 should be formatted as IPv4 (no brackets)
+		ip := net.ParseIP("::ffff:192.168.1.1")
+		result := formatLocalIP(ip)
+		assert.Equal(t, "192.168.1.1", result)
 	})
 }
