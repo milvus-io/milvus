@@ -1132,3 +1132,89 @@ class TestMilvusClientV2Base(Base):
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        **kwargs).run()
         return res, check_result
+
+    # ====================== Snapshot ======================
+    @trace()
+    def create_snapshot(self, client, collection_name, snapshot_name, description="",
+                        timeout=None, check_task=None, check_items=None, **kwargs):
+        """Create a snapshot for a collection.
+
+        Note: Parameter order follows SDK convention - collection_name first, then snapshot_name.
+        """
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.create_snapshot, collection_name, snapshot_name, description], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       snapshot_name=snapshot_name, collection_name=collection_name,
+                                       **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def drop_snapshot(self, client, snapshot_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.drop_snapshot, snapshot_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       snapshot_name=snapshot_name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def list_snapshots(self, client, collection_name="", timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.list_snapshots, collection_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       collection_name=collection_name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def describe_snapshot(self, client, snapshot_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.describe_snapshot, snapshot_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       snapshot_name=snapshot_name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def restore_snapshot(self, client, snapshot_name, collection_name,
+                         timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.restore_snapshot, snapshot_name, collection_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       snapshot_name=snapshot_name, collection_name=collection_name,
+                                       **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def get_restore_snapshot_state(self, client, job_id, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.get_restore_snapshot_state, job_id], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       job_id=job_id, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def list_restore_snapshot_jobs(self, client, collection_name="", timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.list_restore_snapshot_jobs, collection_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       collection_name=collection_name, **kwargs).run()
+        return res, check_result
