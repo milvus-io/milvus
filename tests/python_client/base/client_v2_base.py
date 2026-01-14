@@ -171,10 +171,10 @@ class TestMilvusClientV2Base(Base):
         return res, check_result
 
     @trace()
-    def search(self, client, collection_name, data, limit=10, filter=None, output_fields=None, search_params=None,
+    def search(self, client, collection_name, data=None, limit=10, filter=None, output_fields=None, search_params=None,
                timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
-        kwargs.update({"timeout": timeout})
+        # kwargs.update({"timeout": timeout})
 
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.search, collection_name, data, filter, limit,
@@ -564,6 +564,16 @@ class TestMilvusClientV2Base(Base):
         while start_time + timeout > time.time():
             index_info, _ = self.describe_index(client, collection_name, index_name, **kwargs)
             if index_info.get("pending_index_rows", 1) == 0:
+                return True
+            time.sleep(2)
+        return False
+
+    def wait_for_compaction_ready(self, client, compact_id, timeout=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        start_time = time.time()
+        while start_time + timeout > time.time():
+            res = self.get_compaction_state(client, compact_id, **kwargs)[0]
+            if res == "Completed":
                 return True
             time.sleep(2)
         return False

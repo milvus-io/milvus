@@ -15,9 +15,12 @@
 // limitations under the License.
 
 #include "exec/expression/function/FunctionFactory.h"
-#include <mutex>
 #include "exec/expression/function/impl/StringFunctions.h"
 #include "log/Log.h"
+#include "exec/operator/query-agg/CountAggregateBase.h"
+#include "exec/operator/query-agg/MinAggregateBase.h"
+#include "exec/operator/query-agg/MaxAggregateBase.h"
+#include "exec/operator/query-agg/SumAggregateBase.h"
 
 namespace milvus {
 namespace exec {
@@ -56,7 +59,8 @@ FunctionFactory::RegisterAllFunctions() {
     RegisterFilterFunction("starts_with",
                            {DataType::VARCHAR, DataType::VARCHAR},
                            function::StartsWithVarchar);
-    LOG_INFO("{} functions registered", GetFilterFunctionNum());
+    LOG_INFO("{} filter functions registered", GetFilterFunctionNum());
+    RegisterAggregateFunction();
 }
 
 void
@@ -66,6 +70,14 @@ FunctionFactory::RegisterFilterFunction(
     FilterFunctionPtr func) {
     filter_function_map_[FilterFunctionRegisterKey{
         func_name, func_param_type_list}] = func;
+}
+
+void
+FunctionFactory::RegisterAggregateFunction() {
+    milvus::exec::registerCountAggregate();
+    milvus::exec::registerMinAggregate();
+    milvus::exec::registerMaxAggregate();
+    milvus::exec::registerSumAggregate();
 }
 
 const FilterFunctionPtr

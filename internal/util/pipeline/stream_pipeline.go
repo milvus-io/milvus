@@ -41,19 +41,19 @@ type StreamPipeline interface {
 }
 
 type streamPipeline struct {
-	pipeline        *pipeline
-	input           <-chan *msgstream.MsgPack
-	scanner         streaming.Scanner
-	dispatcher      msgdispatcher.Client
-	startOnce       sync.Once
-	vChannel        string
-	replicateConfig *msgstream.ReplicateConfig
+	pipeline   *pipeline
+	input      <-chan *msgstream.MsgPack
+	scanner    streaming.Scanner
+	dispatcher msgdispatcher.Client
+	startOnce  sync.Once
+	vChannel   string
 
 	closeCh   chan struct{} // notify work to exit
 	closeWg   sync.WaitGroup
 	closeOnce sync.Once
 
-	lastAccessTime *atomic.Time
+	lastAccessTime          *atomic.Time
+	emptyTimeTickSlowdowner *emptyTimeTickSlowdowner
 }
 
 func (p *streamPipeline) work() {
@@ -68,7 +68,16 @@ func (p *streamPipeline) work() {
 				log.Ctx(context.TODO()).Debug("stream pipeline input closed")
 				return
 			}
+
 			p.lastAccessTime.Store(time.Now())
+			// Currently, milvus use the timetick to synchronize the system periodically,
+			// so the wal will still produce empty timetick message after the last write operation is done.
+			// When there're huge amount of vchannel in one pchannel, it will introduce a great overhead.
+			// So we filter out the empty time tick message as much as possible.
+			// TODO: After 3.0, we can remove the filter logic by LSN+MVCC.
+			if p.emptyTimeTickSlowdowner.Filter(msg) {
+				continue
+			}
 			log.Ctx(context.TODO()).RatedDebug(10, "stream pipeline fetch msg", zap.Int("sum", len(msg.Msgs)))
 			p.pipeline.inputChannel <- msg
 			p.pipeline.process()
@@ -96,10 +105,9 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 
 	start := time.Now()
 	p.input, err = p.dispatcher.Register(ctx, &msgdispatcher.StreamConfig{
-		VChannel:        p.vChannel,
-		Pos:             position,
-		SubPos:          common.SubscriptionPositionUnknown,
-		ReplicateConfig: p.replicateConfig,
+		VChannel: p.vChannel,
+		Pos:      position,
+		SubPos:   common.SubscriptionPositionUnknown,
 	})
 	if err != nil {
 		log.Error("dispatcher register failed after retried", zap.String("channel", position.ChannelName), zap.Error(err))
@@ -151,7 +159,7 @@ func NewPipelineWithStream(dispatcher msgdispatcher.Client,
 	nodeTtInterval time.Duration,
 	enableTtChecker bool,
 	vChannel string,
-	replicateConfig *msgstream.ReplicateConfig,
+	lastestMVCCTimeTickGetter LastestMVCCTimeTickGetter,
 ) StreamPipeline {
 	pipeline := &streamPipeline{
 		pipeline: &pipeline{
@@ -159,12 +167,12 @@ func NewPipelineWithStream(dispatcher msgdispatcher.Client,
 			nodeTtInterval:  nodeTtInterval,
 			enableTtChecker: enableTtChecker,
 		},
-		dispatcher:      dispatcher,
-		vChannel:        vChannel,
-		replicateConfig: replicateConfig,
-		closeCh:         make(chan struct{}),
-		closeWg:         sync.WaitGroup{},
-		lastAccessTime:  atomic.NewTime(time.Now()),
+		dispatcher:              dispatcher,
+		vChannel:                vChannel,
+		closeCh:                 make(chan struct{}),
+		closeWg:                 sync.WaitGroup{},
+		lastAccessTime:          atomic.NewTime(time.Now()),
+		emptyTimeTickSlowdowner: newEmptyTimeTickSlowdowner(lastestMVCCTimeTickGetter, vChannel),
 	}
 
 	return pipeline

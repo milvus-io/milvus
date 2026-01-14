@@ -562,6 +562,10 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 		return err
 	}
 	mt.collID2Meta[collectionID] = clone
+	log.Ctx(ctx).Info("update coll state to dropping",
+		zap.Int64("collectionID", collectionID),
+		zap.String("state", clone.State.String()),
+	)
 
 	db, err := mt.getDatabaseByIDInternal(ctx, coll.DBID, typeutil.MaxTimestamp)
 	if err != nil {
@@ -580,31 +584,50 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 	return nil
 }
 
-func (mt *MetaTable) removeIfNameMatchedInternal(collectionID UniqueID, name string) {
+func (mt *MetaTable) removeIfNameMatchedInternal(ctx context.Context, collectionID UniqueID, name string) {
 	mt.names.removeIf(func(db string, collection string, id UniqueID) bool {
-		return collectionID == id
+		if collectionID == id {
+			log.Ctx(ctx).Info("remove from names",
+				zap.String("dbName", db),
+				zap.String("collectionName", collection),
+				zap.Int64("collectionID", id),
+			)
+			return true
+		}
+		return false
 	})
 }
 
-func (mt *MetaTable) removeIfAliasMatchedInternal(collectionID UniqueID, alias string) {
+func (mt *MetaTable) removeIfAliasMatchedInternal(ctx context.Context, collectionID UniqueID, alias string) {
 	mt.aliases.removeIf(func(db string, collection string, id UniqueID) bool {
-		return collectionID == id
+		if collectionID == id {
+			log.Ctx(ctx).Info("remove from aliases",
+				zap.String("dbName", db),
+				zap.String("alias", collection),
+				zap.Int64("collectionID", id),
+			)
+			return true
+		}
+		return false
 	})
 }
 
-func (mt *MetaTable) removeIfMatchedInternal(collectionID UniqueID, name string) {
-	mt.removeIfNameMatchedInternal(collectionID, name)
-	mt.removeIfAliasMatchedInternal(collectionID, name)
+func (mt *MetaTable) removeIfMatchedInternal(ctx context.Context, collectionID UniqueID, name string) {
+	mt.removeIfNameMatchedInternal(ctx, collectionID, name)
+	mt.removeIfAliasMatchedInternal(ctx, collectionID, name)
 }
 
-func (mt *MetaTable) removeAllNamesIfMatchedInternal(collectionID UniqueID, names []string) {
+func (mt *MetaTable) removeAllNamesIfMatchedInternal(ctx context.Context, collectionID UniqueID, names []string) {
 	for _, name := range names {
-		mt.removeIfMatchedInternal(collectionID, name)
+		mt.removeIfMatchedInternal(ctx, collectionID, name)
 	}
 }
 
-func (mt *MetaTable) removeCollectionByIDInternal(collectionID UniqueID) {
+func (mt *MetaTable) removeCollectionByIDInternal(ctx context.Context, collectionID UniqueID) {
 	delete(mt.collID2Meta, collectionID)
+	log.Ctx(ctx).Info("delete from collID2Meta",
+		zap.Int64("collectionID", collectionID),
+	)
 }
 
 func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
@@ -640,8 +663,8 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	allNames = append(allNames, coll.Name)
 
 	// We cannot delete the name directly, since newly collection with same name may be created.
-	mt.removeAllNamesIfMatchedInternal(collectionID, allNames)
-	mt.removeCollectionByIDInternal(collectionID)
+	mt.removeAllNamesIfMatchedInternal(ctx, collectionID, allNames)
+	mt.removeCollectionByIDInternal(ctx, collectionID)
 
 	log.Ctx(ctx).Info("remove collection",
 		zap.Int64("dbID", coll.DBID),
@@ -679,7 +702,6 @@ func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collec
 		return coll.Clone(), nil
 	}
 	if !coll.Available() {
-		log.Warn("collection not available", zap.Int64("collectionID", collectionID), zap.Any("state", coll.State))
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 	return filterUnavailable(coll), nil
@@ -975,7 +997,17 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	mt.names.remove(oldColl.DBName, oldColl.Name)
 	mt.names.insert(newColl.DBName, newColl.Name, newColl.CollectionID)
 	mt.collID2Meta[header.CollectionId] = newColl
-	log.Ctx(ctx).Info("alter collection finished", zap.Bool("dbChanged", dbChanged), zap.Int64("collectionID", oldColl.CollectionID), zap.Uint64("ts", newColl.UpdateTimestamp))
+	log.Ctx(ctx).Info("alter collection finished",
+		zap.String("oldDBName", oldColl.DBName),
+		zap.String("newDBName", newColl.DBName),
+		zap.String("oldCollectionName", oldColl.Name),
+		zap.String("newCollectionName", newColl.Name),
+		zap.Int64("headerCollectionID", header.CollectionId),
+		zap.Int64("newCollectionID", newColl.CollectionID),
+		zap.Int64("oldCollectionID", oldColl.CollectionID),
+		zap.Bool("dbChanged", dbChanged),
+		zap.Uint64("ts", newColl.UpdateTimestamp),
+	)
 	return nil
 }
 
@@ -1004,6 +1036,9 @@ func (mt *MetaTable) BeginTruncateCollection(ctx context.Context, collectionID U
 		return err
 	}
 	mt.collID2Meta[coll.CollectionID] = newColl
+	log.Ctx(ctx).Info("update collID2Meta for begin truncate collection",
+		zap.Int64("collectionID", coll.CollectionID),
+	)
 	return nil
 }
 
@@ -1032,6 +1067,9 @@ func (mt *MetaTable) TruncateCollection(ctx context.Context, result message.Broa
 		return err
 	}
 	mt.collID2Meta[coll.CollectionID] = newColl
+	log.Ctx(ctx).Info("update collID2Meta for truncate collection",
+		zap.Int64("collectionID", coll.CollectionID),
+	)
 	return nil
 }
 
@@ -1347,7 +1385,8 @@ func (mt *MetaTable) AlterAlias(ctx context.Context, result message.BroadcastRes
 	log.Ctx(ctx).Info("alter alias",
 		zap.String("db", header.DbName),
 		zap.String("alias", header.Alias),
-		zap.String("collection", header.CollectionName),
+		zap.String("collectionName", header.CollectionName),
+		zap.Int64("collectionID", header.CollectionId),
 		zap.Uint64("ts", result.GetControlChannelResult().TimeTick),
 	)
 	return nil
@@ -1585,7 +1624,7 @@ func (mt *MetaTable) AlterCredential(ctx context.Context, result message.Broadca
 	}
 	// if the credential already exists and the version is not greater than the current timetick.
 	if existsCredential != nil && existsCredential.TimeTick >= result.GetControlChannelResult().TimeTick {
-		log.Info("credential already exists and the version is not greater than the current timetick",
+		log.Ctx(ctx).Info("credential already exists and the version is not greater than the current timetick",
 			zap.String("username", body.CredentialInfo.Username),
 			zap.Uint64("incoming", result.GetControlChannelResult().TimeTick),
 			zap.Uint64("current", existsCredential.TimeTick),
@@ -1637,7 +1676,7 @@ func (mt *MetaTable) DeleteCredential(ctx context.Context, result message.Broadc
 	}
 	// if the credential already exists and the version is not greater than the current timetick.
 	if existsCredential != nil && existsCredential.TimeTick >= result.GetControlChannelResult().TimeTick {
-		log.Info("credential already exists and the version is not greater than the current timetick",
+		log.Ctx(ctx).Info("credential already exists and the version is not greater than the current timetick",
 			zap.String("username", result.Message.Header().UserName),
 			zap.Uint64("incoming", result.GetControlChannelResult().TimeTick),
 			zap.Uint64("current", existsCredential.TimeTick),

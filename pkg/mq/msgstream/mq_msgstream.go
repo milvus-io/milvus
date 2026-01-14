@@ -20,14 +20,12 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	uatomic "go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
@@ -35,7 +33,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper"
@@ -47,10 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-var (
-	_             MsgStream = (*mqMsgStream)(nil)
-	streamCounter uatomic.Int64
-)
+var _ MsgStream = (*mqMsgStream)(nil)
 
 type mqMsgStream struct {
 	ctx              context.Context
@@ -60,22 +54,16 @@ type mqMsgStream struct {
 	consumers        map[string]mqwrapper.Consumer
 	consumerChannels []string
 
-	repackFunc         RepackFunc
-	unmarshal          UnmarshalDispatcher
-	receiveBuf         chan *ConsumeMsgPack
-	closeRWMutex       *sync.RWMutex
-	streamCancel       func()
-	bufSize            int64
-	producerLock       *sync.RWMutex
-	consumerLock       *sync.Mutex
-	closed             int32
-	onceChan           sync.Once
-	ttMsgEnable        atomic.Value
-	forceEnableProduce atomic.Value
-	configEvent        config.EventHandler
-
-	replicateID string
-	checkFunc   CheckReplicateMsgFunc
+	repackFunc   RepackFunc
+	unmarshal    UnmarshalDispatcher
+	receiveBuf   chan *ConsumeMsgPack
+	closeRWMutex *sync.RWMutex
+	streamCancel func()
+	bufSize      int64
+	producerLock *sync.RWMutex
+	consumerLock *sync.Mutex
+	closed       int32
+	onceChan     sync.Once
 }
 
 // NewMqMsgStream is used to generate a new mqMsgStream object
@@ -109,20 +97,7 @@ func NewMqMsgStream(initCtx context.Context,
 		closeRWMutex: &sync.RWMutex{},
 		closed:       0,
 	}
-	ctxLog := log.Ctx(initCtx)
-	stream.forceEnableProduce.Store(false)
-	stream.ttMsgEnable.Store(paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool())
-	stream.configEvent = config.NewHandler("enable send tt msg "+fmt.Sprint(streamCounter.Inc()), func(event *config.Event) {
-		value, err := strconv.ParseBool(event.Value)
-		if err != nil {
-			ctxLog.Warn("Failed to parse bool value", zap.String("v", event.Value), zap.Error(err))
-			return
-		}
-		stream.ttMsgEnable.Store(value)
-		ctxLog.Info("Msg Stream state updated", zap.Bool("can_produce", stream.isEnabledProduce()))
-	})
-	paramtable.Get().Watch(paramtable.Get().CommonCfg.TTMsgEnabled.Key, stream.configEvent)
-	ctxLog.Info("Msg Stream state", zap.Bool("can_produce", stream.isEnabledProduce()))
+	log.Ctx(initCtx).Info("Msg Stream initialized")
 
 	return stream, nil
 }
@@ -244,7 +219,6 @@ func (ms *mqMsgStream) Close() {
 
 	ms.client.Close()
 	close(ms.receiveBuf)
-	paramtable.Get().Unwatch(paramtable.Get().CommonCfg.TTMsgEnabled.Key, ms.configEvent)
 	log.Info("mq msg stream closed")
 }
 
@@ -273,36 +247,7 @@ func (ms *mqMsgStream) GetProduceChannels() []string {
 	return ms.producerChannels
 }
 
-func (ms *mqMsgStream) ForceEnableProduce(can bool) {
-	ms.forceEnableProduce.Store(can)
-}
-
-func (ms *mqMsgStream) isEnabledProduce() bool {
-	return ms.forceEnableProduce.Load().(bool) || ms.ttMsgEnable.Load().(bool)
-}
-
-func (ms *mqMsgStream) isSkipSystemTT() bool {
-	return ms.replicateID != ""
-}
-
-// checkReplicateID check the replicate id of the message, return values: isMatch, isReplicate
-func (ms *mqMsgStream) checkReplicateID(msg TsMsg) (bool, bool) {
-	if !ms.isSkipSystemTT() {
-		return true, false
-	}
-	msgBase, ok := msg.(interface{ GetBase() *commonpb.MsgBase })
-	if !ok {
-		log.Warn("fail to get msg base, please check it", zap.Any("type", msg.Type()))
-		return false, false
-	}
-	return msgBase.GetBase().GetReplicateInfo().GetReplicateID() == ms.replicateID, true
-}
-
 func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
-	if !ms.isEnabledProduce() {
-		log.Ctx(ms.ctx).Warn("can't produce the msg in the backup instance", zap.Stack("stack"))
-		return merr.ErrDenyProduceMsg
-	}
 	if msgPack == nil || len(msgPack.Msgs) <= 0 {
 		log.Ctx(ms.ctx).Debug("Warning: Receive empty msgPack")
 		return nil
@@ -378,14 +323,7 @@ func (ms *mqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) (map[str
 	if msgPack == nil || len(msgPack.Msgs) <= 0 {
 		return ids, errors.New("empty msgs")
 	}
-	// Only allow to create collection msg in backup instance
-	// However, there may be a problem of ts disorder here, but because the start position of the collection only uses offsets, not time, there is no problem for the time being
-	isCreateCollectionMsg := len(msgPack.Msgs) == 1 && msgPack.Msgs[0].Type() == commonpb.MsgType_CreateCollection
 
-	if !ms.isEnabledProduce() && !isCreateCollectionMsg {
-		log.Ctx(ms.ctx).Warn("can't broadcast the msg in the backup instance", zap.Stack("stack"))
-		return ids, merr.ErrDenyProduceMsg
-	}
 	for _, v := range msgPack.Msgs {
 		spanCtx, sp := MsgSpanFromCtx(v.TraceCtx(), v)
 
@@ -754,15 +692,14 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 							timeTickMsg = v
 							continue
 						}
-						if v.GetTimestamp() <= currTs ||
-							v.GetReplicateID() != "" {
+						if v.GetTimestamp() <= currTs {
 							size += uint64(v.GetSize())
 							timeTickBuf = append(timeTickBuf, v)
 						} else {
 							tempBuffer = append(tempBuffer, v)
 						}
 						// when drop collection, force to exit the buffer loop
-						if v.GetType() == commonpb.MsgType_DropCollection || v.GetType() == commonpb.MsgType_Replicate {
+						if v.GetType() == commonpb.MsgType_DropCollection {
 							containsEndBufferMsg = true
 						}
 					}
@@ -1007,10 +944,6 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 					}
 				}
 
-				// skip the replicate msg because it must have been consumed
-				if packMsg.GetReplicateID() != "" {
-					continue
-				}
 				if packMsg.GetType() == commonpb.MsgType_TimeTick && packMsg.GetTimestamp() >= mp.Timestamp {
 					runLoop = false
 					if time.Since(loopStarTime) > 30*time.Second {

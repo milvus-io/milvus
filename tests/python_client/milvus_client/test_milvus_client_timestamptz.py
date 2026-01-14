@@ -397,128 +397,6 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         
         self.drop_collection(client, collection_name)
         
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_timestamptz_edge_case(self):
-        """
-        target:  Test timestamptz can be successfully inserted and queried
-        method:
-            1. Create a collection
-            2. Generate rows with edge timestamptz and insert the rows
-            3. Insert the rows
-        expected: Step 3 should result success
-        """
-        # step 1: create collection
-        default_dim = 3
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(default_timestamp_field_name, DataType.TIMESTAMPTZ, nullable=True)
-        index_params = self.prepare_index_params(client)[0] 
-        index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
-        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
-        index_params.add_index(default_timestamp_field_name, index_type="AUTOINDEX")
-        self.create_collection(client, collection_name, default_dim, schema=schema, 
-                               consistency_level="Strong", index_params=index_params)
-        
-        # step 2: generate rows with edge timestamptz and insert the rows
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
-        rows = [{default_primary_key_field_name: 0, default_vector_field_name: [1,2,3], default_timestamp_field_name: "0000-01-01 00:00:00"},
-                {default_primary_key_field_name: 1, default_vector_field_name: [4,5,6], default_timestamp_field_name: "9999-12-31T23:59:59"},
-                {default_primary_key_field_name: 2, default_vector_field_name: [10,11,12], default_timestamp_field_name: "1970-01-01T00:00:00+01:00"},
-                {default_primary_key_field_name: 3, default_vector_field_name: [13,14,15], default_timestamp_field_name: "2000-01-01T00:00:00+01:00"}]
-        self.insert(client, collection_name, rows)
-
-        # step 3: query the rows
-        rows = cf.convert_timestamptz(rows, default_timestamp_field_name, "UTC")
-        self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0",
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: rows,
-                                         "pk_name": default_primary_key_field_name})
-        
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_timestamptz_Feb_29(self):
-        """
-        target:  Milvus raise error when input data with Feb 29
-        method:
-            1. Create a collection
-            2. Generate rows with Feb 29 on a leap year and insert the rows
-            3. Insert the rows
-        expected: Step 3 should result success
-        """
-        # step 1: create collection
-        default_dim = 3
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(default_timestamp_field_name, DataType.TIMESTAMPTZ, nullable=True)
-        index_params = self.prepare_index_params(client)[0] 
-        index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
-        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
-        index_params.add_index(default_timestamp_field_name, index_type="AUTOINDEX")
-        self.create_collection(client, collection_name, default_dim, schema=schema, 
-                               consistency_level="Strong", index_params=index_params)
-        
-        # step 2: generate rows with Feb 29 on a leap year and insert the rows
-        rows = [{default_primary_key_field_name: 0, default_vector_field_name: [1,2,3], default_timestamp_field_name: "2024-02-29T00:00:00+03:00"}]
-        self.insert(client, collection_name, rows)
-        
-        # step 3: query the rows
-        rows = cf.convert_timestamptz(rows, default_timestamp_field_name, "UTC")
-        self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0",
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: rows,
-                                         "pk_name": default_primary_key_field_name})
-        
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_timestamptz_partial_update(self):
-        """
-        target:  Test timestamptz can be successfully inserted and queried
-        method:
-            1. Create a collection
-            2. Generate rows with timestamptz and insert the rows
-            3. partial update the rows
-        expected: Step 3 should result success
-        """
-        # step 1: create collection
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(default_timestamp_field_name, DataType.TIMESTAMPTZ, nullable=True)
-        index_params = self.prepare_index_params(client)[0] 
-        index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
-        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
-        index_params.add_index(default_timestamp_field_name, index_type="AUTOINDEX")
-        self.create_collection(client, collection_name, default_dim, schema=schema, 
-                               consistency_level="Strong", index_params=index_params)
-        
-        # step 2: generate rows with timestamptz and insert the rows
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
-        self.upsert(client, collection_name, rows, partial_update=True)
-        
-        # step 3: partial update the rows
-        partial_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, 
-                                                  desired_field_names=[default_primary_key_field_name, default_timestamp_field_name])
-        self.upsert(client, collection_name, partial_rows, partial_update=True)
-        
-        # step 4: query the rows
-        partial_rows = cf.convert_timestamptz(partial_rows, default_timestamp_field_name, "UTC")
-        self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0",
-                            output_fields=[default_timestamp_field_name],
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: partial_rows,
-                                         "pk_name": default_primary_key_field_name})
-        
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_timestamptz_default_value(self):
@@ -646,93 +524,6 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_timestamptz_query(self):
-        """
-        target:  Milvus can query with timestamptz expr
-        method:
-            1. Create a collection
-            2. Generate rows with timestamptz and insert the rows
-            3. Query with timestamptz expr
-        expected: Step 3 should result success
-        """
-        # step 1: create collection
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=3)
-        schema.add_field(default_timestamp_field_name, DataType.TIMESTAMPTZ, nullable=True)
-        index_params = self.prepare_index_params(client)[0] 
-        index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
-        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
-        index_params.add_index(default_timestamp_field_name, index_type="AUTOINDEX")
-        self.create_collection(client, collection_name, 3, schema=schema, 
-                               consistency_level="Strong", index_params=index_params)
-
-        # step 2: generate rows with timestamptz and insert the rows
-        rows = [{default_primary_key_field_name: 0, default_vector_field_name: [1,2,3], default_timestamp_field_name: "1970-01-01 00:00:00"},
-                {default_primary_key_field_name: 1, default_vector_field_name: [4,5,6], default_timestamp_field_name: "2021-02-28T00:00:00Z"},
-                {default_primary_key_field_name: 2, default_vector_field_name: [7,8,9], default_timestamp_field_name: "2025-05-25T23:46:05"},
-                {default_primary_key_field_name: 3, default_vector_field_name: [10,11,12], default_timestamp_field_name:"2025-05-30T23:46:05+05:30"},
-                {default_primary_key_field_name: 4, default_vector_field_name: [13,14,15], default_timestamp_field_name: "2025-10-05 12:56:34"},
-                {default_primary_key_field_name: 5, default_vector_field_name: [16,17,18], default_timestamp_field_name: "9999-12-31T23:46:05"}]
-        self.insert(client, collection_name, rows)
-        
-        # step 3: query with timestamptz expr
-        UTC_time_row = cf.convert_timestamptz(rows, default_timestamp_field_name, "UTC")
-        shanghai_time_row = cf.convert_timestamptz(UTC_time_row, default_timestamp_field_name, "Asia/Shanghai")
-        self.query(client, collection_name, filter=default_search_exp,
-                            timezone="Asia/Shanghai",
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: shanghai_time_row,
-                                         "pk_name": default_primary_key_field_name})
-        # >=
-        expr = f"{default_timestamp_field_name} >= ISO '2025-05-30T23:46:05+05:30'"
-        self.query(client, collection_name, filter=expr,
-                            timezone="Asia/Shanghai",
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: shanghai_time_row[3:],
-                                         "pk_name": default_primary_key_field_name})
-        # ==
-        expr = f"{default_timestamp_field_name} == ISO '9999-12-31T23:46:05Z'"
-        self.query(client, collection_name, filter=expr,
-                    timezone="Asia/Shanghai",
-                    check_task=CheckTasks.check_query_results,
-                    check_items={exp_res: [shanghai_time_row[-1]],
-                                    "pk_name": default_primary_key_field_name})
-        
-        # <=
-        expr = f"{default_timestamp_field_name} <= ISO '2025-01-01T00:00:00+08:00'"
-        self.query(client, collection_name, filter=expr,
-                    timezone="Asia/Shanghai",
-                    check_task=CheckTasks.check_query_results,
-                    check_items={exp_res: shanghai_time_row[:2],
-                                    "pk_name": default_primary_key_field_name})
-        # !=
-        expr = f"{default_timestamp_field_name} != ISO '9999-12-31T23:46:05Z'"
-        self.query(client, collection_name, filter=expr,
-                    timezone="Asia/Shanghai",
-                    check_task=CheckTasks.check_query_results,
-                    check_items={exp_res: shanghai_time_row[:-1],
-                                    "pk_name": default_primary_key_field_name})
-        # INTERVAL
-        expr = f"{default_timestamp_field_name} - INTERVAL 'P3D' >= ISO '1970-01-01T00:00:00Z'"
-        self.query(client, collection_name, filter=expr,
-                    timezone="Asia/Shanghai",
-                    check_task=CheckTasks.check_query_results,
-                    check_items={exp_res: shanghai_time_row[1:],
-                                    "pk_name": default_primary_key_field_name})
-        
-        # lower < tz < upper
-        # BUG: https://github.com/milvus-io/milvus/issues/44600
-        # expr = f"ISO '2025-01-01T00:00:00+08:00' < {default_timestamp_field_name} < ISO '2026-10-05T12:56:34+08:00'"
-        # self.query(client, collection_name, filter=expr,
-        #             check_task=CheckTasks.check_query_results,
-        #             check_items={exp_res: shanghai_time_row,
-        #                             "pk_name": default_primary_key_field_name})
-        
-        self.drop_collection(client, collection_name)
     
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1309,3 +1100,296 @@ class TestMilvusClientTimestamptzInvalid(TestMilvusClientV2Base):
                                   nullable=False, check_task=CheckTasks.err_res, check_items=error)
         
         self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_timestamptz_add_field_with_invalid_default_value(self):
+        """
+        target:  Milvus raise error when add field with default value for timestamptz field
+        method:
+            1. Create a collection with default value for timestamptz field
+            2. Add field with invalid default value for timestamptz field
+        expected: Step 1 should result fail
+        """
+        # step 1: create collection
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        index_params = self.prepare_index_params(client)[0] 
+        index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
+        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
+        self.create_collection(client, collection_name, default_dim, schema=schema, 
+                               consistency_level="Strong", index_params=index_params)
+
+        # step 2: add field with default value for timestamptz field
+        error = {ct.err_code: 1100, 
+                 ct.err_msg: f"invalid default value of field, name: {default_timestamp_field_name}, err: %!w(*errors.errorString=&{{invalid timestamp string: '1234'. Does not match any known format}}): invalid parameter"}
+        self.add_collection_field(client, collection_name, field_name=default_timestamp_field_name, data_type=DataType.TIMESTAMPTZ,
+                                  nullable=True, default_value="1234", check_task=CheckTasks.err_res, check_items=error)
+        
+        self.drop_collection(client, collection_name)
+
+
+
+COLLECTION_NAME = "test_timestamptz" + cf.gen_unique_str("_")
+ROWS = [{default_primary_key_field_name: 0, default_vector_field_name: [1,2,3], default_timestamp_field_name: "0000-01-01 00:00:00"},
+        {default_primary_key_field_name: 1, default_vector_field_name: [4,5,6], default_timestamp_field_name: "9999-12-31T23:59:59"},
+        {default_primary_key_field_name: 2, default_vector_field_name: [7,8,9], default_timestamp_field_name: "1970-01-01T00:00:00+01:00"},
+        {default_primary_key_field_name: 3, default_vector_field_name: [10,11,12], default_timestamp_field_name: "2000-01-01T00:00:00+01:00"},
+        {default_primary_key_field_name: 4, default_vector_field_name: [13,14,15], default_timestamp_field_name: "2024-02-29T00:00:00+03:00"}]
+@pytest.mark.xdist_group("TestMilvusClientTimestamptz")
+class TestMilvusClientTimestamptz(TestMilvusClientV2Base):
+    """
+    #########################################################
+    Init collection with timestamptz so all the tests can use the same collection
+    This aims to save time for the tests
+    Also, timestamptz is difficult to compare the results,
+    so we need to init the collection with pre-defined data
+    #########################################################
+    """
+    @pytest.fixture(scope="module", autouse=True)
+    def prepare_timestamptz_collection(self, request):
+        """
+        Prepare timestamptz collection for the tests
+        """
+        default_dim = 3
+        client = self._client()
+        collection_name = COLLECTION_NAME
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_timestamp_field_name, DataType.TIMESTAMPTZ, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
+        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
+        index_params.add_index(default_timestamp_field_name, index_type="AUTOINDEX")
+        client.create_collection(collection_name, schema=schema, 
+                               consistency_level="Strong", index_params=index_params)
+        
+        self.insert(client, collection_name, ROWS)
+
+        def teardown():
+            try:
+                if self.has_collection(self._client(), COLLECTION_NAME):
+                    self.drop_collection(self._client(), COLLECTION_NAME)
+            except Exception:
+                pass
+        request.addfinalizer(teardown)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.order(0)
+    def test_milvus_client_timestamptz_edge_case(self):
+        """
+        target:  Test timestamptz edge case can be successfully queried
+        """
+        client = self._client()
+        collection_name = COLLECTION_NAME
+        client.load_collection(collection_name)
+
+        rows = cf.convert_timestamptz(ROWS[:4], default_timestamp_field_name, "UTC")
+        self.query(client, collection_name, filter=f"0 <= {default_primary_key_field_name} <= 3",
+                            check_task=CheckTasks.check_query_results,
+                            check_items={exp_res: rows,
+                                         "pk_name": default_primary_key_field_name})
+        
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.order(1)
+    def test_milvus_client_timestamptz_Feb_29(self):
+        """
+        target:  Milvus can query input data with Feb 29 on a leap year
+        """
+        client = self._client()
+        collection_name = COLLECTION_NAME
+        client.load_collection(collection_name)
+
+        row = [ROWS[4].copy()]
+        row = cf.convert_timestamptz(row, default_timestamp_field_name, "UTC")
+        self.query(client, collection_name, filter=f"{default_primary_key_field_name} == 4",
+                            check_task=CheckTasks.check_query_results,
+                            check_items={exp_res: row,
+                                         "pk_name": default_primary_key_field_name})
+
+    
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.order(2)
+    def test_milvus_client_timestamptz_partial_update(self):
+        """
+        target:  Milvus can partial update timestamptz field
+        """
+        client = self._client()
+        collection_name = COLLECTION_NAME
+        client.load_collection(collection_name)
+
+        # partial update these rows to set up for query with filters
+        # pk:5 does not exist in the collection so include all fields
+        rows = [{default_primary_key_field_name: 0, default_timestamp_field_name: "1970-01-01 00:00:00"},
+                {default_primary_key_field_name: 1, default_timestamp_field_name: "2021-02-28T00:00:00Z"},
+                {default_primary_key_field_name: 2, default_timestamp_field_name: "2025-05-25T23:46:05"},
+                {default_primary_key_field_name: 3, default_timestamp_field_name:"2025-05-30T23:46:05+05:30"},
+                {default_primary_key_field_name: 4, default_timestamp_field_name: "2025-10-05 12:56:34"},
+                {default_primary_key_field_name: 5, default_vector_field_name: [16,17,18], default_timestamp_field_name: "9999-12-31T23:46:05"}]
+        
+        # Because partial update does NOT support different fields 
+        # The last row will be inserted
+        self.upsert(client, collection_name, rows[:-1], partial_update=True)
+        self.insert(client, collection_name, rows[-1])
+        
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.order(3)
+    def test_milvus_client_timestamptz_query(self):
+        """
+        target:  Milvus can query rows with timestamptz field
+        """
+        client = self._client()
+        collection_name = COLLECTION_NAME
+        client.load_collection(collection_name)
+
+        rows = [{default_primary_key_field_name: 0, default_vector_field_name: [1,2,3], default_timestamp_field_name: "1970-01-01 00:00:00"},
+                {default_primary_key_field_name: 1, default_vector_field_name: [4,5,6], default_timestamp_field_name: "2021-02-28T00:00:00Z"},
+                {default_primary_key_field_name: 2, default_vector_field_name: [7,8,9], default_timestamp_field_name: "2025-05-25T23:46:05"},
+                {default_primary_key_field_name: 3, default_vector_field_name: [10,11,12], default_timestamp_field_name:"2025-05-30T23:46:05+05:30"},
+                {default_primary_key_field_name: 4, default_vector_field_name: [13,14,15], default_timestamp_field_name: "2025-10-05 12:56:34"},
+                {default_primary_key_field_name: 5, default_vector_field_name: [16,17,18], default_timestamp_field_name: "9999-12-31T23:46:05"}]
+        
+
+        UTC_time_row = cf.convert_timestamptz(rows, default_timestamp_field_name, "UTC")
+        shanghai_time_row = cf.convert_timestamptz(UTC_time_row, default_timestamp_field_name, "Asia/Shanghai")
+        self.query(client, collection_name, filter=default_search_exp,
+                            timezone="Asia/Shanghai",
+                            check_task=CheckTasks.check_query_results,
+                            check_items={exp_res: shanghai_time_row,
+                                         "pk_name": default_primary_key_field_name})
+        # >=
+        expr = f"{default_timestamp_field_name} >= ISO '2025-05-30T23:46:05+05:30'"
+        self.query(client, collection_name, filter=expr,
+                            timezone="Asia/Shanghai",
+                            check_task=CheckTasks.check_query_results,
+                            check_items={exp_res: shanghai_time_row[3:],
+                                         "pk_name": default_primary_key_field_name})
+        # ==
+        expr = f"{default_timestamp_field_name} == ISO '9999-12-31T23:46:05Z'"
+        self.query(client, collection_name, filter=expr,
+                    timezone="Asia/Shanghai",
+                    check_task=CheckTasks.check_query_results,
+                    check_items={exp_res: [shanghai_time_row[-1]],
+                                    "pk_name": default_primary_key_field_name})
+        
+        # <=
+        expr = f"{default_timestamp_field_name} <= ISO '2025-01-01T00:00:00+08:00'"
+        self.query(client, collection_name, filter=expr,
+                    timezone="Asia/Shanghai",
+                    check_task=CheckTasks.check_query_results,
+                    check_items={exp_res: shanghai_time_row[:2],
+                                    "pk_name": default_primary_key_field_name})
+        # !=
+        expr = f"{default_timestamp_field_name} != ISO '9999-12-31T23:46:05Z'"
+        self.query(client, collection_name, filter=expr,
+                    timezone="Asia/Shanghai",
+                    check_task=CheckTasks.check_query_results,
+                    check_items={exp_res: shanghai_time_row[:-1],
+                                    "pk_name": default_primary_key_field_name})
+        # INTERVAL
+        expr = f"{default_timestamp_field_name} - INTERVAL 'P3D' >= ISO '1970-01-01T00:00:00Z'"
+        self.query(client, collection_name, filter=expr,
+                    timezone="Asia/Shanghai",
+                    check_task=CheckTasks.check_query_results,
+                    check_items={exp_res: shanghai_time_row[1:],
+                                    "pk_name": default_primary_key_field_name})
+        
+        # lower < tz < upper
+        # BUG: https://github.com/milvus-io/milvus/issues/44600
+        # expr = f"ISO '2025-01-01T00:00:00+08:00' < {default_timestamp_field_name} < ISO '2026-10-05T12:56:34+08:00'"
+        # self.query(client, collection_name, filter=expr,
+        #             check_task=CheckTasks.check_query_results,
+        #             check_items={exp_res: shanghai_time_row,
+        #                             "pk_name": default_primary_key_field_name})
+
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.order(4)
+    def test_milvus_client_timestamptz_different_time_expressions(self):
+        """
+        target:  Milvus can query rows with different time expressions
+        """
+        client = self._client()
+        collection_name = COLLECTION_NAME
+        client.load_collection(collection_name)
+
+        self.alter_collection_properties(client, collection_name, properties={"timezone": "Asia/Shanghai"})
+        rows = [{default_primary_key_field_name: 0, default_vector_field_name: [1,2,3], default_timestamp_field_name: "2024-12-31 22:00:00Z"},
+                {default_primary_key_field_name: 1, default_vector_field_name: [4,5,6], default_timestamp_field_name: "2024-12-31 22:00:00"},
+                {default_primary_key_field_name: 2, default_vector_field_name: [7,8,9], default_timestamp_field_name: "2024-12-31T22:00:00"},
+                {default_primary_key_field_name: 3, default_vector_field_name: [10,11,12], default_timestamp_field_name: "2024-12-31T22:00:00+08:00"},
+                {default_primary_key_field_name: 4, default_vector_field_name: [13,14,15], default_timestamp_field_name: "2024-12-31T22:00:00-08:00"},
+                {default_primary_key_field_name: 5, default_vector_field_name: [16,17,18], default_timestamp_field_name: "2024-12-31T22:00:00Z"},
+                {default_primary_key_field_name: 6, default_vector_field_name: [19,20,21], default_timestamp_field_name: "2024-12-31 22:00:00+08:00"},
+                {default_primary_key_field_name: 7, default_vector_field_name: [22,23,24], default_timestamp_field_name: "2024-12-31 22:00:00-08:00"}]
+        self.upsert(client, collection_name, rows)
+
+        expected_rows = cf.convert_timestamptz(rows, default_timestamp_field_name, "Asia/Shanghai")
+        self.query(client, collection_name, filter=f"{default_primary_key_field_name} <= 7",
+                    check_task=CheckTasks.check_query_results,
+                    check_items={exp_res: expected_rows,
+                                    "pk_name": default_primary_key_field_name})
+
+    
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.order(5)
+    def test_milvus_client_timestamptz_different_timezone_query(self):
+        """
+        target:  Milvus can query rows with different time expressions with filter
+        """
+        client = self._client()
+        collection_name = COLLECTION_NAME
+        client.load_collection(collection_name)
+
+        """
+        # To test different timezone query, we need to query the same timestamp in different timezone
+        # For reference: 
+        #    2024-12-31T22:00:00Z 
+        # == 2024-12-31T17:00:00-05:00 
+        # == 2025-01-01T06:00:00+08:00 
+        # == 2024-12-31 17:00:00 (with NY timezone) 
+        # == 2025-01-01 06:00:00 (with SH timezone)
+        # these are all the same time in different timezone
+        """
+        
+        # filter: UTC, timezone: None, expected: 2025-01-01T06:00:00+08:00
+        expected_rows = [{default_primary_key_field_name: 0, default_vector_field_name: [1,2,3], default_timestamp_field_name: "2025-01-01T06:00:00+08:00"},
+                         {default_primary_key_field_name: 5, default_vector_field_name: [16,17,18], default_timestamp_field_name: "2025-01-01T06:00:00+08:00"}]  
+        self.query(client, collection_name, filter=f"{default_timestamp_field_name} == ISO '2024-12-31T22:00:00Z'", 
+                    check_task=CheckTasks.check_query_results,
+                    check_items={exp_res: expected_rows,
+                                    "pk_name": default_primary_key_field_name})
+
+        # filter: America/New_York, timezone: Asia/Shanghai, expected: No result 
+        # because Asia/Shanghai will apply to filter time, so it will be 2024-12-31T17:00:00+08:00 Does not exist in the collection
+        expected_rows = []
+        self.query(client, collection_name, filter=f"{default_timestamp_field_name} == ISO '2024-12-31 17:00:00'", 
+                    timezone="Asia/Shanghai",
+                    check_task=CheckTasks.check_query_results,
+                    check_items={exp_res: expected_rows,
+                                    "pk_name": default_primary_key_field_name})
+
+        # filter: America/New_York, timezone: America/New_York, expected: 2024-12-31T17:00:00-05:00
+        # because America/New_York will apply to filter time, so it will be 2024-12-31T17:00:00-05:00
+        expected_rows = [{default_primary_key_field_name: 0, default_vector_field_name: [1,2,3], default_timestamp_field_name: "2024-12-31T17:00:00-05:00"},
+                         {default_primary_key_field_name: 5, default_vector_field_name: [16,17,18], default_timestamp_field_name: "2024-12-31T17:00:00-05:00"}]  
+        self.query(client, collection_name, filter=f"{default_timestamp_field_name} == ISO '2024-12-31 17:00:00'",
+                    timezone="America/New_York",
+                    check_task=CheckTasks.check_query_results,
+                    check_items={exp_res: expected_rows,
+                                    "pk_name": default_primary_key_field_name})
+
+        # filter: Asia/Shanghai, timezone: Asia/Shanghai, expected: 2024-12-31T17:00:00+08:00
+        # because Asia/Shanghai is the same as the filter time, so it will be 2024-12-31T17:00:00+08:00
+        expected_rows = [{default_primary_key_field_name: 0, default_vector_field_name: [1,2,3], default_timestamp_field_name: "2025-01-01T06:00:00+08:00"},
+                         {default_primary_key_field_name: 5, default_vector_field_name: [16,17,18], default_timestamp_field_name: "2025-01-01T06:00:00+08:00"}]  
+        self.query(client, collection_name, filter=f"{default_timestamp_field_name} == ISO '2025-01-01 06:00:00'",
+                    timezone="Asia/Shanghai",
+                    check_task=CheckTasks.check_query_results,
+                    check_items={exp_res: expected_rows,
+                                    "pk_name": default_primary_key_field_name})

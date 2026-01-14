@@ -802,7 +802,7 @@ func TestGetCurUserFromContext(t *testing.T) {
 
 	root := "root"
 	password := "123456"
-	username, err := GetCurUserFromContext(GetContext(context.Background(), fmt.Sprintf("%s%s%s", root, util.CredentialSeperator, password)))
+	username, err := GetCurUserFromContext(GetContext(context.Background(), fmt.Sprintf("%s%s%s", root, util.CredentialSeparator, password)))
 	assert.NoError(t, err)
 	assert.Equal(t, "root", username)
 }
@@ -2373,6 +2373,63 @@ func TestAppendUserInfoForRPC(t *testing.T) {
 	assert.Equal(t, expectAuth, authorization[0])
 }
 
+func TestNewContextWithMetadata(t *testing.T) {
+	t.Run("with username and dbName", func(t *testing.T) {
+		ctx := context.Background()
+		ctx = NewContextWithMetadata(ctx, "testuser", "testdb")
+
+		md, ok := metadata.FromIncomingContext(ctx)
+		assert.True(t, ok)
+
+		// Check dbName
+		dbNameKey := strings.ToLower(util.HeaderDBName)
+		dbNameVal, ok := md[dbNameKey]
+		assert.True(t, ok)
+		assert.Equal(t, "testdb", dbNameVal[0])
+
+		// Check authorization
+		authKey := strings.ToLower(util.HeaderAuthorize)
+		authVal, ok := md[authKey]
+		assert.True(t, ok)
+		expectedAuth := crypto.Base64Encode("testuser:testuser")
+		assert.Equal(t, expectedAuth, authVal[0])
+	})
+
+	t.Run("with empty username", func(t *testing.T) {
+		ctx := context.Background()
+		ctx = NewContextWithMetadata(ctx, "", "testdb")
+
+		md, ok := metadata.FromIncomingContext(ctx)
+		assert.True(t, ok)
+
+		// Check dbName is set
+		dbNameKey := strings.ToLower(util.HeaderDBName)
+		dbNameVal, ok := md[dbNameKey]
+		assert.True(t, ok)
+		assert.Equal(t, "testdb", dbNameVal[0])
+
+		// Check authorization is not set
+		authKey := strings.ToLower(util.HeaderAuthorize)
+		_, ok = md[authKey]
+		assert.False(t, ok)
+	})
+
+	t.Run("with empty dbName", func(t *testing.T) {
+		ctx := context.Background()
+		ctx = NewContextWithMetadata(ctx, "testuser", "")
+
+		md, ok := metadata.FromIncomingContext(ctx)
+		assert.True(t, ok)
+
+		// Check authorization is set
+		authKey := strings.ToLower(util.HeaderAuthorize)
+		authVal, ok := md[authKey]
+		assert.True(t, ok)
+		expectedAuth := crypto.Base64Encode("testuser:testuser")
+		assert.Equal(t, expectedAuth, authVal[0])
+	})
+}
+
 func TestGetCostValue(t *testing.T) {
 	t.Run("empty status", func(t *testing.T) {
 		{
@@ -2582,7 +2639,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.NoError(t, err)
 	})
 
@@ -2607,7 +2664,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "duplicate function name")
 	})
@@ -2626,7 +2683,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "input field not found")
 	})
@@ -2645,7 +2702,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "output field not found")
 	})
@@ -2665,7 +2722,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.NoError(t, err)
 	})
 
@@ -2684,7 +2741,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be primary key")
 	})
@@ -2704,7 +2761,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be partition key or clustering key")
 	})
@@ -2724,7 +2781,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be partition key or clustering key")
 	})
@@ -2744,7 +2801,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be nullable")
 	})
@@ -2775,6 +2832,12 @@ func TestValidateModelFunction(t *testing.T) {
 						{Key: "dim", Value: "4"},
 					},
 				},
+				{
+					Name: "output_dense_field2", DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "4"},
+					},
+				},
 			},
 			Functions: []*schemapb.FunctionSchema{
 				{
@@ -2784,7 +2847,7 @@ func TestValidateModelFunction(t *testing.T) {
 					OutputFieldNames: []string{"output_field"},
 				},
 				{
-					Name:             "text_embedding_func",
+					Name:             "f1",
 					Type:             schemapb.FunctionType_TextEmbedding,
 					InputFieldNames:  []string{"input_field"},
 					OutputFieldNames: []string{"output_dense_field"},
@@ -2795,10 +2858,28 @@ func TestValidateModelFunction(t *testing.T) {
 						{Key: "dim", Value: "4"},
 					},
 				},
+				{
+					Name:             "f2",
+					Type:             schemapb.FunctionType_TextEmbedding,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_dense_field2"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "provider", Value: "unknown_provider"},
+						{Key: "model_name", Value: "text-embedding-ada-002"},
+						{Key: "credential", Value: "mock"},
+						{Key: "dim", Value: "4"},
+					},
+				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "f1", false)
 		assert.NoError(t, err)
+
+		err = validateFunction(schema, "f2", false)
+		assert.Error(t, err)
+
+		err = validateFunction(schema, "", false)
+		assert.Error(t, err)
 	})
 
 	t.Run("Invalid function schema - Invalid function info ", func(t *testing.T) {
@@ -2830,7 +2911,7 @@ func TestValidateModelFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
 	})
 }

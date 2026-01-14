@@ -127,38 +127,40 @@ func (mgr *singleTypeChannelsMgr) getAllChannels(collectionID UniqueID) (channel
 	return channelInfos{}, fmt.Errorf("collection not found in channels manager: %d", collectionID)
 }
 
-func (mgr *singleTypeChannelsMgr) getPChans(collectionID UniqueID) ([]pChan, error) {
-	channelInfos, err := mgr.getChannelsFunc(collectionID)
-	if err != nil {
-		return nil, err
+func (mgr *singleTypeChannelsMgr) ensureChannels(collectionID UniqueID) (channelInfos, error) {
+	if infos, err := mgr.getAllChannels(collectionID); err == nil {
+		return infos, nil
 	}
-	return channelInfos.pchans, nil
-}
 
-func (mgr *singleTypeChannelsMgr) getVChans(collectionID UniqueID) ([]vChan, error) {
 	channelInfos, err := mgr.getChannelsFunc(collectionID)
 	if err != nil {
-		return nil, err
+		return channelInfos, err
 	}
-	return channelInfos.vchans, nil
+
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	if infos, ok := mgr.infos[collectionID]; ok {
+		return infos.channelInfos, nil
+	}
+	mgr.infos[collectionID] = streamInfos{channelInfos: channelInfos}
+	incPChansMetrics(channelInfos.pchans)
+	return channelInfos, nil
 }
 
 // getChannels returns the physical channels.
 func (mgr *singleTypeChannelsMgr) getChannels(collectionID UniqueID) ([]pChan, error) {
-	var channelInfos channelInfos
-	channelInfos, err := mgr.getAllChannels(collectionID)
+	channelInfos, err := mgr.ensureChannels(collectionID)
 	if err != nil {
-		return mgr.getPChans(collectionID)
+		return nil, err
 	}
 	return channelInfos.pchans, nil
 }
 
 // getVChannels returns the virtual channels.
 func (mgr *singleTypeChannelsMgr) getVChannels(collectionID UniqueID) ([]vChan, error) {
-	var channelInfos channelInfos
-	channelInfos, err := mgr.getAllChannels(collectionID)
+	channelInfos, err := mgr.ensureChannels(collectionID)
 	if err != nil {
-		return mgr.getVChans(collectionID)
+		return nil, err
 	}
 	return channelInfos.vchans, nil
 }

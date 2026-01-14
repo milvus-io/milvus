@@ -135,10 +135,12 @@ MemFileManagerImpl::LoadIndexToMemory(
     auto LoadBatchIndexFiles = [&]() {
         auto index_datas = GetObjectData(
             rcm_.get(), batch_files, milvus::PriorityForLoad(priority));
+        // Wait for all futures to ensure all threads complete
+        auto codecs = storage::WaitAllFutures(std::move(index_datas));
         for (size_t idx = 0; idx < batch_files.size(); ++idx) {
             auto file_name =
                 batch_files[idx].substr(batch_files[idx].find_last_of('/') + 1);
-            file_to_index_data[file_name] = index_datas[idx].get();
+            file_to_index_data[file_name] = std::move(codecs[idx]);
         }
     };
 
@@ -164,7 +166,7 @@ MemFileManagerImpl::CacheRawDataToMemory(const Config& config) {
     auto storage_version =
         index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
             .value_or(0);
-    if (storage_version == STORAGE_V2) {
+    if (storage_version == STORAGE_V2 || storage_version == STORAGE_V3) {
         return cache_raw_data_to_memory_storage_v2(config);
     }
     return cache_raw_data_to_memory_internal(config);
@@ -186,8 +188,10 @@ MemFileManagerImpl::cache_raw_data_to_memory_internal(const Config& config) {
 
     auto FetchRawData = [&]() {
         auto raw_datas = GetObjectData(rcm_.get(), batch_files);
-        for (auto& data : raw_datas) {
-            field_datas.emplace_back(data.get()->GetFieldData());
+        // Wait for all futures to ensure all threads complete
+        auto codecs = storage::WaitAllFutures(std::move(raw_datas));
+        for (auto& codec : codecs) {
+            field_datas.emplace_back(codec->GetFieldData());
         }
     };
 

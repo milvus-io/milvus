@@ -41,6 +41,7 @@
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/SearchOnSealed.h"
 #include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentInterface.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "storage/RemoteChunkManagerSingleton.h"
@@ -490,4 +491,265 @@ TEST_P(TestChunkSegment, TestPkRange) {
                                bitset_sorted_view);
         EXPECT_EQ(0, bitset_sorted_view.count());
     }
+}
+
+TEST(TestTTLFieldFilter, TestMaskWithTTLField) {
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64, false);
+    schema->AddField(FieldName("ts"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    auto ttl_fid =
+        schema->AddDebugField("ttl_field", DataType::TIMESTAMPTZ, false);
+    schema->set_primary_field_id(pk_fid);
+    schema->set_ttl_field_id(ttl_fid);
+
+    auto segment = CreateSealedSegment(
+        schema, nullptr, -1, SegcoreConfig::default_config(), true);
+
+    int test_data_count = 100;
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+
+    std::vector<int64_t> pk_data(test_data_count);
+    std::iota(pk_data.begin(), pk_data.end(), 0);
+
+    uint64_t base_ts = 1000000000ULL << 18;
+    std::vector<int64_t> ts_data(test_data_count);
+    for (int i = 0; i < test_data_count; i++) {
+        ts_data[i] = static_cast<int64_t>(base_ts + i);
+    }
+
+    uint64_t base_physical_us = (base_ts >> 18) * 1000;
+    std::vector<int64_t> ttl_data(test_data_count);
+    for (int i = 0; i < test_data_count; i++) {
+        if (i < test_data_count / 2) {
+            ttl_data[i] = static_cast<int64_t>(base_physical_us - 10);
+        } else {
+            ttl_data[i] = static_cast<int64_t>(base_physical_us + 10);
+        }
+    }
+
+    {
+        auto field_data =
+            std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+        field_data->FillFieldData(pk_data.data(), test_data_count);
+        std::vector<FieldDataPtr> field_datas = {field_data};
+        auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                        kPartitionID,
+                                                        kSegmentID,
+                                                        pk_fid.get(),
+                                                        field_datas,
+                                                        cm);
+        segment->LoadFieldData(load_info);
+    }
+
+    {
+        auto field_data =
+            std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+        field_data->FillFieldData(ts_data.data(), test_data_count);
+        std::vector<FieldDataPtr> field_datas = {field_data};
+        auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                        kPartitionID,
+                                                        kSegmentID,
+                                                        TimestampFieldID.get(),
+                                                        field_datas,
+                                                        cm);
+        segment->LoadFieldData(load_info);
+    }
+
+    {
+        auto field_data =
+            std::make_shared<FieldData<int64_t>>(DataType::TIMESTAMPTZ, false);
+        field_data->FillFieldData(ttl_data.data(), test_data_count);
+        std::vector<FieldDataPtr> field_datas = {field_data};
+        auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                        kPartitionID,
+                                                        kSegmentID,
+                                                        ttl_fid.get(),
+                                                        field_datas,
+                                                        cm);
+        segment->LoadFieldData(load_info);
+    }
+
+    // Test TTL field filtering using CompileExpressions pathway
+    Timestamp query_ts = base_ts + test_data_count;
+    int64_t active_count = segment->get_active_count(query_ts);
+
+    // Create an expression list with AlwaysTrueExpr - CompileExpressions will
+    // automatically add TTL field filtering expression
+    auto always_true_expr = std::make_shared<expr::AlwaysTrueExpr>();
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       always_true_expr);
+
+    // Execute query expression - this will trigger CompileExpressions which
+    // automatically adds TTL field filtering expression
+    BitsetType bitset =
+        query::ExecuteQueryExpr(plan, segment.get(), active_count, query_ts);
+
+    // Note: ExecuteQueryExpr already flips the bitset, so bitset[i] = true
+    // means the row matches (not expired), bitset[i] = false means expired
+    BitsetTypeView bitset_view(bitset);
+
+    // Verify results:
+    // After ExecuteQueryExpr, bitset[i] = true means row matches (not expired)
+    // bitset[i] = false means row is filtered out (expired)
+    // - i < test_data_count / 2: expired (TTL < current time), should be expired (bitset_view[i] = false)
+    // - i >= test_data_count / 2: not expired, should NOT be expired (bitset_view[i] = true)
+    int expired_count = 0;
+    for (int i = 0; i < test_data_count; i++) {
+        if (!bitset_view[i]) {
+            expired_count++;
+        }
+    }
+
+    EXPECT_EQ(expired_count, test_data_count / 2);
+    for (int i = 0; i < test_data_count / 2; i++) {
+        EXPECT_FALSE(bitset_view[i]) << "Row " << i << " should be expired";
+    }
+    for (int i = test_data_count / 2; i < test_data_count; i++) {
+        EXPECT_TRUE(bitset_view[i]) << "Row " << i << " should not be expired";
+    }
+}
+
+TEST(TestTTLFieldFilter, TestMaskWithNullableTTLField) {
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64, false);
+    schema->AddField(FieldName("ts"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    auto ttl_fid =
+        schema->AddDebugField("ttl_field", DataType::TIMESTAMPTZ, true);
+    schema->set_primary_field_id(pk_fid);
+    schema->set_ttl_field_id(ttl_fid);
+
+    auto segment = CreateSealedSegment(
+        schema, nullptr, -1, SegcoreConfig::default_config(), true);
+
+    int test_data_count = 100;
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+
+    std::vector<int64_t> pk_data(test_data_count);
+    std::iota(pk_data.begin(), pk_data.end(), 0);
+
+    uint64_t base_ts = 1000000000ULL << 18;
+    std::vector<int64_t> ts_data(test_data_count);
+    for (int i = 0; i < test_data_count; i++) {
+        ts_data[i] = static_cast<int64_t>(base_ts + i);
+    }
+
+    uint64_t base_physical_us = (base_ts >> 18) * 1000;
+    std::vector<int64_t> ttl_data(test_data_count);
+    // Arrow validity bitmap uses 1 bit per value (LSB-first within each byte).
+    std::vector<uint8_t> valid_data((test_data_count + 7) / 8, 0);
+    for (int i = 0; i < test_data_count; i++) {
+        const size_t byte_idx = static_cast<size_t>(i) >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1u << (i & 7));
+        if (i % 4 == 0) {
+            ttl_data[i] = 0;
+            valid_data[byte_idx] &= static_cast<uint8_t>(~bit_mask);
+        } else if (i % 4 == 1) {
+            ttl_data[i] = static_cast<int64_t>(base_physical_us - 10);
+            valid_data[byte_idx] |= bit_mask;
+        } else {
+            ttl_data[i] = static_cast<int64_t>(base_physical_us + 10);
+            valid_data[byte_idx] |= bit_mask;
+        }
+    }
+
+    {
+        auto field_data =
+            std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+        field_data->FillFieldData(pk_data.data(), test_data_count);
+        std::vector<FieldDataPtr> field_datas = {field_data};
+        auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                        kPartitionID,
+                                                        kSegmentID,
+                                                        pk_fid.get(),
+                                                        field_datas,
+                                                        cm);
+        segment->LoadFieldData(load_info);
+    }
+
+    {
+        auto field_data =
+            std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+        field_data->FillFieldData(ts_data.data(), test_data_count);
+        std::vector<FieldDataPtr> field_datas = {field_data};
+        auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                        kPartitionID,
+                                                        kSegmentID,
+                                                        TimestampFieldID.get(),
+                                                        field_datas,
+                                                        cm);
+        segment->LoadFieldData(load_info);
+    }
+
+    {
+        auto field_data =
+            std::make_shared<FieldData<int64_t>>(DataType::TIMESTAMPTZ, true);
+        field_data->FillFieldData(
+            ttl_data.data(), valid_data.data(), test_data_count, 0);
+        std::vector<FieldDataPtr> field_datas = {field_data};
+        auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                        kPartitionID,
+                                                        kSegmentID,
+                                                        ttl_fid.get(),
+                                                        field_datas,
+                                                        cm);
+        segment->LoadFieldData(load_info);
+    }
+
+    // Test TTL field filtering using CompileExpressions pathway
+    Timestamp query_ts = base_ts + test_data_count;
+    int64_t active_count = segment->get_active_count(query_ts);
+
+    // Create an expression list with AlwaysTrueExpr - CompileExpressions will
+    // automatically add TTL field filtering expression
+    auto always_true_expr = std::make_shared<expr::AlwaysTrueExpr>();
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       always_true_expr);
+
+    // Execute query expression - this will trigger CompileExpressions which
+    // automatically adds TTL field filtering expression
+    BitsetType bitset =
+        query::ExecuteQueryExpr(plan, segment.get(), active_count, query_ts);
+
+    // Note: ExecuteQueryExpr already flips the bitset, so bitset[i] = true
+    // means the row matches (not expired), bitset[i] = false means expired
+    BitsetTypeView bitset_view(bitset);
+
+    // Verify results:
+    // After ExecuteQueryExpr, bitset[i] = true means row matches (not expired)
+    // bitset[i] = false means row is filtered out (expired)
+    // - i % 4 == 0: null, should NOT be expired (bitset_view[i] = true)
+    // - i % 4 == 1: expired (TTL < current time), should be expired (bitset_view[i] = false)
+    // - i % 4 == 2 or 3: not expired, should NOT be expired (bitset_view[i] = true)
+    int expired_count = 0;
+    for (int i = 0; i < test_data_count; i++) {
+        if (i % 4 == 0) {
+            // Null value should not be expired (should match)
+            EXPECT_TRUE(bitset_view[i])
+                << "Row " << i << " (null) should not be expired";
+        } else if (i % 4 == 1) {
+            // Should be expired (should be filtered out)
+            EXPECT_FALSE(bitset_view[i]) << "Row " << i << " should be expired";
+            expired_count++;
+        } else {
+            // Should not be expired (should match)
+            EXPECT_TRUE(bitset_view[i])
+                << "Row " << i << " should not be expired";
+        }
+    }
+
+    EXPECT_EQ(expired_count, test_data_count / 4);
 }

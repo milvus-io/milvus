@@ -39,6 +39,8 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -69,6 +71,7 @@ type statsTask struct {
 	queueDur time.Duration
 	manager  *TaskManager
 	binlogIO io.BinlogIO
+	cm       storage.ChunkManager
 
 	deltaLogs   []string
 	logIDOffset int64
@@ -86,7 +89,7 @@ func NewStatsTask(ctx context.Context,
 	cancel context.CancelFunc,
 	req *workerpb.CreateStatsRequest,
 	manager *TaskManager,
-	binlogIO io.BinlogIO,
+	cm storage.ChunkManager,
 ) *statsTask {
 	return &statsTask{
 		ident:       fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
@@ -94,7 +97,8 @@ func NewStatsTask(ctx context.Context,
 		cancel:      cancel,
 		req:         req,
 		manager:     manager,
-		binlogIO:    binlogIO,
+		binlogIO:    io.NewBinlogIO(cm),
+		cm:          cm,
 		tr:          timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
 		currentTime: tsoutil.PhysicalTime(req.GetCurrentTs()),
 		logIDOffset: 0,
@@ -130,6 +134,10 @@ func (st *statsTask) GetState() indexpb.JobState {
 
 func (st *statsTask) GetSlot() int64 {
 	return st.req.GetTaskSlot()
+}
+
+func (st *statsTask) IsVectorIndex() bool {
+	return false
 }
 
 func (st *statsTask) PreExecute(ctx context.Context) error {
@@ -229,13 +237,13 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		predicate = func(r storage.Record, ri, i int) bool {
 			pk := r.Column(pkField.FieldID).(*array.Int64).Value(i)
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
-			return !entityFilter.Filtered(pk, uint64(ts))
+			return !entityFilter.Filtered(pk, uint64(ts), -1)
 		}
 	case schemapb.DataType_VarChar:
 		predicate = func(r storage.Record, ri, i int) bool {
 			pk := r.Column(pkField.FieldID).(*array.String).Value(i)
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
-			return !entityFilter.Filtered(pk, uint64(ts))
+			return !entityFilter.Filtered(pk, uint64(ts), -1)
 		}
 	default:
 		log.Warn("sort task only support int64 and varchar pk field")
@@ -263,7 +271,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		return nil, err
 	}
 
-	binlogs, stats, bm25stats, _ := srw.GetLogs()
+	binlogs, stats, bm25stats, _, _ := srw.GetLogs()
 	insertLogs := storage.SortFieldBinlogs(binlogs)
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
 		return nil, err
@@ -452,7 +460,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	})
 
 	getInsertFiles := func(fieldID int64, enableNull bool) ([]string, error) {
-		if st.req.GetStorageVersion() == storage.StorageV2 {
+		if st.req.GetStorageVersion() == storage.StorageV2 || st.req.GetStorageVersion() == storage.StorageV3 {
 			return []string{}, nil
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
@@ -481,6 +489,19 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 
 	eg, egCtx := errgroup.WithContext(ctx)
 
+	var analyzerExtraInfo string
+	if len(st.req.GetFileResources()) > 0 {
+		err := fileresource.GlobalFileManager.Download(ctx, st.cm, st.req.GetFileResources()...)
+		if err != nil {
+			return err
+		}
+		defer fileresource.GlobalFileManager.Release(st.req.GetFileResources()...)
+		analyzerExtraInfo, err = analyzer.BuildExtraResourceInfo(st.req.GetStorageConfig().GetRootPath(), st.req.GetFileResources())
+		if err != nil {
+			return err
+		}
+	}
+
 	for _, field := range st.req.GetSchema().GetFields() {
 		field := field
 		h := typeutil.CreateFieldSchemaHelper(field)
@@ -499,19 +520,22 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			req.InsertLogs = insertBinlogs
 			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil)
 
+			// set analyzer extra info
+			if len(analyzerExtraInfo) > 0 {
+				buildIndexParams.AnalyzerExtraInfo = analyzerExtraInfo
+			}
+
 			uploaded, err := indexcgowrapper.CreateTextIndex(egCtx, buildIndexParams)
 			if err != nil {
 				return err
 			}
-			// Extract only filenames from full paths to save space
-			filenames := metautil.ExtractTextLogFilenames(lo.Keys(uploaded))
 
 			mu.Lock()
 			textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
 				FieldID: field.GetFieldID(),
 				Version: version,
 				BuildID: taskID,
-				Files:   filenames,
+				Files:   lo.Keys(uploaded),
 			}
 			mu.Unlock()
 
@@ -581,7 +605,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	})
 
 	getInsertFiles := func(fieldID int64) ([]string, error) {
-		if st.req.GetStorageVersion() == storage.StorageV2 {
+		if st.req.GetStorageVersion() == storage.StorageV2 || st.req.GetStorageVersion() == storage.StorageV3 {
 			return []string{}, nil
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
@@ -715,7 +739,7 @@ func buildIndexParams(
 		Manifest:                         req.GetManifestPath(),
 	}
 
-	if req.GetStorageVersion() == storage.StorageV2 {
+	if req.GetStorageVersion() == storage.StorageV2 || req.GetStorageVersion() == storage.StorageV3 {
 		params.SegmentInsertFiles = util.GetSegmentInsertFiles(
 			req.GetInsertLogs(),
 			req.GetStorageConfig(),

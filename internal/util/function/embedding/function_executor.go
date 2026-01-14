@@ -73,23 +73,43 @@ func createFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSc
 	}
 }
 
-// Since bm25 and embedding are implemented in different ways, the bm25 function is not verified here.
-func ValidateFunctions(schema *schemapb.CollectionSchema, extraInfo *models.ModelExtraInfo) error {
-	for _, fSchema := range schema.Functions {
-		f, err := createFunction(schema, fSchema, extraInfo)
-		if err != nil {
-			return err
-		}
+// validateFunction validates a single function.
+func validateFunction(schema *schemapb.CollectionSchema, fSchema *schemapb.FunctionSchema, extraInfo *models.ModelExtraInfo) error {
+	f, err := createFunction(schema, fSchema, extraInfo)
+	if err != nil {
+		return err
+	}
 
-		// ignore bm25 function
-		if f == nil {
-			continue
-		}
-		if err := f.Check(context.Background()); err != nil {
-			return fmt.Errorf("Check function [%s:%s] failed, the err is: %v", fSchema.Name, fSchema.GetType().String(), err)
-		}
+	// BM25 function returns nil from createFunction
+	if f == nil {
+		return nil
+	}
+
+	if err := f.Check(context.Background()); err != nil {
+		return fmt.Errorf("Check function [%s:%s] failed, the err is: %v", fSchema.Name, fSchema.GetType().String(), err)
 	}
 	return nil
+}
+
+// ValidateFunctions validates functions in the schema.
+// If needValidateFunctionName is empty, all functions will be validated; otherwise, only the specified function will be validated.
+func ValidateFunctions(schema *schemapb.CollectionSchema, needValidateFunctionName string, extraInfo *models.ModelExtraInfo) error {
+	if needValidateFunctionName == "" {
+		for _, fSchema := range schema.Functions {
+			if err := validateFunction(schema, fSchema, extraInfo); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	for _, fSchema := range schema.Functions {
+		if fSchema.Name == needValidateFunctionName {
+			return validateFunction(schema, fSchema, extraInfo)
+		}
+	}
+
+	return fmt.Errorf("function [%s] not found in schema", needValidateFunctionName)
 }
 
 func NewFunctionExecutor(schema *schemapb.CollectionSchema, functions []*schemapb.FunctionSchema, extraInfo *models.ModelExtraInfo) (*FunctionExecutor, error) {

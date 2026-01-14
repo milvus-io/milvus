@@ -183,7 +183,7 @@ func GetIndexesForVectorType(fieldType entity.FieldType) []IndexConfig {
 			{"IVF_PQ", "IVF_PQ", entity.L2, map[string]string{"nlist": "128", "m": "8", "nbits": "8"}},
 			{"HNSW", "HNSW", entity.L2, map[string]string{"M": "16", "efConstruction": "200"}},
 			{"SCANN", "SCANN", entity.L2, map[string]string{"nlist": "128", "with_raw_data": "true"}},
-			// {"DISKANN", "DISKANN", entity.L2, nil}, // Skip DISKANN for now
+			{"DISKANN", "DISKANN", entity.L2, nil},
 		}
 	case entity.FieldTypeBinaryVector:
 		return []IndexConfig{
@@ -1962,7 +1962,7 @@ func TestNullableVectorAllNull(t *testing.T) {
 			common.CheckErr(t, err, true)
 
 			// Generate test data with 100% null (nullPercent = 100)
-			nb := 100
+			nb := 10000
 			testData := GenerateNullableVectorTestData(t, vt, nb, 100, "vector")
 
 			pkData := make([]int64, nb)
@@ -1982,8 +1982,34 @@ func TestNullableVectorAllNull(t *testing.T) {
 			err = flushTask.Await(ctx)
 			common.CheckErr(t, err, true)
 
-			// create index and load
-			vecIndex := CreateNullableVectorIndex(vt)
+			// create index (use IVF for dense vectors, requires training)
+			var vecIndex index.Index
+			switch vt.FieldType {
+			case entity.FieldTypeBinaryVector:
+				vecIndex = index.NewGenericIndex("vector", map[string]string{
+					index.MetricTypeKey: string(entity.JACCARD),
+					index.IndexTypeKey:  "BIN_IVF_FLAT",
+					"nlist":             "128",
+				})
+			case entity.FieldTypeSparseVector:
+				vecIndex = index.NewGenericIndex("vector", map[string]string{
+					index.MetricTypeKey: string(entity.IP),
+					index.IndexTypeKey:  "SPARSE_INVERTED_INDEX",
+				})
+			case entity.FieldTypeInt8Vector:
+				vecIndex = index.NewGenericIndex("vector", map[string]string{
+					index.MetricTypeKey: string(entity.COSINE),
+					index.IndexTypeKey:  "HNSW",
+					"M":                 "16",
+					"efConstruction":    "200",
+				})
+			default:
+				vecIndex = index.NewGenericIndex("vector", map[string]string{
+					index.MetricTypeKey: string(entity.L2),
+					index.IndexTypeKey:  "IVF_FLAT",
+					"nlist":             "128",
+				})
+			}
 			indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "vector", vecIndex))
 			common.CheckErr(t, err, true)
 			err = indexTask.Await(ctx)

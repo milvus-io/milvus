@@ -37,12 +37,15 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -50,6 +53,7 @@ import (
 
 type sortCompactionTask struct {
 	binlogIO    io.BinlogIO
+	cm          storage.ChunkManager
 	currentTime time.Time
 
 	plan *datapb.CompactionPlan
@@ -67,6 +71,8 @@ type sortCompactionTask struct {
 	manifest              string
 	useLoonFFI            bool
 
+	ttlFieldID int64
+
 	done chan struct{}
 	tr   *timerecord.TimeRecorder
 
@@ -78,7 +84,7 @@ var _ Compactor = (*sortCompactionTask)(nil)
 
 func NewSortCompactionTask(
 	ctx context.Context,
-	binlogIO io.BinlogIO,
+	cm storage.ChunkManager,
 	plan *datapb.CompactionPlan,
 	compactionParams compaction.Params,
 	sortByFieldIDs []int64,
@@ -87,7 +93,8 @@ func NewSortCompactionTask(
 	return &sortCompactionTask{
 		ctx:              ctx1,
 		cancel:           cancel,
-		binlogIO:         binlogIO,
+		binlogIO:         io.NewBinlogIO(cm),
+		cm:               cm,
 		plan:             plan,
 		tr:               timerecord.NewTimeRecorder("sort compaction"),
 		currentTime:      time.Now(),
@@ -138,6 +145,7 @@ func (t *sortCompactionTask) preCompact() error {
 	t.segmentStorageVersion = segment.GetStorageVersion()
 	t.manifest = segment.GetManifest()
 	t.useLoonFFI = t.compactionParams.UseLoonFFI
+	t.ttlFieldID = getTTLFieldID(t.plan.GetSchema())
 
 	log.Ctx(t.ctx).Info("preCompaction analyze",
 		zap.Int64("planID", t.GetPlanID()),
@@ -195,6 +203,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		log.Warn("load deletePKs failed", zap.Error(err))
 		return nil, err
 	}
+	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
 
 	entityFilter := compaction.NewEntityFilter(deletePKs, t.plan.GetCollectionTtl(), t.currentTime)
 	var predicate func(r storage.Record, ri, i int) bool
@@ -203,13 +212,27 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		predicate = func(r storage.Record, ri, i int) bool {
 			pk := r.Column(pkField.FieldID).(*array.Int64).Value(i)
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
-			return !entityFilter.Filtered(pk, uint64(ts))
+			expireTs := int64(-1)
+			if hasTTLField {
+				col := r.Column(t.ttlFieldID).(*array.Int64)
+				if col.IsValid(i) {
+					expireTs = col.Value(i)
+				}
+			}
+			return !entityFilter.Filtered(pk, uint64(ts), expireTs)
 		}
 	case schemapb.DataType_VarChar:
 		predicate = func(r storage.Record, ri, i int) bool {
 			pk := r.Column(pkField.FieldID).(*array.String).Value(i)
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
-			return !entityFilter.Filtered(pk, uint64(ts))
+			expireTs := int64(-1)
+			if hasTTLField {
+				col := r.Column(t.ttlFieldID).(*array.Int64)
+				if col.IsValid(i) {
+					expireTs = col.Value(i)
+				}
+			}
+			return !entityFilter.Filtered(pk, uint64(ts), expireTs)
 		}
 	default:
 		log.Warn("sort task only support int64 and varchar pk field")
@@ -247,7 +270,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		return nil, err
 	}
 
-	binlogs, stats, bm25stats, manifest := srw.GetLogs()
+	binlogs, stats, bm25stats, manifest, expirQuantiles := srw.GetLogs()
 	insertLogs := storage.SortFieldBinlogs(binlogs)
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
 		return nil, err
@@ -264,6 +287,17 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	}
 
 	debug.FreeOSMemory()
+
+	if numValidRows != int(numRows)-entityFilter.GetDeletedCount()-entityFilter.GetExpiredCount() {
+		log.Warn("unexpected row count after sort compaction",
+			zap.Int64("target segmentID", targetSegmentID),
+			zap.Int64("old rows", numRows),
+			zap.Int("valid rows", numValidRows),
+			zap.Int("deleted rows", entityFilter.GetDeletedCount()),
+			zap.Int("expired rows", entityFilter.GetExpiredCount()))
+		return nil, merr.WrapErrServiceInternal("unexpected row count")
+	}
+
 	log.Info("sort segment end",
 		zap.Int64("target segmentID", targetSegmentID),
 		zap.Int64("old rows", numRows),
@@ -284,6 +318,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 			IsSorted:            true,
 			StorageVersion:      t.storageVersion,
 			Manifest:            manifest,
+			ExpirQuantiles:      expirQuantiles,
 		},
 	}
 	planResult := &datapb.CompactionPlanResult{
@@ -402,7 +437,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 	})
 
 	getInsertFiles := func(fieldID int64) ([]string, error) {
-		if t.storageVersion == storage.StorageV2 {
+		if t.storageVersion == storage.StorageV2 || t.storageVersion == storage.StorageV3 {
 			return []string{}, nil
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
@@ -432,6 +467,19 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 
 	eg, egCtx := errgroup.WithContext(ctx)
 
+	var analyzerExtraInfo string
+	if len(t.plan.GetFileResources()) > 0 {
+		err := fileresource.GlobalFileManager.Download(ctx, t.cm, t.plan.GetFileResources()...)
+		if err != nil {
+			return nil, err
+		}
+		defer fileresource.GlobalFileManager.Release(t.plan.GetFileResources()...)
+		analyzerExtraInfo, err = analyzer.BuildExtraResourceInfo(t.compactionParams.StorageConfig.GetRootPath(), t.plan.GetFileResources())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	for _, field := range t.plan.GetSchema().GetFields() {
 		field := field
 		h := typeutil.CreateFieldSchemaHelper(field)
@@ -460,7 +508,11 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 				Manifest:                  t.manifest,
 			}
 
-			if t.storageVersion == storage.StorageV2 {
+			if len(analyzerExtraInfo) > 0 {
+				buildIndexParams.AnalyzerExtraInfo = analyzerExtraInfo
+			}
+
+			if t.storageVersion == storage.StorageV2 || t.storageVersion == storage.StorageV3 {
 				buildIndexParams.SegmentInsertFiles = util.GetSegmentInsertFiles(
 					insertBinlogs,
 					t.compactionParams.StorageConfig,
@@ -472,15 +524,13 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 			if err != nil {
 				return err
 			}
-			// Extract only filenames from full paths to save space
-			filenames := metautil.ExtractTextLogFilenames(lo.Keys(uploaded))
 
 			mu.Lock()
 			textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
 				FieldID: field.GetFieldID(),
 				Version: 0,
 				BuildID: taskID,
-				Files:   filenames,
+				Files:   lo.Keys(uploaded),
 			}
 			mu.Unlock()
 

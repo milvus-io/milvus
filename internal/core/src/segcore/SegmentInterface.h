@@ -218,14 +218,8 @@ class SegmentInterface {
                          FieldId field_id,
                          const std::string& nested_path) const = 0;
 
-    virtual PinWrapper<index::JsonKeyStats*>
+    virtual std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
-
-    virtual void
-    LoadJsonStats(FieldId field_id, index::CacheJsonKeyStatsPtr cache_slot) = 0;
-
-    virtual void
-    RemoveJsonStats(FieldId field_id) = 0;
 
     virtual void
     LazyCheckSchema(SchemaPtr sch) = 0;
@@ -454,6 +448,9 @@ class SegmentInternalInterface : public SegmentInterface {
         load_info_ = load_info;
     }
 
+    virtual std::shared_ptr<index::JsonKeyStats>
+    GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override;
+
  public:
     // `query_offsets` is not null only for vector array (embedding list) search
     // where it denotes the number of vectors in each embedding list. The length
@@ -554,7 +551,13 @@ class SegmentInternalInterface : public SegmentInterface {
      * @return All candidates offsets.
      */
     virtual std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetType& bitset) const = 0;
+    find_first(int64_t limit, const BitsetTypeView& bitset) const = 0;
+
+    void
+    FillTargetEntryDirectly(
+        tracer::TraceContext* trace_ctx,
+        const std::unique_ptr<proto::segcore::RetrieveResults>& results,
+        RetrieveResult& retrieveResult) const;
 
     void
     FillTargetEntry(
@@ -637,6 +640,16 @@ class SegmentInternalInterface : public SegmentInterface {
                    int64_t count,
                    void* output) const = 0;
 
+    virtual void
+    bulk_subscript(milvus::OpContext* op_ctx,
+                   FieldId field_id,
+                   DataType data_type,
+                   const int64_t* seg_offsets,
+                   int64_t count,
+                   void* data,
+                   TargetBitmap& valid_map,
+                   bool small_int_raw_type = false) const = 0;
+
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to field_offset
     virtual std::unique_ptr<DataArray>
     bulk_subscript(milvus::OpContext* op_ctx,
@@ -692,9 +705,7 @@ class SegmentInternalInterface : public SegmentInterface {
                          milvus::index::TextMatchIndex>>>>
         text_indexes_;
 
-    // json stats cache (field_id -> CacheSlot of JsonKeyStats)
-    mutable folly::Synchronized<
-        std::unordered_map<FieldId, index::CacheJsonKeyStatsPtr>>
+    std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
         json_stats_;
 
     GEOSContextHandle_t ctx_ = GEOS_init_r();

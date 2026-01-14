@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -30,7 +31,12 @@ func setDefaultClientConfig(cfg *client.ClientConfig) {
 }
 
 func GetDefaultClientConfig() *client.ClientConfig {
-	return defaultClientConfig
+	newCfg := *defaultClientConfig
+	dialOptions := newCfg.DialOptions
+	newDialOptions := make([]grpc.DialOption, len(dialOptions))
+	copy(newDialOptions, dialOptions)
+	newCfg.DialOptions = newDialOptions
+	return &newCfg
 }
 
 func GetAddr() string {

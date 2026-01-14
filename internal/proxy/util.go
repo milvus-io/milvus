@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
@@ -718,7 +719,10 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 		}
 	}
 	if idx == -1 {
-		return errors.New("primary key is not specified")
+		// External collections may not have a primary key
+		if !typeutil.IsExternalCollection(coll) {
+			return errors.New("primary key is not specified")
+		}
 	}
 
 	for _, structArrayField := range coll.StructArrayFields {
@@ -785,7 +789,7 @@ func validateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) err
 	return fmt.Errorf("data_type %s mismatch with metric_type %s", dataType.String(), metricTypeStrRaw)
 }
 
-func validateFunction(coll *schemapb.CollectionSchema, disableRuntimeCheck bool) error {
+func validateFunction(coll *schemapb.CollectionSchema, needValidateFunctionName string, disableRuntimeCheck bool) error {
 	nameMap := lo.SliceToMap(coll.GetFields(), func(field *schemapb.FieldSchema) (string, *schemapb.FieldSchema) {
 		return field.GetName(), field
 	})
@@ -852,7 +856,7 @@ func validateFunction(coll *schemapb.CollectionSchema, disableRuntimeCheck bool)
 		}
 	}
 	if !disableRuntimeCheck {
-		if err := embedding.ValidateFunctions(coll, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: coll.DbName}); err != nil {
+		if err := embedding.ValidateFunctions(coll, needValidateFunctionName, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: coll.DbName}); err != nil {
 			return err
 		}
 	}
@@ -1406,7 +1410,7 @@ func NewContextWithMetadata(ctx context.Context, username string, dbName string)
 		ctx = contextutil.AppendToIncomingContext(ctx, dbKey, dbName)
 	}
 	if username != "" {
-		originValue := fmt.Sprintf("%s%s%s", username, util.CredentialSeperator, username)
+		originValue := fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, username)
 		authKey := strings.ToLower(util.HeaderAuthorize)
 		authValue := crypto.Base64Encode(originValue)
 		ctx = contextutil.AppendToIncomingContext(ctx, authKey, authValue)
@@ -1417,7 +1421,7 @@ func NewContextWithMetadata(ctx context.Context, username string, dbName string)
 func AppendUserInfoForRPC(ctx context.Context) context.Context {
 	curUser, _ := GetCurUserFromContext(ctx)
 	if curUser != "" {
-		originValue := fmt.Sprintf("%s%s%s", curUser, util.CredentialSeperator, curUser)
+		originValue := fmt.Sprintf("%s%s%s", curUser, util.CredentialSeparator, curUser)
 		authKey := strings.ToLower(util.HeaderAuthorize)
 		authValue := crypto.Base64Encode(originValue)
 		ctx = metadata.AppendToOutgoingContext(ctx, authKey, authValue)
@@ -1570,7 +1574,7 @@ func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResul
 // 4th return value is true if user requested pk field explicitly or using wildcard.
 // if removePkField is true, pk field will not be include in the first(resultFieldNames)/second(userOutputFields)
 // return value.
-func translateOutputFields(outputFields []string, schema *schemaInfo, removePkField bool) ([]string, []string, []string, bool, error) {
+func translateOutputFields(outputFields []string, schema *schemaInfo, removePkField bool) ([]string, []string, []string, []agg.AggregateBase, bool, error) {
 	var primaryFieldName string
 	allFieldNameMap := make(map[string]*schemapb.FieldSchema)
 	resultFieldNameMap := make(map[string]bool)
@@ -1580,6 +1584,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 	userDynamicFieldsMap := make(map[string]bool)
 	userDynamicFields := make([]string, 0)
 	useAllDyncamicFields := false
+	aggregates := make([]agg.AggregateBase, 0)
 	for _, field := range schema.Fields {
 		if field.IsPrimaryKey {
 			primaryFieldName = field.Name
@@ -1616,6 +1621,33 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 			}
 			useAllDyncamicFields = true
 		} else {
+			if isAgg, aggregateName, aggFieldName := agg.MatchAggregationExpression(outputFieldName); isAgg {
+				if aggField, ok := allFieldNameMap[aggFieldName]; ok {
+					aggFuncs, aggErr := agg.NewAggregate(aggregateName, aggField.GetFieldID(), outputFieldName, aggField.GetDataType())
+					if aggErr != nil {
+						return nil, nil, nil, nil, false, aggErr
+					}
+					aggregates = append(aggregates, aggFuncs...)
+				} else if aggFieldName == "*" {
+					// only count(*) is allowed
+					if aggregateName != "count" {
+						return nil, nil, nil, nil, false, fmt.Errorf("%s(*) is not supported, only count(*) is allowed", aggregateName)
+					}
+					if err := agg.ValidateAggFieldType(aggregateName, schemapb.DataType_None); err != nil {
+						return nil, nil, nil, nil, false, err
+					}
+					aggFuncs, aggErr := agg.NewAggregate(aggregateName, 0, outputFieldName, schemapb.DataType_None)
+					if aggErr != nil {
+						return nil, nil, nil, nil, false, aggErr
+					}
+					aggregates = append(aggregates, aggFuncs...)
+				} else {
+					return nil, nil, nil, nil, false, fmt.Errorf("target field %s for aggregation:%s does not exist", aggFieldName, aggregateName)
+				}
+				userOutputFieldsMap[outputFieldName] = true
+				continue
+			}
+
 			if structArrayField, ok := structArrayNameToFields[outputFieldName]; ok {
 				for _, field := range structArrayField {
 					if schema.CanRetrieveRawFieldData(field) {
@@ -1627,7 +1659,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 			}
 			if field, ok := allFieldNameMap[outputFieldName]; ok {
 				if !schema.CanRetrieveRawFieldData(field) {
-					return nil, nil, nil, false, fmt.Errorf("not allowed to retrieve raw data of field %s", outputFieldName)
+					return nil, nil, nil, nil, false, fmt.Errorf("not allowed to retrieve raw data of field %s", outputFieldName)
 				}
 				resultFieldNameMap[outputFieldName] = true
 				userOutputFieldsMap[outputFieldName] = true
@@ -1658,13 +1690,13 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 					})
 					if err != nil {
 						log.Info("parse output field name failed", zap.String("field name", outputFieldName), zap.Error(err))
-						return nil, nil, nil, false, fmt.Errorf("parse output field name failed: %s", outputFieldName)
+						return nil, nil, nil, nil, false, fmt.Errorf("parse output field name failed: %s", outputFieldName)
 					}
 					resultFieldNameMap[common.MetaFieldName] = true
 					userOutputFieldsMap[outputFieldName] = true
 					userDynamicFieldsMap[dynamicNestedPath] = true
 				} else {
-					return nil, nil, nil, false, fmt.Errorf("field %s not exist", outputFieldName)
+					return nil, nil, nil, nil, false, fmt.Errorf("field %s not exist", outputFieldName)
 				}
 			}
 		}
@@ -1687,7 +1719,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 		}
 	}
 
-	return resultFieldNames, userOutputFields, userDynamicFields, userRequestedPkFieldExplicitly, nil
+	return resultFieldNames, userOutputFields, userDynamicFields, aggregates, userRequestedPkFieldExplicitly, nil
 }
 
 func validCharInIndexName(c byte) bool {
@@ -2283,13 +2315,26 @@ func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, 
 func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) map[string][]int {
 	insertMsg.HashValues = typeutil.HashPK2Channels(pks, channelNames)
 
-	// groupedHashKeys represents the dmChannel index
-	channel2RowOffsets := make(map[string][]int) //   channelName to count
-	// assert len(it.hashValues) < maxInt
+	numChannels := len(channelNames)
+	if numChannels == 0 {
+		return nil
+	}
+
+	numRows := len(insertMsg.HashValues)
+	avgCapacity := (numRows / numChannels) + 1
+
+	channel2RowOffsets := make(map[string][]int, numChannels)
+
 	for offset, channelID := range insertMsg.HashValues {
-		channelName := channelNames[channelID]
+		idx := int(channelID)
+		if idx >= numChannels {
+			continue
+		}
+
+		channelName := channelNames[idx]
+
 		if _, ok := channel2RowOffsets[channelName]; !ok {
-			channel2RowOffsets[channelName] = []int{}
+			channel2RowOffsets[channelName] = make([]int, 0, avgCapacity)
 		}
 		channel2RowOffsets[channelName] = append(channel2RowOffsets[channelName], offset)
 	}
@@ -2652,25 +2697,6 @@ func GetFailedResponse(req any, err error) any {
 	return nil
 }
 
-func GetReplicateID(ctx context.Context, database, collectionName string) (string, error) {
-	if globalMetaCache == nil {
-		return "", merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
-	}
-	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, database, collectionName, 0)
-	if err != nil {
-		return "", err
-	}
-	if colInfo.replicateID != "" {
-		return colInfo.replicateID, nil
-	}
-	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, database)
-	if err != nil {
-		return "", err
-	}
-	replicateID, _ := common.GetReplicateID(dbInfo.properties)
-	return replicateID, nil
-}
-
 func GetFunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {
 	fields := make([]string, 0)
 	for _, fSchema := range collSchema.Functions {
@@ -2689,22 +2715,18 @@ func GetBM25FunctionOutputFields(collSchema *schemapb.CollectionSchema) []string
 	return fields
 }
 
+// getCollectionTTL returns ttl if collection's ttl is specified
+// or return global ttl if collection's ttl is not specified
+// this is a helper util wrapping common.GetCollectionTTL without returning error
 func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
-	properties := make(map[string]string)
-	for _, pair := range pairs {
-		properties[pair.Key] = pair.Value
+	ttl, err := common.GetCollectionTTL(pairs)
+	if err != nil {
+		log.Error("failed to get collection ttl, use default ttl", zap.Error(err))
 	}
-
-	v, ok := properties[common.CollectionTTLConfigKey]
-	if ok {
-		ttl, err := strconv.Atoi(v)
-		if err != nil {
-			return 0
-		}
-		return uint64(time.Duration(ttl) * time.Second)
+	if ttl < 0 {
+		return 0
 	}
-
-	return 0
+	return uint64(ttl)
 }
 
 // reconstructStructFieldDataCommon reconstructs struct fields from flattened sub-fields

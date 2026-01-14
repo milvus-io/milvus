@@ -226,22 +226,22 @@ class HNSW_SQ:
         {
             "description": "Out of Range Test - unknown value",
             "params": {"refine_type": "INT8"},
-            "expected": {"err_code": 1100, "err_msg": "invalid refine type : INT8, optional types are [sq6, sq8, fp16, bf16, fp32, flat]: invalid parameter"}
+            "expected": {"err_code": 1100, "err_msg": "invalid refine type : INT8, optional types are [sq4u, sq6, sq8, fp16, bf16, fp32, flat]: invalid parameter"}
         },
         {
             "description": "Integer Type Test",
             "params": {"refine_type": 1},
-            "expected": {"err_code": 1100, "err_msg": "invalid refine type : 1, optional types are [sq6, sq8, fp16, bf16, fp32, flat]: invalid parameter"}
+            "expected": {"err_code": 1100, "err_msg": "invalid refine type : 1, optional types are [sq4u, sq6, sq8, fp16, bf16, fp32, flat]: invalid parameter"}
         },
         {
             "description": "Float Type Test",
             "params": {"refine_type": 1.0},
-            "expected": {"err_code": 1100, "err_msg": "invalid refine type : 1.0, optional types are [sq6, sq8, fp16, bf16, fp32, flat]: invalid parameter"}
+            "expected": {"err_code": 1100, "err_msg": "invalid refine type : 1.0, optional types are [sq4u, sq6, sq8, fp16, bf16, fp32, flat]: invalid parameter"}
         },
         {
             "description": "List Type Test",
             "params": {"refine_type": ["FP16"]},
-            "expected": {"err_code": 1100, "err_msg": "['FP16'], optional types are [sq6, sq8, fp16, bf16, fp32, flat]: invalid parameter"}
+            "expected": {"err_code": 1100, "err_msg": "['FP16'], optional types are [sq4u, sq6, sq8, fp16, bf16, fp32, flat]: invalid parameter"}
         },
         {
             "description": "None Type Test, use default value",

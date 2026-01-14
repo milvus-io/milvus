@@ -41,7 +41,7 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
                                  char** paths,
                                  int64_t num_paths,
                                  int64_t part_upload_size,
-                                 CColumnGroups column_groups,
+                                 CColumnSplits column_splits,
                                  CStorageConfig c_storage_config,
                                  CPackedWriter* c_packed_writer,
                                  CPluginContext* c_plugin_context) {
@@ -83,7 +83,7 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
 
         auto columnGroups =
-            *static_cast<std::vector<std::vector<int>>*>(column_groups);
+            *static_cast<std::vector<std::vector<int>>*>(column_splits);
 
         parquet::WriterProperties::Builder builder;
         auto plugin_ptr =
@@ -135,7 +135,7 @@ NewPackedWriter(struct ArrowSchema* schema,
                 char** paths,
                 int64_t num_paths,
                 int64_t part_upload_size,
-                CColumnGroups column_groups,
+                CColumnSplits column_splits,
                 CPackedWriter* c_packed_writer,
                 CPluginContext* c_plugin_context) {
     SCOPE_CGO_CALL_METRIC();
@@ -157,7 +157,7 @@ NewPackedWriter(struct ArrowSchema* schema,
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
 
         auto columnGroups =
-            *static_cast<std::vector<std::vector<int>>*>(column_groups);
+            *static_cast<std::vector<std::vector<int>>*>(column_splits);
 
         parquet::WriterProperties::Builder builder;
         auto plugin_ptr =

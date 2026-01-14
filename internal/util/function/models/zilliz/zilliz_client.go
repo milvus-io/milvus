@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/connectivity"
@@ -33,6 +34,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/modelservicepb"
 )
 
@@ -93,7 +95,10 @@ func (m *clientManager) GetConn(clientConf *clientConfig) (*grpc.ClientConn, err
 
 	if m.conn != nil {
 		if clientConf.endpoint != m.config.endpoint {
-			_ = m.conn.Close()
+			err := m.conn.Close()
+			if err != nil {
+				log.Warn("Close connect failed", zap.String("endpoint", m.config.endpoint), zap.Error(err))
+			}
 			m.conn = nil
 		} else {
 			state := m.conn.GetState()
@@ -246,4 +251,39 @@ func (c *ZillizClient) Rerank(ctx context.Context, query string, texts []string,
 		return nil, err
 	}
 	return res.Scores, nil
+}
+
+func (c *ZillizClient) Highlight(ctx context.Context, query string, texts []string, params map[string]string) ([][]string, [][]float32, error) {
+	stub := modelservicepb.NewHighlightServiceClient(c.conn)
+	req := &modelservicepb.HighlightRequest{
+		Query:     query,
+		Documents: texts,
+		Params:    params,
+	}
+	ctx = c.setMeta(ctx)
+	res, err := stub.Highlight(ctx, req)
+	if err != nil {
+		return nil, nil, err
+	}
+	highlights := make([][]string, 0, len(res.GetResults()))
+	scores := make([][]float32, 0, len(res.GetResults()))
+	for _, ret := range res.GetResults() {
+		sentences := ret.GetSentences()
+		retScores := ret.GetScores()
+
+		// Handle nil cases
+		if sentences == nil {
+			sentences = []string{}
+		}
+		if retScores == nil {
+			retScores = []float32{}
+		}
+
+		if len(sentences) != len(retScores) {
+			return nil, nil, fmt.Errorf("sentences length %d does not match scores length %d", len(sentences), len(retScores))
+		}
+		highlights = append(highlights, sentences)
+		scores = append(scores, retScores)
+	}
+	return highlights, scores, nil
 }

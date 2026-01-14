@@ -161,14 +161,4 @@ func TestDelegatorMsgstreamAdaptor(t *testing.T) {
 		}()
 		_ = adaptor.CheckTopicValid("channel1")
 	})
-
-	// Test ForceEnableProduce
-	t.Run("ForceEnableProduce", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r == nil {
-				t.Errorf("ForceEnableProduce should panic but did not")
-			}
-		}()
-		adaptor.ForceEnableProduce(true)
-	})
 }

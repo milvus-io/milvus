@@ -285,8 +285,6 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, collectio
 func (b *ServerBroker) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool {
 	log := log.Ctx(ctx).With(zap.Int64("collection", collectionID), zap.Int64("partition", partitionID))
 
-	log.Info("confirming if gc is finished")
-
 	req := &datapb.GcConfirmRequest{CollectionId: collectionID, PartitionId: partitionID}
 	resp, err := b.s.mixCoord.GcConfirm(ctx, req)
 	if err != nil {
@@ -300,6 +298,5 @@ func (b *ServerBroker) GcConfirm(ctx context.Context, collectionID, partitionID 
 		return false
 	}
 
-	log.Info("received gc_confirm response", zap.Bool("finished", resp.GetGcFinished()))
 	return resp.GetGcFinished()
 }

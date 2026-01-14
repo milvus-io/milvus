@@ -68,6 +68,7 @@ func (suite *SegmentLoaderSuite) SetupSuite() {
 	suite.partitionID = rand.Int63()
 	suite.segmentID = rand.Int63()
 	suite.segmentNum = 5
+	initcore.InitExecExpressionFunctionFactory()
 }
 
 func (suite *SegmentLoaderSuite) SetupTest() {

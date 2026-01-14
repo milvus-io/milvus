@@ -17,6 +17,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
@@ -43,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	"github.com/milvus-io/milvus/internal/util/function/highlight"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -4920,6 +4922,8 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 		},
 	}
 
+	info := newSchemaInfo(schema)
+
 	placeholder := &commonpb.PlaceholderGroup{
 		Placeholders: []*commonpb.PlaceholderValue{{
 			Type:   commonpb.PlaceholderType_VarChar,
@@ -4932,9 +4936,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 	t.Run("lexical highlight success", func(t *testing.T) {
 		task := &searchTask{
-			schema: &schemaInfo{
-				CollectionSchema: schema,
-			},
+			schema: info,
 		}
 
 		highlighter := &commonpb.Highlighter{
@@ -4954,9 +4956,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 	t.Run("Lexical highlight with custom tags", func(t *testing.T) {
 		task := &searchTask{
-			schema: &schemaInfo{
-				CollectionSchema: schema,
-			},
+			schema: info,
 		}
 
 		highlighter := &commonpb.Highlighter{
@@ -4977,9 +4977,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 	t.Run("lexical highlight with wrong metric type", func(t *testing.T) {
 		task := &searchTask{
-			schema: &schemaInfo{
-				CollectionSchema: schema,
-			},
+			schema:        info,
 			SearchRequest: &internalpb.SearchRequest{},
 			request:       &milvuspb.SearchRequest{},
 		}
@@ -4995,9 +4993,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 	t.Run("lexical highlight with invalid pre_tags type", func(t *testing.T) {
 		task := &searchTask{
-			schema: &schemaInfo{
-				CollectionSchema: schema,
-			},
+			schema: info,
 		}
 
 		highlighter := &commonpb.Highlighter{
@@ -5021,10 +5017,9 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 			},
 		}
 
+		info := newSchemaInfo(schemaWithoutBM25)
 		task := &searchTask{
-			schema: &schemaInfo{
-				CollectionSchema: schemaWithoutBM25,
-			},
+			schema: info,
 		}
 
 		highlighter := &commonpb.Highlighter{
@@ -5038,9 +5033,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 	t.Run("highlight without highlight search text", func(t *testing.T) {
 		task := &searchTask{
-			schema: &schemaInfo{
-				CollectionSchema: schema,
-			},
+			schema: info,
 		}
 
 		highlighter := &commonpb.Highlighter{
@@ -5054,9 +5047,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 	t.Run("highlight with invalid highlight search key", func(t *testing.T) {
 		task := &searchTask{
-			schema: &schemaInfo{
-				CollectionSchema: schema,
-			},
+			schema: info,
 		}
 
 		highlighter := &commonpb.Highlighter{
@@ -5070,9 +5061,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 	t.Run("highlight with unknown type", func(t *testing.T) {
 		task := &searchTask{
-			schema: &schemaInfo{
-				CollectionSchema: schema,
-			},
+			schema: info,
 		}
 
 		highlighter := &commonpb.Highlighter{
@@ -5082,5 +5071,24 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 		err := task.addHighlightTask(highlighter, metric.BM25, 101, placeholderBytes, "")
 		assert.Error(t, err)
+	})
+
+	t.Run("semantic highlight success", func(t *testing.T) {
+		task := &searchTask{
+			schema: info,
+		}
+
+		queriesJSON, _ := json.Marshal([]string{"test_query"})
+		inputFieldsJSON, _ := json.Marshal([]string{"text_field"})
+
+		highlighter := &commonpb.Highlighter{
+			Type:   commonpb.HighlightType_Semantic,
+			Params: []*commonpb.KeyValuePair{{Key: "queries", Value: string(queriesJSON)}, {Key: "input_fields", Value: string(inputFieldsJSON)}},
+		}
+
+		mockSemanticHighlight := mockey.Mock(highlight.NewSemanticHighlight).Return(&highlight.SemanticHighlight{}, nil).Build()
+		defer mockSemanticHighlight.UnPatch()
+		task.addHighlightTask(highlighter, metric.BM25, 101, placeholderBytes, "")
+		require.NotNil(t, task.highlighter)
 	})
 }

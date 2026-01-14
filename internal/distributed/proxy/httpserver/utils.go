@@ -83,7 +83,7 @@ func ParseUsernamePassword(c *gin.Context) (string, string, bool) {
 	username, password, ok := c.Request.BasicAuth()
 	if !ok {
 		token := GetAuthorization(c)
-		i := strings.IndexAny(token, util.CredentialSeperator)
+		i := strings.IndexAny(token, util.CredentialSeparator)
 		if i != -1 {
 			username = token[:i]
 			password = token[i+1:]
@@ -750,13 +750,22 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 	}
 
 	isDynamic := sch.EnableDynamicField
+	allowInsertAutoID, _ := common.IsAllowInsertAutoID(sch.GetProperties()...)
+	isAutoIDPK := false
+	pkFieldName := ""
 
 	nameColumns := make(map[string]interface{})
 	nameDims := make(map[string]int64)
 	fieldData := make(map[string]*schemapb.FieldData)
 
 	for _, field := range sch.Fields {
-		if (field.IsPrimaryKey && field.AutoID && inInsert) || field.IsDynamic {
+		if field.IsPrimaryKey {
+			pkFieldName = field.Name
+			if field.AutoID {
+				isAutoIDPK = true
+			}
+		}
+		if (field.IsPrimaryKey && field.AutoID && inInsert && !allowInsertAutoID) || field.IsDynamic {
 			continue
 		}
 		// skip function output field
@@ -845,10 +854,12 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			}
 			candi, ok := set[field.Name]
 			if field.IsPrimaryKey && field.AutoID && inInsert {
-				if ok {
+				if !ok {
+					continue
+				}
+				if !allowInsertAutoID {
 					return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("no need to pass pk field(%s) when autoid==true in insert", field.Name))
 				}
-				continue
 			}
 			if (field.Nullable || field.DefaultValue != nil) && !ok {
 				continue
@@ -947,6 +958,9 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 	}
 	columns := make([]*schemapb.FieldData, 0, len(nameColumns))
 	for name, column := range nameColumns {
+		if fieldLen[name] == 0 && name == pkFieldName && isAutoIDPK {
+			continue
+		}
 		if fieldLen[name] == 0 && partialUpdate {
 			// for partial update, skip update for nullable field
 			// cause we cannot distinguish between missing fields and fields explicitly set to null

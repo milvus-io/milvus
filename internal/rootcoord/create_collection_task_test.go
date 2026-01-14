@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -900,6 +901,107 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		err := task.validateSchema(context.TODO(), schema)
 		assert.NoError(t, err)
 	})
+
+	t.Run("external schema valid case", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name:           collectionName,
+			ExternalSource: "s3://bucket/object",
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "text_field",
+					DataType:      schemapb.DataType_VarChar,
+					ExternalField: "text_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "64"},
+					},
+				},
+				{
+					Name:          "vec_field",
+					DataType:      schemapb.DataType_FloatVector,
+					ExternalField: "vec_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "16"},
+					},
+				},
+			},
+		}
+		err := task.validateSchema(context.TODO(), schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("external schema reject primary key", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name:           collectionName,
+			ExternalSource: "s3://bucket/object",
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "pk",
+					DataType:      schemapb.DataType_Int64,
+					IsPrimaryKey:  true,
+					ExternalField: "pk_col",
+				},
+				{
+					Name:          "vec_field",
+					DataType:      schemapb.DataType_FloatVector,
+					ExternalField: "vec_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "16"},
+					},
+				},
+			},
+		}
+		err := task.validateSchema(context.TODO(), schema)
+		assert.Error(t, err)
+	})
+
+	t.Run("external schema reject functions", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name:           collectionName,
+			ExternalSource: "s3://bucket/object",
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "text_field",
+					DataType:      schemapb.DataType_VarChar,
+					ExternalField: "text_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "64"},
+					},
+				},
+				{
+					Name:          "vec_field",
+					DataType:      schemapb.DataType_FloatVector,
+					ExternalField: "vec_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "16"},
+					},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{{Name: "test_func"}},
+		}
+		err := task.validateSchema(context.TODO(), schema)
+		assert.Error(t, err)
+	})
 }
 
 func Test_createCollectionTask_prepareSchema(t *testing.T) {
@@ -1015,6 +1117,394 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		err := task.prepareSchema(context.TODO())
 		assert.NoError(t, err)
 	})
+
+	t.Run("preserve field IDs with system fields", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+		preservedDynamicFieldID := int64(100)
+		preservedNamespaceFieldID := int64(101)
+
+		schema := &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         field1,
+					FieldID:      1,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					Name:     MetaFieldName,
+					FieldID:  preservedDynamicFieldID,
+					DataType: schemapb.DataType_JSON,
+				},
+				{
+					Name:     NamespaceFieldName,
+					FieldID:  preservedNamespaceFieldID,
+					DataType: schemapb.DataType_VarChar,
+				},
+				{
+					Name:     TimeStampFieldName,
+					FieldID:  TimeStampField,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					Name:     RowIDFieldName,
+					FieldID:  RowIDField,
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		}
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionName:   collectionName,
+				CollectionSchema: schema,
+			},
+			preserveFieldID: true,
+		}
+
+		err = task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+
+		// Unmarshal the schema to verify
+		var resultSchema schemapb.CollectionSchema
+		err = proto.Unmarshal(task.Req.Schema, &resultSchema)
+		assert.NoError(t, err)
+
+		// Verify that system fields TimeStampFieldName and RowIDFieldName are re-added by appendSysFields
+		hasTimestamp := false
+		hasRowID := false
+		hasMeta := false
+		hasNamespace := false
+		hasUserField := false
+		var metaFieldID int64
+		var namespaceFieldID int64
+
+		for _, field := range resultSchema.Fields {
+			if field.Name == TimeStampFieldName {
+				hasTimestamp = true
+			}
+			if field.Name == RowIDFieldName {
+				hasRowID = true
+			}
+			if field.Name == MetaFieldName {
+				hasMeta = true
+				metaFieldID = field.FieldID
+			}
+			if field.Name == NamespaceFieldName {
+				hasNamespace = true
+				namespaceFieldID = field.FieldID
+			}
+			if field.Name == field1 {
+				hasUserField = true
+			}
+		}
+
+		assert.True(t, hasTimestamp, "TimeStampFieldName should be re-added by appendSysFields")
+		assert.True(t, hasRowID, "RowIDFieldName should be re-added by appendSysFields")
+		assert.True(t, hasMeta, "MetaFieldName should be preserved")
+		assert.True(t, hasNamespace, "NamespaceFieldName should be preserved")
+		assert.True(t, hasUserField, "User field should be present")
+		assert.Equal(t, preservedDynamicFieldID, metaFieldID, "Dynamic field ID should be preserved")
+		assert.Equal(t, preservedNamespaceFieldID, namespaceFieldID, "Namespace field ID should be preserved")
+	})
+
+	t.Run("preserve field IDs without system fields", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+		field2 := funcutil.GenRandomStr()
+
+		schema := &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         field1,
+					FieldID:      10,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					Name:     field2,
+					FieldID:  20,
+					DataType: schemapb.DataType_VarChar,
+				},
+			},
+		}
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionName:   collectionName,
+				CollectionSchema: schema,
+			},
+			preserveFieldID: true,
+		}
+
+		err = task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+
+		// Unmarshal the schema to verify
+		var resultSchema schemapb.CollectionSchema
+		err = proto.Unmarshal(task.Req.Schema, &resultSchema)
+		assert.NoError(t, err)
+
+		// Verify that user fields keep their IDs
+		for _, field := range resultSchema.Fields {
+			if field.Name == field1 {
+				assert.Equal(t, int64(10), field.FieldID, "User field ID should be preserved")
+			}
+			if field.Name == field2 {
+				assert.Equal(t, int64(20), field.FieldID, "User field ID should be preserved")
+			}
+		}
+	})
+
+	t.Run("preserve field IDs - user fields integrity", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+
+		// Prepare input schema with multiple user fields
+		userFields := []*schemapb.FieldSchema{
+			{
+				Name:         "pk_field",
+				FieldID:      100,
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				Name:     "varchar_field",
+				FieldID:  105,
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "256"},
+				},
+			},
+			{
+				Name:     "vector_field",
+				FieldID:  200,
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			{
+				Name:     "json_field",
+				FieldID:  300,
+				DataType: schemapb.DataType_JSON,
+			},
+		}
+
+		// Add system fields to simulate snapshot restore scenario
+		allFields := append([]*schemapb.FieldSchema{}, userFields...)
+		allFields = append(allFields,
+			&schemapb.FieldSchema{
+				Name:     MetaFieldName,
+				FieldID:  50,
+				DataType: schemapb.DataType_JSON,
+			},
+			&schemapb.FieldSchema{
+				Name:     RowIDFieldName,
+				FieldID:  RowIDField,
+				DataType: schemapb.DataType_Int64,
+			},
+			&schemapb.FieldSchema{
+				Name:     TimeStampFieldName,
+				FieldID:  TimeStampField,
+				DataType: schemapb.DataType_Int64,
+			},
+		)
+
+		schema := &schemapb.CollectionSchema{
+			Name:               collectionName,
+			EnableDynamicField: true,
+			Fields:             allFields,
+		}
+
+		// Save expected user field information
+		expectedUserFields := make(map[string]int64) // fieldName -> fieldID
+		for _, field := range userFields {
+			expectedUserFields[field.Name] = field.FieldID
+		}
+		expectedUserFieldsInOrder := []string{"pk_field", "varchar_field", "vector_field", "json_field"}
+
+		// Create task and execute prepareSchema
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionName:   collectionName,
+				CollectionSchema: schema,
+			},
+			preserveFieldID: true,
+		}
+
+		err := task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+
+		// Extract user fields after prepareSchema (excluding system fields)
+		systemFieldNames := map[string]bool{
+			RowIDFieldName:     true,
+			TimeStampFieldName: true,
+			MetaFieldName:      true,
+			NamespaceFieldName: true,
+		}
+
+		actualUserFields := make(map[string]int64)
+		actualUserFieldsInOrder := make([]string, 0)
+		for _, field := range task.body.CollectionSchema.Fields {
+			if !systemFieldNames[field.Name] {
+				actualUserFields[field.Name] = field.FieldID
+				actualUserFieldsInOrder = append(actualUserFieldsInOrder, field.Name)
+			}
+		}
+
+		// Verify user field count remains the same
+		assert.Equal(t, len(expectedUserFields), len(actualUserFields),
+			"User field count mismatch after prepareSchema")
+
+		// Verify each user field's FieldID is preserved
+		for fieldName, expectedID := range expectedUserFields {
+			actualID, exists := actualUserFields[fieldName]
+			assert.True(t, exists, "User field '%s' is missing after prepareSchema", fieldName)
+			assert.Equal(t, expectedID, actualID,
+				"FieldID mismatch for field '%s': expected %d, got %d",
+				fieldName, expectedID, actualID)
+		}
+
+		// Verify user field order remains the same
+		assert.Equal(t, expectedUserFieldsInOrder, actualUserFieldsInOrder,
+			"User field order changed after prepareSchema")
+	})
+
+	t.Run("preserve field IDs - non-contiguous field IDs", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+
+		// Use non-contiguous field IDs to ensure they are truly preserved
+		userFields := []*schemapb.FieldSchema{
+			{
+				Name:         "field_100",
+				FieldID:      100,
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				Name:     "field_150",
+				FieldID:  150,
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "100"},
+				},
+			},
+			{
+				Name:     "field_500",
+				FieldID:  500,
+				DataType: schemapb.DataType_Float,
+			},
+			{
+				Name:     "field_1000",
+				FieldID:  1000,
+				DataType: schemapb.DataType_Int32,
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Name:   collectionName,
+			Fields: userFields,
+		}
+
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionName:   collectionName,
+				CollectionSchema: schema,
+			},
+			preserveFieldID: true,
+		}
+
+		err := task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+
+		// Verify non-contiguous IDs are preserved exactly
+		fieldIDMap := make(map[string]int64)
+		for _, field := range task.body.CollectionSchema.Fields {
+			if field.Name != RowIDFieldName && field.Name != TimeStampFieldName {
+				fieldIDMap[field.Name] = field.FieldID
+			}
+		}
+
+		assert.Equal(t, int64(100), fieldIDMap["field_100"], "Non-contiguous ID 100 should be preserved")
+		assert.Equal(t, int64(150), fieldIDMap["field_150"], "Non-contiguous ID 150 should be preserved")
+		assert.Equal(t, int64(500), fieldIDMap["field_500"], "Non-contiguous ID 500 should be preserved")
+		assert.Equal(t, int64(1000), fieldIDMap["field_1000"], "Non-contiguous ID 1000 should be preserved")
+	})
+
+	t.Run("normal case without preserve field IDs", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+
+		schema := &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         field1,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+			},
+		}
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionName:   collectionName,
+				CollectionSchema: schema,
+			},
+			preserveFieldID: false,
+		}
+
+		err = task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+
+		// Use task.schema which is the internal schema after prepareSchema
+		assert.NotNil(t, task.body.CollectionSchema, "Schema should be set")
+
+		// Verify that user fields have been assigned IDs >= StartOfUserFieldID (100)
+		for _, field := range task.body.CollectionSchema.Fields {
+			if field.Name == field1 {
+				assert.GreaterOrEqual(t, field.FieldID, int64(100), "User field ID should be >= StartOfUserFieldID (100)")
+			}
+		}
+	})
 }
 
 func Test_createCollectionTask_Prepare(t *testing.T) {
@@ -1121,12 +1611,6 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).Return(&model.Database{
 			Name: "foo",
 			ID:   1,
-			Properties: []*commonpb.KeyValuePair{
-				{
-					Key:   common.ReplicateIDKey,
-					Value: "local-test",
-				},
-			},
 		}, nil).Twice()
 		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{
 			util.DefaultDBID: {1, 2},
@@ -1387,6 +1871,53 @@ func TestNamespaceProperty(t *testing.T) {
 			DataType:       schemapb.DataType_Int64,
 			IsPartitionKey: true,
 		})
+
+		task := &createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				CollectionName: collectionName,
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.NamespaceEnabledKey,
+						Value: "true",
+					},
+				},
+			},
+			header: &message.CreateCollectionMessageHeader{},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
+		}
+
+		err := task.handleNamespaceField(ctx, schema)
+		assert.Error(t, err)
+	})
+
+	t.Run("test namespace enabled with external collection", func(t *testing.T) {
+		// External collection is identified by having ExternalField set on fields
+		schema := &schemapb.CollectionSchema{
+			Name:           collectionName,
+			ExternalSource: "s3://bucket/path",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:       100,
+					Name:          "text",
+					DataType:      schemapb.DataType_VarChar,
+					ExternalField: "text_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+					},
+				},
+				{
+					FieldID:       101,
+					Name:          "vector",
+					DataType:      schemapb.DataType_FloatVector,
+					ExternalField: "vector_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "1024"},
+					},
+				},
+			},
+		}
 
 		task := &createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{

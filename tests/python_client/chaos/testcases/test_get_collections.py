@@ -1,5 +1,6 @@
 import time
 import json
+import os
 from collections import defaultdict
 import pytest
 from pymilvus import Collection
@@ -37,8 +38,9 @@ class TestGetCollections(TestcaseBase):
         data = {
             "all": selected_collections,
         }
+        os.makedirs("/tmp/ci_logs", exist_ok=True)
         with open("/tmp/ci_logs/chaos_test_all_collections.json", "w") as f:
-            f.write(json.dumps(data))
+            json.dump(data, f)
         log.info(f"write {len(selected_collections)} collections to /tmp/ci_logs/chaos_test_all_collections.json")
         collections_in_json = get_chaos_test_collections()
         assert len(selected_collections) == len(collections_in_json)

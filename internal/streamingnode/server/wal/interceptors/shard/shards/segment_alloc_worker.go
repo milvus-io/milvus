@@ -108,9 +108,9 @@ func (w *segmentAllocWorker) generateNewGrowingSegmentMessage() error {
 		w.Logger().Warn("failed to allocate segment id", zap.Error(err))
 		return err
 	}
-	storageVersion := storage.StorageV1
-	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-		storageVersion = storage.StorageV2
+	storageVersion := storage.StorageV2
+	if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
+		storageVersion = storage.StorageV3
 	}
 	// Getnerate growing segment limitation.
 	limitation := getSegmentLimitationPolicy().GenerateLimitation(datapb.SegmentLevel_L1)

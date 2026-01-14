@@ -14,6 +14,7 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <memory>
 #include <random>
 #include <string>
@@ -558,13 +559,13 @@ DataGen(SchemaPtr schema,
     auto insert_cols =
         [&insert_data](
             auto& data, int64_t count, auto& field_meta, bool random_valid) {
-            FixedVector<bool> valid_data(count);
+            FixedVector<bool> valid_data(count, true);
             if (field_meta.is_nullable()) {
                 for (int i = 0; i < count; ++i) {
                     int x = i;
                     if (random_valid)
                         x = rand();
-                    valid_data[i] = x % 2 == 0 ? true : false;
+                    valid_data[i] = x % 2 == 0;
                 }
             }
             auto array = milvus::segcore::CreateDataArrayFrom(

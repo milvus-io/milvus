@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 )
 
 // ReCalcRowCount re-calculates number of rows of `oldSeg` based on its bin log count, and correct its value in its
@@ -37,6 +38,30 @@ func CalcRowCountFromBinLog(seg *datapb.SegmentInfo) int64 {
 	return rowCt
 }
 
+// CalcValidRowCountFromFieldBinLog calculates valid (non-null) row count for a specific field
+func CalcValidRowCountFromFieldBinLog(seg *datapb.SegmentInfo, fieldID int64) int64 {
+	for _, fieldBinlog := range seg.GetBinlogs() {
+		isMatch := fieldBinlog.GetFieldID() == fieldID
+		if !isMatch {
+			for _, childField := range fieldBinlog.GetChildFields() {
+				if childField == fieldID {
+					isMatch = true
+					break
+				}
+			}
+		}
+		if isMatch {
+			var validRowCt int64
+			for _, binlog := range fieldBinlog.GetBinlogs() {
+				nullCount := binlog.GetFieldNullCounts()[fieldID]
+				validRowCt += binlog.GetEntriesNum() - nullCount
+			}
+			return validRowCt
+		}
+	}
+	return -1
+}
+
 // CalcDelRowCountFromDeltaLog calculates deleted rows of a L0 segment from delta logs
 func CalcDelRowCountFromDeltaLog(seg *datapb.SegmentInfo) int64 {
 	var rowCt int64
@@ -48,4 +73,20 @@ func CalcDelRowCountFromDeltaLog(seg *datapb.SegmentInfo) int64 {
 		}
 	}
 	return rowCt
+}
+
+// MergeRequestCost merges the costs of request; the cost may come from different worker in same channel
+// or different channel in same collection, for now we just choose the part with the highest response time
+func MergeRequestCost(requestCosts []*internalpb.CostAggregation) *internalpb.CostAggregation {
+	var result *internalpb.CostAggregation
+	for _, cost := range requestCosts {
+		if cost == nil {
+			continue
+		}
+		if result == nil || result.ResponseTime < cost.ResponseTime {
+			result = cost
+		}
+	}
+
+	return result
 }

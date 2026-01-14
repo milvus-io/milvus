@@ -25,6 +25,7 @@ package initcore
 #include "segcore/segcore_init_c.h"
 #include "storage/storage_c.h"
 #include "segcore/arrow_fs_c.h"
+#include "exec/expression/function/init_c.h"
 */
 import "C"
 
@@ -41,12 +42,17 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+func InitExecExpressionFunctionFactory() {
+	C.InitExecExpressionFunctionFactory()
+}
 
 func InitLocalChunkManager(path string) {
 	CLocalRootPath := C.CString(path)
@@ -209,7 +215,12 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cBucketName := C.CString(params.MinioCfg.BucketName.GetValue())
 	cAccessKey := C.CString(params.MinioCfg.AccessKeyID.GetValue())
 	cAccessValue := C.CString(params.MinioCfg.SecretAccessKey.GetValue())
-	cRootPath := C.CString(params.MinioCfg.RootPath.GetValue())
+	var cRootPath *C.char
+	if params.CommonCfg.StorageType.GetValue() == "local" {
+		cRootPath = C.CString(params.LocalStorageCfg.Path.GetValue())
+	} else {
+		cRootPath = C.CString(params.MinioCfg.RootPath.GetValue())
+	}
 	cStorageType := C.CString(params.CommonCfg.StorageType.GetValue())
 	cIamEndPoint := C.CString(params.MinioCfg.IAMEndpoint.GetValue())
 	cCloudProvider := C.CString(params.MinioCfg.CloudProvider.GetValue())
@@ -272,6 +283,7 @@ func InitMmapManager(params *paramtable.ComponentParam, nodeID int64) error {
 		scalar_field_enable_mmap: C.bool(params.QueryNodeCfg.MmapScalarField.GetAsBool()),
 		vector_index_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorIndex.GetAsBool()),
 		vector_field_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorField.GetAsBool()),
+		mmap_populate:            C.bool(params.QueryNodeCfg.MmapPopulate.GetAsBool()),
 	}
 	status := C.InitMmapManager(mmapConfig)
 	return HandleCStatus(&status, "InitMmapManager failed")
@@ -563,6 +575,9 @@ func SetupCoreConfigChangelCallback() {
 func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 	enableInterminIndex := C.bool(params.QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool())
 	C.SegcoreSetEnableInterminSegmentIndex(enableInterminIndex)
+
+	memExpansionRate := C.float(params.QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat())
+	C.SegcoreSetInterimIndexMemExpansionRate(memExpansionRate)
 
 	nlist := C.int64_t(params.QueryNodeCfg.InterimIndexNlist.GetAsInt64())
 	C.SegcoreSetNlist(nlist)

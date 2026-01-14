@@ -69,13 +69,13 @@ class OffsetMap {
     using OffsetType = int64_t;
     // TODO: in fact, we can retrieve the pk here. Not sure which way is more efficient.
     virtual std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetType& bitset) const = 0;
+    find_first(int64_t limit, const BitsetTypeView& bitset) const = 0;
 
     virtual void
     clear() = 0;
 
     virtual size_t
-    size() const = 0;
+    memory_size() const = 0;
 };
 
 template <typename T>
@@ -184,7 +184,7 @@ class OffsetOrderedMap : public OffsetMap {
     }
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetType& bitset) const override {
+    find_first(int64_t limit, const BitsetTypeView& bitset) const override {
         std::shared_lock<std::shared_mutex> lck(mtx_);
 
         if (limit == Unlimited || limit == NoLimit) {
@@ -203,14 +203,14 @@ class OffsetOrderedMap : public OffsetMap {
     }
 
     size_t
-    size() const override {
+    memory_size() const override {
         std::shared_lock<std::shared_mutex> lck(mtx_);
         return map_.get_allocator().total_allocated();
     }
 
  private:
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first_by_index(int64_t limit, const BitsetType& bitset) const {
+    find_first_by_index(int64_t limit, const BitsetTypeView& bitset) const {
         int64_t hit_num = 0;  // avoid counting the number everytime.
         auto size = bitset.size();
         int64_t cnt = size - bitset.count();
@@ -364,7 +364,7 @@ class OffsetOrderedArray : public OffsetMap {
     }
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetType& bitset) const override {
+    find_first(int64_t limit, const BitsetTypeView& bitset) const override {
         check_search();
 
         if (limit == Unlimited || limit == NoLimit) {
@@ -383,13 +383,13 @@ class OffsetOrderedArray : public OffsetMap {
     }
 
     size_t
-    size() const override {
+    memory_size() const override {
         return sizeof(std::pair<T, int32_t>) * array_.capacity();
     }
 
  private:
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first_by_index(int64_t limit, const BitsetType& bitset) const {
+    find_first_by_index(int64_t limit, const BitsetTypeView& bitset) const {
         int64_t hit_num = 0;  // avoid counting the number everytime.
         auto size = bitset.size();
         int64_t cnt = size - bitset.count();
@@ -592,8 +592,8 @@ class InsertRecordSealed {
         pk2offset_->seal();
         // update estimated memory size to caching layer
         cachinglayer::Manager::GetInstance().ChargeLoadedResource(
-            {static_cast<int64_t>(pk2offset_->size()), 0});
-        estimated_memory_size_ += pk2offset_->size();
+            {static_cast<int64_t>(pk2offset_->memory_size()), 0});
+        estimated_memory_size_ += pk2offset_->memory_size();
     }
 
     void
@@ -604,11 +604,11 @@ class InsertRecordSealed {
         timestamp_index_ = std::move(timestamp_index);
         AssertInfo(timestamps_.num_chunk() == 1,
                    "num chunk not equal to 1 for sealed segment");
-        size_t size =
-            timestamps.size() * sizeof(Timestamp) + timestamp_index_.size();
+        size_t memory_size = timestamps.size() * sizeof(Timestamp) +
+                             timestamp_index_.memory_size();
         cachinglayer::Manager::GetInstance().ChargeLoadedResource(
-            {static_cast<int64_t>(size), 0});
-        estimated_memory_size_ += size;
+            {static_cast<int64_t>(memory_size), 0});
+        estimated_memory_size_ += memory_size;
     }
 
     const ConcurrentVector<Timestamp>&
@@ -1076,7 +1076,7 @@ class InsertRecordGrowing {
     }
 
     int64_t
-    size() const {
+    row_count() const {
         return ack_responder_.GetAck();
     }
 

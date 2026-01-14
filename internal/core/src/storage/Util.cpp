@@ -942,15 +942,7 @@ GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
     boost::filesystem::path prefix = cm->GetRootPath();
     boost::filesystem::path path = std::string(RAWDATA_ROOT_PATH);
     boost::filesystem::path path1 =
-        std::to_string(segment_id) + "/" + std::to_string(field_id) + "/";
-    return NormalizePath(prefix / path / path1);
-}
-
-std::string
-GetSegmentRawDataPathPrefix(ChunkManagerPtr cm, int64_t segment_id) {
-    boost::filesystem::path prefix = cm->GetRootPath();
-    boost::filesystem::path path = std::string(RAWDATA_ROOT_PATH);
-    boost::filesystem::path path1 = std::to_string(segment_id);
+        std::to_string(segment_id) + "_" + std::to_string(field_id) + "/";
     return NormalizePath(prefix / path / path1);
 }
 
@@ -1324,9 +1316,10 @@ FetchFieldData(ChunkManager* cm, const std::vector<std::string>& remote_files) {
     std::vector<std::string> batch_files;
     auto FetchRawData = [&]() {
         auto fds = GetObjectData(cm, batch_files);
-        for (size_t i = 0; i < batch_files.size(); ++i) {
-            auto data = fds[i].get()->GetFieldData();
-            field_datas.emplace_back(data);
+        // Wait for all futures and collect exceptions to ensure all threads complete
+        auto codecs = storage::WaitAllFutures(std::move(fds));
+        for (auto& codec : codecs) {
+            field_datas.emplace_back(codec->GetFieldData());
         }
     };
 
@@ -1512,7 +1505,21 @@ GetFieldDatasFromManifest(
     std::optional<DataType> element_type) {
     auto column_groups = GetColumnGroups(manifest_path, loon_ffi_properties);
 
-    // ReaderHandle reader_handler = 0;
+    // TODO remove manual check after loon support read null for non-exists field
+    bool field_exists = false;
+    const auto field_id_to_find = std::to_string(field_meta.field_id);
+    for (size_t i = 0; i < column_groups->size() && !field_exists; i++) {
+        auto column_group = column_groups->get_column_group(i);
+        for (const auto& column : column_group->columns) {
+            if (column == field_id_to_find) {
+                field_exists = true;
+                break;
+            }
+        }
+    }
+    if (!field_exists) {
+        return {};
+    }
 
     std::string field_id_str = std::to_string(field_meta.field_id);
     std::vector<std::string> needed_columns = {field_id_str};
@@ -1596,11 +1603,6 @@ CacheRawDataAndFillMissing(const MemFileManagerImplPtr& file_manager,
                            const Config& config) {
     // download field data
     auto field_datas = file_manager->CacheRawDataToMemory(config);
-
-    // check storage version
-    auto storage_version =
-        index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
-            .value_or(0);
 
     int64_t lack_binlog_rows =
         index::GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY)

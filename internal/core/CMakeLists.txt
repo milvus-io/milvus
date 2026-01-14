@@ -25,6 +25,10 @@ add_definitions(-DELPP_THREAD_SAFE)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 message( STATUS "Building using CMake version: ${CMAKE_VERSION}" )
 
+if ( BUILD_UNIT_TEST STREQUAL "ON" )
+    add_definitions(-DWITHOUT_GO_LOGGING)
+endif()
+
 if ( MILVUS_GPU_VERSION )
     add_definitions(-DMILVUS_GPU_VERSION)
 endif ()
@@ -156,6 +160,10 @@ if ( APPLE )
             "-Wno-c++11-narrowing"
             "-DBOOST_STACKTRACE_GNU_SOURCE_NOT_REQUIRED=1"
             )
+    # Fix for macOS 14+ (Sonoma) linker requiring SG_READ_ONLY flag
+    # Disable fixup chains to avoid __DATA_CONST segment issues with third-party libraries
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-no_fixup_chains")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-no_fixup_chains")
 endif ()
 
 # **************************** Coding style check tools ****************************

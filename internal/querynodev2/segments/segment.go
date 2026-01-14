@@ -43,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
@@ -498,6 +497,20 @@ func (s *LocalSegment) MemSize() int64 {
 
 func (s *LocalSegment) LastDeltaTimestamp() uint64 {
 	return s.lastDeltaTimestamp.Load()
+}
+
+// UpdateBloomFilter updates bloom filter with provided pks and charges resource if BF is newly created.
+// This overrides baseSegment.UpdateBloomFilter to handle resource charging for growing segments.
+func (s *LocalSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
+	if s.skipGrowingBF {
+		return
+	}
+
+	// Update bloom filter (may create new BF if not exist)
+	s.bloomFilterSet.UpdateBloomFilter(pks)
+
+	// Charge bloom filter resource (safe to call multiple times - only charges once)
+	s.bloomFilterSet.Charge()
 }
 
 func (s *LocalSegment) GetIndexByID(indexID int64) *IndexedFieldInfo {
@@ -1190,25 +1203,11 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 
 	// Text match index mmap config is based on the raw data mmap.
 	enableMmap := isDataMmapEnable(f)
-
-	// Reconstruct full paths from filenames
-	// Files stored in TextIndexStats only contain filenames to save space
-	fullPaths := metautil.BuildTextLogPaths(
-		binlog.GetRootPath(),
-		textLogs.GetBuildID(),
-		textLogs.GetVersion(),
-		s.Collection(),
-		s.Partition(),
-		s.ID(),
-		textLogs.GetFieldID(),
-		textLogs.GetFiles(),
-	)
-
 	cgoProto := &indexcgopb.LoadTextIndexInfo{
 		FieldID:      textLogs.GetFieldID(),
 		Version:      textLogs.GetVersion(),
 		BuildID:      textLogs.GetBuildID(),
-		Files:        fullPaths,
+		Files:        textLogs.GetFiles(),
 		Schema:       f,
 		CollectionID: s.Collection(),
 		PartitionID:  s.Partition(),
@@ -1271,7 +1270,7 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		LoadPriority: s.loadInfo.Load().GetPriority(),
 		EnableMmap:   paramtable.Get().QueryNodeCfg.MmapJSONStats.GetAsBool(),
 		MmapDirPath:  paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
-		StatsSize:    jsonKeyStats.GetMemorySize(),
+		StatsSize:    jsonKeyStats.GetLogSize(),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)
@@ -1465,6 +1464,9 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 	// TODO: disable logical resource handling for now
 	// usage := s.ResourceUsageEstimate()
 	// s.manager.SubLogicalResource(usage)
+
+	// Refund bloom filter resource
+	s.bloomFilterSet.Refund()
 
 	binlogSize := s.binlogSize.Load()
 	if binlogSize > 0 {

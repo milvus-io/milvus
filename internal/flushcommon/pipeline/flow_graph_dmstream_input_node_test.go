@@ -62,9 +62,6 @@ func (mm *mockMsgStreamFactory) NewMsgStreamDisposer(ctx context.Context) func([
 
 type mockTtMsgStream struct{}
 
-func (mtm *mockTtMsgStream) SetReplicate(config *msgstream.ReplicateConfig) {
-}
-
 func (mtm *mockTtMsgStream) Close() {}
 
 func (mtm *mockTtMsgStream) Chan() <-chan *msgstream.ConsumeMsgPack {
@@ -105,9 +102,6 @@ func (mtm *mockTtMsgStream) GetLatestMsgID(channel string) (msgstream.MessageID,
 
 func (mtm *mockTtMsgStream) CheckTopicValid(channel string) error {
 	return nil
-}
-
-func (mtm *mockTtMsgStream) ForceEnableProduce(can bool) {
 }
 
 func TestNewDmInputNode(t *testing.T) {

@@ -40,6 +40,7 @@
 #include "storage/Util.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "index/Meta.h"
 
 #include "test_utils/storage_test_utils.h"
 
@@ -125,20 +126,21 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
 TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     auto conf = milvus_storage::ArrowFileSystemConfig();
     conf.storage_type = "local";
-    conf.root_path = "/tmp";
-    milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
+    conf.root_path = "/tmp/diskann";
 
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    auto result = milvus_storage::CreateArrowFileSystem(conf);
+    EXPECT_TRUE(result.ok());
+    auto fs = result.ValueOrDie();
 
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string small_index_file_path =
-        "/tmp/diskann/index_files/1000/small_index_file";
+        "/tmp/diskann/index_files/1000/1/2/3/small_index_file";
     std::string large_index_file_path =
-        "/tmp/diskann/index_files/1000/large_index_file";
+        "/tmp/diskann/index_files/1000/1/2/3/large_index_file";
     auto exist = lcm->Exist(large_index_file_path);
 
-    std::string index_file_path = "/tmp/diskann/index_files/1000/index_file";
+    std::string index_file_path =
+        "/tmp/diskann/index_files/1000/1/2/3/index_file";
     boost::filesystem::path localPath(index_file_path);
     auto local_file_name = localPath.filename().string();
 
@@ -165,7 +167,7 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
 
     auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(filed_data_meta, index_meta, cm_, fs_));
+        storage::FileManagerContext(filed_data_meta, index_meta, cm_, fs));
 
     auto os = diskAnnFileManager->OpenOutputStream(index_file_path);
     size_t write_offset = 0;
@@ -184,6 +186,7 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     write_offset += small_index_size;
     close(fd);
     EXPECT_EQ(os->Tell(), write_offset);
+    os->Close();
 
     auto is = diskAnnFileManager->OpenInputStream(index_file_path);
     size_t read_offset = 0;
@@ -206,7 +209,7 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     EXPECT_EQ(read_small_index_size, small_index_size);
     EXPECT_EQ(is->Tell(), read_offset);
     std::string small_index_file_path_read =
-        "/tmp/diskann/index_files/1000/small_index_file_read";
+        "/tmp/diskann/index_files/1000/1/2/3/small_index_file_read";
     lcm->CreateFile(small_index_file_path_read);
     int fd_read = open(small_index_file_path_read.c_str(), O_WRONLY);
     ASSERT_NE(fd_read, -1);
@@ -814,4 +817,168 @@ TEST_F(DiskAnnFileManagerTest, FileCleanup) {
     EXPECT_FALSE(local_chunk_manager->Exist(local_text_index_file_path));
     EXPECT_FALSE(local_chunk_manager->Exist(local_index_file_path));
     EXPECT_FALSE(local_chunk_manager->Exist(local_json_stats_file_path));
+}
+
+TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskValidDataFile) {
+    const int64_t collection_id = 1;
+    const int64_t partition_id = 2;
+    const int64_t segment_id = 3;
+    const int64_t field_id = 100;
+    const int64_t dim = 128;
+    const int64_t num_rows = 100;
+    const int64_t null_percent = 20;  // 20% null
+    const int64_t valid_count = num_rows * (100 - null_percent) / 100;
+
+    std::vector<uint8_t> valid_data((num_rows + 7) / 8, 0);
+    for (int64_t i = 0; i < valid_count; ++i) {
+        valid_data[i >> 3] |= (1 << (i & 0x07));
+    }
+
+    std::vector<float> vec_data(valid_count * dim);
+    for (size_t i = 0; i < vec_data.size(); ++i) {
+        vec_data[i] = static_cast<float>(i % 100);
+    }
+
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, true, dim);
+    auto field_data_impl =
+        std::dynamic_pointer_cast<milvus::FieldData<milvus::FloatVector>>(
+            field_data);
+    field_data_impl->FillFieldData(
+        vec_data.data(), valid_data.data(), num_rows, 0);
+
+    ASSERT_EQ(field_data->get_num_rows(), num_rows);
+    ASSERT_EQ(field_data->get_valid_rows(), valid_count);
+    ASSERT_TRUE(field_data->IsNullable());
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    FieldDataMeta field_data_meta = {
+        collection_id, partition_id, segment_id, field_id};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_data = insert_data.Serialize(storage::StorageType::Remote);
+
+    std::string insert_file_path = "/tmp/diskann/valid_data_test";
+    boost::filesystem::remove_all(insert_file_path);
+    cm_->Write(
+        insert_file_path, serialized_data.data(), serialized_data.size());
+
+    IndexMeta index_meta = {segment_id,
+                            field_id,
+                            1000,
+                            1,
+                            "test",
+                            "vec_field",
+                            DataType::VECTOR_FLOAT,
+                            dim};
+    auto file_manager = std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(field_data_meta, index_meta, cm_, fs_));
+
+    std::string valid_data_path = "/tmp/diskann/valid_data_test_output";
+    boost::filesystem::remove_all(valid_data_path);
+
+    milvus::Config config;
+    config[INSERT_FILES_KEY] = std::vector<std::string>{insert_file_path};
+    config[index::VALID_DATA_PATH_KEY] = valid_data_path;
+
+    auto local_data_path = file_manager->CacheRawDataToDisk<float>(config);
+    ASSERT_FALSE(local_data_path.empty());
+
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+
+    ASSERT_TRUE(local_chunk_manager->Exist(valid_data_path))
+        << "valid_data file should be created for nullable field";
+
+    size_t read_total_num_rows = 0;
+    local_chunk_manager->Read(
+        valid_data_path, 0, &read_total_num_rows, sizeof(size_t));
+    EXPECT_EQ(read_total_num_rows, num_rows)
+        << "total_num_rows should match original num_rows";
+
+    size_t bitmap_size = (num_rows + 7) / 8;
+    std::vector<uint8_t> read_bitmap(bitmap_size);
+    local_chunk_manager->Read(
+        valid_data_path, sizeof(size_t), read_bitmap.data(), bitmap_size);
+
+    // Verify bitmap content
+    for (int64_t i = 0; i < num_rows; ++i) {
+        bool expected_valid = (i < valid_count);
+        bool actual_valid = (read_bitmap[i / 8] >> (i % 8)) & 1;
+        EXPECT_EQ(actual_valid, expected_valid)
+            << "Validity mismatch at row " << i;
+    }
+
+    local_chunk_manager->Remove(local_data_path);
+    local_chunk_manager->Remove(valid_data_path);
+    cm_->Remove(insert_file_path);
+}
+
+TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskNoValidDataForNonNullable) {
+    const int64_t collection_id = 1;
+    const int64_t partition_id = 2;
+    const int64_t segment_id = 3;
+    const int64_t field_id = 100;
+    const int64_t dim = 128;
+    const int64_t num_rows = 100;
+
+    std::vector<float> vec_data(num_rows * dim);
+    for (size_t i = 0; i < vec_data.size(); ++i) {
+        vec_data[i] = static_cast<float>(i % 100);
+    }
+
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, false, dim);
+    field_data->FillFieldData(vec_data.data(), num_rows);
+
+    ASSERT_EQ(field_data->get_num_rows(), num_rows);
+    ASSERT_FALSE(field_data->IsNullable());
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    FieldDataMeta field_data_meta = {
+        collection_id, partition_id, segment_id, field_id};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_data = insert_data.Serialize(storage::StorageType::Remote);
+
+    std::string insert_file_path = "/tmp/diskann/non_nullable_test";
+    boost::filesystem::remove_all(insert_file_path);
+    cm_->Write(
+        insert_file_path, serialized_data.data(), serialized_data.size());
+
+    IndexMeta index_meta = {segment_id,
+                            field_id,
+                            1000,
+                            1,
+                            "test",
+                            "vec_field",
+                            DataType::VECTOR_FLOAT,
+                            dim};
+    auto file_manager = std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(field_data_meta, index_meta, cm_, fs_));
+
+    std::string valid_data_path = "/tmp/diskann/non_nullable_valid_data";
+    boost::filesystem::remove_all(valid_data_path);
+
+    milvus::Config config;
+    config[INSERT_FILES_KEY] = std::vector<std::string>{insert_file_path};
+    config[index::VALID_DATA_PATH_KEY] = valid_data_path;
+
+    auto local_data_path = file_manager->CacheRawDataToDisk<float>(config);
+    ASSERT_FALSE(local_data_path.empty());
+
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+
+    EXPECT_FALSE(local_chunk_manager->Exist(valid_data_path))
+        << "valid_data file should NOT be created for non-nullable field";
+
+    local_chunk_manager->Remove(local_data_path);
+    cm_->Remove(insert_file_path);
 }

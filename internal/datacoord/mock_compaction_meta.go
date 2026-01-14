@@ -6,6 +6,8 @@ import (
 	context "context"
 
 	datapb "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -429,6 +431,79 @@ func (_c *MockCompactionMeta_GetCompactionTasksByTriggerID_Call) Return(_a0 []*d
 }
 
 func (_c *MockCompactionMeta_GetCompactionTasksByTriggerID_Call) RunAndReturn(run func(context.Context, int64) []*datapb.CompactionTask) *MockCompactionMeta_GetCompactionTasksByTriggerID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetFileResources provides a mock function with given fields: ctx, resourceIDs
+func (_m *MockCompactionMeta) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
+	_va := make([]interface{}, len(resourceIDs))
+	for _i := range resourceIDs {
+		_va[_i] = resourceIDs[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFileResources")
+	}
+
+	var r0 []*internalpb.FileResourceInfo
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, ...int64) ([]*internalpb.FileResourceInfo, error)); ok {
+		return rf(ctx, resourceIDs...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, ...int64) []*internalpb.FileResourceInfo); ok {
+		r0 = rf(ctx, resourceIDs...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*internalpb.FileResourceInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, ...int64) error); ok {
+		r1 = rf(ctx, resourceIDs...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCompactionMeta_GetFileResources_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFileResources'
+type MockCompactionMeta_GetFileResources_Call struct {
+	*mock.Call
+}
+
+// GetFileResources is a helper method to define mock.On call
+//   - ctx context.Context
+//   - resourceIDs ...int64
+func (_e *MockCompactionMeta_Expecter) GetFileResources(ctx interface{}, resourceIDs ...interface{}) *MockCompactionMeta_GetFileResources_Call {
+	return &MockCompactionMeta_GetFileResources_Call{Call: _e.mock.On("GetFileResources",
+		append([]interface{}{ctx}, resourceIDs...)...)}
+}
+
+func (_c *MockCompactionMeta_GetFileResources_Call) Run(run func(ctx context.Context, resourceIDs ...int64)) *MockCompactionMeta_GetFileResources_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]int64, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(int64)
+			}
+		}
+		run(args[0].(context.Context), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetFileResources_Call) Return(_a0 []*internalpb.FileResourceInfo, _a1 error) *MockCompactionMeta_GetFileResources_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetFileResources_Call) RunAndReturn(run func(context.Context, ...int64) ([]*internalpb.FileResourceInfo, error)) *MockCompactionMeta_GetFileResources_Call {
 	_c.Call.Return(run)
 	return _c
 }
