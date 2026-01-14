@@ -2972,7 +2972,11 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		zap.Bool("useDefaultConsistency", request.GetUseDefaultConsistency()),
 	)
 
+	succeeded := false
 	defer func() {
+		if !succeeded {
+			return
+		}
 		span := tr.ElapseSpan()
 		spanPerNq := span
 		if qt.SearchRequest.GetNq() > 0 {
@@ -3091,6 +3095,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
 	}
+	succeeded = true
 	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, qt.isRecallEvaluation, nil
 }
 
@@ -3200,7 +3205,11 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		zap.Stringer("dsls", &hybridSearchRequestExprLogger{HybridSearchRequest: request}),
 	)
 
+	succeeded := false
 	defer func() {
+		if !succeeded {
+			return
+		}
 		span := tr.ElapseSpan()
 		spanPerNq := span
 		var totalNq int64
@@ -3322,6 +3331,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeHybridSearch, dbName, username).Add(float64(v))
 		}
 	}
+	succeeded = true
 	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, nil
 }
 
@@ -3628,7 +3638,11 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 	tr := timerecord.NewTimeRecorder(method)
 
+	succeeded := false
 	defer func() {
+		if !succeeded {
+			return
+		}
 		span := tr.ElapseSpan()
 		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			log.Info(
@@ -3699,6 +3713,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}
 
+	succeeded = true
 	return qt.result, qt.storageCost, nil
 }
 
