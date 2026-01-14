@@ -14,6 +14,9 @@
 #include <vector>
 #include <boost/format.hpp>
 
+#include "index/ScalarIndexSort.h"
+#include "index/StringIndexSort.h"
+#include "index/Meta.h"
 #include "common/Schema.h"
 #include "common/ArrayOffsets.h"
 #include "query/Plan.h"
@@ -154,7 +157,7 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                                                 >
                                                 arith_op: Mod
                                                 right_operand: <
-                                                  int64_val: 2
+                                                  int64_val: 30
                                                 >
                                                 op: Equal
                                                 value: <
@@ -975,3 +978,332 @@ TEST(ArrayOffsetsGrowing, MultiplePendingBatches) {
     ASSERT_EQ(r10, 5);
     ASSERT_EQ(i10, 1);
 }
+
+enum class NestedIndexType { NONE, STL_SORT, INVERTED };
+
+std::string
+NestedIndexTypeToString(NestedIndexType type) {
+    switch (type) {
+        case NestedIndexType::NONE:
+            return "None";
+        case NestedIndexType::STL_SORT:
+            return "StlSort";
+        case NestedIndexType::INVERTED:
+            return "Inverted";
+        default:
+            return "Unknown";
+    }
+}
+
+// Test fixture for nested index and execution mode testing
+// Parameters: (NestedIndexType, bool force_offset_mode)
+class ElementFilterNestedIndex
+    : public ::testing::TestWithParam<std::tuple<NestedIndexType, bool>> {
+ protected:
+    NestedIndexType
+    nested_index_type() const {
+        return std::get<0>(GetParam());
+    }
+
+    bool
+    force_offset_mode() const {
+        return std::get<1>(GetParam());
+    }
+};
+
+TEST_P(ElementFilterNestedIndex, ExecutionMode) {
+    auto index_type = nested_index_type();
+    bool offset_mode = force_offset_mode();
+
+    // Step 1: Prepare schema with array field
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    // Use larger N for better selectivity control
+    size_t N = 1000;
+    int array_len = 3;
+
+    // Step 2: Generate test data
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    // Customize int_array data: doc i has elements [i*3+1, i*3+2, i*3+3]
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
+
+            for (int row = 0; row < N; row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
+
+                for (int elem = 0; elem < array_len; elem++) {
+                    int value = row * array_len + elem + 1;
+                    array_data->mutable_int_data()->mutable_data()->Add(value);
+                }
+            }
+            break;
+        }
+    }
+
+    // Step 3: Create sealed segment with field data
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    // Step 4: Load vector index
+    auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
+    std::vector<float> vector_data(dim * N * array_len);
+    for (int i = 0; i < N; i++) {
+        const auto& float_vec = array_vec_values[i].float_vector().data();
+        for (int j = 0; j < array_len * dim; j++) {
+            vector_data[i * array_len * dim + j] = float_vec[j];
+        }
+    }
+
+    auto indexing = GenVecIndexing(N * array_len,
+                                   dim,
+                                   vector_data.data(),
+                                   knowhere::IndexEnum::INDEX_HNSW);
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = vec_fid.get();
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index_params["metric_type"] = knowhere::metric::L2;
+    load_index_info.field_type = DataType::VECTOR_ARRAY;
+    load_index_info.element_type = DataType::VECTOR_FLOAT;
+    segment->LoadIndex(load_index_info);
+
+    // Step 5: Build and load nested scalar index if needed
+    if (index_type != NestedIndexType::NONE) {
+        // Build nested index for int_array field
+        std::vector<int32_t> all_elements;
+        all_elements.reserve(N * array_len);
+        for (int row = 0; row < N; row++) {
+            for (int elem = 0; elem < array_len; elem++) {
+                all_elements.push_back(row * array_len + elem + 1);
+            }
+        }
+
+        milvus::index::IndexBasePtr nested_index;
+        if (index_type == NestedIndexType::STL_SORT) {
+            auto stl_index =
+                std::make_unique<milvus::index::ScalarIndexSort<int32_t>>(
+                    storage::FileManagerContext(), true /* is_nested */);
+            stl_index->Build(all_elements.size(), all_elements.data(), nullptr);
+            nested_index = std::move(stl_index);
+        } else {
+            // INVERTED index - use BuildWithRawDataForUT is not available for int32
+            // So we use ScalarIndexSort for now as a workaround
+            // In real scenario, inverted index would be loaded from disk
+            auto stl_index =
+                std::make_unique<milvus::index::ScalarIndexSort<int32_t>>(
+                    storage::FileManagerContext(), true /* is_nested */);
+            stl_index->Build(all_elements.size(), all_elements.data(), nullptr);
+            nested_index = std::move(stl_index);
+        }
+
+        // Load nested index to segment
+        LoadIndexInfo nested_load_info;
+        nested_load_info.field_id = int_array_fid.get();
+        nested_load_info.field_type = DataType::ARRAY;
+        nested_load_info.element_type = DataType::INT32;
+        nested_load_info.index_params["index_type"] =
+            index_type == NestedIndexType::STL_SORT
+                ? milvus::index::ASCENDING_SORT
+                : milvus::index::INVERTED_INDEX_TYPE;
+        nested_load_info.cache_index =
+            CreateTestCacheIndex("nested_test", std::move(nested_index));
+        segment->LoadIndex(nested_load_info);
+    }
+
+    int topK = 5;
+
+    // Step 6: Build query plan with appropriate selectivity
+    // For offset_mode: use very low selectivity (id == 500 -> 0.1% for N=1000)
+    // For full_mode: use high selectivity (id % 2 == 0 -> 50%)
+    std::string predicate_expr;
+    if (offset_mode) {
+        // Very low selectivity: only 1 doc matches (0.1% for N=1000)
+        // doc 500's elements are [1501, 1502, 1503] which are in range (100, 2000)
+        predicate_expr = R"(
+            term_expr: <
+              column_info: <
+                field_id: %3%
+                data_type: Int64
+              >
+              values: <
+                int64_val: 500
+              >
+            >
+        )";
+    } else {
+        // High selectivity: ~50% docs match
+        predicate_expr = R"(
+            binary_arith_op_eval_range_expr: <
+              column_info: <
+                field_id: %3%
+                data_type: Int64
+              >
+              arith_op: Mod
+              right_operand: <
+                int64_val: 2
+              >
+              op: Equal
+              value: <
+                int64_val: 0
+              >
+            >
+        )";
+    }
+
+    std::string raw_plan =
+        boost::str(boost::format(R"(vector_anns: <
+                                    field_id: %1%
+                                    predicates: <
+                                      element_filter_expr: <
+                                        element_expr: <
+                                          binary_range_expr: <
+                                            column_info: <
+                                              field_id: %2%
+                                              data_type: Int32
+                                              element_type: Int32
+                                              is_element_level: true
+                                            >
+                                            lower_inclusive: false
+                                            upper_inclusive: false
+                                            lower_value: <
+                                              int64_val: 100
+                                            >
+                                            upper_value: <
+                                              int64_val: 2000
+                                            >
+                                          >
+                                        >
+                                        predicate: <
+                                          )" +
+                                 predicate_expr + R"(
+                                        >
+                                        struct_name: "structA"
+                                      >
+                                    >
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"ef\": 50}"
+                                    >
+                                    placeholder_tag: "$0">)") %
+                   vec_fid.get() % int_array_fid.get() % int64_fid.get());
+
+    proto::plan::PlanNode plan_node;
+    auto ok =
+        google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
+    ASSERT_TRUE(ok) << "Failed to parse element-level filter plan";
+
+    auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+    ASSERT_NE(plan, nullptr);
+
+    auto num_queries = 1;
+    auto seed = 1024;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed, true);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    // Step 7: Execute search
+    auto search_result = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+
+    // Step 8: Verify results
+    ASSERT_NE(search_result, nullptr);
+    ASSERT_TRUE(search_result->element_level_);
+
+    // Count valid results (doc_id >= 0, -1 means invalid/padding)
+    size_t valid_count = 0;
+    for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
+        if (search_result->seg_offsets_[i] >= 0) {
+            valid_count++;
+        }
+    }
+
+    if (offset_mode) {
+        // In offset mode with id == 500, only doc 500 matches
+        // doc 500 has 3 elements, all in range (100, 2000): [1501, 1502, 1503]
+        ASSERT_GT(valid_count, 0) << "Should have at least one valid result";
+        ASSERT_LE(valid_count, 3)
+            << "At most 3 elements from doc 500 can match";
+
+        for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
+            int64_t doc_id = search_result->seg_offsets_[i];
+            if (doc_id >= 0) {
+                ASSERT_EQ(doc_id, 500)
+                    << "In offset mode, only doc 500 should match";
+            }
+        }
+    } else {
+        // In full mode with id % 2 == 0, even docs match
+        ASSERT_GT(valid_count, 0) << "Should have valid results";
+        for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
+            int64_t doc_id = search_result->seg_offsets_[i];
+            if (doc_id >= 0) {
+                ASSERT_EQ(doc_id % 2, 0)
+                    << "Result doc_id " << doc_id << " should be even";
+            }
+        }
+    }
+
+    // Verify element values are in range (100, 2000) for valid results
+    for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
+        int64_t doc_id = search_result->seg_offsets_[i];
+        if (doc_id >= 0) {
+            int32_t elem_idx = search_result->element_indices_[i];
+            int element_value = doc_id * array_len + elem_idx + 1;
+            ASSERT_GT(element_value, 100);
+            ASSERT_LT(element_value, 2000);
+        }
+    }
+
+    // Verify distances are sorted (only check valid results)
+    float last_distance = -1;
+    for (size_t i = 0; i < search_result->distances_.size(); ++i) {
+        if (search_result->seg_offsets_[i] >= 0) {
+            if (last_distance >= 0) {
+                ASSERT_LE(last_distance, search_result->distances_[i]);
+            }
+            last_distance = search_result->distances_[i];
+        }
+    }
+
+    std::cout << "Test passed: index_type="
+              << NestedIndexTypeToString(index_type)
+              << ", offset_mode=" << (offset_mode ? "true" : "false")
+              << ", valid_results=" << valid_count << std::endl;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ElementFilter,
+    ElementFilterNestedIndex,
+    ::testing::Combine(::testing::Values(NestedIndexType::NONE,
+                                         NestedIndexType::STL_SORT,
+                                         NestedIndexType::INVERTED),
+                       ::testing::Values(false, true)  // force_offset_mode
+                       ),
+    [](const ::testing::TestParamInfo<ElementFilterNestedIndex::ParamType>&
+           info) {
+        auto index_type = std::get<0>(info.param);
+        bool offset_mode = std::get<1>(info.param);
+        std::string name = NestedIndexTypeToString(index_type);
+        name += offset_mode ? "_OffsetMode" : "_FullMode";
+        return name;
+    });
