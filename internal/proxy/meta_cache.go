@@ -380,6 +380,9 @@ func InitMetaCache(ctx context.Context, mixCoord types.MixCoordClient) error {
 	// Register password verify function for /expr endpoint authentication
 	internalhttp.RegisterPasswordVerifyFunc(PasswordVerify)
 
+	// Register get user role function for /expr endpoint RBAC check
+	internalhttp.RegisterGetUserRoleFunc(GetRole)
+
 	return nil
 }
 

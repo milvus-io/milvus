@@ -29,10 +29,12 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/eventlog"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -115,9 +117,23 @@ func registerDefaults() {
 				return
 			}
 
-			// On Proxy node: require root user authentication via HTTP Basic Auth
-			if err := checkExprRootAuth(req); err != nil {
-				w.WriteHeader(http.StatusUnauthorized)
+			// Check RBAC privilege for /expr access
+			if err := CheckPrivilege(
+				req.Context(),
+				req,
+				commonpb.ObjectType_Global,
+				commonpb.ObjectPrivilege_PrivilegeExpr,
+				util.AnyWord,
+				util.DefaultDBName,
+			); err != nil {
+				if IsAuthenticationError(err) {
+					w.WriteHeader(http.StatusUnauthorized)
+				} else if IsPermissionDeniedError(err) {
+					w.WriteHeader(http.StatusForbidden)
+				} else {
+					// Internal error (e.g., Casbin enforcer failure)
+					w.WriteHeader(http.StatusInternalServerError)
+				}
 				w.Write([]byte(fmt.Sprintf(`{"msg": "%s"}`, err.Error())))
 				return
 			}
@@ -305,43 +321,4 @@ func getHTTPAddr() string {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.MetricsPort.Key, port)
 
 	return fmt.Sprintf(":%s", port)
-}
-
-// checkExprRootAuth verifies that the request is from the root user.
-// It supports HTTP Basic Auth and Bearer token formats.
-func checkExprRootAuth(req *http.Request) error {
-	// Try HTTP Basic Auth first
-	username, password, ok := req.BasicAuth()
-	if !ok {
-		// Try Bearer token format: "user:password"
-		auth := req.Header.Get("Authorization")
-		auth = strings.TrimPrefix(auth, "Bearer ")
-		parts := strings.SplitN(auth, ":", 2)
-		if len(parts) == 2 {
-			username, password = parts[0], parts[1]
-			ok = true
-		}
-	}
-
-	if !ok || username == "" || password == "" {
-		return fmt.Errorf("authentication required. Use HTTP Basic Auth with root credentials")
-	}
-
-	// Only root user can access /expr
-	if username != "root" {
-		log.Warn("non-root user attempted to access /expr", zap.String("username", username))
-		return fmt.Errorf("only root user can access /expr endpoint")
-	}
-
-	// Verify root password
-	if passwordVerifyFunc == nil {
-		return fmt.Errorf("password verification not available")
-	}
-	if !passwordVerifyFunc(context.Background(), username, password) {
-		log.Warn("invalid root password for /expr access")
-		return fmt.Errorf("invalid root password")
-	}
-
-	log.Info("root user authenticated for /expr access")
-	return nil
 }

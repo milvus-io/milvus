@@ -168,6 +168,8 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDescribeSnapshot.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListSnapshots.String()),
+
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeExpr.String()),
 		},
 		commonpb.ObjectType_User.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateUser.String()),
@@ -403,6 +405,7 @@ var (
 			commonpb.ObjectPrivilege_PrivilegeDropPrivilegeGroup.String(),
 			commonpb.ObjectPrivilege_PrivilegeOperatePrivilegeGroup.String(),
 			commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String(),
+			commonpb.ObjectPrivilege_PrivilegeExpr.String(),
 		})...,
 	)
 )
