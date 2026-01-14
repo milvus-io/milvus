@@ -345,7 +345,7 @@ ArrayOffsetsGrowing::RowOffsetsToElementOffsets(
     }
 
     int64_t avg_elem_per_row =
-        committed_row_count_ > 0
+        (committed_row_count_ > 0)
             ? static_cast<int64_t>(element_row_ids_.size()) /
                   committed_row_count_
             : 1;

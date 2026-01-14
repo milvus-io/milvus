@@ -758,12 +758,14 @@ InvertedIndexTantivy<T>::build_index_for_array_nested(
                                            T>;
 
     int64_t offset = 0;
+    int64_t row_offset = 0;
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         auto array_column = static_cast<const Array*>(data->Data());
-        for (int64_t i = 0; i < n; i++) {
+        for (int64_t i = 0; i < n; i++, row_offset++) {
             if (schema_.nullable() && !data->is_valid(i)) {
-                // Skip null arrays - no elements to add
+                // Record null row offset, no elements to add
+                null_offset_.push_back(row_offset);
                 continue;
             }
             auto length = array_column[i].length();
@@ -781,12 +783,14 @@ void
 InvertedIndexTantivy<std::string>::build_index_for_array_nested(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
     int64_t offset = 0;
+    int64_t row_offset = 0;
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         auto array_column = static_cast<const Array*>(data->Data());
-        for (int64_t i = 0; i < n; i++) {
+        for (int64_t i = 0; i < n; i++, row_offset++) {
             if (schema_.nullable() && !data->is_valid(i)) {
-                // Skip null arrays - no elements to add
+                // Record null row offset, no elements to add
+                null_offset_.push_back(row_offset);
                 continue;
             }
             Assert(IsStringDataType(array_column[i].get_element_type()));
