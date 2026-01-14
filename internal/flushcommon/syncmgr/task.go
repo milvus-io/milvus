@@ -136,10 +136,9 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 
 	switch segmentInfo.GetStorageVersion() {
 	case storage.StorageV2:
-		// TODO change to return manifest after integrated
 		// New sync task means needs to flush data immediately, so do not need to buffer data in writer again.
 		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
-			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, t.writeRetryOpts...)
+			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, segmentInfo.ManifestPath(), t.writeRetryOpts...)
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, err = writer.Write(ctx, t.pack)
 		if err != nil {
 			log.Warn("failed to write sync data with storage v2 format", zap.Error(err))
@@ -181,7 +180,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 
 	t.pack.ReleaseData()
 
-	actions := []metacache.SegmentAction{metacache.FinishSyncing(t.batchRows)}
+	actions := []metacache.SegmentAction{metacache.FinishSyncing(t.batchRows), metacache.UpdateManifestPath(t.manifestPath)}
 	if columnGroups != nil {
 		actions = append(actions, metacache.UpdateCurrentSplit(columnGroups))
 	}

@@ -80,6 +80,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DataCoordClient interface {
 	Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushResponse, error)
+	// FlushAll flushes all data in the cluster.
 	FlushAll(ctx context.Context, in *FlushAllRequest, opts ...grpc.CallOption) (*FlushAllResponse, error)
 	// AllocSegment alloc a new growing segment, add it into segment meta.
 	AllocSegment(ctx context.Context, in *AllocSegmentRequest, opts ...grpc.CallOption) (*AllocSegmentResponse, error)
@@ -605,6 +606,7 @@ func (c *dataCoordClient) ListFileResources(ctx context.Context, in *milvuspb.Li
 // for forward compatibility
 type DataCoordServer interface {
 	Flush(context.Context, *FlushRequest) (*FlushResponse, error)
+	// FlushAll flushes all data in the cluster.
 	FlushAll(context.Context, *FlushAllRequest) (*FlushAllResponse, error)
 	// AllocSegment alloc a new growing segment, add it into segment meta.
 	AllocSegment(context.Context, *AllocSegmentRequest) (*AllocSegmentResponse, error)

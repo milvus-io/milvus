@@ -33,7 +33,6 @@ type flushAllTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *milvuspb.FlushAllResponse
-	chMgr    channelsMgr
 }
 
 func (t *flushAllTask) TraceCtx() context.Context {

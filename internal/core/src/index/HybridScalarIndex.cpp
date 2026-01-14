@@ -351,6 +351,7 @@ HybridScalarIndex<T>::Load(const BinarySet& binary_set, const Config& config) {
     index->Load(binary_set, config);
 
     is_built_ = true;
+    ComputeByteSize();
 }
 
 template <typename T>
@@ -382,6 +383,7 @@ HybridScalarIndex<T>::Load(milvus::tracer::TraceContext ctx,
     index->Load(ctx, config);
 
     is_built_ = true;
+    ComputeByteSize();
 }
 
 template class HybridScalarIndex<bool>;

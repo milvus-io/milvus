@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -91,4 +92,58 @@ func JoinIDPath(ids ...typeutil.UniqueID) string {
 		idStr = append(idStr, strconv.FormatInt(id, 10))
 	}
 	return path.Join(idStr...)
+}
+
+// ExtractTextLogFilenames extracts only filenames from full paths to save space.
+// It modifies the TextStatsLogs map in place, compressing full paths to filenames.
+func ExtractTextLogFilenames(textStatsLogs map[int64]*datapb.TextIndexStats) {
+	for _, textStats := range textStatsLogs {
+		if textStats == nil {
+			continue
+		}
+		filenames := make([]string, 0, len(textStats.GetFiles()))
+		for _, fullPath := range textStats.GetFiles() {
+			idx := strings.LastIndex(fullPath, pathSep)
+			if idx < 0 {
+				filenames = append(filenames, fullPath)
+			} else {
+				filenames = append(filenames, fullPath[idx+1:])
+			}
+		}
+		textStats.Files = filenames
+	}
+}
+
+// BuildTextLogPaths reconstructs full paths from filenames for text index logs.
+// This function is compatible with both old version (full paths) and new version (filenames only).
+func BuildTextLogPaths(rootPath string, collectionID, partitionID, segmentID typeutil.UniqueID, textStatsLogs map[int64]*datapb.TextIndexStats) {
+	for _, textStats := range textStatsLogs {
+		if textStats == nil {
+			continue
+		}
+		prefix := path.Join(
+			rootPath,
+			common.TextIndexPath,
+			strconv.FormatInt(textStats.GetBuildID(), 10),
+			strconv.FormatInt(textStats.GetVersion(), 10),
+			strconv.FormatInt(collectionID, 10),
+			strconv.FormatInt(partitionID, 10),
+			strconv.FormatInt(segmentID, 10),
+			strconv.FormatInt(textStats.GetFieldID(), 10),
+		)
+
+		filenames := textStats.GetFiles()
+		fullPaths := make([]string, 0, len(filenames))
+		for _, filename := range filenames {
+			// Check if filename is already a full path (compatible with old version)
+			// If it contains the text_log path segment, treat it as a full path
+			if strings.Contains(filename, common.TextIndexPath+pathSep) {
+				fullPaths = append(fullPaths, filename)
+			} else {
+				// New version: filename only, need to join with prefix
+				fullPaths = append(fullPaths, path.Join(prefix, filename))
+			}
+		}
+		textStats.Files = fullPaths
+	}
 }

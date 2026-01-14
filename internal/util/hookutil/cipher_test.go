@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -135,10 +136,10 @@ func (s *CipherSuite) TestIsDBEncryptionEnabled() {
 	dbProperties := []*commonpb.KeyValuePair{
 		{Key: EncryptionEnabledKey, Value: "true"},
 	}
-	s.True(IsDBEncryptionEnabled(dbProperties))
+	s.True(IsDBEncrypted(dbProperties))
 
 	dbProperties = []*commonpb.KeyValuePair{}
-	s.False(IsDBEncryptionEnabled(dbProperties))
+	s.False(IsDBEncrypted(dbProperties))
 }
 
 func (s *CipherSuite) TestTidyDBCipherPropertiesError() {
@@ -158,14 +159,14 @@ func (s *CipherSuite) TestTestCipherInit() {
 	s.NoError(err)
 }
 
-func (s *CipherSuite) TestIsClusterEncyptionEnabled() {
+func (s *CipherSuite) TestIsClusterEncryptionEnabled() {
 	// Test when cipher is nil
 	storeCipher(nil)
-	s.False(IsClusterEncyptionEnabled())
+	s.False(IsClusterEncryptionEnabled())
 
 	// Test when cipher is not nil
 	InitTestCipher()
-	s.True(IsClusterEncyptionEnabled())
+	s.True(IsClusterEncryptionEnabled())
 }
 
 func (s *CipherSuite) TestContainsCipherProperty() {
@@ -240,11 +241,13 @@ func (s *CipherSuite) TestGetStoragePluginContext() {
 	properties := []*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "1"}}
 	result = GetStoragePluginContext(properties, 2)
 	s.NotNil(result)
-	s.Equal(2, len(result))
-	s.Equal(CipherConfigCreateEZ, result[0].Key)
-	s.Equal("1", result[0].Value)
-	s.Equal(CipherConfigUnsafeEZK, result[1].Key)
-	s.Equal(base64.StdEncoding.EncodeToString([]byte("unsafe key")), result[1].Value)
+	s.Equal(1, len(result))
+	s.Equal(CipherConfigUnsafeEZK, result[0].Key)
+	// Verify encoded format: "1:base64Key"
+	s.Contains(result[0].Value, ":")
+	parts := strings.Split(result[0].Value, ":")
+	s.Equal("1", parts[0])
+	s.Equal(base64.StdEncoding.EncodeToString([]byte("unsafe key")), parts[1])
 
 	result = GetStoragePluginContext([]*commonpb.KeyValuePair{}, 2)
 	s.Nil(result)
@@ -277,32 +280,6 @@ func (s *CipherSuite) TestRemoveEZByDBProperties() {
 	s.NoError(err)
 }
 
-func (s *CipherSuite) TestCreateLocalEZByPluginContext() {
-	storeCipher(nil)
-	ctx, err := CreateLocalEZByPluginContext([]*commonpb.KeyValuePair{{Key: CipherConfigCreateEZ, Value: "1"}})
-	s.NoError(err)
-	s.Nil(ctx)
-
-	InitTestCipher()
-	context := []*commonpb.KeyValuePair{
-		{Key: CipherConfigCreateEZ, Value: "123"},
-		{Key: CipherConfigUnsafeEZK, Value: "test-key"},
-	}
-	ctx, err = CreateLocalEZByPluginContext(context)
-	s.NoError(err)
-	s.NotNil(ctx)
-	s.Equal(int64(123), ctx.EncryptionZoneId)
-	s.Equal("test-key", ctx.EncryptionKey)
-
-	ctx, err = CreateLocalEZByPluginContext([]*commonpb.KeyValuePair{{Key: CipherConfigCreateEZ, Value: "invalid"}})
-	s.Error(err)
-	s.Nil(ctx)
-
-	ctx, err = CreateLocalEZByPluginContext([]*commonpb.KeyValuePair{{Key: CipherConfigCreateEZ, Value: "1"}})
-	s.NoError(err)
-	s.Nil(ctx)
-}
-
 func (s *CipherSuite) TestCreateEZByDBProperties() {
 	storeCipher(nil)
 	err := CreateEZByDBProperties([]*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "1"}})
@@ -325,15 +302,15 @@ func (s *CipherSuite) TestCreateEZByDBProperties() {
 
 func (s *CipherSuite) TestGetEzPropByDBProperties() {
 	props := []*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "123"}}
-	result := GetEzPropByDBProperties(props)
+	result := getCollEzPropsByDBProps(props)
 	s.NotNil(result)
 	s.Equal(EncryptionEzIDKey, result.Key)
 	s.Equal("123", result.Value)
 
-	result = GetEzPropByDBProperties([]*commonpb.KeyValuePair{{Key: "other", Value: "value"}})
+	result = getCollEzPropsByDBProps([]*commonpb.KeyValuePair{{Key: "other", Value: "value"}})
 	s.Nil(result)
 
-	result = GetEzPropByDBProperties([]*commonpb.KeyValuePair{})
+	result = getCollEzPropsByDBProps([]*commonpb.KeyValuePair{})
 	s.Nil(result)
 }
 
@@ -347,13 +324,13 @@ func (s *CipherSuite) TestGetEzByCollPropertiesInvalidValue() {
 
 func (s *CipherSuite) TestIsDBEncryptionEnabledCaseInsensitive() {
 	props := []*commonpb.KeyValuePair{{Key: EncryptionEnabledKey, Value: "True"}}
-	s.True(IsDBEncryptionEnabled(props))
+	s.True(IsDBEncrypted(props))
 
 	props = []*commonpb.KeyValuePair{{Key: EncryptionEnabledKey, Value: "TRUE"}}
-	s.True(IsDBEncryptionEnabled(props))
+	s.True(IsDBEncrypted(props))
 
 	props = []*commonpb.KeyValuePair{{Key: EncryptionEnabledKey, Value: "false"}}
-	s.False(IsDBEncryptionEnabled(props))
+	s.False(IsDBEncrypted(props))
 }
 
 func (s *CipherSuite) TestRegisterCallback() {
@@ -408,4 +385,156 @@ func (s *CipherSuite) TestGetEzByCollPropertiesNotFound() {
 	}
 	result := GetEzByCollProperties(props, 456)
 	s.Nil(result)
+}
+
+func (s *CipherSuite) TestBackupEZ() {
+	storeCipher(nil)
+	_, err := BackupEZ(123)
+	s.Error(err)
+	s.Equal(ErrCipherPluginMissing, err)
+
+	InitTestCipher()
+	_, err = BackupEZ(123)
+	s.Error(err)
+	s.Contains(err.Error(), "does not support backup operation")
+}
+
+func (s *CipherSuite) TestBackupEZKFromDBProperties() {
+	storeCipher(nil)
+	props := []*commonpb.KeyValuePair{
+		{Key: EncryptionEnabledKey, Value: "true"},
+		{Key: EncryptionEzIDKey, Value: "123"},
+	}
+	_, err := BackupEZKFromDBProperties(props)
+	s.Error(err)
+	s.Equal(ErrCipherPluginMissing, err)
+
+	props = []*commonpb.KeyValuePair{
+		{Key: EncryptionEnabledKey, Value: "false"},
+	}
+	_, err = BackupEZKFromDBProperties(props)
+	s.Error(err)
+	s.Contains(err.Error(), "not an encryption zone")
+
+	props = []*commonpb.KeyValuePair{
+		{Key: EncryptionEnabledKey, Value: "true"},
+	}
+	_, err = BackupEZKFromDBProperties(props)
+	s.Error(err)
+	s.Contains(err.Error(), "no ezID found")
+}
+
+func (s *CipherSuite) TestImportEZ() {
+	storeCipher(nil)
+	result, err := ImportEZ("")
+	s.NoError(err)
+	s.Nil(result)
+
+	result, err = ImportEZ("some-base64-string")
+	s.NoError(err)
+	s.Nil(result)
+
+	InitTestCipher()
+	result, err = ImportEZ("invalid-base64")
+	s.Error(err)
+	s.Nil(result)
+	s.Contains(err.Error(), "failed to decode EZK")
+
+	result, err = ImportEZ(base64.StdEncoding.EncodeToString([]byte("not-json")))
+	s.Error(err)
+	s.Nil(result)
+	s.Contains(err.Error(), "failed to unmarshal EZK")
+
+	ezkJSON := `{"ez_id":123}`
+	ezkBase64 := base64.StdEncoding.EncodeToString([]byte(ezkJSON))
+	result, err = ImportEZ(ezkBase64)
+	s.NoError(err)
+	s.NotNil(result)
+	s.Equal(1, len(result))
+	s.Equal(CipherConfigUnsafeEZK, result[0].Key)
+	// Verify encoded format: "123:base64Key"
+	s.Contains(result[0].Value, ":")
+	parts := strings.Split(result[0].Value, ":")
+	s.Equal("123", parts[0])
+	s.Equal(base64.StdEncoding.EncodeToString([]byte("unsafe key")), parts[1])
+}
+
+func (s *CipherSuite) TestIsEncryptionEnabled() {
+	storeCipher(nil)
+	s.False(IsClusterEncryptionEnabled())
+
+	InitTestCipher()
+	s.True(IsClusterEncryptionEnabled())
+}
+
+func (s *CipherSuite) TestParseEzIDFromProperties() {
+	props := []*commonpb.KeyValuePair{
+		{Key: EncryptionEzIDKey, Value: "123"},
+	}
+	ezID, found := ParseEzIDFromProperties(props)
+	s.True(found)
+	s.Equal(int64(123), ezID)
+
+	props = []*commonpb.KeyValuePair{
+		{Key: "other_key", Value: "value"},
+	}
+	ezID, found = ParseEzIDFromProperties(props)
+	s.False(found)
+	s.Equal(int64(0), ezID)
+
+	props = []*commonpb.KeyValuePair{
+		{Key: EncryptionEzIDKey, Value: "invalid"},
+	}
+	ezID, found = ParseEzIDFromProperties(props)
+	s.False(found)
+	s.Equal(int64(0), ezID)
+}
+
+func (s *CipherSuite) TestCreateEZ() {
+	storeCipher(nil)
+	err := CreateEZ(123, "test-kms-key")
+	s.NoError(err)
+
+	InitTestCipher()
+	err = CreateEZ(456, "test-kms-key")
+	s.NoError(err)
+}
+
+func (s *CipherSuite) TestCreateLocalEZ() {
+	storeCipher(nil)
+	err := CreateLocalEZ(123, "test-encryption-key")
+	s.NoError(err)
+
+	InitTestCipher()
+	err = CreateLocalEZ(456, "test-encryption-key")
+	s.NoError(err)
+}
+
+func (s *CipherSuite) TestRemoveEZ() {
+	storeCipher(nil)
+	err := RemoveEZ(123)
+	s.NoError(err)
+
+	InitTestCipher()
+	err = RemoveEZ(456)
+	s.NoError(err)
+}
+
+func (s *CipherSuite) TestGetPluginContext() {
+	storeCipher(nil)
+	result, err := GetPluginContext(123, 456)
+	s.NoError(err)
+	s.Nil(result)
+
+	InitTestCipher()
+	result, err = GetPluginContext(123, 456)
+	s.NoError(err)
+	s.NotNil(result)
+	s.Equal(1, len(result))
+	s.Equal(CipherConfigUnsafeEZK, result[0].Key)
+	// Verify encoded format: "123:base64Key"
+	s.Contains(result[0].Value, ":")
+	parts := strings.Split(result[0].Value, ":")
+	s.Equal("123", parts[0])
+	s.Equal(base64.StdEncoding.EncodeToString([]byte("unsafe key")), parts[1])
 }

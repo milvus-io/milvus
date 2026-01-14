@@ -14,37 +14,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package testutils
+package logging
 
 import (
-	"os"
+	"testing"
 
-	"go.etcd.io/etcd/server/v3/embed"
-
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap/zapcore"
 )
 
-type EmbedEtcdUtil struct {
-	server  *embed.Etcd
-	tempDir string
-}
-
-func (util *EmbedEtcdUtil) SetupEtcd() ([]string, error) {
-	// init embed etcd
-	embedetcdServer, tempDir, err := etcd.StartTestEmbedEtcdServer()
-	if err != nil {
-		return nil, err
-	}
-	util.server, util.tempDir = embedetcdServer, tempDir
-
-	return etcd.GetEmbedEtcdEndpoints(embedetcdServer), nil
-}
-
-func (util *EmbedEtcdUtil) TearDownEmbedEtcd() {
-	if util.server != nil {
-		util.server.Close()
-	}
-	if util.tempDir != "" {
-		os.RemoveAll(util.tempDir)
-	}
+func TestLogging(t *testing.T) {
+	require.Equal(t, zapcore.InfoLevel, mapGlogSeverity(0))
+	require.Equal(t, zapcore.WarnLevel, mapGlogSeverity(1))
+	require.Equal(t, zapcore.ErrorLevel, mapGlogSeverity(2))
+	require.Equal(t, zapcore.ErrorLevel, mapGlogSeverity(3))
+	require.Equal(t, zapcore.InfoLevel, mapGlogSeverity(4))
 }

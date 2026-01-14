@@ -293,7 +293,10 @@ RustResult tantivy_ngram_match_query(void *ptr,
                                      uintptr_t max_gram,
                                      void *bitset);
 
-RustResult tantivy_match_query(void *ptr, const char *query, void *bitset);
+RustResult tantivy_match_query(void *ptr,
+                               const char *query,
+                               uintptr_t min_should_match,
+                               void *bitset);
 
 RustResult tantivy_phrase_match_query(void *ptr, const char *query, uint32_t slop, void *bitset);
 

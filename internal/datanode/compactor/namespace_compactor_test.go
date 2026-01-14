@@ -40,7 +40,6 @@ type NamespaceCompactorTestSuite struct {
 func (s *NamespaceCompactorTestSuite) SetupSuite() {
 	paramtable.Get().Init(paramtable.NewBaseTable())
 	paramtable.Get().Save("common.storageType", "local")
-	paramtable.Get().Save("common.storage.enableV2", "true")
 	initcore.InitStorageV2FileSystem(paramtable.Get())
 
 	s.binlogIO = mock_util.NewMockBinlogIO(s.T())
@@ -111,7 +110,7 @@ func (s *NamespaceCompactorTestSuite) setupSortedSegments() {
 		bw := syncmgr.NewBulkPackWriterV2(mc, s.schema, cm, alloc, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
 			StorageType: "local",
 			RootPath:    rootPath,
-		}, columnGroups)
+		}, columnGroups, "")
 		inserts, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 		s.Require().NoError(err)
 		s.sortedSegments = append(s.sortedSegments, &datapb.CompactionSegmentBinlogs{

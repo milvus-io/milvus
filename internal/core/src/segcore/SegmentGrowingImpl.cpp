@@ -510,6 +510,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
                 }
             }
         }
+        // access underlying feature to get exception if any
+        load_future.get();
 
         for (auto& [field_id, field_data] : field_data_map) {
             load_field_data_common(field_id,
@@ -1312,6 +1314,14 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
 
         schema_ = sch;
     }
+}
+
+void
+SegmentGrowingImpl::Reopen(
+    const milvus::proto::segcore::SegmentLoadInfo& new_load_info) {
+    ThrowInfo(milvus::UnexpectedError,
+              "Unexpected reopening growing segment {} with load info",
+              id_);
 }
 
 void

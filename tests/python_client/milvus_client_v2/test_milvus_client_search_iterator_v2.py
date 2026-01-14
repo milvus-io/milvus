@@ -210,3 +210,39 @@ class TestSearchIterator(TestcaseBase):
                                      check_task=CheckTasks.err_res,
                                      check_items={"err_code": 1,
                                                   "err_msg": "Not support search iteration over multiple vectors at present"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_iterator_not_support_search_by_pk(self):
+        """
+        target: test search iterator does not support search by pk
+        method: 1. search iterator by pk
+        expected: search failed with error
+        """
+        # 1. initialize with data
+        batch_size = 100
+        dim = 128
+        collection_w = self.init_collection_general(
+            prefix, True, dim=dim, is_index=False)[0]
+        collection_w.create_index(field_name, {"metric_type": "L2"})
+        collection_w.load()
+        # 2. search iterator
+        search_params = {"metric_type": "L2"}
+        ids_to_search = [1]
+        collection_w.search_iterator(
+            ids=ids_to_search,
+            anns_field=field_name,
+            param=search_params,
+            batch_size=batch_size,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 999,
+                         "err_msg": "object of type 'NoneType' has no len()"})
+
+        collection_w.search_iterator(
+            data=vectors[:1],
+            ids=ids_to_search,
+            anns_field=field_name,
+            param=search_params,
+            batch_size=batch_size,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 999,
+                         "err_msg": "Either ids or data must be provided, not both"})

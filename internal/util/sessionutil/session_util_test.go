@@ -384,7 +384,11 @@ func (suite *SessionWithVersionSuite) SetupTest() {
 	s1 := NewSessionWithEtcd(ctx, suite.metaRoot, suite.client, WithResueNodeID(false))
 	s1.Version.Major, s1.Version.Minor, s1.Version.Patch = 0, 0, 0
 	s1.Init(suite.serverName, "s1", false, false)
+	assert.Panics(suite.T(), func() {
+		s1.GetRegisteredRevision()
+	})
 	s1.Register()
+	assert.Greater(suite.T(), s1.GetRegisteredRevision(), int64(0))
 
 	suite.sessions = append(suite.sessions, s1)
 
@@ -510,9 +514,13 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	// register session 1, will be active
 	ctx1 := context.Background()
 	s1 := NewSessionWithEtcd(ctx1, metaRoot, etcdCli, WithResueNodeID(false))
+
 	s1.Init("inittest", "testAddr", true, true)
 	s1.SetEnableActiveStandBy(true)
 	s1.Register()
+	assert.Panics(t, func() {
+		s1.GetRegisteredRevision()
+	})
 	wg.Add(1)
 	s1.ProcessActiveStandBy(func() error {
 		log.Debug("Session 1 become active")
@@ -520,6 +528,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 		return nil
 	})
 	wg.Wait()
+	assert.Greater(t, s1.GetRegisteredRevision(), int64(0))
 	assert.False(t, s1.isStandby.Load().(bool))
 
 	// register session 2, will be standby
@@ -759,16 +768,97 @@ func (s *SessionSuite) TestKeepAliveRetryChannelClose() {
 func (s *SessionSuite) TestGetSessions() {
 	os.Setenv("MILVUS_SERVER_LABEL_key1", "value1")
 	os.Setenv("MILVUS_SERVER_LABEL_key2", "value2")
-	os.Setenv("key3", "value3")
+	os.Setenv("MILVUS_SERVER_LABEL_key3", "value3")
+	os.Setenv("MILVUS_SERVER_LABEL_qn_key3", "value33")
+	os.Setenv("MILVUS_SERVER_LABEL_sn_key3", "value33")
+	os.Setenv("key4", "value4")
+	os.Setenv("MILVUS_SERVER_LABEL_", "value5")
+	os.Setenv("MILVUS_SERVER_LABEL_qn", "value6")
 
 	defer os.Unsetenv("MILVUS_SERVER_LABEL_key1")
 	defer os.Unsetenv("MILVUS_SERVER_LABEL_key2")
-	defer os.Unsetenv("key3")
+	defer os.Unsetenv("MILVUS_SERVER_LABEL_qn_key3")
+	defer os.Unsetenv("MILVUS_SERVER_LABEL_sn_key3")
+	defer os.Unsetenv("key4")
 
-	ret := GetServerLabelsFromEnv("querynode")
-	assert.Equal(s.T(), 2, len(ret))
-	assert.Equal(s.T(), "value1", ret["key1"])
-	assert.Equal(s.T(), "value2", ret["key2"])
+	roles := []string{typeutil.QueryNodeRole, typeutil.MixCoordRole, typeutil.StreamingNodeRole, typeutil.ProxyRole}
+
+	for _, role := range roles {
+		ret := getServerLabelsFromEnv(role)
+		switch role {
+		case typeutil.QueryNodeRole, typeutil.StreamingNodeRole:
+			assert.Equal(s.T(), 3, len(ret))
+			assert.Equal(s.T(), "value1", ret["key1"])
+			assert.Equal(s.T(), "value2", ret["key2"])
+			assert.Equal(s.T(), "value33", ret["key3"], "role: %s", role)
+		default:
+			assert.Equal(s.T(), 3, len(ret))
+			assert.Equal(s.T(), "value1", ret["key1"])
+			assert.Equal(s.T(), "value2", ret["key2"])
+			assert.Equal(s.T(), "value3", ret["key3"])
+		}
+	}
+}
+
+func (s *SessionSuite) TestVersionKey() {
+	ctx := context.Background()
+	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
+	session.Init(typeutil.MixCoordRole, "normal", false, false)
+
+	session.Register()
+
+	resp, err := s.client.Get(ctx, session.versionKey)
+	s.Require().NoError(err)
+	s.Equal(1, len(resp.Kvs))
+	s.Equal(common.Version.String(), string(resp.Kvs[0].Value))
+
+	common.Version = semver.MustParse("2.5.6")
+
+	s.Panics(func() {
+		session2 := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
+		session2.Init(typeutil.MixCoordRole, "normal", false, false)
+		session2.Register()
+
+		resp, err = s.client.Get(ctx, session2.versionKey)
+		s.Require().NoError(err)
+		s.Equal(1, len(resp.Kvs))
+		s.Equal(common.Version.String(), string(resp.Kvs[0].Value))
+	})
+
+	session.Stop()
+
+	common.Version = semver.MustParse("2.6.4")
+	session = NewSessionWithEtcd(ctx, s.metaRoot, s.client)
+	session.Init(typeutil.MixCoordRole, "normal", false, false)
+	session.Register()
+
+	resp, err = s.client.Get(ctx, session.versionKey)
+	s.Require().NoError(err)
+	s.Equal(1, len(resp.Kvs))
+	s.Equal(common.Version.String(), string(resp.Kvs[0].Value))
+
+	session.Stop()
+
+	common.Version = semver.MustParse("2.6.7")
+	session = NewSessionWithEtcd(ctx, s.metaRoot, s.client)
+	session.Init(typeutil.MixCoordRole, "normal", false, false)
+	session.Register()
+
+	resp, err = s.client.Get(ctx, session.versionKey)
+	s.Require().NoError(err)
+	s.Equal(1, len(resp.Kvs))
+	s.Equal(common.Version.String(), string(resp.Kvs[0].Value))
+	session.Stop()
+
+	common.Version = semver.MustParse("3.0.0")
+	session = NewSessionWithEtcd(ctx, s.metaRoot, s.client)
+	session.Init(typeutil.MixCoordRole, "normal", false, false)
+	session.Register()
+
+	resp, err = s.client.Get(ctx, session.versionKey)
+	s.Require().NoError(err)
+	s.Equal(1, len(resp.Kvs))
+	s.Equal(common.Version.String(), string(resp.Kvs[0].Value))
 }
 
 func (s *SessionSuite) TestSessionLifetime() {

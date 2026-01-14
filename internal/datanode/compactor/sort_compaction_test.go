@@ -245,7 +245,7 @@ func (s *SortCompactionTaskSuite) setupBM25Test() {
 		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 9530, End: 19530},
 		MaxSize:                64 * 1024 * 1024,
 		JsonParams:             params,
-		TotalRows:              3,
+		TotalRows:              1,
 	}
 
 	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
@@ -281,7 +281,7 @@ func (s *SortCompactionTaskSuite) prepareSortCompactionWithBM25Task() {
 func (s *SortCompactionTaskSuite) TestSortCompactionWithExpiredData() {
 	segmentID := int64(1001)
 
-	s.initSegBuffer(1, segmentID)
+	s.initSegBuffer(1000, segmentID)
 	collTTL := 864000 // 10 days
 	s.task.currentTime = getMilvusBirthday().Add(time.Second * (time.Duration(collTTL) + 1))
 	s.task.plan.CollectionTtl = int64(collTTL)

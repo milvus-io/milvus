@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/base64"
 	"math"
-	"path"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
@@ -31,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -51,11 +51,12 @@ type BulkPackWriterV2 struct {
 
 	storageConfig *indexpb.StorageConfig
 	columnGroups  []storagecommon.ColumnGroup
+	manifestPath  string
 }
 
 func NewBulkPackWriterV2(metaCache metacache.MetaCache, schema *schemapb.CollectionSchema, chunkManager storage.ChunkManager,
 	allocator allocator.Interface, bufferSize, multiPartUploadSize int64,
-	storageConfig *indexpb.StorageConfig, columnGroups []storagecommon.ColumnGroup, writeRetryOpts ...retry.Option,
+	storageConfig *indexpb.StorageConfig, columnGroups []storagecommon.ColumnGroup, curManifestPath string, writeRetryOpts ...retry.Option,
 ) *BulkPackWriterV2 {
 	return &BulkPackWriterV2{
 		BulkPackWriter: &BulkPackWriter{
@@ -70,6 +71,7 @@ func NewBulkPackWriterV2(metaCache metacache.MetaCache, schema *schemapb.Collect
 		multiPartUploadSize: multiPartUploadSize,
 		storageConfig:       storageConfig,
 		columnGroups:        columnGroups,
+		manifestPath:        curManifestPath,
 	}
 }
 
@@ -130,6 +132,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	if err != nil {
 		return nil, "", err
 	}
+	defer rec.Release()
 
 	tsArray := rec.Column(common.TimeStampField).(*array.Int64)
 	rows := rec.Len()
@@ -145,7 +148,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		}
 	}
 	var pluginContextPtr *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncyptionEnabled() {
+	if hookutil.IsClusterEncryptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(bw.schema.GetProperties(), pack.collectionID)
 		if ez != nil {
 			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
@@ -203,10 +206,12 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 	}
 
 	var manifestPath string
-	if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
-		k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID)
-		basePath := path.Join(bw.getRootPath(), common.SegmentInsertLogPath, k)
-		w, err := storage.NewPackedRecordManifestWriter(bucketName, basePath, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
+	if bw.manifestPath != "" {
+		basePath, version, err := packed.UnmarshalManfestPath(bw.manifestPath)
+		if err != nil {
+			return nil, "", err
+		}
+		w, err := storage.NewPackedRecordManifestWriter(bucketName, basePath, version, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
 		if err != nil {
 			return nil, "", err
 		}

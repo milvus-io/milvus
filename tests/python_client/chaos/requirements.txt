@@ -1,5 +1,4 @@
 
-# for test result anaylszer
+# for test result analyzer
 prettytable==3.8.0
 pyarrow==14.0.1
-fastparquet==2023.7.0

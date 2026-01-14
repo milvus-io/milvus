@@ -11,6 +11,7 @@ var messageTypeToCommonpbMsgType = map[message.MessageType]commonpb.MsgType{
 	message.MessageTypeDelete:           commonpb.MsgType_Delete,
 	message.MessageTypeFlush:            commonpb.MsgType_FlushSegment,
 	message.MessageTypeManualFlush:      commonpb.MsgType_ManualFlush,
+	message.MessageTypeFlushAll:         commonpb.MsgType_FlushAll,
 	message.MessageTypeCreateSegment:    commonpb.MsgType_CreateSegment,
 	message.MessageTypeCreateCollection: commonpb.MsgType_CreateCollection,
 	message.MessageTypeDropCollection:   commonpb.MsgType_DropCollection,

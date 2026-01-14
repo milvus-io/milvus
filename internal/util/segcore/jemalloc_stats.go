@@ -11,7 +11,7 @@
 
 //go:build linux || darwin
 
-package hardware
+package segcore
 
 /*
 #cgo pkg-config: milvus_core

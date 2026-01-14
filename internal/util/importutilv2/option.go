@@ -65,6 +65,9 @@ const (
 	StartTs2 = "startTs"
 	EndTs    = "end_ts"
 	EndTs2   = "endTs"
+
+	// EZK is the base64-encoded encryption zone key for reading encrypted backup data.
+	EZK = "ezk"
 )
 
 type Options []*commonpb.KeyValuePair
@@ -182,4 +185,12 @@ func GetCSVNullKey(options Options) (string, error) {
 		return defaultNullKey, nil
 	}
 	return nullKey, nil
+}
+
+func GetEZK(options Options) (string, error) {
+	ezk, err := funcutil.GetAttrByKeyFromRepeatedKV(EZK, options)
+	if err != nil || len(ezk) == 0 {
+		return "", nil
+	}
+	return ezk, nil
 }

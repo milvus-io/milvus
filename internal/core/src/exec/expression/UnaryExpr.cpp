@@ -155,6 +155,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex<proto::plan::Array>(
 
 void
 PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    tracer::AutoSpan span(
+        "PhyUnaryRangeFilterExpr::Eval", tracer::GetRootSpan(), true);
+    span.GetSpan()->SetAttribute("data_type",
+                                 static_cast<int>(expr_->column_.data_type_));
+    span.GetSpan()->SetAttribute("op_type", static_cast<int>(expr_->op_type_));
+
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     switch (expr_->column_.data_type_) {
@@ -175,6 +181,10 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::INT64: {
+            result = ExecRangeVisitorImpl<int64_t>(context);
+            break;
+        }
+        case DataType::TIMESTAMPTZ: {
             result = ExecRangeVisitorImpl<int64_t>(context);
             break;
         }
@@ -1800,10 +1810,18 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
         }
     }
 
-    auto func = [op_type, slop](Index* index,
-                                const std::string& query) -> TargetBitmap {
+    uint32_t min_should_match = 1;  // default value
+    if (op_type == proto::plan::OpType::TextMatch &&
+        expr_->extra_values_.size() > 0) {
+        // min_should_match is stored in the first extra value
+        min_should_match = static_cast<uint32_t>(
+            GetValueFromProto<int64_t>(expr_->extra_values_[0]));
+    }
+
+    auto func = [op_type, slop, min_should_match](
+                    Index* index, const std::string& query) -> TargetBitmap {
         if (op_type == proto::plan::OpType::TextMatch) {
-            return index->MatchQuery(query);
+            return index->MatchQuery(query, min_should_match);
         } else if (op_type == proto::plan::OpType::PhraseMatch) {
             return index->PhraseMatchQuery(query, slop);
         } else {

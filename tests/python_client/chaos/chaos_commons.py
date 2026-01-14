@@ -109,6 +109,7 @@ def assert_statistic(
         succ_rate = checkers[k].succ_rate()
         total = checkers[k].total()
         average_time = checkers[k].average_time
+        error_messages = getattr(checkers[k], 'error_messages', set())
         if expectations.get(k, "") == constants.FAIL:
             log.info(
                 f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}"
@@ -121,7 +122,12 @@ def assert_statistic(
             log.info(
                 f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}"
             )
+            # Build assertion message with error details
+            assert_msg = f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}"
+            if error_messages:
+                error_details = "; ".join(error_messages)
+                assert_msg += f", unique errors({len(error_messages)}): [{error_details}]"
             pytest.assume(
                 succ_rate >= succ_rate_threshold and total > 2,
-                f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}",
+                assert_msg,
             )

@@ -17,9 +17,12 @@
 package metautil
 
 import (
+	"path"
 	"reflect"
 	"testing"
 
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -136,5 +139,59 @@ func TestParseInsertLogPath(t *testing.T) {
 				t.Errorf("ParseInsertLogPath() gotOk = %v, want %v", gotOk, tt.wantOk)
 			}
 		})
+	}
+}
+
+func TestExtractTextLogFilenames(t *testing.T) {
+	textStatsLogs := map[int64]*datapb.TextIndexStats{
+		100: {
+			FieldID: 100,
+			Files: []string{
+				"/root/text_log/1/2/10/20/30/100/file1.txt",
+				"/root/text_log/1/2/10/20/30/100/file2.txt",
+			},
+		},
+	}
+
+	ExtractTextLogFilenames(textStatsLogs)
+
+	wantFiles := []string{"file1.txt", "file2.txt"}
+	if !reflect.DeepEqual(textStatsLogs[100].Files, wantFiles) {
+		t.Errorf("ExtractTextLogFilenames() Files = %v, want %v", textStatsLogs[100].Files, wantFiles)
+	}
+}
+
+func TestBuildTextLogPaths(t *testing.T) {
+	rootPath := "/root"
+	collectionID := typeutil.UniqueID(10)
+	partitionID := typeutil.UniqueID(20)
+	segmentID := typeutil.UniqueID(30)
+
+	// Test building paths from filenames (new version)
+	textStatsLogs := map[int64]*datapb.TextIndexStats{
+		100: {
+			FieldID: 100,
+			BuildID: 1,
+			Version: 2,
+			Files:   []string{"file1.txt", "file2.txt"},
+		},
+	}
+
+	BuildTextLogPaths(rootPath, collectionID, partitionID, segmentID, textStatsLogs)
+
+	wantFiles := []string{
+		path.Join(rootPath, common.TextIndexPath, "1", "2", "10", "20", "30", "100", "file1.txt"),
+		path.Join(rootPath, common.TextIndexPath, "1", "2", "10", "20", "30", "100", "file2.txt"),
+	}
+	if !reflect.DeepEqual(textStatsLogs[100].Files, wantFiles) {
+		t.Errorf("BuildTextLogPaths() Files = %v, want %v", textStatsLogs[100].Files, wantFiles)
+	}
+
+	// Test old version compatibility (already full paths)
+	fullPath := path.Join(rootPath, common.TextIndexPath, "1", "2", "10", "20", "30", "100", "file3.txt")
+	textStatsLogs[100].Files = []string{fullPath}
+	BuildTextLogPaths(rootPath, collectionID, partitionID, segmentID, textStatsLogs)
+	if textStatsLogs[100].Files[0] != fullPath {
+		t.Errorf("BuildTextLogPaths() should keep full path unchanged, got %v", textStatsLogs[100].Files[0])
 	}
 }

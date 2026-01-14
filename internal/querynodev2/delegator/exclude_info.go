@@ -17,7 +17,6 @@
 package delegator
 
 import (
-	"context"
 	"sync"
 	"time"
 
@@ -42,16 +41,32 @@ func NewExcludedSegments(cleanInterval time.Duration) *ExcludedSegments {
 }
 
 func (s *ExcludedSegments) Insert(excludeInfo map[int64]uint64) {
+	if log.Level().Enabled(zap.DebugLevel) {
+		defer func() {
+			s.logExcludeInfo(excludeInfo)
+		}()
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	for segmentID, ts := range excludeInfo {
-		log.Ctx(context.TODO()).Debug("add exclude info",
-			zap.Int64("segmentID", segmentID),
-			zap.Uint64("ts", ts),
-		)
 		s.segments[segmentID] = ts
 	}
+}
+
+func (s *ExcludedSegments) logExcludeInfo(excludeInfo map[int64]uint64) {
+	segmentIDs := make([]int64, 0, len(excludeInfo))
+	timeTicks := make([]uint64, 0, len(excludeInfo))
+	for segmentID, ts := range excludeInfo {
+		segmentIDs = append(segmentIDs, segmentID)
+		timeTicks = append(timeTicks, ts)
+	}
+	log.Debug("add exclude info",
+		zap.Int("count", len(excludeInfo)),
+		zap.Int64s("segmentIDs", segmentIDs),
+		zap.Uint64s("timeTicks", timeTicks),
+	)
 }
 
 // return false if segment has been excluded
@@ -65,6 +80,17 @@ func (s *ExcludedSegments) Verify(segmentID int64, ts uint64) bool {
 }
 
 func (s *ExcludedSegments) CleanInvalid(ts uint64) {
+	removedSegmentIDs := make([]int64, 0, 32)
+	if log.Level().Enabled(zap.DebugLevel) {
+		defer func() {
+			log.Debug("remove segment from exclude info",
+				zap.Int("count", len(removedSegmentIDs)),
+				zap.Uint64("ts", ts),
+				zap.Int64s("segmentIDs", removedSegmentIDs),
+			)
+		}()
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -77,7 +103,7 @@ func (s *ExcludedSegments) CleanInvalid(ts uint64) {
 
 	for _, segmentID := range invalidExcludedInfos {
 		delete(s.segments, segmentID)
-		log.Ctx(context.TODO()).Debug("remove segment from exclude info", zap.Int64("segmentID", segmentID))
+		removedSegmentIDs = append(removedSegmentIDs, segmentID)
 	}
 	s.lastClean.Store(time.Now())
 }

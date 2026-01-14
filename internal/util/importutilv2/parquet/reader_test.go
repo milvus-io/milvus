@@ -32,9 +32,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"github.com/twpayne/go-geom/encoding/wkb"
-	"github.com/twpayne/go-geom/encoding/wkbcommon"
-	"github.com/twpayne/go-geom/encoding/wkt"
 	"golang.org/x/exp/slices"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -46,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -60,10 +56,6 @@ type ReaderSuite struct {
 	numRows     int
 	pkDataType  schemapb.DataType
 	vecDataType schemapb.DataType
-}
-
-func (s *ReaderSuite) SetupSuite() {
-	paramtable.Get().Init(paramtable.NewBaseTable())
 }
 
 func (s *ReaderSuite) SetupTest() {
@@ -238,11 +230,7 @@ func (s *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType
 					}
 				} else if fieldDataType == schemapb.DataType_Geometry && expect != nil {
 					expectData := expect.([]byte)
-					geomT, err := wkt.Unmarshal(string(expectData))
-					if err != nil {
-						s.Fail("unmarshal wkt failed")
-					}
-					wkbValue, err := wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+					wkbValue, err := common.ConvertWKTToWKB(string(expectData))
 					if err != nil {
 						s.Fail("marshal wkb failed")
 					}

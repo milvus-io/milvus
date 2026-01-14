@@ -59,7 +59,6 @@ func (rs ResultSet) Len() int {
 func (rs ResultSet) Slice(start, end int) ResultSet {
 	result := ResultSet{
 		sch: rs.sch,
-		IDs: rs.IDs.Slice(start, end),
 		Fields: lo.Map(rs.Fields, func(column column.Column, _ int) column.Column {
 			return column.Slice(start, end)
 		}),
@@ -67,12 +66,26 @@ func (rs ResultSet) Slice(start, end int) ResultSet {
 		Err: rs.Err,
 	}
 
+	// Handle IDs - may be nil for Query results
+	if rs.IDs != nil {
+		result.IDs = rs.IDs.Slice(start, end)
+		result.ResultCount = result.IDs.Len()
+	} else if len(result.Fields) > 0 {
+		result.ResultCount = result.Fields[0].Len()
+	}
+
 	if rs.GroupByValue != nil {
 		result.GroupByValue = rs.GroupByValue.Slice(start, end)
 	}
 
-	result.ResultCount = result.IDs.Len()
-	result.Scores = rs.Scores[start : start+result.ResultCount]
+	// Handle Scores - may be nil or empty for Query results
+	if len(rs.Scores) > 0 && result.ResultCount > 0 {
+		scoreEnd := start + result.ResultCount
+		if scoreEnd > len(rs.Scores) {
+			scoreEnd = len(rs.Scores)
+		}
+		result.Scores = rs.Scores[start:scoreEnd]
+	}
 
 	return result
 }

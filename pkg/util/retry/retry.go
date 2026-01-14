@@ -141,7 +141,7 @@ func Handle(ctx context.Context, fn func() (bool, error), opts ...Option) error 
 	}
 
 	var lastErr error
-	for i := uint(0); i < c.attempts; i++ {
+	for i := uint(0); c.attempts == 0 || i < c.attempts; i++ {
 		if shouldRetry, err := fn(); err != nil {
 			if i%4 == 0 {
 				log.Warn("retry func failed",

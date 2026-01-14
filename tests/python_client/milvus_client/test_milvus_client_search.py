@@ -1881,12 +1881,16 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("new_field_data_type", [DataType.FLOAT, DataType.DOUBLE])
     @pytest.mark.parametrize("is_flush", [True, False])
-    def test_milvus_client_search_query_add_new_field_with_default_value_float(self, new_field_data_type, is_flush):
+    @pytest.mark.parametrize("use_numpy_float", [True, False])
+    def test_milvus_client_search_query_add_new_field_with_default_value_float(self, new_field_data_type, is_flush, use_numpy_float):
         """
         target: test search with add field using default value
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
+        # Skip use_numpy_float parameter when new_field_data_type is DOUBLE
+        if new_field_data_type == DataType.DOUBLE and not use_numpy_float:
+            pytest.skip("DOUBLE type doesn't need to consider use_numpy_float parameter")
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.using_database(client, "default")
@@ -1925,7 +1929,8 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         # 5. add field
         default_value = 1.0
         if new_field_data_type == DataType.FLOAT:
-            default_value = np.float32(1.0)
+            if use_numpy_float:
+                default_value = np.float32(1.0)
         elif new_field_data_type == DataType.DOUBLE:
             default_value = np.float64(1.0)
         self.add_collection_field(client, collection_name, field_name="field_new", data_type=new_field_data_type,

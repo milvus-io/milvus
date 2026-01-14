@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
+	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -491,7 +492,7 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	}
 
 	var (
-		totalSlots     = node.totalSlot
+		totalSlots     = index.CalculateNodeSlots()
 		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
 		compactionUsed = node.compactionExecutor.Slots()
 		importUsed     = node.importScheduler.Slots()
@@ -550,7 +551,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.PreImport(ctx, req)
@@ -559,7 +560,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.ImportV2(ctx, req)
@@ -568,7 +569,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.CompactionV2(ctx, req)
@@ -577,13 +578,16 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
+			return merr.Status(err), nil
+		}
 		return node.createIndexTask(ctx, req)
 	case taskcommon.Stats:
 		req := &workerpb.CreateStatsRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.createStatsTask(ctx, req)
@@ -592,7 +596,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.createAnalyzeTask(ctx, req)

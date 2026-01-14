@@ -186,6 +186,10 @@ func (s *L0Segment) Load(ctx context.Context) error {
 	return nil
 }
 
+func (s *L0Segment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error {
+	return merr.WrapErrServiceInternal("unexpected reopen on l0 segment")
+}
+
 func (s *L0Segment) Release(ctx context.Context, opts ...releaseOption) {
 	s.dataGuard.Lock()
 	defer s.dataGuard.Unlock()

@@ -243,6 +243,12 @@ func SetStartPosRecorded(flag bool) SegmentAction {
 	}
 }
 
+func UpdateManifestPath(manifestPath string) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.manifestPath = manifestPath
+	}
+}
+
 // MergeSegmentAction is the util function to merge multiple SegmentActions into one.
 func MergeSegmentAction(actions ...SegmentAction) SegmentAction {
 	return func(info *SegmentInfo) {

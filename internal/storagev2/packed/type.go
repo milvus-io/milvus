@@ -36,6 +36,7 @@ type PackedWriter struct {
 
 type FFIPackedWriter struct {
 	basePath      string
+	baseVersion   int64
 	cWriterHandle C.WriterHandle
 	cProperties   *C.Properties
 }

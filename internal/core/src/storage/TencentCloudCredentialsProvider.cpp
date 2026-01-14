@@ -25,7 +25,7 @@
 static const char STS_ASSUME_ROLE_WEB_IDENTITY_LOG_TAG[] =
     "TencentCloudSTSAssumeRoleWebIdentityCredentialsProvider";
 static const int STS_CREDENTIAL_PROVIDER_EXPIRATION_GRACE_PERIOD =
-    7200;  // tencent cloud support 7200s.
+    180 * 1000;  // tencent cloud support 180s.
 
 namespace Aws {
 namespace Auth {

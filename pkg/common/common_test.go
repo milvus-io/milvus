@@ -1,8 +1,10 @@
 package common
 
 import (
+	"math/rand"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -327,4 +329,71 @@ func TestIsDisableFuncRuntimeCheck(t *testing.T) {
 	disable, err = IsDisableFuncRuntimeCheck([]*commonpb.KeyValuePair{{Key: DisableFuncRuntimeCheck, Value: "Error"}}...)
 	assert.Error(t, err)
 	assert.False(t, disable)
+}
+
+func TestGetCollectionTTL(t *testing.T) {
+	type testCase struct {
+		tag       string
+		value     string
+		expect    time.Duration
+		expectErr bool
+	}
+
+	cases := []testCase{
+		{tag: "normal_case", value: "3600", expect: time.Duration(3600) * time.Second, expectErr: false},
+		{tag: "error_value", value: "error value", expectErr: true},
+		{tag: "out_of_int64_range", value: "10000000000000000000000000000000000000000000000000000000000000000000000000000", expectErr: true},
+		{tag: "negative", value: "-1", expect: -1 * time.Second},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.tag, func(t *testing.T) {
+			result, err := GetCollectionTTL([]*commonpb.KeyValuePair{{Key: CollectionTTLConfigKey, Value: tc.value}}, 0)
+			if tc.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.EqualValues(t, tc.expect, result)
+			}
+			result, err = GetCollectionTTLFromMap(map[string]string{CollectionTTLConfigKey: tc.value}, 0)
+			if tc.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.EqualValues(t, tc.expect, result)
+			}
+		})
+	}
+
+	t.Run("not_config", func(t *testing.T) {
+		randValue := rand.Intn(100)
+		result, err := GetCollectionTTL([]*commonpb.KeyValuePair{}, time.Duration(randValue)*time.Second)
+		assert.NoError(t, err)
+		assert.EqualValues(t, time.Duration(randValue)*time.Second, result)
+		result, err = GetCollectionTTLFromMap(map[string]string{}, time.Duration(randValue)*time.Second)
+		assert.NoError(t, err)
+		assert.EqualValues(t, time.Duration(randValue)*time.Second, result)
+	})
+}
+
+func TestWKTWKBConversion(t *testing.T) {
+	testCases := []struct {
+		name string
+		wkt  string
+	}{
+		{"Point Empty", "POINT EMPTY"},
+		{"Polygon Empty", "POLYGON EMPTY"},
+		{"Point with coords", "POINT (1 2)"},
+		{"Polygon with coords", "POLYGON ((30 10, 40 40, 20 40, 10 20, 30 10))"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			wkb, err := ConvertWKTToWKB(tc.wkt)
+			assert.NoError(t, err)
+			assert.NotNil(t, wkb)
+
+			wktResult, err := ConvertWKBToWKT(wkb)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.wkt, wktResult)
+		})
+	}
 }

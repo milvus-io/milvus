@@ -19,6 +19,7 @@ package milvusclient
 import (
 	"fmt"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 )
@@ -144,5 +145,101 @@ func NewSearchIteratorOption(collectionName string, vector entity.Vector) *searc
 			WithSearchParam(IteratorSearchV2Key, "true"),
 		batchSize:     1000,
 		iteratorLimit: Unlimited,
+	}
+}
+
+// QueryIteratorOption is the interface for query iterator options.
+type QueryIteratorOption interface {
+	// Request returns the query request when iterate query
+	Request() (*milvuspb.QueryRequest, error)
+	// BatchSize returns the batch size for each query iteration
+	BatchSize() int
+	// Limit returns the overall limit of entries to iterate
+	Limit() int64
+	// ValidateParams performs the static params validation
+	ValidateParams() error
+}
+
+type queryIteratorOption struct {
+	collectionName             string
+	partitionNames             []string
+	outputFields               []string
+	expr                       string
+	batchSize                  int
+	iteratorLimit              int64
+	consistencyLevel           entity.ConsistencyLevel
+	useDefaultConsistencyLevel bool
+}
+
+func (opt *queryIteratorOption) Request() (*milvuspb.QueryRequest, error) {
+	return &milvuspb.QueryRequest{
+		CollectionName:        opt.collectionName,
+		PartitionNames:        opt.partitionNames,
+		OutputFields:          opt.outputFields,
+		Expr:                  opt.expr,
+		ConsistencyLevel:      opt.consistencyLevel.CommonConsistencyLevel(),
+		UseDefaultConsistency: opt.useDefaultConsistencyLevel,
+		QueryParams:           entity.MapKvPairs(map[string]string{IteratorKey: "true", "reduce_stop_for_best": "true"}),
+	}, nil
+}
+
+func (opt *queryIteratorOption) BatchSize() int {
+	return opt.batchSize
+}
+
+func (opt *queryIteratorOption) Limit() int64 {
+	return opt.iteratorLimit
+}
+
+func (opt *queryIteratorOption) ValidateParams() error {
+	if opt.batchSize <= 0 {
+		return fmt.Errorf("batch size must be greater than 0")
+	}
+	return nil
+}
+
+func (opt *queryIteratorOption) WithBatchSize(batchSize int) *queryIteratorOption {
+	opt.batchSize = batchSize
+	return opt
+}
+
+func (opt *queryIteratorOption) WithPartitions(partitionNames ...string) *queryIteratorOption {
+	opt.partitionNames = partitionNames
+	return opt
+}
+
+func (opt *queryIteratorOption) WithFilter(expr string) *queryIteratorOption {
+	opt.expr = expr
+	return opt
+}
+
+func (opt *queryIteratorOption) WithOutputFields(fieldNames ...string) *queryIteratorOption {
+	opt.outputFields = fieldNames
+	return opt
+}
+
+func (opt *queryIteratorOption) WithConsistencyLevel(consistencyLevel entity.ConsistencyLevel) *queryIteratorOption {
+	opt.consistencyLevel = consistencyLevel
+	opt.useDefaultConsistencyLevel = false
+	return opt
+}
+
+// WithIteratorLimit sets the limit of entries to iterate
+// if limit < 0, then it will be set to Unlimited
+func (opt *queryIteratorOption) WithIteratorLimit(limit int64) *queryIteratorOption {
+	if limit < 0 {
+		limit = Unlimited
+	}
+	opt.iteratorLimit = limit
+	return opt
+}
+
+func NewQueryIteratorOption(collectionName string) *queryIteratorOption {
+	return &queryIteratorOption{
+		collectionName:             collectionName,
+		batchSize:                  1000,
+		iteratorLimit:              Unlimited,
+		useDefaultConsistencyLevel: true,
+		consistencyLevel:           entity.ClBounded,
 	}
 }

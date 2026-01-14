@@ -51,6 +51,8 @@ const (
 
 // proxy management restful api root path
 const (
+	RouteBackupEZ = "/management/rootcoord/ez/backup"
+
 	RouteGcPause  = "/management/datacoord/garbage_collection/pause"
 	RouteGcResume = "/management/datacoord/garbage_collection/resume"
 

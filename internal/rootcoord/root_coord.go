@@ -48,6 +48,7 @@ import (
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -444,7 +445,7 @@ func (c *Core) initInternal() error {
 	c.proxyWatcher = proxyutil.NewProxyWatcher(
 		c.etcdCli,
 		c.chanTimeTick.initSessions,
-		c.proxyClientManager.AddProxyClients,
+		c.proxyClientManager.SetProxyClients,
 	)
 	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
 	c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
@@ -1105,7 +1106,9 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Warn("failed to describe collection", zap.Error(err))
+		if !errors.Is(err, merr.ErrCollectionNotFound) {
+			log.Warn("failed to describe collection", zap.Error(err))
+		}
 		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.FailLabel).Inc()
 		return &milvuspb.DescribeCollectionResponse{
 			Status: merr.Status(err),
@@ -3096,4 +3099,45 @@ func isVisibleCollectionForCurUser(collectionName string, visibleCollections typ
 
 func (c *Core) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return c.quotaCenter.getQuotaMetrics(), nil
+}
+
+func (c *Core) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
+	method := "BackupEzk"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.String("dbName", req.GetDbName()))
+	ctxLog.Debug(method)
+
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &internalpb.BackupEzkResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	db, err := c.meta.GetDatabaseByName(ctx, req.GetDbName(), 0)
+	if err != nil {
+		ctxLog.Warn("database not found", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		return &internalpb.BackupEzkResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	ezkJSON, err := hookutil.BackupEZKFromDBProperties(db.Properties)
+	if err != nil {
+		ctxLog.Warn("failed to backup EZK", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		return &internalpb.BackupEzkResponse{
+			Status: merr.Status(err),
+			Ezk:    "",
+		}, nil
+	}
+
+	ctxLog.Debug(method + " success")
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &internalpb.BackupEzkResponse{
+		Status: merr.Success(),
+		Ezk:    ezkJSON,
+	}, nil
 }

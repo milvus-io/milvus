@@ -407,8 +407,8 @@ func (m *Manager) updateEvent(e *Event) error {
 		}
 	}
 
-	log.Info("receive update event", zap.Any("event", e))
 	e.HasUpdated = true
+	log.Info("receive update event", zap.Any("event", e))
 	return nil
 }
 

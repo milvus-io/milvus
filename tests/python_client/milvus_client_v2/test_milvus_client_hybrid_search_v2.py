@@ -1321,7 +1321,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
                            check_items=check_items)
 
 
-class TestCollectionHybridSearchValid(TestcaseBase):
+class TestCollectionHybridSearch(TestcaseBase):
     """ Test case of search interface """
 
     @pytest.fixture(scope="function", params=["JACCARD", "HAMMING"])
@@ -1728,3 +1728,27 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         for i in range(len(score_answer[:default_limit])):
             delta = math.fabs(score_answer[i] - hybrid_res[0].distances[i])
             assert delta < hybrid_search_epsilon
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_hybrid_search_not_support_search_by_pk(self):
+        """
+        Test case: Hybrid search does not support search by pk
+        Scenario:
+            - Create connection, collection, and insert data.
+            - Perform hybrid search with search requests with different 'limit' parameters.
+        Expected:
+            - Hybrid search failed with error msg
+        """
+        nq = 2
+        req_limit = 10
+        ids_to_search = [0, 1]
+        # generate hybrid search request list
+        sub_params = {
+            "ids": ids_to_search,
+            "anns_field": ct.default_float_vec_field_name,
+            "param": {},
+            "limit": req_limit
+        }
+        with pytest.raises(TypeError,
+                           match="AnnSearchRequest.__init__.*got an unexpected keyword argument 'ids'"):
+            req = AnnSearchRequest(**sub_params)

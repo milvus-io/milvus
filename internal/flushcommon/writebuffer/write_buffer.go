@@ -3,7 +3,9 @@ package writebuffer
 import (
 	"context"
 	"fmt"
+	"path"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -18,13 +20,17 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -47,6 +53,8 @@ type WriteBuffer interface {
 	GetFlushTimestamp() uint64
 	// SealSegments is the method to perform `Sync` operation with provided options.
 	SealSegments(ctx context.Context, segmentIDs []int64) error
+	// SealAllSegments seal all segments in the write buffer.
+	SealAllSegments(ctx context.Context)
 	// DropPartitions mark segments as Dropped of the partition
 	DropPartitions(partitionIDs []int64)
 	// GetCheckpoint returns current channel checkpoint.
@@ -184,6 +192,15 @@ func (wb *writeBufferBase) SealSegments(ctx context.Context, segmentIDs []int64)
 	defer wb.mut.RUnlock()
 
 	return wb.sealSegments(ctx, segmentIDs)
+}
+
+func (wb *writeBufferBase) SealAllSegments(ctx context.Context) {
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
+
+	// mark all segments sealed if they were growing
+	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
+		metacache.WithSegmentState(commonpb.SegmentState_Growing))
 }
 
 func (wb *writeBufferBase) DropPartitions(partitionIDs []int64) {
@@ -499,10 +516,6 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 	_, ok := wb.metaCache.GetSegmentByID(segmentID)
 	// new segment
 	if !ok {
-		storageVersion := storage.StorageV1
-		if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-			storageVersion = storage.StorageV2
-		}
 		segmentInfo := &datapb.SegmentInfo{
 			ID:             segmentID,
 			PartitionID:    partitionID,
@@ -510,12 +523,22 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 			InsertChannel:  wb.channelName,
 			StartPosition:  startPos,
 			State:          commonpb.SegmentState_Growing,
-			StorageVersion: storageVersion,
+			StorageVersion: storage.StorageV2,
+		}
+		// set manifest path when creating segment
+		if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
+			k := metautil.JoinIDPath(wb.collectionID, partitionID, segmentID)
+			basePath := path.Join(paramtable.Get().ServiceParam.MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath, k)
+			if paramtable.Get().CommonCfg.StorageType.GetValue() != "local" {
+				basePath = path.Join(paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue(), basePath)
+			}
+			// -1 for first write
+			segmentInfo.ManifestPath = packed.MarshalManifestPath(basePath, -1)
 		}
 		wb.metaCache.AddSegment(segmentInfo, func(_ *datapb.SegmentInfo) pkoracle.PkStat {
 			return pkoracle.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
 		}, metacache.NewBM25StatsFactory, metacache.SetStartPosRecorded(false))
-		log.Info("add growing segment", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName), zap.Int64("storage version", storageVersion))
+		log.Info("add growing segment", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName), zap.Int64("storage version", storage.StorageV2))
 	}
 }
 
@@ -597,7 +620,8 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithMetaWriter(wb.metaWriter).
 		WithMetaCache(wb.metaCache).
 		WithSchema(schema).
-		WithSyncPack(pack)
+		WithSyncPack(pack).
+		WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second))
 	return task, nil
 }
 

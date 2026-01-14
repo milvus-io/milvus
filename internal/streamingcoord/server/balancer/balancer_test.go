@@ -31,6 +31,7 @@ import (
 
 func TestBalancer(t *testing.T) {
 	paramtable.Init()
+	paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue("3")
 	etcdClient, _ := kvfactory.GetEtcdAndPath()
 	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
@@ -39,6 +40,20 @@ func TestBalancer(t *testing.T) {
 	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
 	streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).Return(nil)
 	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
+	streamingNodeManager.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{
+		1: {
+			ServerID: 1,
+			Address:  "localhost:1",
+		},
+		2: {
+			ServerID: 2,
+			Address:  "localhost:2",
+		},
+		3: {
+			ServerID: 3,
+			Address:  "localhost:3",
+		},
+	}, nil)
 	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything).Return(map[int64]*types.StreamingNodeStatus{
 		1: {
 			StreamingNodeInfo: types.StreamingNodeInfo{
@@ -67,8 +82,15 @@ func TestBalancer(t *testing.T) {
 		},
 	}, nil)
 
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+
 	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
-	resource.InitForTest(resource.OptETCD(etcdClient), resource.OptStreamingCatalog(catalog), resource.OptStreamingManagerClient(streamingNodeManager))
+	resource.InitForTest(
+		resource.OptETCD(etcdClient),
+		resource.OptStreamingCatalog(catalog),
+		resource.OptStreamingManagerClient(streamingNodeManager),
+		resource.OptSession(s))
 	catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
@@ -285,7 +307,14 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 	})
 
 	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
-	resource.InitForTest(resource.OptETCD(etcdClient), resource.OptStreamingCatalog(catalog), resource.OptStreamingManagerClient(streamingNodeManager))
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(
+		resource.OptETCD(etcdClient),
+		resource.OptStreamingCatalog(catalog),
+		resource.OptStreamingManagerClient(streamingNodeManager),
+		resource.OptSession(s),
+	)
 	catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)

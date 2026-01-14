@@ -402,7 +402,8 @@ func (s *Server) initMessageCallback() {
 		if err != nil {
 			return err
 		}
-		if channelAssignment.ReplicateConfiguration != nil {
+		replicateConfig := channelAssignment.ReplicateConfiguration
+		if replicateConfig != nil && len(replicateConfig.GetClusters()) > 1 {
 			return status.NewReplicateViolation("import in replicating cluster is not supported yet")
 		}
 		return nil
@@ -680,6 +681,7 @@ func (s *Server) initCompaction() {
 	cph.loadMeta()
 	s.compactionInspector = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.importMeta)
+	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
 	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
 }
 

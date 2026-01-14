@@ -221,6 +221,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     total_num_rows_ =
         wrapper_->count() + static_cast<int64_t>(null_offset_.size());
     is_built_ = true;
+    ComputeByteSize();
 
     LOG_INFO(
         "Loaded R-Tree index from {} with {} rows", path_, total_num_rows_);
@@ -238,6 +239,7 @@ RTreeIndex<T>::Build(const Config& config) {
     total_num_rows_ =
         wrapper_->count() + static_cast<int64_t>(null_offset_.size());
     is_built_ = true;
+    ComputeByteSize();
 }
 
 template <typename T>
@@ -279,6 +281,7 @@ RTreeIndex<T>::BuildWithFieldData(
         wrapper_->bulk_load_from_field_data(field_datas, schema_.nullable());
         total_num_rows_ = total_rows;
         is_built_ = true;
+        ComputeByteSize();
         return;
     }
 }

@@ -76,6 +76,7 @@ func (m *immutableTxnMessageImpl) MarshalLogObject(enc zapcore.ObjectEncoder) er
 	if m == nil {
 		return nil
 	}
+	enc.AddInt("messageCount", m.Size())
 	enc.AddArray("txn", zapcore.ArrayMarshalerFunc(func(enc zapcore.ArrayEncoder) error {
 		txnMessage := AsImmutableTxnMessage(m)
 		txnMessage.RangeOver(func(im ImmutableMessage) error {

@@ -89,7 +89,7 @@ def get_chaos_test_collections():
 
 
 def wait_signal_to_apply_chaos():
-    all_db_file = glob.glob("/tmp/ci_logs/event_records*.parquet")
+    all_db_file = glob.glob("/tmp/ci_logs/event_records*.jsonl")
     log.info(f"all files {all_db_file}")
     ready_apply_chaos = True
     timeout = 15*60
@@ -97,7 +97,13 @@ def wait_signal_to_apply_chaos():
     for f in all_db_file:
         while True and (time.time() - t0 < timeout):
             try:
-                df = pd.read_parquet(f)
+                records = []
+                with open(f, 'r') as file:
+                    for line in file:
+                        line = line.strip()
+                        if line:
+                            records.append(json.loads(line))
+                df = pd.DataFrame(records) if records else pd.DataFrame(columns=["event_name", "event_status", "event_ts"])
                 log.debug(f"read {f}:result\n {df}")
                 result = df[(df['event_name'] == 'init_chaos') & (df['event_status'] == 'ready')]
                 if len(result) > 0:
@@ -107,7 +113,7 @@ def wait_signal_to_apply_chaos():
                 else:
                     ready_apply_chaos = False
             except Exception as e:
-                log.error(f"read_parquet error: {e}")
+                log.error(f"read jsonl error: {e}")
                 ready_apply_chaos = False
             time.sleep(10)
 

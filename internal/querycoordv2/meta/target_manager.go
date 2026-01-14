@@ -102,8 +102,6 @@ func NewTargetManager(broker Broker, meta *Meta) *TargetManager {
 func (mgr *TargetManager) UpdateCollectionCurrentTarget(ctx context.Context, collectionID int64) bool {
 	log := log.With(zap.Int64("collectionID", collectionID))
 
-	log.Debug("start to update current target for collection")
-
 	newTarget := mgr.next.getCollectionTarget(collectionID)
 	if newTarget == nil || newTarget.IsEmpty() {
 		log.Info("next target does not exist, skip it")

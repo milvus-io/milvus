@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -252,11 +253,6 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 	collectionID := showCollectionsResp.GetCollectionIds()[0]
 	partitionID := showPartitionsResp.GetPartitionIDs()[0]
 
-	storageVersion := 0
-	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-		storageVersion = 2
-	}
-
 	return &SourceCollectionInfo{
 		collectionID: collectionID,
 		partitionID:  partitionID,
@@ -267,7 +263,7 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 			return segment.GetID()
 		}),
 		insertedIDs:    totalInsertedIDs,
-		storageVersion: storageVersion,
+		storageVersion: int(storage.StorageV2),
 	}
 }
 

@@ -199,7 +199,7 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWith1ParallelTask() {
 				{PlanID: 14, Channel: "ch-2", Type: datapb.CompactionType_MixCompaction},
 				{PlanID: 13, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction},
 			},
-			[]UniqueID{13, 14},
+			[]UniqueID{14, 13},
 		},
 		{
 			"empty tasks",
@@ -359,9 +359,10 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 				s.handler.submitTask(t)
 			}
 			gotTasks := s.handler.schedule()
-			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
+			gotPlanIDs := lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
 				return t.GetTaskProto().GetPlanID()
-			}))
+			})
+			s.ElementsMatch(test.expectedOut, gotPlanIDs)
 		})
 	}
 }

@@ -15,7 +15,8 @@
 // limitations under the License.
 
 #include "CountNode.h"
-
+#include "common/Tracer.h"
+#include "fmt/format.h"
 namespace milvus {
 namespace exec {
 
@@ -58,7 +59,7 @@ PhyCountNode::GetOutput() {
     if (is_finished_ || !no_more_input_) {
         return nullptr;
     }
-
+    tracer::AutoSpan span("PhyCountNode::Execute", tracer::GetRootSpan(), true);
     auto col_input = GetColumnVector(input_);
     TargetBitmapView view(col_input->GetRawData(), col_input->size());
     auto cnt = view.size() - view.count();
@@ -66,6 +67,7 @@ PhyCountNode::GetOutput() {
         std::move(*(wrap_num_entities(cnt, view.size()))));
     is_finished_ = true;
 
+    tracer::AddEvent(fmt::format("count_result: {}", cnt));
     return input_;
 }
 

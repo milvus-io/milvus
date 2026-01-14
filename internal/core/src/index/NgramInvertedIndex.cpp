@@ -178,6 +178,8 @@ std::optional<TargetBitmap>
 NgramInvertedIndex::ExecuteQuery(const std::string& literal,
                                  proto::plan::OpType op_type,
                                  exec::SegmentExpr* segment) {
+    tracer::AutoSpan span(
+        "NgramInvertedIndex::ExecuteQuery", tracer::GetRootSpan(), true);
     if (literal.length() < min_gram_) {
         return std::nullopt;
     }
@@ -186,6 +188,11 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
         case proto::plan::OpType::Match:
             return MatchQuery(literal, segment);
         case proto::plan::OpType::InnerMatch: {
+            span.GetSpan()->SetAttribute("op_type", "InnerMatch");
+            span.GetSpan()->SetAttribute("query_literal_length",
+                                         static_cast<int>(literal.length()));
+            span.GetSpan()->SetAttribute("min_gram", min_gram_);
+            span.GetSpan()->SetAttribute("max_gram", max_gram_);
             bool need_post_filter = literal.length() > max_gram_;
 
             if (schema_.data_type() == proto::schema::DataType::JSON) {
@@ -211,6 +218,11 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
             }
         }
         case proto::plan::OpType::PrefixMatch: {
+            span.GetSpan()->SetAttribute("op_type", "PrefixMatch");
+            span.GetSpan()->SetAttribute("query_literal_length",
+                                         static_cast<int>(literal.length()));
+            span.GetSpan()->SetAttribute("min_gram", min_gram_);
+            span.GetSpan()->SetAttribute("max_gram", max_gram_);
             if (schema_.data_type() == proto::schema::DataType::JSON) {
                 auto predicate = [&literal, this](const milvus::Json& data) {
                     auto x =
@@ -239,6 +251,11 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
             }
         }
         case proto::plan::OpType::PostfixMatch: {
+            span.GetSpan()->SetAttribute("op_type", "PostfixMatch");
+            span.GetSpan()->SetAttribute("query_literal_length",
+                                         static_cast<int>(literal.length()));
+            span.GetSpan()->SetAttribute("min_gram", min_gram_);
+            span.GetSpan()->SetAttribute("max_gram", max_gram_);
             if (schema_.data_type() == proto::schema::DataType::JSON) {
                 auto predicate = [&literal, this](const milvus::Json& data) {
                     auto x =
@@ -272,16 +289,16 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
     }
 }
 
-template <typename T>
+template <typename T, typename Predicate>
 inline void
 handle_batch(const T* data,
-             const int size,
+             const int64_t size,
              TargetBitmapView res,
-             std::function<bool(const T&)> predicate) {
+             Predicate&& predicate) {
     auto next_off_option = res.find_first();
     while (next_off_option.has_value()) {
         auto next_off = next_off_option.value();
-        if (next_off >= size) {
+        if (next_off >= static_cast<size_t>(size)) {
             return;
         }
         if (!predicate(data[next_off])) {
@@ -291,36 +308,39 @@ handle_batch(const T* data,
     }
 }
 
-template <typename T>
+template <typename T, typename Predicate>
 std::optional<TargetBitmap>
-NgramInvertedIndex::ExecuteQueryWithPredicate(
-    const std::string& literal,
-    exec::SegmentExpr* segment,
-    std::function<bool(const T&)> predicate,
-    bool need_post_filter) {
+NgramInvertedIndex::ExecuteQueryWithPredicate(const std::string& literal,
+                                              exec::SegmentExpr* segment,
+                                              Predicate&& predicate,
+                                              bool need_post_filter) {
     TargetBitmap bitset{static_cast<size_t>(Count())};
     wrapper_->ngram_match_query(literal, min_gram_, max_gram_, &bitset);
 
+    auto ngram_hit_count = bitset.count();
+    auto final_result_count = ngram_hit_count;
+
     if (need_post_filter) {
         TargetBitmapView res(bitset);
-        TargetBitmap valid(res.size(), true);
-        TargetBitmapView valid_res(valid.data(), valid.size());
 
-        auto execute_batch =
-            [&predicate](
-                const T* data,
-                // `valid_data` is not used as the results returned  by ngram_match_query are all valid
-                const bool* _valid_data,
-                const int32_t* _offsets,
-                const int size,
-                TargetBitmapView res,
-                // the same with `valid_data`
-                TargetBitmapView _valid_res) {
-                handle_batch(data, size, res, predicate);
-            };
+        auto execute_batch = [&predicate](const T* data,
+                                          const int64_t size,
+                                          TargetBitmapView res) {
+            handle_batch(data, size, res, predicate);
+        };
 
-        segment->ProcessAllDataChunk<T>(
-            execute_batch, std::nullptr_t{}, res, valid_res);
+        segment->template ProcessAllDataChunkBatched<T>(execute_batch, res);
+
+        final_result_count = bitset.count();
+    }
+
+    if (auto root_span = tracer::GetRootSpan()) {
+        root_span->SetAttribute("need_post_filter", need_post_filter);
+        root_span->SetAttribute("ngram_hit_count",
+                                static_cast<int>(ngram_hit_count));
+        root_span->SetAttribute("final_result_count",
+                                static_cast<int>(final_result_count));
+        root_span->SetAttribute("total_count", static_cast<int>(bitset.size()));
     }
 
     return std::optional<TargetBitmap>(std::move(bitset));
@@ -359,68 +379,72 @@ split_by_wildcard(const std::string& literal) {
 std::optional<TargetBitmap>
 NgramInvertedIndex::MatchQuery(const std::string& literal,
                                exec::SegmentExpr* segment) {
-    TargetBitmap bitset{static_cast<size_t>(Count())};
+    if (auto root_span = tracer::GetRootSpan()) {
+        root_span->SetAttribute("match_query_literal_length",
+                                static_cast<int>(literal.length()));
+        root_span->SetAttribute("match_query_min_gram", min_gram_);
+        root_span->SetAttribute("match_query_max_gram", max_gram_);
+    }
+    TargetBitmap bitset(static_cast<size_t>(Count()), true);
     auto literals = split_by_wildcard(literal);
     for (const auto& l : literals) {
         if (l.length() < min_gram_) {
             return std::nullopt;
         }
-        wrapper_->ngram_match_query(l, min_gram_, max_gram_, &bitset);
+        TargetBitmap tmp_bitset(static_cast<size_t>(Count()), false);
+        wrapper_->ngram_match_query(l, min_gram_, max_gram_, &tmp_bitset);
+        bitset &= tmp_bitset;
     }
 
     TargetBitmapView res(bitset);
-    TargetBitmap valid(res.size(), true);
-    TargetBitmapView valid_res(valid.data(), valid.size());
 
     PatternMatchTranslator translator;
     auto regex_pattern = translator(literal);
     RegexMatcher matcher(regex_pattern);
 
+    auto ngram_hit_count = bitset.count();
+
     if (schema_.data_type() == proto::schema::DataType::JSON) {
-        auto predicate = [&literal, &matcher, this](const milvus::Json& data) {
+        auto predicate = [&matcher, this](const milvus::Json& data) {
             auto x = data.template at<std::string_view>(this->nested_path_);
             if (x.error()) {
                 return false;
             }
-            auto data_val = x.value();
-            return matcher(data_val);
+            return matcher(x.value());
         };
 
-        auto execute_batch_json =
-            [&predicate](
-                const milvus::Json* data,
-                // `valid_data` is not used as the results returned  by ngram_match_query are all valid
-                const bool* _valid_data,
-                const int32_t* _offsets,
-                const int size,
-                TargetBitmapView res,
-                // the same with `valid_data`
-                TargetBitmapView _valid_res,
-                std::string val) {
-                handle_batch<milvus::Json>(data, size, res, predicate);
-            };
+        auto execute_batch = [&predicate](const milvus::Json* data,
+                                          const int64_t size,
+                                          TargetBitmapView res) {
+            handle_batch<milvus::Json>(data, size, res, predicate);
+        };
 
-        segment->ProcessAllDataChunk<milvus::Json>(
-            execute_batch_json, std::nullptr_t{}, res, valid_res, literal);
+        segment->template ProcessAllDataChunkBatched<milvus::Json>(
+            execute_batch, res);
     } else {
         auto predicate = [&matcher](const std::string_view& data) {
             return matcher(data);
         };
 
-        auto execute_batch =
-            [&predicate](
-                const std::string_view* data,
-                // `valid_data` is not used as the results returned  by ngram_match_query are all valid
-                const bool* _valid_data,
-                const int32_t* _offsets,
-                const int size,
-                TargetBitmapView res,
-                // the same with `valid_data`
-                TargetBitmapView _valid_res) {
-                handle_batch<std::string_view>(data, size, res, predicate);
-            };
-        segment->ProcessAllDataChunk<std::string_view>(
-            execute_batch, std::nullptr_t{}, res, valid_res);
+        auto execute_batch = [&predicate](const std::string_view* data,
+                                          const int64_t size,
+                                          TargetBitmapView res) {
+            handle_batch<std::string_view>(data, size, res, predicate);
+        };
+
+        segment->template ProcessAllDataChunkBatched<std::string_view>(
+            execute_batch, res);
+    }
+
+    auto final_result_count = bitset.count();
+
+    if (auto root_span = tracer::GetRootSpan()) {
+        root_span->SetAttribute("match_ngram_hit_count",
+                                static_cast<int>(ngram_hit_count));
+        root_span->SetAttribute("match_final_result_count",
+                                static_cast<int>(final_result_count));
+        root_span->SetAttribute("match_total_count",
+                                static_cast<int>(bitset.size()));
     }
 
     return std::optional<TargetBitmap>(std::move(bitset));

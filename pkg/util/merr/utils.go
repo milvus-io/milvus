@@ -944,6 +944,13 @@ func WrapErrIoUnexpectEOF(key string, err error) error {
 	return wrapFieldsWithDesc(ErrIoUnexpectEOF, err.Error(), value("key", key))
 }
 
+func WrapErrIoTooManyRequests(key string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return wrapFieldsWithDesc(ErrIoTooManyRequests, err.Error(), value("key", key))
+}
+
 // Parameter related
 func WrapErrParameterInvalid[T any](expected, actual T, msg ...string) error {
 	err := wrapFields(ErrParameterInvalid,

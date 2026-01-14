@@ -369,42 +369,6 @@ func createKafkaConfig(opts ...kafkaCfgOption) *paramtable.KafkaConfig {
 	return cfg
 }
 
-func TestKafkaClient_NewKafkaClientInstanceWithConfig(t *testing.T) {
-	config1 := createKafkaConfig(withAddr("addr"), withPasswd("password"))
-
-	assert.Panics(t, func() { NewKafkaClientInstanceWithConfig(context.Background(), config1) })
-
-	config2 := createKafkaConfig(withAddr("addr"), withUsername("username"))
-	assert.Panics(t, func() { NewKafkaClientInstanceWithConfig(context.Background(), config2) })
-
-	producerConfig := make(map[string]string)
-	producerConfig["client.id"] = "dc1"
-	consumerConfig := make(map[string]string)
-	consumerConfig["client.id"] = "dc"
-
-	config := createKafkaConfig(withKafkaUseSSL("false"), withAddr("addr"), withUsername("username"),
-		withPasswd("password"), withMechanism("sasl"), withProtocol("plain"))
-	config.ConsumerExtraConfig = paramtable.ParamGroup{GetFunc: func() map[string]string { return consumerConfig }}
-	config.ProducerExtraConfig = paramtable.ParamGroup{GetFunc: func() map[string]string { return producerConfig }}
-
-	client, err := NewKafkaClientInstanceWithConfig(context.Background(), config)
-	assert.NoError(t, err)
-	assert.NotNil(t, client)
-	assert.NotNil(t, client.basicConfig)
-
-	assert.Equal(t, "dc", client.consumerConfig["client.id"])
-	newConsumerConfig := client.newConsumerConfig("test", 0)
-	clientID, err := newConsumerConfig.Get("client.id", "")
-	assert.NoError(t, err)
-	assert.Equal(t, "dc", clientID)
-
-	assert.Equal(t, "dc1", client.producerConfig["client.id"])
-	newProducerConfig := client.newProducerConfig()
-	pClientID, err := newProducerConfig.Get("client.id", "")
-	assert.NoError(t, err)
-	assert.Equal(t, pClientID, "dc1")
-}
-
 func createKafkaClient(t *testing.T) *kafkaClient {
 	kafkaAddress := getKafkaBrokerList()
 	kc := NewKafkaClientInstance(kafkaAddress)

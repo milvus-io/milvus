@@ -27,6 +27,25 @@ var NaiveTzLayouts = []string{
 	"2006-01-02 15:04:05",
 }
 
+// Define layouts at the package level for better performance and clarity.
+var extraAbsoluteLayouts = []string{
+	"2006-01-02 15:04:05Z07:00", // Case 3 (Z), Case 7/8 (+08:00)
+	"2006-01-02 15:04:05Z07",    // PostgreSQL also supports short offsets like +08
+}
+
+// validateOffset ensures the absolute time offset is within Milvus/PG valid ranges.
+func validateOffset(t time.Time) (time.Time, error) {
+	// Parsing succeeded (TZ-aware string). Now, perform the strict offset validation.
+	// If the string contains an explicit offset (like +99:00), t.Zone() will reflect it.
+	_, offsetSeconds := t.Zone()
+	if offsetSeconds > MaxOffsetSeconds || offsetSeconds < MinOffsetSeconds {
+		offsetHours := offsetSeconds / 3600
+		return time.Time{}, fmt.Errorf("UTC offset hour %d is out of the valid range [%d, %d]",
+			offsetHours, MinOffsetSeconds/3600, MaxOffsetSeconds/3600)
+	}
+	return t, nil
+}
+
 // ParseTimeTz is the internal core function for parsing TZ-aware or naive timestamps.
 // It includes strict validation for the UTC offset range.
 func ParseTimeTz(inputStr string, defaultTimezoneStr string) (time.Time, error) {
@@ -34,16 +53,21 @@ func ParseTimeTz(inputStr string, defaultTimezoneStr string) (time.Time, error) 
 	t, err := time.Parse(time.RFC3339Nano, inputStr)
 
 	if err == nil {
-		// Parsing succeeded (TZ-aware string). Now, perform the strict offset validation.
+		return validateOffset(t)
+	}
 
-		// If the string contains an explicit offset (like +99:00), t.Zone() will reflect it.
-		_, offsetSeconds := t.Zone()
-
-		if offsetSeconds > MaxOffsetSeconds || offsetSeconds < MinOffsetSeconds {
-			offsetHours := offsetSeconds / 3600
-			return time.Time{}, fmt.Errorf("UTC offset hour %d is out of the valid range [%d, %d]", offsetHours, MinOffsetSeconds/3600, MaxOffsetSeconds/3600)
+	// 2. PostgreSQL-style Absolute Time: Space separator + Offset or Z
+	// Adding layouts to catch "YYYY-MM-DD HH:MM:SS-07:00" or "YYYY-MM-DD HH:MM:SSZ"
+	for _, layout := range extraAbsoluteLayouts {
+		if t, err = time.Parse(layout, inputStr); err == nil {
+			return validateOffset(t)
 		}
+	}
 
+	// 3. Specific fix for Case: "2024-12-31 22:00:00Z"
+	// Handle Absolute Time with a space separator instead of 'T'.
+	// Since it contains 'Z', it is parsed as UTC directly.
+	if t, err = time.Parse("2006-01-02 15:04:05Z", inputStr); err == nil {
 		return t, nil
 	}
 
@@ -52,7 +76,7 @@ func ParseTimeTz(inputStr string, defaultTimezoneStr string) (time.Time, error) 
 		return time.Time{}, fmt.Errorf("invalid default timezone string '%s': %w", defaultTimezoneStr, err)
 	}
 
-	// 2. Fallback parsing: Attempt to parse a naive string using NaiveTzLayouts
+	// 4. Fallback parsing: Attempt to parse a naive string using NaiveTzLayouts
 	var parsed bool
 	for _, layout := range NaiveTzLayouts {
 		// For naive strings, time.ParseInLocation assigns the default location (loc).
@@ -292,14 +316,12 @@ func CheckAndRewriteTimestampTzDefaultValueForFieldSchema(
 	if defaultValue == nil {
 		return nil
 	}
-	// log.Info("czsKKK111")
 
 	// 2. Read the default value as a string (the initial user-provided format).
 	// The default value is expected to be stored in string_data initially.
 	stringTz := defaultValue.GetStringData()
 	if stringTz == "" {
 		// Skip or handle empty string default values if necessary.
-		// log.Info("czsKKK222")
 		return nil
 	}
 
@@ -308,8 +330,6 @@ func CheckAndRewriteTimestampTzDefaultValueForFieldSchema(
 	// in the input stringTz, and performs offset range checks.
 	utcMicro, err := ValidateAndReturnUnixMicroTz(stringTz, collectionTimezone)
 	if err != nil {
-		// log.Info("czsKKK333")
-
 		// If validation fails (e.g., invalid format or illegal offset), return error immediately.
 		return err
 	}
@@ -321,7 +341,6 @@ func CheckAndRewriteTimestampTzDefaultValueForFieldSchema(
 		TimestamptzData: utcMicro,
 	}
 	fieldSchema.DefaultValue = defaultValue
-	// log.Info("czsKKK444", zap.Any("utc", fieldSchema.GetDefaultValue()))
 	return nil
 }
 

@@ -17,6 +17,14 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
+func TestTenant(t *testing.T) {
+	tenant := tenant{
+		tenant:    "milvus",
+		namespace: "aaa",
+	}
+	assert.Equal(t, "milvus/aaa/test", tenant.MustGetFullTopicName("test"))
+}
+
 func TestRegistry(t *testing.T) {
 	registeredB := registry.MustGetBuilder(message.WALNamePulsar)
 	assert.NotNil(t, registeredB)

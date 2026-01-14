@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
@@ -238,7 +239,7 @@ func isCollectionAutoCompactionEnabled(coll *collectionInfo) bool {
 }
 
 func getCompactTime(ts Timestamp, coll *collectionInfo) (*compactTime, error) {
-	collectionTTL, err := getCollectionTTL(coll.Properties)
+	collectionTTL, err := common.GetCollectionTTLFromMap(coll.Properties, paramtable.Get().CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second))
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +408,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 				ResultSegments: []int64{},
 				TotalRows:      totalRows,
 				Schema:         coll.Schema,
-				MaxSize:        getExpandedSize(expectedSize),
+				MaxSize:        expectedSize,
 				PreAllocatedSegmentIDs: &datapb.IDRange{
 					Begin: startID + 1,
 					End:   endID,
@@ -425,6 +426,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			log.Info("time cost of generating compaction",
 				zap.Int64("planID", task.GetPlanID()),
 				zap.Int64("time cost", time.Since(start).Milliseconds()),
+				zap.Int64("target size", task.GetMaxSize()),
 				zap.Int64s("inputSegments", inputSegmentIDs))
 		}
 	}
@@ -807,10 +809,6 @@ func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*SegmentInfo, 
 	}
 
 	return small
-}
-
-func getExpandedSize(size int64) int64 {
-	return int64(float64(size) * Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat())
 }
 
 func canTriggerSortCompaction(segment *SegmentInfo) bool {

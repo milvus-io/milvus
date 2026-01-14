@@ -261,6 +261,7 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
                                                             fid.get(),
                                                             field_datas,
                                                             cm);
+            segment->AddFieldDataInfoForSealed(load_info);
             segment->LoadFieldData(load_info);
         }
     }
@@ -490,4 +491,93 @@ TEST_P(TestChunkSegment, TestPkRange) {
                                bitset_sorted_view);
         EXPECT_EQ(0, bitset_sorted_view.count());
     }
+}
+
+// Test DropIndex reloads field data when the dropped index had raw data
+// and field data was previously dropped.
+TEST_P(TestChunkSegment, TestDropIndexReloadsFieldData) {
+    using namespace milvus::segcore;
+    bool pk_is_string = GetParam();
+    // Only test with int64 pk for simplicity
+    if (pk_is_string) {
+        return;
+    }
+
+    auto segment_impl = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    // Get the int64 field which is not the pk
+    auto fid = fields.at("int64");
+
+    // Verify field data is initially loaded
+    EXPECT_TRUE(segment_impl->HasFieldData(fid))
+        << "int64 field data should be ready before loading index";
+
+    // Prepare field data info for later reload by DropIndex
+    // The data was already written to storage in SetUp(), we just need to store the info
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    std::vector<int64_t> test_data(test_data_count * chunk_num);
+    std::iota(test_data.begin(), test_data.end(), 0);
+    std::vector<FieldDataPtr> field_datas;
+    for (int i = 0; i < chunk_num; i++) {
+        auto field_data =
+            std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+        field_data->FillFieldData(test_data.data() + i * test_data_count,
+                                  test_data_count);
+        field_datas.push_back(field_data);
+    }
+    auto reload_info = PrepareSingleFieldInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, fid.get(), field_datas, cm);
+    segment_impl->AddFieldDataInfoForSealed(reload_info);
+
+    // Build a sort index which has raw data (ASCENDING_SORT has has_raw_data=true)
+    index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::INT64;
+    create_index_info.index_type = index::ASCENDING_SORT;
+    auto index = index::IndexFactory::GetInstance().CreateScalarIndex(
+        create_index_info, storage::FileManagerContext());
+
+    // Get data from chunks
+    std::vector<int64_t> data(test_data_count * chunk_num);
+    for (int i = 0; i < chunk_num; i++) {
+        auto pw = segment_impl->chunk_data<int64_t>(nullptr, fid, i);
+        auto d = pw.get();
+        std::copy(d.data(),
+                  d.data() + test_data_count,
+                  data.begin() + i * test_data_count);
+    }
+
+    index->BuildWithRawDataForUT(data.size(), data.data());
+
+    // Load the index - this should drop the field data if index has raw data
+    LoadIndexInfo load_index_info;
+    load_index_info.index_params = GenIndexParams(index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test_drop_index", std::move(index));
+    load_index_info.field_id = fid.get();
+    segment->LoadIndex(load_index_info);
+
+    // Verify the index is loaded
+    EXPECT_TRUE(segment_impl->HasIndex(fid)) << "Index should be loaded";
+
+    // ASCENDING_SORT has has_raw_data=true, so field data should be dropped
+    EXPECT_FALSE(segment_impl->HasFieldData(fid))
+        << "Field data should be dropped after loading index with raw data";
+
+    // Now drop the index
+    segment_impl->DropIndex(fid);
+
+    // Verify the index is dropped
+    EXPECT_FALSE(segment_impl->HasIndex(fid)) << "Index should be dropped";
+
+    // Since the index had raw data and field data was dropped during LoadIndex,
+    // DropIndex should have reloaded the field data.
+    EXPECT_TRUE(segment_impl->HasFieldData(fid))
+        << "Field data should be reloaded after DropIndex";
+
+    // Verify we can still read the data
+    auto pw = segment_impl->chunk_data<int64_t>(nullptr, fid, 0);
+    auto d = pw.get();
+    EXPECT_EQ(d.data()[0], 0) << "First data value should be 0";
 }

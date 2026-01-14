@@ -52,7 +52,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		zap.Duration("get cache duration", getCacheDur))
 
 	var ez *message.CipherConfig
-	if hookutil.IsClusterEncyptionEnabled() {
+	if hookutil.IsClusterEncryptionEnabled() {
 		ez = hookutil.GetEzByCollProperties(it.schema.GetProperties(), it.collectionID).AsMessageConfig()
 	}
 

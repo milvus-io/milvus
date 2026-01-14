@@ -113,11 +113,25 @@ struct OffsetDisPair {
 };
 
 struct OffsetDisPairComparator {
+    bool larger_is_closer_ = false;
+
+    OffsetDisPairComparator(bool larger_is_closer = false)
+        : larger_is_closer_(larger_is_closer) {
+    }
+
     bool
     operator()(const std::shared_ptr<OffsetDisPair>& left,
                const std::shared_ptr<OffsetDisPair>& right) const {
+        // For priority_queue: return true if left has lower priority than right
+        // We want the element with better (closer) distance at the top
         if (left->GetOffDis().second != right->GetOffDis().second) {
-            return left->GetOffDis().second < right->GetOffDis().second;
+            if (larger_is_closer_) {
+                // IP/Cosine: larger distance is better, smaller has lower priority
+                return left->GetOffDis().second < right->GetOffDis().second;
+            } else {
+                // L2: smaller distance is better, larger has lower priority
+                return left->GetOffDis().second > right->GetOffDis().second;
+            }
         }
         return left->GetOffDis().first < right->GetOffDis().first;
     }
@@ -125,8 +139,11 @@ struct OffsetDisPairComparator {
 struct VectorIterator {
  public:
     VectorIterator(int chunk_count,
-                   const std::vector<int64_t>& total_rows_until_chunk = {})
-        : total_rows_until_chunk_(total_rows_until_chunk) {
+                   const std::vector<int64_t>& total_rows_until_chunk = {},
+                   bool larger_is_closer = false)
+        : total_rows_until_chunk_(total_rows_until_chunk),
+          larger_is_closer_(larger_is_closer),
+          heap_(OffsetDisPairComparator(larger_is_closer)) {
         iterators_.reserve(chunk_count);
     }
 
@@ -195,6 +212,7 @@ struct VectorIterator {
         heap_;
     bool sealed = false;
     std::vector<int64_t> total_rows_until_chunk_;
+    bool larger_is_closer_ = false;
     //currently, VectorIterator is guaranteed to be used serially without concurrent problem, in the future
     //we may need to add mutex to protect the variable sealed
 };
@@ -219,7 +237,8 @@ struct SearchResult {
         int64_t nq,
         int chunk_count,
         const std::vector<int64_t>& total_rows_until_chunk,
-        const std::vector<knowhere::IndexNode::IteratorPtr>& kw_iterators) {
+        const std::vector<knowhere::IndexNode::IteratorPtr>& kw_iterators,
+        bool larger_is_closer = false) {
         AssertInfo(kw_iterators.size() == nq * chunk_count,
                    "kw_iterators count:{} is not equal to nq*chunk_count:{}, "
                    "wrong state",
@@ -231,7 +250,7 @@ struct SearchResult {
             vec_iter_idx = vec_iter_idx % nq;
             if (vector_iterators.size() < nq) {
                 auto vector_iterator = std::make_shared<VectorIterator>(
-                    chunk_count, total_rows_until_chunk);
+                    chunk_count, total_rows_until_chunk, larger_is_closer);
                 vector_iterators.emplace_back(vector_iterator);
             }
             const auto& kw_iterator = kw_iterators[i];

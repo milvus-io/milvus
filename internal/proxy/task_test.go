@@ -561,14 +561,16 @@ func constructSearchRequest(
 	}
 
 	return &milvuspb.SearchRequest{
-		Base:             nil,
-		DbName:           dbName,
-		CollectionName:   collectionName,
-		PartitionNames:   nil,
-		Dsl:              expr,
-		PlaceholderGroup: plgBs,
-		DslType:          commonpb.DslType_BoolExprV1,
-		OutputFields:     nil,
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionNames: nil,
+		Dsl:            expr,
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: plgBs,
+		},
+		DslType:      commonpb.DslType_BoolExprV1,
+		OutputFields: nil,
 		SearchParams: []*commonpb.KeyValuePair{
 			{
 				Key:   common.MetricTypeKey,
@@ -5735,4 +5737,33 @@ func TestHighlightTask(t *testing.T) {
 		err := task.PostExecute(ctx)
 		assert.NoError(t, err)
 	})
+}
+
+func TestValidateCollectionTTL(t *testing.T) {
+	cases := []struct {
+		name      string
+		value     string
+		hasTTL    bool
+		expectErr bool
+	}{
+		{"at_min_boundary", "-1", true, false},         // val <= -1
+		{"out_of_lower_boundary", "-2", true, true},    // val < -1
+		{"exceed_max", "3155760001", true, true},       // val > MaxTTLSeconds
+		{"at_max_boundary", "3155760000", true, false}, // val == MaxTTLSeconds
+		{"valid_value", "3600", true, false},
+		{"min_valid", "1", true, false},
+		{"invalid_format", "abc", true, true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			hasTTL, err := validateCollectionTTL([]*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: c.value}})
+			assert.Equal(t, c.hasTTL, hasTTL)
+			if c.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }

@@ -8,6 +8,10 @@ fn test_analyzer(tokenizer: &mut TextAnalyzer) {
     tokenizer.token_stream(text);
 }
 
+fn clone_analyzer(tokenizer: &mut TextAnalyzer) {
+    let _ = tokenizer.clone();
+}
+
 fn bench_lindua_language_identifier_tokenizer(c: &mut Criterion) {
     let params = r#"
         {
@@ -57,7 +61,7 @@ fn bench_whatlang_language_identifier_tokenizer(c: &mut Criterion) {
                     }
                 },
                 "mapping": {
-                    "Chinese": "jieba",
+                    "Mandarin": "jieba",
                     "English": "en"
                 },
                 "identifier": "whatlang"
@@ -72,9 +76,45 @@ fn bench_whatlang_language_identifier_tokenizer(c: &mut Criterion) {
     });
 }
 
+fn bench_jieba_tokenizer_clone(c: &mut Criterion) {
+    let params = r#"
+        {
+            "tokenizer": {
+                "type": "jieba",
+                "dict":["_extend_default_"]
+            }
+        }
+    "#;
+    let mut analyzer = create_analyzer(params);
+    assert!(analyzer.is_ok(), "error: {}", analyzer.err().unwrap());
+
+    c.bench_function("test", |b| {
+        b.iter(|| clone_analyzer(black_box(&mut analyzer.as_mut().unwrap())))
+    });
+}
+
+fn bench_lindera_tokenizer_clone(c: &mut Criterion) {
+    let params = r#"
+        {
+            "tokenizer": {
+                "type": "lindera",
+                "dict_kind": "ipadic"
+            }
+        }
+    "#;
+    let mut analyzer = create_analyzer(params);
+    assert!(analyzer.is_ok(), "error: {}", analyzer.err().unwrap());
+
+    c.bench_function("test", |b| {
+        b.iter(|| clone_analyzer(black_box(&mut analyzer.as_mut().unwrap())))
+    });
+}
+
 criterion_group!(
     benches,
     bench_lindua_language_identifier_tokenizer,
-    bench_whatlang_language_identifier_tokenizer
+    bench_whatlang_language_identifier_tokenizer,
+    bench_jieba_tokenizer_clone,
+    bench_lindera_tokenizer_clone
 );
 criterion_main!(benches);

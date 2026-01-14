@@ -126,6 +126,7 @@ type Segment struct {
 	LastDeltaTimestamp uint64                            // The timestamp of the last delta record
 	IndexInfo          map[int64]*querypb.FieldIndexInfo // index info of loaded segment, indexID -> FieldIndexInfo
 	JSONStatsField     map[int64]*querypb.JsonStatsInfo  // json index info of loaded segment
+	ManifestPath       string                            // current manifest path of loaded segment
 }
 
 func SegmentFromInfo(info *datapb.SegmentInfo) *Segment {

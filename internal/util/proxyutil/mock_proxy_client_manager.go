@@ -63,39 +63,6 @@ func (_c *MockProxyClientManager_AddProxyClient_Call) RunAndReturn(run func(*ses
 	return _c
 }
 
-// AddProxyClients provides a mock function with given fields: session
-func (_m *MockProxyClientManager) AddProxyClients(session []*sessionutil.Session) {
-	_m.Called(session)
-}
-
-// MockProxyClientManager_AddProxyClients_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddProxyClients'
-type MockProxyClientManager_AddProxyClients_Call struct {
-	*mock.Call
-}
-
-// AddProxyClients is a helper method to define mock.On call
-//   - session []*sessionutil.Session
-func (_e *MockProxyClientManager_Expecter) AddProxyClients(session interface{}) *MockProxyClientManager_AddProxyClients_Call {
-	return &MockProxyClientManager_AddProxyClients_Call{Call: _e.mock.On("AddProxyClients", session)}
-}
-
-func (_c *MockProxyClientManager_AddProxyClients_Call) Run(run func(session []*sessionutil.Session)) *MockProxyClientManager_AddProxyClients_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]*sessionutil.Session))
-	})
-	return _c
-}
-
-func (_c *MockProxyClientManager_AddProxyClients_Call) Return() *MockProxyClientManager_AddProxyClients_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockProxyClientManager_AddProxyClients_Call) RunAndReturn(run func([]*sessionutil.Session)) *MockProxyClientManager_AddProxyClients_Call {
-	_c.Run(run)
-	return _c
-}
-
 // DelProxyClient provides a mock function with given fields: s
 func (_m *MockProxyClientManager) DelProxyClient(s *sessionutil.Session) {
 	_m.Called(s)
@@ -537,6 +504,39 @@ func (_c *MockProxyClientManager_RefreshPolicyInfoCache_Call) Return(_a0 error) 
 
 func (_c *MockProxyClientManager_RefreshPolicyInfoCache_Call) RunAndReturn(run func(context.Context, *proxypb.RefreshPolicyInfoCacheRequest) error) *MockProxyClientManager_RefreshPolicyInfoCache_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// SetProxyClients provides a mock function with given fields: session
+func (_m *MockProxyClientManager) SetProxyClients(session []*sessionutil.Session) {
+	_m.Called(session)
+}
+
+// MockProxyClientManager_SetProxyClients_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetProxyClients'
+type MockProxyClientManager_SetProxyClients_Call struct {
+	*mock.Call
+}
+
+// SetProxyClients is a helper method to define mock.On call
+//   - session []*sessionutil.Session
+func (_e *MockProxyClientManager_Expecter) SetProxyClients(session interface{}) *MockProxyClientManager_SetProxyClients_Call {
+	return &MockProxyClientManager_SetProxyClients_Call{Call: _e.mock.On("SetProxyClients", session)}
+}
+
+func (_c *MockProxyClientManager_SetProxyClients_Call) Run(run func(session []*sessionutil.Session)) *MockProxyClientManager_SetProxyClients_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]*sessionutil.Session))
+	})
+	return _c
+}
+
+func (_c *MockProxyClientManager_SetProxyClients_Call) Return() *MockProxyClientManager_SetProxyClients_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockProxyClientManager_SetProxyClients_Call) RunAndReturn(run func([]*sessionutil.Session)) *MockProxyClientManager_SetProxyClients_Call {
+	_c.Run(run)
 	return _c
 }
 

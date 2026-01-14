@@ -338,6 +338,10 @@ func (s *Server) AlterDatabase(ctx context.Context, request *rootcoordpb.AlterDa
 	return s.mixCoord.AlterDatabase(ctx, request)
 }
 
+func (s *Server) BackupEzk(ctx context.Context, request *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
+	return s.mixCoord.BackupEzk(ctx, request)
+}
+
 func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return s.mixCoord.CheckHealth(ctx, request)
 }
@@ -937,7 +941,7 @@ func (s *Server) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerReques
 	return s.mixCoord.RunAnalyzer(ctx, req)
 }
 
-func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	return s.mixCoord.ValidateAnalyzer(ctx, req)
 }
 

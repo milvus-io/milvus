@@ -12,6 +12,7 @@
 #include "tantivy-binding.h"
 #include "common/Slice.h"
 #include "common/RegexQuery.h"
+#include "common/Tracer.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/InvertedIndexUtil.h"
@@ -201,6 +202,7 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
         // the index is loaded in ram, so we can remove files in advance
         disk_file_manager_->RemoveIndexFiles();
     }
+    ComputeByteSize();
 }
 
 template <typename T>
@@ -237,7 +239,13 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
         if (file_name.find(INDEX_NULL_OFFSET_FILE_NAME) != std::string::npos) {
             null_offset_files.push_back(file);
         }
+
+        // add slice meta file for null offset file compact
+        if (file_name == INDEX_FILE_SLICE_META) {
+            null_offset_files.push_back(file);
+        }
     }
+
     if (null_offset_files.size() > 0) {
         // null offset file is sliced
         auto index_datas = mem_file_manager_->LoadIndexToMemory(
@@ -265,6 +273,10 @@ InvertedIndexTantivy<T>::RetainTantivyIndexFiles(
                 auto file_name =
                     boost::filesystem::path(file).filename().string();
                 return file_name == "index_type" ||
+                       // Slice meta is only used to compact null_offset files and non_exist_offset files.
+                       // It can be removed after compaction is complete.
+                       // Other index files are compacted by slice index instead of meta.
+                       file_name == INDEX_FILE_SLICE_META ||
                        file_name.find(INDEX_NULL_OFFSET_FILE_NAME) !=
                            std::string::npos;
             }),
@@ -274,6 +286,7 @@ InvertedIndexTantivy<T>::RetainTantivyIndexFiles(
 template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::In(size_t n, const T* values) {
+    tracer::AutoSpan span("InvertedIndexTantivy::In", tracer::GetRootSpan());
     TargetBitmap bitset(Count());
     wrapper_->terms_query(values, n, &bitset);
     return bitset;
@@ -282,6 +295,8 @@ InvertedIndexTantivy<T>::In(size_t n, const T* values) {
 template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::IsNull() {
+    tracer::AutoSpan span("InvertedIndexTantivy::IsNull",
+                          tracer::GetRootSpan());
     int64_t count = Count();
     TargetBitmap bitset(count);
 
@@ -306,6 +321,8 @@ InvertedIndexTantivy<T>::IsNull() {
 template <typename T>
 TargetBitmap
 InvertedIndexTantivy<T>::IsNotNull() {
+    tracer::AutoSpan span("InvertedIndexTantivy::IsNotNull",
+                          tracer::GetRootSpan());
     int64_t count = Count();
     TargetBitmap bitset(count, true);
 
@@ -331,6 +348,8 @@ template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::InApplyFilter(
     size_t n, const T* values, const std::function<bool(size_t)>& filter) {
+    tracer::AutoSpan span("InvertedIndexTantivy::InApplyFilter",
+                          tracer::GetRootSpan());
     TargetBitmap bitset(Count());
     wrapper_->terms_query(values, n, &bitset);
     // todo(SpadeA): could push-down the filter to tantivy query
@@ -342,6 +361,8 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::InApplyCallback(
     size_t n, const T* values, const std::function<void(size_t)>& callback) {
+    tracer::AutoSpan span("InvertedIndexTantivy::InApplyCallback",
+                          tracer::GetRootSpan());
     TargetBitmap bitset(Count());
     wrapper_->terms_query(values, n, &bitset);
     // todo(SpadeA): could push-down the callback to tantivy query
@@ -351,6 +372,7 @@ InvertedIndexTantivy<T>::InApplyCallback(
 template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
+    tracer::AutoSpan span("InvertedIndexTantivy::NotIn", tracer::GetRootSpan());
     int64_t count = Count();
     TargetBitmap bitset(count);
     wrapper_->terms_query(values, n, &bitset);
@@ -378,6 +400,7 @@ InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
 template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::Range(T value, OpType op) {
+    tracer::AutoSpan span("InvertedIndexTantivy::Range", tracer::GetRootSpan());
     TargetBitmap bitset(Count());
 
     switch (op) {
@@ -407,6 +430,8 @@ InvertedIndexTantivy<T>::Range(T lower_bound_value,
                                bool lb_inclusive,
                                T upper_bound_value,
                                bool ub_inclusive) {
+    tracer::AutoSpan span("InvertedIndexTantivy::RangeWithBounds",
+                          tracer::GetRootSpan());
     TargetBitmap bitset(Count());
     wrapper_->range_query(lower_bound_value,
                           upper_bound_value,
@@ -419,6 +444,8 @@ InvertedIndexTantivy<T>::Range(T lower_bound_value,
 template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::PrefixMatch(const std::string_view prefix) {
+    tracer::AutoSpan span("InvertedIndexTantivy::PrefixMatch",
+                          tracer::GetRootSpan());
     TargetBitmap bitset(Count());
     std::string s(prefix);
     wrapper_->prefix_query(s, &bitset);
@@ -434,6 +461,7 @@ InvertedIndexTantivy<T>::Query(const DatasetPtr& dataset) {
 template <>
 const TargetBitmap
 InvertedIndexTantivy<std::string>::Query(const DatasetPtr& dataset) {
+    tracer::AutoSpan span("InvertedIndexTantivy::Query", tracer::GetRootSpan());
     auto op = dataset->Get<OpType>(OPERATOR_TYPE);
     if (op == OpType::PrefixMatch) {
         auto prefix = dataset->Get<std::string>(MATCH_VALUE);
@@ -445,6 +473,8 @@ InvertedIndexTantivy<std::string>::Query(const DatasetPtr& dataset) {
 template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::RegexQuery(const std::string& regex_pattern) {
+    tracer::AutoSpan span("InvertedIndexTantivy::RegexQuery",
+                          tracer::GetRootSpan());
     TargetBitmap bitset(Count());
     wrapper_->regex_query(regex_pattern, &bitset);
     return bitset;
@@ -529,6 +559,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
     wrapper_->create_reader(milvus::index::SetBitsetSealed);
     finish();
     wrapper_->reload();
+    ComputeByteSize();
 }
 
 template <typename T>

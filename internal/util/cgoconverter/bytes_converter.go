@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 

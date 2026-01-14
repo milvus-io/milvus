@@ -597,7 +597,7 @@ func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter,
 		if err != nil {
 			return err
 		}
-		err = h.addTaskWithSearchText(fieldId, fieldName, analyzerName, texts)
+		err = h.addTaskWithSearchText(t.schema, fieldId, fieldName, analyzerName, texts)
 		if err != nil {
 			return err
 		}
@@ -613,6 +613,13 @@ func (t *searchTask) addHighlightTask(highlighter *commonpb.Highlighter, metricT
 	switch highlighter.GetType() {
 	case commonpb.HighlightType_Lexical:
 		return t.createLexicalHighlighter(highlighter, metricType, annsField, placeholder, analyzerName)
+	case commonpb.HighlightType_Semantic:
+		h, err := newSemanticHighlighter(t, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()})
+		if err != nil {
+			return err
+		}
+		t.highlighter = h
+		return nil
 	default:
 		return merr.WrapErrParameterInvalidMsg("unsupported highlight type: %v", highlighter.GetType())
 	}
@@ -697,9 +704,9 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		return err
 	}
 	if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, t.SearchRequest.FieldId) {
-		metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.SearchLabel, strconv.FormatInt(t.SearchRequest.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.PlaceholderGroup, int(t.request.GetNq()))))
+		metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.SearchLabel, strconv.FormatInt(t.SearchRequest.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.GetPlaceholderGroup(), int(t.request.GetNq()))))
 	}
-	t.SearchRequest.PlaceholderGroup = t.request.PlaceholderGroup
+	t.SearchRequest.PlaceholderGroup = t.request.GetPlaceholderGroup()
 	t.SearchRequest.Topk = queryInfo.GetTopk()
 	t.SearchRequest.MetricType = queryInfo.GetMetricType()
 	t.queryInfos = append(t.queryInfos, queryInfo)
@@ -757,7 +764,7 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 
 	searchInfo.planInfo.QueryFieldId = annField.GetFieldID()
 	start := time.Now()
-	plan, planErr := planparserv2.CreateSearchPlan(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore())
+	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
 	if planErr != nil {
 		log.Ctx(t.ctx).Warn("failed to create query plan", zap.Error(planErr),
 			zap.String("dsl", dsl), // may be very large if large term passed.

@@ -152,6 +152,10 @@ func (t *fakeTask) GetState() indexpb.JobState {
 	return t.retstate
 }
 
+func (t *fakeTask) IsVectorIndex() bool {
+	return false
+}
+
 var (
 	idLock sync.Mutex
 	id     = 0

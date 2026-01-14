@@ -18,6 +18,7 @@
 #include "common/BitsetView.h"
 #include "common/QueryInfo.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
@@ -196,10 +197,12 @@ SearchOnSealedColumn(const Schema& schema,
         offset += chunk_size;
     }
     if (milvus::exec::UseVectorIterator(search_info)) {
+        bool larger_is_closer = PositivelyRelated(search_info.metric_type_);
         result.AssembleChunkVectorIterators(num_queries,
                                             num_chunk,
                                             column->GetNumRowsUntilChunk(),
-                                            final_qr.chunk_iterators());
+                                            final_qr.chunk_iterators(),
+                                            larger_is_closer);
     } else {
         result.distances_ = std::move(final_qr.mutable_distances());
         result.seg_offsets_ = std::move(final_qr.mutable_seg_offsets());

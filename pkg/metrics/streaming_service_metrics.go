@@ -380,6 +380,11 @@ var (
 		Help: "Total of wal scanner on current streaming node",
 	}, WALChannelLabelName, WALScannerModelLabelName)
 
+	WALScannerPauseConsumption = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "scanner_pause_consumption",
+		Help: "Whether to pause consumption of wal scanner",
+	}, WALChannelLabelName)
+
 	WALScanMessageBytes = newWALHistogramVec(prometheus.HistogramOpts{
 		Name:    "scan_message_bytes",
 		Help:    "Bytes of scanned message from wal",
@@ -461,6 +466,21 @@ var (
 		Name: "recovery_is_on_persisting",
 		Help: "Is recovery storage on persisting",
 	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALDelegatorEmptyTimeTickFilteredTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "delegator_empty_time_tick_filtered_total",
+		Help: "Total of empty time tick filtered",
+	}, WALChannelLabelName)
+
+	WALDelegatorTsafeTimeTickUnfilteredTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "delegator_tsafe_time_tick_unfiltered_total",
+		Help: "Total of empty time tick unfiltered because of tsafe",
+	}, WALChannelLabelName)
+
+	WALFlusherEmptyTimeTickFilteredTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "flusher_empty_time_tick_filtered_total",
+		Help: "Total of empty time tick filtered",
+	}, WALChannelLabelName)
 )
 
 // RegisterStreamingServiceClient registers streaming service client metrics
@@ -546,6 +566,7 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALWriteAheadBufferEarliestTimeTick)
 	registry.MustRegister(WALWriteAheadBufferLatestTimeTick)
 	registry.MustRegister(WALScannerTotal)
+	registry.MustRegister(WALScannerPauseConsumption)
 	registry.MustRegister(WALScanMessageBytes)
 	registry.MustRegister(WALScanMessageTotal)
 	registry.MustRegister(WALScanPassMessageBytes)
@@ -562,6 +583,9 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALRecoveryPersistedTimeTick)
 	registry.MustRegister(WALRecoveryInconsistentEventTotal)
 	registry.MustRegister(WALRecoveryIsOnPersisting)
+	registry.MustRegister(WALDelegatorEmptyTimeTickFilteredTotal)
+	registry.MustRegister(WALDelegatorTsafeTimeTickUnfilteredTotal)
+	registry.MustRegister(WALFlusherEmptyTimeTickFilteredTotal)
 }
 
 func newStreamingCoordGaugeVec(opts prometheus.GaugeOpts, extra ...string) *prometheus.GaugeVec {

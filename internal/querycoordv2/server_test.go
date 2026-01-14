@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/tikv"
 )
 
@@ -420,10 +421,10 @@ func TestApplyLoadConfigChanges(t *testing.T) {
 		}).Build()
 
 		// Mock paramtable.ParamItem.GetAsUint32() for ClusterLevelLoadReplicaNumber
-		mockey.Mock((*paramtable.ParamItem).GetAsUint32).Return(uint32(2)).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsInt32).Return(int32(2)).Build()
 
 		// Mock paramtable.ParamItem.GetAsStrings() for ClusterLevelLoadResourceGroups
-		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default"}).Build()
+		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default", "rg1"}).Build()
 
 		// Mock UpdateLoadConfig to capture the call
 		var updateLoadConfigCalled bool
@@ -438,10 +439,13 @@ func TestApplyLoadConfigChanges(t *testing.T) {
 			return nil
 		}).Build()
 
-		replicaNum := paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsUint32()
-		rgs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
 		// Call applyLoadConfigChanges
-		testServer.applyLoadConfigChanges(ctx, int32(replicaNum), rgs)
+		watcher := &LoadConfigWatcher{
+			s:         testServer,
+			notifier:  syncutil.NewAsyncTaskNotifier[struct{}](),
+			triggerCh: make(chan struct{}, 10),
+		}
+		watcher.applyLoadConfigChanges()
 
 		// Verify UpdateLoadConfig was called
 		assert.True(t, updateLoadConfigCalled, "UpdateLoadConfig should be called")
@@ -449,7 +453,12 @@ func TestApplyLoadConfigChanges(t *testing.T) {
 		// Verify that only collections with IsUserSpecifiedReplicaMode = false are included
 		assert.Equal(t, []int64{1001}, capturedCollectionIDs, "Only collections with IsUserSpecifiedReplicaMode = false should be included")
 		assert.Equal(t, int32(2), capturedReplicaNum, "ReplicaNumber should match cluster level config")
-		assert.Equal(t, []string{"default"}, capturedRGs, "ResourceGroups should match cluster level config")
+		assert.Equal(t, []string{"default", "rg1"}, capturedRGs, "ResourceGroups should match cluster level config")
+
+		watcher = NewLoadConfigWatcher(testServer)
+		watcher.Trigger()
+		time.Sleep(1 * time.Second)
+		watcher.Close()
 	})
 }
 

@@ -202,6 +202,7 @@ message CreateStatsRequest {
   int64 json_stats_max_shredding_columns = 28;
   double json_stats_shredding_ratio_threshold = 29;
   int64 json_stats_write_batch_size = 30;
+  string manifest_path = 31;
 }
 
 message CreateJobV2Request {

@@ -128,10 +128,11 @@ func (c *voyageAIEmbedding) embedding(modelName string, texts []string, dim int,
 		return nil, fmt.Errorf("Voyageai: unsupport output type: [%s], only support float and int8", outputType)
 	}
 	r := EmbeddingRequest{
-		Model:      modelName,
-		Input:      texts,
-		InputType:  textType,
-		Truncation: truncation,
+		Model:       modelName,
+		Input:       texts,
+		InputType:   textType,
+		Truncation:  truncation,
+		OutputDtype: outputType,
 	}
 	if dim != 0 {
 		r.OutputDimension = int64(dim)

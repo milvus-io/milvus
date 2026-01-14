@@ -684,6 +684,64 @@ func (_c *MockShardManager_DropPartition_Call) RunAndReturn(run func(message.Imm
 	return _c
 }
 
+// FlushAllAndFenceSegmentAllocUntil provides a mock function with given fields: timetick
+func (_m *MockShardManager) FlushAllAndFenceSegmentAllocUntil(timetick uint64) ([]int64, error) {
+	ret := _m.Called(timetick)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FlushAllAndFenceSegmentAllocUntil")
+	}
+
+	var r0 []int64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(uint64) ([]int64, error)); ok {
+		return rf(timetick)
+	}
+	if rf, ok := ret.Get(0).(func(uint64) []int64); ok {
+		r0 = rf(timetick)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]int64)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(uint64) error); ok {
+		r1 = rf(timetick)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockShardManager_FlushAllAndFenceSegmentAllocUntil_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FlushAllAndFenceSegmentAllocUntil'
+type MockShardManager_FlushAllAndFenceSegmentAllocUntil_Call struct {
+	*mock.Call
+}
+
+// FlushAllAndFenceSegmentAllocUntil is a helper method to define mock.On call
+//   - timetick uint64
+func (_e *MockShardManager_Expecter) FlushAllAndFenceSegmentAllocUntil(timetick interface{}) *MockShardManager_FlushAllAndFenceSegmentAllocUntil_Call {
+	return &MockShardManager_FlushAllAndFenceSegmentAllocUntil_Call{Call: _e.mock.On("FlushAllAndFenceSegmentAllocUntil", timetick)}
+}
+
+func (_c *MockShardManager_FlushAllAndFenceSegmentAllocUntil_Call) Run(run func(timetick uint64)) *MockShardManager_FlushAllAndFenceSegmentAllocUntil_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockShardManager_FlushAllAndFenceSegmentAllocUntil_Call) Return(_a0 []int64, _a1 error) *MockShardManager_FlushAllAndFenceSegmentAllocUntil_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockShardManager_FlushAllAndFenceSegmentAllocUntil_Call) RunAndReturn(run func(uint64) ([]int64, error)) *MockShardManager_FlushAllAndFenceSegmentAllocUntil_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // FlushAndFenceSegmentAllocUntil provides a mock function with given fields: collectionID, timetick
 func (_m *MockShardManager) FlushAndFenceSegmentAllocUntil(collectionID int64, timetick uint64) ([]int64, error) {
 	ret := _m.Called(collectionID, timetick)

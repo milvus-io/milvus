@@ -119,6 +119,7 @@ func (pc *pulsarClient) Subscribe(ctx context.Context, options mqwrapper.Consume
 		Type:                        pulsar.Exclusive,
 		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(options.SubscriptionInitialPosition),
 		MessageChannel:              receiveChannel,
+		StartMessageIDInclusive:     true,
 	})
 	if err != nil {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()

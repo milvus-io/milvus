@@ -69,6 +69,7 @@ type rwOptions struct {
 	storageConfig       *indexpb.StorageConfig
 	neededFields        typeutil.Set[int64]
 	useLoonFFI          bool
+	pluginContext       *indexcgopb.StoragePluginContext
 }
 
 func (o *rwOptions) validate() error {
@@ -171,6 +172,12 @@ func WithUseLoonFFI(useLoonFFI bool) RwOption {
 	}
 }
 
+func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption {
+	return func(options *rwOptions) {
+		options.pluginContext = pluginContext
+	}
+}
+
 func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloader downloaderFn) (ChunkedBlobsReader, error) {
 	if len(binlogs) == 0 {
 		return func() ([]*Blob, error) {
@@ -253,16 +260,22 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 
 	binlogReaderOpts := []BinlogReaderOption{}
 	var pluginContext *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncyptionEnabled() {
-		if ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID); ez != nil {
-			binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(ez.EzID, ez.CollectionID))
+	if hookutil.IsClusterEncryptionEnabled() {
+		// Reader pluginContext from import tasks
+		if rwOptions.pluginContext != nil {
+			pluginContext = rwOptions.pluginContext
+		} else {
+			ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
+			if ez != nil {
+				binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(ez.EzID, ez.CollectionID))
 
-			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-			if len(unsafe) > 0 {
-				pluginContext = &indexcgopb.StoragePluginContext{
-					EncryptionZoneId: ez.EzID,
-					CollectionId:     ez.CollectionID,
-					EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
+				unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+				if len(unsafe) > 0 {
+					pluginContext = &indexcgopb.StoragePluginContext{
+						EncryptionZoneId: ez.EzID,
+						CollectionId:     ez.CollectionID,
+						EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
+					}
 				}
 			}
 		}
@@ -318,14 +331,20 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, schema *s
 	}
 
 	var pluginContext *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncyptionEnabled() {
-		if ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID); ez != nil {
-			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-			if len(unsafe) > 0 {
-				pluginContext = &indexcgopb.StoragePluginContext{
-					EncryptionZoneId: ez.EzID,
-					CollectionId:     ez.CollectionID,
-					EncryptionKey:    string(unsafe),
+	if hookutil.IsClusterEncryptionEnabled() {
+		// Reader pluginContext from import tasks
+		if rwOptions.pluginContext != nil {
+			pluginContext = rwOptions.pluginContext
+		} else {
+			ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
+			if ez != nil {
+				unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+				if len(unsafe) > 0 {
+					pluginContext = &indexcgopb.StoragePluginContext{
+						EncryptionZoneId: ez.EzID,
+						CollectionId:     ez.CollectionID,
+						EncryptionKey:    string(unsafe),
+					}
 				}
 			}
 		}
@@ -357,7 +376,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 
 	opts := []StreamWriterOption{}
 	var pluginContext *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncyptionEnabled() {
+	if hookutil.IsClusterEncryptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(schema.GetProperties(), collectionID)
 		if ez != nil {
 			encryptor, edek, err := hookutil.GetCipher().GetEncryptor(ez.EzID, ez.CollectionID)

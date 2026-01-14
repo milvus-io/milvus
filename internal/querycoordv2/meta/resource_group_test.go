@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -450,4 +451,34 @@ func TestRGNodeFilter(t *testing.T) {
 		},
 	}, nodeMgr)
 	assert.Equal(t, rg.SelectNodeForRG(rg3), int64(-1))
+}
+
+func TestRGAcceptNode(t *testing.T) {
+	nodeMgr := session.NewNodeManager()
+
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 1,
+		Labels: map[string]string{
+			sessionutil.LabelResourceGroup: "rg1",
+		},
+	}))
+
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 2,
+		Labels: map[string]string{
+			sessionutil.LabelResourceGroup: "rg2",
+		},
+	}))
+
+	rg := NewResourceGroup("rg1", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{
+			NodeNum: 1,
+		},
+		Limits: &rgpb.ResourceGroupLimit{
+			NodeNum: 1,
+		},
+	}, nodeMgr)
+
+	assert.True(t, rg.AcceptNode(1))
+	assert.False(t, rg.AcceptNode(2))
 }

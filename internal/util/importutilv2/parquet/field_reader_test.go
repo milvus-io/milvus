@@ -22,8 +22,13 @@ import (
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+func init() {
+	paramtable.Init()
+}
 
 func TestInvalidUTF8(t *testing.T) {
 	const (

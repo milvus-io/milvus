@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
 )
@@ -49,11 +48,6 @@ type TestArrayStructSuite struct {
 }
 
 func (s *TestArrayStructSuite) run() {
-	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
-		paramtable.Get().CommonCfg.EnableStorageV2.Key: "true",
-	})
-	defer revertGuard()
-
 	ctx, cancel := context.WithCancel(s.Cluster.GetContext())
 	defer cancel()
 

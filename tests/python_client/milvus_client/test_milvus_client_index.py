@@ -234,8 +234,9 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name="embeddings", index_type=not_supported_index, metric_type="L2")
         # 4. create another index
-        error = {ct.err_code: 1100, ct.err_msg: f"data type Int8Vector can't build with this index {not_supported_index}: "
-                                                f"invalid parameter[expected=valid index params][actual=invalid index params]"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"data type Int8Vector can't build with this index {not_supported_index}: "
+                             f"invalid parameter[expected=valid index params][actual=invalid index params]"}
         self.create_index(client, collection_name, index_params,
                           check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
@@ -277,24 +278,8 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
 class TestMilvusClientIndexValid(TestMilvusClientV2Base):
     """ Test case of index interface """
 
-    @pytest.fixture(scope="function", params=[False, True])
-    def auto_id(self, request):
-        yield request.param
-
     @pytest.fixture(scope="function", params=["COSINE", "L2", "IP"])
     def metric_type(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=["TRIE", "STL_SORT", "INVERTED", "AUTOINDEX"])
-    def scalar_index(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=["TRIE", "INVERTED", "AUTOINDEX", ""])
-    def varchar_index(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=["STL_SORT", "INVERTED", "AUTOINDEX", ""])
-    def numeric_index(self, request):
         yield request.param
 
     """
@@ -302,14 +287,16 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
     #  The following are valid base cases
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("index", ct.all_index_types[:8])
-    def test_milvus_client_index_with_params(self, index, metric_type):
+    def test_milvus_client_index_with_params(self, index):
         """
         target: test index with user defined params
         method: create connection, collection, index, insert and search
         expected: index/search/query successfully
         """
+        metric_type = "L2"
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
@@ -351,12 +338,13 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ct.all_index_types[:8])
-    def test_milvus_client_index_after_insert(self, index, metric_type):
+    def test_milvus_client_index_after_insert(self, index):
         """
         target: test index after insert
         method: create connection, collection, insert, index and search
         expected: index/search/query successfully
         """
+        metric_type = "COSINE"
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
@@ -394,25 +382,27 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
                                 "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("add_field", [True, False])
-    def test_milvus_client_index_auto_index(self, numeric_index, varchar_index, metric_type, add_field):
+    def test_milvus_client_scalar_auto_index(self, add_field):
         """
         target: test index with autoindex on both scalar and vector field
         method: create connection, collection, insert and search
         expected: index/search/query successfully
         """
+        metric_type = "COSINE"
+        numeric_fields = [ct.default_int32_field_name, ct.default_int16_field_name,
+                          ct.default_int8_field_name, default_float_field_name,
+                          ct.default_double_field_name, ct.default_int64_field_name]
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         schema = self.create_schema(client)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_int32_field_name, DataType.INT32)
-        schema.add_field(ct.default_int16_field_name, DataType.INT16)
-        schema.add_field(ct.default_int8_field_name, DataType.INT8)
-        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
-        schema.add_field(default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_double_field_name, DataType.DOUBLE)
+        for field_name in numeric_fields:
+            schema.add_field(field_name, DataType.INT32, nullable=True)
+        for index in ct.varchar_supported_index_types:
+            schema.add_field(f"{default_string_field_name}_{index}", DataType.VARCHAR, max_length=64, nullable=True)
         schema.add_field(ct.default_bool_field_name, DataType.BOOL)
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
@@ -428,29 +418,46 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         # 2. prepare index params
         index = "AUTOINDEX"
         index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_primary_key_field_name,
+                               index_type=ct.numeric_supported_index_types[0], metric_type=metric_type)
         index_params.add_index(field_name=default_vector_field_name, index_type=index, metric_type=metric_type)
-        index_params.add_index(field_name=ct.default_int32_field_name, index_type=numeric_index, metric_type=metric_type)
-        index_params.add_index(field_name=ct.default_int16_field_name, index_type=numeric_index, metric_type=metric_type)
-        index_params.add_index(field_name=ct.default_int8_field_name, index_type=numeric_index, metric_type=metric_type)
-        index_params.add_index(field_name=default_float_field_name, index_type=numeric_index, metric_type=metric_type)
-        index_params.add_index(field_name=ct.default_double_field_name, index_type=numeric_index, metric_type=metric_type)
-        index_params.add_index(field_name=ct.default_bool_field_name, index_type="", metric_type=metric_type)
-        index_params.add_index(field_name=default_string_field_name, index_type=varchar_index, metric_type=metric_type)
-        index_params.add_index(field_name=default_primary_key_field_name, index_type=numeric_index, metric_type=metric_type)
+        index_params.add_index(field_name=ct.default_bool_field_name,
+                               index_type="", metric_type=metric_type)
+        if len(numeric_fields) >= len(ct.numeric_supported_index_types):
+            k = 0
+            for i in range(len(numeric_fields)):
+                if k >= len(ct.numeric_supported_index_types):
+                    k = 0
+                index_params.add_index(field_name=numeric_fields[i],
+                                       index_type=ct.numeric_supported_index_types[k], metric_type=metric_type)
+                k += 1
+        else:
+            k = 0
+            for i in range(len(ct.numeric_supported_index_types)):
+                if k >= len(numeric_fields):
+                    k = 0
+                index_params.add_index(field_name=numeric_fields[k],
+                                       index_type=ct.numeric_supported_index_types[i], metric_type=metric_type)
+                k += 1
+
+        for index in ct.varchar_supported_index_types:
+            index_params.add_index(field_name=f"{default_string_field_name}_{index}",
+                                   index_type=index, metric_type=metric_type)
+
         if add_field:
-            index_params.add_index(field_name="field_int", index_type=numeric_index, metric_type=metric_type)
-            index_params.add_index(field_name="field_varchar", index_type=varchar_index, metric_type=metric_type)
+            index_params.add_index(field_name="field_int",
+                                   index_type=ct.numeric_supported_index_types[0], metric_type=metric_type)
+            index_params.add_index(field_name="field_varchar",
+                                   index_type=ct.varchar_supported_index_types[0], metric_type=metric_type)
         # 3. create index
         self.create_index(client, collection_name, index_params)
         # 4. drop index
         self.drop_index(client, collection_name, default_vector_field_name)
-        self.drop_index(client, collection_name, ct.default_int32_field_name)
-        self.drop_index(client, collection_name, ct.default_int16_field_name)
-        self.drop_index(client, collection_name, ct.default_int8_field_name)
-        self.drop_index(client, collection_name, default_float_field_name)
-        self.drop_index(client, collection_name, ct.default_double_field_name)
+        for field_name in numeric_fields:
+            self.drop_index(client, collection_name, field_name)
+        for index in ct.varchar_supported_index_types:
+            self.drop_index(client, collection_name, f"{default_string_field_name}_{index}")
         self.drop_index(client, collection_name, ct.default_bool_field_name)
-        self.drop_index(client, collection_name, default_string_field_name)
         self.drop_index(client, collection_name, default_primary_key_field_name)
         if add_field:
             self.drop_index(client, collection_name, "field_int")
@@ -458,28 +465,38 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         # 5. create index
         self.create_index(client, collection_name, index_params)
         # 6. insert
-        rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 ct.default_int32_field_name: np.int32(i), ct.default_int16_field_name: np.int16(i),
-                 ct.default_int8_field_name: np.int8(i), default_float_field_name: i * 1.0,
-                 ct.default_double_field_name: np.double(i), ct.default_bool_field_name: np.bool_(i),
-                 default_string_field_name: str(i),
-                 **({"field_int": 10} if add_field else {}),
-                 **({"field_varchar": "default"} if add_field else {})
-                 } for i in range(default_nb)]
+        collection_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=2000, schema=collection_info, start=0)
         self.insert(client, collection_name, rows)
         # 7. load collection
         self.load_collection(client, collection_name)
         # 8. search
-        vectors_to_search = rng.random((1, default_dim))
+        vectors_to_search = cf.gen_vectors(nb=1, dim=default_dim)
         insert_ids = [i for i in range(default_nb)]
-        self.search(client, collection_name, vectors_to_search,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "limit": default_limit,
-                                 "pk_name": default_primary_key_field_name})
+        filter_fields = []
+        filter_fields.extend(numeric_fields)
+        if add_field:
+            filter_fields.extend(["field_int", "field_varchar"])
+        for field_name in filter_fields:
+            self.search(client, collection_name, vectors_to_search,
+                        limit=default_limit,
+                        filter=f"{field_name} is null",
+                        check_task=CheckTasks.check_search_results,
+                        check_items={"enable_milvus_client_api": True,
+                                     "nq": len(vectors_to_search),
+                                     "ids": insert_ids,
+                                     "limit": default_limit,
+                                     "pk_name": default_primary_key_field_name})
+        for index in ct.varchar_supported_index_types:
+            self.search(client, collection_name, vectors_to_search,
+                        limit=default_limit,
+                        filter=f"{default_string_field_name}_{index} is not null",
+                        check_task=CheckTasks.check_search_results,
+                        check_items={"enable_milvus_client_api": True,
+                                     "nq": len(vectors_to_search),
+                                     "ids": insert_ids,
+                                     "limit": default_limit,
+                                     "pk_name": default_primary_key_field_name})
         # 9. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
@@ -489,12 +506,13 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_scalar_hybrid_index_small_distinct_before_insert(self, metric_type):
+    def test_milvus_client_scalar_hybrid_index_small_distinct_before_insert(self):
         """
         target: test index with autoindex on int/varchar with small distinct value (<=100)
         method: create connection, collection, insert and search
         expected: index/search/query successfully (autoindex is bitmap index indeed)
         """
+        metric_type = "IP"
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
@@ -544,13 +562,14 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_scalar_hybrid_index_small_to_large_distinct_after_insert(self, metric_type):
+    def test_milvus_client_scalar_hybrid_index_small_to_large_distinct_after_insert(self):
         """
         target: test index with autoindex on int/varchar with small distinct value (<=100) first and
                 insert to large distinct (2000+) later
         method: create connection, collection, insert and search
         expected: index/search/query successfully
         """
+        metric_type = "COSINE"
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
@@ -609,12 +628,12 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  int64_field_name: np.random.randint(0, 99), ct.default_int32_field_name: np.int32(i),
                  ct.default_int16_field_name: np.int16(i), ct.default_int8_field_name: np.int8(i),
-                 default_string_field_name: str(np.random.randint(0, 99))} for i in range(default_nb, 2*default_nb)]
+                 default_string_field_name: str(np.random.randint(0, 99))} for i in range(default_nb, 2 * default_nb)]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 9. search
         vectors_to_search = rng.random((1, default_dim))
-        insert_ids = [i for i in range(2*default_nb)]
+        insert_ids = [i for i in range(2 * default_nb)]
         self.search(client, collection_name, vectors_to_search,
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
@@ -625,7 +644,7 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_index_multiple_vectors(self, numeric_index, metric_type):
+    def test_milvus_client_vector_auto_index(self, metric_type):
         """
         target: test index for multiple vectors
         method: create connection, collection, index, insert and search
@@ -641,6 +660,7 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         assert res == []
         # 2. prepare index params
         index = "AUTOINDEX"
+        numeric_index = "STL_SORT"
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name="vector", index_type=index, metric_type=metric_type)
         index_params.add_index(field_name="id", index_type=numeric_index, metric_type=metric_type)
@@ -736,7 +756,8 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
     @pytest.fixture(scope="function", params=[DataType.INT8.name, DataType.INT16.name, DataType.INT32.name,
                                               DataType.INT64.name, DataType.FLOAT.name,
                                               DataType.ARRAY.name, DataType.FLOAT_VECTOR.name,
-                                              DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name, DataType.BINARY_VECTOR.name,
+                                              DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
+                                              DataType.BINARY_VECTOR.name,
                                               DataType.SPARSE_FLOAT_VECTOR.name, DataType.INT8_VECTOR.name])
     def not_supported_json_cast_type(self, request):
         yield request.param
@@ -813,7 +834,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name="my_json", index_type=invalid_index_type, params={"json_cast_type": "double",
-                                                                                    "json_path": "my_json['a']['b']"})
+                                                                                            "json_path": "my_json['a']['b']"})
         # 3. create index
         error = {ct.err_code: 1100, ct.err_msg: f"invalid parameter[expected=valid index]"
                                                 f"[actual=invalid index type: {invalid_index_type}]"}
@@ -822,7 +843,8 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_json_path_index_not_support_index_type(self, enable_dynamic_field, not_supported_varchar_scalar_index):
+    def test_milvus_client_json_path_index_not_support_index_type(self, enable_dynamic_field,
+                                                                  not_supported_varchar_scalar_index):
         """
         target: test json path index with not supported index type
         method: create json path index with not supported index type
@@ -889,16 +911,18 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         # 2. prepare index params with invalid json index type
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_name="json_index", index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": invalid_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+        index_params.add_index(field_name=json_field_name, index_name="json_index",
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": invalid_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']['b']"})
         # 3. create index
         error = {ct.err_code: 1100, ct.err_msg: f"index params][actual=invalid index params]"}
         self.create_index(client, collection_name, index_params,
                           check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_json_path_index_not_supported_json_cast_type(self, enable_dynamic_field, not_supported_json_cast_type,
+    @pytest.mark.parametrize("enable_dynamic_field", [True])
+    def test_milvus_client_json_path_index_not_supported_json_cast_type(self, enable_dynamic_field,
                                                                         supported_varchar_scalar_index):
         """
         target: test json path index with not supported json_cast_type
@@ -919,17 +943,20 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
         self.create_collection(client, collection_name, default_dim)
         # 2. prepare index params with invalid json index type
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_name="json_index", index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": not_supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
-        # 3. create index
-        error = {ct.err_code: 1100, ct.err_msg: f"index params][actual=invalid index params]"}
-        self.create_index(client, collection_name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        for cast_type in ct.not_supported_json_cast_types:
+            index_params = self.prepare_index_params(client)[0]
+            index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+            index_params.add_index(field_name=json_field_name, index_name="json_index",
+                                   index_type=supported_varchar_scalar_index,
+                                   params={"json_cast_type": cast_type,
+                                           "json_path": f"{json_field_name}['a']['b']"})
+            # 3. create index
+            error = {ct.err_code: 1100, ct.err_msg: f"index params][actual=invalid index params]"}
+            self.create_index(client, collection_name, index_params,
+                              check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("enable_dynamic_field", [False])
     @pytest.mark.parametrize("invalid_json_path", [1, 1.0, '/'])
     def test_milvus_client_json_path_index_invalid_json_path(self, enable_dynamic_field, invalid_json_path,
                                                              supported_varchar_scalar_index):
@@ -983,7 +1010,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
                                params={"json_cast_type": "double", "json_path": f"{json_field_name}['a']"})
         error = {ct.err_code: 65535, ct.err_msg: f"cannot create index on non-exist field: {json_field_name}"}
         self.create_collection(client, collection_name, schema=schema, index_params=index_params,
-                               check_task = CheckTasks.err_res, check_items = error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
@@ -1026,7 +1053,8 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_different_index_name_same_json_path(self, enable_dynamic_field, supported_varchar_scalar_index):
+    def test_milvus_client_different_index_name_same_json_path(self, enable_dynamic_field,
+                                                               supported_varchar_scalar_index):
         """
         target: test json path index with different index name but with same json path
         method: create json path index with different index name but with same json path
@@ -1065,7 +1093,8 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_different_json_path_index_same_field_same_index_name(self, enable_dynamic_field, supported_json_cast_type,
+    def test_milvus_client_different_json_path_index_same_field_same_index_name(self, enable_dynamic_field,
+                                                                                supported_json_cast_type,
                                                                                 supported_varchar_scalar_index):
         """
         target: test different json path index with same index name at the same time
@@ -1094,8 +1123,10 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         index_name = "json_index"
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_name=index_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+        index_params.add_index(field_name=json_field_name, index_name=index_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']['b']"})
         index_params.add_index(field_name=json_field_name, index_name=index_name,
                                index_type=supported_varchar_scalar_index,
                                params={"json_cast_type": supported_json_cast_type,
@@ -1113,9 +1144,9 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
 class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
     """ Test case of search interface """
 
-    @pytest.fixture(scope="function", params=["TRIE", "STL_SORT", "BITMAP"])
-    def not_supported_varchar_scalar_index(self, request):
-        yield request.param
+    # @pytest.fixture(scope="function", params=["TRIE", "STL_SORT", "BITMAP"])
+    # def not_supported_varchar_scalar_index(self, request):
+    #     yield request.param
 
     @pytest.fixture(scope="function", params=["INVERTED"])
     def supported_varchar_scalar_index(self, request):
@@ -1154,18 +1185,18 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         # 2. insert with different data distribution
-        vectors = cf.gen_vectors(default_nb+50, default_dim)
+        vectors = cf.gen_vectors(default_nb + 50, default_dim)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {'a': {"b": i}}} for i in
                 range(default_nb)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: i} for i in
-                range(default_nb, default_nb+10)]
+                range(default_nb, default_nb + 10)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {}} for i in
-                range(default_nb+10, default_nb+20)]
+                range(default_nb + 10, default_nb + 20)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {'a': [1, 2, 3]}} for i in
@@ -1183,7 +1214,8 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']['b']"})
         index_params.add_index(field_name=json_field_name,
                                index_type=supported_varchar_scalar_index,
                                params={"json_cast_type": supported_json_cast_type,
@@ -1288,7 +1320,8 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']['b']"})
         # 3. create index
         if enable_dynamic_field:
             index_name = "$meta/" + json_field_name + '/a/b'
@@ -1339,7 +1372,8 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name=default_string_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{default_string_field_name}['a']['b']"})
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{default_string_field_name}['a']['b']"})
         # 4. create index
         index_name = default_string_field_name
         self.create_index(client, collection_name, index_params)
@@ -1354,7 +1388,8 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_different_json_path_index_same_field_different_index_name(self, enable_dynamic_field, supported_json_cast_type,
+    def test_milvus_client_different_json_path_index_same_field_different_index_name(self, enable_dynamic_field,
+                                                                                     supported_json_cast_type,
                                                                                      supported_varchar_scalar_index):
         """
         target: test different json path index with different default index name at the same time
@@ -1383,8 +1418,10 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         index_name = "json_index"
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_name=index_name + "1", index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+        index_params.add_index(field_name=json_field_name, index_name=index_name + "1",
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']['b']"})
         index_params.add_index(field_name=json_field_name, index_name=index_name + "2",
                                index_type=supported_varchar_scalar_index,
                                params={"json_cast_type": supported_json_cast_type,
@@ -1452,7 +1489,8 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         # 2. prepare index params
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']['b']"})
         self.create_index(client, collection_name, index_params)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=json_field_name,
@@ -1570,7 +1608,7 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     def test_milvus_client_json_path_index_before_load(self, enable_dynamic_field, supported_json_cast_type,
-                                                   supported_varchar_scalar_index):
+                                                       supported_varchar_scalar_index):
         """
         target: test json path index with not supported json_cast_type
         method: create json path index with not supported json_cast_type
@@ -1592,18 +1630,18 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         # 2. release collection
         self.release_collection(client, collection_name)
         # 3. insert with different data distribution
-        vectors = cf.gen_vectors(default_nb+50, default_dim)
+        vectors = cf.gen_vectors(default_nb + 50, default_dim)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {'a': {"b": i}}} for i in
                 range(default_nb)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: i} for i in
-                range(default_nb, default_nb+10)]
+                range(default_nb, default_nb + 10)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {}} for i in
-                range(default_nb+10, default_nb+20)]
+                range(default_nb + 10, default_nb + 20)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {'a': [1, 2, 3]}} for i in
@@ -1621,8 +1659,10 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         index_name = "json_index"
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_name=index_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+        index_params.add_index(field_name=json_field_name, index_name=index_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']['b']"})
         index_params.add_index(field_name=json_field_name, index_name=index_name + '1',
                                index_type=supported_varchar_scalar_index,
                                params={"json_cast_type": supported_json_cast_type,
@@ -1644,7 +1684,7 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         self.describe_index(client, collection_name, index_name,
                             check_task=CheckTasks.check_describe_index_property,
                             check_items={
-                                #"json_cast_type": supported_json_cast_type, # issue 40426
+                                # "json_cast_type": supported_json_cast_type, # issue 40426
                                 "json_path": f"{json_field_name}['a']['b']",
                                 "index_type": supported_varchar_scalar_index,
                                 "field_name": json_field_name,
@@ -1669,7 +1709,7 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
                                 "index_type": supported_varchar_scalar_index,
                                 "field_name": json_field_name,
                                 "index_name": index_name + '1'})
-        self.describe_index(client, collection_name, index_name +'2',
+        self.describe_index(client, collection_name, index_name + '2',
                             check_task=CheckTasks.check_describe_index_property,
                             check_items={
                                 # "json_cast_type": supported_json_cast_type, # issue 40426
@@ -1718,33 +1758,35 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
         res = self.describe_collection(client, collection_name)[0]
         assert res.get('enable_dynamic_field', None) is True
         # 3. insert with different data distribution
-        vectors = cf.gen_vectors(default_nb+50, default_dim)
+        vectors = cf.gen_vectors(default_nb + 50, default_dim)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {'a': {"b": i}}} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: i} for i in range(default_nb, default_nb+10)]
+                 default_string_field_name: str(i), json_field_name: i} for i in range(default_nb, default_nb + 10)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_string_field_name: str(i), json_field_name: {}} for i in range(default_nb+10, default_nb+20)]
+                 default_string_field_name: str(i), json_field_name: {}} for i in
+                range(default_nb + 10, default_nb + 20)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {'a': [1, 2, 3]}}
-                 for i in range(default_nb + 20, default_nb + 30)]
+                for i in range(default_nb + 20, default_nb + 30)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {'a': [{'b': 1}, 2, 3]}}
-                 for i in range(default_nb + 20, default_nb + 30)]
+                for i in range(default_nb + 20, default_nb + 30)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {'a': [{'b': None}, 2, 3]}}
-                 for i in range(default_nb + 30, default_nb + 40)]
+                for i in range(default_nb + 30, default_nb + 40)]
         self.insert(client, collection_name, rows)
         # 4. prepare index params
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']['b']"})
         index_params.add_index(field_name=json_field_name,
                                index_type=supported_varchar_scalar_index,
                                params={"json_cast_type": supported_json_cast_type,

@@ -297,6 +297,9 @@ DispatchBruteForceIteratorByDataType(const knowhere::DataSetPtr& base_dataset,
         case DataType::VECTOR_INT8:
             return knowhere::BruteForce::AnnIterator<int8>(
                 base_dataset, query_dataset, config, bitset);
+        case DataType::VECTOR_BINARY:
+            return knowhere::BruteForce::AnnIterator<bin1>(
+                base_dataset, query_dataset, config, bitset);
         default:
             ThrowInfo(ErrorCode::Unsupported,
                       "Unsupported dataType for chunk brute force iterator:{}",

@@ -416,3 +416,291 @@ func (s *SearchIteratorSuite) TestNextWithLimit() {
 func TestSearchIterator(t *testing.T) {
 	suite.Run(t, new(SearchIteratorSuite))
 }
+
+type QueryIteratorSuite struct {
+	MockSuiteBase
+
+	schema *entity.Schema
+}
+
+func (s *QueryIteratorSuite) SetupSuite() {
+	s.MockSuiteBase.SetupSuite()
+	s.schema = entity.NewSchema().
+		WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("Vector").WithDataType(entity.FieldTypeFloatVector).WithDim(128)).
+		WithField(entity.NewField().WithName("Name").WithDataType(entity.FieldTypeVarChar).WithMaxLength(256))
+}
+
+func (s *QueryIteratorSuite) TestQueryIteratorInit() {
+	ctx := context.Background()
+	s.Run("success", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+
+		s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			CollectionID: 1,
+			Schema:       s.schema.ProtoMessage(),
+		}, nil).Once()
+		s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+			s.Equal(collectionName, qr.GetCollectionName())
+			return &milvuspb.QueryResults{
+				Status: merr.Success(),
+				FieldsData: []*schemapb.FieldData{
+					s.getInt64FieldData("ID", []int64{1, 2, 3}),
+					s.getVarcharFieldData("Name", []string{"a", "b", "c"}),
+				},
+			}, nil
+		}).Once()
+
+		iter, err := s.client.QueryIterator(ctx, NewQueryIteratorOption(collectionName).
+			WithOutputFields("ID", "Name").
+			WithBatchSize(10))
+
+		s.NoError(err)
+		s.NotNil(iter)
+	})
+
+	s.Run("failure", func() {
+		s.Run("option_error", func() {
+			collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+
+			_, err := s.client.QueryIterator(ctx, NewQueryIteratorOption(collectionName).WithBatchSize(-1))
+			s.Error(err)
+		})
+
+		s.Run("describe_fail", func() {
+			collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+
+			s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error")).Once()
+			_, err := s.client.QueryIterator(ctx, NewQueryIteratorOption(collectionName))
+			s.Error(err)
+		})
+
+		s.Run("query_fail", func() {
+			collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+
+			s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+				CollectionID: 1,
+				Schema:       s.schema.ProtoMessage(),
+			}, nil).Once()
+			s.mock.EXPECT().Query(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock query error")).Once()
+
+			_, err := s.client.QueryIterator(ctx, NewQueryIteratorOption(collectionName))
+			s.Error(err)
+		})
+	})
+}
+
+func (s *QueryIteratorSuite) TestQueryIteratorNext() {
+	ctx := context.Background()
+	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+
+	s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionID: 1,
+		Schema:       s.schema.ProtoMessage(),
+	}, nil).Once()
+
+	// first query for init
+	s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		s.Equal(collectionName, qr.GetCollectionName())
+		return &milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				s.getInt64FieldData("ID", []int64{1, 2, 3}),
+				s.getVarcharFieldData("Name", []string{"a", "b", "c"}),
+			},
+		}, nil
+	}).Once()
+
+	iter, err := s.client.QueryIterator(ctx, NewQueryIteratorOption(collectionName).
+		WithOutputFields("ID", "Name").
+		WithBatchSize(3))
+	s.Require().NoError(err)
+	s.Require().NotNil(iter)
+
+	// first Next should return cached data
+	rs, err := iter.Next(ctx)
+	s.NoError(err)
+	s.EqualValues(3, rs.ResultCount)
+
+	// second query
+	s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		s.Equal(collectionName, qr.GetCollectionName())
+		// verify pagination expression contains PK filter
+		s.Contains(qr.GetExpr(), "ID > 3")
+		return &milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				s.getInt64FieldData("ID", []int64{4, 5}),
+				s.getVarcharFieldData("Name", []string{"d", "e"}),
+			},
+		}, nil
+	}).Once()
+
+	rs, err = iter.Next(ctx)
+	s.NoError(err)
+	s.EqualValues(2, rs.ResultCount)
+
+	// third query - empty result
+	s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		s.Equal(collectionName, qr.GetCollectionName())
+		s.Contains(qr.GetExpr(), "ID > 5")
+		return &milvuspb.QueryResults{
+			Status:     merr.Success(),
+			FieldsData: []*schemapb.FieldData{},
+		}, nil
+	}).Once()
+
+	_, err = iter.Next(ctx)
+	s.Error(err)
+	s.ErrorIs(err, io.EOF)
+}
+
+func (s *QueryIteratorSuite) TestQueryIteratorWithLimit() {
+	ctx := context.Background()
+	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+
+	s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionID: 1,
+		Schema:       s.schema.ProtoMessage(),
+	}, nil).Once()
+
+	// first query for init
+	s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		return &milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				s.getInt64FieldData("ID", []int64{1, 2, 3, 4, 5}),
+				s.getVarcharFieldData("Name", []string{"a", "b", "c", "d", "e"}),
+			},
+		}, nil
+	}).Once()
+
+	iter, err := s.client.QueryIterator(ctx, NewQueryIteratorOption(collectionName).
+		WithOutputFields("ID", "Name").
+		WithBatchSize(5).
+		WithIteratorLimit(7))
+	s.Require().NoError(err)
+	s.Require().NotNil(iter)
+
+	// first Next - returns 5 items
+	rs, err := iter.Next(ctx)
+	s.NoError(err)
+	s.EqualValues(5, rs.ResultCount)
+
+	// second query
+	s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		return &milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				s.getInt64FieldData("ID", []int64{6, 7, 8, 9, 10}),
+				s.getVarcharFieldData("Name", []string{"f", "g", "h", "i", "j"}),
+			},
+		}, nil
+	}).Once()
+
+	// second Next - returns only 2 items due to limit (7 - 5 = 2)
+	rs, err = iter.Next(ctx)
+	s.NoError(err)
+	s.EqualValues(2, rs.ResultCount, "should return sliced result due to limit")
+
+	// third Next - limit reached, should return EOF
+	_, err = iter.Next(ctx)
+	s.Error(err)
+	s.ErrorIs(err, io.EOF, "limit reached, return EOF")
+}
+
+func (s *QueryIteratorSuite) TestQueryIteratorWithVarCharPK() {
+	ctx := context.Background()
+	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+
+	schemaVarCharPK := entity.NewSchema().
+		WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeVarChar).WithIsPrimaryKey(true).WithMaxLength(64)).
+		WithField(entity.NewField().WithName("Vector").WithDataType(entity.FieldTypeFloatVector).WithDim(128))
+
+	s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionID: 1,
+		Schema:       schemaVarCharPK.ProtoMessage(),
+	}, nil).Once()
+
+	s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		return &milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				s.getVarcharFieldData("ID", []string{"a", "b", "c"}),
+			},
+		}, nil
+	}).Once()
+
+	iter, err := s.client.QueryIterator(ctx, NewQueryIteratorOption(collectionName).
+		WithOutputFields("ID").
+		WithBatchSize(3))
+	s.Require().NoError(err)
+	s.Require().NotNil(iter)
+
+	rs, err := iter.Next(ctx)
+	s.NoError(err)
+	s.EqualValues(3, rs.ResultCount)
+
+	// second query - verify varchar PK filter
+	s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		s.Contains(qr.GetExpr(), `ID > "c"`)
+		return &milvuspb.QueryResults{
+			Status:     merr.Success(),
+			FieldsData: []*schemapb.FieldData{},
+		}, nil
+	}).Once()
+
+	_, err = iter.Next(ctx)
+	s.Error(err)
+	s.ErrorIs(err, io.EOF)
+}
+
+func (s *QueryIteratorSuite) TestQueryIteratorWithFilter() {
+	ctx := context.Background()
+	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+
+	s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionID: 1,
+		Schema:       s.schema.ProtoMessage(),
+	}, nil).Once()
+
+	s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		s.Equal(`Name == "test"`, qr.GetExpr())
+		return &milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				s.getInt64FieldData("ID", []int64{1, 2}),
+				s.getVarcharFieldData("Name", []string{"test", "test"}),
+			},
+		}, nil
+	}).Once()
+
+	iter, err := s.client.QueryIterator(ctx, NewQueryIteratorOption(collectionName).
+		WithFilter(`Name == "test"`).
+		WithOutputFields("ID", "Name").
+		WithBatchSize(10))
+	s.Require().NoError(err)
+	s.Require().NotNil(iter)
+
+	rs, err := iter.Next(ctx)
+	s.NoError(err)
+	s.EqualValues(2, rs.ResultCount)
+
+	// second query - filter combined with PK filter
+	s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		s.Contains(qr.GetExpr(), `Name == "test"`)
+		s.Contains(qr.GetExpr(), "ID > 2")
+		return &milvuspb.QueryResults{
+			Status:     merr.Success(),
+			FieldsData: []*schemapb.FieldData{},
+		}, nil
+	}).Once()
+
+	_, err = iter.Next(ctx)
+	s.Error(err)
+	s.ErrorIs(err, io.EOF)
+}
+
+func TestQueryIterator(t *testing.T) {
+	suite.Run(t, new(QueryIteratorSuite))
+}

@@ -55,11 +55,6 @@ class ChunkedColumnGroup {
 
     virtual ~ChunkedColumnGroup() = default;
 
-    void
-    ManualEvictCache() const {
-        slot_->ManualEvictAll();
-    }
-
     // Get the number of group chunks
     size_t
     num_chunks() const {
@@ -184,11 +179,9 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
           data_type_(field_meta.get_data_type()) {
     }
 
-    void
-    ManualEvictCache() const override {
-        if (group_->NumFieldsInGroup() == 1) {
-            group_->ManualEvictCache();
-        }
+    bool
+    IsInMultiFieldColumnGroup() const override {
+        return group_->NumFieldsInGroup() > 1;
     }
 
     PinWrapper<const char*>

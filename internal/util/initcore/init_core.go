@@ -41,6 +41,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -209,7 +210,12 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cBucketName := C.CString(params.MinioCfg.BucketName.GetValue())
 	cAccessKey := C.CString(params.MinioCfg.AccessKeyID.GetValue())
 	cAccessValue := C.CString(params.MinioCfg.SecretAccessKey.GetValue())
-	cRootPath := C.CString(params.MinioCfg.RootPath.GetValue())
+	var cRootPath *C.char
+	if params.CommonCfg.StorageType.GetValue() == "local" {
+		cRootPath = C.CString(params.LocalStorageCfg.Path.GetValue())
+	} else {
+		cRootPath = C.CString(params.MinioCfg.RootPath.GetValue())
+	}
 	cStorageType := C.CString(params.CommonCfg.StorageType.GetValue())
 	cIamEndPoint := C.CString(params.MinioCfg.IAMEndpoint.GetValue())
 	cCloudProvider := C.CString(params.MinioCfg.CloudProvider.GetValue())
@@ -641,7 +647,7 @@ func serializeHeaders(headerstr string) string {
 }
 
 func InitPluginLoader() error {
-	if hookutil.IsClusterEncyptionEnabled() {
+	if hookutil.IsClusterEncryptionEnabled() {
 		cSoPath := C.CString(paramtable.GetCipherParams().SoPathCpp.GetValue())
 		log.Info("Init PluginLoader", zap.String("soPath", paramtable.GetCipherParams().SoPathCpp.GetValue()))
 		defer C.free(unsafe.Pointer(cSoPath))

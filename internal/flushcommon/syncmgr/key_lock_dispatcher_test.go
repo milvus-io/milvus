@@ -9,34 +9,6 @@ import (
 	"go.uber.org/atomic"
 )
 
-/*
-type mockTask struct {
-	targetID int64
-	ch       chan struct{}
-	err      error
-}
-
-func (t *mockTask) done() {
-	close(t.ch)
-}
-
-func (t *mockTask) SegmentID() int64                  { panic("no implementation") }
-func (t *mockTask) Checkpoint() *msgpb.MsgPosition    { panic("no implementation") }
-func (t *mockTask) StartPosition() *msgpb.MsgPosition { panic("no implementation") }
-func (t *mockTask) ChannelName() string               { panic("no implementation") }
-
-func (t *mockTask) Run() error {
-	<-t.ch
-	return t.err
-}
-
-func newMockTask(err error) *mockTask {
-	return &mockTask{
-		err: err,
-		ch:  make(chan struct{}),
-	}
-}*/
-
 type KeyLockDispatcherSuite struct {
 	suite.Suite
 }
@@ -59,8 +31,8 @@ func (s *KeyLockDispatcherSuite) TestKeyLock() {
 	d.Submit(ctx, 1, t1)
 
 	go func() {
-		d.Submit(ctx, 1, t2)
-
+		future := d.Submit(ctx, 1, t2)
+		future.Await()
 		sig.Store(true)
 	}()
 
@@ -89,8 +61,8 @@ func (s *KeyLockDispatcherSuite) TestCap() {
 	d.Submit(ctx, 1, t1)
 
 	go func() {
-		// defer t2.done()
-		d.Submit(ctx, 2, t2)
+		future := d.Submit(ctx, 2, t2)
+		future.Await()
 
 		sig.Store(true)
 	}()

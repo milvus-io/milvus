@@ -62,6 +62,20 @@ func getAnalyzerParams(field *schemapb.FieldSchema) string {
 	return "{}"
 }
 
+func NewAnalyzerRunner(field *schemapb.FieldSchema) (Analyzer, error) {
+	params := getAnalyzerParams(field)
+	tokenizer, err := analyzer.NewAnalyzer(params)
+	if err != nil {
+		return nil, err
+	}
+
+	return &BM25FunctionRunner{
+		inputField:  field,
+		tokenizer:   tokenizer,
+		concurrency: 8,
+	}, nil
+}
+
 func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (FunctionRunner, error) {
 	if len(schema.GetOutputFieldIds()) != 1 {
 		return nil, fmt.Errorf("bm25 function should only have one output field, but now %d", len(schema.GetOutputFieldIds()))

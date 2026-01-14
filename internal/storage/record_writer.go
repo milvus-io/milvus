@@ -65,6 +65,7 @@ func (pw *packedRecordWriter) Write(r Record) error {
 			arrays[i] = r.Column(field.FieldID)
 		}
 		rec = array.NewRecord(pw.arrowSchema, arrays, int64(r.Len()))
+		defer rec.Release()
 	} else {
 		rec = sar.r
 	}
@@ -80,7 +81,6 @@ func (pw *packedRecordWriter) Write(r Record) error {
 			}
 		}
 	}
-	defer rec.Release()
 	return pw.writer.WriteRecordBatch(rec)
 }
 
@@ -227,6 +227,7 @@ func (pw *packedRecordManifestWriter) Write(r Record) error {
 			arrays[i] = r.Column(field.FieldID)
 		}
 		rec = array.NewRecord(pw.arrowSchema, arrays, int64(r.Len()))
+		defer rec.Release()
 	} else {
 		rec = sar.r
 	}
@@ -242,7 +243,6 @@ func (pw *packedRecordManifestWriter) Write(r Record) error {
 			}
 		}
 	}
-	defer rec.Release()
 	return pw.writer.WriteRecordBatch(rec)
 }
 
@@ -296,6 +296,7 @@ func (pw *packedRecordManifestWriter) Close() error {
 func NewPackedRecordManifestWriter(
 	bucketName string,
 	basePath string,
+	baseVersion int64,
 	schema *schemapb.CollectionSchema,
 	bufferSize int64,
 	multiPartUploadSize int64,
@@ -314,16 +315,8 @@ func NewPackedRecordManifestWriter(
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", schema.Name, err.Error()))
 	}
-	// if storage config is not passed, use common config
-	storageType := paramtable.Get().CommonCfg.StorageType.GetValue()
-	if storageConfig != nil {
-		storageType = storageConfig.GetStorageType()
-	}
-	ffiBasePath := basePath
-	if storageType != "local" {
-		ffiBasePath = path.Join(bucketName, basePath)
-	}
-	writer, err := packed.NewFFIPackedWriter(ffiBasePath, arrowSchema, columnGroups, storageConfig, storagePluginContext)
+
+	writer, err := packed.NewFFIPackedWriter(basePath, baseVersion, arrowSchema, columnGroups, storageConfig, storagePluginContext)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not new packed record writer %s", err.Error()))

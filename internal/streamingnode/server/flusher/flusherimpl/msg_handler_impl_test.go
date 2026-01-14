@@ -84,7 +84,7 @@ func TestFlushMsgHandler_HandleManualFlush(t *testing.T) {
 
 	handler := newMsgHandler(wbMgr)
 	msgID := mock_message.NewMockMessageID(t)
-	im, err := message.AsImmutableManualFlushMessageV2(msg.IntoImmutableMessage(msgID))
+	im, err := message.AsImmutableManualFlushMessageV2(msg.WithTimeTick(1000).IntoImmutableMessage(msgID))
 	assert.NoError(t, err)
 	err = handler.HandleManualFlush(im)
 	assert.Error(t, err)
@@ -99,6 +99,45 @@ func TestFlushMsgHandler_HandleManualFlush(t *testing.T) {
 	wbMgr.EXPECT().FlushChannel(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	err = handler.HandleManualFlush(im)
+	assert.NoError(t, err)
+}
+
+func TestFlushMsgHandler_HandleFlushAll(t *testing.T) {
+	vchannel := "ch-0"
+
+	// test failed
+	wbMgr := writebuffer.NewMockBufferManager(t)
+	wbMgr.EXPECT().SealAllSegments(mock.Anything, mock.Anything).Return(errors.New("mock err"))
+	wbMgr.EXPECT().FlushChannel(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
+
+	msg := message.NewFlushAllMessageBuilderV2().
+		WithBroadcast([]string{vchannel}).
+		WithHeader(&message.FlushAllMessageHeader{}).
+		WithBody(&message.FlushAllMessageBody{}).
+		WithProperties(map[string]string{
+			"_tt": "1",
+		}).
+		MustBuildBroadcast().
+		WithBroadcastID(1).
+		SplitIntoMutableMessage()[0]
+
+	handler := newMsgHandler(wbMgr)
+	msgID := mock_message.NewMockMessageID(t)
+	im, err := message.AsImmutableFlushAllMessageV2(msg.IntoImmutableMessage(msgID))
+	assert.NoError(t, err)
+	err = handler.HandleFlushAll(vchannel, im)
+	assert.Error(t, err)
+
+	wbMgr.EXPECT().SealAllSegments(mock.Anything, mock.Anything).Unset()
+	wbMgr.EXPECT().SealAllSegments(mock.Anything, mock.Anything).Return(nil)
+	err = handler.HandleFlushAll(vchannel, im)
+	assert.Error(t, err)
+
+	// test normal
+	wbMgr.EXPECT().FlushChannel(mock.Anything, mock.Anything, mock.Anything).Unset()
+	wbMgr.EXPECT().FlushChannel(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	err = handler.HandleFlushAll(vchannel, im)
 	assert.NoError(t, err)
 }
 

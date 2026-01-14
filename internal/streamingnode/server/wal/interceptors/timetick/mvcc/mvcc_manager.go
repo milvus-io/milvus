@@ -44,6 +44,12 @@ func (cm *MVCCManager) GetMVCCOfVChannel(vchannel string) VChannelMVCC {
 
 // UpdateMVCC updates the mvcc state by incoming message.
 func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
+	if !msg.IsPersisted() {
+		// A unpersisted message is always a time tick message that is used to sync up the system time.
+		// No data change should be made by this message so it should be ignored in the mvcc manager.
+		return
+	}
+
 	tt := msg.TimeTick()
 	msgType := msg.MessageType()
 	vchannel := msg.VChannel()

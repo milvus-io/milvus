@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -116,3 +117,7 @@ func (req *cLoadFieldDataRequest) Release() {
 type AddFieldDataInfoRequest = LoadFieldDataRequest
 
 type AddFieldDataInfoResult struct{}
+
+type ReopenRequest struct {
+	LoadInfo *querypb.SegmentLoadInfo
+}

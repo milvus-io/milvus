@@ -29,10 +29,11 @@ type backlogClearHelper struct {
 	channelName    types.PChannelInfo
 	c              pulsar.Client
 	reusedConsumer pulsar.Consumer
+	tenant         tenant
 }
 
 // newBacklogClearHelper creates a new backlog clear helper.
-func newBacklogClearHelper(c pulsar.Client, channelName types.PChannelInfo, threshold int64) *backlogClearHelper {
+func newBacklogClearHelper(c pulsar.Client, channelName types.PChannelInfo, threshold int64, tenant tenant) *backlogClearHelper {
 	h := &backlogClearHelper{
 		notifier:       syncutil.NewAsyncTaskNotifier[struct{}](),
 		cond:           syncutil.NewContextCond(&sync.Mutex{}),
@@ -41,6 +42,7 @@ func newBacklogClearHelper(c pulsar.Client, channelName types.PChannelInfo, thre
 		channelName:    channelName,
 		c:              c,
 		reusedConsumer: nil,
+		tenant:         tenant,
 	}
 	h.SetLogger(log.With(zap.String("channel", channelName.String()), log.FieldComponent("backlog-clear")))
 	go h.background()
@@ -110,8 +112,9 @@ func (h *backlogClearHelper) getConsumer() (pulsar.Consumer, error) {
 	if h.reusedConsumer != nil {
 		return h.reusedConsumer, nil
 	}
+	topic := h.tenant.MustGetFullTopicName(h.channelName.Name)
 	consumer, err := h.c.Subscribe(pulsar.ConsumerOptions{
-		Topic:                    h.channelName.Name,
+		Topic:                    topic,
 		SubscriptionName:         backlogClearHelperName,
 		Type:                     pulsar.Shared, // use shared subscription to avoid the subscription is rejected because of consumer exists.
 		MaxPendingChunkedMessage: 1,             // We cannot set it to 0, because the 0 means 100.

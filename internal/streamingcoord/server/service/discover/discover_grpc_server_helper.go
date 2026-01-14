@@ -5,6 +5,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // discoverGrpcServerHelper is a wrapped discover server of log messages.
@@ -48,6 +49,14 @@ func (h *discoverGrpcServerHelper) SendFullAssignment(param balancer.WatchChanne
 			FullAssignment: &streamingpb.FullStreamingNodeAssignmentWithVersion{
 				StreamingVersion: param.StreamingVersion,
 				Version: &streamingpb.VersionPair{
+					// we are using the node id as the global version at previous implementation.
+					// however, the server id of mixcoord didn't promise monotonic increasing,
+					// so we are using the revision of session to promise it, Version is a deprecated field to keep compatibility,
+					// TODO: may be removed in future.
+					Global: paramtable.GetNodeID(),
+					Local:  param.Version.Local,
+				},
+				VersionByRevision: &streamingpb.VersionPair{
 					Global: param.Version.Global,
 					Local:  param.Version.Local,
 				},

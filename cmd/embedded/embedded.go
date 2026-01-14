@@ -22,6 +22,7 @@ import (
 	"os"
 
 	"github.com/milvus-io/milvus/cmd/milvus"
+	_ "github.com/milvus-io/milvus/internal/util/cgo"
 )
 
 //export startEmbedded

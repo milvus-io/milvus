@@ -440,7 +440,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
     
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("offset", [0, 100])
-    def test_search_pagination_with_expression(self, offset):
+    @pytest.mark.parametrize("search_by_pk", [True, False])
+    def test_search_pagination_with_expression(self, offset, search_by_pk):
         """
         target: Test search pagination functionality with filtering expressions
         method: 1. Create collection and insert test data
@@ -470,12 +471,17 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
             elif len(filter_ids) - offset < default_limit:
                 limit = len(filter_ids) - offset
             # 3. search with a high nprobe for better accuracy
-            search_params = {"metric_type": "COSINE", "params": {"nprobe": 128}, "offset": offset} 
+            search_params = {"metric_type": "COSINE", "params": {"nprobe": 128}, "offset": offset}
+            ids_to_search = None
             vectors_to_search = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+            if search_by_pk:
+                ids_to_search = [k for k in range(default_nq)]
+                vectors_to_search = None
             search_res_with_offset, _ = self.search(
                 client,
                 collection_name,
-                vectors_to_search[:default_nq],
+                data=vectors_to_search,
+                ids=ids_to_search,
                 anns_field=self.float_vector_field_name,
                 search_params=search_params,
                 limit=default_limit,
@@ -492,7 +498,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
             search_res_full, _ = self.search(
                 client,
                 collection_name,
-                vectors_to_search[:default_nq],
+                data=vectors_to_search,
+                ids=ids_to_search,
                 anns_field=self.float_vector_field_name,
                 search_params=search_params_full,
                 limit=default_limit + offset,
@@ -516,7 +523,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
             search_res_with_offset, _ = self.search(
                 client,
                 collection_name,
-                vectors_to_search[:default_nq],
+                data=vectors_to_search,
+                ids=ids_to_search,
                 anns_field=self.float_vector_field_name,
                 search_params=search_params,
                 limit=default_limit,
@@ -533,7 +541,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
             search_res_full, _ = self.search(
                 client,
                 collection_name,
-                vectors_to_search[:default_nq],
+                data=vectors_to_search,
+                ids=ids_to_search,
                 anns_field=self.float_vector_field_name,
                 search_params=search_params_full,
                 limit=default_limit + offset,

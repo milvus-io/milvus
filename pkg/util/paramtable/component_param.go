@@ -48,7 +48,7 @@ const (
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
 	DefaultLowPriorityThreadCoreCoefficient    = 1
 
-	DefaultSessionTTL        = 10 // s
+	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
 
 	DefaultMaxDegree                = 56
@@ -261,6 +261,7 @@ type commonConfig struct {
 	DefaultRootPassword   ParamItem `refreshable:"false"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
 	EnablePublicPrivilege ParamItem `refreshable:"false"`
+	ExprEnabled           ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -285,7 +286,6 @@ type commonConfig struct {
 	MaxWLockConditionalWaitTime ParamItem `refreshable:"true"`
 
 	// storage v2
-	EnableStorageV2                      ParamItem `refreshable:"false"`
 	Stv2SplitSystemColumn                ParamItem `refreshable:"true"`
 	Stv2SystemColumnIncludePK            ParamItem `refreshable:"true"`
 	Stv2SystemColumnIncludePartitionKey  ParamItem `refreshable:"true"`
@@ -294,8 +294,10 @@ type commonConfig struct {
 	Stv2SplitAvgSizeThreshold            ParamItem `refreshable:"true"`
 	UseLoonFFI                           ParamItem `refreshable:"true"`
 
-	StoragePathPrefix         ParamItem `refreshable:"false"`
-	StorageZstdConcurrency    ParamItem `refreshable:"false"`
+	StoragePathPrefix        ParamItem `refreshable:"false"`
+	StorageZstdConcurrency   ParamItem `refreshable:"false"`
+	StorageReadRetryAttempts ParamItem `refreshable:"true"`
+
 	TTMsgEnabled              ParamItem `refreshable:"true"`
 	TraceLogMode              ParamItem `refreshable:"true"`
 	BloomFilterSize           ParamItem `refreshable:"true"`
@@ -841,6 +843,15 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	}
 	p.EnablePublicPrivilege.Init(base.mgr)
 
+	p.ExprEnabled = ParamItem{
+		Key:          "common.security.exprEnabled",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "Whether to enable the /expr endpoint for debugging. When enabled, only root user can access it via HTTP Basic Auth on Proxy nodes.",
+		Export:       true,
+	}
+	p.ExprEnabled.Init(base.mgr)
+
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",
 		Version:      "2.0.0",
@@ -851,7 +862,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	p.SessionTTL = ParamItem{
 		Key:          "common.session.ttl",
 		Version:      "2.0.0",
-		DefaultValue: "30",
+		DefaultValue: "15",
 		Doc:          "ttl value when session granting a lease to register service",
 		Export:       true,
 	}
@@ -977,14 +988,6 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	}
 	p.MaxWLockConditionalWaitTime.Init(base.mgr)
 
-	p.EnableStorageV2 = ParamItem{
-		Key:          "common.storage.enablev2",
-		Version:      "2.3.1",
-		DefaultValue: "true",
-		Export:       true,
-	}
-	p.EnableStorageV2.Init(base.mgr)
-
 	p.UseLoonFFI = ParamItem{
 		Key:          "common.storage.useLoonFFI",
 		Version:      "2.6.7",
@@ -1064,6 +1067,15 @@ The default value is 1, which is enough for most cases.`,
 		Export: false,
 	}
 	p.StorageZstdConcurrency.Init(base.mgr)
+
+	p.StorageReadRetryAttempts = ParamItem{
+		Key:          "common.storage.readRetryAttempts",
+		Version:      "2.6.8",
+		DefaultValue: "10",
+		Doc:          "The number of retry attempts for reading from object storage; only retryable errors will trigger a retry.",
+		Export:       false,
+	}
+	p.StorageReadRetryAttempts.Init(base.mgr)
 
 	p.TTMsgEnabled = ParamItem{
 		Key:          "common.ttMsgEnabled",
@@ -2543,6 +2555,8 @@ type queryCoordConfig struct {
 	BalanceCheckCollectionMaxCount    ParamItem `refreshable:"true"`
 	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
 	ResourceExhaustionCleanupInterval ParamItem `refreshable:"true"`
+
+	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -3203,6 +3217,15 @@ Set to 0 to disable the penalty period.`,
 		Export:       true,
 	}
 	p.ResourceExhaustionCleanupInterval.Init(base.mgr)
+
+	p.UpdateTargetNeedSegmentDataReady = ParamItem{
+		Key:          "queryCoord.updateTargetNeedSegmentDataReady",
+		Version:      "2.6.8",
+		DefaultValue: "true",
+		Doc:          "update target need segment data ready",
+		Export:       false,
+	}
+	p.UpdateTargetNeedSegmentDataReady.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -3301,8 +3324,9 @@ type queryNodeConfig struct {
 	GracefulStopTimeout   ParamItem `refreshable:"false"`
 
 	// tsafe
-	MaxTimestampLag ParamItem `refreshable:"true"`
-	DowngradeTsafe  ParamItem `refreshable:"true"`
+	MaxTimestampLag           ParamItem `refreshable:"true"`
+	DowngradeTsafe            ParamItem `refreshable:"true"`
+	CatchUpStreamingDataTsLag ParamItem `refreshable:"true"`
 
 	// delete buffer
 	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
@@ -3424,6 +3448,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Key:          "queryNode.segcore.tieredStorage.warmup.scalarField",
 		Version:      "2.6.0",
 		DefaultValue: "sync",
+		Forbidden:    true,
 		Doc: `options: sync, disable.
 Specifies the timing for warming up the Tiered Storage cache.
 - "sync": data will be loaded into the cache before a segment is considered loaded.
@@ -3437,6 +3462,7 @@ Defaults to "sync", except for vector field which defaults to "disable".`,
 		Key:          "queryNode.segcore.tieredStorage.warmup.scalarIndex",
 		Version:      "2.6.0",
 		DefaultValue: "sync",
+		Forbidden:    true,
 		Export:       true,
 	}
 	p.TieredWarmupScalarIndex.Init(base.mgr)
@@ -3445,6 +3471,7 @@ Defaults to "sync", except for vector field which defaults to "disable".`,
 		Key:          "queryNode.segcore.tieredStorage.warmup.vectorField",
 		Version:      "2.6.0",
 		DefaultValue: "disable",
+		Forbidden:    true,
 		Doc:          `cache warmup for vector field raw data is by default disabled.`,
 		Export:       true,
 	}
@@ -3454,6 +3481,7 @@ Defaults to "sync", except for vector field which defaults to "disable".`,
 		Key:          "queryNode.segcore.tieredStorage.warmup.vectorIndex",
 		Version:      "2.6.0",
 		DefaultValue: "sync",
+		Forbidden:    true,
 		Export:       true,
 	}
 	p.TieredWarmupVectorIndex.Init(base.mgr)
@@ -3462,6 +3490,7 @@ Defaults to "sync", except for vector field which defaults to "disable".`,
 		Key:          "queryNode.segcore.tieredStorage.evictionEnabled",
 		Version:      "2.6.0",
 		DefaultValue: "false",
+		Forbidden:    true,
 		Doc: `Enable eviction for Tiered Storage. Defaults to false.
 Note that if eviction is enabled, cache data loaded during sync warmup is also subject to eviction.`,
 		Export: true,
@@ -3472,6 +3501,7 @@ Note that if eviction is enabled, cache data loaded during sync warmup is also s
 		Key:          "queryNode.segcore.tieredStorage.evictableMemoryCacheRatio",
 		Version:      "2.6.0",
 		DefaultValue: "0.3",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
@@ -3493,6 +3523,7 @@ It defaults to 0.3 (meaning about 30% of evictable in-memory data can be cached)
 		Key:          "queryNode.segcore.tieredStorage.evictableDiskCacheRatio",
 		Version:      "2.6.0",
 		DefaultValue: "0.3",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
@@ -3514,6 +3545,7 @@ It defaults to 0.3 (meaning about 30% of evictable on-disk data can be cached), 
 		Key:          "queryNode.segcore.tieredStorage.memoryLowWatermarkRatio",
 		Version:      "2.6.0",
 		DefaultValue: "0.75",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
@@ -3534,6 +3566,7 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Key:          "queryNode.segcore.tieredStorage.memoryHighWatermarkRatio",
 		Version:      "2.6.0",
 		DefaultValue: "0.8",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
@@ -3549,6 +3582,7 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Key:          "queryNode.segcore.tieredStorage.diskLowWatermarkRatio",
 		Version:      "2.6.0",
 		DefaultValue: "0.75",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
@@ -3564,6 +3598,7 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Key:          "queryNode.segcore.tieredStorage.diskHighWatermarkRatio",
 		Version:      "2.6.0",
 		DefaultValue: "0.8",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
@@ -3579,6 +3614,7 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Key:          "queryNode.segcore.tieredStorage.cacheTouchWindowMs",
 		Version:      "2.6.0",
 		DefaultValue: "3000",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			window := getAsInt64(v)
 			if window < 0 {
@@ -3595,6 +3631,7 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Key:          "queryNode.segcore.tieredStorage.backgroundEvictionEnabled",
 		Version:      "2.6.2",
 		DefaultValue: "false",
+		Forbidden:    true,
 		Doc: `Enable background eviction for Tiered Storage. Defaults to false.
 Background eviction is used to do periodic eviction in a separate thread.
 And it will only work when both 'evictionEnabled' and 'backgroundEvictionEnabled' are set to 'true'.`,
@@ -3606,6 +3643,7 @@ And it will only work when both 'evictionEnabled' and 'backgroundEvictionEnabled
 		Key:          "queryNode.segcore.tieredStorage.evictionIntervalMs",
 		Version:      "2.6.0",
 		DefaultValue: "1000",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			window := getAsInt64(v)
 			if window < 0 {
@@ -3622,6 +3660,7 @@ And it will only work when both 'evictionEnabled' and 'backgroundEvictionEnabled
 		Key:          "queryNode.segcore.tieredStorage.cacheTtl",
 		Version:      "2.6.0",
 		DefaultValue: "0",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			timeout := getAsInt64(v)
 			if timeout <= 0 {
@@ -3640,6 +3679,7 @@ If set to 0, time based eviction is disabled.`,
 		Key:          "queryNode.segcore.tieredStorage.storageUsageTrackingEnabled",
 		Version:      "2.6.3",
 		DefaultValue: "false",
+		Forbidden:    true,
 		Doc:          "Enable storage usage tracking for Tiered Storage. Defaults to false.",
 		Export:       true,
 	}
@@ -3649,6 +3689,7 @@ If set to 0, time based eviction is disabled.`,
 		Key:          "queryNode.segcore.tieredStorage.loadingResourceFactor",
 		Version:      "2.6.0",
 		DefaultValue: "1.0",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			factor := getAsFloat(v)
 			if factor < 1.0 {
@@ -3953,7 +3994,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MmapVectorIndex = ParamItem{
 		Key:          "queryNode.mmap.vectorIndex",
 		Version:      "2.4.7",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Formatter: func(originValue string) string {
 			if p.MmapEnabled.GetAsBool() {
 				return "true"
@@ -3968,7 +4009,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MmapScalarField = ParamItem{
 		Key:          "queryNode.mmap.scalarField",
 		Version:      "2.4.7",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Formatter: func(originValue string) string {
 			if p.MmapEnabled.GetAsBool() {
 				return "true"
@@ -3983,7 +4024,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MmapScalarIndex = ParamItem{
 		Key:          "queryNode.mmap.scalarIndex",
 		Version:      "2.4.7",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Formatter: func(originValue string) string {
 			if p.MmapEnabled.GetAsBool() {
 				return "true"
@@ -4008,7 +4049,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.GrowingMmapEnabled = ParamItem{
 		Key:          "queryNode.mmap.growingMmapEnabled",
 		Version:      "2.4.6",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		FallbackKeys: []string{"queryNode.growingMmapEnabled"},
 		Doc: `Enable memory mapping (mmap) to optimize the handling of growing raw data.
 By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized.
@@ -4250,6 +4291,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       false,
 	}
 	p.DowngradeTsafe.Init(base.mgr)
+
+	p.CatchUpStreamingDataTsLag = ParamItem{
+		Key:          "queryNode.delegator.catchUpStreamingDataTsLag",
+		Version:      "2.6.8",
+		DefaultValue: "1s",
+		Doc:          "Tolerable lag for delegator to be considered caught up with streaming data",
+	}
+	p.CatchUpStreamingDataTsLag.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "queryNode.gracefulStopTimeout",
@@ -4568,27 +4617,34 @@ type dataCoordConfig struct {
 	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
 	CompactionPreAllocateIDExpansionFactor ParamItem `refreshable:"false"`
 
-	CompactionRPCTimeout             ParamItem `refreshable:"true"`
-	CompactionMaxParallelTasks       ParamItem `refreshable:"true"`
-	CompactionWorkerParallelTasks    ParamItem `refreshable:"true"`
-	MinSegmentToMerge                ParamItem `refreshable:"true"`
-	SegmentSmallProportion           ParamItem `refreshable:"true"`
-	SegmentCompactableProportion     ParamItem `refreshable:"true"`
-	SegmentExpansionRate             ParamItem `refreshable:"true"`
-	CompactionTimeoutInSeconds       ParamItem `refreshable:"true"` // deprecated
-	CompactionDropToleranceInSeconds ParamItem `refreshable:"true"`
-	CompactionGCIntervalInSeconds    ParamItem `refreshable:"true"`
-	CompactionCheckIntervalInSeconds ParamItem `refreshable:"false"` // deprecated
-	CompactionScheduleInterval       ParamItem `refreshable:"false"`
-	MixCompactionTriggerInterval     ParamItem `refreshable:"false"`
-	L0CompactionTriggerInterval      ParamItem `refreshable:"false"`
-	GlobalCompactionInterval         ParamItem `refreshable:"false"`
-	CompactionExpiryTolerance        ParamItem `refreshable:"true"`
+	CompactionRPCTimeout                      ParamItem `refreshable:"true"`
+	CompactionMaxParallelTasks                ParamItem `refreshable:"true"`
+	CompactionWorkerParallelTasks             ParamItem `refreshable:"true"`
+	CompactionMaxFullSegmentThreshold         ParamItem `refreshable:"true"`
+	CompactionForceMergeDataNodeMemoryFactor  ParamItem `refreshable:"true"`
+	CompactionForceMergeQueryNodeMemoryFactor ParamItem `refreshable:"true"`
+	MinSegmentToMerge                         ParamItem `refreshable:"true"`
+	SegmentSmallProportion                    ParamItem `refreshable:"true"`
+	SegmentCompactableProportion              ParamItem `refreshable:"true"`
+	SegmentExpansionRate                      ParamItem `refreshable:"true"`
+	CompactionTimeoutInSeconds                ParamItem `refreshable:"true"` // deprecated
+	CompactionDropToleranceInSeconds          ParamItem `refreshable:"true"`
+	CompactionGCIntervalInSeconds             ParamItem `refreshable:"true"`
+	CompactionCheckIntervalInSeconds          ParamItem `refreshable:"false"` // deprecated
+	CompactionScheduleInterval                ParamItem `refreshable:"false"`
+	MixCompactionTriggerInterval              ParamItem `refreshable:"false"`
+	L0CompactionTriggerInterval               ParamItem `refreshable:"false"`
+	GlobalCompactionInterval                  ParamItem `refreshable:"false"`
+	CompactionExpiryTolerance                 ParamItem `refreshable:"true"`
 
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
 	SingleCompactionExpiredLogMaxSize ParamItem `refreshable:"true"`
 	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
+
+	StorageVersionCompactionEnabled           ParamItem `refreshable:"true"`
+	StorageVersionCompactionRateLimitTokens   ParamItem `refreshable:"true"`
+	StorageVersionCompactionRateLimitInterval ParamItem `refreshable:"true"`
 
 	ChannelCheckpointMaxLag ParamItem `refreshable:"true"`
 	SyncSegmentsInterval    ParamItem `refreshable:"false"`
@@ -4897,7 +4953,7 @@ This configuration takes effect only when dataCoord.enableCompaction is set as t
 	p.CompactionTaskPrioritizer = ParamItem{
 		Key:          "dataCoord.compaction.taskPrioritizer",
 		Version:      "2.5.0",
-		DefaultValue: "default",
+		DefaultValue: "level",
 		Doc: `compaction task prioritizer, options: [default, level, mix].
 default is FIFO.
 level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
@@ -5025,6 +5081,47 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.CompactionScheduleInterval.Init(base.mgr)
 
+	p.CompactionMaxFullSegmentThreshold = ParamItem{
+		Key:          "dataCoord.compaction.maxFullSegmentThreshold",
+		Version:      "2.6.8",
+		DefaultValue: "100",
+		Doc:          "Maximum number of segments to use maxFull algorithm (O(n³) complexity) for optimal full segment count. For larger counts, uses faster larger algorithm (O(n)).",
+		Export:       false,
+	}
+	p.CompactionMaxFullSegmentThreshold.Init(base.mgr)
+
+	p.CompactionForceMergeDataNodeMemoryFactor = ParamItem{
+		Key:          "dataCoord.compaction.forceMerge.dataNodeMemoryFactor",
+		Version:      "2.6.8",
+		DefaultValue: "3.0",
+		Doc:          "Memory safety factor for DataNode during force merge compaction. Max segment size = DataNode memory / factor. Default 3.0 means segments can use up to 1/3 of DataNode memory. Must be >= 1.0.",
+		Export:       false,
+		Formatter: func(value string) string {
+			factor, err := strconv.ParseFloat(value, 64)
+			if err != nil || factor < 1.0 {
+				factor = 1.0
+			}
+			return strconv.FormatFloat(factor, 'f', -1, 64)
+		},
+	}
+	p.CompactionForceMergeDataNodeMemoryFactor.Init(base.mgr)
+
+	p.CompactionForceMergeQueryNodeMemoryFactor = ParamItem{
+		Key:          "dataCoord.compaction.forceMerge.queryNodeMemoryFactor",
+		Version:      "2.6.8",
+		DefaultValue: "3.0",
+		Doc:          "Memory safety factor for QueryNode when loading segments after force merge. Max segment size = QueryNode memory / factor. Default 3.0 means segments can use up to 40% of QueryNode memory. Must be >= 1.0.",
+		Export:       false,
+		Formatter: func(value string) string {
+			factor, err := strconv.ParseFloat(value, 64)
+			if err != nil || factor < 1.0 {
+				factor = 1.0
+			}
+			return strconv.FormatFloat(factor, 'f', -1, 64)
+		},
+	}
+	p.CompactionForceMergeQueryNodeMemoryFactor.Init(base.mgr)
+
 	p.SingleCompactionRatioThreshold = ParamItem{
 		Key:          "dataCoord.compaction.single.ratio.threshold",
 		Version:      "2.0.0",
@@ -5060,6 +5157,33 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.SingleCompactionDeltalogMaxNum.Init(base.mgr)
+
+	p.StorageVersionCompactionEnabled = ParamItem{
+		Key:          "dataCoord.compaction.storageVersion.enabled",
+		Version:      "2.6.9",
+		DefaultValue: "true",
+		Doc:          "Enable storage version compaction",
+		Export:       false,
+	}
+	p.StorageVersionCompactionEnabled.Init(base.mgr)
+
+	p.StorageVersionCompactionRateLimitTokens = ParamItem{
+		Key:          "dataCoord.compaction.storageVersion.rateLimitTokens",
+		Version:      "2.6.9",
+		DefaultValue: "3",
+		Doc:          "The storage version compaction tokens per period, applying rate limit",
+		Export:       false,
+	}
+	p.StorageVersionCompactionRateLimitTokens.Init(base.mgr)
+
+	p.StorageVersionCompactionRateLimitInterval = ParamItem{
+		Key:          "dataCoord.compaction.storageVersion.rateLimitInterval",
+		Version:      "2.6.9",
+		DefaultValue: "120",
+		Doc:          "The storage version compaction rate limit interval, in seconds",
+		Export:       false,
+	}
+	p.StorageVersionCompactionRateLimitInterval.Init(base.mgr)
 
 	p.GlobalCompactionInterval = ParamItem{
 		Key:          "dataCoord.compaction.global.interval",
@@ -5876,6 +6000,7 @@ type dataNodeConfig struct {
 	ImportBaseBufferSize        ParamItem `refreshable:"true"`
 	ImportDeleteBufferSize      ParamItem `refreshable:"true"`
 	ImportMemoryLimitPercentage ParamItem `refreshable:"true"`
+	ImportMaxWriteRetryAttempts ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
@@ -5898,7 +6023,8 @@ type dataNodeConfig struct {
 	DeltalogFormat ParamItem `refreshable:"false"`
 
 	// index services config
-	BuildParallel ParamItem `refreshable:"false"`
+	BuildParallel               ParamItem `refreshable:"false"`
+	MaxVecIndexBuildConcurrency ParamItem `refreshable:"true"`
 
 	WorkerSlotUnit      ParamItem `refreshable:"true"`
 	StandaloneSlotRatio ParamItem `refreshable:"false"`
@@ -6228,6 +6354,14 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.ImportMemoryLimitPercentage.Init(base.mgr)
 
+	p.ImportMaxWriteRetryAttempts = ParamItem{
+		Key:          "dataNode.import.maxWriteRetryAttempts",
+		Version:      "2.6.9",
+		Doc:          "The maximum number of write retry attempts. 0 means unlimited.",
+		DefaultValue: "0",
+	}
+	p.ImportMaxWriteRetryAttempts.Init(base.mgr)
+
 	p.L0BatchMemoryRatio = ParamItem{
 		Key:          "dataNode.compaction.levelZeroBatchMemoryRatio",
 		Version:      "2.4.0",
@@ -6339,6 +6473,14 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.BuildParallel.Init(base.mgr)
 
+	p.MaxVecIndexBuildConcurrency = ParamItem{
+		Key:          "dataNode.index.maxVecIndexBuildConcurrency",
+		Version:      "2.6.9",
+		DefaultValue: "4",
+		Export:       false,
+	}
+	p.MaxVecIndexBuildConcurrency.Init(base.mgr)
+
 	p.WorkerSlotUnit = ParamItem{
 		Key:          "dataNode.workerSlotUnit",
 		Version:      "2.5.7",
@@ -6357,6 +6499,9 @@ if this parameter <= 0, will set it as 10`,
 }
 
 type streamingConfig struct {
+	// scanner
+	WALScannerPauseConsumption ParamItem `refreshable:"true"`
+
 	// balancer
 	WALBalancerTriggerInterval        ParamItem `refreshable:"true"`
 	WALBalancerBackoffInitialInterval ParamItem `refreshable:"true"`
@@ -6374,6 +6519,7 @@ type streamingConfig struct {
 	WALBalancerPolicyVChannelFairAntiAffinityWeight     ParamItem `refreshable:"true"`
 	WALBalancerPolicyVChannelFairRebalanceTolerance     ParamItem `refreshable:"true"`
 	WALBalancerPolicyVChannelFairRebalanceMaxStep       ParamItem `refreshable:"true"`
+	WALBalancerExpectedInitialStreamingNodeNum          ParamItem `refreshable:"true"`
 
 	// broadcaster
 	WALBroadcasterConcurrencyRatio       ParamItem `refreshable:"false"`
@@ -6409,9 +6555,34 @@ type streamingConfig struct {
 	WALRecoveryMaxDirtyMessage           ParamItem `refreshable:"true"`
 	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
+
+	// Empty TimeTick Filtering configration
+	DelegatorEmptyTimeTickMaxFilterInterval ParamItem `refreshable:"true"`
+	FlushEmptyTimeTickMaxFilterInterval     ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
+	// scanner
+	p.WALScannerPauseConsumption = ParamItem{
+		Key:     "streaming.walScanner.pauseConsumption",
+		Version: "2.6.8",
+		Doc: `Whether to pause the scanner from consuming WAL messages, false by default.
+
+This parameter can be used as a temporary mitigation when a StreamingNode
+enters a crash loop and fails to execute UpdateReplicateConfigure (Primary-Secondary switchover) 
+due to bugs. Pausing scanner consumption prevents the crash from being 
+repeatedly triggered during the node's startup and recovery phase.
+
+In such recovery scenarios, set this value to "true". After UpdateReplicateConfigure
+completes successfully or the StreamingNode returns to a healthy state, 
+this value should be set back to "false" to resume normal message processing.
+
+This configuration is applied dynamically and does not require restarting the cluster.`,
+		DefaultValue: "false",
+		Export:       false,
+	}
+	p.WALScannerPauseConsumption.Init(base.mgr)
+
 	// balancer
 	p.WALBalancerTriggerInterval = ParamItem{
 		Key:     "streaming.walBalancer.triggerInterval",
@@ -6547,6 +6718,17 @@ it also determine the depth of depth first search method that is used to find th
 		Export:       true,
 	}
 	p.WALBalancerPolicyVChannelFairRebalanceMaxStep.Init(base.mgr)
+
+	p.WALBalancerExpectedInitialStreamingNodeNum = ParamItem{
+		Key:     "streaming.walBalancer.expectedInitialStreamingNodeNum",
+		Version: "2.6.9",
+		Doc: `The expected initial streaming node number, 0 by default, means no expected initial streaming node number.
+When the milvus is upgrading from 2.5 -> 2.6.9, the mixcoord will check if the expected initial streaming node number is reached,
+then open the streaming service to continue the upgrade process.`,
+		DefaultValue: "0",
+		Export:       false,
+	}
+	p.WALBalancerExpectedInitialStreamingNodeNum.Init(base.mgr)
 
 	p.WALBroadcasterConcurrencyRatio = ParamItem{
 		Key:          "streaming.walBroadcaster.concurrencyRatio",
@@ -6743,6 +6925,29 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Export:       false,
 	}
 	p.WALRecoverySchemaExpirationTolerance.Init(base.mgr)
+
+	p.DelegatorEmptyTimeTickMaxFilterInterval = ParamItem{
+		Key:     "streaming.delegator.emptyTimeTick.maxFilterInterval",
+		Version: "2.6.9",
+		Doc: `The max filter interval for empty time tick of delegator, 1m by default.
+If the interval since last timetick is less than this config, the empty time tick will be filtered.`,
+		DefaultValue: "1m",
+		Export:       false,
+	}
+	p.DelegatorEmptyTimeTickMaxFilterInterval.Init(base.mgr)
+
+	p.FlushEmptyTimeTickMaxFilterInterval = ParamItem{
+		Key:     "streaming.flush.emptyTimeTick.maxFilterInterval",
+		Version: "2.6.9",
+		Doc: `The max filter interval for empty time tick of flush, 1s by default.
+If the interval since last timetick is less than this config, the empty time tick will be filtered.
+Because current flusher need the empty time tick to trigger the cp update,
+too huge threshold will block the GetFlushState operation,
+so we set 1 second here as a threshold.`,
+		DefaultValue: "1s",
+		Export:       false,
+	}
+	p.FlushEmptyTimeTickMaxFilterInterval.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.

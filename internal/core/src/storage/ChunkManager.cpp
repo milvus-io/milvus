@@ -14,7 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <fstream>
 #include <aws/core/auth/AWSCredentials.h>
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
 #include <aws/core/auth/STSCredentialsProvider.h>
@@ -29,15 +28,9 @@
 #include <aws/s3/model/PutObjectRequest.h>
 
 #include "storage/MinioChunkManager.h"
-#include "storage/AliyunSTSClient.h"
-#include "storage/TencentCloudSTSClient.h"
-#include "storage/AliyunCredentialsProvider.h"
-#include "storage/TencentCloudCredentialsProvider.h"
-#include "storage/HuaweiCloudCredentialsProvider.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "log/Log.h"
-#include "signal.h"
 
 namespace milvus::storage {
 
@@ -172,9 +165,8 @@ AliyunChunkManager::AliyunChunkManager(const StorageConfig& storage_config) {
     StorageConfig mutable_config = storage_config;
     mutable_config.useVirtualHost = true;
     if (storage_config.useIAM) {
-        auto aliyun_provider = Aws::MakeShared<
-            Aws::Auth::AliyunSTSAssumeRoleWebIdentityCredentialsProvider>(
-            "AliyunSTSAssumeRoleWebIdentityCredentialsProvider");
+        auto aliyun_provider = AliyunChunkManager::
+            GetAliyunSTSAssumeRoleWebIdentityCredentialsProvider();
         auto aliyun_credentials = aliyun_provider->GetAWSCredentials();
         AssertInfo(!aliyun_credentials.GetAWSAccessKeyId().empty(),
                    "if use iam, access key id should not be empty");
@@ -214,9 +206,8 @@ TencentCloudChunkManager::TencentCloudChunkManager(
     StorageConfig mutable_config = storage_config;
     mutable_config.useVirtualHost = true;
     if (storage_config.useIAM) {
-        auto tencent_cloud_provider = Aws::MakeShared<
-            Aws::Auth::TencentCloudSTSAssumeRoleWebIdentityCredentialsProvider>(
-            "TencentCloudSTSAssumeRoleWebIdentityCredentialsProvider");
+        auto tencent_cloud_provider = TencentCloudChunkManager::
+            GetTencentCloudSTSAssumeRoleWebIdentityCredentialsProvider();
         auto tencent_cloud_credentials =
             tencent_cloud_provider->GetAWSCredentials();
         AssertInfo(!tencent_cloud_credentials.GetAWSAccessKeyId().empty(),
@@ -254,9 +245,8 @@ HuaweiCloudChunkManager::HuaweiCloudChunkManager(
     StorageConfig mutable_config = storage_config;
     mutable_config.useVirtualHost = true;
     if (storage_config.useIAM) {
-        auto huawei_cloud_provider = Aws::MakeShared<
-            Aws::Auth::HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider>(
-            "HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider");
+        auto huawei_cloud_provider = HuaweiCloudChunkManager::
+            GetHuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider();
         auto huawei_cloud_credentials =
             huawei_cloud_provider->GetAWSCredentials();
         AssertInfo(!huawei_cloud_credentials.GetAWSAccessKeyId().empty(),
@@ -283,6 +273,39 @@ HuaweiCloudChunkManager::HuaweiCloudChunkManager(
         storage_config.bucket_name,
         storage_config.root_path,
         storage_config.useSSL);
+}
+
+std::shared_ptr<
+    Aws::Auth::HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider>
+HuaweiCloudChunkManager::
+    GetHuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider() {
+    static std::shared_ptr<
+        Aws::Auth::HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider>
+        provider = std::make_shared<
+            Aws::Auth::
+                HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider>();
+    return provider;
+}
+
+std::shared_ptr<Aws::Auth::AliyunSTSAssumeRoleWebIdentityCredentialsProvider>
+AliyunChunkManager::GetAliyunSTSAssumeRoleWebIdentityCredentialsProvider() {
+    static std::shared_ptr<
+        Aws::Auth::AliyunSTSAssumeRoleWebIdentityCredentialsProvider>
+        provider = std::make_shared<
+            Aws::Auth::AliyunSTSAssumeRoleWebIdentityCredentialsProvider>();
+    return provider;
+}
+
+std::shared_ptr<
+    Aws::Auth::TencentCloudSTSAssumeRoleWebIdentityCredentialsProvider>
+TencentCloudChunkManager::
+    GetTencentCloudSTSAssumeRoleWebIdentityCredentialsProvider() {
+    static std::shared_ptr<
+        Aws::Auth::TencentCloudSTSAssumeRoleWebIdentityCredentialsProvider>
+        provider = std::make_shared<
+            Aws::Auth::
+                TencentCloudSTSAssumeRoleWebIdentityCredentialsProvider>();
+    return provider;
 }
 
 }  // namespace milvus::storage

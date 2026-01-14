@@ -261,22 +261,12 @@ func (c *Collection) GetLoadType() querypb.LoadType {
 
 func (c *Collection) Ref(count uint32) uint32 {
 	refCount := c.refCount.Add(count)
-	log.Debug("collection ref increment",
-		zap.Int64("nodeID", paramtable.GetNodeID()),
-		zap.Int64("collectionID", c.ID()),
-		zap.Uint32("refCount", refCount),
-	)
 	putOrUpdateStorageContext(c.Schema().GetProperties(), c.ID())
 	return refCount
 }
 
 func (c *Collection) Unref(count uint32) uint32 {
 	refCount := c.refCount.Sub(count)
-	log.Debug("collection ref decrement",
-		zap.Int64("nodeID", paramtable.GetNodeID()),
-		zap.Int64("collectionID", c.ID()),
-		zap.Uint32("refCount", refCount),
-	)
 	return refCount
 }
 
@@ -378,7 +368,7 @@ func DeleteCollection(collection *Collection) {
 	collection.mu.Lock()
 	defer collection.mu.Unlock()
 
-	if hookutil.IsClusterEncyptionEnabled() {
+	if hookutil.IsClusterEncryptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(collection.Schema().GetProperties(), collection.ID())
 		if ez != nil {
 			if err := segcore.UnRefPluginContext(ez); err != nil {
@@ -395,7 +385,7 @@ func DeleteCollection(collection *Collection) {
 }
 
 func putOrUpdateStorageContext(properties []*commonpb.KeyValuePair, collectionID int64) {
-	if hookutil.IsClusterEncyptionEnabled() {
+	if hookutil.IsClusterEncryptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(properties, collectionID)
 		if ez != nil {
 			key := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)

@@ -38,6 +38,7 @@ enum class ScalarIndexType {
     HYBRID,
     JSONSTATS,
     RTREE,
+    NGRAM,
 };
 
 inline std::string
@@ -57,6 +58,8 @@ ToString(ScalarIndexType type) {
             return "HYBRID";
         case ScalarIndexType::RTREE:
             return "RTREE";
+        case ScalarIndexType::NGRAM:
+            return "NGRAM";
         default:
             return "UNKNOWN";
     }
@@ -144,7 +147,8 @@ class ScalarIndex : public IndexBase {
                index_type_ == milvus::index::HYBRID_INDEX_TYPE ||
                index_type_ == milvus::index::INVERTED_INDEX_TYPE ||
                index_type_ == milvus::index::MARISA_TRIE ||
-               index_type_ == milvus::index::MARISA_TRIE_UPPER;
+               index_type_ == milvus::index::MARISA_TRIE_UPPER ||
+               index_type_ == milvus::index::ASCENDING_SORT;
     }
 
     virtual int64_t

@@ -450,6 +450,53 @@ func (_c *MockLoader_LoadLazySegment_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// ReopenSegments provides a mock function with given fields: ctx, loadInfos
+func (_m *MockLoader) ReopenSegments(ctx context.Context, loadInfos []*querypb.SegmentLoadInfo) error {
+	ret := _m.Called(ctx, loadInfos)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReopenSegments")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []*querypb.SegmentLoadInfo) error); ok {
+		r0 = rf(ctx, loadInfos)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockLoader_ReopenSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReopenSegments'
+type MockLoader_ReopenSegments_Call struct {
+	*mock.Call
+}
+
+// ReopenSegments is a helper method to define mock.On call
+//   - ctx context.Context
+//   - loadInfos []*querypb.SegmentLoadInfo
+func (_e *MockLoader_Expecter) ReopenSegments(ctx interface{}, loadInfos interface{}) *MockLoader_ReopenSegments_Call {
+	return &MockLoader_ReopenSegments_Call{Call: _e.mock.On("ReopenSegments", ctx, loadInfos)}
+}
+
+func (_c *MockLoader_ReopenSegments_Call) Run(run func(ctx context.Context, loadInfos []*querypb.SegmentLoadInfo)) *MockLoader_ReopenSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]*querypb.SegmentLoadInfo))
+	})
+	return _c
+}
+
+func (_c *MockLoader_ReopenSegments_Call) Return(_a0 error) *MockLoader_ReopenSegments_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockLoader_ReopenSegments_Call) RunAndReturn(run func(context.Context, []*querypb.SegmentLoadInfo) error) *MockLoader_ReopenSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockLoader creates a new instance of MockLoader. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockLoader(t interface {

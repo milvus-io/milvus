@@ -150,4 +150,7 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#STOverlaps.
 	VisitSTOverlaps(ctx *STOverlapsContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#textMatchOption.
+	VisitTextMatchOption(ctx *TextMatchOptionContext) interface{}
 }

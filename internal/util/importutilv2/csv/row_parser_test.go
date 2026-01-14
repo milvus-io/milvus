@@ -23,15 +23,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
-	"github.com/twpayne/go-geom/encoding/wkb"
-	"github.com/twpayne/go-geom/encoding/wkbcommon"
-	"github.com/twpayne/go-geom/encoding/wkt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -49,10 +45,6 @@ type testCase struct {
 	name             string
 	content          map[string]string
 	dontCheckDynamic bool
-}
-
-func (suite *RowParserSuite) SetupSuite() {
-	paramtable.Get().Init(paramtable.NewBaseTable())
 }
 
 func (suite *RowParserSuite) SetupTest() {
@@ -541,9 +533,7 @@ func (suite *RowParserSuite) runValid(c *testCase) {
 				suite.Equal(expectedFlat, vf.GetFloatVector().GetData())
 			}
 		case schemapb.DataType_Geometry:
-			geomT, err := wkt.Unmarshal(rawVal)
-			suite.NoError(err)
-			wkbValue, err := wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+			wkbValue, err := common.ConvertWKTToWKB(rawVal)
 			suite.NoError(err)
 			suite.Equal(wkbValue, val)
 		default:

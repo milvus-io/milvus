@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/samber/lo"
 
@@ -9,122 +10,112 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-// The LevelZeroSegments keeps the min group
-type LevelZeroSegmentsView struct {
-	label                     *CompactionGroupLabel
-	segments                  []*SegmentView
-	earliestGrowingSegmentPos *msgpb.MsgPosition
-	triggerID                 int64
+// LevelZeroCompactionView holds all compactable L0 segments in a compaction group
+// Trigger use static algorithm, it will selects l0Segments according to the min and max threshold
+//
+//	to limit the memory and io usages per L0 Compaction.
+//
+// Given the same l0Segments, Trigger is idempotent, it'll give consist result.
+type LevelZeroCompactionView struct {
+	triggerID       int64
+	label           *CompactionGroupLabel
+	l0Segments      []*SegmentView
+	latestDeletePos *msgpb.MsgPosition
 }
 
-var _ CompactionView = (*LevelZeroSegmentsView)(nil)
+var _ CompactionView = (*LevelZeroCompactionView)(nil)
 
-func (v *LevelZeroSegmentsView) String() string {
-	l0strings := lo.Map(v.segments, func(v *SegmentView, _ int) string {
+func (v *LevelZeroCompactionView) String() string {
+	l0strings := lo.Map(v.l0Segments, func(v *SegmentView, _ int) string {
 		return v.LevelZeroString()
 	})
 
-	count := lo.SumBy(v.segments, func(v *SegmentView) int {
+	count := lo.SumBy(v.l0Segments, func(v *SegmentView) int {
 		return v.DeltaRowCount
 	})
 	return fmt.Sprintf("L0SegCount=%d, DeltaRowCount=%d, label=<%s>, posT=<%v>, L0 segments=%v",
-		len(v.segments),
+		len(v.l0Segments),
 		count,
 		v.label.String(),
-		v.earliestGrowingSegmentPos.GetTimestamp(),
+		v.latestDeletePos.GetTimestamp(),
 		l0strings)
 }
 
-func (v *LevelZeroSegmentsView) Append(segments ...*SegmentView) {
-	if v.segments == nil {
-		v.segments = segments
+func (v *LevelZeroCompactionView) Append(segments ...*SegmentView) {
+	if v.l0Segments == nil {
+		v.l0Segments = segments
 		return
 	}
 
-	v.segments = append(v.segments, segments...)
+	v.l0Segments = append(v.l0Segments, segments...)
 }
 
-func (v *LevelZeroSegmentsView) GetGroupLabel() *CompactionGroupLabel {
+func (v *LevelZeroCompactionView) GetGroupLabel() *CompactionGroupLabel {
 	if v == nil {
 		return &CompactionGroupLabel{}
 	}
 	return v.label
 }
 
-func (v *LevelZeroSegmentsView) GetSegmentsView() []*SegmentView {
+func (v *LevelZeroCompactionView) GetSegmentsView() []*SegmentView {
 	if v == nil {
 		return nil
 	}
 
-	return v.segments
-}
-
-func (v *LevelZeroSegmentsView) Equal(others []*SegmentView) bool {
-	if len(v.segments) != len(others) {
-		return false
-	}
-
-	IDSelector := func(v *SegmentView, _ int) int64 {
-		return v.ID
-	}
-
-	diffLeft, diffRight := lo.Difference(lo.Map(others, IDSelector), lo.Map(v.segments, IDSelector))
-
-	diffCount := len(diffLeft) + len(diffRight)
-	return diffCount == 0
+	return v.l0Segments
 }
 
 // ForceTrigger triggers all qualified LevelZeroSegments according to views
-func (v *LevelZeroSegmentsView) ForceTrigger() (CompactionView, string) {
-	// Only choose segments with position less than the earliest growing segment position
-	validSegments := lo.Filter(v.segments, func(view *SegmentView, _ int) bool {
-		return view.dmlPos.GetTimestamp() < v.earliestGrowingSegmentPos.GetTimestamp()
+func (v *LevelZeroCompactionView) ForceTrigger() (CompactionView, string) {
+	sort.Slice(v.l0Segments, func(i, j int) bool {
+		return v.l0Segments[i].dmlPos.GetTimestamp() < v.l0Segments[j].dmlPos.GetTimestamp()
 	})
 
-	targetViews, reason := v.forceTrigger(validSegments)
+	targetViews, reason := v.forceTrigger(v.l0Segments)
+
+	// Use the max dmlPos timestamp as the latestDeletePos
+	latestL0 := lo.MaxBy(targetViews, func(view1, view2 *SegmentView) bool {
+		return view1.dmlPos.GetTimestamp() > view2.dmlPos.GetTimestamp()
+	})
 	if len(targetViews) > 0 {
-		return &LevelZeroSegmentsView{
-			label:                     v.label,
-			segments:                  targetViews,
-			earliestGrowingSegmentPos: v.earliestGrowingSegmentPos,
-			triggerID:                 v.triggerID,
+		return &LevelZeroCompactionView{
+			label:           v.label,
+			l0Segments:      targetViews,
+			latestDeletePos: latestL0.dmlPos,
+			triggerID:       v.triggerID,
 		}, reason
 	}
 
 	return nil, ""
 }
 
-func (v *LevelZeroSegmentsView) ForceTriggerAll() ([]CompactionView, string) {
-	// Only choose segments with position less than the earliest growing segment position
-	validSegments := lo.Filter(v.segments, func(view *SegmentView, _ int) bool {
-		return view.dmlPos.GetTimestamp() < v.earliestGrowingSegmentPos.GetTimestamp()
+func (v *LevelZeroCompactionView) ForceTriggerAll() ([]CompactionView, string) {
+	sort.Slice(v.l0Segments, func(i, j int) bool {
+		return v.l0Segments[i].dmlPos.GetTimestamp() < v.l0Segments[j].dmlPos.GetTimestamp()
 	})
 
-	if len(validSegments) == 0 {
-		return nil, ""
-	}
-
 	var resultViews []CompactionView
-	var lastReason string
-	remainingSegments := validSegments
+	remainingSegments := v.l0Segments
 
 	// Multi-round force trigger loop
 	for len(remainingSegments) > 0 {
-		targetViews, reason := v.forceTrigger(remainingSegments)
+		targetViews, _ := v.forceTrigger(remainingSegments)
 		if len(targetViews) == 0 {
 			// No more segments can be force triggered, break the loop
 			break
 		}
 
 		// Create a new LevelZeroSegmentsView for this round's target views
-		roundView := &LevelZeroSegmentsView{
-			label:                     v.label,
-			segments:                  targetViews,
-			earliestGrowingSegmentPos: v.earliestGrowingSegmentPos,
-			triggerID:                 v.triggerID,
+		latestL0 := lo.MaxBy(targetViews, func(view1, view2 *SegmentView) bool {
+			return view1.dmlPos.GetTimestamp() > view2.dmlPos.GetTimestamp()
+		})
+		roundView := &LevelZeroCompactionView{
+			label:           v.label,
+			l0Segments:      targetViews,
+			latestDeletePos: latestL0.dmlPos,
+			triggerID:       v.triggerID,
 		}
 		resultViews = append(resultViews, roundView)
-		lastReason = reason
 
 		// Remove the target segments from remaining segments for next round
 		targetSegmentIDs := lo.Map(targetViews, func(view *SegmentView, _ int) int64 {
@@ -135,27 +126,26 @@ func (v *LevelZeroSegmentsView) ForceTriggerAll() ([]CompactionView, string) {
 		})
 	}
 
-	return resultViews, lastReason
+	return resultViews, "force trigger all"
 }
 
-func (v *LevelZeroSegmentsView) GetTriggerID() int64 {
+func (v *LevelZeroCompactionView) GetTriggerID() int64 {
 	return v.triggerID
 }
 
 // Trigger triggers all qualified LevelZeroSegments according to views
-func (v *LevelZeroSegmentsView) Trigger() (CompactionView, string) {
-	// Only choose segments with position less than the earliest growing segment position
-	validSegments := lo.Filter(v.segments, func(view *SegmentView, _ int) bool {
-		return view.dmlPos.GetTimestamp() < v.earliestGrowingSegmentPos.GetTimestamp()
+func (v *LevelZeroCompactionView) Trigger() (CompactionView, string) {
+	latestL0 := lo.MaxBy(v.l0Segments, func(view1, view2 *SegmentView) bool {
+		return view1.dmlPos.GetTimestamp() > view2.dmlPos.GetTimestamp()
 	})
 
-	targetViews, reason := v.minCountSizeTrigger(validSegments)
+	targetViews, reason := v.minCountSizeTrigger(v.l0Segments)
 	if len(targetViews) > 0 {
-		return &LevelZeroSegmentsView{
-			label:                     v.label,
-			segments:                  targetViews,
-			earliestGrowingSegmentPos: v.earliestGrowingSegmentPos,
-			triggerID:                 v.triggerID,
+		return &LevelZeroCompactionView{
+			label:           v.label,
+			l0Segments:      targetViews,
+			latestDeletePos: latestL0.dmlPos,
+			triggerID:       v.triggerID,
 		}, reason
 	}
 
@@ -165,7 +155,7 @@ func (v *LevelZeroSegmentsView) Trigger() (CompactionView, string) {
 // minCountSizeTrigger tries to trigger LevelZeroCompaction when segmentViews reaches minimum trigger conditions:
 // 1. count >= minDeltaCount, OR
 // 2. size >= minDeltaSize
-func (v *LevelZeroSegmentsView) minCountSizeTrigger(segments []*SegmentView) (picked []*SegmentView, reason string) {
+func (v *LevelZeroCompactionView) minCountSizeTrigger(segments []*SegmentView) (picked []*SegmentView, reason string) {
 	var (
 		minDeltaSize  = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerMinSize.GetAsFloat()
 		maxDeltaSize  = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerMaxSize.GetAsFloat()
@@ -195,7 +185,7 @@ func (v *LevelZeroSegmentsView) minCountSizeTrigger(segments []*SegmentView) (pi
 
 // forceTrigger tries to trigger LevelZeroCompaction even when segmentsViews don't meet the minimum condition,
 // the picked plan is still satisfied with the maximum condition
-func (v *LevelZeroSegmentsView) forceTrigger(segments []*SegmentView) (picked []*SegmentView, reason string) {
+func (v *LevelZeroCompactionView) forceTrigger(segments []*SegmentView) (picked []*SegmentView, reason string) {
 	var (
 		maxDeltaSize  = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerMaxSize.GetAsFloat()
 		maxDeltaCount = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMaxNum.GetAsInt()

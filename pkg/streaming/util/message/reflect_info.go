@@ -64,6 +64,7 @@ const (
 	MessageTypeCreateIndex          MessageType = MessageType(messagespb.MessageType_CreateIndex)
 	MessageTypeAlterIndex           MessageType = MessageType(messagespb.MessageType_AlterIndex)
 	MessageTypeDropIndex            MessageType = MessageType(messagespb.MessageType_DropIndex)
+	MessageTypeFlushAll             MessageType = MessageType(messagespb.MessageType_FlushAll)
 )
 
 // Export extra message type
@@ -164,6 +165,8 @@ type (
 	AlterIndexMessageBody             = messagespb.AlterIndexMessageBody
 	DropIndexMessageHeader            = messagespb.DropIndexMessageHeader
 	DropIndexMessageBody              = messagespb.DropIndexMessageBody
+	FlushAllMessageHeader             = messagespb.FlushAllMessageHeader
+	FlushAllMessageBody               = messagespb.FlushAllMessageBody
 )
 
 // Type aliases for TimeTickMessageV1
@@ -1826,6 +1829,47 @@ var MustAsBroadcastDropIndexMessageV2 = MustAsSpecializedBroadcastMessage[*DropI
 // NewDropIndexMessageBuilderV2 creates a new message builder for DropIndexMessageV2
 var NewDropIndexMessageBuilderV2 = newMutableMessageBuilder[*DropIndexMessageHeader, *DropIndexMessageBody]
 
+// Type aliases for FlushAllMessageV2
+type (
+	MutableFlushAllMessageV2         = specializedMutableMessage[*FlushAllMessageHeader, *FlushAllMessageBody]
+	ImmutableFlushAllMessageV2       = SpecializedImmutableMessage[*FlushAllMessageHeader, *FlushAllMessageBody]
+	BroadcastFlushAllMessageV2       = SpecializedBroadcastMessage[*FlushAllMessageHeader, *FlushAllMessageBody]
+	BroadcastResultFlushAllMessageV2 = BroadcastResult[*FlushAllMessageHeader, *FlushAllMessageBody]
+)
+
+// MessageTypeWithVersion for FlushAllMessageV2
+var MessageTypeFlushAllV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeFlushAll,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for FlushAllMessageV2
+var SpecializedTypeFlushAllV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*FlushAllMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*FlushAllMessageHeader)(nil)),
+}
+
+// AsMutableFlushAllMessageV2 converts a BasicMessage to MutableFlushAllMessageV2
+var AsMutableFlushAllMessageV2 = asSpecializedMutableMessage[*FlushAllMessageHeader, *FlushAllMessageBody]
+
+// MustAsMutableFlushAllMessageV2 converts a BasicMessage to MutableFlushAllMessageV2, panics on error
+var MustAsMutableFlushAllMessageV2 = mustAsSpecializedMutableMessage[*FlushAllMessageHeader, *FlushAllMessageBody]
+
+// AsImmutableFlushAllMessageV2 converts an ImmutableMessage to ImmutableFlushAllMessageV2
+var AsImmutableFlushAllMessageV2 = asSpecializedImmutableMessage[*FlushAllMessageHeader, *FlushAllMessageBody]
+
+// MustAsImmutableFlushAllMessageV2 converts an ImmutableMessage to ImmutableFlushAllMessageV2, panics on error
+var MustAsImmutableFlushAllMessageV2 = MustAsSpecializedImmutableMessage[*FlushAllMessageHeader, *FlushAllMessageBody]
+
+// AsBroadcastFlushAllMessageV2 converts a BasicMessage to BroadcastFlushAllMessageV2
+var AsBroadcastFlushAllMessageV2 = asSpecializedBroadcastMessage[*FlushAllMessageHeader, *FlushAllMessageBody]
+
+// MustAsBroadcastFlushAllMessageV2 converts a BasicMessage to BroadcastFlushAllMessageV2, panics on error
+var MustAsBroadcastFlushAllMessageV2 = MustAsSpecializedBroadcastMessage[*FlushAllMessageHeader, *FlushAllMessageBody]
+
+// NewFlushAllMessageBuilderV2 creates a new message builder for FlushAllMessageV2
+var NewFlushAllMessageBuilderV2 = newMutableMessageBuilder[*FlushAllMessageHeader, *FlushAllMessageBody]
+
 // messageTypeMap make the contriants that one header type can only be used for one message type.
 var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.AlterAliasMessageHeader{}):           MessageTypeAlterAlias,
@@ -1860,6 +1904,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.DropRoleMessageHeader{}):             MessageTypeDropRole,
 	reflect.TypeOf(&messagespb.DropUserMessageHeader{}):             MessageTypeDropUser,
 	reflect.TypeOf(&messagespb.DropUserRoleMessageHeader{}):         MessageTypeDropUserRole,
+	reflect.TypeOf(&messagespb.FlushAllMessageHeader{}):             MessageTypeFlushAll,
 	reflect.TypeOf(&messagespb.FlushMessageHeader{}):                MessageTypeFlush,
 	reflect.TypeOf(&messagespb.ImportMessageHeader{}):               MessageTypeImport,
 	reflect.TypeOf(&messagespb.InsertMessageHeader{}):               MessageTypeInsert,
@@ -1921,6 +1966,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeDropRoleV2:             SpecializedTypeDropRoleV2,
 	MessageTypeDropUserRoleV2:         SpecializedTypeDropUserRoleV2,
 	MessageTypeDropUserV2:             SpecializedTypeDropUserV2,
+	MessageTypeFlushAllV2:             SpecializedTypeFlushAllV2,
 	MessageTypeFlushV2:                SpecializedTypeFlushV2,
 	MessageTypeImportV1:               SpecializedTypeImportV1,
 	MessageTypeInsertV1:               SpecializedTypeInsertV1,
@@ -1966,6 +2012,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeDropRoleV2:             MessageTypeDropRoleV2,
 	SpecializedTypeDropUserRoleV2:         MessageTypeDropUserRoleV2,
 	SpecializedTypeDropUserV2:             MessageTypeDropUserV2,
+	SpecializedTypeFlushAllV2:             MessageTypeFlushAllV2,
 	SpecializedTypeFlushV2:                MessageTypeFlushV2,
 	SpecializedTypeImportV1:               MessageTypeImportV1,
 	SpecializedTypeInsertV1:               MessageTypeInsertV1,

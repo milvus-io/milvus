@@ -968,7 +968,9 @@ class TestCreateImportJob(TestBase):
         # flush data to generate binlog file
         c = Collection(name)
         c.flush()
-        time.sleep(2)
+        # wait for index building to complete, which ensures sort compaction is done
+        for field_name in ["text_emb", "image_emb"]:
+            utility.wait_for_index_building_complete(name, field_name)
 
         # query data to make sure the data is inserted
         rsp = self.vector_client.vector_query({"collectionName": name, "filter": "user_id > 0", "limit": 50})

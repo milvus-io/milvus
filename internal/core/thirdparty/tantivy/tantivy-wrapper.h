@@ -956,8 +956,11 @@ struct TantivyIndexWrapper {
     }
 
     void
-    match_query(const std::string& query, void* bitset) {
-        auto array = tantivy_match_query(reader_, query.c_str(), bitset);
+    match_query(const std::string& query,
+                uintptr_t min_should_match,
+                void* bitset) {
+        auto array = tantivy_match_query(
+            reader_, query.c_str(), min_should_match, bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.match_query: {}",

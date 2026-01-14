@@ -19,9 +19,6 @@ package segments
 import (
 	"context"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -30,8 +27,6 @@ func validate(ctx context.Context, manager *Manager, collectionID int64, partiti
 	if collection == nil {
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
-
-	log.Ctx(ctx).Debug("read target partitions", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
 
 	// validate segment
 	segments := make([]Segment, 0, len(segmentIDs))

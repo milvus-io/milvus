@@ -63,6 +63,51 @@ func (_c *MockShardDelegator_AddExcludedSegments_Call) RunAndReturn(run func(map
 	return _c
 }
 
+// CatchingUpStreamingData provides a mock function with no fields
+func (_m *MockShardDelegator) CatchingUpStreamingData() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for CatchingUpStreamingData")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_CatchingUpStreamingData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CatchingUpStreamingData'
+type MockShardDelegator_CatchingUpStreamingData_Call struct {
+	*mock.Call
+}
+
+// CatchingUpStreamingData is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) CatchingUpStreamingData() *MockShardDelegator_CatchingUpStreamingData_Call {
+	return &MockShardDelegator_CatchingUpStreamingData_Call{Call: _e.mock.On("CatchingUpStreamingData")}
+}
+
+func (_c *MockShardDelegator_CatchingUpStreamingData_Call) Run(run func()) *MockShardDelegator_CatchingUpStreamingData_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_CatchingUpStreamingData_Call) Return(_a0 bool) *MockShardDelegator_CatchingUpStreamingData_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_CatchingUpStreamingData_Call) RunAndReturn(run func() bool) *MockShardDelegator_CatchingUpStreamingData_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Close provides a mock function with no fields
 func (_m *MockShardDelegator) Close() {
 	_m.Called()
@@ -344,6 +389,51 @@ func (_c *MockShardDelegator_GetHighlight_Call) Return(_a0 []*querypb.HighlightR
 }
 
 func (_c *MockShardDelegator_GetHighlight_Call) RunAndReturn(run func(context.Context, *querypb.GetHighlightRequest) ([]*querypb.HighlightResult, error)) *MockShardDelegator_GetHighlight_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetLatestRequiredMVCCTimeTick provides a mock function with no fields
+func (_m *MockShardDelegator) GetLatestRequiredMVCCTimeTick() uint64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLatestRequiredMVCCTimeTick")
+	}
+
+	var r0 uint64
+	if rf, ok := ret.Get(0).(func() uint64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetLatestRequiredMVCCTimeTick'
+type MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call struct {
+	*mock.Call
+}
+
+// GetLatestRequiredMVCCTimeTick is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) GetLatestRequiredMVCCTimeTick() *MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call {
+	return &MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call{Call: _e.mock.On("GetLatestRequiredMVCCTimeTick")}
+}
+
+func (_c *MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call) Run(run func()) *MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call) Return(_a0 uint64) *MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call) RunAndReturn(run func() uint64) *MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call {
 	_c.Call.Return(run)
 	return _c
 }

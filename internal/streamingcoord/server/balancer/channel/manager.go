@@ -68,12 +68,12 @@ func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*Cha
 		return nil, err
 	}
 
-	globalVersion := paramtable.GetNodeID()
+	globalVersion := resource.Resource().Session().GetRegisteredRevision()
 	return &ChannelManager{
 		cond:     syncutil.NewContextCond(&sync.Mutex{}),
 		channels: channels,
 		version: typeutil.VersionInt64Pair{
-			Global: globalVersion, // global version should be keep increasing globally, it's ok to use node id.
+			Global: globalVersion, // global version should be keep increasing globally, use revision of session to promise it.
 			Local:  0,
 		},
 		metrics:          metrics,

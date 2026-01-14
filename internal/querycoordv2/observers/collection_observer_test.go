@@ -344,6 +344,53 @@ func (suite *CollectionObserverSuite) TestObserve() {
 
 	suite.dist.ChannelDistManager.Update(3, ch4, ch5)
 
+	// Add segment distribution for CheckSegmentDataReady
+	// Collection 100: segments 1, 2
+	suite.dist.SegmentDistManager.Update(1, &meta.Segment{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1,
+			CollectionID:  100,
+			PartitionID:   10,
+			InsertChannel: "100-dmc0",
+		},
+		Node: 1,
+	})
+	suite.dist.SegmentDistManager.Update(2, &meta.Segment{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            2,
+			CollectionID:  100,
+			PartitionID:   10,
+			InsertChannel: "100-dmc1",
+		},
+		Node: 2,
+	})
+
+	// Collection 102: segments from 5 to 1003 (999 segments)
+	segments102 := make([]*meta.Segment, 0, len(suite.segments[102]))
+	for _, seg := range suite.segments[102] {
+		segments102 = append(segments102, &meta.Segment{
+			SegmentInfo: seg,
+			Node:        3,
+		})
+	}
+	suite.dist.SegmentDistManager.Update(3, segments102...)
+
+	// Collection 103: segments from 2000 to 2009 (10 segments), distributed on node 2 and 3
+	segments103Node2 := make([]*meta.Segment, 0, len(suite.segments[103]))
+	segments103Node3 := make([]*meta.Segment, 0, len(suite.segments[103]))
+	for _, seg := range suite.segments[103] {
+		segments103Node2 = append(segments103Node2, &meta.Segment{
+			SegmentInfo: seg,
+			Node:        2,
+		})
+		segments103Node3 = append(segments103Node3, &meta.Segment{
+			SegmentInfo: seg,
+			Node:        3,
+		})
+	}
+	suite.dist.SegmentDistManager.Update(2, segments103Node2...)
+	suite.dist.SegmentDistManager.Update(3, segments103Node3...)
+
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
@@ -410,6 +457,27 @@ func (suite *CollectionObserverSuite) TestObservePartition() {
 			Channel:      "100-dmc1",
 			Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 2, Version: 0}},
 		},
+	})
+
+	// Add segment distribution for CheckSegmentDataReady
+	// Collection 100, partition 10: segments 1, 2
+	suite.dist.SegmentDistManager.Update(1, &meta.Segment{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1,
+			CollectionID:  100,
+			PartitionID:   10,
+			InsertChannel: "100-dmc0",
+		},
+		Node: 1,
+	})
+	suite.dist.SegmentDistManager.Update(2, &meta.Segment{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            2,
+			CollectionID:  100,
+			PartitionID:   10,
+			InsertChannel: "100-dmc1",
+		},
+		Node: 2,
 	})
 
 	suite.Eventually(func() bool {

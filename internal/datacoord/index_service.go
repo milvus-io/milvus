@@ -1118,7 +1118,6 @@ func (s *Server) ListIndexes(ctx context.Context, req *indexpb.ListIndexesReques
 			UserIndexParams: index.UserIndexParams,
 		}
 	})
-	log.Debug("List index success")
 	return &indexpb.ListIndexesResponse{
 		Status:     merr.Success(),
 		IndexInfos: indexInfos,

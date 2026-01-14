@@ -340,6 +340,7 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		JsonStatsMaxShreddingColumns:     Params.DataCoordCfg.JSONStatsMaxShreddingColumns.GetAsInt64(),
 		JsonStatsShreddingRatioThreshold: Params.DataCoordCfg.JSONStatsShreddingRatioThreshold.GetAsFloat(),
 		JsonStatsWriteBatchSize:          Params.DataCoordCfg.JSONStatsWriteBatchSize.GetAsInt64(),
+		ManifestPath:                     segment.GetManifestPath(),
 	}
 	WrapPluginContext(segment.GetCollectionID(), collInfo.Schema.GetProperties(), req)
 

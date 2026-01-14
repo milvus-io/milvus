@@ -354,6 +354,22 @@ func (t *createCollectionTask) validateClusteringKey(ctx context.Context) error 
 	return nil
 }
 
+func validateCollectionTTL(props []*commonpb.KeyValuePair) (bool, error) {
+	for _, pair := range props {
+		if pair.Key == common.CollectionTTLConfigKey {
+			val, err := strconv.Atoi(pair.Value)
+			if err != nil {
+				return true, merr.WrapErrParameterInvalidMsg("collection TTL is not a valid positive integer")
+			}
+			if val < -1 || val > common.MaxTTLSeconds {
+				return true, merr.WrapErrParameterInvalidMsg("collection TTL is out of range, expect [-1, 3155760000], got %d", val)
+			}
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_CreateCollection
 	t.Base.SourceID = paramtable.GetNodeID()
@@ -370,7 +386,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := validateFunction(t.schema, disableCheck); err != nil {
+	if err := validateFunction(t.schema, "", disableCheck); err != nil {
 		return err
 	}
 
@@ -431,6 +447,12 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.GetProperties())
 	if exist && !timestamptz.IsTimezoneValid(tz) {
 		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
+	}
+
+	// Validate collection ttl
+	_, err = validateCollectionTTL(t.GetProperties())
+	if err != nil {
+		return err
 	}
 
 	// validate clustering key
@@ -1222,6 +1244,11 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		userDefinedTimezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.Properties)
 		if exist && !timestamptz.IsTimezoneValid(userDefinedTimezone) {
 			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", userDefinedTimezone)
+		}
+
+		_, err := validateCollectionTTL(t.GetProperties())
+		if err != nil {
+			return err
 		}
 	} else if len(t.GetDeleteKeys()) > 0 {
 		key := hasPropInDeletekeys(t.DeleteKeys)

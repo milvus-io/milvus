@@ -135,10 +135,12 @@ MemFileManagerImpl::LoadIndexToMemory(
     auto LoadBatchIndexFiles = [&]() {
         auto index_datas = GetObjectData(
             rcm_.get(), batch_files, milvus::PriorityForLoad(priority));
+        // Wait for all futures to ensure all threads complete
+        auto codecs = storage::WaitAllFutures(std::move(index_datas));
         for (size_t idx = 0; idx < batch_files.size(); ++idx) {
             auto file_name =
                 batch_files[idx].substr(batch_files[idx].find_last_of('/') + 1);
-            file_to_index_data[file_name] = index_datas[idx].get();
+            file_to_index_data[file_name] = std::move(codecs[idx]);
         }
     };
 
@@ -186,8 +188,10 @@ MemFileManagerImpl::cache_raw_data_to_memory_internal(const Config& config) {
 
     auto FetchRawData = [&]() {
         auto raw_datas = GetObjectData(rcm_.get(), batch_files);
-        for (auto& data : raw_datas) {
-            field_datas.emplace_back(data.get()->GetFieldData());
+        // Wait for all futures to ensure all threads complete
+        auto codecs = storage::WaitAllFutures(std::move(raw_datas));
+        for (auto& codec : codecs) {
+            field_datas.emplace_back(codec->GetFieldData());
         }
     };
 
@@ -373,6 +377,39 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
             "vector index build with multiple fields is not supported yet");
     }
 
+    auto manifest =
+        index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
+    // use manifest file for storage v2
+    auto manifest_path_str = manifest.value_or("");
+    if (manifest_path_str != "") {
+        AssertInfo(loon_ffi_properties_ != nullptr,
+                   "[StorageV2] loon ffi properties is null when build index "
+                   "with manifest");
+        std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> res;
+        for (auto& [field_id, tup] : fields_map) {
+            const auto& field_type = std::get<1>(tup);
+            const auto& element_type = std::get<2>(tup);
+
+            // compose field schema for optional field
+            proto::schema::FieldSchema field_schema;
+            field_schema.set_fieldid(field_id);
+            field_schema.set_nullable(true);  // use always nullable
+            milvus::storage::FieldDataMeta field_meta{field_meta_.collection_id,
+                                                      field_meta_.partition_id,
+                                                      field_meta_.segment_id,
+                                                      field_id,
+                                                      field_schema};
+            auto field_datas = GetFieldDatasFromManifest(manifest_path_str,
+                                                         loon_ffi_properties_,
+                                                         field_meta_,
+                                                         field_type,
+                                                         1,  // scalar field
+                                                         element_type);
+
+            res[field_id] = GetOptFieldIvfData(field_type, field_datas);
+        }
+        return res;
+    }
     auto segment_insert_files =
         index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
             config, SEGMENT_INSERT_FILES_KEY);

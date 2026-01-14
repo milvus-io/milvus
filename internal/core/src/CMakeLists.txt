@@ -32,6 +32,7 @@ include_directories(
     ${KNOWHERE_INCLUDE_DIR}
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
+    ${BSONCXX_INCLUDE_DIR}
     ${CONAN_INCLUDE_DIRS}
     ${MILVUS_COMMON_INCLUDE_DIR}
     ${MILVUS_STORAGE_INCLUDE_DIR}
@@ -71,13 +72,14 @@ add_library(milvus_core SHARED
     $<TARGET_OBJECTS:milvus_rescores>
 )
 
-set(LINK_TARGETS 
+set(LINK_TARGETS
     boost_bitset_ext
     simdjson
     tantivy_binding
     knowhere
     milvus-storage
     milvus-common
+    bsoncxx
     ${OpenMP_CXX_FLAGS}
     ${CONAN_LIBS}
     )
@@ -94,11 +96,6 @@ endif()
 
 if (ENABLE_GCP_NATIVE)
     set(LINK_TARGETS ${LINK_TARGETS} gcp-native-storage)
-endif()
-
-# Link jemalloc library for mallctl API access (Linux only)
-if (LINUX)
-    set(LINK_TARGETS ${LINK_TARGETS} jemalloc)
 endif()
 
 target_link_libraries(milvus_core ${LINK_TARGETS})

@@ -26,9 +26,12 @@ class ChunkedColumnInterface {
  public:
     virtual ~ChunkedColumnInterface() = default;
 
-    // Default implementation does nothing.
-    virtual void
-    ManualEvictCache() const {
+    // Check if the field is part of a multi-field column group.
+    // If true, the field data should not be dropped independently
+    // because it shares storage with other fields.
+    virtual bool
+    IsInMultiFieldColumnGroup() const {
+        return false;
     }
 
     // Get raw data pointer of a specific chunk

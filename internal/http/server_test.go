@@ -203,26 +203,96 @@ func (suite *HTTPServerTestSuite) TestPprofHandler() {
 func (suite *HTTPServerTestSuite) TestExprHandler() {
 	expr.Init()
 	expr.Register("foo", "hello")
-	suite.Run("fail", func() {
+
+	suite.Run("disabled_by_default", func() {
+		// By default, exprEnabled is false, should return 403
+		paramtable.Get().Save("common.security.exprEnabled", "false")
+		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo&auth=by-dev"
+		client := http.Client{}
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		resp, err := client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		suite.Equal(http.StatusForbidden, resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		suite.True(strings.Contains(string(body), "expr endpoint is disabled"))
+	})
+
+	suite.Run("disabled_on_non_proxy_nodes", func() {
+		// When enabled but not on Proxy node (no proxy registered, no passwordVerifyFunc),
+		// it should return 403 Forbidden
+		paramtable.Get().Save("common.security.exprEnabled", "true")
+
+		// Should be forbidden on non-Proxy nodes
+		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo&auth=by-dev"
+		client := http.Client{}
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		resp, err := client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		suite.Equal(http.StatusForbidden, resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		suite.True(strings.Contains(string(body), "only available on Proxy nodes"))
+	})
+
+	suite.Run("enabled_on_proxy_requires_root_auth", func() {
+		// When enabled on Proxy node (proxy registered and passwordVerifyFunc set),
+		// it should require root user authentication
+		paramtable.Get().Save("common.security.exprEnabled", "true")
+		expr.Register("proxy", "mock_proxy")
+
+		// Register a mock password verify function
+		RegisterPasswordVerifyFunc(func(ctx context.Context, username, password string) bool {
+			return username == "root" && password == "Milvus"
+		})
+
+		// Without auth header - should fail with 401
 		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
 		client := http.Client{}
 		req, _ := http.NewRequest(http.MethodGet, url, nil)
 		resp, err := client.Do(req)
 		suite.Nil(err)
 		defer resp.Body.Close()
+		suite.Equal(http.StatusUnauthorized, resp.StatusCode)
 		body, _ := io.ReadAll(resp.Body)
-		suite.True(strings.Contains(string(body), "failed to execute"))
-	})
-	suite.Run("success", func() {
-		url := "http://localhost:" + DefaultListenPort + ExprPath + "?auth=by-dev&code=foo"
-		client := http.Client{}
-		req, _ := http.NewRequest(http.MethodGet, url, nil)
-		resp, err := client.Do(req)
+		suite.True(strings.Contains(string(body), "authentication required"))
+
+		// With non-root user - should fail with 401
+		url = "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
+		req, _ = http.NewRequest(http.MethodGet, url, nil)
+		req.SetBasicAuth("admin", "password")
+		resp, err = client.Do(req)
 		suite.Nil(err)
 		defer resp.Body.Close()
-		body, _ := io.ReadAll(resp.Body)
+		suite.Equal(http.StatusUnauthorized, resp.StatusCode)
+		body, _ = io.ReadAll(resp.Body)
+		suite.True(strings.Contains(string(body), "only root user"))
+
+		// With root user but wrong password - should fail with 401
+		url = "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
+		req, _ = http.NewRequest(http.MethodGet, url, nil)
+		req.SetBasicAuth("root", "wrong_password")
+		resp, err = client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		suite.Equal(http.StatusUnauthorized, resp.StatusCode)
+		body, _ = io.ReadAll(resp.Body)
+		suite.True(strings.Contains(string(body), "invalid root password"))
+
+		// With correct root credentials - should succeed
+		url = "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
+		req, _ = http.NewRequest(http.MethodGet, url, nil)
+		req.SetBasicAuth("root", "Milvus")
+		resp, err = client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		suite.Equal(http.StatusOK, resp.StatusCode)
+		body, _ = io.ReadAll(resp.Body)
 		suite.True(strings.Contains(string(body), "hello"))
 	})
+
+	// Reset config
+	paramtable.Get().Save("common.security.exprEnabled", "false")
 }
 
 func TestHTTPServerSuite(t *testing.T) {

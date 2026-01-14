@@ -22,6 +22,7 @@ import (
 	"math/bits"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -134,7 +135,8 @@ const (
 )
 
 const (
-	JSONStatsDataFormatVersion = 2
+	// Version 3: metadata moved to separate meta.json file (instead of parquet metadata)
+	JSONStatsDataFormatVersion = 3
 )
 
 // Search, Index parameter keys
@@ -187,6 +189,7 @@ const (
 	CollectionTTLConfigKey      = "collection.ttl.seconds"
 	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
 	CollectionDescription       = "collection.description"
+	MaxTTLSeconds               = 3155760000 // 100 years
 
 	// Note:
 	// Function output fields cannot be included in inserted data.
@@ -197,8 +200,6 @@ const (
 	// rate limit
 	CollectionInsertRateMaxKey   = "collection.insertRate.max.mb"
 	CollectionInsertRateMinKey   = "collection.insertRate.min.mb"
-	CollectionUpsertRateMaxKey   = "collection.upsertRate.max.mb"
-	CollectionUpsertRateMinKey   = "collection.upsertRate.min.mb"
 	CollectionDeleteRateMaxKey   = "collection.deleteRate.max.mb"
 	CollectionDeleteRateMinKey   = "collection.deleteRate.min.mb"
 	CollectionBulkLoadRateMaxKey = "collection.bulkLoadRate.max.mb"
@@ -631,10 +632,45 @@ func GetStringValue(kvs []*commonpb.KeyValuePair, key string) (result string, ex
 	return kv.GetValue(), true
 }
 
+func GetCollectionTTL(kvs []*commonpb.KeyValuePair, defaultValue time.Duration) (time.Duration, error) {
+	value, parseErr, exist := GetInt64Value(kvs, CollectionTTLConfigKey)
+	if parseErr != nil {
+		return 0, parseErr
+	}
+
+	if !exist {
+		return defaultValue, nil
+	}
+
+	return time.Duration(value) * time.Second, nil
+}
+
+func GetCollectionTTLFromMap(kvs map[string]string, defaultValue time.Duration) (time.Duration, error) {
+	value, exist := kvs[CollectionTTLConfigKey]
+	if !exist {
+		return defaultValue, nil
+	}
+
+	ttlSeconds, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return time.Duration(ttlSeconds) * time.Second, nil
+}
+
 func ConvertWKTToWKB(wktStr string) ([]byte, error) {
 	geomT, err := wkt.Unmarshal(wktStr)
 	if err != nil {
 		return nil, err
 	}
 	return wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+}
+
+func ConvertWKBToWKT(wkbData []byte) (string, error) {
+	geomT, err := wkb.Unmarshal(wkbData, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+	if err != nil {
+		return "", err
+	}
+	return wkt.Marshal(geomT)
 }

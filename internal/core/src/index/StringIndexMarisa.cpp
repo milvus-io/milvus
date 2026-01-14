@@ -57,6 +57,29 @@ StringIndexMarisa::Size() {
     return total_size_;
 }
 
+void
+StringIndexMarisa::ComputeByteSize() {
+    StringIndex::ComputeByteSize();
+    int64_t total = cached_byte_size_;
+
+    // Size of the trie structure (marisa trie uses io_size() for serialized/memory size)
+    total += trie_.io_size();
+
+    // str_ids_: vector<int64_t>
+    total += str_ids_.capacity() * sizeof(int64_t);
+
+    // str_ids_to_offsets_: map<size_t, vector<size_t>>
+    for (const auto& [key, vec] : str_ids_to_offsets_) {
+        total += sizeof(size_t);                   // key
+        total += vec.capacity() * sizeof(size_t);  // vector capacity
+        total += sizeof(std::vector<size_t>);      // vector object overhead
+    }
+    // Map node overhead (rough estimate: ~40 bytes per node for std::map)
+    total += str_ids_to_offsets_.size() * 40;
+
+    cached_byte_size_ = total;
+}
+
 int64_t
 StringIndexMarisa::CalculateTotalSize() const {
     int64_t size = 0;
@@ -135,6 +158,7 @@ StringIndexMarisa::BuildWithFieldData(
 
     built_ = true;
     total_size_ = CalculateTotalSize();
+    ComputeByteSize();
 }
 
 void
@@ -161,6 +185,7 @@ StringIndexMarisa::Build(size_t n,
 
     built_ = true;
     total_size_ = CalculateTotalSize();
+    ComputeByteSize();
 }
 
 BinarySet
@@ -247,6 +272,7 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     fill_offsets();
     built_ = true;
     total_size_ = CalculateTotalSize();
+    ComputeByteSize();
 }
 
 void
@@ -277,6 +303,7 @@ StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
 
 const TargetBitmap
 StringIndexMarisa::In(size_t n, const std::string* values) {
+    tracer::AutoSpan span("StringIndexMarisa::In", tracer::GetRootSpan());
     TargetBitmap bitset(str_ids_.size());
     for (size_t i = 0; i < n; i++) {
         auto str = values[i];
@@ -293,6 +320,7 @@ StringIndexMarisa::In(size_t n, const std::string* values) {
 
 const TargetBitmap
 StringIndexMarisa::NotIn(size_t n, const std::string* values) {
+    tracer::AutoSpan span("StringIndexMarisa::NotIn", tracer::GetRootSpan());
     TargetBitmap bitset(str_ids_.size(), true);
     for (size_t i = 0; i < n; i++) {
         auto str = values[i];
@@ -311,6 +339,7 @@ StringIndexMarisa::NotIn(size_t n, const std::string* values) {
 
 const TargetBitmap
 StringIndexMarisa::IsNull() {
+    tracer::AutoSpan span("StringIndexMarisa::IsNull", tracer::GetRootSpan());
     TargetBitmap bitset(str_ids_.size());
     SetNull(bitset);
     return bitset;
@@ -318,6 +347,7 @@ StringIndexMarisa::IsNull() {
 
 void
 StringIndexMarisa::SetNull(TargetBitmap& bitset) {
+    tracer::AutoSpan span("StringIndexMarisa::SetNull", tracer::GetRootSpan());
     for (size_t i = 0; i < bitset.size(); i++) {
         if (str_ids_[i] == MARISA_NULL_KEY_ID) {
             bitset.set(i);
@@ -327,6 +357,8 @@ StringIndexMarisa::SetNull(TargetBitmap& bitset) {
 
 void
 StringIndexMarisa::ResetNull(TargetBitmap& bitset) {
+    tracer::AutoSpan span("StringIndexMarisa::ResetNull",
+                          tracer::GetRootSpan());
     for (size_t i = 0; i < bitset.size(); i++) {
         if (str_ids_[i] == MARISA_NULL_KEY_ID) {
             bitset.reset(i);
@@ -336,6 +368,8 @@ StringIndexMarisa::ResetNull(TargetBitmap& bitset) {
 
 TargetBitmap
 StringIndexMarisa::IsNotNull() {
+    tracer::AutoSpan span("StringIndexMarisa::IsNotNull",
+                          tracer::GetRootSpan());
     TargetBitmap bitset(str_ids_.size());
     for (size_t i = 0; i < bitset.size(); i++) {
         if (str_ids_[i] != MARISA_NULL_KEY_ID) {
@@ -347,6 +381,7 @@ StringIndexMarisa::IsNotNull() {
 
 const TargetBitmap
 StringIndexMarisa::Range(std::string value, OpType op) {
+    tracer::AutoSpan span("StringIndexMarisa::Range", tracer::GetRootSpan());
     auto count = Count();
     TargetBitmap bitset(count);
     std::vector<size_t> ids;
@@ -469,6 +504,7 @@ StringIndexMarisa::Range(std::string lower_bound_value,
                          bool lb_inclusive,
                          std::string upper_bound_value,
                          bool ub_inclusive) {
+    tracer::AutoSpan span("StringIndexMarisa::Range", tracer::GetRootSpan());
     auto count = Count();
     TargetBitmap bitset(count);
     if (lower_bound_value.compare(upper_bound_value) > 0 ||
@@ -520,6 +556,8 @@ StringIndexMarisa::Range(std::string lower_bound_value,
 
 const TargetBitmap
 StringIndexMarisa::PrefixMatch(std::string_view prefix) {
+    tracer::AutoSpan span("StringIndexMarisa::PrefixMatch",
+                          tracer::GetRootSpan());
     TargetBitmap bitset(str_ids_.size());
     auto matched = prefix_match(prefix);
     for (const auto str_id : matched) {
@@ -572,6 +610,8 @@ StringIndexMarisa::lookup(const std::string_view str) {
 
 std::vector<size_t>
 StringIndexMarisa::prefix_match(const std::string_view prefix) {
+    tracer::AutoSpan span("StringIndexMarisa::prefix_match",
+                          tracer::GetRootSpan());
     std::vector<size_t> ret;
     marisa::Agent agent;
     agent.set_query(prefix.data());
@@ -582,6 +622,8 @@ StringIndexMarisa::prefix_match(const std::string_view prefix) {
 }
 std::optional<std::string>
 StringIndexMarisa::Reverse_Lookup(size_t offset) const {
+    tracer::AutoSpan span("StringIndexMarisa::Reverse_Lookup",
+                          tracer::GetRootSpan());
     AssertInfo(offset < str_ids_.size(), "out of range of total count");
     marisa::Agent agent;
     if (str_ids_[offset] < 0) {

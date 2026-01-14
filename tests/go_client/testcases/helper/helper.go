@@ -151,7 +151,7 @@ func GetAllFieldsName(schema entity.Schema) []string {
 // CreateDefaultMilvusClient creates a new client with default configuration
 func CreateDefaultMilvusClient(ctx context.Context, t *testing.T) *base.MilvusClient {
 	t.Helper()
-	mc, err := base.NewMilvusClient(ctx, defaultClientConfig)
+	mc, err := base.NewMilvusClient(ctx, GetDefaultClientConfig())
 	common.CheckErr(t, err, true)
 
 	t.Cleanup(func() {

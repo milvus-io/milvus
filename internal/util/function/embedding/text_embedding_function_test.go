@@ -1023,3 +1023,44 @@ func (s *TextEmbeddingFunctionSuite) TestDisable() {
 	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.ErrorContains(err, "Text embedding model provider [openai] is disabled")
 }
+
+func (s *TextEmbeddingFunctionSuite) TestCheck() {
+	schema := &schemapb.CollectionSchema{
+		Name: "test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+			{
+				FieldID: 102, Name: "vector", DataType: schemapb.DataType_Int8Vector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "4"},
+				},
+			},
+		},
+	}
+	ts := CreateOpenAIEmbeddingServer()
+	defer ts.Close()
+	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+		key := openAIProvider + "." + models.URLParamKey
+		return map[string]string{
+			key: ts.URL,
+		}
+	}
+	runner, err := NewTextEmbeddingFunction(schema, &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_TextEmbedding,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+		Params: []*commonpb.KeyValuePair{
+			{Key: Provider, Value: openAIProvider},
+			{Key: models.ModelNameParamKey, Value: "text-embedding-ada-002"},
+			{Key: models.DimParamKey, Value: "4"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		},
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
+	s.NoError(err)
+	err = runner.Check(context.Background())
+	s.ErrorContains(err, "Embedding model output and field type mismatch, model output is FloatVector, field type is Int8Vector")
+}

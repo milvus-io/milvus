@@ -31,8 +31,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -93,6 +95,15 @@ func (mm *metaMemoryKV) CompareVersionAndSwap(ctx context.Context, key string, v
 
 func newMemoryMeta(t *testing.T) (*meta, error) {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+	return newMeta(context.TODO(), catalog, nil, broker)
+}
+
+func newMetaWithEtcd(t *testing.T, rootPath string) (*meta, error) {
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	catalogKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	catalog := datacoord.NewCatalog(catalogKV, "", rootPath)
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	return newMeta(context.TODO(), catalog, nil, broker)
@@ -491,6 +502,10 @@ func (m *mockMixCoord) BackupRBAC(ctx context.Context, req *milvuspb.BackupRBACM
 }
 
 func (m *mockMixCoord) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMetaRequest) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockMixCoord) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
 	panic("not implemented") // TODO: Implement
 }
 
@@ -938,7 +953,7 @@ func (s *mockMixCoord) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzer
 	panic("implement me")
 }
 
-func (s *mockMixCoord) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (s *mockMixCoord) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	panic("implement me")
 }
 

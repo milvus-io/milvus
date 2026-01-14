@@ -692,12 +692,13 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriority() {
 	suite.checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 
 	// test getSealedSegmentDiff
-	toLoad, loadPriorities, toRelease := suite.checker.getSealedSegmentDiff(ctx, collectionID, replicaID)
+	toLoad, loadPriorities, toRelease, toUpdate := suite.checker.getSealedSegmentDiff(ctx, collectionID, replicaID)
 
 	// verify results
 	suite.Equal(2, len(toLoad))
 	suite.Equal(2, len(loadPriorities))
 	suite.Equal(0, len(toRelease))
+	suite.Equal(0, len(toUpdate))
 
 	// segment2 not in current target, should use replica's priority
 	suite.True(segment2.GetID() == toLoad[0].GetID() || segment2.GetID() == toLoad[1].GetID())
@@ -713,11 +714,12 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriority() {
 	// update current target to include segment2
 	suite.checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 	// test again
-	toLoad, loadPriorities, toRelease = suite.checker.getSealedSegmentDiff(ctx, collectionID, replicaID)
+	toLoad, loadPriorities, toRelease, toUpdate = suite.checker.getSealedSegmentDiff(ctx, collectionID, replicaID)
 	// verify results
 	suite.Equal(0, len(toLoad))
 	suite.Equal(0, len(loadPriorities))
 	suite.Equal(0, len(toRelease))
+	suite.Equal(0, len(toUpdate))
 }
 
 func (suite *SegmentCheckerTestSuite) TestFilterOutExistedOnLeader() {

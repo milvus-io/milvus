@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -82,7 +83,7 @@ var defaultClientManagerHelper = ProxyClientManagerHelper{
 
 type ProxyClientManagerInterface interface {
 	AddProxyClient(session *sessionutil.Session)
-	AddProxyClients(session []*sessionutil.Session)
+	SetProxyClients(session []*sessionutil.Session)
 	GetProxyClients() *typeutil.ConcurrentMap[int64, types.ProxyClient]
 	DelProxyClient(s *sessionutil.Session)
 	GetProxyCount() int
@@ -111,7 +112,26 @@ func NewProxyClientManager(creator ProxyCreator) *ProxyClientManager {
 	}
 }
 
-func (p *ProxyClientManager) AddProxyClients(sessions []*sessionutil.Session) {
+// SetProxyClients sets proxy clients from a full snapshot of sessions.
+// It removes stale clients not in the new snapshot and adds new ones.
+// This is called during initial setup or when re-watching after etcd error.
+func (p *ProxyClientManager) SetProxyClients(sessions []*sessionutil.Session) {
+	aliveSessions := lo.KeyBy(sessions, func(session *sessionutil.Session) int64 {
+		return session.ServerID
+	})
+
+	// Remove stale clients not in the alive sessions
+	p.proxyClient.Range(func(key int64, value types.ProxyClient) bool {
+		if _, ok := aliveSessions[key]; !ok {
+			if cli, loaded := p.proxyClient.GetAndRemove(key); loaded {
+				cli.Close()
+				log.Info("remove stale proxy client", zap.Int64("serverID", key))
+			}
+		}
+		return true
+	})
+
+	// Add new clients
 	for _, session := range sessions {
 		p.AddProxyClient(session)
 	}

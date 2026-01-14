@@ -22,7 +22,7 @@ func (ut *upsertTask) Execute(ctx context.Context) error {
 	log := log.Ctx(ctx).With(zap.String("collectionName", ut.req.CollectionName))
 
 	var ez *message.CipherConfig
-	if hookutil.IsClusterEncyptionEnabled() {
+	if hookutil.IsClusterEncryptionEnabled() {
 		ez = hookutil.GetEzByCollProperties(ut.schema.GetProperties(), ut.collectionID).AsMessageConfig()
 	}
 
