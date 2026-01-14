@@ -378,6 +378,30 @@ using GroupByValueType = std::optional<std::variant<std::monostate,
                                                     int64_t,
                                                     bool,
                                                     std::string>>;
+
+// Underlying variant type for OrderByValueType
+using OrderByVariant = std::variant<std::monostate,
+                                    int8_t,
+                                    int16_t,
+                                    int32_t,
+                                    int64_t,
+                                    bool,
+                                    float,
+                                    double,
+                                    std::string>;
+
+using OrderByValueType = std::optional<OrderByVariant>;
+
+// Helper function to construct OrderByValueType from a typed optional value
+template <typename T>
+inline OrderByValueType
+MakeOrderByValue(const std::optional<T>& val) {
+    if (!val.has_value()) {
+        return std::nullopt;
+    }
+    return OrderByValueType(std::make_optional(OrderByVariant(val.value())));
+}
+
 using ContainsType = proto::plan::JSONContainsExpr_JSONOp;
 using NullExprType = proto::plan::NullExpr_NullOp;
 using GISFunctionType = proto::plan::GISFunctionFilterExpr_GISOp;

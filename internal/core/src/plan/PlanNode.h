@@ -484,6 +484,50 @@ class SearchGroupByNode : public PlanNode {
     const std::vector<PlanNodePtr> sources_;
 };
 
+class SearchOrderByNode : public PlanNode {
+ public:
+    using OrderByField = plan::OrderByField;
+
+    SearchOrderByNode(
+        const PlanNodeId& id,
+        std::vector<OrderByField>&& order_by_fields,
+        std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{})
+        : PlanNode(id),
+          sources_{std::move(sources)},
+          order_by_fields_{std::move(order_by_fields)} {
+    }
+
+    RowTypePtr
+    output_type() const override {
+        return RowType::None;
+    }
+
+    std::vector<PlanNodePtr>
+    sources() const override {
+        return sources_;
+    }
+
+    const std::vector<OrderByField>&
+    order_by_fields() const {
+        return order_by_fields_;
+    }
+
+    std::string_view
+    name() const override {
+        return "SearchOrderByNode";
+    }
+
+    std::string
+    ToString() const override {
+        return fmt::format("SearchOrderByNode:\n\t[source node:{}]",
+                           SourceToString());
+    }
+
+ private:
+    const std::vector<PlanNodePtr> sources_;
+    const std::vector<OrderByField> order_by_fields_;
+};
+
 class RescoresNode : public PlanNode {
  public:
     RescoresNode(

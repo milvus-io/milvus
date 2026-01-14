@@ -312,6 +312,12 @@ struct SearchResult {
     std::optional<std::vector<GroupByValueType>> group_by_values_;
     std::optional<int64_t> group_size_;
 
+    // Cache for group-by + order-by: store the order_by values of the first item in each group
+    // This avoids re-reading order_by fields in FillOtherData after already reading them in Reduce stage
+    std::optional<
+        std::unordered_map<GroupByValueType, std::vector<OrderByValueType>>>
+        group_first_item_order_by_values_;
+
     // first fill data during fillPrimaryKey, and then update data after reducing search results
     std::vector<PkType> primary_keys_;
     DataType pk_type_;

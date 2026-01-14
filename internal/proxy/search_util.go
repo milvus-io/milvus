@@ -277,7 +277,13 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		}
 	}
 
-	// 6. parse iterator tag, prevent trying to groupBy when doing iteration or doing range-search
+	// 6. parse order_by fields
+	orderByFields, err := parseOrderByFields(searchParamsPair, schema)
+	if err != nil {
+		return nil, err
+	}
+
+	// 7. parse iterator tag, prevent trying to groupBy when doing iteration or doing range-search
 	if isIterator && groupByFieldId > 0 {
 		return nil, merr.WrapErrParameterInvalid("", "",
 			"Not allowed to do groupBy when doing iteration")
@@ -328,6 +334,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			JsonPath:             jsonPath,
 			JsonType:             jsonType,
 			StrictCast:           strictCast,
+			OrderByFields:        orderByFields,
 		},
 		offset:       offset,
 		isIterator:   isIterator,
@@ -544,6 +551,118 @@ func parseGroupByField(groupByFieldName string, schema *schemapb.CollectionSchem
 	}
 
 	return groupByFieldId, jsonPath, nil
+}
+
+// isOrderByTypeSupported checks if a field type is supported for order_by
+// Must match the types supported in SearchOrderByOperator.cpp
+func isOrderByTypeSupported(dataType schemapb.DataType) bool {
+	switch dataType {
+	case schemapb.DataType_Bool,
+		schemapb.DataType_Int8,
+		schemapb.DataType_Int16,
+		schemapb.DataType_Int32,
+		schemapb.DataType_Int64,
+		schemapb.DataType_Float,
+		schemapb.DataType_Double,
+		schemapb.DataType_VarChar,
+		schemapb.DataType_String,
+		schemapb.DataType_JSON:
+		return true
+	default:
+		return false
+	}
+}
+
+// parseOrderByFields parses order_by fields from search params
+// Expected format: order_by_fields=field1:asc,field2:desc or JSON array
+func parseOrderByFields(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema) ([]*planpb.OrderByField, error) {
+	orderByStr, err := funcutil.GetAttrByKeyFromRepeatedKV("order_by_fields", searchParamsPair)
+	if err != nil || orderByStr == "" {
+		// No order_by specified, return empty
+		return nil, nil
+	}
+
+	var orderByFields []*planpb.OrderByField
+
+	// Parse comma-separated format: field1:asc,field2:desc
+	parts := strings.Split(orderByStr, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		// Parse field_name:direction format
+		fieldParts := strings.Split(part, ":")
+		if len(fieldParts) == 0 || len(fieldParts) > 2 {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"invalid order_by format, expected 'field:asc' or 'field:desc', got: %s", part)
+		}
+
+		fieldName := strings.TrimSpace(fieldParts[0])
+		ascending := true // default to ascending
+		if len(fieldParts) == 2 {
+			direction := strings.ToLower(strings.TrimSpace(fieldParts[1]))
+			if direction == "desc" || direction == "descending" {
+				ascending = false
+			} else if direction != "asc" && direction != "ascending" {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"invalid order direction, expected 'asc' or 'desc', got: %s", direction)
+			}
+		}
+
+		// Parse field name and get field ID
+		var fieldId int64
+		var jsonPath string
+		var fieldType schemapb.DataType
+
+		// Check if it's a JSON field access like metadata["price"]
+		if strings.Contains(fieldName, "[") && strings.Contains(fieldName, "]") {
+			baseField := strings.Split(fieldName, "[")[0]
+			field := typeutil.GetFieldByName(schema, baseField)
+			if field == nil {
+				return nil, merr.WrapErrFieldNotFound(baseField, "order_by field not found")
+			}
+			fieldId = field.FieldID
+			fieldType = field.DataType
+			if typeutil.IsJSONType(field.DataType) {
+				jsonPath = fieldName
+			}
+		} else {
+			// Regular field
+			field := typeutil.GetFieldByName(schema, fieldName)
+			if field == nil {
+				// Try dynamic field
+				dynamicField := typeutil.GetDynamicField(schema)
+				if dynamicField != nil {
+					fieldId = dynamicField.FieldID
+					fieldType = dynamicField.DataType
+					jsonPath = fieldName
+				} else {
+					return nil, merr.WrapErrFieldNotFound(fieldName, "order_by field not found")
+				}
+			} else {
+				fieldId = field.FieldID
+				fieldType = field.DataType
+			}
+		}
+
+		// Validate field type is supported for order_by
+		// Must match supported types in SearchOrderByOperator.cpp
+		if !isOrderByTypeSupported(fieldType) {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"order_by field '%s' has unsupported type %s, supported types: Bool, Int8, Int16, Int32, Int64, Float, Double, VarChar, String, JSON",
+				fieldName, fieldType.String())
+		}
+
+		orderByFields = append(orderByFields, &planpb.OrderByField{
+			FieldId:   fieldId,
+			Ascending: ascending,
+			JsonPath:  jsonPath,
+		})
+	}
+
+	return orderByFields, nil
 }
 
 func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema) (*groupByInfo, error) {

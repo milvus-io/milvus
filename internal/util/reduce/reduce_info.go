@@ -2,6 +2,7 @@ package reduce
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 )
 
 type ResultInfo struct {
@@ -13,6 +14,7 @@ type ResultInfo struct {
 	groupByFieldId int64
 	groupSize      int64
 	isAdvance      bool
+	orderByFields  []*planpb.OrderByField
 }
 
 func NewReduceSearchResultInfo(
@@ -89,6 +91,15 @@ func (r *ResultInfo) GetIsAdvance() bool {
 
 func (r *ResultInfo) SetMetricType(metricType string) {
 	r.metricType = metricType
+}
+
+func (r *ResultInfo) WithOrderByFields(orderByFields []*planpb.OrderByField) *ResultInfo {
+	r.orderByFields = orderByFields
+	return r
+}
+
+func (r *ResultInfo) GetOrderByFields() []*planpb.OrderByField {
+	return r.orderByFields
 }
 
 type IReduceType int32

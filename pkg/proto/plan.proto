@@ -70,6 +70,12 @@ message SearchIteratorV2Info {
   optional float last_bound = 3;
 }
 
+message OrderByField {
+  int64 field_id = 1;
+  bool ascending = 2;  // true for asc, false for desc
+  string json_path = 3;  // optional, for JSON field access
+}
+
 message QueryInfo {
   int64 topk = 1;
   string metric_type = 3;
@@ -86,6 +92,7 @@ message QueryInfo {
   string json_path = 14;
   schema.DataType json_type = 15;
   bool strict_cast = 16;
+  repeated OrderByField order_by_fields = 17;
 }
 
 message ColumnInfo {

@@ -17,11 +17,14 @@
 #pragma once
 
 #include <memory>
+#include <vector>
+#include <optional>
 
 #include "ArrayOffsets.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "knowhere/config.h"
+#include "plan/OrderByField.h"
 
 namespace milvus {
 
@@ -49,6 +52,7 @@ struct SearchInfo {
     bool strict_cast_{false};
     std::shared_ptr<const IArrayOffsets> array_offsets_{
         nullptr};  // For element-level search
+    std::optional<std::vector<plan::OrderByField>> order_by_fields_;
 
     bool
     element_level() const {

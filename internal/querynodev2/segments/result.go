@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -225,6 +226,229 @@ func SelectSearchResultData(dataArray []*schemapb.SearchResultData, resultOffset
 		}
 	}
 	return sel
+}
+
+// SelectSearchResultDataByOrderBy selects the next result to merge based on order_by field values
+// Returns the index of the selected result data array, or -1 if no valid result
+func SelectSearchResultDataByOrderBy(
+	dataArray []*schemapb.SearchResultData,
+	resultOffsets [][]int64,
+	offsets []int64,
+	qi int64,
+	orderByFields []*planpb.OrderByField,
+	orderByIterators [][]func(int) any, // orderByIterators[dataIndex][fieldIndex] -> value getter
+) int {
+	if len(orderByFields) == 0 {
+		// Fallback to distance-based selection
+		return SelectSearchResultData(dataArray, resultOffsets, offsets, qi)
+	}
+
+	var (
+		sel                 = -1
+		resultDataIdx int64 = -1
+	)
+
+	for i, offset := range offsets {
+		if offset >= dataArray[i].Topks[qi] {
+			continue
+		}
+
+		idx := resultOffsets[i][qi] + offset
+
+		if sel == -1 {
+			sel = i
+			resultDataIdx = idx
+			continue
+		}
+
+		// Compare by order_by fields
+		compareResult := compareByOrderByFields(
+			dataArray[i], idx, orderByIterators[i],
+			dataArray[sel], resultDataIdx, orderByIterators[sel],
+			orderByFields,
+		)
+
+		if compareResult < 0 {
+			// Current result is better
+			sel = i
+			resultDataIdx = idx
+		} else if compareResult == 0 {
+			// Equal order_by values, use distance as tie-breaker
+			distanceI := dataArray[i].Scores[idx]
+			distanceSel := dataArray[sel].Scores[resultDataIdx]
+			if distanceI > distanceSel {
+				sel = i
+				resultDataIdx = idx
+			}
+			// If distances are also equal, preserve current selection (relative order)
+			// Don't use PK as tie-breaker; PK uniqueness is guaranteed by idSet
+		}
+	}
+
+	return sel
+}
+
+// compareByOrderByFields compares two results by order_by fields
+// Returns: -1 if lhs < rhs, 0 if lhs == rhs, 1 if lhs > rhs
+func compareByOrderByFields(
+	lhsData *schemapb.SearchResultData,
+	lhsIdx int64,
+	lhsIterators []func(int) any,
+	rhsData *schemapb.SearchResultData,
+	rhsIdx int64,
+	rhsIterators []func(int) any,
+	orderByFields []*planpb.OrderByField,
+) int {
+	for fieldIdx, field := range orderByFields {
+		if fieldIdx >= len(lhsIterators) || fieldIdx >= len(rhsIterators) {
+			break
+		}
+
+		lhsVal := lhsIterators[fieldIdx](int(lhsIdx))
+		rhsVal := rhsIterators[fieldIdx](int(rhsIdx))
+
+		// Handle null values: null < non-null
+		if lhsVal == nil && rhsVal == nil {
+			continue // Both null, compare next field
+		}
+		if lhsVal == nil {
+			if field.Ascending {
+				return -1 // null < non-null for ascending
+			}
+			return 1 // null > non-null for descending
+		}
+		if rhsVal == nil {
+			if field.Ascending {
+				return 1 // non-null > null for ascending
+			}
+			return -1 // non-null < null for descending
+		}
+
+		// Compare values
+		cmp := compareValues(lhsVal, rhsVal)
+		if cmp != 0 {
+			if field.Ascending {
+				return cmp
+			}
+			return -cmp // Reverse for descending
+		}
+		// Equal, continue to next field
+	}
+	return 0 // All fields equal
+}
+
+// compareValues compares two values of any type
+// Returns: -1 if lhs < rhs, 0 if lhs == rhs, 1 if lhs > rhs
+func compareValues(lhs, rhs any) int {
+	// Handle different types
+	switch l := lhs.(type) {
+	case bool:
+		if r, ok := rhs.(bool); ok {
+			if l == r {
+				return 0
+			}
+			if l {
+				return 1
+			}
+			return -1
+		}
+	case int8:
+		if r, ok := rhs.(int8); ok {
+			if l < r {
+				return -1
+			}
+			if l > r {
+				return 1
+			}
+			return 0
+		}
+	case int16:
+		if r, ok := rhs.(int16); ok {
+			if l < r {
+				return -1
+			}
+			if l > r {
+				return 1
+			}
+			return 0
+		}
+	case int32:
+		if r, ok := rhs.(int32); ok {
+			if l < r {
+				return -1
+			}
+			if l > r {
+				return 1
+			}
+			return 0
+		}
+	case int64:
+		if r, ok := rhs.(int64); ok {
+			if l < r {
+				return -1
+			}
+			if l > r {
+				return 1
+			}
+			return 0
+		}
+	case float32:
+		if r, ok := rhs.(float32); ok {
+			// Handle NaN: NaN < non-NaN (consistent with C++ CompareOrderByValue)
+			lIsNaN := math.IsNaN(float64(l))
+			rIsNaN := math.IsNaN(float64(r))
+			if lIsNaN && rIsNaN {
+				return 0
+			}
+			if lIsNaN {
+				return -1 // NaN < non-NaN
+			}
+			if rIsNaN {
+				return 1 // non-NaN > NaN
+			}
+			if l < r {
+				return -1
+			}
+			if l > r {
+				return 1
+			}
+			return 0
+		}
+	case float64:
+		if r, ok := rhs.(float64); ok {
+			// Handle NaN: NaN < non-NaN (consistent with C++ CompareOrderByValue)
+			lIsNaN := math.IsNaN(l)
+			rIsNaN := math.IsNaN(r)
+			if lIsNaN && rIsNaN {
+				return 0
+			}
+			if lIsNaN {
+				return -1 // NaN < non-NaN
+			}
+			if rIsNaN {
+				return 1 // non-NaN > NaN
+			}
+			if l < r {
+				return -1
+			}
+			if l > r {
+				return 1
+			}
+			return 0
+		}
+	case string:
+		if r, ok := rhs.(string); ok {
+			if l < r {
+				return -1
+			}
+			if l > r {
+				return 1
+			}
+			return 0
+		}
+	}
+	// Type mismatch or unsupported
+	return 0
 }
 
 func DecodeSearchResults(ctx context.Context, searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {
