@@ -56,10 +56,10 @@ func NewScoreBasedBalancer(scheduler task.Scheduler,
 // AssignSegment got a segment list, and try to assign each segment to node's with lowest score
 func (b *ScoreBasedBalancer) AssignSegment(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64, forceAssign bool) []SegmentAssignPlan {
 	br := NewBalanceReport()
-	return b.assignSegment(br, collectionID, segments, nodes, forceAssign)
+	return b.assignSegment(br, collectionID, segments, nodes, forceAssign, nil)
 }
 
-func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64, segments []*meta.Segment, nodes []int64, forceAssign bool) []SegmentAssignPlan {
+func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64, segments []*meta.Segment, nodes []int64, forceAssign bool, nodeItemsMap map[int64]*nodeItem) []SegmentAssignPlan {
 	balanceBatchSize := math.MaxInt64
 	if !forceAssign {
 		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
@@ -80,14 +80,14 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 		return !b.nodeManager.IsResourceExhausted(node)
 	})
 
-	// calculate each node's score
-	nodeItemsMap := b.convertToNodeItemsBySegment(br, collectionID, nodes)
+	// calculate each node's score if nodeItemsMap is not provided
+	if nodeItemsMap == nil {
+		nodeItemsMap = b.convertToNodeItemsBySegment(br, collectionID, nodes)
+	} else {
+		// filter nodeItemsMap to only include valid nodes
+		nodeItemsMap = lo.PickByKeys(nodeItemsMap, nodes)
+	}
 
-	return b.assignSegmentWithNodeItems(br, segments, nodeItemsMap, balanceBatchSize, forceAssign)
-}
-
-// assignSegmentWithNodeItems assigns segments with precomputed node items to avoid redundant calculation
-func (b *ScoreBasedBalancer) assignSegmentWithNodeItems(br *balanceReport, segments []*meta.Segment, nodeItemsMap map[int64]*nodeItem, balanceBatchSize int, forceAssign bool) []SegmentAssignPlan {
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
@@ -161,10 +161,10 @@ func (b *ScoreBasedBalancer) assignSegmentWithNodeItems(br *balanceReport, segme
 
 func (b *ScoreBasedBalancer) AssignChannel(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan {
 	br := NewBalanceReport()
-	return b.assignChannel(br, collectionID, channels, nodes, forceAssign)
+	return b.assignChannel(br, collectionID, channels, nodes, forceAssign, nil)
 }
 
-func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan {
+func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool, nodeItemsMap map[int64]*nodeItem) []ChannelAssignPlan {
 	nodes = filterSQNIfStreamingServiceEnabled(nodes)
 
 	balanceBatchSize := math.MaxInt64
@@ -187,14 +187,14 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 		return !b.nodeManager.IsResourceExhausted(node)
 	})
 
-	// calculate each node's score
-	nodeItemsMap := b.convertToNodeItemsByChannel(br, collectionID, nodes)
+	// calculate each node's score if nodeItemsMap is not provided
+	if nodeItemsMap == nil {
+		nodeItemsMap = b.convertToNodeItemsByChannel(br, collectionID, nodes)
+	} else {
+		// filter nodeItemsMap to only include valid nodes
+		nodeItemsMap = lo.PickByKeys(nodeItemsMap, nodes)
+	}
 
-	return b.assignChannelWithNodeItems(br, collectionID, channels, nodeItemsMap, balanceBatchSize, forceAssign)
-}
-
-// assignChannelWithNodeItems assigns channels with precomputed node items to avoid redundant calculation
-func (b *ScoreBasedBalancer) assignChannelWithNodeItems(br *balanceReport, collectionID int64, channels []*meta.DmChannel, nodeItemsMap map[int64]*nodeItem, balanceBatchSize int, forceAssign bool) []ChannelAssignPlan {
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
@@ -651,24 +651,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceRepo
 		return nil
 	}
 
-	// Filter nodes for assignment
-	filteredNodes := lo.Filter(onlineNodes, func(node int64, _ int) bool {
-		info := b.nodeManager.Get(node)
-		normalNode := info != nil && info.GetState() == session.NodeStateNormal
-		if !normalNode {
-			br.AddRecord(StrRecord(fmt.Sprintf("segment balance skip abnormal node: %d", node)))
-		}
-		return normalNode && !b.nodeManager.IsResourceExhausted(node)
-	})
-
-	// Filter nodeItemsMap to only include filtered nodes
-	filteredNodeItemsMap := lo.PickByKeys(nodeItemsMap, filteredNodes)
-
-	// genSegmentPlan is always non-forceAssign (false), so use configured batch size
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
-
-	// Pass the filtered nodeItemsMap
-	segmentPlans := b.assignSegmentWithNodeItems(br, segmentsToMove, filteredNodeItemsMap, balanceBatchSize, false)
+	segmentPlans := b.assignSegment(br, replica.GetCollectionID(), segmentsToMove, onlineNodes, false, nodeItemsMap)
 	for i := range segmentPlans {
 		segmentPlans[i].From = segmentPlans[i].Segment.Node
 		segmentPlans[i].Replica = replica
@@ -732,25 +715,7 @@ func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceRepo
 		return nil
 	}
 
-	// Filter nodes for assignment
-	filteredNodes := filterSQNIfStreamingServiceEnabled(onlineNodes)
-	filteredNodes = lo.Filter(filteredNodes, func(node int64, _ int) bool {
-		info := b.nodeManager.Get(node)
-		normalNode := info != nil && info.GetState() == session.NodeStateNormal
-		if !normalNode {
-			br.AddRecord(StrRecord(fmt.Sprintf("channel balance skip abnormal node: %d", node)))
-		}
-		return normalNode && !b.nodeManager.IsResourceExhausted(node)
-	})
-
-	// Filter nodeItemsMap to only include filtered nodes
-	filteredNodeItemsMap := lo.PickByKeys(nodeItemsMap, filteredNodes)
-
-	// genChannelPlan is always non-forceAssign (false), so use configured batch size
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.BalanceChannelBatchSize.GetAsInt()
-
-	// Pass the filtered nodeItemsMap
-	channelPlans := b.assignChannelWithNodeItems(br, replica.GetCollectionID(), channelsToMove, filteredNodeItemsMap, balanceBatchSize, false)
+	channelPlans := b.assignChannel(br, replica.GetCollectionID(), channelsToMove, onlineNodes, false, nodeItemsMap)
 	for i := range channelPlans {
 		channelPlans[i].From = channelPlans[i].Channel.Node
 		channelPlans[i].Replica = replica
