@@ -2038,6 +2038,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		mmapEnabled := true
 		isVectorType := true
 		needWarmup := false
+		hasIndex := true
 
 		for _, fieldID := range fieldIDs {
 			// get field schema from fieldID
@@ -2045,6 +2046,9 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			if err != nil {
 				log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
 				return nil, err
+			}
+			if _, ok := indexedFields[fieldID]; !ok {
+				hasIndex = false
 			}
 
 			// missing mapping, shall be "0" group for storage v2
@@ -2072,7 +2076,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			continue
 		}
 
-		if _, ok := indexedFields[fieldID]; !ok {
+		if !hasIndex {
 			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
 				interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && supportInterimIndexDataType
 				if interimIndexEnable {
