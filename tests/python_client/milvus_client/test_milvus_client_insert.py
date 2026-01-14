@@ -1676,9 +1676,9 @@ class TestInsertAsync(TestMilvusClientV2Base):
         await async_client.create_collection(collection_name, default_dim)
 
         # missing vector field
-        rows = [{ct.default_int64_field_name: 1}]
+        rows = [{ct.default_primary_key_field_name: 1}]
 
-        error = {ct.err_code: 0, ct.err_msg: "Insert missed an field `id` to collection without set nullable==true or set default_value"}
+        error = {ct.err_code: 1, ct.err_msg: "Insert missed an field `vector` to collection without set nullable==true or set default_value"}
 
         await async_client.insert(collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
 
@@ -1702,7 +1702,7 @@ class TestInsertAsync(TestMilvusClientV2Base):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 200, ct.err_msg: f"partition not found"}
+        error = {ct.err_code: 200, ct.err_msg: f"partition not found[partition={partition_name}]"}
 
         await async_client.insert(collection_name, data=rows, partition_name=partition_name,
                                   check_task=CheckTasks.err_res, check_items=error)
