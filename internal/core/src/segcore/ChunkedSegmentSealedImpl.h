@@ -979,8 +979,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadBatchIndexes(
         milvus::tracer::TraceContext& trace_ctx,
-        std::map<FieldId, std::vector<const proto::segcore::FieldIndexInfo*>>&
-            field_id_to_index_info);
+        std::map<FieldId, std::vector<LoadIndexInfo>>& field_id_to_index_info);
 
     void
     LoadBatchFieldData(milvus::tracer::TraceContext& trace_ctx,
@@ -988,22 +987,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                              proto::segcore::FieldBinlog>>&
                            field_binlog_to_load);
 
-    /**
-     * @brief Load all column groups from a manifest file path
-     *
-     * This method reads the manifest file to retrieve column groups metadata
-     * and loads each column group into the segment.
-     *
-     * @param manifest_path JSON string containing base_path and version fields
-     */
-    void
-    LoadManifest(const std::string& manifest_path);
-
     void
     LoadColumnGroups(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids);
+        std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
+        bool eager_load);
 
     /**
      * @brief Load a single column group at the specified index
@@ -1014,13 +1003,24 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      * @param column_groups Metadata about all available column groups
      * @param properties Storage properties for accessing the data
      * @param index Index of the column group to load
+     * @param milvus_field_ids A vector of field IDs to load
+     * @param eager_load Whether to eagerly load provided columns
      */
     void
     LoadColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
         int64_t index,
-        const std::vector<FieldId>& milvus_field_ids);
+        const std::vector<FieldId>& milvus_field_ids,
+        bool eager_load);
+
+    /**
+     * @brief Reloads columns from the specified field IDs
+     *
+     * @param field_ids_to_reload A vector of field IDs to reload
+     */
+    void
+    ReloadColumns(const std::vector<FieldId>& field_ids_to_reload);
 
     /**
      * @brief Apply load differences to update segment load information

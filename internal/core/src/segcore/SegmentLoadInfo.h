@@ -16,6 +16,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common/Schema.h"
@@ -36,9 +37,8 @@ namespace milvus::segcore {
  * Cross-category changes (binlog <-> manifest) are not supported.
  */
 struct LoadDiff {
-    // Indexes that need to be loaded (field_id -> list of FieldIndexInfo pointers)
-    std::map<FieldId, std::vector<const proto::segcore::FieldIndexInfo*>>
-        indexes_to_load;
+    // Indexes that need to be loaded (field_id -> list of LoadIndexInfo)
+    std::map<FieldId, std::vector<LoadIndexInfo>> indexes_to_load;
 
     // Field binlog paths that need to be loaded [field_ids,FieldBinlog]
     // Only populated when both current and new use binlog mode
@@ -48,6 +48,12 @@ struct LoadDiff {
     // list of column group indices and related field ids to load
     // same index could appear multiple times if same group using different setups
     std::vector<std::pair<int, std::vector<FieldId>>> column_groups_to_load;
+
+    // list of column group indices and related field ids to lazy load
+    // used for lazy load fields or fields with index has raw data
+    std::vector<std::pair<int, std::vector<FieldId>>> column_groups_to_lazyload;
+
+    std::vector<FieldId> fields_to_reload;
 
     // Indexes that need to be dropped (field_id set)
     std::set<FieldId> indexes_to_drop;
@@ -65,8 +71,9 @@ struct LoadDiff {
     [[nodiscard]] bool
     HasChanges() const {
         return !indexes_to_load.empty() || !binlogs_to_load.empty() ||
-               !column_groups_to_load.empty() || !indexes_to_drop.empty() ||
-               !field_data_to_drop.empty() || manifest_updated;
+               !column_groups_to_load.empty() || !fields_to_reload.empty() ||
+               !indexes_to_drop.empty() || !field_data_to_drop.empty() ||
+               manifest_updated;
     }
 
     [[nodiscard]] bool
@@ -178,26 +185,29 @@ class SegmentLoadInfo {
      * @brief Construct from a protobuf SegmentLoadInfo (copy)
      * @param info The protobuf SegmentLoadInfo to wrap
      */
-    explicit SegmentLoadInfo(const ProtoType& info) : info_(info) {
-        BuildIndexCache();
+    explicit SegmentLoadInfo(const ProtoType& info, SchemaPtr schema)
+        : info_(info), schema_(std::move(schema)) {
+        BuildCache();
     }
 
     /**
      * @brief Construct from a protobuf SegmentLoadInfo (move)
      * @param info The protobuf SegmentLoadInfo to wrap
      */
-    explicit SegmentLoadInfo(ProtoType&& info) : info_(std::move(info)) {
-        BuildIndexCache();
+    explicit SegmentLoadInfo(ProtoType&& info, SchemaPtr schema)
+        : info_(std::move(info)), schema_(std::move(schema)) {
+        BuildCache();
     }
 
     /**
      * @brief Copy constructor
+     * @note Rebuilds cache instead of copying (LoadIndexInfo is not copyable)
      */
     SegmentLoadInfo(const SegmentLoadInfo& other)
         : info_(other.info_),
-          field_index_cache_(other.field_index_cache_),
-          field_binlog_cache_(other.field_binlog_cache_),
+          schema_(other.schema_),
           column_groups_(other.column_groups_) {
+        BuildCache();
     }
 
     /**
@@ -205,21 +215,25 @@ class SegmentLoadInfo {
      */
     SegmentLoadInfo(SegmentLoadInfo&& other) noexcept
         : info_(std::move(other.info_)),
-          field_index_cache_(std::move(other.field_index_cache_)),
+          schema_(std::move(other.schema_)),
+          converted_index_infos_(std::move(other.converted_index_infos_)),
+          converted_field_index_cache_(
+              std::move(other.converted_field_index_cache_)),
           field_binlog_cache_(std::move(other.field_binlog_cache_)),
           column_groups_(std::move(other.column_groups_)) {
     }
 
     /**
      * @brief Copy assignment operator
+     * @note Rebuilds cache instead of copying (LoadIndexInfo is not copyable)
      */
     SegmentLoadInfo&
     operator=(const SegmentLoadInfo& other) {
         if (this != &other) {
             info_ = other.info_;
-            field_index_cache_ = other.field_index_cache_;
-            field_binlog_cache_ = other.field_binlog_cache_;
+            schema_ = other.schema_;
             column_groups_ = other.column_groups_;
+            BuildCache();
         }
         return *this;
     }
@@ -231,7 +245,10 @@ class SegmentLoadInfo {
     operator=(SegmentLoadInfo&& other) noexcept {
         if (this != &other) {
             info_ = std::move(other.info_);
-            field_index_cache_ = std::move(other.field_index_cache_);
+            schema_ = std::move(other.schema_);
+            converted_index_infos_ = std::move(other.converted_index_infos_);
+            converted_field_index_cache_ =
+                std::move(other.converted_field_index_cache_);
             field_binlog_cache_ = std::move(other.field_binlog_cache_);
             column_groups_ = std::move(other.column_groups_);
         }
@@ -242,18 +259,20 @@ class SegmentLoadInfo {
      * @brief Set from protobuf (copy)
      */
     void
-    Set(const ProtoType& info) {
+    Set(const ProtoType& info, SchemaPtr schema) {
         info_ = info;
-        BuildIndexCache();
+        schema_ = std::move(schema);
+        BuildCache();
     }
 
     /**
      * @brief Set from protobuf (move)
      */
     void
-    Set(ProtoType&& info) {
+    Set(ProtoType&& info, SchemaPtr schema) {
         info_ = std::move(info);
-        BuildIndexCache();
+        schema_ = std::move(schema);
+        BuildCache();
     }
 
     // ==================== Basic Accessors ====================
@@ -365,7 +384,8 @@ class SegmentLoadInfo {
      */
     [[nodiscard]] bool
     HasIndexInfo(FieldId field_id) const {
-        return field_index_cache_.find(field_id) != field_index_cache_.end();
+        return converted_field_index_cache_.find(field_id) !=
+               converted_field_index_cache_.end();
     }
 
     /**
@@ -373,27 +393,13 @@ class SegmentLoadInfo {
      * @param field_id The field ID
      * @return Vector of pointers to FieldIndexInfo, empty if field has no index
      */
-    [[nodiscard]] std::vector<const proto::segcore::FieldIndexInfo*>
+    [[nodiscard]] std::vector<LoadIndexInfo>
     GetFieldIndexInfos(FieldId field_id) const {
-        auto it = field_index_cache_.find(field_id);
-        if (it != field_index_cache_.end()) {
+        auto it = converted_field_index_cache_.find(field_id);
+        if (it != converted_field_index_cache_.end()) {
             return it->second;
         }
         return {};
-    }
-
-    /**
-     * @brief Get the first index info for a specific field
-     * @param field_id The field ID
-     * @return Pointer to FieldIndexInfo, nullptr if field has no index
-     */
-    [[nodiscard]] const proto::segcore::FieldIndexInfo*
-    GetFirstFieldIndexInfo(FieldId field_id) const {
-        auto it = field_index_cache_.find(field_id);
-        if (it != field_index_cache_.end() && !it->second.empty()) {
-            return it->second[0];
-        }
-        return nullptr;
     }
 
     /**
@@ -403,7 +409,7 @@ class SegmentLoadInfo {
     [[nodiscard]] std::set<FieldId>
     GetIndexedFieldIds() const {
         std::set<FieldId> result;
-        for (const auto& pair : field_index_cache_) {
+        for (const auto& pair : converted_field_index_cache_) {
             result.insert(pair.first);
         }
         return result;
@@ -696,7 +702,7 @@ class SegmentLoadInfo {
      */
     void
     RebuildCache() {
-        BuildIndexCache();
+        BuildCache();
     }
 
     /**
@@ -716,65 +722,56 @@ class SegmentLoadInfo {
      * LoadIndexInfo structure used for loading indexes.
      *
      * @param field_index_info Pointer to the FieldIndexInfo to convert
-     * @param schema The schema to get field metadata from
      * @param segment_id The segment ID for the LoadIndexInfo
      * @return LoadIndexInfo structure populated with the converted data
      */
     [[nodiscard]] LoadIndexInfo
     ConvertFieldIndexInfoToLoadIndexInfo(
         const proto::segcore::FieldIndexInfo* field_index_info,
-        const Schema& schema,
         int64_t segment_id) const;
 
     /**
-     * @brief Get all LoadIndexInfos for a specific field
-     *
-     * Converts all index infos for the given field to LoadIndexInfo structures.
-     * A field may have multiple indexes (e.g., for JSON fields with multiple paths).
-     *
-     * @param field_id The field ID to get LoadIndexInfos for
-     * @param schema The schema to get field metadata from
-     * @param segment_id The segment ID for the LoadIndexInfo
-     * @return Vector of LoadIndexInfo structures, empty if field has no indexes
-     */
-    [[nodiscard]] std::vector<LoadIndexInfo>
-    GetAllLoadIndexInfos(FieldId field_id,
-                         const Schema& schema,
-                         int64_t segment_id) const;
-
-    /**
-     * @brief Get LoadIndexInfos for all indexed fields
-     *
-     * Converts all index infos in this SegmentLoadInfo to LoadIndexInfo structures.
-     *
-     * @param schema The schema to get field metadata from
-     * @param segment_id The segment ID for the LoadIndexInfo
-     * @return Map from field ID to vector of LoadIndexInfo structures
-     */
-    [[nodiscard]] std::map<FieldId, std::vector<LoadIndexInfo>>
-    GetAllLoadIndexInfos(const Schema& schema, int64_t segment_id) const;
+    * @brief Check if a field's index has raw data
+    *
+    * Determines whether the index for a given field contains raw data
+    * by querying the IndexFactory with the index parameters.
+    *
+    * @param load_index_info The LoadIndexInfo containing index parameters
+    * @return true if the index has raw data, false otherwise
+    */
+    [[nodiscard]] static bool
+    CheckIndexHasRawData(const LoadIndexInfo& load_index_info);
 
  private:
     void
-    BuildIndexCache() {
-        field_index_cache_.clear();
+    BuildCache() {
         field_binlog_cache_.clear();
-
-        // Build index cache
-        for (int i = 0; i < info_.index_infos_size(); i++) {
-            const auto& index_info = info_.index_infos(i);
-            if (index_info.index_file_paths_size() == 0) {
-                continue;
-            }
-            auto field_id = FieldId(index_info.fieldid());
-            field_index_cache_[field_id].push_back(&index_info);
-        }
-
         // Build binlog cache
         for (int i = 0; i < info_.binlog_paths_size(); i++) {
             const auto& binlog = info_.binlog_paths(i);
             auto field_id = FieldId(binlog.fieldid());
             field_binlog_cache_[field_id] = &binlog;
+        }
+
+        // Convert index infos to LoadIndexInfo and build per-field cache
+        converted_index_infos_.clear();
+        converted_field_index_cache_.clear();
+        index_has_raw_data_.clear();
+        for (int i = 0; i < info_.index_infos_size(); i++) {
+            const auto& index_info = info_.index_infos(i);
+            if (index_info.index_file_paths_size() == 0) {
+                continue;
+            }
+            auto load_index_info = ConvertFieldIndexInfoToLoadIndexInfo(
+                &index_info, info_.segmentid());
+            converted_index_infos_.push_back(load_index_info);
+            auto field_id = FieldId(index_info.fieldid());
+            // Check if index has raw data before moving
+            if (CheckIndexHasRawData(load_index_info)) {
+                index_has_raw_data_.insert(field_id);
+            }
+            converted_field_index_cache_[field_id].push_back(
+                std::move(load_index_info));
         }
     }
 
@@ -787,11 +784,20 @@ class SegmentLoadInfo {
     void
     ComputeDiffColumnGroups(LoadDiff& diff, SegmentLoadInfo& new_info);
 
+    void
+    ComputeDiffReloadFields(LoadDiff& diff, SegmentLoadInfo& new_info);
+
     ProtoType info_;
 
-    // Cache for quick field -> index info lookup
-    std::map<FieldId, std::vector<const proto::segcore::FieldIndexInfo*>>
-        field_index_cache_;
+    SchemaPtr schema_;
+
+    std::vector<LoadIndexInfo> converted_index_infos_;
+
+    // Cache for quick field -> converted LoadIndexInfo lookup
+    std::map<FieldId, std::vector<LoadIndexInfo>> converted_field_index_cache_;
+
+    // set of field ids that corresponding index has raw data
+    std::set<FieldId> index_has_raw_data_;
 
     // Cache for quick field -> binlog lookup
     std::map<FieldId, const proto::segcore::FieldBinlog*> field_binlog_cache_;
