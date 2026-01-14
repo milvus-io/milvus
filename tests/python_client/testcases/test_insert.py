@@ -221,21 +221,6 @@ class TestInsertParams(TestcaseBase):
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_field_name_not_match(self):
-        """
-        target: test insert field name not match
-        method: data field name not match schema
-        expected: raise exception
-        """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name)
-        df = cf.gen_default_dataframe_data(10)
-        df.rename(columns={ct.default_float_field_name: "int"}, inplace=True)
-        error = {ct.err_code: 999, ct.err_msg: "The name of field doesn't match, expected: float, got int"}
-        collection_w.insert(
-            data=df, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="Currently not check in pymilvus")
     def test_insert_field_value_not_match(self):
         """

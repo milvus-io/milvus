@@ -51,6 +51,8 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
     #  The following are invalid base cases
     ******************************************************************
     """
+
+    @pytest.mark.skip(reason="duplicate with test_insert_without_connection")
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_insert_after_client_closed(self):
         """
@@ -173,8 +175,8 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_insert_data_vector_field_missing(self):
         """
-        target: test high level api: client.create_collection
-        method: create collection with invalid primary field
+        target: test insert entities, with no vector field
+        method: vector field is missing in data
         expected: Raise exception
         """
         client = self._client()
@@ -251,7 +253,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         self.insert(client, collection_name, data=rows,
                     check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_binary_dim_not_match(self):
         """
         target: test insert binary with dim not match
@@ -444,7 +446,7 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_insert_binary_default(self):
         """
         target: test insert binary data, test binary vector insert/search using client api
@@ -845,6 +847,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.skip(reason="duplicate with test_milvus_client_insert_data_vector_field_missing")
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_no_vector_field_dtype(self):
         """
@@ -864,12 +867,35 @@ class TestInsertOperation(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_insert_data_field_name_not_match(self):
+        """
+        target: test insert field name not match
+        method: data field name not match schema
+        expected: Raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong",
+                               enable_dynamic_field=False)
+        # 2. insert with wrong field name
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i,
+                 "wrong_vector": list(rng.random((1, default_dim))[0]),
+                 } for i in range(default_nb)]
+        error = {ct.err_code: 1,
+                 ct.err_msg: f"Attempt to insert an unexpected field `wrong_vector` to collection without enabling dynamic field"}
+        self.insert(client, collection_name, data=rows,
+                    check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_vector_field_dismatch_dtype(self):
         """
-        target: test insert entities, with no vector field
-        method: vector field is missing in data
-        expected: error raised
+        target: test insert entities with mismatched vector field data type
+        method: provide vector field with scalar value instead of list/array
+        expected: raise exception due to schema dtype mismatch
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1204,32 +1230,31 @@ class TestInsertOperation(TestMilvusClientV2Base):
         assert num_entities.get("row_count", None) == ct.default_nb
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.skip(reason="Covered by test_insert_auto_id_true")
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_with_dataframe_values(self, pk_field, auto_id):
         """
         target: test insert with dataframe data
-        method: create collection with auto_id=True
+        method: create collection
         expected: milvus client does not support insert with dataframe
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         
-        # Create schema with auto_id=True
-        schema = self.create_schema(client, auto_id=True, enable_dynamic_field=True)[0]
+        # Create schema with auto_id
+        schema = self.create_schema(client, auto_id=auto_id, enable_dynamic_field=True)[0]
         if pk_field == ct.default_int64_field_name:
-            schema.add_field(pk_field, DataType.INT64, is_primary=True, auto_id=True)
+            schema.add_field(pk_field, DataType.INT64, is_primary=True, auto_id=auto_id)
         else:
-            schema.add_field(pk_field, DataType.VARCHAR, max_length=ct.default_length, is_primary=True, auto_id=True)
+            schema.add_field(pk_field, DataType.VARCHAR, max_length=ct.default_length, is_primary=True, auto_id=auto_id)
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field(default_float_field_name, DataType.FLOAT)
         if pk_field != ct.default_string_field_name:
             schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
         
-        self.create_collection(client, collection_name, dimension=default_dim, schema=schema, auto_id=True)
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema, auto_id=auto_id)
         
         # Try to insert with primary key included (should fail)
-        df = cf.gen_default_dataframe_data(nb=100, auto_id=True)
+        df = cf.gen_default_dataframe_data(nb=100, auto_id=auto_id)
         error = {ct.err_code: 999,
                  ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'DataFrame'"}
         self.insert(client, collection_name, df, check_task=CheckTasks.err_res, check_items=error)
@@ -1239,6 +1264,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         assert num_entities.get("row_count", None) == 0
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.skip(reason="Covered by test_insert_auto_id_true")
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_auto_id_true_with_list_values(self, pk_field):
         """
