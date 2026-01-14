@@ -49,6 +49,7 @@ const (
 	TriggerTypePartitionKeySort
 	TriggerTypeClusteringPartitionKeySort
 	TriggerTypeForceMerge
+	TriggerTypeStorageVersionUpgrade
 )
 
 func (t CompactionTriggerType) GetCompactionType() datapb.CompactionType {
@@ -65,6 +66,8 @@ func (t CompactionTriggerType) GetCompactionType() datapb.CompactionType {
 		return datapb.CompactionType_PartitionKeySortCompaction
 	case TriggerTypeClusteringPartitionKeySort:
 		return datapb.CompactionType_ClusteringPartitionKeySortCompaction
+	case TriggerTypeStorageVersionUpgrade:
+		return datapb.CompactionType_MixCompaction
 	default:
 		return datapb.CompactionType_MixCompaction
 	}
@@ -92,6 +95,8 @@ func (t CompactionTriggerType) String() string {
 		return "ClusteringPartitionKeySort"
 	case TriggerTypeForceMerge:
 		return "ForceMerge"
+	case TriggerTypeStorageVersionUpgrade:
+		return "StorageVersionUpgrade"
 	default:
 		return ""
 	}
@@ -117,12 +122,13 @@ type CompactionTriggerManager struct {
 	handler   Handler
 	allocator allocator.Allocator
 
-	meta             *meta
-	importMeta       ImportMeta
-	l0Policy         *l0CompactionPolicy
-	clusteringPolicy *clusteringCompactionPolicy
-	singlePolicy     *singleCompactionPolicy
-	forceMergePolicy *forceMergeCompactionPolicy
+	meta                        *meta
+	importMeta                  ImportMeta
+	l0Policy                    *l0CompactionPolicy
+	clusteringPolicy            *clusteringCompactionPolicy
+	singlePolicy                *singleCompactionPolicy
+	forceMergePolicy            *forceMergeCompactionPolicy
+	upgradeStorageVersionPolicy *storageVersionUpgradePolicy
 
 	cancel  context.CancelFunc
 	closeWg sync.WaitGroup
@@ -152,6 +158,7 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
 	m.singlePolicy = newSingleCompactionPolicy(meta, m.allocator, m.handler)
 	m.forceMergePolicy = newForceMergeCompactionPolicy(meta, m.allocator, m.handler)
+	m.upgradeStorageVersionPolicy = newStorageVersionUpgradePolicy(meta, m.allocator, m.handler)
 	return m
 }
 
@@ -254,6 +261,8 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 	defer clusteringTicker.Stop()
 	singleTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer singleTicker.Stop()
+	storageVersionTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
+	defer storageVersionTicker.Stop()
 	log.Info("Compaction trigger manager start")
 	for {
 		select {
@@ -310,6 +319,24 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 			events, err := m.singlePolicy.Trigger(ctx)
 			if err != nil {
 				log.Warn("Fail to trigger single policy", zap.Error(err))
+				continue
+			}
+			if len(events) > 0 {
+				for triggerType, views := range events {
+					m.notify(ctx, triggerType, views)
+				}
+			}
+		case <-storageVersionTicker.C:
+			if !m.upgradeStorageVersionPolicy.Enable() {
+				continue
+			}
+			if m.inspector.isFull() {
+				log.RatedInfo(10, "Skip trigger storage version compaction since inspector is full")
+				continue
+			}
+			events, err := m.upgradeStorageVersionPolicy.Trigger(ctx)
+			if err != nil {
+				log.Warn("Fail to trigger storage version policy", zap.Error(err))
 				continue
 			}
 			if len(events) > 0 {

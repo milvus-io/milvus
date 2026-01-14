@@ -261,14 +261,18 @@ func (s *SemanticHighlightSuite) TestProcessOneQuery_Success() {
 		{"machine learning"},
 		{"machine"},
 	}
+	expectedScores := [][]float32{
+		{0.95},
+		{0.80},
+	}
 
 	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
 		return &zilliz.ZillizClient{}, nil
 	}).Build()
 	defer mock1.UnPatch()
 
-	mock2 := mockey.Mock((*zilliz.ZillizClient).Highlight).To(func(_ *zilliz.ZillizClient, _ context.Context, _ string, _ []string, _ map[string]string) ([][]string, error) {
-		return expectedHighlights, nil
+	mock2 := mockey.Mock((*zilliz.ZillizClient).Highlight).To(func(_ *zilliz.ZillizClient, _ context.Context, _ string, _ []string, _ map[string]string) ([][]string, [][]float32, error) {
+		return expectedHighlights, expectedScores, nil
 	}).Build()
 	defer mock2.UnPatch()
 
@@ -292,10 +296,11 @@ func (s *SemanticHighlightSuite) TestProcessOneQuery_Success() {
 
 	ctx := context.Background()
 	data := []string{"Machine learning is a subset of AI", "Machine learning is powerful"}
-	highlights, err := highlight.processOneQuery(ctx, "machine learning", data, nil)
+	highlights, scores, err := highlight.processOneQuery(ctx, "machine learning", data)
 
 	s.NoError(err)
 	s.Equal(expectedHighlights, highlights)
+	s.Equal(expectedScores, scores)
 }
 
 func (s *SemanticHighlightSuite) TestProcessOneQuery_Error() {
@@ -312,8 +317,8 @@ func (s *SemanticHighlightSuite) TestProcessOneQuery_Error() {
 	}).Build()
 	defer mock1.UnPatch()
 
-	mock2 := mockey.Mock((*zilliz.ZillizClient).Highlight).To(func(_ *zilliz.ZillizClient, _ context.Context, _ string, _ []string, _ map[string]string) ([][]string, error) {
-		return nil, expectedError
+	mock2 := mockey.Mock((*zilliz.ZillizClient).Highlight).To(func(_ *zilliz.ZillizClient, _ context.Context, _ string, _ []string, _ map[string]string) ([][]string, [][]float32, error) {
+		return nil, nil, expectedError
 	}).Build()
 	defer mock2.UnPatch()
 
@@ -337,10 +342,11 @@ func (s *SemanticHighlightSuite) TestProcessOneQuery_Error() {
 
 	ctx := context.Background()
 	data := []string{"test document"}
-	highlights, err := highlight.processOneQuery(ctx, "test query", data, nil)
+	highlights, scores, err := highlight.processOneQuery(ctx, "test query", data)
 
 	s.Error(err)
 	s.Nil(highlights)
+	s.Nil(scores)
 	s.Equal(expectedError, err)
 }
 
@@ -354,8 +360,14 @@ func (s *SemanticHighlightSuite) TestProcess_Success() {
 	expectedHighlights1 := [][]string{
 		{"machine learning", "deep learning"},
 	}
+	expectedScores1 := [][]float32{
+		{0.90},
+	}
 	expectedHighlights2 := [][]string{
 		{"deep learning", "machine learning"},
+	}
+	expectedScores2 := [][]float32{
+		{0.85},
 	}
 
 	callCount := 0
@@ -364,12 +376,12 @@ func (s *SemanticHighlightSuite) TestProcess_Success() {
 	}).Build()
 	defer mock1.UnPatch()
 
-	mock2 := mockey.Mock((*zilliz.ZillizClient).Highlight).To(func(_ *zilliz.ZillizClient, _ context.Context, query string, _ []string, _ map[string]string) ([][]string, error) {
+	mock2 := mockey.Mock((*zilliz.ZillizClient).Highlight).To(func(_ *zilliz.ZillizClient, _ context.Context, query string, _ []string, _ map[string]string) ([][]string, [][]float32, error) {
 		callCount++
 		if query == "machine learning" {
-			return expectedHighlights1, nil
+			return expectedHighlights1, expectedScores1, nil
 		}
-		return expectedHighlights2, nil
+		return expectedHighlights2, expectedScores2, nil
 	}).Build()
 	defer mock2.UnPatch()
 
@@ -393,11 +405,15 @@ func (s *SemanticHighlightSuite) TestProcess_Success() {
 
 	ctx := context.Background()
 	data := []string{"Machine learning document", "Deep learning document"}
-	highlights, err := highlight.Process(ctx, []int64{1, 1}, data, nil)
+	highlights, scores, err := highlight.Process(ctx, []int64{1, 1}, data)
 
 	s.NoError(err)
 	s.NotNil(highlights)
 	s.Equal(2, callCount, "Should call highlight twice for two queries")
+	s.NotNil(scores)
+	s.Equal(2, len(scores))
+	s.Equal(1, len(scores[0]))
+	s.Equal(1, len(scores[1]))
 }
 
 func (s *SemanticHighlightSuite) TestProcess_NqMismatch() {
@@ -432,11 +448,12 @@ func (s *SemanticHighlightSuite) TestProcess_NqMismatch() {
 
 	ctx := context.Background()
 	data := []string{"test document"}
-	highlights, err := highlight.Process(ctx, []int64{1, 1, 1}, data, nil) // nq=3 but queries has only 1
+	highlights, scores, err := highlight.Process(ctx, []int64{1, 1, 1}, data) // nq=3 but queries has only 1
 
 	s.Error(err)
 	s.Nil(highlights)
 	s.Contains(err.Error(), "nq must equal to queries size")
+	s.Nil(scores)
 }
 
 func (s *SemanticHighlightSuite) TestProcess_ProviderError() {
@@ -453,8 +470,8 @@ func (s *SemanticHighlightSuite) TestProcess_ProviderError() {
 	}).Build()
 	defer mock1.UnPatch()
 
-	mock2 := mockey.Mock((*zilliz.ZillizClient).Highlight).To(func(_ *zilliz.ZillizClient, _ context.Context, _ string, _ []string, _ map[string]string) ([][]string, error) {
-		return nil, expectedError
+	mock2 := mockey.Mock((*zilliz.ZillizClient).Highlight).To(func(_ *zilliz.ZillizClient, _ context.Context, _ string, _ []string, _ map[string]string) ([][]string, [][]float32, error) {
+		return nil, nil, expectedError
 	}).Build()
 	defer mock2.UnPatch()
 
@@ -478,11 +495,12 @@ func (s *SemanticHighlightSuite) TestProcess_ProviderError() {
 
 	ctx := context.Background()
 	data := []string{"test document"}
-	highlights, err := highlight.Process(ctx, []int64{1}, data, nil)
+	highlights, scores, err := highlight.Process(ctx, []int64{1}, data)
 
 	s.Error(err)
 	s.Nil(highlights)
 	s.Equal(expectedError, err)
+	s.Nil(scores)
 }
 
 func (s *SemanticHighlightSuite) TestProcess_EmptyData() {
@@ -497,8 +515,12 @@ func (s *SemanticHighlightSuite) TestProcess_EmptyData() {
 	}).Build()
 	defer mock1.UnPatch()
 
-	mock2 := mockey.Mock((*zilliz.ZillizClient).Highlight).To(func(_ *zilliz.ZillizClient, _ context.Context, _ string, texts []string, _ map[string]string) ([][]string, error) {
-		return [][]string{texts}, nil
+	mock2 := mockey.Mock((*zilliz.ZillizClient).Highlight).To(func(_ *zilliz.ZillizClient, _ context.Context, _ string, texts []string, _ map[string]string) ([][]string, [][]float32, error) {
+		scores := make([][]float32, len(texts))
+		for i := range texts {
+			scores[i] = []float32{0.75}
+		}
+		return [][]string{texts}, scores, nil
 	}).Build()
 	defer mock2.UnPatch()
 
@@ -522,18 +544,25 @@ func (s *SemanticHighlightSuite) TestProcess_EmptyData() {
 
 	ctx := context.Background()
 	data := []string{}
-	highlights, err := highlight.Process(ctx, []int64{0, 0, 0}, data, nil)
+	highlights, scores, err := highlight.Process(ctx, []int64{0, 0, 0}, data)
 
 	s.NoError(err)
 	s.NotNil(highlights)
+	s.Equal(0, len(highlights))
+	s.NotNil(scores)
+	s.Equal(0, len(scores))
 
 	data2 := []string{"test document"}
 
-	highlights2, err := highlight.Process(ctx, []int64{0, 1, 0}, data2, nil)
+	highlights2, scores2, err := highlight.Process(ctx, []int64{0, 1, 0}, data2)
 
 	s.NoError(err)
 	s.Equal(1, len(highlights2))
 	s.Equal([][]string{{"test document"}}, highlights2)
+	s.NotNil(scores2)
+	s.Equal(1, len(scores2))
+	s.Equal(1, len(scores2[0]))
+	s.Equal(float32(0.75), scores2[0][0])
 }
 
 func (s *SemanticHighlightSuite) TestBaseSemanticHighlightProvider_MaxBatch() {

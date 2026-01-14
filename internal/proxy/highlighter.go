@@ -455,18 +455,23 @@ func (op *semanticHighlightOperator) run(ctx context.Context, span trace.Span, i
 			return nil, errors.Errorf("get highlight failed, text field not in output field %d", fieldID)
 		}
 		texts := fieldDatas.GetScalars().GetStringData().GetData()
-		highlights, err := op.highlight.Process(ctx, result.Results.GetTopks(), texts, nil)
+		highlights, scores, err := op.highlight.Process(ctx, result.Results.GetTopks(), texts)
 		if err != nil {
 			return nil, err
 		}
-		singeFieldHighlights := &commonpb.HighlightResult{
-			FieldName: fieldDatas.FieldName,
-			Datas:     make([]*commonpb.HighlightData, 0, len(highlights)),
+
+		if len(highlights) != len(scores) {
+			return nil, errors.Errorf("Highlights size must equal to scores size, but got highlights size [%d], scores size [%d]", len(highlights), len(scores))
 		}
-		for _, highlight := range highlights {
-			singeFieldHighlights.Datas = append(singeFieldHighlights.Datas, &commonpb.HighlightData{Fragments: highlight})
+
+		singleFieldHighlights := &commonpb.HighlightResult{
+			FieldName: op.highlight.GetFieldName(fieldID),
+			Datas:     make([]*commonpb.HighlightData, len(highlights)),
 		}
-		highlightResults = append(highlightResults, singeFieldHighlights)
+		for i := range highlights {
+			singleFieldHighlights.Datas[i] = &commonpb.HighlightData{Fragments: highlights[i], Scores: scores[i]}
+		}
+		highlightResults = append(highlightResults, singleFieldHighlights)
 	}
 	result.Results.HighlightResults = highlightResults
 	return []any{result}, nil

@@ -4280,7 +4280,6 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
     @pytest.mark.parametrize("entities", [1000])
     @pytest.mark.parametrize("array_capacity", [100])
     @pytest.mark.parametrize("file_type", ["PARQUET", "JSON"])
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/pymilvus/issues/3050")
     def test_import_struct_array_with_local_bulk_writer(self, dim, entities, array_capacity, file_type):
         """
         Test bulk import of struct array data using LocalBulkWriter
@@ -4364,23 +4363,29 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         # Step 2: Generate insert-format data with all supported types
         log.info(f"Generating {entities} rows of insert-format data")
         insert_data = []
+        empty_array_count = 0
         for i in range(entities):
-            # Generate random number of struct elements (1-5)
-            arr_len = random.randint(1, 5)
-            struct_list = []
-            for j in range(arr_len):
-                struct_obj = {
-                    "struct_varchar": f"varchar_{i}_{j}_{cf.gen_unique_str()}",
-                    "struct_int8": random.randint(-128, 127),
-                    "struct_int16": random.randint(-32768, 32767),
-                    "struct_int32": random.randint(-2147483648, 2147483647),
-                    "struct_int64": random.randint(-9223372036854775808, 9223372036854775807),
-                    "struct_float": random.random() * 100,
-                    "struct_double": random.random() * 1000,
-                    "struct_bool": random.choice([True, False]),
-                    "struct_float_vec": [random.random() for _ in range(dim)]
-                }
-                struct_list.append(struct_obj)
+            # 10% probability to generate empty array
+            if random.random() < 0.1:
+                struct_list = []
+                empty_array_count += 1
+            else:
+                # Generate random number of struct elements (1-5)
+                arr_len = random.randint(1, 5)
+                struct_list = []
+                for j in range(arr_len):
+                    struct_obj = {
+                        "struct_varchar": f"varchar_{i}_{j}_{cf.gen_unique_str()}",
+                        "struct_int8": random.randint(-128, 127),
+                        "struct_int16": random.randint(-32768, 32767),
+                        "struct_int32": random.randint(-2147483648, 2147483647),
+                        "struct_int64": random.randint(-9223372036854775808, 9223372036854775807),
+                        "struct_float": random.random() * 100,
+                        "struct_double": random.random() * 1000,
+                        "struct_bool": random.choice([True, False]),
+                        "struct_float_vec": [random.random() for _ in range(dim)]
+                    }
+                    struct_list.append(struct_obj)
 
             row = {
                 "id": i,
@@ -4388,6 +4393,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
                 "struct_array": struct_list
             }
             insert_data.append(row)
+        log.info(f"Generated {empty_array_count} rows with empty struct_array")
 
         # Step 3: Use LocalBulkWriter to convert data to import files
         log.info(f"Using LocalBulkWriter to generate {file_type} files")

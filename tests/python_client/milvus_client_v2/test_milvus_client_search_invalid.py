@@ -177,8 +177,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         try:
             collection_w.search()
         except TypeError as e:
-            assert "missing 4 required positional arguments: 'data', " \
-                   "'anns_field', 'param', and 'limit'" in str(e)
+            assert "Either ids or data must be provided" in str(e)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_vectors(self, get_invalid_vectors):

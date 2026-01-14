@@ -2304,7 +2304,7 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 	}
 
 	// Delegate to snapshot manager
-	collectionID, err := s.snapshotManager.RestoreSnapshot(
+	jobID, err := s.snapshotManager.RestoreSnapshot(
 		ctx,
 		req.GetName(),
 		req.GetCollectionName(),
@@ -2320,10 +2320,10 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 		}, nil
 	}
 
-	log.Info("restore snapshot completed", zap.Int64("collectionID", collectionID))
+	log.Info("restore snapshot completed", zap.Int64("jobID", jobID))
 	return &datapb.RestoreSnapshotResponse{
-		Status:       merr.Success(),
-		CollectionId: collectionID,
+		Status: merr.Success(),
+		JobId:  jobID,
 	}, nil
 }
 
@@ -2336,6 +2336,10 @@ func (s *Server) rollbackRestoreSnapshot(ctx context.Context, dbName, collection
 	log.Info("rolling back restore snapshot, dropping collection")
 
 	if err := s.broker.DropCollection(ctx, dbName, collectionName); err != nil {
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			log.Debug("collection not found, skipping rollback")
+			return nil
+		}
 		log.Error("failed to drop collection during rollback", zap.Error(err))
 		return err
 	}

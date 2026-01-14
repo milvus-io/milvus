@@ -63,19 +63,6 @@ class TestInsertParams(TestcaseBase):
         assert mutation_res.primary_keys == data[0].tolist()
         assert collection_w.num_entities == ct.default_nb
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_non_data_type(self):
-        """
-        target: test insert with non-dataframe, non-list data
-        method: insert with data (non-dataframe and non-list type)
-        expected: raise exception
-        """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name)
-        error = {ct.err_code: 999,
-                 ct.err_msg: "The type of data should be List, pd.DataFrame or Dict"}
-        collection_w.insert(data=None,
-                            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("data", [pd.DataFrame()])
@@ -232,38 +219,6 @@ class TestInsertParams(TestcaseBase):
         error = {ct.err_code: 999,
                  ct.err_msg: f'Collection field dim is {ct.default_dim}, but entities field dim is {dim}'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_binary_dim_not_match(self):
-        """
-        target: test insert binary with dim not match
-        method: insert binary data dim not equal to schema
-        expected: raise exception
-        """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(
-            name=c_name, schema=default_binary_schema)
-        dim = 120
-        df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb, dim=dim)
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f'the dim ({dim}) of field data(binary_vector) is not equal to schema dim '
-                             f'({ct.default_dim}): invalid parameter[expected={ct.default_dim}][actual={dim}]'}
-        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_field_name_not_match(self):
-        """
-        target: test insert field name not match
-        method: data field name not match schema
-        expected: raise exception
-        """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name)
-        df = cf.gen_default_dataframe_data(10)
-        df.rename(columns={ct.default_float_field_name: "int"}, inplace=True)
-        error = {ct.err_code: 999, ct.err_msg: "The name of field doesn't match, expected: float, got int"}
-        collection_w.insert(
-            data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="Currently not check in pymilvus")
@@ -814,20 +769,6 @@ class TestInsertOperation(TestcaseBase):
             )
 
         assert collection_w.num_entities == nb
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_insert_all_datatype_collection(self):
-        """
-        target: test insert into collection that contains all datatype fields
-        method: 1.create all datatype collection 2.insert data
-        expected: verify num entities
-        """
-        self._connect()
-        nb = 100
-        df = cf.gen_dataframe_all_data_type(nb=nb)
-        self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
-                                                      primary_field=ct.default_int64_field_name)
-        assert self.collection_wrap.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_equal_to_resource_limit(self):

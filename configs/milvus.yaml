@@ -582,7 +582,6 @@ queryNode:
     size: 10 # the size for worker querynode client pool
   idfOracle:
     enableDisk: true
-    writeConcurrency: 4
   ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
   port: 21123 # TCP port of queryNode
   grpc:
@@ -924,6 +923,7 @@ common:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool
     middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
     lowPriority: 1 # This parameter specify how many times the number of threads is the number of cores in low priority pool
+    bm25Load: 1 # This parameter specify how many times the number of threads is the number of cores in BM25 load pool
   buildIndexThreadPoolRatio: 0.75
   DiskIndex:
     MaxDegree: 56
@@ -975,6 +975,7 @@ common:
     defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
+    exprEnabled: false # Whether to enable the /expr endpoint for debugging. When enabled, only root user can access it via HTTP Basic Auth on Proxy nodes.
     rbac:
       overrideBuiltInPrivilegeGroups:
         enabled: false # Whether to override build-in privilege groups
@@ -1021,7 +1022,7 @@ common:
         enabled: true # enable split system column policy in storage v2
         includePK: true # whether split system column policy include pk field
       splitByAvgSize:
-        enabled: false # enable split by average size policy in storage v2
+        enabled: true # enable split by average size policy in storage v2
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
     useLoonFFI: false
   traceLogMode: 0 # trace request info

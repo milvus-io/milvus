@@ -477,6 +477,75 @@ func (g *groupByInfo) GetStrictCast() bool {
 	return false
 }
 
+// parseGroupByField parses the groupByFieldName and returns groupByFieldId and jsonPath.
+// It handles the following cases:
+// 1. Field exists in schema: use the field's ID, set jsonPath if it's a JSON field with brackets
+// 2. Field doesn't exist but dynamic field exists: use dynamic field's ID and set jsonPath
+// 3. Field doesn't exist and no dynamic field: return error
+func parseGroupByField(groupByFieldName string, schema *schemapb.CollectionSchema) (groupByFieldId int64, jsonPath string, err error) {
+	if groupByFieldName == "" {
+		return -1, "", nil
+	}
+
+	// Build field name to field map to avoid repeated loops
+	fields := schema.GetFields()
+	fieldNameMap := make(map[string]*schemapb.FieldSchema, len(fields))
+	var dynamicField *schemapb.FieldSchema
+	for _, field := range fields {
+		fieldNameMap[field.Name] = field
+		if field.GetIsDynamic() {
+			dynamicField = field
+		}
+	}
+
+	// Check if groupByFieldName matches JSON field access pattern (e.g., metadata["product_info"])
+	// Pattern: fieldName["key"] or fieldName["key1"]["key2"]...
+	hasBrackets := strings.Contains(groupByFieldName, "[") && strings.Contains(groupByFieldName, "]")
+
+	if hasBrackets {
+		// Extract field name (part before the first '[')
+		fieldName := strings.Split(groupByFieldName, "[")[0]
+		if field, exists := fieldNameMap[fieldName]; exists {
+			// Field exists in schema
+			groupByFieldId = field.FieldID
+			// If the field is JSON type, set jsonPath to the full groupByFieldName
+			if typeutil.IsJSONType(field.DataType) {
+				// Case 2.1: groupByField is JSON column + brackets pattern
+				// Set jsonPath to the full groupByFieldName (e.g., metadata["product_info"])
+				jsonPath = groupByFieldName
+			}
+			// If field exists but is not JSON type, still use the field but don't set jsonPath
+		} else {
+			// Field name doesn't exist in schema
+			if dynamicField != nil {
+				// Case 2.2: Use dynamic field
+				groupByFieldId = dynamicField.FieldID
+				jsonPath = groupByFieldName
+			} else {
+				// Case 2.3: Field not found and no dynamic field
+				return -1, "", merr.WrapErrFieldNotFound(groupByFieldName, "groupBy field not found in schema")
+			}
+		}
+	} else {
+		// Case 1: Regular field name (no brackets)
+		if field, exists := fieldNameMap[groupByFieldName]; exists {
+			groupByFieldId = field.FieldID
+		} else {
+			// Field not found
+			if dynamicField != nil {
+				// Case 2.2: Use dynamic field
+				groupByFieldId = dynamicField.FieldID
+				jsonPath = groupByFieldName
+			} else {
+				// Case 2.3: Field not found and no dynamic field
+				return -1, "", merr.WrapErrFieldNotFound(groupByFieldName, "groupBy field not found in schema")
+			}
+		}
+	}
+
+	return groupByFieldId, jsonPath, nil
+}
+
 func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema) (*groupByInfo, error) {
 	ret := &groupByInfo{}
 
@@ -485,29 +554,14 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 	if err != nil {
 		groupByFieldName = ""
 	}
-	var groupByFieldId int64 = -1
-	if groupByFieldName != "" {
-		fields := schema.GetFields()
-		var dynamicField *schemapb.FieldSchema
-		for _, field := range fields {
-			if field.Name == groupByFieldName {
-				groupByFieldId = field.FieldID
-				break
-			}
-			if field.GetIsDynamic() {
-				dynamicField = field
-				break
-			}
-		}
-		if groupByFieldId == -1 {
-			if dynamicField != nil {
-				groupByFieldId = dynamicField.FieldID
-			} else {
-				return nil, merr.WrapErrFieldNotFound(groupByFieldName, "groupBy field not found in schema")
-			}
-		}
+	groupByFieldId, jsonPath, err := parseGroupByField(groupByFieldName, schema)
+	if err != nil {
+		return nil, err
 	}
 	ret.groupByFieldId = groupByFieldId
+	if jsonPath != "" {
+		ret.jsonPath = jsonPath
+	}
 
 	// 2. parse group size
 	var groupSize int64
@@ -545,9 +599,10 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 	ret.strictGroupSize = strictGroupSize
 
 	// 4. parse json path
-	jsonPath, err := funcutil.GetAttrByKeyFromRepeatedKV(JSONPath, searchParamsPair)
+	// If jsonPath was already set from groupByFieldName parsing, it will be overridden if explicitly provided
+	explicitJSONPath, err := funcutil.GetAttrByKeyFromRepeatedKV(JSONPath, searchParamsPair)
 	if err == nil {
-		ret.jsonPath = jsonPath
+		ret.jsonPath = explicitJSONPath
 	}
 
 	// 5. parse json type

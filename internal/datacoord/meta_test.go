@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"sync/atomic"
 	"testing"
@@ -41,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -48,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -159,7 +162,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		_, err := newMeta(ctx, suite.catalog, nil, brk)
 		suite.NoError(err)
 
-		suite.MetricsEqual(metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel, datapb.SegmentLevel_Legacy.String(), "unsorted"), 1)
+		suite.MetricsEqual(metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel, datapb.SegmentLevel_Legacy.String(), "unsorted", "0"), 1)
 	})
 
 	suite.Run("test list segments", func() {
@@ -354,10 +357,10 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		suite.EqualValues(2, len(mutation.stateChange[datapb.SegmentLevel_L1.String()]))
 		suite.EqualValues(-4, mutation.rowCountChange)
 		suite.EqualValues(0, mutation.rowCountAccChange)
-		flushedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Flushed.String()][getSortStatus(false)]
+		flushedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Flushed.String()][getSortStatus(false)]["0"]
 		suite.EqualValues(-2, flushedUnsorted)
 
-		droppedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Dropped.String()][getSortStatus(false)]
+		droppedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Dropped.String()][getSortStatus(false)]["0"]
 		suite.EqualValues(3, droppedUnsorted)
 	})
 
@@ -428,10 +431,10 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		suite.EqualValues(2, len(mutation.stateChange[datapb.SegmentLevel_L1.String()]))
 		suite.EqualValues(-2, mutation.rowCountChange)
 		suite.EqualValues(2, mutation.rowCountAccChange)
-		flushedCount := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Flushed.String()][getSortStatus(false)]
+		flushedCount := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Flushed.String()][getSortStatus(false)]["0"]
 		suite.EqualValues(-1, flushedCount)
 
-		droppedCount := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Dropped.String()][getSortStatus(false)]
+		droppedCount := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Dropped.String()][getSortStatus(false)]["0"]
 		suite.EqualValues(2, droppedCount)
 	})
 
@@ -882,6 +885,99 @@ func TestGetUnFlushedSegments(t *testing.T) {
 	assert.EqualValues(t, 1, len(segments))
 	assert.EqualValues(t, 0, segments[0].ID)
 	assert.NotEqualValues(t, commonpb.SegmentState_Flushed, segments[0].State)
+}
+
+func TestAlterSegmentsWithRecovery(t *testing.T) {
+	rootPath := "AlterSegmentsWithRecovery-" + funcutil.RandomString(10)
+	meta, _ := newMetaWithEtcd(t, rootPath)
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+
+	collectionID := int64(1)
+	partitionID := int64(1)
+	segmentID := int64(1)
+	fieldID := int64(1)
+	segment1 := NewSegmentInfo(&datapb.SegmentInfo{
+		CollectionID:  collectionID,
+		PartitionID:   partitionID,
+		ID:            segmentID,
+		State:         commonpb.SegmentState_Growing,
+		Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)},
+		Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(1, 334)},
+		Deltalogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(1, 100)},
+		Bm25Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 20)},
+	})
+	err := meta.AddSegment(context.TODO(), segment1)
+	require.NoError(t, err)
+
+	segmentPath := fmt.Sprintf("%s/%s/%d/%d/%d", rootPath, datacoord.SegmentPrefix, collectionID, partitionID, segmentID)
+	binlogsPath := fmt.Sprintf("%s/%s/%d/%d/%d/%d", rootPath, datacoord.SegmentBinlogPathPrefix, collectionID, partitionID, segmentID, fieldID)
+	statslogsPath := fmt.Sprintf("%s/%s/%d/%d/%d/%d", rootPath, datacoord.SegmentStatslogPathPrefix, collectionID, partitionID, segmentID, fieldID)
+	deltalogsPath := fmt.Sprintf("%s/%s/%d/%d/%d/%d", rootPath, datacoord.SegmentDeltalogPathPrefix, collectionID, partitionID, segmentID, fieldID)
+	bm25StatslogsPath := fmt.Sprintf("%s/%s/%d/%d/%d/%d", rootPath, datacoord.SegmentBM25logPathPrefix, collectionID, partitionID, segmentID, fieldID)
+
+	checkVersion := func(sVersion int64, bVersion int64, stVersion int64, dVersion int64, bm25Version int64) {
+		kv, err := etcdCli.Get(context.TODO(), segmentPath)
+		require.NoError(t, err)
+		require.Equal(t, kv.Kvs[0].Version, sVersion)
+		kv, err = etcdCli.Get(context.TODO(), binlogsPath)
+		require.NoError(t, err)
+		require.Equal(t, kv.Kvs[0].Version, bVersion)
+		kv, err = etcdCli.Get(context.TODO(), statslogsPath)
+		require.NoError(t, err)
+		require.Equal(t, kv.Kvs[0].Version, stVersion)
+		kv, err = etcdCli.Get(context.TODO(), deltalogsPath)
+		require.NoError(t, err)
+		require.Equal(t, kv.Kvs[0].Version, dVersion)
+		kv, err = etcdCli.Get(context.TODO(), bm25StatslogsPath)
+		require.NoError(t, err)
+		require.Equal(t, kv.Kvs[0].Version, bm25Version)
+	}
+	checkVersion(1, 1, 1, 1, 1)
+
+	err = meta.UpdateSegmentsInfo(context.TODO(), AddBinlogsOperator(1,
+		[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)},
+		nil,
+		nil,
+		nil,
+	))
+	require.NoError(t, err)
+	checkVersion(2, 2, 1, 1, 1)
+
+	err = meta.UpdateSegmentsInfo(context.TODO(), AddBinlogsOperator(1,
+		nil,
+		[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)},
+		nil,
+		nil,
+	))
+	require.NoError(t, err)
+	checkVersion(3, 2, 2, 1, 1)
+
+	err = meta.UpdateSegmentsInfo(context.TODO(), AddBinlogsOperator(1,
+		nil,
+		nil,
+		[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)},
+		nil,
+	))
+	require.NoError(t, err)
+	checkVersion(4, 2, 2, 2, 1)
+
+	err = meta.UpdateSegmentsInfo(context.TODO(), AddBinlogsOperator(1,
+		nil,
+		nil,
+		nil,
+		[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)},
+	))
+	require.NoError(t, err)
+	checkVersion(5, 2, 2, 2, 2)
+
+	err = meta.UpdateSegmentsInfo(context.TODO(), AddBinlogsOperator(1,
+		[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)},
+		[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)},
+		[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)},
+		[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)},
+	))
+	require.NoError(t, err)
+	checkVersion(6, 3, 3, 3, 3)
 }
 
 func TestUpdateSegmentsInfo(t *testing.T) {

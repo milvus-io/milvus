@@ -254,11 +254,12 @@ message AssignmentDiscoverResponse {
 // FullStreamingNodeAssignmentWithVersion is the full assignment info of a log
 // node with version.
 message FullStreamingNodeAssignmentWithVersion {
-    VersionPair version                                   = 1;
+    VersionPair version                                   = 1 [deprecated = true];
     repeated StreamingNodeAssignment assignments          = 2;
     CChannelAssignment cchannel                           = 3; // Where the control channel located.
     common.ReplicateConfiguration replicate_configuration = 4;
     StreamingVersion streaming_version = 5;
+    VersionPair version_by_revision = 6;
 }
 
 // CChannelAssignment is the assignment info of a control channel.

@@ -118,6 +118,7 @@ type Core struct {
 	mixCoord       types.MixCoord
 	streamingCoord *streamingcoord.Server
 	quotaCenter    *QuotaCenter
+	keyManager     *KeyManager
 
 	stateCode atomic.Int32
 	initOnce  sync.Once
@@ -161,6 +162,14 @@ func (c *Core) UpdateStateCode(code commonpb.StateCode) {
 
 func (c *Core) GetStateCode() commonpb.StateCode {
 	return commonpb.StateCode(c.stateCode.Load())
+}
+
+func (c *Core) GetMetaTable() IMetaTable {
+	return c.meta
+}
+
+func (c *Core) GetQuotaCenter() *QuotaCenter {
+	return c.quotaCenter
 }
 
 func (c *Core) sendTimeTick(t Timestamp, reason string) error {
@@ -452,6 +461,11 @@ func (c *Core) initInternal() error {
 
 	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.mixCoord, c.tsoAllocator, c.meta)
 	log.Debug("RootCoord init QuotaCenter done")
+
+	// Initialize KeyManager for KMS key state management
+	c.keyManager = NewKeyManager(c.ctx, c.meta)
+	c.quotaCenter.SetKeyManager(c.keyManager)
+	log.Debug("RootCoord init KeyManager done")
 
 	if err := c.initCredentials(initCtx); err != nil {
 		return err
@@ -1078,6 +1092,8 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		EnableDynamicField: collInfo.EnableDynamicField,
 		Properties:         collInfo.Properties,
 		FileResourceIds:    collInfo.FileResourceIds,
+		ExternalSource:     collInfo.ExternalSource,
+		ExternalSpec:       collInfo.ExternalSpec,
 	}
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames

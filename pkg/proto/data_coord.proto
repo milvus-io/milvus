@@ -555,6 +555,8 @@ message Binlog {
   // log_size represents the size after data serialized.
   // for stats_log, the memory_size always equal log_size.
   int64 memory_size = 7;
+  // null counts per field in this column group.
+  map<int64, int64> field_null_counts = 8;
 }
 
 message GetRecoveryInfoResponse {
@@ -1518,7 +1520,7 @@ message RestoreSnapshotRequest {
 message RestoreSnapshotResponse {
   common.Status status = 1;
   int64 job_id = 2; // restore job ID for async tracking (deprecated, use ListRestoreJobs)
-  int64 collection_id = 3; // target collection ID
+  int64 collection_id = 3; // deprecated
 }
 
 message GetRestoreSnapshotStateRequest {

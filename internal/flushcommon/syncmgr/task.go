@@ -135,7 +135,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	columnGroups := t.getColumnGroups(segmentInfo)
 
 	switch segmentInfo.GetStorageVersion() {
-	case storage.StorageV2:
+	case storage.StorageV2, storage.StorageV3:
 		// New sync task means needs to flush data immediately, so do not need to buffer data in writer again.
 		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, segmentInfo.ManifestPath(), t.writeRetryOpts...)
@@ -144,6 +144,8 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 			log.Warn("failed to write sync data with storage v2 format", zap.Error(err))
 			return err
 		}
+	// case storage.StorageV3:
+
 	default:
 		writer := NewBulkPackWriter(t.metacache, t.schema, t.chunkManager, t.allocator, t.writeRetryOpts...)
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
@@ -207,7 +209,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 
 func (t *SyncTask) getColumnGroups(segmentInfo *metacache.SegmentInfo) []storagecommon.ColumnGroup {
 	// column group only needed for storage v2 segment
-	if segmentInfo.GetStorageVersion() != storage.StorageV2 {
+	if segmentInfo.GetStorageVersion() != storage.StorageV2 && segmentInfo.GetStorageVersion() != storage.StorageV3 {
 		return nil
 	}
 

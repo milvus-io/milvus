@@ -29,7 +29,7 @@ import (
 )
 
 type semanticHighlightProvider interface {
-	highlight(ctx context.Context, query string, texts []string, params map[string]string) ([][]string, error)
+	highlight(ctx context.Context, query string, texts []string) ([][]string, [][]float32, error)
 	maxBatch() int
 }
 
@@ -42,9 +42,10 @@ func (provider *baseSemanticHighlightProvider) maxBatch() int {
 }
 
 type SemanticHighlight struct {
-	fieldIDs []int64
-	provider semanticHighlightProvider
-	queries  []string
+	fieldNames map[int64]string
+	fieldIDs   []int64
+	provider   semanticHighlightProvider
+	queries    []string
 }
 
 const (
@@ -77,8 +78,10 @@ func NewSemanticHighlight(collSchema *schemapb.CollectionSchema, params []*commo
 	}
 
 	fieldIDMap := make(map[string]*schemapb.FieldSchema)
+	fieldIDNameMap := make(map[int64]string)
 	for _, field := range collSchema.Fields {
 		fieldIDMap[field.Name] = field
+		fieldIDNameMap[field.FieldID] = field.Name
 	}
 
 	fieldIDs := []int64{}
@@ -100,47 +103,54 @@ func NewSemanticHighlight(collSchema *schemapb.CollectionSchema, params []*commo
 		return nil, err
 	}
 
-	return &SemanticHighlight{fieldIDs: fieldIDs, provider: provider, queries: queries}, nil
+	return &SemanticHighlight{fieldNames: fieldIDNameMap, fieldIDs: fieldIDs, provider: provider, queries: queries}, nil
 }
 
 func (highlight *SemanticHighlight) FieldIDs() []int64 {
 	return highlight.fieldIDs
 }
 
-func (highlight *SemanticHighlight) processOneQuery(ctx context.Context, query string, data []string, params map[string]string) ([][]string, error) {
-	if len(data) == 0 {
-		return [][]string{}, nil
-	}
-	highlights, err := highlight.provider.highlight(ctx, query, data, params)
-	if err != nil {
-		return nil, err
-	}
-	if len(highlights) != len(data) {
-		return nil, fmt.Errorf("Highlights size must equal to data size, but got highlights size [%d], data size [%d]", len(highlights), len(data))
-	}
-	return highlights, nil
+func (highlight *SemanticHighlight) GetFieldName(id int64) string {
+	return highlight.fieldNames[id]
 }
 
-func (highlight *SemanticHighlight) Process(ctx context.Context, topks []int64, data []string, params map[string]string) ([][]string, error) {
-	nq := len(topks)
-	if len(highlight.queries) != nq {
-		return nil, fmt.Errorf("nq must equal to queries size, but got nq [%d], queries size [%d], queries: [%v]", nq, len(highlight.queries), highlight.queries)
+func (highlight *SemanticHighlight) processOneQuery(ctx context.Context, query string, documents []string) ([][]string, [][]float32, error) {
+	if len(documents) == 0 {
+		return [][]string{}, [][]float32{}, nil
 	}
-	if len(data) == 0 {
-		return [][]string{}, nil
+	highlights, scores, err := highlight.provider.highlight(ctx, query, documents)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(highlights) != len(documents) || len(scores) != len(documents) {
+		return nil, nil, fmt.Errorf("Highlights size must equal to documents size, but got highlights size [%d], scores size [%d], documents size [%d]", len(highlights), len(scores), len(documents))
 	}
 
-	highlights := make([][]string, 0, len(data))
+	return highlights, scores, nil
+}
+
+func (highlight *SemanticHighlight) Process(ctx context.Context, topks []int64, documents []string) ([][]string, [][]float32, error) {
+	nq := len(topks)
+	if len(highlight.queries) != nq {
+		return nil, nil, fmt.Errorf("nq must equal to queries size, but got nq [%d], queries size [%d], queries: [%v]", nq, len(highlight.queries), highlight.queries)
+	}
+	if len(documents) == 0 {
+		return [][]string{}, [][]float32{}, nil
+	}
+
+	highlights := make([][]string, 0, len(documents))
+	scores := make([][]float32, 0, len(documents))
 	start := int64(0)
 
 	for i, query := range highlight.queries {
 		size := topks[i]
-		singleHighlights, err := highlight.processOneQuery(ctx, query, data[start:start+size], params)
+		singleQueryHighlights, singleQueryScores, err := highlight.processOneQuery(ctx, query, documents[start:start+size])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		highlights = append(highlights, singleHighlights...)
+		highlights = append(highlights, singleQueryHighlights...)
+		scores = append(scores, singleQueryScores...)
 		start += size
 	}
-	return highlights, nil
+	return highlights, scores, nil
 }

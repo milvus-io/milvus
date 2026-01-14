@@ -722,7 +722,10 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 		}
 	}
 	if idx == -1 {
-		return errors.New("primary key is not specified")
+		// External collections may not have a primary key
+		if !typeutil.IsExternalCollection(coll) {
+			return errors.New("primary key is not specified")
+		}
 	}
 
 	for _, structArrayField := range coll.StructArrayFields {
@@ -789,7 +792,7 @@ func validateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) err
 	return fmt.Errorf("data_type %s mismatch with metric_type %s", dataType.String(), metricTypeStrRaw)
 }
 
-func validateFunction(coll *schemapb.CollectionSchema, disableRuntimeCheck bool) error {
+func validateFunction(coll *schemapb.CollectionSchema, needValidateFunctionName string, disableRuntimeCheck bool) error {
 	nameMap := lo.SliceToMap(coll.GetFields(), func(field *schemapb.FieldSchema) (string, *schemapb.FieldSchema) {
 		return field.GetName(), field
 	})
@@ -856,7 +859,7 @@ func validateFunction(coll *schemapb.CollectionSchema, disableRuntimeCheck bool)
 		}
 	}
 	if !disableRuntimeCheck {
-		if err := embedding.ValidateFunctions(coll, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: coll.DbName}); err != nil {
+		if err := embedding.ValidateFunctions(coll, needValidateFunctionName, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: coll.DbName}); err != nil {
 			return err
 		}
 	}
@@ -2315,13 +2318,26 @@ func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, 
 func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) map[string][]int {
 	insertMsg.HashValues = typeutil.HashPK2Channels(pks, channelNames)
 
-	// groupedHashKeys represents the dmChannel index
-	channel2RowOffsets := make(map[string][]int) //   channelName to count
-	// assert len(it.hashValues) < maxInt
+	numChannels := len(channelNames)
+	if numChannels == 0 {
+		return nil
+	}
+
+	numRows := len(insertMsg.HashValues)
+	avgCapacity := (numRows / numChannels) + 1
+
+	channel2RowOffsets := make(map[string][]int, numChannels)
+
 	for offset, channelID := range insertMsg.HashValues {
-		channelName := channelNames[channelID]
+		idx := int(channelID)
+		if idx >= numChannels {
+			continue
+		}
+
+		channelName := channelNames[idx]
+
 		if _, ok := channel2RowOffsets[channelName]; !ok {
-			channel2RowOffsets[channelName] = []int{}
+			channel2RowOffsets[channelName] = make([]int, 0, avgCapacity)
 		}
 		channel2RowOffsets[channelName] = append(channel2RowOffsets[channelName], offset)
 	}

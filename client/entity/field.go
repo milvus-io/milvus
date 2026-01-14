@@ -234,6 +234,7 @@ type Field struct {
 	DefaultValue    *schemapb.ValueField
 	Nullable        bool
 	StructSchema    *StructSchema
+	ExternalField   string // external field name - maps to column name in external source
 }
 
 // ProtoMessage generates corresponding FieldSchema
@@ -253,6 +254,7 @@ func (f *Field) ProtoMessage() *schemapb.FieldSchema {
 		ElementType:     schemapb.DataType(f.ElementType),
 		Nullable:        f.Nullable,
 		DefaultValue:    f.DefaultValue,
+		ExternalField:   f.ExternalField,
 	}
 }
 
@@ -460,6 +462,12 @@ func (f *Field) WithStructSchema(schema *StructSchema) *Field {
 	return f
 }
 
+// WithExternalField sets the external field name for external collection fields.
+func (f *Field) WithExternalField(externalField string) *Field {
+	f.ExternalField = externalField
+	return f
+}
+
 // ReadProto parses FieldSchema
 func (f *Field) ReadProto(p *schemapb.FieldSchema) *Field {
 	f.ID = p.GetFieldID()
@@ -476,6 +484,7 @@ func (f *Field) ReadProto(p *schemapb.FieldSchema) *Field {
 	f.ElementType = FieldType(p.GetElementType())
 	f.DefaultValue = p.GetDefaultValue()
 	f.Nullable = p.GetNullable()
+	f.ExternalField = p.GetExternalField()
 
 	return f
 }

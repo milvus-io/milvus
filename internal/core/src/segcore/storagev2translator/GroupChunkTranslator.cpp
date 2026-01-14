@@ -437,7 +437,8 @@ GroupChunkTranslator::load_group_chunk(
 
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
     if (!use_mmap_) {
-        chunks = create_group_chunk(field_ids, field_metas, array_vecs);
+        chunks = create_group_chunk(
+            field_ids, field_metas, array_vecs, mmap_populate_);
     } else {
         std::filesystem::path filepath;
         switch (group_chunk_type_) {
@@ -467,8 +468,9 @@ GroupChunkTranslator::load_group_chunk(
         chunks = create_group_chunk(field_ids,
                                     field_metas,
                                     array_vecs,
+                                    mmap_populate_,
                                     filepath.string(),
-                                    mmap_populate_);
+                                    load_priority_);
     }
     return std::make_unique<milvus::GroupChunk>(chunks);
 }

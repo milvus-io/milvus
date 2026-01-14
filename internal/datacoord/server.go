@@ -450,7 +450,8 @@ func (s *Server) initMessageCallback() {
 		if err != nil {
 			return err
 		}
-		if channelAssignment.ReplicateConfiguration != nil {
+		replicateConfig := channelAssignment.ReplicateConfiguration
+		if replicateConfig != nil && len(replicateConfig.GetClusters()) > 1 {
 			return status.NewReplicateViolation("import in replicating cluster is not supported yet")
 		}
 		return nil
@@ -1104,6 +1105,11 @@ func (s *Server) Stop() error {
 	log.Info("datacoord server shutdown")
 	s.garbageCollector.close()
 	log.Info("datacoord garbage collector stopped")
+
+	if s.meta != nil {
+		s.meta.GetSnapshotMeta().Close()
+		log.Info("datacoord snapshot meta closed")
+	}
 
 	s.stopServerLoop()
 	log.Info("datacoord stopServerLoop stopped")

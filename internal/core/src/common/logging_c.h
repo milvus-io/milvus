@@ -15,15 +15,20 @@
 // limitations under the License.
 
 #pragma once
-#include <glog/logging.h>
 
-class GoZapSink : public google::LogSink {
-    void
-    send(google::LogSeverity severity,
-         const char* full_filename,
-         const char* base_filename,
-         int line,
-         const struct tm*,
-         const char* message,
-         size_t message_len) override;
-};
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void
+InitGoogleLoggingWithZapSink();
+
+void
+InitGoogleLoggingWithoutZapSink();
+
+void
+GoogleLoggingAtLevel(int severity, const char* msg);
+
+#ifdef __cplusplus
+}
+#endif

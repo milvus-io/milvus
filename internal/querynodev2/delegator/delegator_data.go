@@ -155,7 +155,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 				// register created growing segment after insert, avoid to add empty growing to delegator
 				sd.pkOracle.Register(growing, paramtable.GetNodeID())
 				if sd.idfOracle != nil {
-					sd.idfOracle.Register(segmentID, insertData.BM25Stats, segments.SegmentTypeGrowing)
+					sd.idfOracle.RegisterGrowing(segmentID, insertData.BM25Stats)
 				}
 				sd.segmentManager.Put(context.Background(), segments.SegmentTypeGrowing, growing)
 				sd.addGrowing(SegmentEntry{
@@ -379,7 +379,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 	for _, segment := range loaded {
 		sd.pkOracle.Register(segment, paramtable.GetNodeID())
 		if sd.idfOracle != nil {
-			sd.idfOracle.Register(segment.ID(), segment.GetBM25Stats(), segments.SegmentTypeGrowing)
+			sd.idfOracle.RegisterGrowing(segment.ID(), segment.GetBM25Stats())
 		}
 	}
 	sd.addGrowing(lo.Map(loaded, func(segment segments.Segment, _ int) SegmentEntry {
@@ -391,6 +391,51 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 			TargetVersion: sd.distribution.getTargetVersion(),
 		}
 	})...)
+	return nil
+}
+
+// load bm25 stats for sealed segments
+func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
+	if sd.idfOracle == nil {
+		return nil
+	}
+
+	pool := segments.GetBM25LoadPool()
+
+	future := pool.Submit(func() (any, error) {
+		bm25Stats, err := sd.loader.LoadBM25Stats(ctx, req.GetCollectionID(), infos...)
+		if err != nil {
+			log.Warn("failed to load bm25 stats for segment", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
+			return nil, err
+		}
+
+		if bm25Stats != nil {
+			bm25Stats.Range(func(segmentID int64, stats map[int64]*storage.BM25Stats) bool {
+				log.Info("register sealed segment bm25 stats into idforacle",
+					zap.Int64("segmentID", segmentID),
+				)
+				err = sd.idfOracle.RegisterSealed(segmentID, stats)
+				if err != nil {
+					log.Warn("failed to register sealed segment bm25 stats into idforacle", zap.Error(err))
+					return false
+				}
+				return true
+			})
+
+			if err != nil {
+				log.Warn("failed to register sealed segment bm25 stats into idforacle", zap.Error(err))
+				return nil, err
+			}
+		}
+
+		return nil, nil
+	})
+
+	err := conc.BlockOnAll(future)
+	if err != nil {
+		log.Warn("failed to load bm25 stats", zap.Error(err))
+		return err
+	}
 	return nil
 }
 
@@ -485,19 +530,10 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			Level:       info.GetLevel(),
 		}
 	})
-	// load bloom filter only when candidate not exists
+
 	infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
 		return !sd.pkOracle.Exists(pkoracle.NewCandidateKey(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed), targetNodeID)
 	})
-
-	var bm25Stats *typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats]
-	if sd.idfOracle != nil {
-		bm25Stats, err = sd.loader.LoadBM25Stats(ctx, req.GetCollectionID(), infos...)
-		if err != nil {
-			log.Warn("failed to load bm25 stats for segment", zap.Error(err))
-			return err
-		}
-	}
 
 	candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), infos...)
 	if err != nil {
@@ -506,10 +542,24 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	}
 
 	log.Debug("load delete...")
-	err = sd.loadStreamDelete(ctx, candidates, bm25Stats, infos, req, targetNodeID, worker)
+	err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker)
 	if err != nil {
 		log.Warn("load stream delete failed", zap.Error(err))
 		return err
+	}
+
+	err = sd.loadBM25Stats(ctx, infos, req)
+	if err != nil {
+		log.Warn("failed to load BM25 stats", zap.Error(err))
+		return err
+	}
+
+	// add candidate after load success
+	for _, candidate := range candidates {
+		log.Info("register sealed segment bfs into pko candidates",
+			zap.Int64("segmentID", candidate.ID()),
+		)
+		sd.pkOracle.Register(candidate, targetNodeID)
 	}
 
 	return sd.addDistributionIfVersionOK(req.GetLoadMeta().GetSchemaVersion(), entries...)
@@ -660,7 +710,6 @@ func (sd *shardDelegator) RefreshLevel0DeletionStats() {
 
 func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	candidates []*pkoracle.BloomFilterSet,
-	bm25Stats *typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats],
 	infos []*querypb.SegmentLoadInfo,
 	req *querypb.LoadSegmentsRequest,
 	targetNodeID int64,
@@ -745,28 +794,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			return err
 		}
 	}
-
-	// add candidate after load success
-	for _, candidate := range candidates {
-		log.Info("register sealed segment bfs into pko candidates",
-			zap.Int64("segmentID", candidate.ID()),
-		)
-		sd.pkOracle.Register(candidate, targetNodeID)
-	}
-
-	if sd.idfOracle != nil && bm25Stats != nil {
-		bm25Stats.Range(func(segmentID int64, stats map[int64]*storage.BM25Stats) bool {
-			log.Info("register sealed segment bm25 stats into idforacle",
-				zap.Int64("segmentID", segmentID),
-			)
-			sd.idfOracle.Register(segmentID, stats, segments.SegmentTypeSealed)
-			// continue iterating to register all segments' stats
-			return true
-		})
-	}
-
 	log.Info("load delete done")
-
 	return nil
 }
 
@@ -835,17 +863,20 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	sd.AddExcludedSegments(droppedInfos)
 
 	if len(sealed) > 0 {
-		sd.pkOracle.Remove(
+		removed := sd.pkOracle.Remove(
 			pkoracle.WithSegmentIDs(lo.Map(sealed, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })...),
 			pkoracle.WithSegmentType(commonpb.SegmentState_Sealed),
 			pkoracle.WithWorkerID(targetNodeID),
 		)
+		// Refund resources for removed sealed segment candidates
+		sd.pkOracle.RefundRemoved(removed)
 	}
 	if len(growing) > 0 {
 		sd.pkOracle.Remove(
 			pkoracle.WithSegmentIDs(lo.Map(growing, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })...),
 			pkoracle.WithSegmentType(commonpb.SegmentState_Growing),
 		)
+		// leave the bloom filter sets in growing segment be closed by Release()
 	}
 
 	var releaseErr error

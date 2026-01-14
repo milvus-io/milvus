@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/manager"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -38,6 +39,13 @@ func OptMixCoordClient(mixCoordClient *syncutil.Future[types.MixCoordClient]) op
 func OptStreamingCatalog(catalog metastore.StreamingCoordCataLog) optResourceInit {
 	return func(r *resourceImpl) {
 		r.streamingCatalog = catalog
+	}
+}
+
+// OptSession provides the session to the resource.
+func OptSession(session sessionutil.SessionInterface) optResourceInit {
+	return func(r *resourceImpl) {
+		r.session = session
 	}
 }
 
@@ -76,6 +84,7 @@ func Resource() *resourceImpl {
 type resourceImpl struct {
 	idAllocator                idalloc.Allocator
 	mixCoordClient             *syncutil.Future[types.MixCoordClient]
+	session                    sessionutil.SessionInterface
 	etcdClient                 *clientv3.Client
 	streamingCatalog           metastore.StreamingCoordCataLog
 	streamingNodeManagerClient manager.ManagerClient
@@ -100,6 +109,10 @@ func (r *resourceImpl) StreamingCatalog() metastore.StreamingCoordCataLog {
 // ETCD returns the etcd client.
 func (r *resourceImpl) ETCD() *clientv3.Client {
 	return r.etcdClient
+}
+
+func (r *resourceImpl) Session() sessionutil.SessionInterface {
+	return r.session
 }
 
 // StreamingNodeClient returns the streaming node client.

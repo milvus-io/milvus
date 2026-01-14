@@ -172,11 +172,15 @@ func (s *ZillizHighlightProviderSuite) TestZillizHighlightProvider_Highlight_Suc
 		"Deep learning is a type of machine learning.",
 		"Natural language processing uses machine learning techniques.",
 	}
-	params := map[string]string{"param1": "value1"}
 	expectedHighlights := [][]string{
 		{"Machine learning", "artificial intelligence"},
 		{"Deep learning", "machine learning"},
 		{"Natural language processing", "machine learning"},
+	}
+	expectedScores := [][]float32{
+		{0.9, 0.8},
+		{0.8, 0.7},
+		{0.7, 0.6},
 	}
 
 	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
@@ -184,8 +188,8 @@ func (s *ZillizHighlightProviderSuite) TestZillizHighlightProvider_Highlight_Suc
 	}).Build()
 	defer mock1.UnPatch()
 
-	mock2 := mockey.Mock((*zilliz.ZillizClient).Highlight).To(func(_ *zilliz.ZillizClient, _ context.Context, _ string, _ []string, _ map[string]string) ([][]string, error) {
-		return expectedHighlights, nil
+	mock2 := mockey.Mock((*zilliz.ZillizClient).Highlight).To(func(_ *zilliz.ZillizClient, _ context.Context, _ string, _ []string, _ map[string]string) ([][]string, [][]float32, error) {
+		return expectedHighlights, expectedScores, nil
 	}).Build()
 	defer mock2.UnPatch()
 
@@ -198,10 +202,11 @@ func (s *ZillizHighlightProviderSuite) TestZillizHighlightProvider_Highlight_Suc
 	s.NoError(err)
 	s.NotNil(provider)
 
-	highlights, err := provider.highlight(ctx, query, texts, params)
+	highlights, scores, err := provider.highlight(ctx, query, texts)
 
 	s.NoError(err)
 	s.Equal(expectedHighlights, highlights)
+	s.Equal(expectedScores, scores)
 }
 
 func (s *ZillizHighlightProviderSuite) TestZillizHighlightProvider_Highlight_Error() {
@@ -209,7 +214,6 @@ func (s *ZillizHighlightProviderSuite) TestZillizHighlightProvider_Highlight_Err
 	ctx := context.Background()
 	query := "test query"
 	texts := []string{"doc1", "doc2", "doc3"}
-	params := map[string]string{"param1": "value1"}
 	expectedError := errors.New("highlight service error")
 
 	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
@@ -217,8 +221,8 @@ func (s *ZillizHighlightProviderSuite) TestZillizHighlightProvider_Highlight_Err
 	}).Build()
 	defer mock1.UnPatch()
 
-	mock2 := mockey.Mock((*zilliz.ZillizClient).Highlight).To(func(_ *zilliz.ZillizClient, _ context.Context, _ string, _ []string, _ map[string]string) ([][]string, error) {
-		return nil, expectedError
+	mock2 := mockey.Mock((*zilliz.ZillizClient).Highlight).To(func(_ *zilliz.ZillizClient, _ context.Context, _ string, _ []string, _ map[string]string) ([][]string, [][]float32, error) {
+		return nil, nil, expectedError
 	}).Build()
 	defer mock2.UnPatch()
 
@@ -232,9 +236,10 @@ func (s *ZillizHighlightProviderSuite) TestZillizHighlightProvider_Highlight_Err
 	s.NotNil(provider)
 
 	// Test the highlight method
-	highlights, err := provider.highlight(ctx, query, texts, params)
+	highlights, scores, err := provider.highlight(ctx, query, texts)
 
 	s.Error(err)
 	s.Nil(highlights)
+	s.Nil(scores)
 	s.Equal(expectedError, err)
 }
