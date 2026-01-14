@@ -1919,6 +1919,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		log.Warn("failed to create schema helper", zap.String("name", schema.GetName()), zap.Error(err))
 		return nil, err
 	}
+	indexedFields := make(map[int64]struct{})
 	ctx := context.Background()
 
 	// PART 1: calculate size of indexes
@@ -1929,6 +1930,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			if err != nil {
 				return nil, err
 			}
+			indexedFields[fieldID] = struct{}{}
 
 			isVectorType := typeutil.IsVectorType(fieldSchema.GetDataType())
 
@@ -2041,10 +2043,12 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			continue
 		}
 
-		if !multiplyFactor.TieredEvictionEnabled || needWarmup {
-			interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && supportInterimIndexDataType
-			if interimIndexEnable {
-				segMemoryLoadingSize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
+		if _, ok := indexedFields[fieldID]; !ok {
+			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+				interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && supportInterimIndexDataType
+				if interimIndexEnable {
+					segMemoryLoadingSize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
+				}
 			}
 		}
 
