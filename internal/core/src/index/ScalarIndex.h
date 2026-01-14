@@ -156,11 +156,6 @@ class ScalarIndex : public IndexBase {
         return false;
     }
 
-    virtual bool
-    IsNestedIndex() const {
-        return false;
-    }
-
     virtual int64_t
     Size() = 0;
 

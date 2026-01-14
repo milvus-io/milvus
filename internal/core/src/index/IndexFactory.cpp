@@ -624,6 +624,48 @@ IndexFactory::CreateNestedIndexScalarIndexSort(
 }
 
 IndexBasePtr
+IndexFactory::CreateScalarIndex(
+    const CreateIndexInfo& create_index_info,
+    const storage::FileManagerContext& file_manager_context) {
+    auto data_type = create_index_info.field_type;
+
+    if (IsStructSubField(create_index_info.field_name)) {
+        assert(data_type == DataType::ARRAY);
+        return CreateNestedIndex(create_index_info.index_type,
+                                 create_index_info.tantivy_index_version,
+                                 file_manager_context);
+    }
+
+    switch (data_type) {
+        case DataType::BOOL:
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+        case DataType::FLOAT:
+        case DataType::DOUBLE:
+        case DataType::VARCHAR:
+        case DataType::STRING:
+        case DataType::TIMESTAMPTZ:
+            return CreatePrimitiveScalarIndex(
+                data_type, create_index_info, file_manager_context);
+        case DataType::ARRAY: {
+            return CreateCompositeScalarIndex(create_index_info,
+                                              file_manager_context);
+        }
+        case DataType::JSON: {
+            return CreateJsonIndex(create_index_info, file_manager_context);
+        }
+        case DataType::GEOMETRY: {
+            return CreateGeometryIndex(create_index_info.index_type,
+                                       file_manager_context);
+        }
+        default:
+            ThrowInfo(DataTypeInvalid, "Invalid data type:{}", data_type);
+    }
+}
+
+IndexBasePtr
 IndexFactory::CreateVectorIndex(
     const CreateIndexInfo& create_index_info,
     const storage::FileManagerContext& file_manager_context,
