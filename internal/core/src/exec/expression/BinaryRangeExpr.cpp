@@ -281,7 +281,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         return res;
     }
 
-    auto real_batch_size = GetNextBatchSize();
+    auto real_batch_size =
+        GetNextRealBatchSize(nullptr, expr_->column_.element_level_);
     if (real_batch_size == 0) {
         return nullptr;
     }
@@ -327,7 +328,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     }
 
     auto real_batch_size =
-        has_offset_input_ ? input->size() : GetNextBatchSize();
+        GetNextRealBatchSize(input, expr_->column_.element_level_);
     if (real_batch_size == 0) {
         return nullptr;
     }
@@ -433,7 +434,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     int64_t processed_size;
     if (has_offset_input_) {
         if (expr_->column_.element_level_) {
-            // For element-level filtering
+            // For element-level filtering with offset input
             processed_size = ProcessElementLevelByOffsets<T>(execute_sub_batch,
                                                              skip_index_func,
                                                              input,
@@ -452,10 +453,14 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
                                                      val2);
         }
     } else {
-        AssertInfo(!expr_->column_.element_level_,
-                   "Element-level filtering is not supported without offsets");
-        processed_size = ProcessDataChunks<T>(
-            execute_sub_batch, skip_index_func, res, valid_res, val1, val2);
+        if (expr_->column_.element_level_) {
+            // For element-level filtering without offset input (brute force)
+            processed_size = ProcessDataChunksForElementLevel<T>(
+                execute_sub_batch, skip_index_func, res, valid_res, val1, val2);
+        } else {
+            processed_size = ProcessDataChunks<T>(
+                execute_sub_batch, skip_index_func, res, valid_res, val1, val2);
+        }
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
