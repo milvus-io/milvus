@@ -381,7 +381,6 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        nb = 100
 
         # 1. Create binary vector collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
@@ -1698,7 +1697,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         # 2. Insert binary data multiple times
         nums = 2
         start_id = 0
-        for i in range(nums):
+        for _ in range(nums):
             # Generate data with unique primary keys for each insert
             rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema, start=start_id)
             results = self.insert(client, collection_name, rows)[0]
