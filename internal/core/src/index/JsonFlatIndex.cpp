@@ -57,11 +57,14 @@ JsonFlatIndex::build_index_for_json(
                     }
                     std::string_view str = str_result.value();
                     // Resize scratch buffer if needed (with some growth factor)
-                    if (scratch_buffer.size() < str.size()) {
+                    // Need space for str.size() + 1 for null terminator
+                    if (scratch_buffer.size() < str.size() + 1) {
                         scratch_buffer =
-                            simdjson::padded_string(str.size() * 2);
+                            simdjson::padded_string((str.size() + 1) * 2);
                     }
                     std::memcpy(scratch_buffer.data(), str.data(), str.size());
+                    // Add null terminator - required for C string FFI to Rust
+                    scratch_buffer.data()[str.size()] = '\0';
                     // Create Json referencing scratch buffer (non-owning)
                     Json subpath_json(scratch_buffer.data(), str.size());
                     wrapper_->add_json_data(&subpath_json, 1, offset++);
