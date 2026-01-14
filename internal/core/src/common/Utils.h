@@ -321,8 +321,7 @@ SparseBytesToRows(const Iterable& rows, const bool validate = false) {
 // SparseRowsToProto converts a list of knowhere::sparse::SparseRow<SparseValueType> to
 // a milvus::proto::schema::SparseFloatArray. The resulting proto is a deep copy
 // of the source data. source(i) returns the i-th row to be copied.
-inline void
-SparseRowsToProto(
+inline void SparseRowsToProto(
     const std::function<
         const knowhere::sparse::SparseRow<SparseValueType>*(size_t)>& source,
     int64_t rows,
