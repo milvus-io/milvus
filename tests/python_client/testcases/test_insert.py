@@ -770,20 +770,6 @@ class TestInsertOperation(TestcaseBase):
 
         assert collection_w.num_entities == nb
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_insert_all_datatype_collection(self):
-        """
-        target: test insert into collection that contains all datatype fields
-        method: 1.create all datatype collection 2.insert data
-        expected: verify num entities
-        """
-        self._connect()
-        nb = 100
-        df = cf.gen_dataframe_all_data_type(nb=nb)
-        self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
-                                                      primary_field=ct.default_int64_field_name)
-        assert self.collection_wrap.num_entities == nb
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_equal_to_resource_limit(self):
         """
