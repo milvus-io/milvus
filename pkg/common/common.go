@@ -231,6 +231,11 @@ const (
 	CollectionResourceGroups = "collection.resource_groups"
 )
 
+// Field properties key
+const (
+	FieldDescriptionKey = "field.description"
+)
+
 // common properties
 const (
 	MmapEnabledKey             = "mmap.enabled"
