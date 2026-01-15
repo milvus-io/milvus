@@ -2983,3 +2983,46 @@ func (s *CollectionFunctionSuite) TestDropCollectionFunctionNormal() {
 		validateRequestBodyTestCases(s.T(), s.testEngine, addFunctionTestCases, false)
 	})
 }
+
+func TestTruncateCollection(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().TruncateCollection(mock.Anything, mock.Anything).Return(&milvuspb.TruncateCollectionResponse{
+		Status: commonSuccessStatus,
+	}, nil).Times(2)
+	testEngine := initHTTPServerV2(mp, false)
+
+	testCases := []requestBodyTestCase{
+		{
+			path:        versionalV2(CollectionCategory, TruncateAction),
+			requestBody: []byte(`{"dbName": "default", "collectionName": "` + DefaultCollectionName + `"}`),
+			errCode:     0,
+			errMsg:      "",
+		},
+		{
+			path:        versionalV2(CollectionCategory, TruncateAction),
+			requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `"}`),
+			errCode:     0,
+			errMsg:      "",
+		},
+		{
+			path:        versionalV2(CollectionCategory, TruncateAction),
+			requestBody: []byte(`{"dbName": "db", "collectionName": ""}`),
+			errCode:     1802,
+			errMsg:      "missing required parameters",
+		},
+		{
+			path:        versionalV2(CollectionCategory, TruncateAction),
+			requestBody: []byte(`invalid json`),
+			errCode:     1801,
+			errMsg:      "can only accept json format request",
+		},
+	}
+
+	for _, testcase := range testCases {
+		sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
+	}
+}
