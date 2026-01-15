@@ -408,6 +408,22 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 		for i, v := range valids {
 			fmt.Printf("\t\t%d : %v\n", i, v)
 		}
+	// print the mol pickle bytes
+	case schemapb.DataType_Mol:
+		rows, err := reader.GetPayloadLengthFromReader()
+		if err != nil {
+			return err
+		}
+		val, valids, err := reader.GetMolFromPayload()
+		if err != nil {
+			return err
+		}
+		for i := 0; i < rows; i++ {
+			fmt.Printf("\t\t%d : [MOL data, %d bytes]\n", i, len(val[i]))
+		}
+		for i, v := range valids {
+			fmt.Printf("\t\t%d : %v\n", i, v)
+		}
 	case schemapb.DataType_SparseFloatVector:
 		sparseData, _, _, err := reader.GetSparseFloatVectorFromPayload()
 		if err != nil {

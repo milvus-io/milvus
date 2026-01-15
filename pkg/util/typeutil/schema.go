@@ -82,7 +82,7 @@ func getVarFieldLength(fieldSchema *schemapb.FieldSchema, policy getVariableFiel
 			return 0, fmt.Errorf("unrecognized getVariableFieldLengthPolicy %v", policy)
 		}
 		// geometry field max length now consider the same as json field, which is 512 bytes
-	case schemapb.DataType_Array, schemapb.DataType_JSON, schemapb.DataType_Geometry:
+	case schemapb.DataType_Array, schemapb.DataType_JSON, schemapb.DataType_Geometry, schemapb.DataType_Mol:
 		return GetDynamicFieldEstimateLength(), nil
 	default:
 		return 0, fmt.Errorf("field %s is not a variable-length type", fieldSchema.DataType.String())
@@ -239,6 +239,10 @@ func CalcScalarSize(column *schemapb.FieldData) int {
 		for _, str := range column.GetScalars().GetGeometryData().GetData() {
 			res += len(str)
 		}
+	case schemapb.DataType_Mol:
+		for _, data := range column.GetScalars().GetMolData().GetData() {
+			res += len(data)
+		}
 	default:
 		panic("Unknown data type:" + column.Type.String())
 	}
@@ -308,6 +312,11 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 				return 0, fmt.Errorf("offset out range of field datas")
 			}
 			res += len(fs.GetScalars().GetGeometryData().GetData()[rowOffset])
+		case schemapb.DataType_Mol:
+			if rowOffset >= len(fs.GetScalars().GetMolData().GetData()) {
+				return 0, errors.New("offset out range of field datas")
+			}
+			res += len(fs.GetScalars().GetMolData().GetData()[rowOffset])
 		case schemapb.DataType_BinaryVector,
 			schemapb.DataType_FloatVector,
 			schemapb.DataType_Float16Vector,
@@ -786,6 +795,12 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 						Data: make([][]byte, 0, topK),
 					},
 				}
+			case *schemapb.ScalarField_MolData:
+				scalar.Scalars.Data = &schemapb.ScalarField_MolData{
+					MolData: &schemapb.MolArray{
+						Data: make([][]byte, 0, topK),
+					},
+				}
 			case *schemapb.ScalarField_ArrayData:
 				scalar.Scalars.Data = &schemapb.ScalarField_ArrayData{
 					ArrayData: &schemapb.ArrayArray{
@@ -1062,6 +1077,27 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				} else {
 					dstScalar.GetGeometryWktData().Data = append(dstScalar.GetGeometryWktData().Data, srcScalar.GeometryWktData.Data[idx])
 				}
+			case *schemapb.ScalarField_MolData:
+				if dstScalar.GetMolData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_MolData{
+						MolData: &schemapb.MolArray{
+							Data: [][]byte{srcScalar.MolData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetMolData().Data = append(dstScalar.GetMolData().Data, srcScalar.MolData.Data[idx])
+				}
+				appendSize += int64(unsafe.Sizeof(srcScalar.MolData.Data[idx]))
+			case *schemapb.ScalarField_MolSmilesData:
+				if dstScalar.GetMolSmilesData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_MolSmilesData{
+						MolSmilesData: &schemapb.MolSmilesArray{
+							Data: []string{srcScalar.MolSmilesData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetMolSmilesData().Data = append(dstScalar.GetMolSmilesData().Data, srcScalar.MolSmilesData.Data[idx])
+				}
 			}
 		case *schemapb.FieldData_Vectors:
 			dim := fieldType.Vectors.Dim
@@ -1215,6 +1251,8 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 				dstScalar.GetJsonData().Data = dstScalar.GetJsonData().Data[:len(dstScalar.GetJsonData().Data)-1]
 			case *schemapb.ScalarField_GeometryData:
 				dstScalar.GetGeometryData().Data = dstScalar.GetGeometryData().Data[:len(dstScalar.GetGeometryData().Data)-1]
+			case *schemapb.ScalarField_MolData:
+				dstScalar.GetMolData().Data = dstScalar.GetMolData().Data[:len(dstScalar.GetMolData().Data)-1]
 			}
 		case *schemapb.FieldData_Vectors:
 			if dst[i] == nil || dst[i].GetVectors() == nil {
@@ -1363,6 +1401,13 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 			case *schemapb.ScalarField_GeometryData:
 				updateData := updateScalar.GetGeometryData()
 				baseData := baseScalar.GetGeometryData()
+				if updateData != nil && baseData != nil &&
+					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
+					baseData.Data[baseIdx] = updateData.Data[updateIdx]
+				}
+			case *schemapb.ScalarField_MolData:
+				updateData := updateScalar.GetMolData()
+				baseData := baseScalar.GetMolData()
 				if updateData != nil && baseData != nil &&
 					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
 					baseData.Data[baseIdx] = updateData.Data[updateIdx]
@@ -1586,6 +1631,16 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 					}
 				} else {
 					dstScalar.GetGeometryData().Data = append(dstScalar.GetGeometryData().Data, srcScalar.GeometryData.Data...)
+				}
+			case *schemapb.ScalarField_MolData:
+				if dstScalar.GetMolData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_MolData{
+						MolData: &schemapb.MolArray{
+							Data: srcScalar.MolData.Data,
+						},
+					}
+				} else {
+					dstScalar.GetMolData().Data = append(dstScalar.GetMolData().Data, srcScalar.MolData.Data...)
 				}
 			case *schemapb.ScalarField_BytesData:
 				if dstScalar.GetBytesData() == nil {

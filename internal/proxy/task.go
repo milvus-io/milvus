@@ -476,6 +476,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// validate MOL field (temporarily disabled)
+	if err := validateMOLField(t.schema); err != nil {
+		return err
+	}
+
 	// validate partition key mode
 	if err := t.validatePartitionKey(ctx); err != nil {
 		return err
