@@ -136,6 +136,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		log.Ctx(ctx).Warn("fail to get collection info", zap.Error(err))
 		return err
 	}
+
 	if it.schemaTimestamp != 0 {
 		if it.schemaTimestamp != colInfo.updateTimestamp {
 			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)

@@ -1680,6 +1680,11 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual compaction successfully", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.meta = &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
+		svr.meta.collections.Insert(1, &collectionInfo{
+			ID:     1,
+			Schema: &schemapb.CollectionSchema{},
+		})
 		mockTrigger := NewMockTrigger(t)
 		svr.compactionTrigger = mockTrigger
 		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(1, nil)
@@ -1698,6 +1703,11 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual l0 compaction successfully", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.meta = &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
+		svr.meta.collections.Insert(1, &collectionInfo{
+			ID:     1,
+			Schema: &schemapb.CollectionSchema{},
+		})
 		mockTriggerManager := NewMockTriggerManager(t)
 		svr.compactionTriggerManager = mockTriggerManager
 		mockTriggerManager.EXPECT().ManualTrigger(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
@@ -1717,6 +1727,11 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual compaction failure", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.meta = &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
+		svr.meta.collections.Insert(1, &collectionInfo{
+			ID:     1,
+			Schema: &schemapb.CollectionSchema{},
+		})
 		mockTrigger := NewMockTrigger(t)
 		svr.compactionTrigger = mockTrigger
 		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(0, errors.New("mock error"))

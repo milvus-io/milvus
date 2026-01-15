@@ -77,6 +77,17 @@ import (
 
 const moduleName = "Proxy"
 
+// checkExternalCollectionBlockedForWrite checks if the collection is external and returns error if so.
+// External collections do not support write operations (insert, delete, upsert, flush, etc).
+func checkExternalCollectionBlockedForWrite(ctx context.Context, dbName, collName, operation string) error {
+	collSchema, _ := globalMetaCache.GetCollectionSchema(ctx, dbName, collName)
+	if collSchema != nil && typeutil.IsExternalCollection(collSchema.CollectionSchema) {
+		return merr.WrapErrParameterInvalidMsg(
+			"%s operation is not supported for external collection %s", operation, collName)
+	}
+	return nil
+}
+
 // GetComponentStates gets the state of Proxy.
 func (node *Proxy) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	stats := &milvuspb.ComponentStates{
@@ -940,6 +951,13 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 	if err := merr.CheckRPCCall(dresp, err); err != nil {
 		return merr.Status(err), nil
 	}
+
+	// Check for external collection - add field is not supported
+	if typeutil.IsExternalCollection(dresp.GetSchema()) {
+		return merr.Status(merr.WrapErrParameterInvalidMsg(
+			"add field operation is not supported for external collection %s", request.GetCollectionName())), nil
+	}
+
 	task := &addCollectionFieldTask{
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
@@ -1415,6 +1433,11 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 	method := "AlterCollectionField"
 	tr := timerecord.NewTimeRecorder(method)
 
+	// Check for external collection - alter field is not supported
+	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "alter field"); err != nil {
+		return merr.Status(err), nil
+	}
+
 	act := &alterCollectionFieldTask{
 		ctx:                         ctx,
 		Condition:                   NewTaskCondition(ctx),
@@ -1467,6 +1490,11 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 // CreatePartition create a partition in specific collection.
 func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	// Check for external collection - create partition is not supported
+	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "create partition"); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -1526,6 +1554,11 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 // DropPartition drop a partition in specific collection.
 func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	// Check for external collection - drop partition is not supported
+	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "drop partition"); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -2530,6 +2563,13 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		}, nil
 	}
 
+	// Check for external collection - insert is not supported
+	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "insert"); err != nil {
+		return &milvuspb.MutationResult{
+			Status: merr.Status(err),
+		}, nil
+	}
+
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
@@ -2676,6 +2716,13 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
+	// Check for external collection - delete is not supported
+	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "delete"); err != nil {
+		return &milvuspb.MutationResult{
+			Status: merr.Status(err),
+		}, nil
+	}
+
 	tr := timerecord.NewTimeRecorder(method)
 
 	var limiter types.Limiter
@@ -2772,6 +2819,14 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 			Status: merr.Status(err),
 		}, nil
 	}
+
+	// Check for external collection - upsert is not supported
+	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "upsert"); err != nil {
+		return &milvuspb.MutationResult{
+			Status: merr.Status(err),
+		}, nil
+	}
+
 	method := "Upsert"
 	tr := timerecord.NewTimeRecorder(method)
 
@@ -3649,6 +3704,14 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
+	}
+
+	// Check for external collection - flush is not supported
+	for _, collName := range request.GetCollectionNames() {
+		if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), collName, "flush"); err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
 	}
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Flush")
@@ -4839,7 +4902,29 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 		}
 	}
 
-	resp, err := node.mixCoord.ManualCompaction(ctx, req)
+	// Check for external collection - manual compaction is not supported
+	// Only check if we have collection identifier (collectionID > 0 or collectionName not empty)
+	if req.GetCollectionID() > 0 || req.GetCollectionName() != "" {
+		collInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), req.GetCollectionID())
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		if typeutil.IsExternalCollection(collInfo.schema.CollectionSchema) {
+			var collIdentifier string
+			if req.GetCollectionName() != "" {
+				collIdentifier = fmt.Sprintf("name=%s", req.GetCollectionName())
+			} else {
+				collIdentifier = fmt.Sprintf("id=%d", req.GetCollectionID())
+			}
+			resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg(
+				"manual compaction is not supported for external collection (%s)", collIdentifier))
+			return resp, nil
+		}
+	}
+
+	var err error
+	resp, err = node.mixCoord.ManualCompaction(ctx, req)
 	log.Info("received ManualCompaction response",
 		zap.Any("resp", resp),
 		zap.Error(err))
@@ -6424,6 +6509,12 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
 	}
+
+	// Check for external collection - import is not supported
+	if err := checkExternalCollectionBlockedForWrite(ctx, req.GetDbName(), req.GetCollectionName(), "import"); err != nil {
+		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
+	}
+
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("collectionName", req.GetCollectionName()),
