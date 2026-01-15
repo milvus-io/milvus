@@ -1,6 +1,9 @@
 import time
+import json
 import pytest
 import numpy as np
+from minio import Minio
+import pyetcd
 
 from base.client_v2_base import TestMilvusClientV2Base
 from utils.util_log import test_log as log
@@ -8,6 +11,17 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from pymilvus import DataType
+
+# MinIO configuration for GC verification tests
+MINIO_ENDPOINT = "10.100.36.174:9000"
+MINIO_ACCESS_KEY = "minioadmin"
+MINIO_SECRET_KEY = "minioadmin"
+MINIO_BUCKET = "snapshot-test"
+
+# etcd configuration for snapshot metadata verification
+ETCD_HOST = "10.100.36.173"
+ETCD_PORT = 2379
+ETCD_ROOT_PATH = "snapshot-test"  # Milvus deployment name as etcd root path
 
 
 prefix = "snapshot"
@@ -1557,3 +1571,1270 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
                 raise Exception(f"Restore snapshot failed: {state['reason']}")
             time.sleep(1)
         raise TimeoutError(f"Restore snapshot job {job_id} did not complete within {timeout}s")
+
+
+class TestMilvusClientSnapshotGC(TestMilvusClientV2Base):
+    """
+    GC Protection Tests for Snapshot Feature (L3)
+
+    These tests verify that snapshot-referenced segments are protected from GC.
+    Requires special test environment:
+    - Milvus cluster with short GC interval (dataCoord.gc.interval: 10s)
+    - Short retention duration (common.retentionDuration: 60s)
+
+    Test Environment Configuration (snapshot-test-milvus.yaml):
+        dataCoord:
+          gc:
+            interval: 10
+            missingTolerance: 10
+            dropTolerance: 10
+        common:
+          gcConfirm:
+            interval: 5
+          retentionDuration: 60
+    """
+
+    def _get_minio_client(self):
+        """Get MinIO client for segment verification"""
+        return Minio(
+            MINIO_ENDPOINT,
+            access_key=MINIO_ACCESS_KEY,
+            secret_key=MINIO_SECRET_KEY,
+            secure=False
+        )
+
+    def _get_etcd_client(self):
+        """Get pyetcd client for metadata verification"""
+        return pyetcd.client(host=ETCD_HOST, port=ETCD_PORT)
+
+    def _etcd_get_prefix_raw(self, prefix):
+        """
+        Get all key-value pairs with a prefix from etcd.
+        Returns list of (key, value) tuples with raw bytes.
+        """
+        etcd_client = self._get_etcd_client()
+        try:
+            results = []
+            for value, metadata in etcd_client.get_prefix(prefix):
+                key = metadata.key.decode('utf-8')
+                results.append((key, value))
+            return results
+        finally:
+            etcd_client.close()
+
+    def _etcd_get_prefix(self, prefix):
+        """
+        Get all values with a prefix from etcd.
+        Returns list of parsed JSON objects.
+        """
+        etcd_client = self._get_etcd_client()
+        try:
+            values = []
+            for value, metadata in etcd_client.get_prefix(prefix):
+                try:
+                    data = json.loads(value.decode('utf-8'))
+                    values.append(data)
+                except json.JSONDecodeError:
+                    continue
+            return values
+        finally:
+            etcd_client.close()
+
+    def _parse_snapshot_info_from_protobuf(self, raw_bytes):
+        """
+        Parse SnapshotInfo from protobuf-encoded data.
+
+        Based on data_coord.proto definition:
+        message SnapshotInfo {
+          string name = 1;
+          int64 id = 2;
+          string description = 3;
+          int64 collection_id = 4;
+          repeated int64 partition_ids = 5;
+          int64 create_ts = 6;
+          string s3_location = 7;
+        }
+        """
+        from google.protobuf.internal.decoder import _DecodeVarint32
+
+        result = {}
+        pos = 0
+        while pos < len(raw_bytes):
+            try:
+                # Read field tag
+                tag, new_pos = _DecodeVarint32(raw_bytes, pos)
+                pos = new_pos
+
+                field_number = tag >> 3
+                wire_type = tag & 0x7
+
+                if wire_type == 0:  # Varint (int64)
+                    value, new_pos = _DecodeVarint32(raw_bytes, pos)
+                    pos = new_pos
+                    if field_number == 2:
+                        result['id'] = value
+                    elif field_number == 4:
+                        result['collection_id'] = value
+                    elif field_number == 6:
+                        result['create_ts'] = value
+                elif wire_type == 2:  # Length-delimited (string)
+                    length, new_pos = _DecodeVarint32(raw_bytes, pos)
+                    pos = new_pos
+                    value = raw_bytes[pos:pos+length]
+                    pos += length
+                    try:
+                        str_value = value.decode('utf-8')
+                        if field_number == 1:
+                            result['name'] = str_value
+                        elif field_number == 3:
+                            result['description'] = str_value
+                        elif field_number == 7:
+                            result['s3_location'] = str_value
+                    except:
+                        pass
+                else:
+                    # Skip unknown wire types
+                    break
+            except Exception:
+                break
+        return result
+
+    def _parse_snapshot_name_from_protobuf(self, raw_bytes):
+        """
+        Extract snapshot name from protobuf-encoded data.
+        Uses proper protobuf parsing instead of regex hack.
+        """
+        info = self._parse_snapshot_info_from_protobuf(raw_bytes)
+        return info.get('name')
+
+    def _get_snapshot_metadata_from_etcd(self, snapshot_name):
+        """
+        Get snapshot metadata from etcd.
+        Milvus stores snapshot info under: {root_path}/meta/datacoord-meta/snapshot/{collection_id}/{snapshot_id}
+        Data is protobuf encoded.
+        """
+        prefix = f"{ETCD_ROOT_PATH}/meta/datacoord-meta/snapshot/"
+        raw_data = self._etcd_get_prefix_raw(prefix)
+
+        for key, value in raw_data:
+            # Extract snapshot name from protobuf data
+            name = self._parse_snapshot_name_from_protobuf(value)
+            if name == snapshot_name:
+                # Parse key to get collection_id and snapshot_id
+                # Key format: {root}/meta/datacoord-meta/snapshot/{collection_id}/{snapshot_id}
+                parts = key.split('/')
+                if len(parts) >= 2:
+                    collection_id = parts[-2]
+                    snapshot_id = parts[-1]
+                    log.info(f"Found snapshot in etcd: name={name}, collection_id={collection_id}, snapshot_id={snapshot_id}")
+                    return {
+                        "name": name,
+                        "collection_id": collection_id,
+                        "snapshot_id": snapshot_id,
+                        "etcd_key": key,
+                        "raw_data": value
+                    }
+        return None
+
+    def _get_snapshot_segment_refs_from_etcd(self, collection_id, snapshot_id):
+        """
+        Get segment references for a snapshot.
+        Segment refs are stored in MinIO manifest files, not in etcd.
+        Path: files/snapshots/{collection_id}/manifests/{snapshot_id}/*.avro
+        Returns list of manifest file paths.
+        """
+        minio_client = self._get_minio_client()
+        prefix = f"files/snapshots/{collection_id}/manifests/{snapshot_id}/"
+        segment_refs = []
+        try:
+            for obj in minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True):
+                if obj.object_name.endswith('.avro'):
+                    segment_refs.append({
+                        "manifest_file": obj.object_name,
+                        "size": obj.size
+                    })
+            log.info(f"Found {len(segment_refs)} manifest files for snapshot {snapshot_id}")
+        except Exception as e:
+            log.warning(f"Error listing manifest files: {e}")
+        return segment_refs
+
+    def _get_snapshot_metadata_json_from_minio(self, collection_id, snapshot_id):
+        """
+        Get snapshot metadata JSON from MinIO.
+        Path: files/snapshots/{collection_id}/metadata/{snapshot_id}.json
+        """
+        minio_client = self._get_minio_client()
+        path = f"files/snapshots/{collection_id}/metadata/{snapshot_id}.json"
+        try:
+            response = minio_client.get_object(MINIO_BUCKET, path)
+            content = json.loads(response.read().decode('utf-8'))
+            response.close()
+            response.release_conn()
+            log.info(f"Found snapshot metadata JSON: {path}")
+            return content
+        except Exception as e:
+            log.warning(f"Error reading snapshot metadata JSON: {e}")
+            return None
+
+    def _list_all_snapshots_from_etcd(self):
+        """List all snapshots from etcd"""
+        prefix = f"{ETCD_ROOT_PATH}/meta/datacoord-meta/snapshot/"
+        raw_data = self._etcd_get_prefix_raw(prefix)
+        snapshots = []
+        for key, value in raw_data:
+            name = self._parse_snapshot_name_from_protobuf(value)
+            if name:
+                parts = key.split('/')
+                if len(parts) >= 2:
+                    snapshots.append({
+                        "name": name,
+                        "collection_id": parts[-2],
+                        "snapshot_id": parts[-1],
+                        "etcd_key": key
+                    })
+        log.info(f"Found {len(snapshots)} snapshots in etcd")
+        return snapshots
+
+    def _get_segment_gc_status_from_etcd(self, segment_id):
+        """
+        Check segment status in etcd to verify GC protection.
+        Segments stored under: {root_path}/meta/datacoord-meta/s/{collection_id}/{partition_id}/{segment_id}
+        """
+        prefix = f"{ETCD_ROOT_PATH}/meta/datacoord-meta/s/"
+        segments = self._etcd_get_prefix(prefix)
+        for data in segments:
+            if data.get("ID") == segment_id:
+                log.info(f"Found segment {segment_id}: state={data.get('State')}")
+                return data
+        return None
+
+    def _verify_snapshot_exists_in_etcd(self, snapshot_name):
+        """Verify snapshot metadata exists in etcd"""
+        metadata = self._get_snapshot_metadata_from_etcd(snapshot_name)
+        return metadata is not None
+
+    def _get_segment_files_count(self, collection_id):
+        """Count segment files for a collection in MinIO"""
+        minio_client = self._get_minio_client()
+        # Segment files are stored under files/insert_log/{collection_id}/
+        # and files/index_files/{collection_id}/
+        prefixes = [
+            f"files/insert_log/{collection_id}/",
+            f"files/index_files/{collection_id}/",
+        ]
+        total_count = 0
+        for prefix in prefixes:
+            objects = list(minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True))
+            total_count += len(objects)
+        return total_count
+
+    def _list_segment_files(self, collection_id):
+        """List all segment files for a collection in MinIO"""
+        minio_client = self._get_minio_client()
+        prefixes = [
+            f"files/insert_log/{collection_id}/",
+            f"files/index_files/{collection_id}/",
+        ]
+        files = []
+        for prefix in prefixes:
+            objects = list(minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True))
+            files.extend([obj.object_name for obj in objects])
+        return files
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_snapshot_protects_segments_from_gc(self):
+        """
+        target: verify snapshot-referenced segments are not GC'd
+        method:
+            1. Create collection, insert data, flush to create segment
+            2. Record segment files count in MinIO
+            3. Create snapshot
+            4. Drop original collection (normally triggers GC)
+            5. Wait for multiple GC cycles
+            6. Verify segment files still exist in MinIO
+            7. Restore snapshot
+        expected: segment files should remain, restore should succeed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_collection_name = cf.gen_unique_str(prefix + "_restored")
+
+        # Create collection and insert data
+        self.create_collection(client, collection_name, default_dim)
+
+        # Get collection ID for MinIO verification
+        collection_info = client.describe_collection(collection_name)
+        collection_id = collection_info.get("collection_id")
+        log.info(f"Created collection: {collection_name}, ID: {collection_id}")
+
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(1000)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Check initial segment files count in MinIO
+        initial_files_count = self._get_segment_files_count(collection_id)
+        log.info(f"Initial segment files count in MinIO: {initial_files_count}")
+        assert initial_files_count > 0, "Should have segment files after flush"
+
+        # Create snapshot to protect segments
+        self.create_snapshot(client, collection_name, snapshot_name)
+        log.info(f"Created snapshot: {snapshot_name}")
+
+        # Drop original collection
+        self.drop_collection(client, collection_name)
+        log.info(f"Dropped collection: {collection_name}")
+
+        # Wait for multiple GC cycles (GC interval is 10s)
+        gc_wait_time = 60  # Wait 60s for multiple GC cycles
+        log.info(f"Waiting {gc_wait_time}s for GC cycles...")
+        time.sleep(gc_wait_time)
+
+        # Verify segment files still exist in MinIO (protected by snapshot)
+        protected_files_count = self._get_segment_files_count(collection_id)
+        log.info(f"Segment files count after GC cycles (should be protected): {protected_files_count}")
+        assert protected_files_count > 0, \
+            f"Segment files should still exist (protected by snapshot), but got {protected_files_count}"
+
+        # Restore snapshot - should succeed because snapshot protects segments
+        log.info(f"Restoring snapshot to: {restored_collection_name}")
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        self._wait_for_restore_complete(client, job_id, timeout=120)
+
+        # Verify all data is intact
+        self.load_collection(client, restored_collection_name)
+        res, _ = self.query(client, restored_collection_name,
+                            filter="id >= 0", output_fields=["count(*)"])
+        assert res[0]["count(*)"] == 1000, \
+            f"Expected 1000 rows after GC cycles, got {res[0]['count(*)']}"
+
+        log.info("SUCCESS: Snapshot protected segments from GC (verified in MinIO)")
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name)
+        self.drop_collection(client, restored_collection_name)
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_segments_gc_after_snapshot_drop(self):
+        """
+        target: verify segments are GC'd after snapshot is dropped
+        method:
+            1. Create collection, insert data, flush
+            2. Record segment files count in MinIO
+            3. Create snapshot
+            4. Drop original collection
+            5. Verify segments still exist (protected by snapshot)
+            6. Drop snapshot
+            7. Wait for GC cycles
+            8. Verify segments are cleaned from MinIO
+        expected: after snapshot dropped, segment files should be removed by GC
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+
+        # Create collection and insert data
+        self.create_collection(client, collection_name, default_dim)
+
+        # Get collection ID for MinIO verification
+        collection_info = client.describe_collection(collection_name)
+        collection_id = collection_info.get("collection_id")
+        log.info(f"Created collection: {collection_name}, ID: {collection_id}")
+
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(500)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Check initial segment files count in MinIO
+        initial_files_count = self._get_segment_files_count(collection_id)
+        log.info(f"Initial segment files count in MinIO: {initial_files_count}")
+        assert initial_files_count > 0, "Should have segment files after flush"
+
+        # Create snapshot to protect segments
+        self.create_snapshot(client, collection_name, snapshot_name)
+        log.info(f"Created snapshot: {snapshot_name}")
+
+        # Drop original collection
+        self.drop_collection(client, collection_name)
+        log.info(f"Dropped collection: {collection_name}")
+
+        # Wait a bit and verify segments still exist (protected by snapshot)
+        time.sleep(30)
+        protected_files_count = self._get_segment_files_count(collection_id)
+        log.info(f"Segment files count after drop collection (snapshot protected): {protected_files_count}")
+        assert protected_files_count > 0, "Segment files should still exist (protected by snapshot)"
+
+        # Drop snapshot - this releases segment protection
+        self.drop_snapshot(client, snapshot_name)
+        log.info(f"Dropped snapshot: {snapshot_name}")
+
+        # Wait for GC cycles to clean up
+        gc_wait_time = 90
+        log.info(f"Waiting {gc_wait_time}s for GC to clean up segment files...")
+        time.sleep(gc_wait_time)
+
+        # Verify segments are cleaned from MinIO
+        final_files_count = self._get_segment_files_count(collection_id)
+        log.info(f"Final segment files count after GC: {final_files_count}")
+
+        # List remaining files for debugging if any
+        if final_files_count > 0:
+            remaining_files = self._list_segment_files(collection_id)
+            log.warning(f"Remaining files (should be 0): {remaining_files[:10]}")
+
+        assert final_files_count == 0, \
+            f"Segment files should be cleaned by GC, but {final_files_count} files remain"
+
+        log.info("SUCCESS: Segment files cleaned by GC after snapshot dropped")
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_multiple_snapshots_share_segment_gc_protection(self):
+        """
+        target: verify shared segments remain protected when one snapshot is dropped
+        method:
+            1. Create collection with data
+            2. Create snapshot_1
+            3. Create snapshot_2 (same data, shares segments)
+            4. Drop original collection
+            5. Drop snapshot_1
+            6. Wait for GC
+            7. Restore from snapshot_2
+        expected: snapshot_2 should still restore successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name_1 = cf.gen_unique_str(prefix + "_1")
+        snapshot_name_2 = cf.gen_unique_str(prefix + "_2")
+        restored_collection_name = cf.gen_unique_str(prefix + "_restored")
+
+        # Create collection and insert data
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(500)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Create two snapshots that share segments
+        self.create_snapshot(client, collection_name, snapshot_name_1)
+        log.info(f"Created snapshot_1: {snapshot_name_1}")
+
+        self.create_snapshot(client, collection_name, snapshot_name_2)
+        log.info(f"Created snapshot_2: {snapshot_name_2}")
+
+        # Drop original collection
+        self.drop_collection(client, collection_name)
+        log.info(f"Dropped collection: {collection_name}")
+
+        # Drop snapshot_1 - snapshot_2 still references the segments
+        self.drop_snapshot(client, snapshot_name_1)
+        log.info(f"Dropped snapshot_1: {snapshot_name_1}")
+
+        # Wait for GC cycles
+        gc_wait_time = 45
+        log.info(f"Waiting {gc_wait_time}s for GC cycles...")
+        time.sleep(gc_wait_time)
+
+        # Restore from snapshot_2 - should succeed
+        log.info(f"Restoring from snapshot_2 to: {restored_collection_name}")
+        job_id, _ = self.restore_snapshot(client, snapshot_name_2, restored_collection_name)
+        self._wait_for_restore_complete(client, job_id, timeout=120)
+
+        # Verify data
+        self.load_collection(client, restored_collection_name)
+        res, _ = self.query(client, restored_collection_name,
+                            filter="id >= 0", output_fields=["count(*)"])
+        assert res[0]["count(*)"] == 500, \
+            f"Expected 500 rows, got {res[0]['count(*)']}"
+
+        log.info("SUCCESS: Shared segments protected by remaining snapshot")
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name_2)
+        self.drop_collection(client, restored_collection_name)
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_snapshot_create_during_gc_cycle(self):
+        """
+        target: verify snapshot creation during active GC
+        method:
+            1. Create collection, insert data
+            2. Delete some data to trigger GC on deleted segments
+            3. Immediately create snapshot
+            4. Wait for GC
+            5. Restore and verify
+        expected: snapshot should capture consistent state
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_collection_name = cf.gen_unique_str(prefix + "_restored")
+
+        # Create collection and insert data
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(1000)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Load and delete some data to trigger GC activity
+        self.load_collection(client, collection_name)
+        self.delete(client, collection_name, filter="id < 500")
+        self.flush(client, collection_name)
+        log.info("Deleted rows 0-499, triggering potential GC")
+
+        # Immediately create snapshot to capture current state
+        self.create_snapshot(client, collection_name, snapshot_name)
+        log.info(f"Created snapshot immediately after delete: {snapshot_name}")
+
+        # Wait for GC cycles
+        gc_wait_time = 45
+        log.info(f"Waiting {gc_wait_time}s for GC cycles...")
+        time.sleep(gc_wait_time)
+
+        # Restore and verify
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        self._wait_for_restore_complete(client, job_id)
+
+        self.load_collection(client, restored_collection_name)
+        res, _ = self.query(client, restored_collection_name,
+                            filter="id >= 0", output_fields=["count(*)"])
+
+        # Should have 500 rows (rows 500-999)
+        assert res[0]["count(*)"] == 500, \
+            f"Expected 500 rows after delete+snapshot, got {res[0]['count(*)']}"
+
+        log.info("SUCCESS: Snapshot created during GC cycle captured consistent state")
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name)
+        self.drop_collection(client, restored_collection_name)
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_restore_during_gc_of_other_collections(self):
+        """
+        target: verify restore works while GC is processing other collections
+        method:
+            1. Create collection_1, insert data, create snapshot, drop collection_1
+            2. Create collection_2, insert data, drop collection_2 (triggers GC)
+            3. Immediately start restore of snapshot
+        expected: restore should succeed despite concurrent GC activity
+        """
+        client = self._client()
+        collection_name_1 = cf.gen_collection_name_by_testcase_name() + "_1"
+        collection_name_2 = cf.gen_collection_name_by_testcase_name() + "_2"
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_collection_name = cf.gen_unique_str(prefix + "_restored")
+
+        # Create collection_1 with snapshot
+        self.create_collection(client, collection_name_1, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(500)]
+        self.insert(client, collection_name_1, rows)
+        self.flush(client, collection_name_1)
+        self.create_snapshot(client, collection_name_1, snapshot_name)
+        self.drop_collection(client, collection_name_1)
+        log.info(f"Created snapshot from collection_1 and dropped it")
+
+        # Create collection_2 and drop it to trigger GC activity
+        self.create_collection(client, collection_name_2, default_dim)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(1000)]
+        self.insert(client, collection_name_2, rows)
+        self.flush(client, collection_name_2)
+        self.drop_collection(client, collection_name_2)
+        log.info(f"Created and dropped collection_2 to trigger GC")
+
+        # Immediately start restore while GC may be running
+        log.info(f"Starting restore while GC may be running...")
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        self._wait_for_restore_complete(client, job_id, timeout=120)
+
+        # Verify restore succeeded
+        self.load_collection(client, restored_collection_name)
+        res, _ = self.query(client, restored_collection_name,
+                            filter="id >= 0", output_fields=["count(*)"])
+        assert res[0]["count(*)"] == 500, \
+            f"Expected 500 rows, got {res[0]['count(*)']}"
+
+        log.info("SUCCESS: Restore completed successfully during concurrent GC")
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name)
+        self.drop_collection(client, restored_collection_name)
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_gc_with_incremental_snapshots(self):
+        """
+        target: test GC behavior with incremental snapshots
+        method:
+            1. Create collection, insert batch1, flush, create snapshot_1
+            2. Insert batch2, flush, create snapshot_2
+            3. Insert batch3, flush, create snapshot_3
+            4. Drop collection
+            5. Drop snapshot_1 and snapshot_3
+            6. Wait for GC
+            7. Restore from snapshot_2
+        expected: snapshot_2 should restore correctly with its exact data state
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_names = []
+        restored_collection_name = cf.gen_unique_str(prefix + "_restored")
+
+        # Create collection
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+
+        # Batch 1: rows 0-99, snapshot_1
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(100)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        snap_1 = cf.gen_unique_str(prefix + "_snap1")
+        self.create_snapshot(client, collection_name, snap_1)
+        snapshot_names.append(snap_1)
+        log.info(f"Created snapshot_1 with 100 rows")
+
+        # Batch 2: rows 100-199, snapshot_2
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(100, 200)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        snap_2 = cf.gen_unique_str(prefix + "_snap2")
+        self.create_snapshot(client, collection_name, snap_2)
+        snapshot_names.append(snap_2)
+        log.info(f"Created snapshot_2 with 200 rows")
+
+        # Batch 3: rows 200-299, snapshot_3
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(200, 300)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        snap_3 = cf.gen_unique_str(prefix + "_snap3")
+        self.create_snapshot(client, collection_name, snap_3)
+        snapshot_names.append(snap_3)
+        log.info(f"Created snapshot_3 with 300 rows")
+
+        # Drop collection
+        self.drop_collection(client, collection_name)
+
+        # Drop snapshot_1 and snapshot_3, keep snapshot_2
+        self.drop_snapshot(client, snap_1)
+        self.drop_snapshot(client, snap_3)
+        log.info("Dropped snapshot_1 and snapshot_3, keeping snapshot_2")
+
+        # Wait for GC
+        gc_wait_time = 45
+        log.info(f"Waiting {gc_wait_time}s for GC...")
+        time.sleep(gc_wait_time)
+
+        # Restore from snapshot_2
+        job_id, _ = self.restore_snapshot(client, snap_2, restored_collection_name)
+        self._wait_for_restore_complete(client, job_id)
+
+        # Verify snapshot_2 has exactly 200 rows (batch 1 + batch 2)
+        self.load_collection(client, restored_collection_name)
+        res, _ = self.query(client, restored_collection_name,
+                            filter="id >= 0", output_fields=["count(*)"])
+        assert res[0]["count(*)"] == 200, \
+            f"Expected 200 rows from snapshot_2, got {res[0]['count(*)']}"
+
+        # Verify data range is 0-199
+        res, _ = self.query(client, restored_collection_name,
+                            filter="id >= 0", output_fields=["id"])
+        ids = sorted([r["id"] for r in res])
+        assert ids == list(range(200)), "IDs should be 0-199"
+
+        log.info("SUCCESS: Incremental snapshot with GC restored correctly")
+
+        # Cleanup
+        self.drop_snapshot(client, snap_2)
+        self.drop_collection(client, restored_collection_name)
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_long_running_gc_protection(self):
+        """
+        target: verify snapshot protection persists over extended GC period
+        method:
+            1. Create collection with substantial data
+            2. Create snapshot
+            3. Drop collection
+            4. Wait for extended period (multiple GC cycles)
+            5. Restore snapshot
+        expected: data should remain intact after extended GC exposure
+
+        Note: This is a longer-running test to verify sustained protection
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_collection_name = cf.gen_unique_str(prefix + "_restored")
+
+        # Create collection with more data
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(2000)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Create snapshot
+        self.create_snapshot(client, collection_name, snapshot_name)
+        log.info(f"Created snapshot: {snapshot_name}")
+
+        # Drop collection
+        self.drop_collection(client, collection_name)
+        log.info(f"Dropped collection: {collection_name}")
+
+        # Extended wait - multiple GC cycles
+        gc_wait_time = 90  # 9 GC cycles at 10s interval
+        log.info(f"Extended wait {gc_wait_time}s for multiple GC cycles...")
+        time.sleep(gc_wait_time)
+
+        # Restore and verify
+        log.info(f"Restoring snapshot after extended GC exposure...")
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        self._wait_for_restore_complete(client, job_id, timeout=180)
+
+        self.load_collection(client, restored_collection_name)
+        res, _ = self.query(client, restored_collection_name,
+                            filter="id >= 0", output_fields=["count(*)"])
+        assert res[0]["count(*)"] == 2000, \
+            f"Expected 2000 rows after extended GC, got {res[0]['count(*)']}"
+
+        log.info("SUCCESS: Snapshot protection persisted over extended GC period")
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name)
+        self.drop_collection(client, restored_collection_name)
+
+    def _wait_for_restore_complete(self, client, job_id, timeout=60):
+        """Wait for restore snapshot job to complete"""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            state, _ = self.get_restore_snapshot_state(client, job_id)
+            if state.state == "RestoreSnapshotCompleted":
+                return
+            if state.state == "RestoreSnapshotFailed":
+                raise Exception(f"Restore snapshot failed: {state['reason']}")
+            time.sleep(1)
+        raise TimeoutError(f"Restore snapshot job {job_id} did not complete within {timeout}s")
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_snapshot_metadata_in_etcd(self):
+        """
+        target: verify snapshot metadata is correctly stored in etcd
+        method:
+            1. Create collection and insert data
+            2. Create snapshot
+            3. Verify snapshot metadata exists in etcd
+            4. Verify segment references in etcd
+            5. Drop snapshot
+            6. Verify snapshot metadata is removed from etcd
+        expected: snapshot metadata should be correctly managed in etcd
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+
+        # Create collection and insert data
+        self.create_collection(client, collection_name, default_dim)
+        collection_info = client.describe_collection(collection_name)
+        collection_id = collection_info.get("collection_id")
+        log.info(f"Created collection: {collection_name}, ID: {collection_id}")
+
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(500)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Create snapshot
+        self.create_snapshot(client, collection_name, snapshot_name)
+        log.info(f"Created snapshot: {snapshot_name}")
+
+        # Verify snapshot metadata in etcd
+        snapshot_metadata = self._get_snapshot_metadata_from_etcd(snapshot_name)
+        assert snapshot_metadata is not None, \
+            f"Snapshot {snapshot_name} metadata should exist in etcd"
+        log.info(f"Snapshot metadata from etcd: {snapshot_metadata}")
+
+        # Verify snapshot ID is valid
+        snapshot_id = snapshot_metadata.get("snapshot_id") or snapshot_metadata.get("id")
+        assert snapshot_id is not None, "Snapshot should have a valid ID in etcd"
+        log.info(f"Snapshot ID: {snapshot_id}")
+
+        # List all snapshots from etcd to verify
+        all_snapshots = self._list_all_snapshots_from_etcd()
+        snapshot_names = [s.get("name") for s in all_snapshots]
+        assert snapshot_name in snapshot_names, \
+            f"Snapshot {snapshot_name} should be in etcd snapshot list"
+
+        # Drop snapshot
+        self.drop_snapshot(client, snapshot_name)
+        log.info(f"Dropped snapshot: {snapshot_name}")
+
+        # Wait for metadata cleanup
+        time.sleep(5)
+
+        # Verify snapshot metadata is removed from etcd
+        snapshot_metadata_after = self._get_snapshot_metadata_from_etcd(snapshot_name)
+        assert snapshot_metadata_after is None, \
+            f"Snapshot {snapshot_name} metadata should be removed from etcd after drop"
+
+        log.info("SUCCESS: Snapshot metadata correctly managed in etcd")
+
+        # Cleanup
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_gc_protection_with_etcd_verification(self):
+        """
+        target: comprehensive GC protection test with etcd and MinIO verification
+        method:
+            1. Create collection, insert data, flush
+            2. Record segment files in MinIO and metadata in etcd
+            3. Create snapshot
+            4. Verify snapshot metadata in etcd
+            5. Drop original collection
+            6. Wait for GC cycles
+            7. Verify:
+               - Segment files still exist in MinIO
+               - Snapshot metadata still exists in etcd
+            8. Restore and verify data integrity
+        expected: full verification of GC protection via etcd and MinIO
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_collection_name = cf.gen_unique_str(prefix + "_restored")
+
+        # Create collection and insert data
+        self.create_collection(client, collection_name, default_dim)
+        collection_info = client.describe_collection(collection_name)
+        collection_id = collection_info.get("collection_id")
+        log.info(f"Created collection: {collection_name}, ID: {collection_id}")
+
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(800)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Record initial segment files count
+        initial_files_count = self._get_segment_files_count(collection_id)
+        log.info(f"Initial segment files count in MinIO: {initial_files_count}")
+        assert initial_files_count > 0, "Should have segment files after flush"
+
+        # Create snapshot
+        self.create_snapshot(client, collection_name, snapshot_name)
+        log.info(f"Created snapshot: {snapshot_name}")
+
+        # Verify snapshot metadata in etcd
+        snapshot_metadata = self._get_snapshot_metadata_from_etcd(snapshot_name)
+        assert snapshot_metadata is not None, "Snapshot metadata should exist in etcd"
+        snapshot_id = snapshot_metadata.get("snapshot_id") or snapshot_metadata.get("id")
+        log.info(f"Snapshot metadata: ID={snapshot_id}, name={snapshot_metadata.get('name')}")
+
+        # Drop original collection
+        self.drop_collection(client, collection_name)
+        log.info(f"Dropped collection: {collection_name}")
+
+        # Wait for GC cycles
+        gc_wait_time = 60
+        log.info(f"Waiting {gc_wait_time}s for GC cycles...")
+        time.sleep(gc_wait_time)
+
+        # Verify segment files still exist in MinIO (protected by snapshot)
+        protected_files_count = self._get_segment_files_count(collection_id)
+        log.info(f"Segment files after GC cycles: {protected_files_count}")
+        assert protected_files_count > 0, \
+            f"Segment files should still exist (protected), but got {protected_files_count}"
+
+        # Verify snapshot metadata still exists in etcd
+        snapshot_metadata_after_gc = self._get_snapshot_metadata_from_etcd(snapshot_name)
+        assert snapshot_metadata_after_gc is not None, \
+            "Snapshot metadata should still exist in etcd after GC"
+
+        # Restore and verify data
+        log.info(f"Restoring snapshot to: {restored_collection_name}")
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        self._wait_for_restore_complete(client, job_id, timeout=120)
+
+        self.load_collection(client, restored_collection_name)
+        res, _ = self.query(client, restored_collection_name,
+                            filter="id >= 0", output_fields=["count(*)"])
+        assert res[0]["count(*)"] == 800, \
+            f"Expected 800 rows, got {res[0]['count(*)']}"
+
+        log.info("SUCCESS: GC protection verified via etcd and MinIO")
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name)
+        self.drop_collection(client, restored_collection_name)
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_snapshot_drop_triggers_segment_gc_with_verification(self):
+        """
+        target: verify segment cleanup after snapshot drop with etcd and MinIO verification
+        method:
+            1. Create collection, insert data, flush
+            2. Create snapshot, verify metadata in etcd
+            3. Drop collection
+            4. Verify segments protected (MinIO)
+            5. Drop snapshot, verify metadata removed from etcd
+            6. Wait for GC
+            7. Verify segment files cleaned from MinIO
+        expected: full lifecycle verification with etcd and MinIO
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+
+        # Create collection and insert data
+        self.create_collection(client, collection_name, default_dim)
+        collection_info = client.describe_collection(collection_name)
+        collection_id = collection_info.get("collection_id")
+        log.info(f"Created collection: {collection_name}, ID: {collection_id}")
+
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(500)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Verify initial segment files
+        initial_files = self._list_segment_files(collection_id)
+        log.info(f"Initial segment files: {len(initial_files)} files")
+        assert len(initial_files) > 0, "Should have segment files"
+
+        # Create snapshot
+        self.create_snapshot(client, collection_name, snapshot_name)
+        log.info(f"Created snapshot: {snapshot_name}")
+
+        # Verify snapshot in etcd
+        snapshot_metadata = self._get_snapshot_metadata_from_etcd(snapshot_name)
+        assert snapshot_metadata is not None, "Snapshot should exist in etcd"
+
+        # Drop collection
+        self.drop_collection(client, collection_name)
+        log.info(f"Dropped collection: {collection_name}")
+
+        # Wait and verify segments still protected
+        time.sleep(30)
+        protected_files = self._list_segment_files(collection_id)
+        log.info(f"Protected segment files: {len(protected_files)} files")
+        assert len(protected_files) > 0, "Segment files should be protected by snapshot"
+
+        # Drop snapshot
+        self.drop_snapshot(client, snapshot_name)
+        log.info(f"Dropped snapshot: {snapshot_name}")
+
+        # Wait for metadata cleanup
+        time.sleep(10)
+
+        # Verify snapshot removed from etcd
+        snapshot_metadata_after = self._get_snapshot_metadata_from_etcd(snapshot_name)
+        assert snapshot_metadata_after is None, "Snapshot should be removed from etcd"
+        log.info("Snapshot metadata removed from etcd")
+
+        # Wait for GC to clean segment files
+        gc_wait_time = 90
+        log.info(f"Waiting {gc_wait_time}s for GC to clean segment files...")
+        time.sleep(gc_wait_time)
+
+        # Verify segment files cleaned from MinIO
+        final_files = self._list_segment_files(collection_id)
+        log.info(f"Final segment files after GC: {len(final_files)} files")
+
+        if len(final_files) > 0:
+            log.warning(f"Remaining files: {final_files[:5]}")
+
+        assert len(final_files) == 0, \
+            f"Segment files should be cleaned by GC, but {len(final_files)} remain"
+
+        log.info("SUCCESS: Full snapshot lifecycle verified with etcd and MinIO")
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_snapshot_segment_refs_in_etcd(self):
+        """
+        target: verify snapshot segment references (manifests) are correctly stored
+        method:
+            1. Create collection, insert data, flush (creates segment)
+            2. Create snapshot
+            3. Query etcd for snapshot metadata and get snapshot_id
+            4. Query MinIO for manifest files under snapshots/{collection_id}/manifests/{snapshot_id}/
+            5. Verify manifest files exist
+            6. Verify snapshot metadata JSON in MinIO
+            7. Drop snapshot
+            8. Verify manifest files are cleaned from MinIO
+        expected: segment references (manifests) should be correctly managed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+
+        # Create collection and insert data
+        self.create_collection(client, collection_name, default_dim)
+        collection_info = client.describe_collection(collection_name)
+        collection_id = collection_info.get("collection_id")
+        log.info(f"Created collection: {collection_name}, ID: {collection_id}")
+
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(1000)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        log.info("Data flushed, segment should be created")
+
+        # Create snapshot
+        self.create_snapshot(client, collection_name, snapshot_name)
+        log.info(f"Created snapshot: {snapshot_name}")
+
+        # Get snapshot metadata from etcd
+        snapshot_metadata = self._get_snapshot_metadata_from_etcd(snapshot_name)
+        assert snapshot_metadata is not None, f"Snapshot {snapshot_name} should exist in etcd"
+
+        # Get snapshot ID and collection_id from etcd metadata
+        snapshot_id = snapshot_metadata.get("snapshot_id")
+        etcd_collection_id = snapshot_metadata.get("collection_id")
+        assert snapshot_id is not None, "Snapshot should have a valid ID"
+        log.info(f"Snapshot ID from etcd: {snapshot_id}, collection_id: {etcd_collection_id}")
+
+        # Get manifest files from MinIO
+        manifest_refs = self._get_snapshot_segment_refs_from_etcd(etcd_collection_id, snapshot_id)
+        log.info(f"Found {len(manifest_refs)} manifest files")
+
+        # Verify manifest files exist
+        assert len(manifest_refs) > 0, \
+            f"Snapshot should have manifest files, but got {len(manifest_refs)}"
+
+        # Log manifest file details
+        for ref in manifest_refs:
+            log.info(f"Manifest file: {ref}")
+
+        # Verify manifest files are avro format
+        for ref in manifest_refs:
+            assert ref.get("manifest_file", "").endswith('.avro'), \
+                f"Manifest file should be avro format: {ref}"
+
+        # Verify snapshot metadata JSON exists in MinIO
+        metadata_json = self._get_snapshot_metadata_json_from_minio(etcd_collection_id, snapshot_id)
+        assert metadata_json is not None, "Snapshot metadata JSON should exist in MinIO"
+        assert metadata_json.get("snapshot_info", {}).get("name") == snapshot_name, \
+            "Snapshot name in metadata JSON should match"
+        log.info(f"Snapshot metadata JSON verified: {list(metadata_json.keys())}")
+
+        # Verify manifest_list in metadata JSON
+        manifest_list = metadata_json.get("manifest_list", [])
+        assert len(manifest_list) > 0, "Snapshot should have manifest_list in metadata JSON"
+        log.info(f"manifest_list in metadata JSON: {manifest_list}")
+
+        # Drop snapshot
+        self.drop_snapshot(client, snapshot_name)
+        log.info(f"Dropped snapshot: {snapshot_name}")
+
+        # Wait for cleanup
+        time.sleep(15)
+
+        # Verify manifest files are cleaned from MinIO
+        manifest_refs_after = self._get_snapshot_segment_refs_from_etcd(etcd_collection_id, snapshot_id)
+        assert len(manifest_refs_after) == 0, \
+            f"Manifest files should be cleaned after snapshot drop, but got {len(manifest_refs_after)}"
+
+        # Verify snapshot metadata from etcd is cleaned
+        snapshot_metadata_after = self._get_snapshot_metadata_from_etcd(snapshot_name)
+        assert snapshot_metadata_after is None, \
+            "Snapshot metadata should be cleaned from etcd after drop"
+
+        log.info("SUCCESS: Snapshot segment references (manifests) correctly managed")
+
+        # Cleanup
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_multiple_snapshots_share_segment_etcd_refs(self):
+        """
+        target: verify snapshot manifest files when multiple snapshots share same segments
+        method:
+            1. Create collection, insert data, flush (segment_1)
+            2. Create snapshot_1 (refs segment_1)
+            3. Create snapshot_2 (also refs segment_1 - same data, no changes)
+            4. Verify both snapshots have manifest files in MinIO
+            5. Insert more data, flush (segment_2)
+            6. Create snapshot_3 (refs segment_1 + segment_2)
+            7. Verify snapshot_3 has manifest files
+            8. Drop snapshot_1
+            9. Verify snapshot_2 and snapshot_3 manifests still exist
+            10. Verify segment files are still protected (not GC'd)
+        expected: each snapshot maintains independent manifest files
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name_1 = cf.gen_unique_str(prefix + "_1")
+        snapshot_name_2 = cf.gen_unique_str(prefix + "_2")
+        snapshot_name_3 = cf.gen_unique_str(prefix + "_3")
+
+        # Create collection
+        self.create_collection(client, collection_name, default_dim)
+        collection_info = client.describe_collection(collection_name)
+        collection_id = collection_info.get("collection_id")
+        log.info(f"Created collection: {collection_name}, ID: {collection_id}")
+
+        # Insert initial data and flush (creates segment_1)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(500)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        log.info("Batch 1 flushed - segment_1 created")
+
+        # Create snapshot_1
+        self.create_snapshot(client, collection_name, snapshot_name_1)
+        log.info(f"Created snapshot_1: {snapshot_name_1}")
+
+        # Create snapshot_2 (same data state, shares segment_1)
+        self.create_snapshot(client, collection_name, snapshot_name_2)
+        log.info(f"Created snapshot_2: {snapshot_name_2}")
+
+        # Get snapshot metadata
+        snap1_metadata = self._get_snapshot_metadata_from_etcd(snapshot_name_1)
+        snap2_metadata = self._get_snapshot_metadata_from_etcd(snapshot_name_2)
+        assert snap1_metadata is not None, "snapshot_1 should exist in etcd"
+        assert snap2_metadata is not None, "snapshot_2 should exist in etcd"
+
+        snap1_id = snap1_metadata.get("snapshot_id")
+        snap2_id = snap2_metadata.get("snapshot_id")
+        snap1_coll_id = snap1_metadata.get("collection_id")
+        snap2_coll_id = snap2_metadata.get("collection_id")
+        log.info(f"Snapshot IDs: snap1={snap1_id}, snap2={snap2_id}")
+
+        # Get manifest files for both snapshots
+        snap1_manifests = self._get_snapshot_segment_refs_from_etcd(snap1_coll_id, snap1_id)
+        snap2_manifests = self._get_snapshot_segment_refs_from_etcd(snap2_coll_id, snap2_id)
+        log.info(f"Manifest files count: snap1={len(snap1_manifests)}, snap2={len(snap2_manifests)}")
+
+        # Both should have manifest files
+        assert len(snap1_manifests) > 0, "snapshot_1 should have manifest files"
+        assert len(snap2_manifests) > 0, "snapshot_2 should have manifest files"
+
+        # Insert more data and flush (creates segment_2)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(500, 1000)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        log.info("Batch 2 flushed - segment_2 created")
+
+        # Create snapshot_3 (has both segment_1 and segment_2)
+        self.create_snapshot(client, collection_name, snapshot_name_3)
+        log.info(f"Created snapshot_3: {snapshot_name_3}")
+
+        snap3_metadata = self._get_snapshot_metadata_from_etcd(snapshot_name_3)
+        assert snap3_metadata is not None, "snapshot_3 should exist in etcd"
+        snap3_id = snap3_metadata.get("snapshot_id")
+        snap3_coll_id = snap3_metadata.get("collection_id")
+
+        snap3_manifests = self._get_snapshot_segment_refs_from_etcd(snap3_coll_id, snap3_id)
+        log.info(f"snapshot_3 manifest files count: {len(snap3_manifests)}")
+
+        # snapshot_3 should have manifest files (may have more due to new segments)
+        assert len(snap3_manifests) > 0, "snapshot_3 should have manifest files"
+
+        # Verify snapshot metadata JSON in MinIO for each snapshot
+        for snap_name, snap_id, coll_id in [
+            (snapshot_name_1, snap1_id, snap1_coll_id),
+            (snapshot_name_2, snap2_id, snap2_coll_id),
+            (snapshot_name_3, snap3_id, snap3_coll_id)
+        ]:
+            metadata_json = self._get_snapshot_metadata_json_from_minio(coll_id, snap_id)
+            assert metadata_json is not None, f"{snap_name} metadata JSON should exist"
+            assert metadata_json.get("snapshot_info", {}).get("name") == snap_name
+            log.info(f"{snap_name} metadata JSON verified")
+
+        # Drop snapshot_1
+        self.drop_snapshot(client, snapshot_name_1)
+        log.info(f"Dropped snapshot_1: {snapshot_name_1}")
+
+        # Wait for cleanup
+        time.sleep(15)
+
+        # Verify snapshot_1 manifests are cleaned
+        snap1_manifests_after = self._get_snapshot_segment_refs_from_etcd(snap1_coll_id, snap1_id)
+        assert len(snap1_manifests_after) == 0, \
+            f"snapshot_1 manifests should be cleaned, but got {len(snap1_manifests_after)}"
+
+        # Verify snapshot_2 and snapshot_3 manifests still exist
+        snap2_manifests_after = self._get_snapshot_segment_refs_from_etcd(snap2_coll_id, snap2_id)
+        snap3_manifests_after = self._get_snapshot_segment_refs_from_etcd(snap3_coll_id, snap3_id)
+        assert len(snap2_manifests_after) > 0, "snapshot_2 manifests should still exist"
+        assert len(snap3_manifests_after) > 0, "snapshot_3 manifests should still exist"
+        log.info(f"After drop snap1 - snap2 manifests: {len(snap2_manifests_after)}, snap3 manifests: {len(snap3_manifests_after)}")
+
+        # Drop collection to trigger potential GC
+        self.drop_collection(client, collection_name)
+        log.info("Dropped collection")
+
+        # Wait for GC cycles
+        time.sleep(45)
+
+        # Verify segments still protected by remaining snapshots
+        files_count = self._get_segment_files_count(collection_id)
+        log.info(f"Segment files after collection drop: {files_count}")
+        assert files_count > 0, \
+            "Segment files should still exist (protected by snapshot_2 and snapshot_3)"
+
+        # Restore from snapshot_2 to verify data integrity
+        restored_name = cf.gen_unique_str(prefix + "_restored")
+        job_id, _ = self.restore_snapshot(client, snapshot_name_2, restored_name)
+        self._wait_for_restore_complete(client, job_id, timeout=120)
+
+        self.load_collection(client, restored_name)
+        res, _ = self.query(client, restored_name, filter="id >= 0", output_fields=["count(*)"])
+        assert res[0]["count(*)"] == 500, f"snapshot_2 should have 500 rows, got {res[0]['count(*)']}"
+        log.info("snapshot_2 restored successfully with 500 rows")
+
+        # Cleanup
+        self.drop_collection(client, restored_name)
+        self.drop_snapshot(client, snapshot_name_2)
+        self.drop_snapshot(client, snapshot_name_3)
+
+        log.info("SUCCESS: Multiple snapshots manifest files managed correctly")
