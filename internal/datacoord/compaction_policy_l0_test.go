@@ -26,10 +26,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestL0CompactionPolicySuite(t *testing.T) {
@@ -44,6 +46,7 @@ type L0CompactionPolicySuite struct {
 	testLabel          *CompactionGroupLabel
 	handler            Handler
 	inspector          *MockCompactionInspector
+	collection         *collectionInfo
 
 	l0_policy *l0CompactionPolicy
 }
@@ -56,10 +59,18 @@ func (s *L0CompactionPolicySuite) SetupTest() {
 	}
 
 	segments := genSegmentsForMeta(s.testLabel)
-	meta := &meta{segments: NewSegmentsInfo()}
+	meta := &meta{
+		segments:    NewSegmentsInfo(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
+	s.collection = &collectionInfo{
+		ID:     s.testLabel.CollectionID,
+		Schema: &schemapb.CollectionSchema{},
+	}
+	meta.collections.Insert(s.testLabel.CollectionID, s.collection)
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.l0_policy = newL0CompactionPolicy(meta, s.mockAlloc)
 }
@@ -164,7 +175,14 @@ func (s *L0CompactionPolicySuite) TestTriggerViewChange() {
 		info.DmlPosition = &msgpb.MsgPosition{Timestamp: arg.PosT}
 		segments[arg.ID] = info
 	}
-	meta := &meta{segments: NewSegmentsInfo()}
+	meta := &meta{
+		segments:    NewSegmentsInfo(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
+	meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
+		ID:     s.testLabel.CollectionID,
+		Schema: &schemapb.CollectionSchema{},
+	})
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
@@ -182,6 +200,20 @@ func (s *L0CompactionPolicySuite) TestTriggerViewChange() {
 	gotViews, ok = events[TriggerTypeLevelZeroViewIDLE]
 	s.False(ok)
 	s.Empty(gotViews)
+}
+
+func (s *L0CompactionPolicySuite) TestTriggerSkipExternalCollection() {
+	defer func() {
+		s.collection.Schema = &schemapb.CollectionSchema{}
+	}()
+	s.collection.Schema = &schemapb.CollectionSchema{
+		ExternalSource: "s3://foo",
+	}
+
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil).Maybe()
+	events, err := s.l0_policy.Trigger(context.Background())
+	s.NoError(err)
+	s.Empty(events)
 }
 
 func (s *L0CompactionPolicySuite) TestManualTrigger() {

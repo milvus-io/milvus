@@ -1680,6 +1680,11 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual compaction successfully", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.meta = &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
+		svr.meta.collections.Insert(1, &collectionInfo{
+			ID:     1,
+			Schema: &schemapb.CollectionSchema{},
+		})
 		mockTrigger := NewMockTrigger(t)
 		svr.compactionTrigger = mockTrigger
 		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(1, nil)
@@ -1698,6 +1703,11 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual l0 compaction successfully", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.meta = &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
+		svr.meta.collections.Insert(1, &collectionInfo{
+			ID:     1,
+			Schema: &schemapb.CollectionSchema{},
+		})
 		mockTriggerManager := NewMockTriggerManager(t)
 		svr.compactionTriggerManager = mockTriggerManager
 		mockTriggerManager.EXPECT().ManualTrigger(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
@@ -1714,9 +1724,88 @@ func TestManualCompaction(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
+	t.Run("test manual compaction external collection", func(t *testing.T) {
+		const collID = int64(1)
+		const segID = int64(10)
+
+		svr := &Server{}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.meta = &meta{
+			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			segments:    NewSegmentsInfo(),
+			indexMeta: &indexMeta{
+				indexes:        make(map[UniqueID]map[UniqueID]*model.Index),
+				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+			},
+		}
+		svr.meta.collections.Insert(collID, &collectionInfo{
+			ID: collID,
+			Schema: &schemapb.CollectionSchema{
+				ExternalSource: "s3://external",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:  common.StartOfUserFieldID,
+						DataType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "128"},
+						},
+					},
+				},
+			},
+			Properties: map[string]string{
+				common.CollectionTTLConfigKey: "0",
+			},
+		})
+		svr.meta.segments.SetSegment(segID, &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID,
+				CollectionID:  collID,
+				PartitionID:   1,
+				InsertChannel: "by-dev-rootcoord-0",
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				NumOfRows:     100,
+				MaxRowNum:     1000,
+				IsSorted:      true,
+				Binlogs: []*datapb.FieldBinlog{
+					{Binlogs: []*datapb.Binlog{{MemorySize: 1024, EntriesNum: 10}}},
+				},
+			},
+		})
+
+		mockInspector := NewMockCompactionInspector(t)
+		trigger := newCompactionTrigger(
+			svr.meta,
+			mockInspector,
+			newMock0Allocator(t),
+			newMockHandlerWithMeta(svr.meta),
+			newIndexEngineVersionManager(),
+		)
+		trigger.testingOnly = true
+		trigger.closeWaiter.Add(1)
+		go func() {
+			defer trigger.closeWaiter.Done()
+			trigger.work()
+		}()
+		defer trigger.stop()
+		svr.compactionTrigger = trigger
+
+		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
+			CollectionID: collID,
+			Timetravel:   1,
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable)
+	})
+
 	t.Run("test manual compaction failure", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		svr.meta = &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
+		svr.meta.collections.Insert(1, &collectionInfo{
+			ID:     1,
+			Schema: &schemapb.CollectionSchema{},
+		})
 		mockTrigger := NewMockTrigger(t)
 		svr.compactionTrigger = mockTrigger
 		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(0, errors.New("mock error"))
