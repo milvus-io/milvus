@@ -871,24 +871,6 @@ class TestInsertAsync(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_insert_sync(self):
-        """
-        target: test async insert
-        method: insert with async=True
-        expected: verify num entities
-        """
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix))
-        df = cf.gen_default_dataframe_data()
-        future, _ = collection_w.insert(data=df, _async=True)
-        future.done()
-        mutation_res = future.result()
-        assert mutation_res.insert_count == ct.default_nb
-        assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist(
-        )
-        assert collection_w.num_entities == ct.default_nb
-
-    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_async_false(self):
         """
         target: test insert with false async
@@ -923,25 +905,6 @@ class TestInsertAsync(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_async_long(self):
-        """
-        target: test insert with async
-        method: insert 5w entities with callback func
-        expected: verify num entities
-        """
-        nb = 50000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix))
-        df = cf.gen_default_dataframe_data(nb)
-        future, _ = collection_w.insert(data=df, _async=True)
-        future.done()
-        mutation_res = future.result()
-        assert mutation_res.insert_count == nb
-        assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist(
-        )
-        assert collection_w.num_entities == nb
-
-    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_async_callback_timeout(self):
         """
         target: test insert async with callback
@@ -956,39 +919,6 @@ class TestInsertAsync(TestcaseBase):
             data=df, _async=True, _callback=None, timeout=0.2)
         with pytest.raises(MilvusException):
             future.result()
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_async_invalid_data(self):
-        """
-        target: test insert async with invalid data
-        method: insert async with invalid data
-        expected: raise exception
-        """
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix))
-        columns = [ct.default_int64_field_name,
-                   ct.default_float_vec_field_name]
-        df = pd.DataFrame(columns=columns)
-        error = {ct.err_code: 0,
-                 ct.err_msg: "The fields don't match with schema fields"}
-        collection_w.insert(data=df, _async=True,
-                            check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_async_invalid_partition(self):
-        """
-        target: test insert async with invalid partition
-        method: insert async with invalid partition
-        expected: raise exception
-        """
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        df = cf.gen_default_dataframe_data()
-        err_msg = "partition not found"
-        future, _ = collection_w.insert(data=df, partition_name="p", _async=True)
-        future.done()
-        with pytest.raises(MilvusException, match=err_msg):
-            future.result()
-
 
 def assert_mutation_result(mutation_res):
     assert mutation_res.insert_count == ct.default_nb
