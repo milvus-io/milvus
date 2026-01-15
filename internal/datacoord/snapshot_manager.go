@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -434,6 +435,68 @@ func (sm *snapshotManager) ListSnapshots(ctx context.Context, collectionID, part
 // Restore Main Flow
 // ============================================================================
 
+// validateCMEKCompatibility validates that snapshots can only be restored
+// to databases with matching encryption configuration.
+//
+// Validation rules:
+//   - Non-encrypted snapshots can only be restored to non-encrypted databases
+//   - Encrypted snapshots can only be restored to databases with matching ezID
+//
+// Returns nil if validation passes, error with descriptive message otherwise.
+func (sm *snapshotManager) validateCMEKCompatibility(
+	ctx context.Context,
+	snapshotData *SnapshotData,
+	targetDbName string,
+) error {
+	// Defensive nil check - return error for corrupted/invalid snapshot data
+	if snapshotData == nil || snapshotData.Collection == nil || snapshotData.Collection.Schema == nil {
+		return merr.WrapErrParameterInvalidMsg("invalid snapshot data: missing collection or schema information")
+	}
+
+	// Extract source EZ ID from snapshot collection's SCHEMA properties
+	// Note: cipher.ezID is the canonical indicator of CMEK encryption for collections.
+	// cipher.enabled is a database-level flag and is not stored in collection properties.
+	// If ezID exists, the collection was encrypted and we must validate target DB compatibility.
+	sourceEzID, hasSourceEz := hookutil.ParseEzIDFromProperties(snapshotData.Collection.Schema.Properties)
+
+	// Get target database properties first (needed for both encrypted and non-encrypted snapshots)
+	dbResp, err := sm.broker.DescribeDatabase(ctx, targetDbName)
+	if err != nil {
+		return fmt.Errorf("failed to describe target database %s: %w", targetDbName, err)
+	}
+	targetIsEncrypted := hookutil.IsDBEncrypted(dbResp.GetProperties())
+
+	// Case 1: Non-encrypted snapshot
+	if !hasSourceEz {
+		if targetIsEncrypted {
+			return merr.WrapErrParameterInvalidMsg(
+				"cannot restore non-encrypted collection to CMEK-encrypted database %s", targetDbName)
+		}
+		return nil // Non-encrypted → Non-encrypted: OK
+	}
+
+	// Case 2: Encrypted snapshot → target must be encrypted with same ezID
+	if !targetIsEncrypted {
+		return merr.WrapErrParameterInvalidMsg(
+			"cannot restore CMEK-encrypted collection to non-encrypted database %s", targetDbName)
+	}
+
+	// Extract target EZ ID and validate match
+	targetEzID, hasTargetEz := hookutil.ParseEzIDFromProperties(dbResp.GetProperties())
+	if !hasTargetEz {
+		return merr.WrapErrParameterInvalidMsg(
+			"target database %s is marked as encrypted but has no encryption zone ID", targetDbName)
+	}
+
+	if sourceEzID != targetEzID {
+		return merr.WrapErrParameterInvalidMsg(
+			"cannot restore CMEK-encrypted collection to database %s with different encryption zone (source ezID=%d, target ezID=%d)",
+			targetDbName, sourceEzID, targetEzID)
+	}
+
+	return nil
+}
+
 // RestoreSnapshot orchestrates the complete snapshot restoration process.
 // It reads snapshot data, creates collection/partitions/indexes, validates resources,
 // and broadcasts the restore message.
@@ -460,6 +523,13 @@ func (sm *snapshotManager) RestoreSnapshot(
 	log.Info("snapshot data loaded",
 		zap.Int("segmentCount", len(snapshotData.Segments)),
 		zap.Int("indexCount", len(snapshotData.Indexes)))
+
+	// Phase 1.5: Validate CMEK compatibility
+	// CMEK-encrypted collections can only be restored to databases with matching encryption zone
+	if err := sm.validateCMEKCompatibility(ctx, snapshotData, targetDbName); err != nil {
+		log.Warn("CMEK compatibility validation failed", zap.Error(err))
+		return 0, err
+	}
 
 	// Phase 2: Restore collection and partitions
 	collectionID, err := sm.RestoreCollection(ctx, snapshotData, targetCollectionName, targetDbName)
@@ -542,10 +612,11 @@ func (sm *snapshotManager) RestoreCollection(
 	collection := snapshotData.Collection
 
 	// Clone the schema to avoid modifying the original snapshot data,
-	// and update the schema name to match the target collection name.
+	// and update the schema name and database name to match the target.
 	// This is required because Milvus validates that CollectionName == Schema.Name.
 	schema := proto.Clone(collection.Schema).(*schemapb.CollectionSchema)
 	schema.Name = targetCollectionName
+	schema.DbName = targetDbName
 
 	schemaInBytes, err := proto.Marshal(schema)
 	if err != nil {
