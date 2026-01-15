@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 )
 
@@ -589,6 +590,722 @@ func Test_handleCompare(t *testing.T) {
 		assert.NotNil(t, result.GetUnaryRangeExpr())
 		assert.Equal(t, planpb.OpType_GreaterThan, result.GetUnaryRangeExpr().GetOp())
 		assert.Equal(t, "var1", result.GetUnaryRangeExpr().GetTemplateVariableName())
+	})
+}
+
+// Test_toValueExpr tests the toValueExpr function which converts GenericValue to ExprWithType
+// This tests all type branches including the nil return path for unknown types
+func Test_toValueExpr(t *testing.T) {
+	t.Run("bool value", func(t *testing.T) {
+		// Test that bool values are correctly converted to Bool DataType
+		value := NewBool(true)
+		result := toValueExpr(value)
+		assert.NotNil(t, result)
+		assert.Equal(t, schemapb.DataType_Bool, result.dataType)
+		assert.True(t, result.expr.GetValueExpr().GetValue().GetBoolVal())
+	})
+
+	t.Run("int64 value", func(t *testing.T) {
+		// Test that int64 values are correctly converted to Int64 DataType
+		value := NewInt(42)
+		result := toValueExpr(value)
+		assert.NotNil(t, result)
+		assert.Equal(t, schemapb.DataType_Int64, result.dataType)
+		assert.Equal(t, int64(42), result.expr.GetValueExpr().GetValue().GetInt64Val())
+	})
+
+	t.Run("float value", func(t *testing.T) {
+		// Test that float values are correctly converted to Double DataType
+		value := NewFloat(3.14)
+		result := toValueExpr(value)
+		assert.NotNil(t, result)
+		assert.Equal(t, schemapb.DataType_Double, result.dataType)
+		assert.Equal(t, 3.14, result.expr.GetValueExpr().GetValue().GetFloatVal())
+	})
+
+	t.Run("string value", func(t *testing.T) {
+		// Test that string values are correctly converted to VarChar DataType
+		value := NewString("hello")
+		result := toValueExpr(value)
+		assert.NotNil(t, result)
+		assert.Equal(t, schemapb.DataType_VarChar, result.dataType)
+		assert.Equal(t, "hello", result.expr.GetValueExpr().GetValue().GetStringVal())
+	})
+
+	t.Run("array value", func(t *testing.T) {
+		// Test that array values are correctly converted to Array DataType
+		value := &planpb.GenericValue{
+			Val: &planpb.GenericValue_ArrayVal{
+				ArrayVal: &planpb.Array{
+					Array:       []*planpb.GenericValue{NewInt(1), NewInt(2)},
+					ElementType: schemapb.DataType_Int64,
+				},
+			},
+		}
+		result := toValueExpr(value)
+		assert.NotNil(t, result)
+		assert.Equal(t, schemapb.DataType_Array, result.dataType)
+	})
+
+	t.Run("nil/unknown value type returns nil", func(t *testing.T) {
+		// Test that unknown value types return nil - this covers the default branch
+		value := &planpb.GenericValue{
+			Val: nil, // nil Val should trigger default case
+		}
+		result := toValueExpr(value)
+		assert.Nil(t, result)
+	})
+}
+
+// Test_getTargetType tests type inference for binary operations
+// This ensures correct type promotion rules are applied
+func Test_getTargetType(t *testing.T) {
+	tests := []struct {
+		name        string
+		left        schemapb.DataType
+		right       schemapb.DataType
+		expected    schemapb.DataType
+		expectError bool
+	}{
+		{
+			name:     "JSON with JSON returns JSON",
+			left:     schemapb.DataType_JSON,
+			right:    schemapb.DataType_JSON,
+			expected: schemapb.DataType_JSON,
+		},
+		{
+			name:     "JSON with Float returns Double",
+			left:     schemapb.DataType_JSON,
+			right:    schemapb.DataType_Float,
+			expected: schemapb.DataType_Double,
+		},
+		{
+			name:     "JSON with Int returns Int64",
+			left:     schemapb.DataType_JSON,
+			right:    schemapb.DataType_Int64,
+			expected: schemapb.DataType_Int64,
+		},
+		{
+			name:     "Geometry with Geometry returns Geometry",
+			left:     schemapb.DataType_Geometry,
+			right:    schemapb.DataType_Geometry,
+			expected: schemapb.DataType_Geometry,
+		},
+		{
+			name:     "Timestamptz with Timestamptz returns Timestamptz",
+			left:     schemapb.DataType_Timestamptz,
+			right:    schemapb.DataType_Timestamptz,
+			expected: schemapb.DataType_Timestamptz,
+		},
+		{
+			name:     "Float with JSON returns Double",
+			left:     schemapb.DataType_Float,
+			right:    schemapb.DataType_JSON,
+			expected: schemapb.DataType_Double,
+		},
+		{
+			name:     "Float with Int returns Double",
+			left:     schemapb.DataType_Float,
+			right:    schemapb.DataType_Int64,
+			expected: schemapb.DataType_Double,
+		},
+		{
+			name:     "Int with Float returns Double",
+			left:     schemapb.DataType_Int64,
+			right:    schemapb.DataType_Float,
+			expected: schemapb.DataType_Double,
+		},
+		{
+			name:     "Int with Int returns Int64",
+			left:     schemapb.DataType_Int64,
+			right:    schemapb.DataType_Int64,
+			expected: schemapb.DataType_Int64,
+		},
+		{
+			name:     "Int with JSON returns Int64",
+			left:     schemapb.DataType_Int64,
+			right:    schemapb.DataType_JSON,
+			expected: schemapb.DataType_Int64,
+		},
+		{
+			name:        "String with Int is incompatible",
+			left:        schemapb.DataType_VarChar,
+			right:       schemapb.DataType_Int64,
+			expectError: true,
+		},
+		{
+			name:        "Bool with Int is incompatible",
+			left:        schemapb.DataType_Bool,
+			right:       schemapb.DataType_Int64,
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := getTargetType(tt.left, tt.right)
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "incompatible data type")
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
+		})
+	}
+}
+
+// Test_reverseOrder tests the reverseOrder function which reverses comparison operators
+// This is used when the operands of a comparison are swapped
+func Test_reverseOrder(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       planpb.OpType
+		expected    planpb.OpType
+		expectError bool
+	}{
+		{
+			name:     "LessThan reverses to GreaterThan",
+			input:    planpb.OpType_LessThan,
+			expected: planpb.OpType_GreaterThan,
+		},
+		{
+			name:     "LessEqual reverses to GreaterEqual",
+			input:    planpb.OpType_LessEqual,
+			expected: planpb.OpType_GreaterEqual,
+		},
+		{
+			name:     "GreaterThan reverses to LessThan",
+			input:    planpb.OpType_GreaterThan,
+			expected: planpb.OpType_LessThan,
+		},
+		{
+			name:     "GreaterEqual reverses to LessEqual",
+			input:    planpb.OpType_GreaterEqual,
+			expected: planpb.OpType_LessEqual,
+		},
+		{
+			name:     "Equal stays Equal",
+			input:    planpb.OpType_Equal,
+			expected: planpb.OpType_Equal,
+		},
+		{
+			name:     "NotEqual stays NotEqual",
+			input:    planpb.OpType_NotEqual,
+			expected: planpb.OpType_NotEqual,
+		},
+		{
+			name:        "Invalid op type returns error",
+			input:       planpb.OpType_Invalid,
+			expectError: true,
+		},
+		{
+			name:        "PrefixMatch cannot be reversed",
+			input:       planpb.OpType_PrefixMatch,
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := reverseOrder(tt.input)
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "cannot reverse order")
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
+		})
+	}
+}
+
+// Test_isIntegerColumn tests the isIntegerColumn helper function
+// This function checks if a column can be converted to integer type
+func Test_isIntegerColumn(t *testing.T) {
+	tests := []struct {
+		name     string
+		column   *planpb.ColumnInfo
+		expected bool
+	}{
+		{
+			name: "Int64 column is integer",
+			column: &planpb.ColumnInfo{
+				DataType: schemapb.DataType_Int64,
+			},
+			expected: true,
+		},
+		{
+			name: "Int32 column is integer",
+			column: &planpb.ColumnInfo{
+				DataType: schemapb.DataType_Int32,
+			},
+			expected: true,
+		},
+		{
+			name: "JSON column is integer (can contain integers)",
+			column: &planpb.ColumnInfo{
+				DataType: schemapb.DataType_JSON,
+			},
+			expected: true,
+		},
+		{
+			name: "Array of Int64 is integer",
+			column: &planpb.ColumnInfo{
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int64,
+			},
+			expected: true,
+		},
+		{
+			name: "Timestamptz is integer",
+			column: &planpb.ColumnInfo{
+				DataType: schemapb.DataType_Timestamptz,
+			},
+			expected: true,
+		},
+		{
+			name: "Float column is not integer",
+			column: &planpb.ColumnInfo{
+				DataType: schemapb.DataType_Float,
+			},
+			expected: false,
+		},
+		{
+			name: "String column is not integer",
+			column: &planpb.ColumnInfo{
+				DataType: schemapb.DataType_VarChar,
+			},
+			expected: false,
+		},
+		{
+			name: "Array of Float is not integer",
+			column: &planpb.ColumnInfo{
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Float,
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isIntegerColumn(tt.column)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// Test_parseJSONValue tests JSON value parsing for various types
+// This covers all branches including nested arrays and error cases
+func Test_parseJSONValue(t *testing.T) {
+	t.Run("parse integer from json.Number", func(t *testing.T) {
+		// Test parsing integer values from JSON numbers
+		value, dataType, err := parseJSONValue(json.Number("42"))
+		assert.NoError(t, err)
+		assert.Equal(t, schemapb.DataType_Int64, dataType)
+		assert.Equal(t, int64(42), value.GetInt64Val())
+	})
+
+	t.Run("parse float from json.Number", func(t *testing.T) {
+		// Test parsing float values from JSON numbers
+		value, dataType, err := parseJSONValue(json.Number("3.14"))
+		assert.NoError(t, err)
+		assert.Equal(t, schemapb.DataType_Double, dataType)
+		assert.Equal(t, 3.14, value.GetFloatVal())
+	})
+
+	t.Run("parse string", func(t *testing.T) {
+		// Test parsing string values
+		value, dataType, err := parseJSONValue("hello")
+		assert.NoError(t, err)
+		assert.Equal(t, schemapb.DataType_String, dataType)
+		assert.Equal(t, "hello", value.GetStringVal())
+	})
+
+	t.Run("parse bool true", func(t *testing.T) {
+		// Test parsing boolean true
+		value, dataType, err := parseJSONValue(true)
+		assert.NoError(t, err)
+		assert.Equal(t, schemapb.DataType_Bool, dataType)
+		assert.True(t, value.GetBoolVal())
+	})
+
+	t.Run("parse bool false", func(t *testing.T) {
+		// Test parsing boolean false
+		value, dataType, err := parseJSONValue(false)
+		assert.NoError(t, err)
+		assert.Equal(t, schemapb.DataType_Bool, dataType)
+		assert.False(t, value.GetBoolVal())
+	})
+
+	t.Run("parse array of integers", func(t *testing.T) {
+		// Test parsing arrays with same element types
+		arr := []interface{}{json.Number("1"), json.Number("2"), json.Number("3")}
+		value, dataType, err := parseJSONValue(arr)
+		assert.NoError(t, err)
+		assert.Equal(t, schemapb.DataType_Array, dataType)
+		assert.True(t, value.GetArrayVal().GetSameType())
+		assert.Equal(t, schemapb.DataType_Int64, value.GetArrayVal().GetElementType())
+		assert.Len(t, value.GetArrayVal().GetArray(), 3)
+	})
+
+	t.Run("parse array of mixed types", func(t *testing.T) {
+		// Test parsing arrays with mixed element types - sameType should be false
+		arr := []interface{}{json.Number("1"), "hello", true}
+		value, dataType, err := parseJSONValue(arr)
+		assert.NoError(t, err)
+		assert.Equal(t, schemapb.DataType_Array, dataType)
+		assert.False(t, value.GetArrayVal().GetSameType())
+		assert.Len(t, value.GetArrayVal().GetArray(), 3)
+	})
+
+	t.Run("parse empty array", func(t *testing.T) {
+		// Test parsing empty arrays
+		arr := []interface{}{}
+		value, dataType, err := parseJSONValue(arr)
+		assert.NoError(t, err)
+		assert.Equal(t, schemapb.DataType_Array, dataType)
+		assert.Len(t, value.GetArrayVal().GetArray(), 0)
+	})
+
+	t.Run("invalid json.Number", func(t *testing.T) {
+		// Test that invalid numbers return error
+		_, _, err := parseJSONValue(json.Number("not_a_number"))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "couldn't convert it")
+	})
+
+	t.Run("unknown type returns error", func(t *testing.T) {
+		// Test that unknown types return error
+		_, _, err := parseJSONValue(struct{}{})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown type")
+	})
+
+	t.Run("nested array with invalid element", func(t *testing.T) {
+		// Test that arrays with invalid elements return error
+		arr := []interface{}{struct{}{}}
+		_, _, err := parseJSONValue(arr)
+		assert.Error(t, err)
+	})
+}
+
+// Test_checkValidPoint tests WKT point validation
+// This ensures only valid POINT geometries are accepted
+func Test_checkValidPoint(t *testing.T) {
+	t.Run("valid point", func(t *testing.T) {
+		// Valid POINT geometry should pass
+		err := checkValidPoint("POINT(1 2)")
+		assert.NoError(t, err)
+	})
+
+	t.Run("valid point with decimal", func(t *testing.T) {
+		// Valid POINT with decimal coordinates should pass
+		err := checkValidPoint("POINT(1.5 2.5)")
+		assert.NoError(t, err)
+	})
+
+	t.Run("valid point with negative coordinates", func(t *testing.T) {
+		// Valid POINT with negative coordinates should pass
+		err := checkValidPoint("POINT(-1.5 -2.5)")
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid WKT syntax", func(t *testing.T) {
+		// Invalid WKT syntax should return error
+		err := checkValidPoint("invalid")
+		assert.Error(t, err)
+	})
+
+	t.Run("empty string", func(t *testing.T) {
+		// Empty string should return error
+		err := checkValidPoint("")
+		assert.Error(t, err)
+	})
+
+	t.Run("point with extra spaces", func(t *testing.T) {
+		// POINT with extra spaces should pass
+		err := checkValidPoint("POINT( 1  2 )")
+		assert.NoError(t, err)
+	})
+}
+
+// Test_convertHanToASCII_FastPath tests the Chinese character to Unicode escape conversion
+// This function has a fast path for ASCII-only strings to avoid allocation
+func Test_convertHanToASCII_FastPath(t *testing.T) {
+	t.Run("ASCII only string returns unchanged (fast path)", func(t *testing.T) {
+		// ASCII-only strings should be returned without modification
+		// This tests the fast path optimization
+		input := "hello world 123"
+		result := convertHanToASCII(input)
+		assert.Equal(t, input, result)
+	})
+
+	t.Run("Chinese characters are converted", func(t *testing.T) {
+		// Chinese characters should be converted to Unicode escapes
+		input := "年份"
+		result := convertHanToASCII(input)
+		assert.NotEqual(t, input, result)
+		assert.Contains(t, result, "\\u")
+	})
+
+	t.Run("mixed ASCII and Chinese", func(t *testing.T) {
+		// Mixed strings should only convert Chinese characters
+		input := "field年份"
+		result := convertHanToASCII(input)
+		assert.Contains(t, result, "field")
+		assert.Contains(t, result, "\\u")
+	})
+
+	t.Run("string with escape sequence", func(t *testing.T) {
+		// Escape sequences should be preserved
+		input := "\\n"
+		result := convertHanToASCII(input)
+		assert.Equal(t, input, result)
+	})
+
+	t.Run("string with invalid escape returns original", func(t *testing.T) {
+		// Invalid escape sequences trigger early return
+		input := "\\x"
+		result := convertHanToASCII(input)
+		assert.Equal(t, input, result)
+	})
+}
+
+// Test_canArithmetic tests arithmetic operation type compatibility
+// This ensures proper type checking for arithmetic expressions
+func Test_canArithmetic(t *testing.T) {
+	tests := []struct {
+		name         string
+		left         schemapb.DataType
+		leftElement  schemapb.DataType
+		right        schemapb.DataType
+		rightElement schemapb.DataType
+		reverse      bool
+		expectError  bool
+	}{
+		{
+			name:  "Int64 with Int64",
+			left:  schemapb.DataType_Int64,
+			right: schemapb.DataType_Int64,
+		},
+		{
+			name:  "Float with Float",
+			left:  schemapb.DataType_Float,
+			right: schemapb.DataType_Float,
+		},
+		{
+			name:  "Float with Int64",
+			left:  schemapb.DataType_Float,
+			right: schemapb.DataType_Int64,
+		},
+		{
+			name:  "JSON with Int64",
+			left:  schemapb.DataType_JSON,
+			right: schemapb.DataType_Int64,
+		},
+		{
+			name:        "VarChar with Int64 is invalid",
+			left:        schemapb.DataType_VarChar,
+			right:       schemapb.DataType_Int64,
+			expectError: true,
+		},
+		{
+			name:        "Bool with Int64 is invalid",
+			left:        schemapb.DataType_Bool,
+			right:       schemapb.DataType_Int64,
+			expectError: true,
+		},
+		{
+			name:        "Array of Int64 with Int64",
+			left:        schemapb.DataType_Array,
+			leftElement: schemapb.DataType_Int64,
+			right:       schemapb.DataType_Int64,
+		},
+		{
+			name:    "reverse flag swaps operands",
+			left:    schemapb.DataType_Int64,
+			right:   schemapb.DataType_Float,
+			reverse: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := canArithmetic(tt.left, tt.leftElement, tt.right, tt.rightElement, tt.reverse)
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// Test_checkValidModArith tests modulo operation validation
+// Modulo can only be applied to integer types
+func Test_checkValidModArith(t *testing.T) {
+	t.Run("mod with integers is valid", func(t *testing.T) {
+		err := checkValidModArith(planpb.ArithOpType_Mod,
+			schemapb.DataType_Int64, schemapb.DataType_None,
+			schemapb.DataType_Int64, schemapb.DataType_None)
+		assert.NoError(t, err)
+	})
+
+	t.Run("mod with float left is invalid", func(t *testing.T) {
+		err := checkValidModArith(planpb.ArithOpType_Mod,
+			schemapb.DataType_Float, schemapb.DataType_None,
+			schemapb.DataType_Int64, schemapb.DataType_None)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "modulo can only apply on integer types")
+	})
+
+	t.Run("mod with float right is invalid", func(t *testing.T) {
+		err := checkValidModArith(planpb.ArithOpType_Mod,
+			schemapb.DataType_Int64, schemapb.DataType_None,
+			schemapb.DataType_Float, schemapb.DataType_None)
+		assert.Error(t, err)
+	})
+
+	t.Run("add operation is always valid", func(t *testing.T) {
+		// Non-mod operations should not be validated by this function
+		err := checkValidModArith(planpb.ArithOpType_Add,
+			schemapb.DataType_Float, schemapb.DataType_None,
+			schemapb.DataType_Float, schemapb.DataType_None)
+		assert.NoError(t, err)
+	})
+}
+
+// Test_castRangeValue tests value casting for range operations
+// This ensures proper type validation and conversion for range expressions
+func Test_castRangeValue(t *testing.T) {
+	t.Run("string value for string type", func(t *testing.T) {
+		value := NewString("test")
+		result, err := castRangeValue(schemapb.DataType_VarChar, value)
+		assert.NoError(t, err)
+		assert.Equal(t, "test", result.GetStringVal())
+	})
+
+	t.Run("non-string value for string type fails", func(t *testing.T) {
+		value := NewInt(42)
+		_, err := castRangeValue(schemapb.DataType_VarChar, value)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid range operations")
+	})
+
+	t.Run("bool type is invalid for range", func(t *testing.T) {
+		value := NewBool(true)
+		_, err := castRangeValue(schemapb.DataType_Bool, value)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid range operations on boolean expr")
+	})
+
+	t.Run("integer value for integer type", func(t *testing.T) {
+		value := NewInt(42)
+		result, err := castRangeValue(schemapb.DataType_Int64, value)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(42), result.GetInt64Val())
+	})
+
+	t.Run("non-integer value for integer type fails", func(t *testing.T) {
+		value := NewFloat(3.14)
+		_, err := castRangeValue(schemapb.DataType_Int64, value)
+		assert.Error(t, err)
+	})
+
+	t.Run("float value for float type", func(t *testing.T) {
+		value := NewFloat(3.14)
+		result, err := castRangeValue(schemapb.DataType_Float, value)
+		assert.NoError(t, err)
+		assert.Equal(t, 3.14, result.GetFloatVal())
+	})
+
+	t.Run("integer value promoted to float for float type", func(t *testing.T) {
+		// Integer values should be promoted to float when target type is float
+		value := NewInt(42)
+		result, err := castRangeValue(schemapb.DataType_Double, value)
+		assert.NoError(t, err)
+		assert.Equal(t, float64(42), result.GetFloatVal())
+	})
+
+	t.Run("non-number value for float type fails", func(t *testing.T) {
+		value := NewString("test")
+		_, err := castRangeValue(schemapb.DataType_Float, value)
+		assert.Error(t, err)
+	})
+}
+
+// Test_hexDigit tests the hexDigit helper function
+// This is used for Unicode escape encoding
+func Test_hexDigit(t *testing.T) {
+	// Test digits 0-9
+	for i := uint32(0); i < 10; i++ {
+		result := hexDigit(i)
+		expected := byte(i) + '0'
+		assert.Equal(t, expected, result, "hexDigit(%d) should be %c", i, expected)
+	}
+
+	// Test hex digits a-f
+	for i := uint32(10); i < 16; i++ {
+		result := hexDigit(i)
+		expected := byte(i-10) + 'a'
+		assert.Equal(t, expected, result, "hexDigit(%d) should be %c", i, expected)
+	}
+
+	// Test that only lower 4 bits are used
+	result := hexDigit(0x1f) // 31 & 0xf = 15 = 'f'
+	assert.Equal(t, byte('f'), result)
+}
+
+// Test_formatUnicode tests Unicode escape formatting
+func Test_formatUnicode(t *testing.T) {
+	// Test basic Chinese character
+	result := formatUnicode(0x5e74) // '年'
+	assert.Equal(t, "\\u5e74", result)
+
+	// Test ASCII character
+	result = formatUnicode(0x0041) // 'A'
+	assert.Equal(t, "\\u0041", result)
+}
+
+// Test_isEscapeCh tests escape character detection
+func Test_isEscapeCh(t *testing.T) {
+	escapeChs := []uint8{'\\', 'n', 't', 'r', 'f', '"', '\''}
+	for _, ch := range escapeChs {
+		assert.True(t, isEscapeCh(ch), "isEscapeCh(%c) should be true", ch)
+	}
+
+	nonEscapeChs := []uint8{'a', 'b', '1', ' ', 'x'}
+	for _, ch := range nonEscapeChs {
+		assert.False(t, isEscapeCh(ch), "isEscapeCh(%c) should be false", ch)
+	}
+}
+
+// Test_isEmptyExpression_Utils tests empty expression detection
+func Test_isEmptyExpression_Utils(t *testing.T) {
+	assert.True(t, isEmptyExpression(""))
+	assert.True(t, isEmptyExpression("   "))
+	assert.True(t, isEmptyExpression("\t\n"))
+	assert.False(t, isEmptyExpression("a > 1"))
+	assert.False(t, isEmptyExpression("  a > 1  "))
+}
+
+// Test_checkValidWKT tests WKT validation
+func Test_checkValidWKT(t *testing.T) {
+	t.Run("valid point", func(t *testing.T) {
+		err := checkValidWKT("POINT(1 2)")
+		assert.NoError(t, err)
+	})
+
+	t.Run("valid polygon", func(t *testing.T) {
+		err := checkValidWKT("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid WKT", func(t *testing.T) {
+		err := checkValidWKT("invalid geometry")
+		assert.Error(t, err)
 	})
 }
 

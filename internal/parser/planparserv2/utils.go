@@ -26,6 +26,22 @@ const (
 	RandomScoreFileIdKey   = "field_id"
 )
 
+// Precompiled regex patterns for performance optimization
+var (
+	unicodeEscapeRegex   = regexp.MustCompile(`\\u[0-9a-fA-F]{4}`)
+	iso8601DurationRegex = regexp.MustCompile(
+		`^P` + // P at the start
+			`(?:(\d+)Y)?` + // Years (optional)
+			`(?:(\d+)M)?` + // Months (optional)
+			`(?:(\d+)D)?` + // Days (optional)
+			`(?:T` + // T separator (optional, but required for time parts)
+			`(?:(\d+)H)?` + // Hours (optional)
+			`(?:(\d+)M)?` + // Minutes (optional)
+			`(?:(\d+)S)?` + // Seconds (optional)
+			`)?$`,
+	)
+)
+
 func IsBool(n *planpb.GenericValue) bool {
 	switch n.GetVal().(type) {
 	case *planpb.GenericValue_BoolVal:
@@ -781,6 +797,20 @@ func parseJSONValue(value interface{}) (*planpb.GenericValue, schemapb.DataType,
 }
 
 func convertHanToASCII(s string) string {
+	// Fast path: check if any Han characters exist first
+	// This avoids allocation for the common case (ASCII-only strings)
+	hasHan := false
+	for _, r := range s {
+		if unicode.Is(unicode.Han, r) {
+			hasHan = true
+			break
+		}
+	}
+	if !hasHan {
+		return s // Zero allocation for ASCII-only strings
+	}
+
+	// Slow path: process string with Han characters
 	var builder strings.Builder
 	builder.Grow(len(s) * 6)
 	skipCur := false
@@ -811,8 +841,7 @@ func convertHanToASCII(s string) string {
 }
 
 func decodeUnicode(input string) string {
-	re := regexp.MustCompile(`\\u[0-9a-fA-F]{4}`)
-	return re.ReplaceAllStringFunc(input, func(match string) string {
+	return unicodeEscapeRegex.ReplaceAllStringFunc(input, func(match string) string {
 		code, _ := strconv.ParseInt(match[2:], 16, 32)
 		return string(rune(code))
 	})
@@ -835,17 +864,6 @@ func checkValidPoint(wktStr string) error {
 }
 
 func parseISODuration(durationStr string) (*planpb.Interval, error) {
-	iso8601DurationRegex := regexp.MustCompile(
-		`^P` + // P at the start
-			`(?:(\d+)Y)?` + // Years (optional)
-			`(?:(\d+)M)?` + // Months (optional)
-			`(?:(\d+)D)?` + // Days (optional)
-			`(?:T` + // T separator (optional, but required for time parts)
-			`(?:(\d+)H)?` + // Hours (optional)
-			`(?:(\d+)M)?` + // Minutes (optional)
-			`(?:(\d+)S)?` + // Seconds (optional)
-			`)?$`,
-	)
 	matches := iso8601DurationRegex.FindStringSubmatch(durationStr)
 	if matches == nil {
 		return nil, fmt.Errorf("invalid ISO 8601 duration: %s", durationStr)
