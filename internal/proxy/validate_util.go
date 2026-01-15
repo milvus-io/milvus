@@ -226,6 +226,14 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 				return err
 			}
 
+			expectedRows := getExpectedVectorRows(field, f)
+			if field.GetVectors() == nil {
+				if expectedRows != 0 {
+					return errNumRowsMismatch(field.GetFieldName(), 0)
+				}
+				continue
+			}
+
 			dim, err := typeutil.GetDim(f)
 			if err != nil {
 				return err
@@ -240,7 +248,6 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 				return errDimMismatch(field.GetFieldName(), dataDim, dim)
 			}
 
-			expectedRows := getExpectedVectorRows(field, f)
 			if n != expectedRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
@@ -249,6 +256,14 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			f, err := schema.GetFieldFromName(field.GetFieldName())
 			if err != nil {
 				return err
+			}
+
+			expectedRows := getExpectedVectorRows(field, f)
+			if field.GetVectors() == nil {
+				if expectedRows != 0 {
+					return errNumRowsMismatch(field.GetFieldName(), 0)
+				}
+				continue
 			}
 
 			dim, err := typeutil.GetDim(f)
@@ -265,7 +280,6 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 				return err
 			}
 
-			expectedRows := getExpectedVectorRows(field, f)
 			if n != expectedRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
@@ -274,6 +288,14 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			f, err := schema.GetFieldFromName(field.GetFieldName())
 			if err != nil {
 				return err
+			}
+
+			expectedRows := getExpectedVectorRows(field, f)
+			if field.GetVectors() == nil {
+				if expectedRows != 0 {
+					return errNumRowsMismatch(field.GetFieldName(), 0)
+				}
+				continue
 			}
 
 			dim, err := typeutil.GetDim(f)
@@ -290,7 +312,6 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 				return err
 			}
 
-			expectedRows := getExpectedVectorRows(field, f)
 			if n != expectedRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
@@ -299,6 +320,14 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			f, err := schema.GetFieldFromName(field.GetFieldName())
 			if err != nil {
 				return err
+			}
+
+			expectedRows := getExpectedVectorRows(field, f)
+			if field.GetVectors() == nil {
+				if expectedRows != 0 {
+					return errNumRowsMismatch(field.GetFieldName(), 0)
+				}
+				continue
 			}
 
 			dim, err := typeutil.GetDim(f)
@@ -315,7 +344,6 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 				return err
 			}
 
-			expectedRows := getExpectedVectorRows(field, f)
 			if n != expectedRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
@@ -325,8 +353,16 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			if err != nil {
 				return err
 			}
-			n := uint64(len(field.GetVectors().GetSparseFloatVector().Contents))
+
 			expectedRows := getExpectedVectorRows(field, f)
+			if field.GetVectors() == nil || field.GetVectors().GetSparseFloatVector() == nil {
+				if expectedRows != 0 {
+					return errNumRowsMismatch(field.GetFieldName(), 0)
+				}
+				continue
+			}
+
+			n := uint64(len(field.GetVectors().GetSparseFloatVector().Contents))
 			if n != expectedRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
@@ -335,6 +371,14 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			f, err := schema.GetFieldFromName(field.GetFieldName())
 			if err != nil {
 				return err
+			}
+
+			expectedRows := getExpectedVectorRows(field, f)
+			if field.GetVectors() == nil {
+				if expectedRows != 0 {
+					return errNumRowsMismatch(field.GetFieldName(), 0)
+				}
+				continue
 			}
 
 			dim, err := typeutil.GetDim(f)
@@ -351,7 +395,6 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 				return errDimMismatch(field.GetFieldName(), dataDim, dim)
 			}
 
-			expectedRows := getExpectedVectorRows(field, f)
 			if n != expectedRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
