@@ -3056,7 +3056,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 
     // assumption: vector field occupies whole column group
     bool is_vector = false;
-    bool index_has_rawdata = true;
     bool has_mmap_setting = false;
     bool mmap_enabled = false;
     for (auto& [field_id, field_meta] : field_metas) {
@@ -3065,11 +3064,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         }
         std::shared_lock lck(mutex_);
         auto iter = index_has_raw_data_.find(field_id);
-        if (iter != index_has_raw_data_.end()) {
-            index_has_rawdata = index_has_rawdata && iter->second;
-        } else {
-            index_has_rawdata = false;
-        }
 
         // if field has mmap setting, use it
         // - mmap setting at collection level, then all field are the same
@@ -3078,15 +3072,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             schema_->MmapEnabled(field_id);
         has_mmap_setting = has_mmap_setting || field_has_setting;
         mmap_enabled = mmap_enabled || field_mmap_enabled;
-    }
-
-    if (index_has_rawdata) {
-        LOG_INFO(
-            "[StorageV2] segment {} index(es) provide all raw data for column "
-            "group index {}, skip loading binlog",
-            this->get_segment_id(),
-            index);
-        return;
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
