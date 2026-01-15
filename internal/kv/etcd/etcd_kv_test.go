@@ -36,6 +36,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+
+	retry "github.com/milvus-io/milvus/pkg/util/retry"
 )
 
 var Params = paramtable.Get()
@@ -910,9 +912,9 @@ func TestHasPrefix(t *testing.T) {
 
 func TestRetrySuccess(t *testing.T) {
 	// Test case where the function succeeds on the first attempt
-	err := retry(defaultRetryCount, defaultRetryInterval, func() error {
+	err := retry.Do(context.TODO(), func() error {
 		return nil
-	})
+	}, retry.Attempts(defaultRetryCount))
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -921,9 +923,11 @@ func TestRetrySuccess(t *testing.T) {
 func TestRetryFailure(t *testing.T) {
 	// Test case where the function fails all attempts
 	expectedErr := errors.New("always fail")
-	err := retry(defaultRetryCount, defaultRetryInterval, func() error {
+	err := retry.Do(context.TODO(), func() error {
+
 		return expectedErr
-	})
+	}, retry.Attempts(defaultRetryCount))
+
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
@@ -935,13 +939,13 @@ func TestRetryFailure(t *testing.T) {
 func TestRetryEventuallySucceeds(t *testing.T) {
 	// Test case where the function fails the first two attempts and succeeds on the third
 	attempts := 0
-	err := retry(defaultRetryCount, defaultRetryInterval, func() error {
+	err := retry.Do(context.TODO(), func() error {
 		attempts++
 		if attempts < 3 {
 			return errors.New("temporary failure")
 		}
 		return nil
-	})
+	}, retry.Attempts(defaultRetryCount))
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -953,12 +957,25 @@ func TestRetryEventuallySucceeds(t *testing.T) {
 func TestRetryInterval(t *testing.T) {
 	// Test case to check if retry respects the interval
 	startTime := time.Now()
-	err := retry(defaultRetryCount, defaultRetryInterval, func() error {
+	err := retry.Do(context.TODO(), func() error {
 		return errors.New("fail")
-	})
+
+	}, retry.Attempts(defaultRetryCount),
+		retry.Sleep(defaultRetryInterval),
+		retry.MaxSleepTime(defaultMaxSleepInterval))
+
 	elapsed := time.Since(startTime)
 	// expected (defaultRetryCount - 1) intervals of defaultRetryInterval
-	expectedMin := defaultRetryInterval * (defaultRetryCount - 1)
+	expectedMin := defaultRetryInterval
+	var incrementingSleepTime time.Duration = defaultRetryInterval
+	for i := defaultRetryCount - 1; i > 0; i-- {
+		if (incrementingSleepTime * 2) > defaultMaxSleepInterval {
+			incrementingSleepTime = defaultMaxSleepInterval
+		} else {
+			incrementingSleepTime *= 2
+		}
+		expectedMin += incrementingSleepTime
+	}
 	expectedMax := expectedMin + (50 * time.Millisecond) // Allow 50ms margin for timing precision
 
 	if err == nil {
