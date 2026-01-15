@@ -1825,3 +1825,383 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 		})
 	})
 }
+
+func TestBuildNullableVectorIdxMap(t *testing.T) {
+	t.Run("empty validData", func(t *testing.T) {
+		result := buildNullableVectorIdxMap(nil)
+		assert.Nil(t, result)
+
+		result = buildNullableVectorIdxMap([]bool{})
+		assert.Nil(t, result)
+	})
+
+	t.Run("all valid", func(t *testing.T) {
+		validData := []bool{true, true, true, true}
+		result := buildNullableVectorIdxMap(validData)
+		assert.Equal(t, []int64{0, 1, 2, 3}, result)
+	})
+
+	t.Run("all null", func(t *testing.T) {
+		validData := []bool{false, false, false, false}
+		result := buildNullableVectorIdxMap(validData)
+		assert.Equal(t, []int64{-1, -1, -1, -1}, result)
+	})
+
+	t.Run("mixed valid and null", func(t *testing.T) {
+		validData := []bool{true, false, true, false, true}
+		result := buildNullableVectorIdxMap(validData)
+		// dataIdx: 0 for row 0, -1 for row 1, 1 for row 2, -1 for row 3, 2 for row 4
+		assert.Equal(t, []int64{0, -1, 1, -1, 2}, result)
+	})
+
+	t.Run("alternating pattern", func(t *testing.T) {
+		validData := []bool{false, true, false, true, false, true}
+		result := buildNullableVectorIdxMap(validData)
+		assert.Equal(t, []int64{-1, 0, -1, 1, -1, 2}, result)
+	})
+}
+
+func TestPrepareNullableVectorFieldData(t *testing.T) {
+	dim := int64(4)
+
+	t.Run("FloatVector", func(t *testing.T) {
+		sample := &schemapb.FieldData{
+			Type:      schemapb.DataType_FloatVector,
+			FieldName: "float_vec",
+			FieldId:   100,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  dim,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}},
+				},
+			},
+		}
+		result := prepareNullableVectorFieldData(sample, 10)
+		assert.Equal(t, schemapb.DataType_FloatVector, result.Type)
+		assert.Equal(t, "float_vec", result.FieldName)
+		assert.Equal(t, int64(100), result.FieldId)
+		assert.Equal(t, dim, result.GetVectors().GetDim())
+		assert.Empty(t, result.GetVectors().GetFloatVector().Data)
+	})
+
+	t.Run("Float16Vector", func(t *testing.T) {
+		sample := &schemapb.FieldData{
+			Type:      schemapb.DataType_Float16Vector,
+			FieldName: "fp16_vec",
+			FieldId:   101,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  dim,
+					Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8}},
+				},
+			},
+		}
+		result := prepareNullableVectorFieldData(sample, 10)
+		assert.Equal(t, schemapb.DataType_Float16Vector, result.Type)
+		assert.Equal(t, dim, result.GetVectors().GetDim())
+		assert.Empty(t, result.GetVectors().GetFloat16Vector())
+	})
+
+	t.Run("BFloat16Vector", func(t *testing.T) {
+		sample := &schemapb.FieldData{
+			Type:      schemapb.DataType_BFloat16Vector,
+			FieldName: "bf16_vec",
+			FieldId:   102,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  dim,
+					Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8}},
+				},
+			},
+		}
+		result := prepareNullableVectorFieldData(sample, 10)
+		assert.Equal(t, schemapb.DataType_BFloat16Vector, result.Type)
+		assert.Equal(t, dim, result.GetVectors().GetDim())
+		assert.Empty(t, result.GetVectors().GetBfloat16Vector())
+	})
+
+	t.Run("BinaryVector", func(t *testing.T) {
+		sample := &schemapb.FieldData{
+			Type:      schemapb.DataType_BinaryVector,
+			FieldName: "binary_vec",
+			FieldId:   103,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  int64(32), // binary vector dim is in bits
+					Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2, 3, 4}},
+				},
+			},
+		}
+		result := prepareNullableVectorFieldData(sample, 10)
+		assert.Equal(t, schemapb.DataType_BinaryVector, result.Type)
+		assert.Equal(t, int64(32), result.GetVectors().GetDim())
+		assert.Empty(t, result.GetVectors().GetBinaryVector())
+	})
+
+	t.Run("SparseFloatVector", func(t *testing.T) {
+		sample := &schemapb.FieldData{
+			Type:      schemapb.DataType_SparseFloatVector,
+			FieldName: "sparse_vec",
+			FieldId:   104,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 100,
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      100,
+							Contents: [][]byte{{1, 2, 3}},
+						},
+					},
+				},
+			},
+		}
+		result := prepareNullableVectorFieldData(sample, 10)
+		assert.Equal(t, schemapb.DataType_SparseFloatVector, result.Type)
+		assert.Empty(t, result.GetVectors().GetSparseFloatVector().Contents)
+	})
+
+	t.Run("nil vectors", func(t *testing.T) {
+		sample := &schemapb.FieldData{
+			Type:      schemapb.DataType_FloatVector,
+			FieldName: "empty_vec",
+			FieldId:   105,
+		}
+		result := prepareNullableVectorFieldData(sample, 10)
+		assert.Equal(t, schemapb.DataType_FloatVector, result.Type)
+		assert.Nil(t, result.GetVectors())
+	})
+}
+
+func TestAppendSingleVector(t *testing.T) {
+	t.Run("FloatVector", func(t *testing.T) {
+		dim := int64(4)
+		source := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6, 7, 8}}, // 2 vectors
+					},
+				},
+			},
+		}
+		target := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  dim,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{}}},
+				},
+			},
+		}
+
+		appendSingleVector(target, source, 0)
+		assert.Equal(t, []float32{1, 2, 3, 4}, target.GetVectors().GetFloatVector().Data)
+
+		appendSingleVector(target, source, 1)
+		assert.Equal(t, []float32{1, 2, 3, 4, 5, 6, 7, 8}, target.GetVectors().GetFloatVector().Data)
+	})
+
+	t.Run("Float16Vector", func(t *testing.T) {
+		dim := int64(2)
+		source := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  dim,
+					Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8}}, // 2 vectors (dim*2 bytes each)
+				},
+			},
+		}
+		target := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  dim,
+					Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{}},
+				},
+			},
+		}
+
+		appendSingleVector(target, source, 0)
+		assert.Equal(t, []byte{1, 2, 3, 4}, target.GetVectors().GetFloat16Vector())
+
+		appendSingleVector(target, source, 1)
+		assert.Equal(t, []byte{1, 2, 3, 4, 5, 6, 7, 8}, target.GetVectors().GetFloat16Vector())
+	})
+
+	t.Run("BinaryVector", func(t *testing.T) {
+		dim := int64(16) // 16 bits = 2 bytes per vector
+		source := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  dim,
+					Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2, 3, 4}}, // 2 vectors
+				},
+			},
+		}
+		target := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  dim,
+					Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}},
+				},
+			},
+		}
+
+		appendSingleVector(target, source, 0)
+		assert.Equal(t, []byte{1, 2}, target.GetVectors().GetBinaryVector())
+
+		appendSingleVector(target, source, 1)
+		assert.Equal(t, []byte{1, 2, 3, 4}, target.GetVectors().GetBinaryVector())
+	})
+
+	t.Run("SparseFloatVector", func(t *testing.T) {
+		source := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 100,
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      100,
+							Contents: [][]byte{{1, 2}, {3, 4}},
+						},
+					},
+				},
+			},
+		}
+		target := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 100,
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      0,
+							Contents: [][]byte{},
+						},
+					},
+				},
+			},
+		}
+
+		appendSingleVector(target, source, 0)
+		assert.Equal(t, [][]byte{{1, 2}}, target.GetVectors().GetSparseFloatVector().Contents)
+
+		appendSingleVector(target, source, 1)
+		assert.Equal(t, [][]byte{{1, 2}, {3, 4}}, target.GetVectors().GetSparseFloatVector().Contents)
+	})
+
+	t.Run("nil vectors", func(t *testing.T) {
+		source := &schemapb.FieldData{}
+		target := &schemapb.FieldData{}
+		// Should not panic
+		appendSingleVector(target, source, 0)
+	})
+}
+
+func TestRebuildNullableVectorFieldData(t *testing.T) {
+	dim := int64(4)
+
+	t.Run("with upsert data - all valid", func(t *testing.T) {
+		upsertField := &schemapb.FieldData{
+			Type:      schemapb.DataType_FloatVector,
+			FieldName: "vec",
+			FieldId:   100,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  dim,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}}},
+				},
+			},
+			ValidData: []bool{true, true, true},
+		}
+
+		ctx := &nullableVectorMergeContext{
+			upsertIdxMap:  []int64{0, 1, 2},
+			upsertField:   upsertField,
+			hasUpsertData: true,
+			mergedValid:   []bool{true, true},
+		}
+
+		updateIdxInUpsert := []int{0, 2}
+		upsertIDs := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}
+		existPKToIndex := map[interface{}]int{}
+
+		result := rebuildNullableVectorFieldData(ctx, updateIdxInUpsert, upsertIDs, existPKToIndex)
+		assert.NotNil(t, result)
+		assert.Equal(t, []bool{true, true}, result.ValidData)
+		// Should have 2 vectors: index 0 and index 2 from source
+		assert.Equal(t, []float32{1, 2, 3, 4, 9, 10, 11, 12}, result.GetVectors().GetFloatVector().Data)
+	})
+
+	t.Run("with upsert data - mixed valid/null", func(t *testing.T) {
+		upsertField := &schemapb.FieldData{
+			Type:      schemapb.DataType_FloatVector,
+			FieldName: "vec",
+			FieldId:   100,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  dim,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6, 7, 8}}}, // only 2 vectors (compressed)
+				},
+			},
+			ValidData: []bool{true, false, true}, // row 0 valid, row 1 null, row 2 valid
+		}
+
+		ctx := &nullableVectorMergeContext{
+			upsertIdxMap:  []int64{0, -1, 1}, // row 0 -> data 0, row 1 -> null, row 2 -> data 1
+			upsertField:   upsertField,
+			hasUpsertData: true,
+			mergedValid:   []bool{true, false}, // result: row 0 valid, row 1 null
+		}
+
+		updateIdxInUpsert := []int{0, 1}
+		upsertIDs := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}
+		existPKToIndex := map[interface{}]int{}
+
+		result := rebuildNullableVectorFieldData(ctx, updateIdxInUpsert, upsertIDs, existPKToIndex)
+		assert.NotNil(t, result)
+		assert.Equal(t, []bool{true, false}, result.ValidData)
+		// Should have only 1 vector (row 0), row 1 is null
+		assert.Equal(t, []float32{1, 2, 3, 4}, result.GetVectors().GetFloatVector().Data)
+	})
+
+	t.Run("without upsert data - use exist data", func(t *testing.T) {
+		existField := &schemapb.FieldData{
+			Type:      schemapb.DataType_FloatVector,
+			FieldName: "vec",
+			FieldId:   100,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim:  dim,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6, 7, 8}}},
+				},
+			},
+			ValidData: []bool{true, true},
+		}
+
+		ctx := &nullableVectorMergeContext{
+			existIdxMap:   []int64{0, 1},
+			existField:    existField,
+			hasUpsertData: false,
+			mergedValid:   []bool{true, true},
+		}
+
+		updateIdxInUpsert := []int{0, 1}
+		upsertIDs := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10, 20}}}}
+		existPKToIndex := map[interface{}]int{int64(10): 0, int64(20): 1}
+
+		result := rebuildNullableVectorFieldData(ctx, updateIdxInUpsert, upsertIDs, existPKToIndex)
+		assert.NotNil(t, result)
+		assert.Equal(t, []bool{true, true}, result.ValidData)
+		assert.Equal(t, []float32{1, 2, 3, 4, 5, 6, 7, 8}, result.GetVectors().GetFloatVector().Data)
+	})
+
+	t.Run("nil source field", func(t *testing.T) {
+		ctx := &nullableVectorMergeContext{
+			hasUpsertData: false,
+			existField:    nil,
+			mergedValid:   []bool{true},
+		}
+
+		result := rebuildNullableVectorFieldData(ctx, []int{0}, nil, nil)
+		assert.Nil(t, result)
+	})
+}
