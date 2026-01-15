@@ -57,7 +57,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -115,7 +114,7 @@ type Server struct {
 	replicaObserver      *observers.ReplicaObserver
 	resourceObserver     *observers.ResourceObserver
 	leaderCacheObserver  *observers.LeaderCacheObserver
-	fileResourceObserver *observers.FileResourceObserver
+	fileResourceObserver FileResourceObserver
 
 	getBalancerFunc checkers.GetBalancerFunc
 	balancerMap     map[string]balance.Balance
@@ -138,6 +137,11 @@ type Server struct {
 
 	// load config watcher
 	loadConfigWatcher *LoadConfigWatcher
+}
+
+type FileResourceObserver interface {
+	InitQueryCoord(manager *session.NodeManager, cluster session.Cluster)
+	Notify()
 }
 
 func NewQueryCoord(ctx context.Context) (*Server, error) {
@@ -232,6 +236,10 @@ func (s *Server) registerMetricsRequest() {
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SegmentKey, QuerySegmentsAction)
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ChannelKey, QueryChannelsAction)
 	log.Ctx(s.ctx).Info("register metrics actions finished")
+}
+
+func (s *Server) SetFileResourceObserver(observer FileResourceObserver) {
+	s.fileResourceObserver = observer
 }
 
 func (s *Server) Init() error {
@@ -471,7 +479,9 @@ func (s *Server) initObserver() {
 		s.proxyClientManager,
 	)
 
-	s.fileResourceObserver = observers.NewFileResourceObserver(s.ctx, s.nodeMgr, s.cluster)
+	if s.fileResourceObserver != nil {
+		s.fileResourceObserver.InitQueryCoord(s.nodeMgr, s.cluster)
+	}
 }
 
 func (s *Server) afterStart() {}
@@ -535,7 +545,6 @@ func (s *Server) startServerLoop() {
 	s.targetObserver.Start()
 	s.replicaObserver.Start()
 	s.resourceObserver.Start()
-	s.fileResourceObserver.Start()
 
 	log.Info("start task scheduler...")
 	s.taskScheduler.Start()
@@ -595,9 +604,6 @@ func (s *Server) Stop() error {
 	}
 	if s.leaderCacheObserver != nil {
 		s.leaderCacheObserver.Stop()
-	}
-	if s.fileResourceObserver != nil {
-		s.fileResourceObserver.Stop()
 	}
 
 	if s.distController != nil {
@@ -701,7 +707,9 @@ func (s *Server) watchNodes(revision int64) {
 					Labels:   event.Session.GetServerLabel(),
 				}))
 				s.handleNodeUp(nodeID)
-				s.fileResourceObserver.Notify()
+				if s.fileResourceObserver != nil {
+					s.fileResourceObserver.Notify()
+				}
 
 			case sessionutil.SessionUpdateEvent:
 				log.Info("stopping the node")
@@ -893,9 +901,4 @@ func (s *Server) watchLoadConfigChanges() {
 
 	rgHandler := config.NewHandler("watchResourceGroupChanges", func(e *config.Event) { w.Trigger() })
 	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, rgHandler)
-}
-
-func (s *Server) SyncFileResource(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
-	s.fileResourceObserver.UpdateResources(resources, version)
-	return nil
 }

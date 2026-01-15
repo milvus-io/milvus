@@ -3,6 +3,7 @@ package balancer
 import (
 	"context"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -81,6 +82,21 @@ type balancerImpl struct {
 	reqCh                  chan *request                         // reqCh is the request channel, send the operation to background task.
 	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}] // backgroundTaskNotifier is used to conmunicate with the background task.
 	freezeNodes            typeutil.Set[int64]                   // freezeNodes is the nodes that will be frozen, no more wal will be assigned to these nodes and wal will be removed from these nodes.
+
+	fileResourceChecker FileResourceChecker
+	checkerMu           sync.RWMutex
+}
+
+func (b *balancerImpl) SetFileResourceChecker(checker FileResourceChecker) {
+	b.checkerMu.Lock()
+	defer b.checkerMu.Unlock()
+	b.fileResourceChecker = checker
+}
+
+func (b *balancerImpl) GetFileResourceChecker() FileResourceChecker {
+	b.checkerMu.RLock()
+	defer b.checkerMu.RUnlock()
+	return b.fileResourceChecker
 }
 
 // RegisterStreamingEnabledNotifier registers a notifier into the balancer.
@@ -503,6 +519,16 @@ func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context) (map[int64]
 			node.Err = types.ErrFrozen
 		}
 	}
+
+	// check if the node sync the file resource successfully.
+	if checker := b.GetFileResourceChecker(); checker != nil {
+		for _, node := range nodeStatus {
+			if ok := checker.CheckNodeSynced(node.ServerID); !ok {
+				node.Err = types.ErrFileResource
+			}
+		}
+	}
+
 	// clean up the freeze node that has been removed from session.
 	for serverID := range b.freezeNodes {
 		if _, ok := nodeStatus[serverID]; !ok {

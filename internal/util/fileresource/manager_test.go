@@ -29,6 +29,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -119,7 +120,7 @@ func (suite *SyncManagerSuite) SetupTest() {
 	suite.manager = &SyncManager{
 		BaseManager: BaseManager{localPath: suite.tempDir},
 		downloader:  suite.mockStorage,
-		version:     0,
+		version:     atomic.NewUint64(0),
 		resourceMap: make(map[string]int64),
 	}
 }
