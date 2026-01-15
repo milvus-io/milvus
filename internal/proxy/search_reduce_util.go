@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
@@ -246,8 +247,8 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 			Topks:      []int64{},
 		},
 	}
-	groupBound := groupSize * limit
-	if err := setupIdListForSearchResult(ret, pkType, groupBound); err != nil {
+	outputBound := groupSize * limit
+	if err := setupIdListForSearchResult(ret, pkType, outputBound); err != nil {
 		return ret, err
 	}
 
@@ -715,8 +716,8 @@ func reduceSearchResultDataWithGroupOrderBy(ctx context.Context, subSearchResult
 			Topks:      []int64{},
 		},
 	}
-	groupBound := groupSize * limit
-	if err := setupIdListForSearchResult(ret, pkType, groupBound); err != nil {
+	outputBound := groupSize * limit
+	if err := setupIdListForSearchResult(ret, pkType, outputBound); err != nil {
 		return ret, err
 	}
 
@@ -764,6 +765,7 @@ func reduceSearchResultDataWithGroupOrderBy(ctx context.Context, subSearchResult
 	var realTopK int64 = -1
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
+	selectionBound := groupSize * topk
 
 	// reducing nq * topk results
 	for i := int64(0); i < nq; i++ {
@@ -771,128 +773,80 @@ func reduceSearchResultDataWithGroupOrderBy(ctx context.Context, subSearchResult
 			cursors        = make([]int64, subSearchNum)
 			j              int64
 			groupByValMap  = make(map[interface{}][]*groupReduceInfo)
-			skipOffsetMap  = make(map[interface{}]bool)
-			groupByValList = make([]interface{}, limit)
-			groupByValIdx  = 0
+			groupByValList = make([]interface{}, 0, int(topk))
 		)
 
-		// Map to cache each group's first item's order_by values
-		groupFirstItemOrderByMap := make(map[interface{}][]any)
+		for j = 0; j < selectionBound; {
+			subSearchIdx, resultDataIdx := selectHighestScoreIndex(ctx, subSearchResultData, subSearchNqOffset, cursors, i)
 
-		// Helper to get first item's order_by values for a group
-		getFirstItemOrderByValues := func(dataIndex int, groupByVal interface{}, startIdx int64, endIdx int64) []any {
-			// Find first item in this group
-			var firstIdx int64 = -1
-			for idx := startIdx; idx < endIdx; idx++ {
-				if subSearchGroupByValIterator[dataIndex](int(idx)) == groupByVal {
-					firstIdx = idx
-					break
-				}
-			}
-
-			if firstIdx == -1 {
-				return nil
-			}
-
-			// Get order_by values for first item
-			firstItemOrderByVals := make([]any, len(orderByFields))
-			for fieldIdx := range orderByFields {
-				if fieldIdx < len(orderByIterators[dataIndex]) {
-					firstItemOrderByVals[fieldIdx] = orderByIterators[dataIndex][fieldIdx](int(firstIdx))
-				}
-			}
-			return firstItemOrderByVals
-		}
-
-		for j = 0; j < groupBound; {
-			// Select based on group's first item's order_by values
-			sel := -1
-			var selGroupByVal interface{}
-			var selOrderByVals []any
-
-			for dataIdx, cursor := range cursors {
-				if cursor >= subSearchResultData[dataIdx].Topks[i] {
-					continue
-				}
-
-				idx := subSearchNqOffset[dataIdx][i] + cursor
-				groupByVal := subSearchGroupByValIterator[dataIdx](int(idx))
-
-				// Get or cache this group's first item's order_by values
-				var orderByVals []any
-				if cached, ok := groupFirstItemOrderByMap[groupByVal]; ok {
-					orderByVals = cached
-				} else {
-					startIdx := subSearchNqOffset[dataIdx][i]
-					endIdx := startIdx + subSearchResultData[dataIdx].Topks[i]
-					orderByVals = getFirstItemOrderByValues(dataIdx, groupByVal, startIdx, endIdx)
-					groupFirstItemOrderByMap[groupByVal] = orderByVals
-				}
-
-				if sel == -1 {
-					sel = dataIdx
-					selGroupByVal = groupByVal
-					selOrderByVals = orderByVals
-					continue
-				}
-
-				// Compare groups by their first item's order_by values
-				cmp := compareOrderByValuesProxy(selOrderByVals, orderByVals, orderByFields)
-				if cmp > 0 {
-					// Current group is better
-					sel = dataIdx
-					selGroupByVal = groupByVal
-					selOrderByVals = orderByVals
-				} else if cmp == 0 {
-					// Equal order_by values, use distance as tie-breaker
-					selIdx := subSearchNqOffset[sel][i] + cursors[sel]
-					currIdx := subSearchNqOffset[dataIdx][i] + cursor
-					selDistance := subSearchResultData[sel].Scores[selIdx]
-					currDistance := subSearchResultData[dataIdx].Scores[currIdx]
-					if currDistance > selDistance {
-						sel = dataIdx
-						selGroupByVal = groupByVal
-						selOrderByVals = orderByVals
-					}
-				}
-			}
-
-			if sel == -1 {
+			if subSearchIdx == -1 {
 				break
 			}
 
-			idx := subSearchNqOffset[sel][i] + cursors[sel]
-			id := typeutil.GetPK(subSearchResultData[sel].GetIds(), idx)
-			groupByVal := selGroupByVal
-			score := subSearchResultData[sel].Scores[idx]
+			subSearchRes := subSearchResultData[subSearchIdx]
 
-			if int64(len(skipOffsetMap)) < offset || skipOffsetMap[groupByVal] {
-				skipOffsetMap[groupByVal] = true
-				// the first offset's group will be ignored
-			} else if len(groupByValMap[groupByVal]) == 0 && int64(len(groupByValMap)) >= limit {
+			id := typeutil.GetPK(subSearchRes.GetIds(), resultDataIdx)
+			score := subSearchRes.GetScores()[resultDataIdx]
+			groupByVal := subSearchGroupByValIterator[subSearchIdx](int(resultDataIdx))
+
+			if len(groupByValMap[groupByVal]) == 0 && int64(len(groupByValMap)) >= topk {
 				// skip when groupbyMap has been full and found new groupByVal
 			} else if int64(len(groupByValMap[groupByVal])) >= groupSize {
 				// skip when target group has been full
 			} else {
 				if len(groupByValMap[groupByVal]) == 0 {
-					groupByValList[groupByValIdx] = groupByVal
-					groupByValIdx++
+					groupByValList = append(groupByValList, groupByVal)
 				}
 				groupByValMap[groupByVal] = append(groupByValMap[groupByVal], &groupReduceInfo{
-					subSearchIdx: sel,
-					resultIdx:    idx, id: id, score: score,
+					subSearchIdx: subSearchIdx,
+					resultIdx:    resultDataIdx,
+					id:           id,
+					score:        score,
 				})
 				j++
 			}
 
-			cursors[sel]++
+			cursors[subSearchIdx]++
 		}
 
-		// Sort groups by their first item's order_by values
-		// Note: groupByValList is already sorted by the selection process above
-		// assemble all eligible values in group
+		type groupOrderByInfo struct {
+			groupVal    interface{}
+			orderByVals []any
+		}
+		groupInfos := make([]groupOrderByInfo, 0, len(groupByValMap))
 		for _, groupVal := range groupByValList {
 			groupEntities := groupByValMap[groupVal]
+			if len(groupEntities) == 0 {
+				continue
+			}
+			first := groupEntities[0]
+			orderByVals := make([]any, len(orderByFields))
+			for fieldIdx := range orderByFields {
+				if fieldIdx < len(orderByIterators[first.subSearchIdx]) {
+					orderByVals[fieldIdx] = orderByIterators[first.subSearchIdx][fieldIdx](int(first.resultIdx))
+				}
+			}
+			groupInfos = append(groupInfos, groupOrderByInfo{
+				groupVal:    groupVal,
+				orderByVals: orderByVals,
+			})
+		}
+		sort.SliceStable(groupInfos, func(i, j int) bool {
+			return compareOrderByValuesProxy(groupInfos[i].orderByVals, groupInfos[j].orderByVals, orderByFields) < 0
+		})
+
+		var outputCount int64
+		var groupIdx int64
+		for _, group := range groupInfos {
+			if groupIdx < offset {
+				groupIdx++
+				continue
+			}
+			if groupIdx >= offset+limit {
+				break
+			}
+			groupIdx++
+			groupEntities := groupByValMap[group.groupVal]
 			for _, groupEntity := range groupEntities {
 				subResData := subSearchResultData[groupEntity.subSearchIdx]
 				if len(ret.Results.FieldsData) > 0 {
@@ -913,14 +867,15 @@ func reduceSearchResultDataWithGroupOrderBy(ctx context.Context, subSearchResult
 					ret.Results.ElementIndices.Data = append(ret.Results.ElementIndices.Data, elemIdx)
 				}
 
-				gpFieldBuilder.Add(groupVal)
+				gpFieldBuilder.Add(group.groupVal)
+				outputCount++
 			}
 		}
 
-		if realTopK != -1 && realTopK != j {
+		if realTopK != -1 && realTopK != outputCount {
 			log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
 		}
-		realTopK = j
+		realTopK = outputCount
 		ret.Results.Topks = append(ret.Results.Topks, realTopK)
 		ret.Results.GroupByFieldValue = gpFieldBuilder.Build()
 

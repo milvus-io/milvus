@@ -3,6 +3,7 @@ package segments
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -318,6 +319,13 @@ func getOrderByFieldData(fieldsData []*schemapb.FieldData, fieldId int64) *schem
 	return nil
 }
 
+type groupReduceInfo struct {
+	subSearchIdx int
+	resultIdx    int64
+	score        float32
+	id           interface{}
+}
+
 type SearchOrderByReduce struct{}
 
 func (sor *SearchOrderByReduce) ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *reduce.ResultInfo) (*schemapb.SearchResultData, error) {
@@ -497,46 +505,6 @@ func (sgor *SearchGroupOrderByReduce) ReduceSearchResultData(ctx context.Context
 	// Build order_by iterators
 	orderByIterators := buildOrderByIterators(searchResultData, orderByFields)
 
-	// Map to cache each group's first item's order_by values
-	// Key: (dataIndex, groupByValue), Value: first item's order_by values
-	type groupKey struct {
-		dataIndex  int
-		groupByVal interface{}
-	}
-	groupOrderByMap := make(map[groupKey][]any)
-
-	// Helper to get first item's order_by values for a group
-	getFirstItemOrderByValues := func(dataIndex int, groupByVal interface{}, startIdx int64, endIdx int64) []any {
-		key := groupKey{dataIndex: dataIndex, groupByVal: groupByVal}
-		if cached, ok := groupOrderByMap[key]; ok {
-			return cached
-		}
-
-		// Find first item in this group
-		var firstIdx int64 = -1
-		for idx := startIdx; idx < endIdx; idx++ {
-			if groupByValIterator[dataIndex](int(idx)) == groupByVal {
-				firstIdx = idx
-				break
-			}
-		}
-
-		if firstIdx == -1 {
-			return nil
-		}
-
-		// Get order_by values for first item
-		firstItemOrderByVals := make([]any, len(orderByFields))
-		for fieldIdx := range orderByFields {
-			if fieldIdx < len(orderByIterators[dataIndex]) {
-				firstItemOrderByVals[fieldIdx] = orderByIterators[dataIndex][fieldIdx](int(firstIdx))
-			}
-		}
-
-		groupOrderByMap[key] = firstItemOrderByVals
-		return firstItemOrderByVals
-	}
-
 	idxComputers := make([]*typeutil.FieldDataIdxComputer, len(searchResultData))
 	for i, srd := range searchResultData {
 		idxComputers[i] = typeutil.NewFieldDataIdxComputer(srd.FieldsData)
@@ -555,64 +523,12 @@ func (sgor *SearchGroupOrderByReduce) ReduceSearchResultData(ctx context.Context
 		offsets := make([]int64, len(searchResultData))
 
 		idSet := make(map[interface{}]struct{})
-		groupByValueMap := make(map[interface{}]int64)
-
-		// Map to track groups and their first item's order_by values for selection
-		groupFirstItemOrderByMap := make(map[interface{}][]any)
+		groupByValueMap := make(map[interface{}][]*groupReduceInfo)
+		groupOrder := make([]interface{}, 0, int(info.GetTopK()))
 
 		var j int64
 		for j = 0; j < groupBound; {
-			// Select based on group's first item's order_by values
-			sel := -1
-			var selGroupByVal interface{}
-			var selOrderByVals []any
-
-			for dataIdx, offset := range offsets {
-				if offset >= searchResultData[dataIdx].Topks[i] {
-					continue
-				}
-
-				idx := resultOffsets[dataIdx][i] + offset
-				groupByVal := groupByValIterator[dataIdx](int(idx))
-
-				// Get or cache this group's first item's order_by values
-				var orderByVals []any
-				if cached, ok := groupFirstItemOrderByMap[groupByVal]; ok {
-					orderByVals = cached
-				} else {
-					startIdx := resultOffsets[dataIdx][i]
-					endIdx := startIdx + searchResultData[dataIdx].Topks[i]
-					orderByVals = getFirstItemOrderByValues(dataIdx, groupByVal, startIdx, endIdx)
-					groupFirstItemOrderByMap[groupByVal] = orderByVals
-				}
-
-				if sel == -1 {
-					sel = dataIdx
-					selGroupByVal = groupByVal
-					selOrderByVals = orderByVals
-					continue
-				}
-
-				// Compare groups by their first item's order_by values
-				cmp := compareOrderByValues(selOrderByVals, orderByVals, orderByFields)
-				if cmp > 0 {
-					// Current group is better
-					sel = dataIdx
-					selGroupByVal = groupByVal
-					selOrderByVals = orderByVals
-				} else if cmp == 0 {
-					// Equal order_by values, use distance as tie-breaker
-					selIdx := resultOffsets[sel][i] + offsets[sel]
-					currIdx := resultOffsets[dataIdx][i] + offset
-					selDistance := searchResultData[sel].Scores[selIdx]
-					currDistance := searchResultData[dataIdx].Scores[currIdx]
-					if currDistance > selDistance {
-						sel = dataIdx
-						selGroupByVal = groupByVal
-						selOrderByVals = orderByVals
-					}
-				}
-			}
+			sel := SelectSearchResultData(searchResultData, resultOffsets, offsets, i)
 
 			if sel == -1 {
 				break
@@ -620,11 +536,11 @@ func (sgor *SearchGroupOrderByReduce) ReduceSearchResultData(ctx context.Context
 
 			idx := resultOffsets[sel][i] + offsets[sel]
 			id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
-			groupByVal := selGroupByVal
+			groupByVal := groupByValIterator[sel](int(idx))
 			score := searchResultData[sel].Scores[idx]
 
 			if _, ok := idSet[id]; !ok {
-				groupCount := groupByValueMap[groupByVal]
+				groupCount := int64(len(groupByValueMap[groupByVal]))
 				if groupCount == 0 && int64(len(groupByValueMap)) >= info.GetTopK() {
 					// exceed the limit for group count, filter this entity
 					filteredCount++
@@ -632,16 +548,15 @@ func (sgor *SearchGroupOrderByReduce) ReduceSearchResultData(ctx context.Context
 					// exceed the limit for each group, filter this entity
 					filteredCount++
 				} else {
-					fieldsData := searchResultData[sel].FieldsData
-					fieldIdxs := idxComputers[sel].Compute(idx)
-					retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, idx, fieldIdxs...)
-					typeutil.AppendPKs(ret.Ids, id)
-					ret.Scores = append(ret.Scores, score)
-					if searchResultData[sel].ElementIndices != nil && ret.ElementIndices != nil {
-						ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[sel].ElementIndices.Data[idx])
+					if groupCount == 0 {
+						groupOrder = append(groupOrder, groupByVal)
 					}
-					gpFieldBuilder.Add(groupByVal)
-					groupByValueMap[groupByVal] += 1
+					groupByValueMap[groupByVal] = append(groupByValueMap[groupByVal], &groupReduceInfo{
+						subSearchIdx: sel,
+						resultIdx:    idx,
+						score:        score,
+						id:           id,
+					})
 					idSet[id] = struct{}{}
 					j++
 				}
@@ -651,7 +566,50 @@ func (sgor *SearchGroupOrderByReduce) ReduceSearchResultData(ctx context.Context
 			}
 			offsets[sel]++
 		}
-		ret.Topks = append(ret.Topks, j)
+
+		type groupOrderByInfo struct {
+			groupVal    interface{}
+			orderByVals []any
+		}
+		groupInfos := make([]groupOrderByInfo, 0, len(groupByValueMap))
+		for _, groupVal := range groupOrder {
+			entries := groupByValueMap[groupVal]
+			if len(entries) == 0 {
+				continue
+			}
+			first := entries[0]
+			orderByVals := make([]any, len(orderByFields))
+			for fieldIdx := range orderByFields {
+				if fieldIdx < len(orderByIterators[first.subSearchIdx]) {
+					orderByVals[fieldIdx] = orderByIterators[first.subSearchIdx][fieldIdx](int(first.resultIdx))
+				}
+			}
+			groupInfos = append(groupInfos, groupOrderByInfo{
+				groupVal:    groupVal,
+				orderByVals: orderByVals,
+			})
+		}
+		sort.SliceStable(groupInfos, func(i, j int) bool {
+			return compareOrderByValues(groupInfos[i].orderByVals, groupInfos[j].orderByVals, orderByFields) < 0
+		})
+
+		var outputCount int64
+		for _, group := range groupInfos {
+			groupEntities := groupByValueMap[group.groupVal]
+			for _, groupEntity := range groupEntities {
+				fieldsData := searchResultData[groupEntity.subSearchIdx].FieldsData
+				fieldIdxs := idxComputers[groupEntity.subSearchIdx].Compute(groupEntity.resultIdx)
+				retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, groupEntity.resultIdx, fieldIdxs...)
+				typeutil.AppendPKs(ret.Ids, groupEntity.id)
+				ret.Scores = append(ret.Scores, groupEntity.score)
+				if searchResultData[groupEntity.subSearchIdx].ElementIndices != nil && ret.ElementIndices != nil {
+					ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[groupEntity.subSearchIdx].ElementIndices.Data[groupEntity.resultIdx])
+				}
+				gpFieldBuilder.Add(group.groupVal)
+				outputCount++
+			}
+		}
+		ret.Topks = append(ret.Topks, outputCount)
 
 		// limit search result to avoid oom
 		if retSize > maxOutputSize {

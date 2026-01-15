@@ -16,6 +16,7 @@
 #include "common/EasyAssert.h"
 #include "log/Log.h"
 #include "exec/operator/search-groupby/SearchGroupByOperator.h"
+#include <algorithm>
 #include <map>
 #include <functional>
 
@@ -31,25 +32,13 @@ GroupOrderByReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
         return GroupReduceHelper::ReduceSearchResultForOneNQ(qi, topk, offset);
     }
 
-    // Create comparator with order_by_fields
-    SearchResultPairComparator comparator(order_by_fields_);
-
     std::priority_queue<SearchResultPair*,
                         std::vector<SearchResultPair*>,
                         SearchResultPairComparator>
-        heap(comparator);
+        heap;
     pk_set_.clear();
     pairs_.clear();
     pairs_.reserve(num_segments_);
-
-    // Initialize OpContext for reading field values
-    milvus::OpContext op_ctx;
-
-    // Map to track groups and their first item's order_by values per segment
-    // Since GroupByValueType is a variant, we use a nested map structure
-    // Outer key: segment_index, Inner key: group_by_value
-    std::vector<std::unordered_map<GroupByValueType, std::vector<OrderByValueType>>>
-        group_order_by_maps(num_segments_);
 
     for (int i = 0; i < num_segments_; i++) {
         auto search_result = search_results_[i];
@@ -76,22 +65,7 @@ GroupOrderByReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
                             offset_beg,
                             offset_end,
                             std::move(group_by_val));
-        auto* pair = &pairs_.back();
-
-        // Read order_by field values for the first item in this group
-        // This represents the group when comparing groups
-        auto& segment_map = group_order_by_maps[i];
-        if (segment_map.find(pair->group_by_value_.value()) == segment_map.end()) {
-            auto first_item_order_by_vals =
-                GetFirstItemOrderByValues(pair->group_by_value_.value(),
-                                          search_result,
-                                          offset_beg);
-            segment_map[pair->group_by_value_.value()] =
-                std::move(first_item_order_by_vals);
-        }
-        pair->order_by_values_ = segment_map[pair->group_by_value_.value()];
-
-        heap.push(pair);
+        heap.push(&pairs_.back());
     }
 
     // nq has no results for all segments
@@ -104,9 +78,14 @@ GroupOrderByReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
     int64_t filtered_count = 0;
     auto start = offset;
     std::unordered_map<GroupByValueType, int64_t> group_by_map;
-
-    // Track which groups we've seen, ordered by their first item's order_by values
-    std::vector<GroupByValueType> ordered_groups;
+    struct SelectedItem {
+        int segment_index;
+        int64_t offset;
+        GroupByValueType group_by_val;
+        SearchResult* search_result;
+    };
+    std::vector<SelectedItem> selected_items;
+    selected_items.reserve(group_by_total_size);
 
     auto should_filtered = [&](const PkType& pk,
                                const GroupByValueType& group_by_val) {
@@ -120,7 +99,8 @@ GroupOrderByReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
         return false;
     };
 
-    while (offset - start < group_by_total_size && !heap.empty()) {
+    while (static_cast<int64_t>(selected_items.size()) < group_by_total_size &&
+           !heap.empty()) {
         // fetch value
         auto pilot = heap.top();
         heap.pop();
@@ -133,13 +113,11 @@ GroupOrderByReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
 
         // judge filter
         if (!should_filtered(pk, group_by_val)) {
-            pilot->search_result_->result_offsets_.push_back(offset++);
-            final_search_records_[index][qi].push_back(pilot->offset_);
+            selected_items.push_back(SelectedItem{index,
+                                                  pilot->offset_,
+                                                  group_by_val,
+                                                  pilot->search_result_});
             pk_set_.insert(pk);
-            if (group_by_map.count(group_by_val) == 0) {
-                group_by_map[group_by_val] = 0;
-                ordered_groups.push_back(group_by_val);
-            }
             group_by_map[group_by_val] += 1;
         } else {
             filtered_count++;
@@ -148,29 +126,90 @@ GroupOrderByReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
         // move pilot forward
         pilot->advance();
         if (pilot->primary_key_ != INVALID_PK) {
-            // Update order_by_values for the next result in the same group
-            // Use the group's first item's order_by values (already cached)
-            if (pilot->group_by_value_.has_value()) {
-                auto& segment_map = group_order_by_maps[pilot->segment_index_];
-                if (segment_map.find(pilot->group_by_value_.value()) !=
-                    segment_map.end()) {
-                    pilot->order_by_values_ =
-                        segment_map[pilot->group_by_value_.value()];
-                } else {
-                    // New group encountered, read its first item's order_by values
-                    auto first_item_order_by_vals =
-                        GetFirstItemOrderByValues(pilot->group_by_value_.value(),
-                                                pilot->search_result_,
-                                                pilot->offset_);
-                    segment_map[pilot->group_by_value_.value()] =
-                        first_item_order_by_vals;
-                    pilot->order_by_values_ = std::move(first_item_order_by_vals);
-                }
-            } else {
-                // Fallback: read order_by values for this item
-                ReadOrderByValues(pilot);
-            }
             heap.push(pilot);
+        }
+    }
+    offset = start + static_cast<int64_t>(selected_items.size());
+
+    if (selected_items.empty()) {
+        return filtered_count;
+    }
+
+    std::unordered_map<GroupByValueType, std::vector<size_t>> group_item_map;
+    std::vector<GroupByValueType> group_list;
+    group_list.reserve(group_by_map.size());
+    for (size_t i = 0; i < selected_items.size(); ++i) {
+        const auto& item = selected_items[i];
+        if (group_item_map.find(item.group_by_val) == group_item_map.end()) {
+            group_list.push_back(item.group_by_val);
+        }
+        group_item_map[item.group_by_val].push_back(i);
+    }
+
+    struct GroupInfo {
+        GroupByValueType group_val;
+        std::vector<OrderByValueType> order_by_vals;
+    };
+    std::vector<GroupInfo> groups;
+    groups.reserve(group_list.size());
+
+    for (const auto& group_val : group_list) {
+        const auto& indices = group_item_map[group_val];
+        const auto& first_item = selected_items[indices[0]];
+        SearchResultPair temp_pair(first_item.search_result->primary_keys_[first_item.offset],
+                                   first_item.search_result->distances_[first_item.offset],
+                                   first_item.search_result,
+                                   first_item.segment_index,
+                                   first_item.offset,
+                                   first_item.offset + 1,
+                                   first_item.group_by_val);
+        ReadOrderByValues(&temp_pair);
+        std::vector<OrderByValueType> order_by_vals;
+        if (temp_pair.order_by_values_.has_value()) {
+            order_by_vals = temp_pair.order_by_values_.value();
+        }
+        if (order_by_vals.size() < order_by_fields_.size()) {
+            order_by_vals.resize(order_by_fields_.size(), std::nullopt);
+        }
+        groups.push_back(GroupInfo{group_val, std::move(order_by_vals)});
+    }
+
+    auto group_comparator = [&](const GroupInfo& lhs,
+                                const GroupInfo& rhs) -> bool {
+        for (size_t field_idx = 0; field_idx < order_by_fields_.size();
+             ++field_idx) {
+            const auto& field = order_by_fields_[field_idx];
+            const auto& lhs_val = lhs.order_by_vals[field_idx];
+            const auto& rhs_val = rhs.order_by_vals[field_idx];
+
+            if (!lhs_val.has_value() && !rhs_val.has_value()) {
+                continue;
+            }
+            if (!lhs_val.has_value()) {
+                return field.ascending_;
+            }
+            if (!rhs_val.has_value()) {
+                return !field.ascending_;
+            }
+            int cmp = CompareOrderByValue(lhs_val, rhs_val);
+            if (cmp < 0) {
+                return field.ascending_;
+            }
+            if (cmp > 0) {
+                return !field.ascending_;
+            }
+        }
+        return false;
+    };
+    std::stable_sort(groups.begin(), groups.end(), group_comparator);
+
+    int64_t loc = start;
+    for (const auto& group : groups) {
+        const auto& indices = group_item_map[group.group_val];
+        for (auto idx : indices) {
+            const auto& item = selected_items[idx];
+            item.search_result->result_offsets_.push_back(loc++);
+            final_search_records_[item.segment_index][qi].push_back(item.offset);
         }
     }
     return filtered_count;
