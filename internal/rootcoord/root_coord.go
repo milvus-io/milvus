@@ -1134,6 +1134,7 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		FileResourceIds:    collInfo.FileResourceIds,
 		ExternalSource:     collInfo.ExternalSource,
 		ExternalSpec:       collInfo.ExternalSpec,
+		DbName:             dbName, // Use dbName parameter for consistency with resp.DbName
 	}
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
