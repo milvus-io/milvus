@@ -914,9 +914,7 @@ class SegmentExpr : public Expr {
                 continue;
 
             auto& skip_index = segment_->GetSkipIndex();
-            if ((!skip_func || !skip_func(skip_index, field_id_, i)) &&
-                (!namespace_skip_func_.has_value() ||
-                 !namespace_skip_func_.value()(i))) {
+            if ((!skip_func || !skip_func(skip_index, field_id_, i))) {
                 if (segment_->type() == SegmentType::Sealed) {
                     auto pw = segment_->get_batch_views<ArrayView>(
                         op_ctx_, field_id_, i, data_pos, size);
