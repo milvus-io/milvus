@@ -58,11 +58,9 @@ func (suite *FileResourceManagerSuite) SetupTest() {
 	suite.mockNodeManager = session.NewMockNodeManager(suite.T())
 	suite.mockDataNode = mocks.NewMockDataNodeClient(suite.T())
 	suite.mockCatalog = metamock.NewDataCoordCatalog(suite.T())
-
 	// Create test meta with minimal initialization
 	suite.testMeta = &meta{
 		catalog:         suite.mockCatalog,
-		resourceMeta:    make(map[string]*internalpb.FileResourceInfo),
 		resourceIDMap:   make(map[int64]*internalpb.FileResourceInfo),
 		resourceVersion: 0,
 	}
@@ -97,11 +95,9 @@ func (suite *FileResourceManagerSuite) TestNormal() {
 		suite.Equal(testResource.Path, in.Resources[0].Path)
 		syncCh <- struct{}{}
 	}).Return(merr.Success(), nil).Once()
-	suite.mockCatalog.EXPECT().SaveFileResource(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	suite.testMeta.AddFileResource(suite.ctx, testResource)
 
 	// notify sync
-	suite.manager.Notify()
+	suite.manager.UpdateResources([]*internalpb.FileResourceInfo{testResource}, 1)
 
 	suite.Eventually(func() bool {
 		select {
@@ -111,41 +107,6 @@ func (suite *FileResourceManagerSuite) TestNormal() {
 			return false
 		}
 	}, 2*time.Second, 100*time.Millisecond)
-}
-
-func (suite *FileResourceManagerSuite) TestSync_Success() {
-	// Prepare test data
-	nodeID := int64(1)
-	resources := []*internalpb.FileResourceInfo{
-		{
-			Id:   1,
-			Name: "test.file",
-			Path: "/test/test.file",
-		},
-	}
-	version := uint64(100)
-
-	// Setup meta state directly
-	suite.testMeta.resourceMeta["test.file"] = resources[0]
-	suite.testMeta.resourceVersion = version
-
-	// Setup mocks
-	suite.mockNodeManager.EXPECT().GetClientIDs().Return([]int64{nodeID})
-	suite.mockNodeManager.EXPECT().GetClient(nodeID).Return(suite.mockDataNode, nil)
-	suite.mockDataNode.EXPECT().SyncFileResource(
-		suite.ctx,
-		&internalpb.SyncFileResourceRequest{
-			Resources: resources,
-			Version:   version,
-		},
-	).Return(merr.Success(), nil)
-
-	// Execute sync
-	err := suite.manager.sync()
-
-	// Verify
-	suite.NoError(err)
-	suite.Equal(version, suite.manager.distribution[nodeID])
 }
 
 func (suite *FileResourceManagerSuite) TestSync_NodeClientError() {
