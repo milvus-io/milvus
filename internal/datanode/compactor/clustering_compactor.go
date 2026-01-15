@@ -934,7 +934,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 				binlogs = append(binlogs, fieldBinlog)
 			}
 		}
-	case storage.StorageV2:
+	case storage.StorageV2, storage.StorageV3:
 		binlogs = segment.GetFieldBinlogs()
 	default:
 		log.Warn("unsupported storage version", zap.Int64("storage version", segment.GetStorageVersion()))

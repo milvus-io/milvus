@@ -33,12 +33,13 @@ import (
 type CohereEmbeddingProvider struct {
 	fieldDim int64
 
-	client     *cohere.CohereClient
-	url        string
-	modelName  string
-	truncate   string
-	embdType   models.EmbeddingType
-	outputType string
+	client        *cohere.CohereClient
+	url           string
+	modelName     string
+	truncate      string
+	embedDimParam int64
+	embdType      models.EmbeddingType
+	outputType    string
 
 	maxBatch   int
 	timeoutSec int64
@@ -55,11 +56,17 @@ func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		return nil, err
 	}
 	var modelName string
+	var dim int64
 	truncate := "END"
 	for _, param := range functionSchema.Params {
 		switch strings.ToLower(param.Key) {
 		case models.ModelNameParamKey:
 			modelName = param.Value
+		case models.DimParamKey:
+			dim, err = models.ParseAndCheckFieldDim(param.Value, fieldDim, fieldSchema.Name)
+			if err != nil {
+				return nil, err
+			}
 		case models.TruncateParamKey:
 			if param.Value != "NONE" && param.Value != "START" && param.Value != "END" {
 				return nil, fmt.Errorf("Illegal parameters, %s only supports [NONE, START, END]", models.TruncateParamKey)
@@ -91,16 +98,17 @@ func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 	}()
 
 	provider := CohereEmbeddingProvider{
-		client:     c,
-		url:        url,
-		fieldDim:   fieldDim,
-		modelName:  modelName,
-		truncate:   truncate,
-		embdType:   embdType,
-		outputType: outputType,
-		maxBatch:   96,
-		timeoutSec: 30,
-		extraInfo:  extraInfo,
+		client:        c,
+		url:           url,
+		fieldDim:      fieldDim,
+		modelName:     modelName,
+		truncate:      truncate,
+		embedDimParam: dim,
+		embdType:      embdType,
+		outputType:    outputType,
+		maxBatch:      96,
+		timeoutSec:    30,
+		extraInfo:     extraInfo,
 	}
 	return &provider, nil
 }
@@ -135,7 +143,7 @@ func (provider *CohereEmbeddingProvider) CallEmbedding(ctx context.Context, text
 			end = numRows
 		}
 
-		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], inputType, provider.outputType, provider.truncate, provider.timeoutSec)
+		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], inputType, provider.outputType, provider.truncate, int(provider.embedDimParam), provider.timeoutSec)
 		if err != nil {
 			return nil, err
 		}

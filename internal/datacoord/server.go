@@ -347,6 +347,7 @@ func (s *Server) initDataCoord() error {
 	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.compactionTriggerManager)
 
 	s.fileManager = NewFileResourceManager(s.ctx, s.meta, s.nodeManager)
+
 	// Initialize copy segment meta and components
 	s.copySegmentMeta, err = NewCopySegmentMeta(s.ctx, s.meta.catalog, s.meta, s.meta.snapshotMeta)
 	if err != nil {
@@ -1105,6 +1106,11 @@ func (s *Server) Stop() error {
 	log.Info("datacoord server shutdown")
 	s.garbageCollector.close()
 	log.Info("datacoord garbage collector stopped")
+
+	if s.meta != nil {
+		s.meta.GetSnapshotMeta().Close()
+		log.Info("datacoord snapshot meta closed")
+	}
 
 	s.stopServerLoop()
 	log.Info("datacoord stopServerLoop stopped")

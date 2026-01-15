@@ -308,7 +308,7 @@ TEST_F(VectorArrayChunkTest, TestWriteWithMmap) {
                          DataType::VECTOR_FLOAT,
                          dim,
                          std::nullopt);
-    auto chunk = create_chunk(field_meta, array_vec, temp_file);
+    auto chunk = create_chunk(field_meta, array_vec, true, temp_file);
     auto vector_array_chunk = static_cast<VectorArrayChunk*>(chunk.get());
 
     // Verify mmap write

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -68,28 +69,57 @@ func createFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSc
 			return nil, err
 		}
 		return f, nil
+	case schemapb.FunctionType_MinHash:
+		return nil, nil
 	default:
 		return nil, fmt.Errorf("unknown functionRunner type %s", schema.GetType().String())
 	}
 }
 
-// Since bm25 and embedding are implemented in different ways, the bm25 function is not verified here.
-func ValidateFunctions(schema *schemapb.CollectionSchema, extraInfo *models.ModelExtraInfo) error {
-	for _, fSchema := range schema.Functions {
-		f, err := createFunction(schema, fSchema, extraInfo)
-		if err != nil {
-			return err
-		}
+// validateFunction validates a single function.
+func validateFunction(schema *schemapb.CollectionSchema, fSchema *schemapb.FunctionSchema, extraInfo *models.ModelExtraInfo) error {
+	f, err := createFunction(schema, fSchema, extraInfo)
+	if err != nil {
+		return err
+	}
 
-		// ignore bm25 function
-		if f == nil {
-			continue
+	// BM25 or minhash function returns nil from createFunction
+	if f == nil {
+		if fSchema.GetType() == schemapb.FunctionType_MinHash {
+			err := function.ValidateMinHashFunction(schema, fSchema)
+			if err != nil {
+				return err
+			}
 		}
-		if err := f.Check(context.Background()); err != nil {
-			return fmt.Errorf("Check function [%s:%s] failed, the err is: %v", fSchema.Name, fSchema.GetType().String(), err)
-		}
+		// bm25 or minhash validate pass
+		return nil
+	}
+
+	if err := f.Check(context.Background()); err != nil {
+		return fmt.Errorf("Check function [%s:%s] failed, the err is: %v", fSchema.Name, fSchema.GetType().String(), err)
 	}
 	return nil
+}
+
+// ValidateFunctions validates functions in the schema.
+// If needValidateFunctionName is empty, all functions will be validated; otherwise, only the specified function will be validated.
+func ValidateFunctions(schema *schemapb.CollectionSchema, needValidateFunctionName string, extraInfo *models.ModelExtraInfo) error {
+	if needValidateFunctionName == "" {
+		for _, fSchema := range schema.Functions {
+			if err := validateFunction(schema, fSchema, extraInfo); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	for _, fSchema := range schema.Functions {
+		if fSchema.Name == needValidateFunctionName {
+			return validateFunction(schema, fSchema, extraInfo)
+		}
+	}
+
+	return fmt.Errorf("function [%s] not found in schema", needValidateFunctionName)
 }
 
 func NewFunctionExecutor(schema *schemapb.CollectionSchema, functions []*schemapb.FunctionSchema, extraInfo *models.ModelExtraInfo) (*FunctionExecutor, error) {

@@ -44,9 +44,9 @@ func (c *CohereClient) headers() map[string]string {
 	}
 }
 
-func (c *CohereClient) Embedding(url string, modelName string, texts []string, inputType string, outputType string, truncate string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *CohereClient) Embedding(url string, modelName string, texts []string, inputType string, outputType string, truncate string, dim int, timeoutSec int64) (*EmbeddingResponse, error) {
 	embClient := newCohereEmbedding(c.apiKey, url)
-	return embClient.embedding(modelName, texts, inputType, outputType, truncate, c.headers(), timeoutSec)
+	return embClient.embedding(modelName, texts, inputType, outputType, truncate, dim, c.headers(), timeoutSec)
 }
 
 func (c *CohereClient) Rerank(url string, modelName string, query string, texts []string, params map[string]any, timeoutSec int64) (*RerankResponse, error) {
@@ -70,6 +70,8 @@ type EmbeddingRequest struct {
 	// exactly the maximum input token length for the model.
 	// If NONE is selected, when the input exceeds the maximum input token length an error will be returned.
 	Truncate string `json:"truncate,omitempty"`
+
+	OutputDimension int `json:"output_dimension,omitempty"`
 }
 
 // Currently only float32/int8 is supported
@@ -95,7 +97,7 @@ func newCohereEmbedding(apiKey string, url string) *cohereEmbedding {
 	}
 }
 
-func (c *cohereEmbedding) embedding(modelName string, texts []string, inputType string, outputType string, truncate string, headers map[string]string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *cohereEmbedding) embedding(modelName string, texts []string, inputType string, outputType string, truncate string, dim int, headers map[string]string, timeoutSec int64) (*EmbeddingResponse, error) {
 	var r EmbeddingRequest
 	r.Model = modelName
 	r.Texts = texts
@@ -104,6 +106,9 @@ func (c *cohereEmbedding) embedding(modelName string, texts []string, inputType 
 	}
 	r.EmbeddingTypes = []string{outputType}
 	r.Truncate = truncate
+	if dim != 0 {
+		r.OutputDimension = dim
+	}
 
 	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutSec)
 	if err != nil {

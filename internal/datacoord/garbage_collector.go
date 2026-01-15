@@ -739,8 +739,9 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 
 		// Check if snapshot RefIndex is loaded before querying snapshot references
 		// If not loaded, skip this segment and try again in next GC cycle
-		if !gc.meta.GetSnapshotMeta().IsRefIndexLoaded() {
-			log.Info("skip GC segment since snapshot RefIndex is not loaded yet")
+		if !gc.meta.GetSnapshotMeta().IsRefIndexLoadedForCollection(segment.GetCollectionID()) {
+			log.Info("skip GC segment since snapshot RefIndex is not loaded yet",
+				zap.Int64("collectionID", segment.GetCollectionID()))
 			continue
 		}
 
@@ -994,8 +995,9 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 
 			// Check if snapshot RefIndex is loaded before querying snapshot references
 			// If not loaded, skip this index and try again in next GC cycle
-			if !gc.meta.GetSnapshotMeta().IsRefIndexLoaded() {
-				log.Info("skip GC segment index since snapshot RefIndex is not loaded yet")
+			if !gc.meta.GetSnapshotMeta().IsRefIndexLoadedForCollection(segIdx.CollectionID) {
+				log.Info("skip GC segment index since snapshot RefIndex is not loaded yet",
+					zap.Int64("collectionID", segIdx.CollectionID))
 				continue
 			}
 
@@ -1451,12 +1453,18 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 //   - Timeout mechanism prevents cleanup of snapshots still being created
 //
 // Process flow:
-//  1. Get all PENDING snapshots from catalog that have exceeded timeout
+//  1. Get all PENDING snapshots from catalog that have exceeded timeout.
 //  2. For each pending snapshot:
-//     a. Compute manifest directory and metadata file path from snapshot ID
-//     b. Delete manifest directory using RemoveWithPrefix
-//     c. Delete metadata file
-//     d. Delete etcd record
+//     a. Compute manifest directory and metadata file path from snapshot ID.
+//     b. Delete manifest directory using RemoveWithPrefix.
+//     c. Delete metadata file.
+//     d. Delete catalog (etcd) record.
+//
+// Failure handling:
+//   - For PENDING snapshots, if any S3 cleanup step fails (b/c), GC will NOT
+//     delete the catalog record. This keeps the snapshot eligible for retry in
+//     the next GC cycle, ensuring we do not lose the ability to clean up S3
+//     artifacts.
 func (gc *garbageCollector) recyclePendingSnapshots(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
 	log := log.Ctx(ctx).With(zap.String("gcName", "recyclePendingSnapshots"), zap.Time("startAt", start))
@@ -1509,13 +1517,15 @@ func (gc *garbageCollector) recyclePendingSnapshots(ctx context.Context, signal 
 		// This removes all segment manifest files: manifests/{snapshot_id}/*.avro
 		if err := gc.option.cli.RemoveWithPrefix(ctx, manifestDir); err != nil {
 			snapshotLog.Warn("failed to remove pending snapshot manifest directory", zap.Error(err))
-			// Continue with metadata and etcd cleanup even if S3 cleanup fails
+			// Keep catalog record for retry in next GC cycle.
+			continue
 		}
 
 		// Delete metadata file
 		if err := gc.option.cli.Remove(ctx, metadataPath); err != nil {
 			snapshotLog.Warn("failed to remove pending snapshot metadata file", zap.Error(err))
-			// Continue with etcd cleanup even if S3 cleanup fails
+			// Keep catalog record for retry in next GC cycle.
+			continue
 		}
 
 		// Delete etcd record

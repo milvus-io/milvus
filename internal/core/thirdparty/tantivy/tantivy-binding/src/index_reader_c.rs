@@ -1,4 +1,3 @@
-use core::slice;
 use std::ffi::{c_char, c_void, CStr};
 
 use crate::{
@@ -550,4 +549,38 @@ pub extern "C" fn tantivy_ngram_match_query(
             .ngram_match_query(literal, min_gram, max_gram, bitset)
             .into()
     }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_ngram_tokenize(
+    ptr: *mut c_void,
+    literals: *const *const c_char,
+    literals_len: usize,
+    min_gram: usize,
+    max_gram: usize,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let literals_slice = unsafe { convert_to_rust_slice!(literals, literals_len) };
+
+    let mut literal_strs: Vec<&str> = Vec::with_capacity(literals_len);
+    for &lit in literals_slice {
+        literal_strs.push(cstr_to_str!(lit));
+    }
+
+    unsafe {
+        (*real)
+            .ngram_tokenize(&literal_strs, min_gram, max_gram)
+            .into()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_ngram_term_posting_list(
+    ptr: *mut c_void,
+    term: *const c_char,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let term = cstr_to_str!(term);
+    unsafe { (*real).ngram_term_posting_list(term, bitset).into() }
 }

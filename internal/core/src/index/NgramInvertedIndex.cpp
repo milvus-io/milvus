@@ -18,10 +18,28 @@
 
 namespace milvus::index {
 
+const std::string NGRAM_AVG_ROW_SIZE_FILE_NAME = "ngram_avg_row_size";
+
 const JsonCastType JSON_CAST_TYPE = JsonCastType::FromString("VARCHAR");
 // ngram index doesn't need cast function
 const JsonCastFunction JSON_CAST_FUNCTION =
     JsonCastFunction::FromString("unknown");
+
+constexpr size_t kLargeRowThreshold = 5000;
+constexpr size_t kMediumRowThreshold = 1000;
+constexpr size_t kSmallRowThreshold = 100;
+
+constexpr double kPreFilterHitRateThreshold = 0.20;  // 20%
+// Default avg_row_size for compatibility (older indexes without metadata)
+constexpr size_t kDefaultAvgRowSize = kLargeRowThreshold;
+// Iterative strategy parameters
+constexpr size_t kMaxIterations = 5;
+constexpr double kBreakThreshold = 0.002;  // 0.2%
+
+constexpr size_t kMaxIterationsForMediumRow = 3;
+
+constexpr double kBreakThresholdForSmallRow = 0.01;  // 1%
+constexpr size_t kMaxIterationsForSmallRow = 2;
 
 // for string/varchar type
 NgramInvertedIndex::NgramInvertedIndex(const storage::FileManagerContext& ctx,
@@ -68,6 +86,25 @@ NgramInvertedIndex::BuildWithFieldData(const std::vector<FieldDataPtr>& datas) {
     if (schema_.data_type() == proto::schema::DataType::JSON) {
         BuildWithJsonFieldData(datas);
     } else {
+        // Calculate avg_row_size for String/VarChar types
+        size_t total_bytes = 0;
+        size_t total_rows = 0;
+        for (const auto& data : datas) {
+            auto n = data->get_num_rows();
+            for (size_t i = 0; i < n; i++) {
+                if (schema_.nullable() && !data->is_valid(i)) {
+                    continue;
+                }
+                auto* str = static_cast<const std::string*>(data->RawValue(i));
+                if (str) {
+                    total_bytes += str->size();
+                    total_rows += 1;
+                }
+            }
+        }
+        avg_row_size_ = total_rows > 0 ? total_bytes / total_rows : 0;
+        LOG_INFO("Ngram index avg_row_size: {} bytes", avg_row_size_);
+
         InvertedIndexTantivy<std::string>::BuildWithFieldData(datas);
     }
 }
@@ -83,6 +120,11 @@ NgramInvertedIndex::BuildWithJsonFieldData(
              nested_path_);
 
     index_build_begin_ = std::chrono::system_clock::now();
+
+    // Track total bytes and rows for avg_row_size calculation
+    size_t total_bytes = 0;
+    size_t total_rows = 0;
+
     ProcessJsonFieldData<std::string>(
         field_datas,
         this->schema_,
@@ -90,9 +132,15 @@ NgramInvertedIndex::BuildWithJsonFieldData(
         JSON_CAST_TYPE,
         JSON_CAST_FUNCTION,
         // add data
-        [this](const std::string* data, int64_t size, int64_t offset) {
+        [this, &total_bytes, &total_rows](
+            const std::string* data, int64_t size, int64_t offset) {
             this->wrapper_->template add_array_data<std::string>(
                 data, size, offset);
+            // Track row size
+            if (data && size > 0) {
+                total_bytes += data->size();
+                total_rows++;
+            }
         },
         // handle null
         [this](int64_t offset) { this->null_offset_.push_back(offset); },
@@ -105,7 +153,23 @@ NgramInvertedIndex::BuildWithJsonFieldData(
             this->error_recorder_.Record(json, nested_path, error);
         });
 
+    avg_row_size_ = total_rows > 0 ? total_bytes / total_rows : 0;
+    LOG_INFO("Ngram index (JSON) avg_row_size: {} bytes", avg_row_size_);
+
     error_recorder_.PrintErrStats();
+}
+
+BinarySet
+NgramInvertedIndex::Serialize(const Config& config) {
+    auto res_set = InvertedIndexTantivy<std::string>::Serialize(config);
+
+    // Serialize avg_row_size
+    std::shared_ptr<uint8_t[]> avg_row_size_data(new uint8_t[sizeof(size_t)]);
+    memcpy(avg_row_size_data.get(), &avg_row_size_, sizeof(size_t));
+    res_set.Append(
+        NGRAM_AVG_ROW_SIZE_FILE_NAME, avg_row_size_data, sizeof(size_t));
+
+    return res_set;
 }
 
 IndexStatsPtr
@@ -117,11 +181,62 @@ NgramInvertedIndex::Upload(const Config& config) {
             .count();
     LOG_INFO(
         "index build done for ngram index, data type {}, field id: {}, "
-        "duration: {}s",
+        "duration: {}s, avg_row_size: {} bytes",
         schema_.data_type(),
         field_id_,
-        index_build_duration);
+        index_build_duration,
+        avg_row_size_);
+
     return InvertedIndexTantivy<std::string>::Upload(config);
+}
+
+void
+NgramInvertedIndex::LoadIndexMetas(const std::vector<std::string>& index_files,
+                                   const Config& config) {
+    // Call parent to load null_offset
+    InvertedIndexTantivy<std::string>::LoadIndexMetas(index_files, config);
+
+    // Load avg_row_size
+    auto avg_row_size_it = std::find_if(
+        index_files.begin(), index_files.end(), [](const std::string& file) {
+            return file.find(NGRAM_AVG_ROW_SIZE_FILE_NAME) != std::string::npos;
+        });
+
+    if (avg_row_size_it != index_files.end()) {
+        auto load_priority =
+            GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                config, milvus::LOAD_PRIORITY)
+                .value_or(milvus::proto::common::LoadPriority::HIGH);
+        // avg_row_size is only 8 bytes, never sliced
+        auto index_datas = mem_file_manager_->LoadIndexToMemory(
+            {*avg_row_size_it}, load_priority);
+        auto avg_row_size_data =
+            std::move(index_datas.at(NGRAM_AVG_ROW_SIZE_FILE_NAME));
+        memcpy(
+            &avg_row_size_, avg_row_size_data->PayloadData(), sizeof(size_t));
+        LOG_INFO("Loaded ngram index avg_row_size: {} bytes", avg_row_size_);
+    } else {
+        avg_row_size_ = kDefaultAvgRowSize;
+        LOG_INFO("No avg_row_size metadata found, using default: {}",
+                 kDefaultAvgRowSize);
+    }
+}
+
+void
+NgramInvertedIndex::RetainTantivyIndexFiles(
+    std::vector<std::string>& index_files) {
+    // Call parent to filter null_offset
+    InvertedIndexTantivy<std::string>::RetainTantivyIndexFiles(index_files);
+
+    // Also filter avg_row_size
+    index_files.erase(
+        std::remove_if(index_files.begin(),
+                       index_files.end(),
+                       [](const std::string& file) {
+                           return file.find(NGRAM_AVG_ROW_SIZE_FILE_NAME) !=
+                                  std::string::npos;
+                       }),
+        index_files.end());
 }
 
 void
@@ -131,38 +246,19 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load ngram index");
+    auto files_value = index_files.value();
+
+    LoadIndexMetas(files_value, config);
+    RetainTantivyIndexFiles(files_value);
 
     auto load_priority =
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
-    auto files_value = index_files.value();
-    auto it = std::find_if(
-        files_value.begin(), files_value.end(), [](const std::string& file) {
-            constexpr std::string_view suffix{"/index_null_offset"};
-            return file.size() >= suffix.size() &&
-                   std::equal(suffix.rbegin(), suffix.rend(), file.rbegin());
-        });
-    if (it != files_value.end()) {
-        std::vector<std::string> file;
-        file.push_back(*it);
-        files_value.erase(it);
-        auto index_datas =
-            mem_file_manager_->LoadIndexToMemory(file, load_priority);
-        BinarySet binary_set;
-        AssembleIndexDatas(index_datas, binary_set);
-        // clear index_datas to free memory early
-        index_datas.clear();
-        auto index_valid_data = binary_set.GetByName("index_null_offset");
-        null_offset_.resize((size_t)index_valid_data->size / sizeof(size_t));
-        memcpy(null_offset_.data(),
-               index_valid_data->data.get(),
-               (size_t)index_valid_data->size);
-    }
-
     disk_file_manager_->CacheNgramIndexToDisk(files_value, load_priority);
     AssertInfo(
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
+
     auto load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
@@ -190,7 +286,6 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
     if (literal.length() < min_gram_) {
         return std::nullopt;
     }
-
     if (Count() == 0) {
         return TargetBitmap{};
     }
@@ -319,6 +414,48 @@ handle_batch(const T* data,
     }
 }
 
+void
+NgramInvertedIndex::ApplyIterativeNgramFilter(
+    const std::vector<std::string>& sorted_terms,
+    size_t total_count,
+    TargetBitmap& bitset) {
+    auto max_iterations = kMaxIterations;
+    if (avg_row_size_ < kSmallRowThreshold) {
+        max_iterations = kMaxIterationsForSmallRow;
+    } else if (avg_row_size_ < kMediumRowThreshold) {
+        max_iterations = kMaxIterationsForMediumRow;
+    }
+
+    for (size_t i = 0; i < std::min(sorted_terms.size(), max_iterations); i++) {
+        TargetBitmap term_bitset{total_count};
+        wrapper_->ngram_term_posting_list(sorted_terms[i], &term_bitset);
+        bitset &= term_bitset;
+
+        double current_hit_rate = 1.0 * bitset.count() / total_count;
+        if (current_hit_rate < kBreakThreshold) {
+            break;
+        }
+        if (avg_row_size_ < kSmallRowThreshold &&
+            current_hit_rate < kBreakThresholdForSmallRow) {
+            break;
+        }
+    }
+}
+
+// Strategy selection based on avg_row_size and pre_filter_hit_rate:
+// - Batch strategy: query all ngram terms at once via ngram_match_query.
+//   Used for large rows (>= 5KB) where full matching is efficient, or for
+//   medium rows (>= 1KB) with high pre_filter_hit_rate (> 20%).
+// - Iterative strategy: query terms one by one, sorted by doc_freq (rarest first).
+//   Used for small/medium rows with low pre_filter_hit_rate, allowing early
+//   termination when hit_rate drops below threshold.
+bool
+NgramInvertedIndex::ShouldUseBatchStrategy(double pre_filter_hit_rate) const {
+    return avg_row_size_ >= kLargeRowThreshold ||
+           (avg_row_size_ >= kMediumRowThreshold &&
+            pre_filter_hit_rate > kPreFilterHitRateThreshold);
+}
+
 template <typename T, typename Predicate>
 std::optional<TargetBitmap>
 NgramInvertedIndex::ExecuteQueryWithPredicate(const std::string& literal,
@@ -327,24 +464,43 @@ NgramInvertedIndex::ExecuteQueryWithPredicate(const std::string& literal,
                                               bool need_post_filter,
                                               const TargetBitmap* pre_filter) {
     auto total_count = static_cast<size_t>(Count());
-    // Phase 1: ngram index filtering
-    TargetBitmap bitset{total_count};
-    wrapper_->ngram_match_query(literal, min_gram_, max_gram_, &bitset);
-    auto phase1_hit_count = bitset.count();
-    if (phase1_hit_count == 0) {
+
+    AssertInfo(total_count > 0, "total_count should be greater than 0");
+
+    // Calculate pre_filter stats for strategy selection
+    size_t candidate_count = (pre_filter != nullptr && !pre_filter->empty())
+                                 ? pre_filter->count()
+                                 : total_count;
+    double pre_filter_hit_rate = 1.0 * candidate_count / total_count;
+
+    // Phase 1: ngram index query with adaptive strategy
+    TargetBitmap bitset(total_count, true);
+    if (pre_filter != nullptr && !pre_filter->empty()) {
+        bitset &= *pre_filter;
+    }
+
+    if (ShouldUseBatchStrategy(pre_filter_hit_rate)) {
+        TargetBitmap ngram_bitset{total_count};
+        wrapper_->ngram_match_query(
+            literal, min_gram_, max_gram_, &ngram_bitset);
+        bitset &= ngram_bitset;
+    } else {
+        std::vector<std::string> literals_vec = {literal};
+        auto sorted_terms =
+            wrapper_->ngram_tokenize(literals_vec, min_gram_, max_gram_);
+        AssertInfo(!sorted_terms.empty(),
+                   "ngram_tokenize should not return empty for valid literal");
+        ApplyIterativeNgramFilter(sorted_terms, total_count, bitset);
+    }
+
+    if (bitset.none()) {
         return std::move(bitset);
     }
 
-    // Apply pre_filter from previous expressions to reduce phase 2 workload
-    if (pre_filter != nullptr && !pre_filter->empty()) {
-        bitset &= *pre_filter;
-        if (bitset.none()) {
-            return std::move(bitset);
-        }
-    }
-    auto phase2_input_count = bitset.count();
+    auto after_pre_filter_count = bitset.count();
+    auto final_result_count = after_pre_filter_count;
 
-    // Phase 2: post-filter with predicate
+    // Phase 2: post-filter
     if (need_post_filter) {
         TargetBitmapView res(bitset);
 
@@ -355,22 +511,20 @@ NgramInvertedIndex::ExecuteQueryWithPredicate(const std::string& literal,
         };
 
         segment->template ProcessAllDataChunkBatched<T>(execute_batch, res);
-    }
 
+        final_result_count = bitset.count();
+    }
     if (auto root_span = tracer::GetRootSpan()) {
+        double hit_rate_before_phase2 =
+            1.0 * after_pre_filter_count / total_count;
+        double final_hit_rate = 1.0 * final_result_count / total_count;
+
         root_span->SetAttribute("need_post_filter", need_post_filter);
-        root_span->SetAttribute(
-            "phase1_hit_rate",
-            static_cast<double>(phase1_hit_count) / total_count);
-        root_span->SetAttribute(
-            "pre_filter_rate",
-            static_cast<double>(phase2_input_count) / phase1_hit_count);
-        root_span->SetAttribute(
-            "phase2_input_rate",
-            static_cast<double>(phase2_input_count) / total_count);
-        root_span->SetAttribute(
-            "final_hit_rate",
-            static_cast<double>(bitset.count()) / total_count);
+        root_span->SetAttribute("pre_filter_hit_rate", pre_filter_hit_rate);
+        root_span->SetAttribute("hit_rate_before_phase2",
+                                hit_rate_before_phase2);
+        root_span->SetAttribute("final_hit_rate", final_hit_rate);
+        root_span->SetAttribute("total_count", static_cast<int>(total_count));
     }
 
     return std::optional<TargetBitmap>(std::move(bitset));
@@ -418,86 +572,99 @@ NgramInvertedIndex::MatchQuery(const std::string& literal,
     }
 
     auto total_count = static_cast<size_t>(Count());
+    AssertInfo(total_count > 0, "total_count should be greater than 0");
 
-    // Phase 1: ngram index filtering
-    TargetBitmap bitset(total_count, true);
     auto literals = split_by_wildcard(literal);
     for (const auto& l : literals) {
         if (l.length() < min_gram_) {
             return std::nullopt;
         }
-        TargetBitmap tmp_bitset(total_count, false);
-        wrapper_->ngram_match_query(l, min_gram_, max_gram_, &tmp_bitset);
-        bitset &= tmp_bitset;
     }
-    auto phase1_hit_count = bitset.count();
-    if (phase1_hit_count == 0) {
+
+    // Calculate pre_filter stats for strategy selection
+    size_t candidate_count = (pre_filter != nullptr && !pre_filter->empty())
+                                 ? pre_filter->count()
+                                 : total_count;
+    double pre_filter_hit_rate = 1.0 * candidate_count / total_count;
+
+    TargetBitmap bitset(total_count, true);
+    if (pre_filter != nullptr && !pre_filter->empty()) {
+        bitset &= *pre_filter;
+    }
+
+    if (ShouldUseBatchStrategy(pre_filter_hit_rate)) {
+        for (const auto& l : literals) {
+            TargetBitmap tmp_bitset{total_count};
+            wrapper_->ngram_match_query(l, min_gram_, max_gram_, &tmp_bitset);
+            bitset &= tmp_bitset;
+        }
+    } else {
+        auto sorted_terms =
+            wrapper_->ngram_tokenize(literals, min_gram_, max_gram_);
+        AssertInfo(!sorted_terms.empty(),
+                   "ngram_tokenize returned empty sorted_terms for iterative "
+                   "strategy");
+        ApplyIterativeNgramFilter(sorted_terms, total_count, bitset);
+    }
+
+    if (bitset.none()) {
         return std::move(bitset);
     }
 
-    // Apply pre_filter from previous expressions to reduce phase 2 workload
-    if (pre_filter != nullptr && !pre_filter->empty()) {
-        bitset &= *pre_filter;
-        if (bitset.none()) {
-            return std::move(bitset);
-        }
+    auto after_pre_filter_count = bitset.count();
+
+    TargetBitmapView res(bitset);
+
+    PatternMatchTranslator translator;
+    auto regex_pattern = translator(literal);
+    RegexMatcher matcher(regex_pattern);
+
+    if (schema_.data_type() == proto::schema::DataType::JSON) {
+        auto predicate = [&matcher, this](const milvus::Json& data) {
+            auto x = data.template at<std::string_view>(this->nested_path_);
+            if (x.error()) {
+                return false;
+            }
+            return matcher(x.value());
+        };
+
+        auto execute_batch = [&predicate](const milvus::Json* data,
+                                          const int64_t size,
+                                          TargetBitmapView res) {
+            handle_batch<milvus::Json>(data, size, res, predicate);
+        };
+
+        segment->template ProcessAllDataChunkBatched<milvus::Json>(
+            execute_batch, res);
+    } else {
+        auto predicate = [&matcher](const std::string_view& data) {
+            return matcher(data);
+        };
+
+        auto execute_batch = [&predicate](const std::string_view* data,
+                                          const int64_t size,
+                                          TargetBitmapView res) {
+            handle_batch<std::string_view>(data, size, res, predicate);
+        };
+
+        segment->template ProcessAllDataChunkBatched<std::string_view>(
+            execute_batch, res);
     }
-    auto phase2_input_count = bitset.count();
 
-    // Phase 2: post-filter with regex
-    {
-        TargetBitmapView res(bitset);
-
-        PatternMatchTranslator translator;
-        auto regex_pattern = translator(literal);
-        RegexMatcher matcher(regex_pattern);
-
-        if (schema_.data_type() == proto::schema::DataType::JSON) {
-            auto predicate = [&matcher, this](const milvus::Json& data) {
-                auto x = data.template at<std::string_view>(this->nested_path_);
-                if (x.error()) {
-                    return false;
-                }
-                return matcher(x.value());
-            };
-
-            auto execute_batch = [&predicate](const milvus::Json* data,
-                                              const int64_t size,
-                                              TargetBitmapView res) {
-                handle_batch<milvus::Json>(data, size, res, predicate);
-            };
-
-            segment->template ProcessAllDataChunkBatched<milvus::Json>(
-                execute_batch, res);
-        } else {
-            auto predicate = [&matcher](const std::string_view& data) {
-                return matcher(data);
-            };
-
-            auto execute_batch = [&predicate](const std::string_view* data,
-                                              const int64_t size,
-                                              TargetBitmapView res) {
-                handle_batch<std::string_view>(data, size, res, predicate);
-            };
-
-            segment->template ProcessAllDataChunkBatched<std::string_view>(
-                execute_batch, res);
-        }
-    }
+    auto final_result_count = bitset.count();
 
     if (auto root_span = tracer::GetRootSpan()) {
-        root_span->SetAttribute(
-            "match_phase1_hit_rate",
-            static_cast<double>(phase1_hit_count) / total_count);
-        root_span->SetAttribute(
-            "match_pre_filter_rate",
-            static_cast<double>(phase2_input_count) / phase1_hit_count);
-        root_span->SetAttribute(
-            "match_phase2_input_rate",
-            static_cast<double>(phase2_input_count) / total_count);
-        root_span->SetAttribute(
-            "match_final_hit_rate",
-            static_cast<double>(bitset.count()) / total_count);
+        double hit_rate_before_phase2 =
+            1.0 * after_pre_filter_count / total_count;
+        double final_hit_rate = 1.0 * final_result_count / total_count;
+
+        root_span->SetAttribute("match_pre_filter_hit_rate",
+                                pre_filter_hit_rate);
+        root_span->SetAttribute("match_hit_rate_before_phase2",
+                                hit_rate_before_phase2);
+        root_span->SetAttribute("match_final_hit_rate", final_hit_rate);
+        root_span->SetAttribute("match_total_count",
+                                static_cast<int>(total_count));
     }
 
     return std::optional<TargetBitmap>(std::move(bitset));

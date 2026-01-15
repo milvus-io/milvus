@@ -31,161 +31,233 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 )
 
-func TestEmbeddingNode_BM25_Operator(t *testing.T) {
-	collSchema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID:  common.TimeStampField,
-				Name:     common.TimeStampFieldName,
-				DataType: schemapb.DataType_Int64,
-			}, {
-				Name:         "pk",
-				FieldID:      100,
-				IsPrimaryKey: true,
-				DataType:     schemapb.DataType_Int64,
-			}, {
-				Name:     "text",
-				FieldID:  101,
-				DataType: schemapb.DataType_VarChar,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "enable_analyzer",
-						Value: "true",
+func TestEmbeddingNode_Operator(t *testing.T) {
+	// Define test cases for different function types
+	testCases := []struct {
+		name        string
+		setupSchema func() *schemapb.CollectionSchema
+		setupMock   func(*schemapb.CollectionSchema) error
+	}{
+		{
+			name: "BM25",
+			setupSchema: func() *schemapb.CollectionSchema {
+				return &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:  common.TimeStampField,
+							Name:     common.TimeStampFieldName,
+							DataType: schemapb.DataType_Int64,
+						}, {
+							Name:         "pk",
+							FieldID:      100,
+							IsPrimaryKey: true,
+							DataType:     schemapb.DataType_Int64,
+						}, {
+							Name:     "text",
+							FieldID:  101,
+							DataType: schemapb.DataType_VarChar,
+							TypeParams: []*commonpb.KeyValuePair{
+								{
+									Key:   "enable_analyzer",
+									Value: "true",
+								},
+							},
+						}, {
+							Name:             "sparse",
+							FieldID:          102,
+							DataType:         schemapb.DataType_SparseFloatVector,
+							IsFunctionOutput: true,
+						},
 					},
-				},
-			}, {
-				Name:             "sparse",
-				FieldID:          102,
-				DataType:         schemapb.DataType_SparseFloatVector,
-				IsFunctionOutput: true,
+					Functions: []*schemapb.FunctionSchema{{
+						Name:           "BM25",
+						Type:           schemapb.FunctionType_BM25,
+						InputFieldIds:  []int64{101},
+						OutputFieldIds: []int64{102},
+					}},
+				}
+			},
+			setupMock: func(schema *schemapb.CollectionSchema) error {
+				return nil // BM25 doesn't need mock setup
 			},
 		},
-		Functions: []*schemapb.FunctionSchema{{
-			Name:           "BM25",
-			Type:           schemapb.FunctionType_BM25,
-			InputFieldIds:  []int64{101},
-			OutputFieldIds: []int64{102},
-		}},
+		{
+			name: "MinHash",
+			setupSchema: func() *schemapb.CollectionSchema {
+				return &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:  common.TimeStampField,
+							Name:     common.TimeStampFieldName,
+							DataType: schemapb.DataType_Int64,
+						}, {
+							Name:         "pk",
+							FieldID:      100,
+							IsPrimaryKey: true,
+							DataType:     schemapb.DataType_Int64,
+						}, {
+							Name:     "text",
+							FieldID:  101,
+							DataType: schemapb.DataType_VarChar,
+							TypeParams: []*commonpb.KeyValuePair{
+								{
+									Key:   "enable_analyzer",
+									Value: "true",
+								},
+							},
+						}, {
+							Name:             "binary_vector",
+							FieldID:          102,
+							DataType:         schemapb.DataType_BinaryVector,
+							IsFunctionOutput: true,
+							TypeParams: []*commonpb.KeyValuePair{
+								{
+									Key:   "dim",
+									Value: "1024",
+								},
+							},
+						},
+					},
+					Functions: []*schemapb.FunctionSchema{{
+						Name:           "MinHash",
+						Type:           schemapb.FunctionType_MinHash,
+						InputFieldIds:  []int64{101},
+						OutputFieldIds: []int64{102},
+					}},
+				}
+			},
+			setupMock: func(schema *schemapb.CollectionSchema) error {
+				return nil
+			},
+		},
 	}
 
-	metaCache := metacache.NewMockMetaCache(t)
-	metaCache.EXPECT().GetSchema(mock.Anything).Return(collSchema)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			collSchema := tc.setupSchema()
+			err := tc.setupMock(collSchema)
+			assert.NoError(t, err)
 
-	t.Run("normal case", func(t *testing.T) {
-		node, err := newEmbeddingNode("test-channel", metaCache)
-		assert.NoError(t, err)
-		defer node.Free()
+			metaCache := metacache.NewMockMetaCache(t)
+			metaCache.EXPECT().GetSchema(mock.Anything).Return(collSchema)
 
-		var output []Msg
-		assert.NotPanics(t, func() {
-			output = node.Operate([]Msg{
-				&FlowGraphMsg{
-					BaseMsg: flowgraph.NewBaseMsg(false),
-					InsertMessages: []*msgstream.InsertMsg{{
-						BaseMsg: msgstream.BaseMsg{},
-						InsertRequest: &msgpb.InsertRequest{
-							SegmentID:  1,
-							Version:    msgpb.InsertDataVersion_ColumnBased,
-							Timestamps: []uint64{1, 1, 1},
-							FieldsData: []*schemapb.FieldData{
-								{
-									FieldId: 100,
-									Field: &schemapb.FieldData_Scalars{
-										Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}},
-									},
-								}, {
-									FieldId: 101,
-									Field: &schemapb.FieldData_Scalars{
-										Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"test1", "test2", "test3"}}}},
+			t.Run("normal case", func(t *testing.T) {
+				node, err := newEmbeddingNode("test-channel", metaCache)
+				assert.NoError(t, err)
+				defer node.Free()
+
+				var output []Msg
+				assert.NotPanics(t, func() {
+					output = node.Operate([]Msg{
+						&FlowGraphMsg{
+							BaseMsg: flowgraph.NewBaseMsg(false),
+							InsertMessages: []*msgstream.InsertMsg{{
+								BaseMsg: msgstream.BaseMsg{},
+								InsertRequest: &msgpb.InsertRequest{
+									SegmentID:  1,
+									Version:    msgpb.InsertDataVersion_ColumnBased,
+									Timestamps: []uint64{1, 1, 1},
+									FieldsData: []*schemapb.FieldData{
+										{
+											FieldId: 100,
+											Field: &schemapb.FieldData_Scalars{
+												Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}},
+											},
+										}, {
+											FieldId: 101,
+											Field: &schemapb.FieldData_Scalars{
+												Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"test1", "test2", "test3"}}}},
+											},
+										},
 									},
 								},
-							},
-						},
-					}},
-				},
-			})
-		})
-
-		assert.Equal(t, 1, len(output))
-
-		msg, ok := output[0].(*FlowGraphMsg)
-		assert.True(t, ok)
-		assert.NotNil(t, msg.InsertData)
-	})
-
-	t.Run("with close msg", func(t *testing.T) {
-		node, err := newEmbeddingNode("test-channel", metaCache)
-		assert.NoError(t, err)
-		defer node.Free()
-
-		var output []Msg
-
-		assert.NotPanics(t, func() {
-			output = node.Operate([]Msg{
-				&FlowGraphMsg{
-					BaseMsg: flowgraph.NewBaseMsg(true),
-				},
-			})
-		})
-
-		assert.Equal(t, 1, len(output))
-	})
-
-	t.Run("prepare insert failed", func(t *testing.T) {
-		node, err := newEmbeddingNode("test-channel", metaCache)
-		assert.NoError(t, err)
-		defer node.Free()
-
-		assert.Panics(t, func() {
-			node.Operate([]Msg{
-				&FlowGraphMsg{
-					BaseMsg: flowgraph.NewBaseMsg(false),
-					InsertMessages: []*msgstream.InsertMsg{{
-						BaseMsg: msgstream.BaseMsg{},
-						InsertRequest: &msgpb.InsertRequest{
-							FieldsData: []*schemapb.FieldData{{
-								FieldId: 1100, // invalid fieldID
 							}},
 						},
-					}},
-				},
+					})
+				})
+
+				assert.Equal(t, 1, len(output))
+
+				msg, ok := output[0].(*FlowGraphMsg)
+				assert.True(t, ok)
+				assert.NotNil(t, msg.InsertData)
 			})
-		})
-	})
 
-	t.Run("embedding failed", func(t *testing.T) {
-		node, err := newEmbeddingNode("test-channel", metaCache)
-		assert.NoError(t, err)
-		defer node.Free()
+			t.Run("with close msg", func(t *testing.T) {
+				node, err := newEmbeddingNode("test-channel", metaCache)
+				assert.NoError(t, err)
+				defer node.Free()
 
-		node.functionRunners[0].GetSchema().Type = 0
-		assert.Panics(t, func() {
-			node.Operate([]Msg{
-				&FlowGraphMsg{
-					BaseMsg: flowgraph.NewBaseMsg(false),
-					InsertMessages: []*msgstream.InsertMsg{{
-						BaseMsg: msgstream.BaseMsg{},
-						InsertRequest: &msgpb.InsertRequest{
-							SegmentID:  1,
-							Version:    msgpb.InsertDataVersion_ColumnBased,
-							Timestamps: []uint64{1, 1, 1},
-							FieldsData: []*schemapb.FieldData{
-								{
-									FieldId: 100,
-									Field: &schemapb.FieldData_Scalars{
-										Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}},
-									},
-								}, {
-									FieldId: 101,
-									Field: &schemapb.FieldData_Scalars{
-										Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"test1", "test2", "test3"}}}},
+				var output []Msg
+
+				assert.NotPanics(t, func() {
+					output = node.Operate([]Msg{
+						&FlowGraphMsg{
+							BaseMsg: flowgraph.NewBaseMsg(true),
+						},
+					})
+				})
+
+				assert.Equal(t, 1, len(output))
+			})
+
+			t.Run("prepare insert failed", func(t *testing.T) {
+				node, err := newEmbeddingNode("test-channel", metaCache)
+				assert.NoError(t, err)
+				defer node.Free()
+
+				assert.Panics(t, func() {
+					node.Operate([]Msg{
+						&FlowGraphMsg{
+							BaseMsg: flowgraph.NewBaseMsg(false),
+							InsertMessages: []*msgstream.InsertMsg{{
+								BaseMsg: msgstream.BaseMsg{},
+								InsertRequest: &msgpb.InsertRequest{
+									FieldsData: []*schemapb.FieldData{{
+										FieldId: 1100, // invalid fieldID
+									}},
+								},
+							}},
+						},
+					})
+				})
+			})
+
+			t.Run("embedding failed", func(t *testing.T) {
+				node, err := newEmbeddingNode("test-channel", metaCache)
+				assert.NoError(t, err)
+				defer node.Free()
+
+				node.functionRunners[0].GetSchema().Type = 0
+				assert.Panics(t, func() {
+					node.Operate([]Msg{
+						&FlowGraphMsg{
+							BaseMsg: flowgraph.NewBaseMsg(false),
+							InsertMessages: []*msgstream.InsertMsg{{
+								BaseMsg: msgstream.BaseMsg{},
+								InsertRequest: &msgpb.InsertRequest{
+									SegmentID:  1,
+									Version:    msgpb.InsertDataVersion_ColumnBased,
+									Timestamps: []uint64{1, 1, 1},
+									FieldsData: []*schemapb.FieldData{
+										{
+											FieldId: 100,
+											Field: &schemapb.FieldData_Scalars{
+												Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}},
+											},
+										}, {
+											FieldId: 101,
+											Field: &schemapb.FieldData_Scalars{
+												Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"test1", "test2", "test3"}}}},
+											},
+										},
 									},
 								},
-							},
+							}},
 						},
-					}},
-				},
+					})
+				})
 			})
 		})
-	})
+	}
 }

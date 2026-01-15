@@ -901,9 +901,10 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
         AssertInfo(
             vec_data != nullptr, "vector field {} not loaded", field_id.get());
 
-        // get index params for bm25 brute force
+        // get index params for bm25 and minhash brute force
         std::map<std::string, std::string> index_info;
-        if (search_info.metric_type_ == knowhere::metric::BM25) {
+        if (search_info.metric_type_ == knowhere::metric::BM25 ||
+            search_info.metric_type_ == knowhere::metric::MHJACCARD) {
             index_info =
                 col_index_meta_->GetFieldIndexMeta(field_id).GetIndexParams();
         }
@@ -2883,12 +2884,27 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
         data_type,
         field_id.get(),
         id_);
+    auto [field_has_setting, field_mmap_enabled] =
+        schema_->MmapEnabled(field_id);
+    auto is_vector = IsVectorDataType(field_meta.get_data_type());
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    bool global_use_mmap = is_vector ? mmap_config.GetVectorFieldEnableMmap()
+                                     : mmap_config.GetScalarFieldEnableMmap();
+    bool use_mmap = field_has_setting ? field_mmap_enabled : global_use_mmap;
+    auto mmap_dir_path =
+        milvus::storage::LocalChunkManagerSingleton::GetInstance()
+            .GetChunkManager()
+            ->GetRootPath();
     int64_t size = num_rows_.value();
     AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
-    auto field_data_info = FieldDataInfo(field_id.get(), size, "");
+    auto field_data_info = FieldDataInfo(field_id.get(), size, mmap_dir_path);
     std::unique_ptr<Translator<milvus::Chunk>> translator =
         std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
-            get_segment_id(), field_meta, field_data_info, false);
+            get_segment_id(),
+            field_meta,
+            field_data_info,
+            use_mmap,
+            mmap_config.GetMmapPopulate());
     auto column =
         MakeChunkedColumnBase(data_type, std::move(translator), field_meta);
 

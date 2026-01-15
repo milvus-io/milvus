@@ -1981,94 +1981,6 @@ func (s *Server) NotifyDropPartition(ctx context.Context, channel string, partit
 	return s.meta.DropSegmentsOfPartition(ctx, partitionIDs)
 }
 
-// AddFileResource add file resource to datacoord
-func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
-	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-
-	log.Ctx(ctx).Info("receive AddFileResource request",
-		zap.String("name", req.GetName()),
-		zap.String("path", req.GetPath()))
-
-	id, err := s.idAllocator.AllocOne()
-	if err != nil {
-		log.Ctx(ctx).Warn("AddFileResource alloc id failed", zap.Error(err))
-		return merr.Status(err), nil
-	}
-
-	// Convert to internalpb.FileResourceInfo
-	resource := &internalpb.FileResourceInfo{
-		Id:   id,
-		Name: req.GetName(),
-		Path: req.GetPath(),
-	}
-
-	err = s.meta.AddFileResource(ctx, resource)
-	if err != nil {
-		log.Ctx(ctx).Warn("AddFileResource fail", zap.Error(err))
-		return merr.Status(err), nil
-	}
-	s.fileManager.Notify()
-
-	resources, version := s.meta.ListFileResource(ctx)
-	s.mixCoord.SyncQcFileResource(ctx, resources, version)
-
-	log.Ctx(ctx).Info("AddFileResource success")
-	return merr.Success(), nil
-}
-
-// RemoveFileResource remove file resource from datacoord
-func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error) {
-	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-
-	log.Ctx(ctx).Info("receive RemoveFileResource request",
-		zap.String("name", req.GetName()))
-
-	err := s.meta.RemoveFileResource(ctx, req.GetName())
-	if err != nil {
-		log.Ctx(ctx).Warn("RemoveFileResource fail", zap.Error(err))
-		return merr.Status(err), nil
-	}
-	s.fileManager.Notify()
-
-	resources, version := s.meta.ListFileResource(ctx)
-	s.mixCoord.SyncQcFileResource(ctx, resources, version)
-
-	log.Ctx(ctx).Info("RemoveFileResource success")
-	return merr.Success(), nil
-}
-
-// ListFileResources list file resources from datacoord
-func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
-	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return &milvuspb.ListFileResourcesResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-
-	log.Ctx(ctx).Info("receive ListFileResources request")
-
-	resources, _ := s.meta.ListFileResource(ctx)
-
-	// Convert internal.FileResourceInfo to milvuspb.FileResourceInfo
-	fileResources := make([]*milvuspb.FileResourceInfo, 0, len(resources))
-	for _, resource := range resources {
-		fileResources = append(fileResources, &milvuspb.FileResourceInfo{
-			Name: resource.Name,
-			Path: resource.Path,
-		})
-	}
-
-	log.Ctx(ctx).Info("ListFileResources success", zap.Int("count", len(fileResources)))
-	return &milvuspb.ListFileResourcesResponse{
-		Status:    merr.Success(),
-		Resources: fileResources,
-	}, nil
-}
-
 // CreateExternalCollection creates an external collection in datacoord
 // This is a skeleton implementation - details to be filled in later
 func (s *Server) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
@@ -2114,10 +2026,10 @@ func (s *Server) CreateExternalCollection(ctx context.Context, req *msgpb.Create
 	}, nil
 }
 
-// first sync file resource data to qc when all coord init finished
-func (s *Server) SyncFileResources(ctx context.Context) error {
-	resources, version := s.meta.ListFileResource(ctx)
-	return s.mixCoord.SyncQcFileResource(ctx, resources, version)
+// sync file resource to datacoord file manager
+func (s *Server) SyncFileResource(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
+	s.fileManager.UpdateResources(resources, version)
+	return nil
 }
 
 // DropSegmentsByTime drop segments that were updated before the flush timestamp for TruncateCollection
@@ -2304,7 +2216,7 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 	}
 
 	// Delegate to snapshot manager
-	collectionID, err := s.snapshotManager.RestoreSnapshot(
+	jobID, err := s.snapshotManager.RestoreSnapshot(
 		ctx,
 		req.GetName(),
 		req.GetCollectionName(),
@@ -2320,10 +2232,10 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 		}, nil
 	}
 
-	log.Info("restore snapshot completed", zap.Int64("collectionID", collectionID))
+	log.Info("restore snapshot completed", zap.Int64("jobID", jobID))
 	return &datapb.RestoreSnapshotResponse{
-		Status:       merr.Success(),
-		CollectionId: collectionID,
+		Status: merr.Success(),
+		JobId:  jobID,
 	}, nil
 }
 
@@ -2336,6 +2248,10 @@ func (s *Server) rollbackRestoreSnapshot(ctx context.Context, dbName, collection
 	log.Info("rolling back restore snapshot, dropping collection")
 
 	if err := s.broker.DropCollection(ctx, dbName, collectionName); err != nil {
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			log.Debug("collection not found, skipping rollback")
+			return nil
+		}
 		log.Error("failed to drop collection during rollback", zap.Error(err))
 		return err
 	}

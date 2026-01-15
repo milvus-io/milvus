@@ -13,6 +13,7 @@
 
 #include <deque>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <string>
 #include <tbb/concurrent_priority_queue.h>
@@ -22,6 +23,7 @@
 #include <utility>
 
 #include "cachinglayer/CacheSlot.h"
+#include "cachinglayer/Manager.h"
 #include "AckResponder.h"
 #include "ConcurrentVector.h"
 #include "DeletedRecord.h"
@@ -354,6 +356,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
               segment_id) {
         this->CreateTextIndexes();
         this->InitializeArrayOffsets();
+        this->UpdateResourceTracking();
     }
 
     ~SegmentGrowingImpl() {
@@ -372,6 +375,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
             auto mcm =
                 storage::MmapManager::GetInstance().GetMmapChunkManager();
             mcm->UnRegister(mmap_descriptor_);
+        }
+
+        // Refund any tracked resources before destruction
+        // No lock needed - destructor implies exclusive access
+        if (tracked_resource_.AnyGTZero()) {
+            Manager::GetInstance().RefundLoadedResource(
+                tracked_resource_,
+                fmt::format("growing_segment_{}_destructor", id_));
         }
     }
 
@@ -515,6 +526,22 @@ class SegmentGrowingImpl : public SegmentGrowing {
                              const int64_t* seg_offsets,
                              int64_t count) const;
 
+    /**
+     * @brief Estimate the current total resource usage of the growing segment
+     *
+     * This includes memory/disk usage for:
+     * - Field data (raw vectors and scalars)
+     * - Timestamps
+     * - PK-to-offset index
+     * - Interim vector indexes (if enabled)
+     * - Text match indexes (if enabled)
+     * - Deleted records
+     *
+     * @return ResourceUsage containing memory_bytes and file_bytes estimates
+     */
+    ResourceUsage
+    EstimateSegmentResourceUsage() const;
+
  protected:
     int64_t
     num_chunk(FieldId field_id) const override;
@@ -571,6 +598,20 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     fill_empty_field(const FieldMeta& field_meta);
+
+    /**
+     * @brief Update resource tracking by refunding old estimate and charging new
+     *
+     * This method:
+     * 1. Estimates current total resource usage of the growing segment
+     * 2. Refunds the previously tracked resource from the cache manager
+     * 3. Charges the new resource usage to the cache manager
+     * 4. Updates the tracked resource checkpoint
+     *
+     * Should be called after data modifications (Insert, Delete, etc.)
+     */
+    void
+    UpdateResourceTracking();
 
  private:
     void
@@ -646,6 +687,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // Representative field_id for each struct (used to extract array lengths during Insert)
     // One field_id per struct, since all fields in the same struct have identical array lengths
     std::unordered_set<FieldId> struct_representative_fields_;
+
+    // Tracked resource usage for refund-then-charge pattern
+    // This stores the last estimated resource usage that was charged to the cache manager
+    ResourceUsage tracked_resource_{};
+    // Mutex to protect tracked_resource_ updates (refund-then-charge must be atomic)
+    mutable std::mutex resource_tracking_mutex_;
 };
 
 inline SegmentGrowingPtr

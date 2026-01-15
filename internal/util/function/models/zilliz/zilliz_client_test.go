@@ -585,9 +585,11 @@ func TestZillizClient_Highlight(t *testing.T) {
 			Results: []*modelservicepb.HighlightResult{
 				{
 					Sentences: []string{"highlight1", "highlight2"},
+					Scores:    []float32{0.9, 0.8},
 				},
 				{
 					Sentences: []string{"highlight3", "highlight4"},
+					Scores:    []float32{0.8, 0.7},
 				},
 			},
 		},
@@ -623,9 +625,10 @@ func TestZillizClient_Highlight(t *testing.T) {
 	query := "test query"
 	texts := []string{"doc1", "doc2", "doc3"}
 	params := map[string]string{"param1": "value1"}
-	highlights, err := client.Highlight(ctx, query, texts, params)
+	highlights, scores, err := client.Highlight(ctx, query, texts, params)
 	assert.NoError(t, err)
 	assert.Equal(t, [][]string{{"highlight1", "highlight2"}, {"highlight3", "highlight4"}}, highlights)
+	assert.Equal(t, [][]float32{{0.9, 0.8}, {0.8, 0.7}}, scores)
 }
 
 func TestZillizClient_Highlight_Error(t *testing.T) {
@@ -668,7 +671,130 @@ func TestZillizClient_Highlight_Error(t *testing.T) {
 	query := "test query"
 	texts := []string{"doc1", "doc2", "doc3"}
 	params := map[string]string{"param1": "value1"}
-	highlights, err := client.Highlight(ctx, query, texts, params)
+	highlights, scores, err := client.Highlight(ctx, query, texts, params)
 	assert.Error(t, err)
 	assert.Nil(t, highlights)
+	assert.Nil(t, scores)
+}
+
+func TestZillizClient_Highlight_MismatchLength(t *testing.T) {
+	tests := []struct {
+		name           string
+		response       *modelservicepb.HighlightResponse
+		expectedErrMsg string
+	}{
+		{
+			name: "more sentences than scores",
+			response: &modelservicepb.HighlightResponse{
+				Status: &modelservicepb.Status{Code: 0, Msg: "success"},
+				Results: []*modelservicepb.HighlightResult{
+					{
+						Sentences: []string{"highlight1", "highlight2", "highlight3"},
+						Scores:    []float32{0.9, 0.8},
+					},
+				},
+			},
+			expectedErrMsg: "sentences length 3 does not match scores length 2",
+		},
+		{
+			name: "more scores than sentences",
+			response: &modelservicepb.HighlightResponse{
+				Status: &modelservicepb.Status{Code: 0, Msg: "success"},
+				Results: []*modelservicepb.HighlightResult{
+					{
+						Sentences: []string{"highlight1"},
+						Scores:    []float32{0.9, 0.8, 0.7},
+					},
+				},
+			},
+			expectedErrMsg: "sentences length 1 does not match scores length 3",
+		},
+		{
+			name: "mismatch in second result",
+			response: &modelservicepb.HighlightResponse{
+				Status: &modelservicepb.Status{Code: 0, Msg: "success"},
+				Results: []*modelservicepb.HighlightResult{
+					{
+						Sentences: []string{"highlight1", "highlight2"},
+						Scores:    []float32{0.9, 0.8},
+					},
+					{
+						Sentences: []string{"highlight3"},
+						Scores:    []float32{0.7, 0.6},
+					},
+				},
+			},
+			expectedErrMsg: "sentences length 1 does not match scores length 2",
+		},
+		{
+			name: "nil sentences",
+			response: &modelservicepb.HighlightResponse{
+				Status: &modelservicepb.Status{Code: 0, Msg: "success"},
+				Results: []*modelservicepb.HighlightResult{
+					{},
+					{
+						Sentences: []string{"highlight3"},
+						Scores:    []float32{0.7, 0.6},
+					},
+				},
+			},
+			expectedErrMsg: "sentences length 1 does not match scores length 2",
+		},
+		{
+			name: "nil scores",
+			response: &modelservicepb.HighlightResponse{
+				Status: &modelservicepb.Status{Code: 0, Msg: "success"},
+				Results: []*modelservicepb.HighlightResult{
+					{
+						Sentences: []string{"highlight1", "highlight2"},
+						Scores:    nil,
+					},
+				},
+			},
+			expectedErrMsg: "sentences length 2 does not match scores length 0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, lis, dialer := setupMockServer(t)
+			defer lis.Close()
+			defer s.Stop()
+
+			mockServer := &mockHighlightServer{
+				response: tt.response,
+			}
+
+			modelservicepb.RegisterHighlightServiceServer(s, mockServer)
+
+			go func() {
+				if err := s.Serve(lis); err != nil {
+					fmt.Printf("Server exited with error: %v\n", err)
+				}
+			}()
+
+			conn, err := grpc.DialContext(
+				context.Background(),
+				"bufnet",
+				grpc.WithContextDialer(dialer),
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+				grpc.WithBlock(),
+			)
+			require.NoError(t, err)
+			defer conn.Close()
+
+			client := &ZillizClient{
+				modelDeploymentID: "test-deployment",
+				clusterID:         "test-cluster",
+				conn:              conn,
+			}
+
+			ctx := context.Background()
+			highlights, scores, err := client.Highlight(ctx, "test query", []string{"doc1"}, map[string]string{})
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tt.expectedErrMsg)
+			assert.Nil(t, highlights)
+			assert.Nil(t, scores)
+		})
+	}
 }

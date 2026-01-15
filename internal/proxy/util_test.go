@@ -2639,7 +2639,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.NoError(t, err)
 	})
 
@@ -2664,7 +2664,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "duplicate function name")
 	})
@@ -2683,7 +2683,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "input field not found")
 	})
@@ -2702,7 +2702,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "output field not found")
 	})
@@ -2722,7 +2722,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.NoError(t, err)
 	})
 
@@ -2741,7 +2741,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be primary key")
 	})
@@ -2761,7 +2761,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be partition key or clustering key")
 	})
@@ -2781,7 +2781,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be partition key or clustering key")
 	})
@@ -2801,7 +2801,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be nullable")
 	})
@@ -2832,6 +2832,12 @@ func TestValidateModelFunction(t *testing.T) {
 						{Key: "dim", Value: "4"},
 					},
 				},
+				{
+					Name: "output_dense_field2", DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "4"},
+					},
+				},
 			},
 			Functions: []*schemapb.FunctionSchema{
 				{
@@ -2841,7 +2847,7 @@ func TestValidateModelFunction(t *testing.T) {
 					OutputFieldNames: []string{"output_field"},
 				},
 				{
-					Name:             "text_embedding_func",
+					Name:             "f1",
 					Type:             schemapb.FunctionType_TextEmbedding,
 					InputFieldNames:  []string{"input_field"},
 					OutputFieldNames: []string{"output_dense_field"},
@@ -2852,10 +2858,28 @@ func TestValidateModelFunction(t *testing.T) {
 						{Key: "dim", Value: "4"},
 					},
 				},
+				{
+					Name:             "f2",
+					Type:             schemapb.FunctionType_TextEmbedding,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_dense_field2"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "provider", Value: "unknown_provider"},
+						{Key: "model_name", Value: "text-embedding-ada-002"},
+						{Key: "credential", Value: "mock"},
+						{Key: "dim", Value: "4"},
+					},
+				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "f1", false)
 		assert.NoError(t, err)
+
+		err = validateFunction(schema, "f2", false)
+		assert.Error(t, err)
+
+		err = validateFunction(schema, "", false)
+		assert.Error(t, err)
 	})
 
 	t.Run("Invalid function schema - Invalid function info ", func(t *testing.T) {
@@ -2887,7 +2911,7 @@ func TestValidateModelFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema, false)
+		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
 	})
 }
@@ -4031,7 +4055,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		}
 		err := ValidateFieldsInStruct(field, schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Unsupported element type of array field array_vector_with_scalar, now only float vector is supported")
+		assert.Contains(t, err.Error(), "only fixed dimension vector types are supported")
 	})
 
 	t.Run("array of vector missing dimension", func(t *testing.T) {
@@ -4924,146 +4948,100 @@ func TestGetStorageCost(t *testing.T) {
 	})
 }
 
-func TestCheckDuplicatePkExist_Int64PK(t *testing.T) {
-	primaryFieldSchema := &schemapb.FieldSchema{
-		Name:     "id",
-		FieldID:  100,
-		DataType: schemapb.DataType_Int64,
-	}
-
-	t.Run("with duplicates", func(t *testing.T) {
-		fieldsData := []*schemapb.FieldData{
-			{
-				FieldName: "id",
-				Type:      schemapb.DataType_Int64,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_LongData{
-							LongData: &schemapb.LongArray{
-								Data: []int64{1, 2, 3, 1, 4, 2}, // duplicates: 1, 2
-							},
+func TestMinHashFunction(t *testing.T) {
+	t.Run("MinHash function without permutations ", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{
+					Name:     "minhash_output",
+					DataType: schemapb.DataType_BinaryVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "4096",
 						},
+					},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_to_minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"minhash_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "num_hashes", Value: "128"},
+						{Key: "shingle_size", Value: "3"},
+						{Key: "hash_function", Value: "xxhash64"},
+						{Key: "seed", Value: "42"},
 					},
 				},
 			},
 		}
 
-		hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, fieldsData)
+		err := validateFunction(schema, "", false)
 		assert.NoError(t, err)
-		assert.True(t, hasDup)
 	})
 
-	t.Run("without duplicates", func(t *testing.T) {
-		fieldsData := []*schemapb.FieldData{
-			{
-				FieldName: "id",
-				Type:      schemapb.DataType_Int64,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_LongData{
-							LongData: &schemapb.LongArray{
-								Data: []int64{1, 2, 3, 4, 5},
-							},
+	t.Run("miss num_hashes", func(t *testing.T) {
+		createSchema := func() *schemapb.CollectionSchema {
+			return &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{Name: "text_field", DataType: schemapb.DataType_VarChar},
+					{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4096"},
+					}},
+				},
+				Functions: []*schemapb.FunctionSchema{
+					{
+						Name:             "text_to_minhash",
+						Type:             schemapb.FunctionType_MinHash,
+						InputFieldNames:  []string{"text_field"},
+						OutputFieldNames: []string{"minhash_output"},
+						Params: []*commonpb.KeyValuePair{
+							{Key: "seed", Value: "999"},
 						},
 					},
 				},
-			},
+			}
 		}
 
-		hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, fieldsData)
+		schema1 := createSchema()
+
+		// Inject permutations in both schemas
+		err := validateFunction(schema1, "", false)
 		assert.NoError(t, err)
-		assert.False(t, hasDup)
 	})
-}
 
-func TestCheckDuplicatePkExist_VarCharPK(t *testing.T) {
-	primaryFieldSchema := &schemapb.FieldSchema{
-		Name:     "id",
-		FieldID:  100,
-		DataType: schemapb.DataType_VarChar,
-	}
-
-	t.Run("with duplicates", func(t *testing.T) {
-		fieldsData := []*schemapb.FieldData{
-			{
-				FieldName: "id",
-				Type:      schemapb.DataType_VarChar,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_StringData{
-							StringData: &schemapb.StringArray{
-								Data: []string{"a", "b", "c", "a", "d"}, // duplicate: "a"
-							},
+	t.Run("num_hashes * 32 != dim", func(t *testing.T) {
+		createSchema := func() *schemapb.CollectionSchema {
+			return &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{Name: "text_field", DataType: schemapb.DataType_VarChar},
+					{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4096"},
+					}},
+				},
+				Functions: []*schemapb.FunctionSchema{
+					{
+						Name:             "text_to_minhash",
+						Type:             schemapb.FunctionType_MinHash,
+						InputFieldNames:  []string{"text_field"},
+						OutputFieldNames: []string{"minhash_output"},
+						Params: []*commonpb.KeyValuePair{
+							{Key: "num_hashes", Value: "9999"},
+							{Key: "seed", Value: "999"},
 						},
 					},
 				},
-			},
+			}
 		}
 
-		hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, fieldsData)
-		assert.NoError(t, err)
-		assert.True(t, hasDup)
+		schema1 := createSchema()
+
+		// Inject permutations in both schemas
+		err := validateFunction(schema1, "", false)
+		assert.Error(t, err)
 	})
-
-	t.Run("without duplicates", func(t *testing.T) {
-		fieldsData := []*schemapb.FieldData{
-			{
-				FieldName: "id",
-				Type:      schemapb.DataType_VarChar,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_StringData{
-							StringData: &schemapb.StringArray{
-								Data: []string{"a", "b", "c", "d", "e"},
-							},
-						},
-					},
-				},
-			},
-		}
-
-		hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, fieldsData)
-		assert.NoError(t, err)
-		assert.False(t, hasDup)
-	})
-}
-
-func TestCheckDuplicatePkExist_EmptyData(t *testing.T) {
-	primaryFieldSchema := &schemapb.FieldSchema{
-		Name:     "id",
-		FieldID:  100,
-		DataType: schemapb.DataType_Int64,
-	}
-
-	hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, []*schemapb.FieldData{})
-	assert.NoError(t, err)
-	assert.False(t, hasDup)
-}
-
-func TestCheckDuplicatePkExist_MissingPrimaryKey(t *testing.T) {
-	primaryFieldSchema := &schemapb.FieldSchema{
-		Name:     "id",
-		FieldID:  100,
-		DataType: schemapb.DataType_Int64,
-	}
-
-	fieldsData := []*schemapb.FieldData{
-		{
-			FieldName: "other_field",
-			Type:      schemapb.DataType_Int64,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_LongData{
-						LongData: &schemapb.LongArray{
-							Data: []int64{1, 2, 3},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, fieldsData)
-	assert.Error(t, err)
-	assert.False(t, hasDup)
 }

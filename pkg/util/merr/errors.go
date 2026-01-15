@@ -227,6 +227,9 @@ var (
 
 	ErrDataNodeSlotExhausted = newMilvusError("datanode slot exhausted", 2401, false)
 
+	// Cipher/Encryption related
+	ErrKMSKeyRevoked = newMilvusError("KMS key has been revoked, access denied", 2500, false)
+
 	// General
 	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)
 

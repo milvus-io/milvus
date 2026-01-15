@@ -1930,7 +1930,6 @@ type proxyConfig struct {
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
-	SlowLogSpanInSeconds   ParamItem `refreshable:"true"`
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
@@ -2432,21 +2431,11 @@ Disabled if the value is less or equal to 0.`,
 	p.SlowQuerySpanInSeconds = ParamItem{
 		Key:          "proxy.slowQuerySpanInSeconds",
 		Version:      "2.3.11",
-		Doc:          "query whose executed time exceeds the `slowQuerySpanInSeconds` can be considered slow, in seconds.",
-		DefaultValue: "5",
+		Doc:          "threshold for slow query detection in seconds. For Search/HybridSearch requests, the time is divided by nq for more accurate per-query measurement. Triggers slow log, WebUI display, and metrics.",
+		DefaultValue: "1",
 		Export:       true,
 	}
 	p.SlowQuerySpanInSeconds.Init(base.mgr)
-
-	p.SlowLogSpanInSeconds = ParamItem{
-		Key:          "proxy.slowLogSpanInSeconds",
-		Version:      "2.5.8",
-		Doc:          "query whose executed time exceeds the `slowLogSpanInSeconds` will have slow log, in seconds. If request type is search, the query time will be divided by nq number.",
-		DefaultValue: "1",
-		FallbackKeys: []string{"proxy.slowQuerySpanInSeconds"},
-		Export:       false,
-	}
-	p.SlowLogSpanInSeconds.Init(base.mgr)
 
 	p.QueryNodePoolingSize = ParamItem{
 		Key:          "proxy.queryNodePooling.size",
@@ -4641,6 +4630,10 @@ type dataCoordConfig struct {
 	SingleCompactionExpiredLogMaxSize ParamItem `refreshable:"true"`
 	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
 
+	StorageVersionCompactionEnabled           ParamItem `refreshable:"true"`
+	StorageVersionCompactionRateLimitTokens   ParamItem `refreshable:"true"`
+	StorageVersionCompactionRateLimitInterval ParamItem `refreshable:"true"`
+
 	ChannelCheckpointMaxLag ParamItem `refreshable:"true"`
 	SyncSegmentsInterval    ParamItem `refreshable:"false"`
 
@@ -4671,15 +4664,16 @@ type dataCoordConfig struct {
 	LevelZeroCompactionTriggerDeltalogMaxNum ParamItem `refreshable:"true"`
 
 	// Garbage Collection
-	EnableGarbageCollection     ParamItem `refreshable:"false"`
-	GCInterval                  ParamItem `refreshable:"false"`
-	GCMissingTolerance          ParamItem `refreshable:"false"`
-	GCDropTolerance             ParamItem `refreshable:"false"`
-	GCRemoveConcurrent          ParamItem `refreshable:"false"`
-	GCScanIntervalInHour        ParamItem `refreshable:"false"`
-	GCSlowDownCPUUsageThreshold ParamItem `refreshable:"false"`
-	SnapshotPendingTimeout      ParamItem `refreshable:"true"`
-	EnableActiveStandby         ParamItem `refreshable:"false"`
+	EnableGarbageCollection      ParamItem `refreshable:"false"`
+	GCInterval                   ParamItem `refreshable:"false"`
+	GCMissingTolerance           ParamItem `refreshable:"false"`
+	GCDropTolerance              ParamItem `refreshable:"false"`
+	GCRemoveConcurrent           ParamItem `refreshable:"false"`
+	GCScanIntervalInHour         ParamItem `refreshable:"false"`
+	GCSlowDownCPUUsageThreshold  ParamItem `refreshable:"false"`
+	SnapshotPendingTimeout       ParamItem `refreshable:"true"`
+	SnapshotRefIndexLoadInterval ParamItem `refreshable:"true"`
+	EnableActiveStandby          ParamItem `refreshable:"false"`
 
 	BindIndexNodeMode    ParamItem `refreshable:"false"`
 	IndexNodeAddress     ParamItem `refreshable:"false"`
@@ -5158,6 +5152,33 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.SingleCompactionDeltalogMaxNum.Init(base.mgr)
 
+	p.StorageVersionCompactionEnabled = ParamItem{
+		Key:          "dataCoord.compaction.storageVersion.enabled",
+		Version:      "2.6.9",
+		DefaultValue: "true",
+		Doc:          "Enable storage version compaction",
+		Export:       false,
+	}
+	p.StorageVersionCompactionEnabled.Init(base.mgr)
+
+	p.StorageVersionCompactionRateLimitTokens = ParamItem{
+		Key:          "dataCoord.compaction.storageVersion.rateLimitTokens",
+		Version:      "2.6.9",
+		DefaultValue: "3",
+		Doc:          "The storage version compaction tokens per period, applying rate limit",
+		Export:       false,
+	}
+	p.StorageVersionCompactionRateLimitTokens.Init(base.mgr)
+
+	p.StorageVersionCompactionRateLimitInterval = ParamItem{
+		Key:          "dataCoord.compaction.storageVersion.rateLimitInterval",
+		Version:      "2.6.9",
+		DefaultValue: "120",
+		Doc:          "The storage version compaction rate limit interval, in seconds",
+		Export:       false,
+	}
+	p.StorageVersionCompactionRateLimitInterval.Init(base.mgr)
+
 	p.GlobalCompactionInterval = ParamItem{
 		Key:          "dataCoord.compaction.global.interval",
 		Version:      "2.0.0",
@@ -5467,6 +5488,14 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.SnapshotPendingTimeout.Init(base.mgr)
+
+	p.SnapshotRefIndexLoadInterval = ParamItem{
+		Key:          "dataCoord.snapshot.refIndexLoadInterval",
+		Version:      "2.6.10",
+		DefaultValue: "60s",
+		Doc:          "The interval for loading snapshot RefIndex from S3",
+	}
+	p.SnapshotRefIndexLoadInterval.Init(base.mgr)
 
 	p.EnableActiveStandby = ParamItem{
 		Key:          "dataCoord.enableActiveStandby",
@@ -6538,6 +6567,7 @@ type streamingConfig struct {
 	WALBalancerPolicyVChannelFairAntiAffinityWeight     ParamItem `refreshable:"true"`
 	WALBalancerPolicyVChannelFairRebalanceTolerance     ParamItem `refreshable:"true"`
 	WALBalancerPolicyVChannelFairRebalanceMaxStep       ParamItem `refreshable:"true"`
+	WALBalancerExpectedInitialStreamingNodeNum          ParamItem `refreshable:"true"`
 
 	// broadcaster
 	WALBroadcasterConcurrencyRatio       ParamItem `refreshable:"false"`
@@ -6736,6 +6766,17 @@ it also determine the depth of depth first search method that is used to find th
 		Export:       true,
 	}
 	p.WALBalancerPolicyVChannelFairRebalanceMaxStep.Init(base.mgr)
+
+	p.WALBalancerExpectedInitialStreamingNodeNum = ParamItem{
+		Key:     "streaming.walBalancer.expectedInitialStreamingNodeNum",
+		Version: "2.6.9",
+		Doc: `The expected initial streaming node number, 0 by default, means no expected initial streaming node number.
+When the milvus is upgrading from 2.5 -> 2.6.9, the mixcoord will check if the expected initial streaming node number is reached,
+then open the streaming service to continue the upgrade process.`,
+		DefaultValue: "0",
+		Export:       false,
+	}
+	p.WALBalancerExpectedInitialStreamingNodeNum.Init(base.mgr)
 
 	p.WALBroadcasterConcurrencyRatio = ParamItem{
 		Key:          "streaming.walBroadcaster.concurrencyRatio",

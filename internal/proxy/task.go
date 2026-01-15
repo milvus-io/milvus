@@ -358,9 +358,12 @@ func (t *createCollectionTask) validateClusteringKey(ctx context.Context) error 
 func validateCollectionTTL(props []*commonpb.KeyValuePair) (bool, error) {
 	for _, pair := range props {
 		if pair.Key == common.CollectionTTLConfigKey {
-			_, err := strconv.Atoi(pair.Value)
+			val, err := strconv.Atoi(pair.Value)
 			if err != nil {
 				return true, merr.WrapErrParameterInvalidMsg("collection TTL is not a valid positive integer")
+			}
+			if val < -1 || val > common.MaxTTLSeconds {
+				return true, merr.WrapErrParameterInvalidMsg("collection TTL is out of range, expect [-1, 3155760000], got %d", val)
 			}
 			return true, nil
 		}
@@ -415,11 +418,16 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema.AutoID = false
 	t.schema.DbName = t.GetDbName()
 
+	isExternalCollection := typeutil.IsExternalCollection(t.schema)
+	if err := typeutil.ValidateExternalCollectionSchema(t.schema); err != nil {
+		return err
+	}
+
 	disableCheck, err := common.IsDisableFuncRuntimeCheck(t.GetProperties()...)
 	if err != nil {
 		return err
 	}
-	if err := validateFunction(t.schema, disableCheck); err != nil {
+	if err := validateFunction(t.schema, "", disableCheck); err != nil {
 		return err
 	}
 
@@ -446,9 +454,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// validate primary key definition
-	if err := validatePrimaryKey(t.schema); err != nil {
-		return err
+	// validate primary key definition when needed
+	if !isExternalCollection {
+		if err := validatePrimaryKey(t.schema); err != nil {
+			return err
+		}
 	}
 
 	// validate dynamic field
@@ -602,6 +612,7 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 	if t.oldSchema == nil {
 		return merr.WrapErrParameterInvalidMsg("empty old schema in add field task")
 	}
+
 	t.fieldSchema = &schemapb.FieldSchema{}
 	err := proto.Unmarshal(t.GetSchema(), t.fieldSchema)
 	if err != nil {
@@ -1004,6 +1015,8 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result.Schema.Description = result.Schema.Description
 	t.result.Schema.AutoID = result.Schema.AutoID
 	t.result.Schema.EnableDynamicField = result.Schema.EnableDynamicField
+	t.result.Schema.ExternalSource = result.Schema.ExternalSource
+	t.result.Schema.ExternalSpec = result.Schema.ExternalSpec
 	t.result.CollectionID = result.CollectionID
 	t.result.VirtualChannelNames = result.VirtualChannelNames
 	t.result.PhysicalChannelNames = result.PhysicalChannelNames
@@ -1035,6 +1048,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 			ElementType:      field.ElementType,
 			Nullable:         field.Nullable,
 			IsFunctionOutput: field.IsFunctionOutput,
+			ExternalField:    field.GetExternalField(),
 		}
 	}
 
@@ -1376,11 +1390,6 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			}
 		}
 
-		_, err = common.GetCollectionTTL(t.GetProperties())
-		if err != nil {
-			return merr.WrapErrParameterInvalidMsg("collection ttl properties value not valid, parse error: %s", err.Error())
-		}
-
 		enabled, _ := common.IsAllowInsertAutoID(t.Properties...)
 		if enabled {
 			primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(collSchema.CollectionSchema)
@@ -1556,6 +1565,7 @@ var allowedAlterProps = []string{
 	common.MaxLengthKey,
 	common.MmapEnabledKey,
 	common.MaxCapacityKey,
+	common.FieldDescriptionKey,
 }
 
 var allowedDropProps = []string{
@@ -1782,11 +1792,12 @@ func (t *createPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, t.GetDbName(), collName)
+	// Check partition key mode
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), collName)
 	if err != nil {
 		return err
 	}
-	if partitionKeyMode {
+	if typeutil.HasPartitionKey(collSchema.CollectionSchema) {
 		return errors.New("disable create partition if partition key mode is used")
 	}
 
@@ -1881,11 +1892,12 @@ func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, t.GetDbName(), collName)
+	// Check partition key mode
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), collName)
 	if err != nil {
 		return err
 	}
-	if partitionKeyMode {
+	if typeutil.HasPartitionKey(collSchema.CollectionSchema) {
 		return errors.New("disable drop partition if partition key mode is used")
 	}
 

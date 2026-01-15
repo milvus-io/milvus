@@ -1705,6 +1705,21 @@ func GetAllFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldSche
 	return all
 }
 
+// IsExternalCollection returns true when schema describes an external collection.
+// External collections are identified by having fields with ExternalField set,
+// since ExternalSource can be null for empty external collections.
+func IsExternalCollection(schema *schemapb.CollectionSchema) bool {
+	if schema == nil {
+		return false
+	}
+	for _, field := range schema.GetFields() {
+		if field.GetExternalField() != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // GetVectorFieldSchemas get vector fields schema from collection schema.
 func GetVectorFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldSchema {
 	ret := make([]*schemapb.FieldSchema, 0)
@@ -1743,6 +1758,57 @@ func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSc
 	}
 
 	return nil, errors.New("primary field is not found")
+}
+
+// ValidateExternalCollectionSchema ensures unsupported features are disabled for external collections.
+func ValidateExternalCollectionSchema(schema *schemapb.CollectionSchema) error {
+	if !IsExternalCollection(schema) {
+		return nil
+	}
+
+	if len(schema.GetFunctions()) > 0 {
+		return fmt.Errorf("external collection %s does not support functions", schema.GetName())
+	}
+
+	if schema.GetEnableDynamicField() {
+		return fmt.Errorf("external collection %s does not support dynamic field", schema.GetName())
+	}
+
+	if len(schema.GetStructArrayFields()) > 0 {
+		return fmt.Errorf("external collection %s does not support struct fields", schema.GetName())
+	}
+
+	for _, field := range schema.GetFields() {
+		// Skip system fields (RowID and Timestamp)
+		if field.GetName() == common.RowIDFieldName || field.GetName() == common.TimeStampFieldName {
+			continue
+		}
+
+		if field.GetIsPrimaryKey() {
+			return fmt.Errorf("external collection %s does not support primary key field %s", schema.GetName(), field.GetName())
+		}
+		if field.GetIsPartitionKey() {
+			return fmt.Errorf("external collection %s does not support partition key field %s", schema.GetName(), field.GetName())
+		}
+		if field.GetIsClusteringKey() {
+			return fmt.Errorf("external collection %s does not support clustering key field %s", schema.GetName(), field.GetName())
+		}
+		if field.GetAutoID() {
+			return fmt.Errorf("external collection %s does not support auto id on field %s", schema.GetName(), field.GetName())
+		}
+
+		helper := CreateFieldSchemaHelper(field)
+		if helper.EnableMatch() {
+			return fmt.Errorf("external collection %s does not support text match on field %s", schema.GetName(), field.GetName())
+		}
+
+		// Validate external_field mapping is set for all user fields
+		if field.GetExternalField() == "" {
+			return fmt.Errorf("field '%s' in external collection %s must have external_field mapping", field.GetName(), schema.GetName())
+		}
+	}
+
+	return nil
 }
 
 func IsFieldSparseFloatVector(schema *schemapb.CollectionSchema, fieldID int64) bool {
@@ -2562,6 +2628,24 @@ func IsBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.F
 	for _, fn := range coll.GetFunctions() {
 		if fn.GetType() == schemapb.FunctionType_BM25 && field.GetName() == fn.GetInputFieldNames()[0] {
 			return true
+		}
+	}
+	return false
+}
+
+func IsMinHashFunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
+	if !(field.GetIsFunctionOutput() && field.GetDataType() == schemapb.DataType_BinaryVector) {
+		return false
+	}
+
+	for _, fSchema := range collSchema.Functions {
+		if fSchema.Type == schemapb.FunctionType_MinHash {
+			if len(fSchema.OutputFieldNames) != 0 && field.Name == fSchema.OutputFieldNames[0] {
+				return true
+			}
+			if len(fSchema.OutputFieldIds) != 0 && field.FieldID == fSchema.OutputFieldIds[0] {
+				return true
+			}
 		}
 	}
 	return false
