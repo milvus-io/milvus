@@ -135,3 +135,4 @@ func (s *MixCompactionTaskSuite) TestQueryTaskOnWorker() {
 
 	s.Equal(taskcommon.Retry, t1.GetTaskState())
 }
+
