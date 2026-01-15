@@ -157,7 +157,7 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                                                 >
                                                 arith_op: Mod
                                                 right_operand: <
-                                                  int64_val: 30
+                                                  int64_val: 2
                                                 >
                                                 op: Equal
                                                 value: <
