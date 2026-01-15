@@ -69,10 +69,10 @@ func newZillizHighlightProvider(params []*commonpb.KeyValuePair, conf map[string
 	return &provider, nil
 }
 
-func (h *zillizHighlightProvider) highlight(ctx context.Context, query string, texts []string) ([][]string, error) {
-	highlights, err := h.client.Highlight(ctx, query, texts, h.modelParams)
+func (h *zillizHighlightProvider) highlight(ctx context.Context, query string, texts []string) ([][]string, [][]float32, error) {
+	highlights, scores, err := h.client.Highlight(ctx, query, texts, h.modelParams)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return highlights, nil
+	return highlights, scores, nil
 }

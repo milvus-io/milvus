@@ -181,6 +181,35 @@ GetObjectData(
     milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::HIGH,
     bool is_field_data = true);
 
+// Helper function to wait for all futures and collect exceptions
+// This ensures all background threads complete before rethrowing exception
+template <typename T>
+std::vector<T>
+WaitAllFutures(std::vector<std::future<T>> futures) {
+    std::vector<T> results;
+    results.reserve(futures.size());
+    std::exception_ptr first_exception = nullptr;
+
+    // Wait for all futures to complete and collect exceptions
+    for (auto& future : futures) {
+        try {
+            results.emplace_back(future.get());
+        } catch (...) {
+            if (!first_exception) {
+                first_exception = std::current_exception();
+            }
+            // Continue to wait for remaining futures to ensure all threads complete
+        }
+    }
+
+    // Rethrow the first exception after all futures are processed
+    if (first_exception) {
+        std::rethrow_exception(first_exception);
+    }
+
+    return results;
+}
+
 std::vector<FieldDataPtr>
 GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,

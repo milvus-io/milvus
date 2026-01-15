@@ -253,7 +253,7 @@ func (c *ZillizClient) Rerank(ctx context.Context, query string, texts []string,
 	return res.Scores, nil
 }
 
-func (c *ZillizClient) Highlight(ctx context.Context, query string, texts []string, params map[string]string) ([][]string, error) {
+func (c *ZillizClient) Highlight(ctx context.Context, query string, texts []string, params map[string]string) ([][]string, [][]float32, error) {
 	stub := modelservicepb.NewHighlightServiceClient(c.conn)
 	req := &modelservicepb.HighlightRequest{
 		Query:     query,
@@ -263,11 +263,27 @@ func (c *ZillizClient) Highlight(ctx context.Context, query string, texts []stri
 	ctx = c.setMeta(ctx)
 	res, err := stub.Highlight(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	highlights := make([][]string, 0, len(res.GetResults()))
+	scores := make([][]float32, 0, len(res.GetResults()))
 	for _, ret := range res.GetResults() {
-		highlights = append(highlights, ret.GetSentences())
+		sentences := ret.GetSentences()
+		retScores := ret.GetScores()
+
+		// Handle nil cases
+		if sentences == nil {
+			sentences = []string{}
+		}
+		if retScores == nil {
+			retScores = []float32{}
+		}
+
+		if len(sentences) != len(retScores) {
+			return nil, nil, fmt.Errorf("sentences length %d does not match scores length %d", len(sentences), len(retScores))
+		}
+		highlights = append(highlights, sentences)
+		scores = append(scores, retScores)
 	}
-	return highlights, nil
+	return highlights, scores, nil
 }

@@ -44,9 +44,9 @@ func (c *SiliconflowClient) headers() map[string]string {
 	}
 }
 
-func (c *SiliconflowClient) Embedding(url string, modelName string, texts []string, encodingFormat string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *SiliconflowClient) Embedding(url string, modelName string, texts []string, encodingFormat string, dim int, timeoutSec int64) (*EmbeddingResponse, error) {
 	embClient := newSiliconflowEmbedding(c.apiKey, url)
-	return embClient.embedding(modelName, texts, encodingFormat, c.headers(), timeoutSec)
+	return embClient.embedding(modelName, texts, encodingFormat, dim, c.headers(), timeoutSec)
 }
 
 func (c *SiliconflowClient) Rerank(url string, modelName string, query string, texts []string, params map[string]any, timeoutSec int64) (*RerankResponse, error) {
@@ -62,6 +62,10 @@ type EmbeddingRequest struct {
 	Input []string `json:"input"`
 
 	EncodingFormat string `json:"encoding_format,omitempty"`
+
+	// The number of dimensions the resulting output embeddings should have.
+	// Only supported in some models.
+	Dimensions int `json:"dimensions,omitempty"`
 }
 
 type Usage struct {
@@ -101,11 +105,14 @@ func newSiliconflowEmbedding(apiKey string, url string) *siliconflowEmbedding {
 	}
 }
 
-func (c *siliconflowEmbedding) embedding(modelName string, texts []string, encodingFormat string, headers map[string]string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *siliconflowEmbedding) embedding(modelName string, texts []string, encodingFormat string, dim int, headers map[string]string, timeoutSec int64) (*EmbeddingResponse, error) {
 	var r EmbeddingRequest
 	r.Model = modelName
 	r.Input = texts
 	r.EncodingFormat = encodingFormat
+	if dim != 0 {
+		r.Dimensions = dim
+	}
 
 	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutSec)
 	if err != nil {

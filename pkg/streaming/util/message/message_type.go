@@ -21,6 +21,8 @@ type MessageTypeProperties struct {
 	ExclusiveRequired bool
 	// a cipher enabled message type will be encrypted before appending to the wal if cipher is enabled.
 	CipherEnabled bool
+	// A broadcast to all message type is a message that will be broadcasted to all vchannels.
+	BroadcastToAll bool
 }
 
 var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
@@ -109,6 +111,7 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeDropIndex:           {},
 	MessageTypeFlushAll: {
 		ExclusiveRequired: true,
+		BroadcastToAll:    true,
 	},
 }
 
@@ -149,6 +152,11 @@ func (t MessageType) IsSystem() bool {
 // IsSelfControlled checks if the MessageType is self controlled.
 func (t MessageType) IsSelfControlled() bool {
 	return messageTypePropertiesMap[t].SelfControlled
+}
+
+// IsBroadcastToAll checks if the MessageType is broadcast to all.
+func (t MessageType) IsBroadcastToAll() bool {
+	return messageTypePropertiesMap[t].BroadcastToAll
 }
 
 // LogLevel returns the log level of the MessageType.
