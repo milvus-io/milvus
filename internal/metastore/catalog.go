@@ -93,6 +93,11 @@ type RootCoordCatalog interface {
 	SavePrivilegeGroup(ctx context.Context, data *milvuspb.PrivilegeGroupInfo) error
 	ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error)
 
+	// File resource related
+	SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error
+	RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error
+	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error)
+
 	Close()
 }
 
@@ -240,10 +245,6 @@ type DataCoordCatalog interface {
 	SaveUpdateExternalCollectionTask(ctx context.Context, task *indexpb.UpdateExternalCollectionTask) error
 	DropUpdateExternalCollectionTask(ctx context.Context, taskID typeutil.UniqueID) error
 
-	// Analyzer Resource
-	SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error
-	RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error
-	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error)
 	// snapshot related
 	SaveSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error
 	DropSnapshot(ctx context.Context, collectionID int64, snapshotID int64) error

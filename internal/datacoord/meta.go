@@ -104,8 +104,7 @@ type meta struct {
 	externalCollectionTaskMeta *externalCollectionTaskMeta
 
 	// File Resource Meta
-	resourceMeta    map[string]*internalpb.FileResourceInfo // name -> info
-	resourceIDMap   map[int64]*internalpb.FileResourceInfo  // id -> info
+	resourceIDMap   map[int64]*internalpb.FileResourceInfo // id -> info
 	resourceVersion uint64
 	resourceLock    lock.RWMutex
 	// Snapshot Meta
@@ -222,9 +221,10 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		compactionTaskMeta: ctm,
 		statsTaskMeta:      stm,
 		// externalCollectionTaskMeta: ectm,
-		resourceMeta:  make(map[string]*internalpb.FileResourceInfo),
-		resourceIDMap: make(map[int64]*internalpb.FileResourceInfo),
-		snapshotMeta:  spm,
+		resourceIDMap:   make(map[int64]*internalpb.FileResourceInfo),
+		resourceVersion: 0,
+		resourceLock:    lock.RWMutex{},
+		snapshotMeta:    spm,
 	}
 	err = mt.reloadFromKV(ctx, broker)
 	if err != nil {
@@ -330,11 +330,6 @@ func (m *meta) reloadFromKV(ctx context.Context, broker broker.Broker) error {
 			metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
 				Set(float64(ts.Unix()))
 		}
-	}
-
-	// Load FileResource meta
-	if err := m.reloadFileResourceMeta(ctx); err != nil {
-		return err
 	}
 
 	log.Ctx(ctx).Info("DataCoord meta reloadFromKV done", zap.Int("numSegments", numSegments), zap.Duration("duration", record.ElapseSpan()))
@@ -2475,62 +2470,22 @@ func contains(arr []int64, target int64) bool {
 	return false
 }
 
-// reloadFileResourceMeta load file resource meta from catalog
-func (m *meta) reloadFileResourceMeta(ctx context.Context) error {
+func (m *meta) UpdateFileResources(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
 	m.resourceLock.Lock()
 	defer m.resourceLock.Unlock()
-
-	resources, version, err := m.catalog.ListFileResource(ctx)
-	if err != nil {
-		return err
-	}
-
-	m.resourceMeta = make(map[string]*internalpb.FileResourceInfo)
+	m.resourceIDMap = make(map[int64]*internalpb.FileResourceInfo)
 	for _, resource := range resources {
-		m.resourceMeta[resource.Name] = resource
 		m.resourceIDMap[resource.Id] = resource
 	}
 	m.resourceVersion = version
+
 	return nil
 }
 
-// AddFileResource add file resource to meta
-func (m *meta) AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error {
-	m.resourceLock.Lock()
-	defer m.resourceLock.Unlock()
-
-	if _, ok := m.resourceMeta[resource.Name]; ok {
-		return merr.WrapErrAsInputError(fmt.Errorf("create resource failed: resource name exist"))
-	}
-
-	err := m.catalog.SaveFileResource(ctx, resource, m.resourceVersion+1)
-	if err != nil {
-		return err
-	}
-
-	m.resourceMeta[resource.Name] = resource
-	m.resourceIDMap[resource.Id] = resource
-	m.resourceVersion += 1
-	return nil
-}
-
-// RemoveFileResource remove file resource from meta
-func (m *meta) RemoveFileResource(ctx context.Context, name string) error {
-	m.resourceLock.Lock()
-	defer m.resourceLock.Unlock()
-
-	if resource, ok := m.resourceMeta[name]; ok {
-		err := m.catalog.RemoveFileResource(ctx, resource.Id, m.resourceVersion+1)
-		if err != nil {
-			return err
-		}
-
-		delete(m.resourceMeta, name)
-		delete(m.resourceIDMap, resource.Id)
-		m.resourceVersion += 1
-	}
-
-	return nil
+func (m *meta) ListFileResources(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64) {
+	m.resourceLock.RLock()
+	defer m.resourceLock.RUnlock()
+	return lo.Values(m.resourceIDMap), m.resourceVersion
 }
 
 func (m *meta) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
@@ -2538,22 +2493,14 @@ func (m *meta) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*i
 	defer m.resourceLock.RUnlock()
 
 	resources := make([]*internalpb.FileResourceInfo, 0)
-	for _, resourceID := range resourceIDs {
-		if resource, ok := m.resourceIDMap[resourceID]; ok {
+	for _, id := range resourceIDs {
+		if resource, ok := m.resourceIDMap[id]; ok {
 			resources = append(resources, resource)
 		} else {
-			return nil, errors.Errorf("file resource %d not found", resourceID)
+			return nil, errors.Errorf("file resource %d not found", id)
 		}
 	}
 	return resources, nil
-}
-
-// ListFileResource list file resources from meta
-func (m *meta) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64) {
-	m.resourceLock.RLock()
-	defer m.resourceLock.RUnlock()
-
-	return lo.Values(m.resourceMeta), m.resourceVersion
 }
 
 // TruncateChannelByTime drops segments of a channel that were updated before the flush timestamp
