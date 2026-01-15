@@ -13,6 +13,10 @@ func Register(balancer balancer.Balancer) {
 	singleton.Set(balancer)
 }
 
+func SetFileResourceChecker(checker balancer.FileResourceChecker) {
+	singleton.Get().SetFileResourceChecker(checker)
+}
+
 func GetWithContext(ctx context.Context) (balancer.Balancer, error) {
 	return singleton.GetWithContext(ctx)
 }

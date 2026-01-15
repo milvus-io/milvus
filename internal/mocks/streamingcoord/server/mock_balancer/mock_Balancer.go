@@ -421,6 +421,39 @@ func (_c *MockBalancer_ReplicateRole_Call) RunAndReturn(run func() replicateutil
 	return _c
 }
 
+// SetFileResourceChecker provides a mock function with given fields: checker
+func (_m *MockBalancer) SetFileResourceChecker(checker balancer.FileResourceChecker) {
+	_m.Called(checker)
+}
+
+// MockBalancer_SetFileResourceChecker_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetFileResourceChecker'
+type MockBalancer_SetFileResourceChecker_Call struct {
+	*mock.Call
+}
+
+// SetFileResourceChecker is a helper method to define mock.On call
+//   - checker balancer.FileResourceChecker
+func (_e *MockBalancer_Expecter) SetFileResourceChecker(checker interface{}) *MockBalancer_SetFileResourceChecker_Call {
+	return &MockBalancer_SetFileResourceChecker_Call{Call: _e.mock.On("SetFileResourceChecker", checker)}
+}
+
+func (_c *MockBalancer_SetFileResourceChecker_Call) Run(run func(checker balancer.FileResourceChecker)) *MockBalancer_SetFileResourceChecker_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(balancer.FileResourceChecker))
+	})
+	return _c
+}
+
+func (_c *MockBalancer_SetFileResourceChecker_Call) Return() *MockBalancer_SetFileResourceChecker_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockBalancer_SetFileResourceChecker_Call) RunAndReturn(run func(balancer.FileResourceChecker)) *MockBalancer_SetFileResourceChecker_Call {
+	_c.Run(run)
+	return _c
+}
+
 // Trigger provides a mock function with given fields: ctx
 func (_m *MockBalancer) Trigger(ctx context.Context) error {
 	ret := _m.Called(ctx)

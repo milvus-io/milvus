@@ -134,6 +134,15 @@ type Core struct {
 
 	tombstoneSweeper tombstone.TombstoneSweeper
 	storage          storage.ChunkManager // used to check file resource existence
+
+	fileResourceObserver FileResourceObserver
+}
+
+type FileResourceObserver interface {
+	CheckAllQnReady() error
+	InitMeta(meta IMetaTable)
+	Notify()
+	Sync() error
 }
 
 // --------------------- function --------------------------
@@ -160,6 +169,10 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 func (c *Core) UpdateStateCode(code commonpb.StateCode) {
 	c.stateCode.Store(int32(code))
 	log.Ctx(c.ctx).Info("update rootcoord state", zap.String("state", code.String()))
+}
+
+func (c *Core) SetFileResourceObserver(observer FileResourceObserver) {
+	c.fileResourceObserver = observer
 }
 
 func (c *Core) GetStateCode() commonpb.StateCode {
@@ -483,6 +496,11 @@ func (c *Core) initInternal() error {
 		return err
 	}
 	c.storage = cli
+
+	// init file resource observer
+	if c.fileResourceObserver != nil {
+		c.fileResourceObserver.InitMeta(c.meta)
+	}
 	log.Info("init rootcoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", c.address))
 	return nil
 }
@@ -2985,9 +3003,14 @@ func (c *Core) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourc
 		return merr.Status(err), nil
 	}
 
-	resources, version := c.meta.ListFileResource(ctx)
-	c.mixCoord.SyncQcFileResource(ctx, resources, version)
-	c.mixCoord.SyncDcFileResource(ctx, resources, version)
+	if c.fileResourceObserver != nil {
+		err = c.fileResourceObserver.Sync()
+		if err != nil {
+			c.fileResourceObserver.Notify()
+			return merr.Status(errors.Wrap(err, "add file resource success but some node sync failed")), nil
+		}
+	}
+
 	ctxLog.Debug(method + " success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -3010,10 +3033,12 @@ func (c *Core) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileR
 		return merr.Status(err), nil
 	}
 
-	if exist {
-		resources, version := c.meta.ListFileResource(ctx)
-		c.mixCoord.SyncQcFileResource(ctx, resources, version)
-		c.mixCoord.SyncDcFileResource(ctx, resources, version)
+	if exist && c.fileResourceObserver != nil {
+		err = c.fileResourceObserver.Sync()
+		if err != nil {
+			c.fileResourceObserver.Notify()
+			return merr.Status(errors.Wrap(err, "remove file resource success but some node sync failed")), nil
+		}
 	}
 
 	ctxLog.Debug(method + " success")
@@ -3295,18 +3320,4 @@ func (c *Core) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest) 
 		Status: merr.Success(),
 		Ezk:    ezkJSON,
 	}, nil
-}
-
-func (c *Core) InitFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) error {
-	resources, version := c.meta.ListFileResource(ctx)
-	err := c.mixCoord.SyncQcFileResource(ctx, resources, version)
-	if err != nil {
-		return err
-	}
-
-	err = c.mixCoord.SyncDcFileResource(ctx, resources, version)
-	if err != nil {
-		return err
-	}
-	return nil
 }

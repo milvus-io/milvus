@@ -85,6 +85,9 @@ type mixCoordImpl struct {
 	posixCleanupWg        sync.WaitGroup
 	posixCleanupStartOnce sync.Once
 	posixCleanupStopOnce  sync.Once
+
+	// file resource observer
+	fileResourceObserver *FileResourceObserver
 }
 
 func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoordImpl, error) {
@@ -160,15 +163,17 @@ func (s *mixCoordImpl) initInternal() error {
 	s.rootcoordServer.SetMixCoord(s)
 	s.datacoordServer.SetMixCoord(s)
 	s.queryCoordServer.SetMixCoord(s)
+	s.fileResourceObserver = NewFileResourceObserver(s.ctx)
 
 	// Register WAL callbacks
 	RegisterWALCallbacks(s)
 
-	if err := s.streamingCoord.Start(s.ctx); err != nil {
+	if err := s.streamingCoord.Start(s.ctx, s.fileResourceObserver); err != nil {
 		log.Error("streamCoord start failed", zap.Error(err))
 		return err
 	}
 
+	s.rootcoordServer.SetFileResourceObserver(s.fileResourceObserver)
 	if err := s.rootcoordServer.Init(); err != nil {
 		log.Error("rootCoord init failed", zap.Error(err))
 		return err
@@ -179,6 +184,7 @@ func (s *mixCoordImpl) initInternal() error {
 		return err
 	}
 
+	s.datacoordServer.SetFileResourceObserver(s.fileResourceObserver)
 	if err := s.datacoordServer.Init(); err != nil {
 		log.Error("dataCoord init failed", zap.Error(err))
 		return err
@@ -189,6 +195,7 @@ func (s *mixCoordImpl) initInternal() error {
 		return err
 	}
 
+	s.queryCoordServer.SetFileResourceObserver(s.fileResourceObserver)
 	if err := s.queryCoordServer.Init(); err != nil {
 		log.Error("queryCoord init failed", zap.Error(err))
 		return err
@@ -199,10 +206,7 @@ func (s *mixCoordImpl) initInternal() error {
 		return err
 	}
 
-	if err := s.rootcoordServer.InitFileResources(s.ctx, &milvuspb.ListFileResourcesRequest{}); err != nil {
-		log.Error("init file resource failed", zap.Error(err))
-		return err
-	}
+	s.fileResourceObserver.Start()
 	return nil
 }
 
@@ -346,6 +350,8 @@ func (s *mixCoordImpl) Stop() error {
 	if err := s.rootcoordServer.Stop(); err != nil {
 		log.Error("Failed to stop rootCoord", zap.Error(err))
 	}
+
+	s.fileResourceObserver.Stop()
 	s.cancel()
 	return nil
 }
@@ -873,15 +879,6 @@ func (s *mixCoordImpl) GetQcMetrics(ctx context.Context, in *milvuspb.GetMetrics
 	return s.queryCoordServer.GetMetrics(ctx, in)
 }
 
-func (s *mixCoordImpl) SyncQcFileResource(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
-	return s.queryCoordServer.SyncFileResource(ctx, resources, version)
-}
-
-func (s *mixCoordImpl) SyncDcFileResource(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
-	return s.datacoordServer.SyncFileResource(ctx, resources, version)
-}
-
-// QueryCoordServer
 func (s *mixCoordImpl) ActivateChecker(ctx context.Context, req *querypb.ActivateCheckerRequest) (*commonpb.Status, error) {
 	return s.queryCoordServer.ActivateChecker(ctx, req)
 }
