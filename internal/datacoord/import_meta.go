@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
@@ -259,11 +258,6 @@ func (m *importMeta) UpdateTask(ctx context.Context, taskID int64, actions ...Up
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if task := m.tasks.get(taskID); task != nil {
-		if task.GetState() == datapb.ImportTaskStateV2_Completed ||
-			task.GetState() == datapb.ImportTaskStateV2_Failed {
-			// import task is already completed or failed, no need to update
-			return nil
-		}
 		updatedTask := task.Clone()
 		for _, action := range actions {
 			action(updatedTask)
