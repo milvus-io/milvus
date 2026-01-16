@@ -1948,7 +1948,6 @@ type proxyConfig struct {
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
-	SlowLogSpanInSeconds   ParamItem `refreshable:"true"`
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
@@ -2434,21 +2433,11 @@ Disabled if the value is less or equal to 0.`,
 	p.SlowQuerySpanInSeconds = ParamItem{
 		Key:          "proxy.slowQuerySpanInSeconds",
 		Version:      "2.3.11",
-		Doc:          "query whose executed time exceeds the `slowQuerySpanInSeconds` can be considered slow, in seconds.",
-		DefaultValue: "5",
+		Doc:          "threshold for slow query detection in seconds. For Search/HybridSearch requests, the time is divided by nq for more accurate per-query measurement. Triggers slow log, WebUI display, and metrics.",
+		DefaultValue: "1",
 		Export:       true,
 	}
 	p.SlowQuerySpanInSeconds.Init(base.mgr)
-
-	p.SlowLogSpanInSeconds = ParamItem{
-		Key:          "proxy.slowLogSpanInSeconds",
-		Version:      "2.5.8",
-		Doc:          "query whose executed time exceeds the `slowLogSpanInSeconds` will have slow log, in seconds. If request type is search, the query time will be divided by nq number.",
-		DefaultValue: "1",
-		FallbackKeys: []string{"proxy.slowQuerySpanInSeconds"},
-		Export:       false,
-	}
-	p.SlowLogSpanInSeconds.Init(base.mgr)
 
 	p.QueryNodePoolingSize = ParamItem{
 		Key:          "proxy.queryNodePooling.size",

@@ -2972,16 +2972,19 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		zap.Bool("useDefaultConsistency", request.GetUseDefaultConsistency()),
 	)
 
+	succeeded := false
 	defer func() {
+		if !succeeded {
+			return
+		}
 		span := tr.ElapseSpan()
 		spanPerNq := span
 		if qt.SearchRequest.GetNq() > 0 {
 			spanPerNq = span / time.Duration(qt.SearchRequest.GetNq())
 		}
-		if spanPerNq >= paramtable.Get().ProxyCfg.SlowLogSpanInSeconds.GetAsDuration(time.Second) {
+		if spanPerNq >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			log.Info(rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
 				zap.Int64("nq", qt.SearchRequest.GetNq()), zap.Duration("duration", span), zap.Duration("durationPerNq", spanPerNq))
-			// WebUI slow query shall use slow log as well.
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -2990,8 +2993,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			if node.slowQueries != nil {
 				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithSearchRequest(request, user, span, traceID))
 			}
-		}
-		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			metrics.ProxySlowQueryCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -3094,6 +3095,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
 	}
+	succeeded = true
 	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, qt.isRecallEvaluation, nil
 }
 
@@ -3203,11 +3205,23 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		zap.Stringer("dsls", &hybridSearchRequestExprLogger{HybridSearchRequest: request}),
 	)
 
+	succeeded := false
 	defer func() {
+		if !succeeded {
+			return
+		}
 		span := tr.ElapseSpan()
-		if span >= paramtable.Get().ProxyCfg.SlowLogSpanInSeconds.GetAsDuration(time.Second) {
-			log.Info(rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()), zap.Duration("duration", span))
-			// WebUI slow query shall use slow log as well.
+		spanPerNq := span
+		var totalNq int64
+		for _, subReq := range request.GetRequests() {
+			totalNq += subReq.GetNq()
+		}
+		if totalNq > 0 {
+			spanPerNq = span / time.Duration(totalNq)
+		}
+		if spanPerNq >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
+			log.Info(rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
+				zap.Int64("totalNq", totalNq), zap.Duration("duration", span), zap.Duration("durationPerNq", spanPerNq))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -3216,8 +3230,6 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			if node.slowQueries != nil {
 				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithSearchRequest(newSearchReq, user, span, traceID))
 			}
-		}
-		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			metrics.ProxySlowQueryCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.HybridSearchLabel,
@@ -3319,6 +3331,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeHybridSearch, dbName, username).Add(float64(v))
 		}
 	}
+	succeeded = true
 	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, nil
 }
 
@@ -3625,9 +3638,13 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 	tr := timerecord.NewTimeRecorder(method)
 
+	succeeded := false
 	defer func() {
+		if !succeeded {
+			return
+		}
 		span := tr.ElapseSpan()
-		if span >= paramtable.Get().ProxyCfg.SlowLogSpanInSeconds.GetAsDuration(time.Second) {
+		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			log.Info(
 				rpcSlow(method),
 				zap.String("expr", request.Expr),
@@ -3635,18 +3652,14 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 				zap.Uint64("travel_timestamp", request.TravelTimestamp),
 				zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
 				zap.Duration("duration", span))
-			// WebUI slow query shall use slow log as well.
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
 				traceID = sp.SpanContext().TraceID().String()
 			}
-
 			if node.slowQueries != nil {
 				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithQueryRequest(request, user, span, traceID))
 			}
-		}
-		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			metrics.ProxySlowQueryCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.QueryLabel,
@@ -3700,6 +3713,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}
 
+	succeeded = true
 	return qt.result, qt.storageCost, nil
 }
 
