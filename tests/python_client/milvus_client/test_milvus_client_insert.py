@@ -582,7 +582,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
                 error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
 
                 # Inject type errors based on value type (only for simple scalar types)
-                if value_type is int:
+                if value_type in (int, bool, float):
                     tmp = rows[dirty_i][field_name]
                     rows[dirty_i][field_name] = "iamstring"
                     self.insert(client, collection_name, data=rows,
@@ -591,18 +591,6 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
                 elif value_type is str:
                     tmp = rows[dirty_i][field_name]
                     rows[dirty_i][field_name] = random.randint(0, 1000)
-                    self.insert(client, collection_name, data=rows,
-                                check_task=CheckTasks.err_res, check_items=error)
-                    rows[dirty_i][field_name] = tmp
-                elif value_type is bool:
-                    tmp = rows[dirty_i][field_name]
-                    rows[dirty_i][field_name] = "iamstring"
-                    self.insert(client, collection_name, data=rows,
-                                check_task=CheckTasks.err_res, check_items=error)
-                    rows[dirty_i][field_name] = tmp
-                elif value_type is float:
-                    tmp = rows[dirty_i][field_name]
-                    rows[dirty_i][field_name] = "iamstring"
                     self.insert(client, collection_name, data=rows,
                                 check_task=CheckTasks.err_res, check_items=error)
                     rows[dirty_i][field_name] = tmp
@@ -666,8 +654,8 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         vectors = cf.gen_vectors(ct.default_nb, ct.default_dim)
 
         # 4. Prepare test data with invalid type for varchar field
-        data = [{default_primary_key_field_name: 1, default_float_field_name: vectors[1],
-                 default_string_field_name: default_value, default_vector_field_name: np.float32(1.0)}]
+        data = [{default_primary_key_field_name: 1, default_float_field_name: 1.0,
+                 default_string_field_name: default_value, default_vector_field_name: vectors[0]}]
 
         # 5. Verify error on upsert
         error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
