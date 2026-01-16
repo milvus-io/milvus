@@ -37,7 +37,8 @@ func reduceSearchResult(ctx context.Context, subSearchResultData []*schemapb.Sea
 			reduceInfo.GetMetricType(),
 			reduceInfo.GetPkType(),
 			reduceInfo.GetOffset(),
-			reduceInfo.GetGroupSize())
+			reduceInfo.GetGroupSize(),
+			reduceInfo.GetStrictGroupSize())
 	}
 	return reduceSearchResultDataNoGroupBy(ctx,
 		subSearchResultData,
@@ -192,6 +193,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 	pkType schemapb.DataType,
 	offset int64,
 	groupSize int64,
+	strictGroupSize bool,
 ) (*milvuspb.SearchResults, error) {
 	tr := timerecord.NewTimeRecorder("reduceSearchResultData")
 	defer func() {
@@ -204,6 +206,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		zap.Int64("nq", nq),
 		zap.Int64("offset", offset),
 		zap.Int64("limit", limit),
+		zap.Bool("strictGroupSize", strictGroupSize),
 		zap.String("metricType", metricType))
 
 	ret := &milvuspb.SearchResults{
@@ -277,8 +280,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 			j              int64
 			groupByValMap  = make(map[interface{}][]*groupReduceInfo)
 			skipOffsetMap  = make(map[interface{}]bool)
-			groupByValList = make([]interface{}, limit)
-			groupByValIdx  = 0
+			groupByValList = make([]interface{}, 0, limit)
 		)
 
 		for j = 0; j < groupBound; {
@@ -301,8 +303,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 				// skip when target group has been full
 			} else {
 				if len(groupByValMap[groupByVal]) == 0 {
-					groupByValList[groupByValIdx] = groupByVal
-					groupByValIdx++
+					groupByValList = append(groupByValList, groupByVal)
 				}
 				groupByValMap[groupByVal] = append(groupByValMap[groupByVal], &groupReduceInfo{
 					subSearchIdx: subSearchIdx,
@@ -316,8 +317,13 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 
 		// assemble all eligible values in group
 		// values in groupByValList is sorted by the highest score in each group
+		var outputCount int64
 		for _, groupVal := range groupByValList {
 			groupEntities := groupByValMap[groupVal]
+			// If strictGroupSize is true, skip groups that don't have exactly groupSize elements
+			if strictGroupSize && int64(len(groupEntities)) < groupSize {
+				continue
+			}
 			for _, groupEntity := range groupEntities {
 				subResData := subSearchResultData[groupEntity.subSearchIdx]
 				if len(ret.Results.FieldsData) > 0 {
@@ -339,13 +345,14 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 				}
 
 				gpFieldBuilder.Add(groupVal)
+				outputCount++
 			}
 		}
 
-		if realTopK != -1 && realTopK != j {
+		if realTopK != -1 && realTopK != outputCount {
 			log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
 		}
-		realTopK = j
+		realTopK = outputCount
 		ret.Results.Topks = append(ret.Results.Topks, realTopK)
 		ret.Results.GroupByFieldValue = gpFieldBuilder.Build()
 
@@ -575,7 +582,7 @@ func reduceResults(ctx context.Context, toReduceResults []*internalpb.SearchResu
 		zap.Int("number of valid search results", len(validSearchResults)))
 	var result *milvuspb.SearchResults
 	result, err = reduceSearchResult(ctx, validSearchResults, reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metricType).WithPkType(pkType).
-		WithOffset(offset).WithGroupByField(queryInfo.GetGroupByFieldId()).WithGroupSize(queryInfo.GetGroupSize()).WithAdvance(isAdvance))
+		WithOffset(offset).WithGroupByField(queryInfo.GetGroupByFieldId()).WithGroupSize(queryInfo.GetGroupSize()).WithStrictGroupSize(queryInfo.GetStrictGroupSize()).WithAdvance(isAdvance))
 	if err != nil {
 		log.Warn("failed to reduce search results", zap.Error(err))
 		return nil, err

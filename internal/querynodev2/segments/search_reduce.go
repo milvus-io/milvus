@@ -126,6 +126,16 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 
 type SearchGroupByReduce struct{}
 
+// groupByEntity stores information about a single entity in a group
+type groupByEntity struct {
+	sel          int
+	idx          int64
+	id           interface{}
+	score        float32
+	groupByVal   interface{}
+	elementIndex int64
+}
+
 func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *reduce.ResultInfo) (*schemapb.SearchResultData, error) {
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceSearchResultData")
 	defer sp.End()
@@ -192,13 +202,17 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 	if groupSize <= 0 {
 		groupSize = 1
 	}
+	strictGroupSize := info.GetStrictGroupSize()
 	groupBound := info.GetTopK() * groupSize
 
 	for i := int64(0); i < info.GetNq(); i++ {
 		offsets := make([]int64, len(searchResultData))
 
 		idSet := make(map[interface{}]struct{})
-		groupByValueMap := make(map[interface{}]int64)
+		// groupByValueMap stores entities for each group value, preserving order
+		groupByValueMap := make(map[interface{}][]*groupByEntity)
+		// groupOrder preserves the order in which groups were first seen
+		groupOrder := make([]interface{}, 0, info.GetTopK())
 
 		var j int64
 		for j = 0; j < groupBound; {
@@ -212,24 +226,28 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 			groupByVal := groupByValIterator[sel](int(idx))
 			score := searchResultData[sel].Scores[idx]
 			if _, ok := idSet[id]; !ok {
-				groupCount := groupByValueMap[groupByVal]
-				if groupCount == 0 && int64(len(groupByValueMap)) >= info.GetTopK() {
+				entities := groupByValueMap[groupByVal]
+				if len(entities) == 0 && int64(len(groupByValueMap)) >= info.GetTopK() {
 					// exceed the limit for group count, filter this entity
 					filteredCount++
-				} else if groupCount >= groupSize {
+				} else if int64(len(entities)) >= groupSize {
 					// exceed the limit for each group, filter this entity
 					filteredCount++
 				} else {
-					fieldsData := searchResultData[sel].FieldsData
-					fieldIdxs := idxComputers[sel].Compute(idx)
-					retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, idx, fieldIdxs...)
-					typeutil.AppendPKs(ret.Ids, id)
-					ret.Scores = append(ret.Scores, score)
-					if searchResultData[sel].ElementIndices != nil && ret.ElementIndices != nil {
-						ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[sel].ElementIndices.Data[idx])
+					entity := &groupByEntity{
+						sel:        sel,
+						idx:        idx,
+						id:         id,
+						score:      score,
+						groupByVal: groupByVal,
 					}
-					gpFieldBuilder.Add(groupByVal)
-					groupByValueMap[groupByVal] += 1
+					if hasElementIndices {
+						entity.elementIndex = searchResultData[sel].ElementIndices.Data[idx]
+					}
+					if len(entities) == 0 {
+						groupOrder = append(groupOrder, groupByVal)
+					}
+					groupByValueMap[groupByVal] = append(groupByValueMap[groupByVal], entity)
 					idSet[id] = struct{}{}
 					j++
 				}
@@ -239,7 +257,30 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 			}
 			offsets[sel]++
 		}
-		ret.Topks = append(ret.Topks, j)
+
+		// Output results, filtering incomplete groups if strictGroupSize is true
+		var outputCount int64
+		for _, groupVal := range groupOrder {
+			entities := groupByValueMap[groupVal]
+			// If strictGroupSize is true, skip groups that don't have exactly groupSize elements
+			if strictGroupSize && int64(len(entities)) < groupSize {
+				filteredCount += int64(len(entities))
+				continue
+			}
+			for _, entity := range entities {
+				fieldsData := searchResultData[entity.sel].FieldsData
+				fieldIdxs := idxComputers[entity.sel].Compute(entity.idx)
+				retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, entity.idx, fieldIdxs...)
+				typeutil.AppendPKs(ret.Ids, entity.id)
+				ret.Scores = append(ret.Scores, entity.score)
+				if hasElementIndices && ret.ElementIndices != nil {
+					ret.ElementIndices.Data = append(ret.ElementIndices.Data, entity.elementIndex)
+				}
+				gpFieldBuilder.Add(entity.groupByVal)
+				outputCount++
+			}
+		}
+		ret.Topks = append(ret.Topks, outputCount)
 
 		// limit search result to avoid oom
 		if retSize > maxOutputSize {
