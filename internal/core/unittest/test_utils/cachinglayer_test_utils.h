@@ -93,7 +93,7 @@ class TestChunkTranslator : public Translator<milvus::Chunk> {
     }
 
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::Chunk>>>
-    get_cells(const std::vector<cid_t>& cids) override {
+    get_cells(milvus::OpContext* ctx, const std::vector<cid_t>& cids) override {
         std::vector<std::pair<cid_t, std::unique_ptr<milvus::Chunk>>> res;
         res.reserve(cids.size());
         for (auto cid : cids) {
@@ -169,7 +169,7 @@ class TestGroupChunkTranslator : public Translator<milvus::GroupChunk> {
     }
 
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::GroupChunk>>>
-    get_cells(const std::vector<cid_t>& cids) override {
+    get_cells(milvus::OpContext* ctx, const std::vector<cid_t>& cids) override {
         std::vector<std::pair<cid_t, std::unique_ptr<milvus::GroupChunk>>> res;
         res.reserve(cids.size());
         for (auto cid : cids) {
@@ -234,7 +234,7 @@ class TestIndexTranslator : public Translator<milvus::index::IndexBase> {
     }
 
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
-    get_cells(const std::vector<cid_t>& cids) override {
+    get_cells(milvus::OpContext* ctx, const std::vector<cid_t>& cids) override {
         std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
             res;
         res.reserve(cids.size());

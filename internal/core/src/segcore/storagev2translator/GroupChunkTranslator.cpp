@@ -14,7 +14,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
+
 #include "common/type_c.h"
+#include "segcore/Utils.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "common/GroupChunk.h"
 #include "mmap/Types.h"
@@ -279,7 +281,11 @@ GroupChunkTranslator::get_global_row_group_idx(size_t file_idx,
 }
 
 std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>>
-GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
+GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
+                                const std::vector<cachinglayer::cid_t>& cids) {
+    // Check for cancellation before loading group chunks
+    CheckCancellation(ctx, segment_id_, "LoadGroupChunk");
+
     std::vector<std::pair<milvus::cachinglayer::cid_t,
                           std::unique_ptr<milvus::GroupChunk>>>
         cells;
