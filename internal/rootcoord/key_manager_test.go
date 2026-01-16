@@ -59,10 +59,6 @@ func TestKeyManager_GetDatabaseByEzID(t *testing.T) {
 					Key:   common.EncryptionEzIDKey,
 					Value: "123", // the same as the dbID
 				},
-				{
-					Key:   common.EncryptionEnabledKey,
-					Value: "true",
-				},
 			},
 		}
 
@@ -89,10 +85,6 @@ func TestKeyManager_GetDatabaseByEzID(t *testing.T) {
 				{
 					Key:   common.EncryptionEzIDKey,
 					Value: strconv.FormatInt(ezID, 10),
-				},
-				{
-					Key:   common.EncryptionEnabledKey,
-					Value: "true",
 				},
 			},
 		}
