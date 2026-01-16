@@ -165,7 +165,7 @@ func TestServiceParam(t *testing.T) {
 			assert.Equal(t, wpCfg.RetentionTTL.GetAsDurationByParse().Milliseconds()/1000, int64(24*60*60))
 		}
 	})
-	
+
 	t.Run("test woodpeckerQuorumConfig", func(t *testing.T) {
 		wpCfg := &SParams.WoodpeckerCfg
 
