@@ -77,6 +77,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(CollectionCategory+LoadStateAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.getCollectionLoadState))))
 	router.POST(CollectionCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionReq{AutoID: DisableAutoID} }, wrapperTraceLog(h.createCollection))))
 	router.POST(CollectionCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.dropCollection))))
+	router.POST(CollectionCategory+TruncateAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.truncateCollection))))
 	router.POST(CollectionCategory+RenameAction, timeoutMiddleware(wrapperPost(func() any { return &RenameCollectionReq{} }, wrapperTraceLog(h.renameCollection))))
 	router.POST(CollectionCategory+LoadAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.loadCollection))))
 	router.POST(CollectionCategory+RefreshLoadAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.refreshLoadCollection))))
@@ -616,6 +617,22 @@ func (h *HandlersV2) dropCollection(ctx context.Context, c *gin.Context, anyReq 
 	c.Set(ContextRequest, req)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DropCollection", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DropCollection(reqCtx, req.(*milvuspb.DropCollectionRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) truncateCollection(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	getter, _ := anyReq.(requestutil.CollectionNameGetter)
+	req := &milvuspb.TruncateCollectionRequest{
+		DbName:         dbName,
+		CollectionName: getter.GetCollectionName(),
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/TruncateCollection", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.TruncateCollection(reqCtx, req.(*milvuspb.TruncateCollectionRequest))
 	})
 	if err == nil {
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
@@ -1304,8 +1321,8 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 
 	if vectorField.GetIsFunctionOutput() {
 		for _, function := range collSchema.Functions {
-			if function.Type == schemapb.FunctionType_BM25 || function.Type == schemapb.FunctionType_TextEmbedding {
-				// TODO: currently only BM25 & text embedding function is supported, thus guarantees one input field to one output field
+			if function.Type == schemapb.FunctionType_BM25 || function.Type == schemapb.FunctionType_TextEmbedding || function.Type == schemapb.FunctionType_MinHash {
+				// TODO: currently only BM25, text & MinHash embedding function is supported, thus guarantees one input field to one output field
 				if function.OutputFieldNames[0] == vectorField.Name {
 					dataType = schemapb.DataType_VarChar
 				}

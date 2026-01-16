@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -195,20 +196,13 @@ func transformFieldBinlogs(
 	var totalRows int64
 
 	for _, srcFieldBinlog := range srcFieldBinlogs {
-		dstFieldBinlog := &datapb.FieldBinlog{
-			FieldID: srcFieldBinlog.GetFieldID(),
-			Binlogs: make([]*datapb.Binlog, 0, len(srcFieldBinlog.GetBinlogs())),
-		}
+		dstFieldBinlog := proto.Clone(srcFieldBinlog).(*datapb.FieldBinlog)
+		dstFieldBinlog.Binlogs = make([]*datapb.Binlog, 0, len(srcFieldBinlog.GetBinlogs()))
 
 		for _, srcBinlog := range srcFieldBinlog.GetBinlogs() {
 			if srcPath := srcBinlog.GetLogPath(); srcPath != "" {
-				dstBinlog := &datapb.Binlog{
-					EntriesNum:    srcBinlog.GetEntriesNum(),
-					TimestampFrom: srcBinlog.GetTimestampFrom(),
-					TimestampTo:   srcBinlog.GetTimestampTo(),
-					LogPath:       mappings[srcPath],
-					LogSize:       srcBinlog.GetLogSize(),
-				}
+				dstBinlog := proto.Clone(srcBinlog).(*datapb.Binlog)
+				dstBinlog.LogPath = mappings[srcPath]
 				dstFieldBinlog.Binlogs = append(dstFieldBinlog.Binlogs, dstBinlog)
 
 				if countRows {
@@ -524,14 +518,9 @@ func buildIndexInfoFromSource(
 			}
 		}
 
-		textIndexInfos[fieldID] = &datapb.TextIndexStats{
-			FieldID:    srcText.GetFieldID(),
-			Version:    srcText.GetVersion(),
-			BuildID:    srcText.GetBuildID(),
-			Files:      targetFiles,
-			LogSize:    srcText.GetLogSize(),
-			MemorySize: srcText.GetMemorySize(),
-		}
+		dstText := proto.Clone(srcText).(*datapb.TextIndexStats)
+		dstText.Files = targetFiles
+		textIndexInfos[fieldID] = dstText
 	}
 
 	// Process JSON Key indexes - transform file paths
@@ -545,14 +534,9 @@ func buildIndexInfoFromSource(
 			}
 		}
 
-		jsonKeyIndexInfos[fieldID] = &datapb.JsonKeyStats{
-			FieldID:                srcJson.GetFieldID(),
-			Version:                srcJson.GetVersion(),
-			BuildID:                srcJson.GetBuildID(),
-			Files:                  targetFiles,
-			JsonKeyStatsDataFormat: srcJson.GetJsonKeyStatsDataFormat(),
-			MemorySize:             srcJson.GetMemorySize(),
-		}
+		dstJson := proto.Clone(srcJson).(*datapb.JsonKeyStats)
+		dstJson.Files = targetFiles
+		jsonKeyIndexInfos[fieldID] = dstJson
 	}
 
 	return indexInfos, textIndexInfos, jsonKeyIndexInfos

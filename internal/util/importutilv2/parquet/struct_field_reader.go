@@ -329,17 +329,79 @@ func (r *StructFieldReader) readArrayOfVectorField(chunked *arrow.Chunked) (any,
 					result = append(result, vectorField)
 				}
 
-			case schemapb.DataType_BinaryVector:
-				return nil, nil, merr.WrapErrImportFailed("ArrayOfVector with BinaryVector element type is not implemented yet")
-
 			case schemapb.DataType_Float16Vector:
-				return nil, nil, merr.WrapErrImportFailed("ArrayOfVector with Float16Vector element type is not implemented yet")
+				var allVectors []byte
+				for structIdx := startIdx; structIdx < endIdx; structIdx++ {
+					vecStart, vecEnd := fieldArray.ValueOffsets(int(structIdx))
+					if uint8Arr, ok := fieldArray.ListValues().(*array.Uint8); ok {
+						allVectors = append(allVectors, uint8Arr.Uint8Values()[vecStart:vecEnd]...)
+					}
+				}
+				if len(allVectors) >= 0 {
+					vectorField := &schemapb.VectorField{
+						Dim: int64(r.dim),
+						Data: &schemapb.VectorField_Float16Vector{
+							Float16Vector: allVectors,
+						},
+					}
+					result = append(result, vectorField)
+				}
 
 			case schemapb.DataType_BFloat16Vector:
-				return nil, nil, merr.WrapErrImportFailed("ArrayOfVector with BFloat16Vector element type is not implemented yet")
+				var allVectors []byte
+				for structIdx := startIdx; structIdx < endIdx; structIdx++ {
+					vecStart, vecEnd := fieldArray.ValueOffsets(int(structIdx))
+					if uint8Arr, ok := fieldArray.ListValues().(*array.Uint8); ok {
+						allVectors = append(allVectors, uint8Arr.Uint8Values()[vecStart:vecEnd]...)
+					}
+				}
+				if len(allVectors) >= 0 {
+					vectorField := &schemapb.VectorField{
+						Dim: int64(r.dim),
+						Data: &schemapb.VectorField_Bfloat16Vector{
+							Bfloat16Vector: allVectors,
+						},
+					}
+					result = append(result, vectorField)
+				}
 
 			case schemapb.DataType_Int8Vector:
-				return nil, nil, merr.WrapErrImportFailed("ArrayOfVector with Int8Vector element type is not implemented yet")
+				var allVectors []byte
+				for structIdx := startIdx; structIdx < endIdx; structIdx++ {
+					vecStart, vecEnd := fieldArray.ValueOffsets(int(structIdx))
+					if int8Arr, ok := fieldArray.ListValues().(*array.Int8); ok {
+						for j := vecStart; j < vecEnd; j++ {
+							allVectors = append(allVectors, byte(int8Arr.Value(int(j))))
+						}
+					}
+				}
+				if len(allVectors) >= 0 {
+					vectorField := &schemapb.VectorField{
+						Dim: int64(r.dim),
+						Data: &schemapb.VectorField_Int8Vector{
+							Int8Vector: allVectors,
+						},
+					}
+					result = append(result, vectorField)
+				}
+
+			case schemapb.DataType_BinaryVector:
+				var allVectors []byte
+				for structIdx := startIdx; structIdx < endIdx; structIdx++ {
+					vecStart, vecEnd := fieldArray.ValueOffsets(int(structIdx))
+					if uint8Arr, ok := fieldArray.ListValues().(*array.Uint8); ok {
+						allVectors = append(allVectors, uint8Arr.Uint8Values()[vecStart:vecEnd]...)
+					}
+				}
+				if len(allVectors) >= 0 {
+					vectorField := &schemapb.VectorField{
+						Dim: int64(r.dim),
+						Data: &schemapb.VectorField_BinaryVector{
+							BinaryVector: allVectors,
+						},
+					}
+					result = append(result, vectorField)
+				}
 
 			case schemapb.DataType_SparseFloatVector:
 				return nil, nil, merr.WrapErrImportFailed("ArrayOfVector with SparseFloatVector element type is not implemented yet")

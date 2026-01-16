@@ -113,6 +113,32 @@ ArrayOffsetsSealed::RowBitsetToElementOffsets(
     return element_offsets;
 }
 
+FixedVector<int32_t>
+ArrayOffsetsSealed::RowOffsetsToElementOffsets(
+    const FixedVector<int32_t>& row_offsets) const {
+    FixedVector<int32_t> element_offsets;
+    if (row_offsets.empty()) {
+        return element_offsets;
+    }
+
+    int32_t row_count = GetRowCount();
+    int64_t avg_elem_per_row =
+        (row_count > 0)
+            ? static_cast<int64_t>(element_row_ids_.size()) / row_count
+            : 1;
+    element_offsets.reserve(row_offsets.size() * avg_elem_per_row);
+    for (auto row_id : row_offsets) {
+        assert(row_id >= 0 && row_id < row_count);
+        int32_t first_elem = row_to_element_start_[row_id];
+        int32_t last_elem = row_to_element_start_[row_id + 1];
+        for (int32_t elem_id = first_elem; elem_id < last_elem; ++elem_id) {
+            element_offsets.push_back(elem_id);
+        }
+    }
+
+    return element_offsets;
+}
+
 std::shared_ptr<ArrayOffsetsSealed>
 ArrayOffsetsSealed::BuildFromSegment(const void* segment,
                                      const FieldMeta& field_meta) {
@@ -302,6 +328,35 @@ ArrayOffsetsGrowing::RowBitsetToElementOffsets(
             for (int32_t elem_id = first_elem; elem_id < last_elem; ++elem_id) {
                 element_offsets.push_back(elem_id);
             }
+        }
+    }
+
+    return element_offsets;
+}
+
+FixedVector<int32_t>
+ArrayOffsetsGrowing::RowOffsetsToElementOffsets(
+    const FixedVector<int32_t>& row_offsets) const {
+    std::shared_lock lock(mutex_);
+
+    FixedVector<int32_t> element_offsets;
+    if (row_offsets.empty()) {
+        return element_offsets;
+    }
+
+    int64_t avg_elem_per_row =
+        (committed_row_count_ > 0)
+            ? static_cast<int64_t>(element_row_ids_.size()) /
+                  committed_row_count_
+            : 1;
+    element_offsets.reserve(row_offsets.size() * avg_elem_per_row);
+
+    for (auto row_id : row_offsets) {
+        assert(row_id >= 0 && row_id < committed_row_count_);
+        int32_t first_elem = row_to_element_start_[row_id];
+        int32_t last_elem = row_to_element_start_[row_id + 1];
+        for (int32_t elem_id = first_elem; elem_id < last_elem; ++elem_id) {
+            element_offsets.push_back(elem_id);
         }
     }
 

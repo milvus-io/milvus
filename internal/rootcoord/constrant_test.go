@@ -37,6 +37,7 @@ func TestCheckGeneralCapacity(t *testing.T) {
 
 	catalog := mocks.NewRootCoordCatalog(t)
 	catalog.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0), nil)
 	catalog.EXPECT().ListCollections(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListAliases(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().CreateDatabase(mock.Anything, mock.Anything, mock.Anything).Return(nil)

@@ -516,6 +516,16 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 	_, ok := wb.metaCache.GetSegmentByID(segmentID)
 	// new segment
 	if !ok {
+		storageVersion := storage.StorageV2
+		manifestPath := ""
+		if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
+			storageVersion = storage.StorageV3
+			// set manifest path when creating segment
+			k := metautil.JoinIDPath(wb.collectionID, partitionID, segmentID)
+			basePath := path.Join(paramtable.Get().ServiceParam.MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath, k)
+			// -1 for first write
+			manifestPath = packed.MarshalManifestPath(basePath, -1)
+		}
 		segmentInfo := &datapb.SegmentInfo{
 			ID:             segmentID,
 			PartitionID:    partitionID,
@@ -523,22 +533,13 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 			InsertChannel:  wb.channelName,
 			StartPosition:  startPos,
 			State:          commonpb.SegmentState_Growing,
-			StorageVersion: storage.StorageV2,
-		}
-		// set manifest path when creating segment
-		if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
-			k := metautil.JoinIDPath(wb.collectionID, partitionID, segmentID)
-			basePath := path.Join(paramtable.Get().ServiceParam.MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath, k)
-			if paramtable.Get().CommonCfg.StorageType.GetValue() != "local" {
-				basePath = path.Join(paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue(), basePath)
-			}
-			// -1 for first write
-			segmentInfo.ManifestPath = packed.MarshalManifestPath(basePath, -1)
+			StorageVersion: storageVersion,
+			ManifestPath:   manifestPath,
 		}
 		wb.metaCache.AddSegment(segmentInfo, func(_ *datapb.SegmentInfo) pkoracle.PkStat {
 			return pkoracle.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
 		}, metacache.NewBM25StatsFactory, metacache.SetStartPosRecorded(false))
-		log.Info("add growing segment", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName), zap.Int64("storage version", storage.StorageV2))
+		log.Info("add growing segment", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName), zap.Int64("storage version", storageVersion))
 	}
 }
 

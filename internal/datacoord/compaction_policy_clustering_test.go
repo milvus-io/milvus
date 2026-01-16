@@ -218,6 +218,25 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionAbnormal() {
 	s.Equal(int64(0), triggerID2)
 }
 
+func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionSkipExternal() {
+	collID := int64(100)
+	s.handler.EXPECT().GetCollection(mock.Anything, collID).Return(&collectionInfo{
+		ID: collID,
+		Schema: func() *schemapb.CollectionSchema {
+			schema := newTestScalarClusteringKeySchema()
+			schema.ExternalSource = "s3://external"
+			// External collections are identified by having ExternalField set on fields.
+			schema.Fields[0].ExternalField = "field1_col"
+			return schema
+		}(),
+	}, nil)
+
+	views, triggerID, err := s.clusteringCompactionPolicy.triggerOneCollection(context.Background(), collID, false)
+	s.NoError(err)
+	s.Nil(views)
+	s.EqualValues(0, triggerID)
+}
+
 func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNoClusteringKeySchema() {
 	ctx := context.Background()
 	coll := &collectionInfo{

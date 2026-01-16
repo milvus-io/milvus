@@ -568,6 +568,16 @@ class TestMilvusClientV2Base(Base):
             time.sleep(2)
         return False
 
+    def wait_for_compaction_ready(self, client, compact_id, timeout=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        start_time = time.time()
+        while start_time + timeout > time.time():
+            res = self.get_compaction_state(client, compact_id, **kwargs)[0]
+            if res == "Completed":
+                return True
+            time.sleep(2)
+        return False
+
     @trace()
     def create_alias(self, client, collection_name, alias, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout

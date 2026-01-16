@@ -118,17 +118,17 @@ func createFieldBinlogList(insertLogs map[int64][]string) []*datapb.FieldBinlog 
 
 func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs map[int64][]string) (map[int64][]string, *schemapb.CollectionSchema, error) {
 	// check system fields (ts and rowID)
-	if storageVersion == storage.StorageV2 {
-		if _, ok := insertLogs[storagecommon.DefaultShortColumnGroupID]; !ok {
-			return nil, nil, merr.WrapErrImportFailed("no binlog for system fields")
+	switch storageVersion {
+	case storage.StorageV1:
+		if _, ok := insertLogs[common.TimeStampField]; !ok {
+			return nil, nil, merr.WrapErrImportFailed("no binlog for Timestamp field")
 		}
-	} else {
-		// storage v1
 		if _, ok := insertLogs[common.RowIDField]; !ok {
 			return nil, nil, merr.WrapErrImportFailed("no binlog for RowID field")
 		}
-		if _, ok := insertLogs[common.TimeStampField]; !ok {
-			return nil, nil, merr.WrapErrImportFailed("no binlog for Timestamp field")
+	case storage.StorageV2, storage.StorageV3:
+		if _, ok := insertLogs[storagecommon.DefaultShortColumnGroupID]; !ok {
+			return nil, nil, merr.WrapErrImportFailed("no binlog for system fields")
 		}
 	}
 
@@ -141,7 +141,7 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 	}
 
 	allFields := typeutil.GetAllFieldSchemas(schema)
-	if storageVersion == storage.StorageV2 {
+	if storageVersion == storage.StorageV2 || storageVersion == storage.StorageV3 {
 		for _, field := range allFields {
 			if typeutil.IsVectorType(field.GetDataType()) {
 				if _, ok := insertLogs[field.GetFieldID()]; !ok {

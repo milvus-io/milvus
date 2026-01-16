@@ -156,7 +156,9 @@ type shardDelegator struct {
 
 	// outputFieldId -> functionRunner map for search function field
 	functionRunners map[UniqueID]function.FunctionRunner
-	isBM25Field     map[UniqueID]bool
+
+	// outputFieldId -> function type map
+	functionFieldType map[UniqueID]schemapb.FunctionType
 
 	// analyzerFieldID -> analyzerRunner map for run analyzer.
 	analyzerRunners map[UniqueID]function.Analyzer
@@ -323,9 +325,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		}()
 	}
 
-	searchAgainstBM25Field := sd.isBM25Field[req.GetReq().GetFieldId()]
-
-	if searchAgainstBM25Field {
+	if sd.functionFieldType[req.GetReq().GetFieldId()] == schemapb.FunctionType_BM25 {
 		if req.GetReq().GetMetricType() != metric.BM25 && req.GetReq().GetMetricType() != metric.EMPTY {
 			return nil, merr.WrapErrParameterInvalid("BM25", req.GetReq().GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
 		}
@@ -338,6 +338,14 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		if avgdl <= 0 {
 			log.Warn("search bm25 from empty data, skip search", zap.String("channel", sd.vchannelName), zap.Float64("avgdl", avgdl))
 			return []*internalpb.SearchResults{}, nil
+		}
+	} else if sd.functionFieldType[req.GetReq().GetFieldId()] == schemapb.FunctionType_MinHash {
+		if req.GetReq().GetMetricType() != metric.MHJACCARD && req.GetReq().GetMetricType() != metric.EMPTY {
+			return nil, merr.WrapErrParameterInvalid("MHJACCARD", req.GetReq().GetMetricType(), "must use MHJACCARD metric type when searching against MinHash Function output field")
+		}
+		err := sd.parseMinHash(req.GetReq())
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -1146,6 +1154,9 @@ func (sd *shardDelegator) Close() {
 	sd.tsCond.Broadcast()
 	sd.lifetime.Wait()
 
+	// Remove all candidates and refund bloom filter resources
+	sd.pkOracle.RemoveAndRefundAll()
+
 	// clean idf oracle
 	if sd.idfOracle != nil {
 		sd.idfOracle.Close()
@@ -1259,12 +1270,13 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		excludedSegments:           excludedSegments,
 		functionRunners:            make(map[int64]function.FunctionRunner),
 		analyzerRunners:            make(map[UniqueID]function.Analyzer),
-		isBM25Field:                make(map[int64]bool),
+		functionFieldType:          make(map[int64]schemapb.FunctionType),
 		l0ForwardPolicy:            policy,
 		catchingUpStreamingData:    atomic.NewBool(true),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 
+	hasBM25Field := false
 	for _, tf := range collection.Schema().GetFunctions() {
 		if tf.GetType() == schemapb.FunctionType_BM25 {
 			functionRunner, err := function.NewFunctionRunner(collection.Schema(), tf)
@@ -1275,8 +1287,16 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 			// bm25 input field could use same runner between function and analyzer.
 			sd.analyzerRunners[tf.InputFieldIds[0]] = functionRunner.(function.Analyzer)
 			if tf.GetType() == schemapb.FunctionType_BM25 {
-				sd.isBM25Field[tf.OutputFieldIds[0]] = true
+				sd.functionFieldType[tf.OutputFieldIds[0]] = schemapb.FunctionType_BM25
 			}
+			hasBM25Field = true
+		} else if tf.GetType() == schemapb.FunctionType_MinHash {
+			functionRunner, err := function.NewFunctionRunner(collection.Schema(), tf)
+			if err != nil {
+				return nil, err
+			}
+			sd.functionRunners[tf.OutputFieldIds[0]] = functionRunner
+			sd.functionFieldType[tf.OutputFieldIds[0]] = schemapb.FunctionType_MinHash
 		}
 	}
 
@@ -1291,7 +1311,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		}
 	}
 
-	if len(sd.isBM25Field) > 0 {
+	if hasBM25Field {
 		sd.idfOracle = NewIDFOracle(sd.vchannelName, collection.Schema().GetFunctions())
 		sd.distribution.SetIDFOracle(sd.idfOracle)
 		sd.idfOracle.Start()
@@ -1306,7 +1326,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
 	analyzer, ok := sd.analyzerRunners[req.GetFieldId()]
 	if !ok {
-		return nil, fmt.Errorf("analyzer runner for field %d not exist, now only support run analyzer by field if field was bm25 input field", req.GetFieldId())
+		return nil, fmt.Errorf("analyzer runner for field %d not exist, now only support run analyzer by field if field was bm25/minhash input field", req.GetFieldId())
 	}
 
 	var result [][]*milvuspb.AnalyzerToken

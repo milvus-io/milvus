@@ -368,12 +368,16 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOp() {
 
 	// Mock SemanticHighlight methods
 	mockProcess := mockey.Mock((*highlight.SemanticHighlight).Process).To(
-		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, error) {
+		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, [][]float32, error) {
 			return [][]string{
-				{"<em>highlighted</em> text 1"},
-				{"<em>highlighted</em> text 2"},
-				{"<em>highlighted</em> text 3"},
-			}, nil
+					{"<em>highlighted</em> text 1"},
+					{"<em>highlighted</em> text 2"},
+					{"<em>highlighted</em> text 3"},
+				}, [][]float32{
+					{0.9},
+					{0.8},
+					{0.7},
+				}, nil
 		}).Build()
 	defer mockProcess.UnPatch()
 
@@ -484,12 +488,15 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpMultipleFields() {
 	// Use a counter to return different results for different calls
 	callCount := 0
 	mockProcess := mockey.Mock((*highlight.SemanticHighlight).Process).To(
-		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, error) {
+		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, [][]float32, error) {
 			callCount++
 			return [][]string{
-				{fmt.Sprintf("<em>highlighted</em> text field%d-1", callCount)},
-				{fmt.Sprintf("<em>highlighted</em> text field%d-2", callCount)},
-			}, nil
+					{fmt.Sprintf("<em>highlighted</em> text field%d-1", callCount)},
+					{fmt.Sprintf("<em>highlighted</em> text field%d-2", callCount)},
+				}, [][]float32{
+					{0.9},
+					{0.8},
+				}, nil
 		}).Build()
 	defer mockProcess.UnPatch()
 
@@ -571,8 +578,8 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpEmptyResults() {
 
 	// Mock Process to return empty results
 	mockProcess := mockey.Mock((*highlight.SemanticHighlight).Process).To(
-		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, error) {
-			return [][]string{}, nil
+		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, [][]float32, error) {
+			return [][]string{}, [][]float32{}, nil
 		}).Build()
 	defer mockProcess.UnPatch()
 

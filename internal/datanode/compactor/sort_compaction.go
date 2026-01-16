@@ -437,7 +437,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 	})
 
 	getInsertFiles := func(fieldID int64) ([]string, error) {
-		if t.storageVersion == storage.StorageV2 {
+		if t.storageVersion == storage.StorageV2 || t.storageVersion == storage.StorageV3 {
 			return []string{}, nil
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
@@ -512,7 +512,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 				buildIndexParams.AnalyzerExtraInfo = analyzerExtraInfo
 			}
 
-			if t.storageVersion == storage.StorageV2 {
+			if t.storageVersion == storage.StorageV2 || t.storageVersion == storage.StorageV3 {
 				buildIndexParams.SegmentInsertFiles = util.GetSegmentInsertFiles(
 					insertBinlogs,
 					t.compactionParams.StorageConfig,

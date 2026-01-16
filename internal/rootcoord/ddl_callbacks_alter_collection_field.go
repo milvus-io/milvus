@@ -5,6 +5,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -32,15 +33,22 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 		return err
 	}
 	oldFieldPropertiesMap := common.CloneKeyValuePairs(oldFieldProperties).ToMap()
+	var desc *commonpb.KeyValuePair = nil
 	for _, prop := range req.GetProperties() {
+		// field.description is a special property to change field's description, skip it here, apply it later.
+		if prop.GetKey() == common.FieldDescriptionKey {
+			desc = prop
+			continue
+		}
 		oldFieldPropertiesMap[prop.GetKey()] = prop.GetValue()
 	}
+
 	for _, deleteKey := range req.GetDeleteKeys() {
 		delete(oldFieldPropertiesMap, deleteKey)
 	}
 
 	newFieldProperties := common.NewKeyValuePairs(oldFieldPropertiesMap)
-	if newFieldProperties.Equal(oldFieldProperties) {
+	if newFieldProperties.Equal(oldFieldProperties) && desc == nil {
 		// if there's no change, return nil directly to promise idempotent.
 		return errIgnoredAlterCollection
 	}
@@ -60,6 +68,9 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	for _, field := range schema.Fields {
 		if field.Name == req.GetFieldName() {
 			field.TypeParams = newFieldProperties
+			if desc != nil {
+				field.Description = desc.GetValue()
+			}
 			break
 		}
 	}

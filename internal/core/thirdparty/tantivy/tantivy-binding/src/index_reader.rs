@@ -590,6 +590,87 @@ impl IndexReaderWrapper {
         let query = BooleanQuery::intersection(term_queries);
         self.search(&query, bitset)
     }
+
+    /// Tokenize literals into ngram terms and return them sorted by doc_freq (ascending).
+    ///
+    /// For Match type queries like `%xxx%yyy%`, literals = ["xxx", "yyy"].
+    /// For InnerMatch/PrefixMatch/PostfixMatch type queries like `%xxx%`, literals = ["xxx"].
+    ///
+    /// Returns: Vec of term strings sorted by doc_freq ascending (rarest first).
+    pub fn ngram_tokenize(
+        &self,
+        literals: &[&str],
+        min_gram: usize,
+        max_gram: usize,
+    ) -> Result<Vec<String>> {
+        // Collect (term_text, Term) pairs to track text alongside terms
+        let mut all_term_pairs: Vec<(String, Term)> = vec![];
+        let mut tokenizer = NgramTokenizer::new(max_gram, max_gram, false).unwrap();
+
+        for literal in literals {
+            assert!(
+                literal.chars().count() >= min_gram,
+                "literal '{}' must be >= min_gram {}",
+                literal,
+                min_gram
+            );
+
+            if literal.chars().count() <= max_gram {
+                all_term_pairs.push((
+                    literal.to_string(),
+                    Term::from_field_text(self.field, literal),
+                ));
+            } else {
+                let mut token_stream = tokenizer.token_stream(literal);
+                token_stream.process(&mut |token| {
+                    all_term_pairs.push((
+                        token.text.clone(),
+                        Term::from_field_text(self.field, &token.text),
+                    ));
+                });
+            }
+        }
+
+        assert!(
+            !all_term_pairs.is_empty(),
+            "ngram_tokenize should not produce empty terms for valid literals"
+        );
+
+        // Get doc_freq for each term and sort
+        let searcher = self.reader.searcher();
+        let mut term_with_freq: Vec<(String, u64)> = Vec::with_capacity(all_term_pairs.len());
+
+        for (text, term) in all_term_pairs.iter() {
+            let mut total_doc_freq: u64 = 0;
+            for segment_reader in searcher.segment_readers() {
+                let inv_index = segment_reader.inverted_index(term.field())?;
+                total_doc_freq += inv_index.doc_freq(term)? as u64;
+            }
+            term_with_freq.push((text.clone(), total_doc_freq));
+        }
+
+        // Sort by doc_freq ascending (rarest first)
+        term_with_freq.sort_by_key(|(_, freq)| *freq);
+
+        // Remove duplicates
+        let mut seen = std::collections::HashSet::new();
+        Ok(term_with_freq
+            .into_iter()
+            .filter_map(|(text, _)| {
+                if seen.insert(text.clone()) {
+                    Some(text)
+                } else {
+                    None
+                }
+            })
+            .collect())
+    }
+
+    /// Get the posting list for a single ngram term.
+    /// Sets bits in the bitset for all documents containing the term.
+    pub fn ngram_term_posting_list(&self, term_str: &str, bitset: *mut c_void) -> Result<()> {
+        self.term_query_keyword(term_str, bitset)
+    }
 }
 
 #[cfg(test)]

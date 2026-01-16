@@ -4928,7 +4928,8 @@ class TestQueryCount(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False, enable_dynamic_field=False)
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False,
+                               enable_dynamic_field=False)
         self.release_collection(client, collection_name)
         self.drop_index(client, collection_name, default_vector_field_name)
         # 2. create index and load collection
@@ -4941,10 +4942,13 @@ class TestQueryCount(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
         self.insert(client, collection_name, rows)
         # 4. query with invalid count output field
+        if invalid_output_field == "count":
+            err_msg = "field count not exist"
+        else:
+            err_msg = "for aggregation:count does not exist"
         self.query(client, collection_name, filter=default_search_exp, output_fields=[invalid_output_field],
                    check_task=CheckTasks.err_res,
-                   check_items={"err_code": 1,
-                                "err_msg": f"field {invalid_output_field} not exist"})
+                   check_items={"err_code": 1, "err_msg": err_msg})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)

@@ -21,7 +21,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	sio "io"
-	"path"
 	"sort"
 
 	"github.com/samber/lo"
@@ -40,8 +39,12 @@ import (
 )
 
 const (
+	// StorageV1 is milvus 2.0 legacy binlog format
 	StorageV1 int64 = 0
+	// StorageV2 is milvus-storage packed writer binlog format(parquet)
 	StorageV2 int64 = 2
+	// StorageV3 is loon manifest format
+	StorageV3 int64 = 3
 )
 
 type (
@@ -85,7 +88,7 @@ func (o *rwOptions) validate() error {
 		if o.op == OpRead && o.downloader == nil {
 			return merr.WrapErrServiceInternal("downloader is nil for v1 reader")
 		}
-	case StorageV2:
+	case StorageV2, StorageV3:
 		if o.storageConfig == nil {
 			return merr.WrapErrServiceInternal("storage config is nil")
 		}
@@ -288,7 +291,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 			return nil, err
 		}
 		rr = newIterativeCompositeBinlogRecordReader(schema, rwOptions.neededFields, blobsReader, binlogReaderOpts...)
-	case StorageV2:
+	case StorageV2, StorageV3:
 		if len(binlogs) <= 0 {
 			return nil, sio.EOF
 		}
@@ -299,14 +302,10 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		binlogLists := lo.Map(binlogs, func(fieldBinlog *datapb.FieldBinlog, _ int) []*datapb.Binlog {
 			return fieldBinlog.GetBinlogs()
 		})
-		bucketName := rwOptions.storageConfig.BucketName
 		paths := make([][]string, len(binlogLists[0]))
 		for _, binlogs := range binlogLists {
 			for j, binlog := range binlogs {
 				logPath := binlog.GetLogPath()
-				if rwOptions.storageConfig.StorageType != "local" {
-					logPath = path.Join(bucketName, logPath)
-				}
 				paths[j] = append(paths[j], logPath)
 			}
 		}
@@ -403,21 +402,19 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			blobsWriter, allocator, chunkSize, rootPath, maxRowNum, opts...,
 		)
 	case StorageV2:
-		if rwOptions.useLoonFFI {
-			return newPackedManifestRecordWriter(collectionID, partitionID, segmentID, schema,
-				blobsWriter, allocator, maxRowNum,
-				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
-				rwOptions.storageConfig,
-				pluginContext,
-			)
-		} else {
-			return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
-				blobsWriter, allocator, maxRowNum,
-				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
-				rwOptions.storageConfig,
-				pluginContext,
-			)
-		}
+		return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
+			blobsWriter, allocator, maxRowNum,
+			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
+			rwOptions.storageConfig,
+			pluginContext,
+		)
+	case StorageV3:
+		return newPackedManifestRecordWriter(collectionID, partitionID, segmentID, schema,
+			blobsWriter, allocator, maxRowNum,
+			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
+			rwOptions.storageConfig,
+			pluginContext,
+		)
 	}
 	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
 }

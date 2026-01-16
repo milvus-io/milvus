@@ -144,12 +144,12 @@ func TestForceMergeSegmentView_Complete(t *testing.T) {
 	}
 
 	view := &ForceMergeSegmentView{
-		label:         label,
-		segments:      segments,
-		triggerID:     99999,
-		collectionTTL: 24 * time.Hour,
-		targetSize:    2048 * 1024 * 1024,
-		topology:      topology,
+		label:             label,
+		segments:          segments,
+		triggerID:         99999,
+		collectionTTL:     24 * time.Hour,
+		targetSegmentSize: 2048 * 1024 * 1024,
+		topology:          topology,
 	}
 
 	// Test String output
@@ -627,4 +627,398 @@ func BenchmarkGroupByPartitionChannel(b *testing.B) {
 			}
 		})
 	}
+}
+
+func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
+	t.Run("single QueryNode - no adjustment", func(t *testing.T) {
+		topology := &CollectionTopology{
+			QueryNodeMemory: map[int64]uint64{1: 8 * 1024 * 1024 * 1024},
+			DataNodeMemory:  map[int64]uint64{1: 8 * 1024 * 1024 * 1024},
+		}
+		view := &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments: []*SegmentView{
+				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
+				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
+			},
+			triggerID:     1,
+			configMaxSize: 100 * 1024 * 1024,
+			topology:      topology,
+		}
+		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+		assert.Equal(t, int64(1), targetCount)
+		assert.Greater(t, maxSafeSize, 0.0)
+	})
+
+	t.Run("two QueryNodes - adjust to 2 segments", func(t *testing.T) {
+		topology := &CollectionTopology{
+			QueryNodeMemory: map[int64]uint64{
+				1: 8 * 1024 * 1024 * 1024,
+				2: 8 * 1024 * 1024 * 1024,
+			},
+			DataNodeMemory: map[int64]uint64{1: 8 * 1024 * 1024 * 1024},
+		}
+		view := &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments: []*SegmentView{
+				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
+				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
+			},
+			triggerID:     1,
+			configMaxSize: 100 * 1024 * 1024,
+			topology:      topology,
+		}
+		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+		assert.Equal(t, int64(2), targetCount, "Should produce 2 segments for 2 QueryNodes")
+		assert.InDelta(t, 1*1024*1024*1024, maxSafeSize, 1024*1024)
+	})
+
+	t.Run("three QueryNodes - adjust to 3 segments", func(t *testing.T) {
+		topology := &CollectionTopology{
+			QueryNodeMemory: map[int64]uint64{
+				1: 8 * 1024 * 1024 * 1024,
+				2: 8 * 1024 * 1024 * 1024,
+				3: 8 * 1024 * 1024 * 1024,
+			},
+			DataNodeMemory: map[int64]uint64{1: 8 * 1024 * 1024 * 1024},
+		}
+		view := &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments: []*SegmentView{
+				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
+				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
+				{ID: 3, Size: 1 * 1024 * 1024 * 1024},
+			},
+			triggerID:     1,
+			configMaxSize: 100 * 1024 * 1024,
+			topology:      topology,
+		}
+		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+		assert.Equal(t, int64(3), targetCount, "Should produce 3 segments for 3 QueryNodes")
+		assert.InDelta(t, 1*1024*1024*1024, maxSafeSize, 1024*1024)
+	})
+
+	t.Run("two QueryNodes but segments too small - no adjustment", func(t *testing.T) {
+		topology := &CollectionTopology{
+			QueryNodeMemory: map[int64]uint64{
+				1: 8 * 1024 * 1024 * 1024,
+				2: 8 * 1024 * 1024 * 1024,
+			},
+			DataNodeMemory: map[int64]uint64{1: 8 * 1024 * 1024 * 1024},
+		}
+		view := &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments: []*SegmentView{
+				{ID: 1, Size: 50 * 1024 * 1024},
+				{ID: 2, Size: 50 * 1024 * 1024},
+			},
+			triggerID:     1,
+			configMaxSize: 100 * 1024 * 1024,
+			topology:      topology,
+		}
+		_, targetCount := view.calculateTargetSizeCount()
+		assert.Equal(t, int64(1), targetCount, "Should not split when resulting segments would be below configMaxSize")
+	})
+
+	t.Run("already exceeds QueryNode count - no adjustment", func(t *testing.T) {
+		topology := &CollectionTopology{
+			QueryNodeMemory: map[int64]uint64{
+				1: 8 * 1024 * 1024 * 1024,
+				2: 8 * 1024 * 1024 * 1024,
+			},
+			DataNodeMemory: map[int64]uint64{1: 8 * 1024 * 1024 * 1024},
+		}
+		view := &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments: []*SegmentView{
+				{ID: 1, Size: 500 * 1024 * 1024},
+				{ID: 2, Size: 500 * 1024 * 1024},
+				{ID: 3, Size: 500 * 1024 * 1024},
+				{ID: 4, Size: 500 * 1024 * 1024},
+			},
+			triggerID:     1,
+			configMaxSize: 100 * 1024 * 1024,
+			topology:      topology,
+		}
+		_, targetCount := view.calculateTargetSizeCount()
+		assert.GreaterOrEqual(t, targetCount, int64(2), "Should not adjust when already >= QueryNode count")
+	})
+
+	t.Run("4 QueryNodes with 2 replicas - adjust to 2 segments", func(t *testing.T) {
+		topology := &CollectionTopology{
+			NumReplicas: 2,
+			QueryNodeMemory: map[int64]uint64{
+				1: 8 * 1024 * 1024 * 1024,
+				2: 8 * 1024 * 1024 * 1024,
+				3: 8 * 1024 * 1024 * 1024,
+				4: 8 * 1024 * 1024 * 1024,
+			},
+			DataNodeMemory: map[int64]uint64{1: 8 * 1024 * 1024 * 1024},
+		}
+		view := &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments: []*SegmentView{
+				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
+				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
+			},
+			triggerID:     1,
+			configMaxSize: 100 * 1024 * 1024,
+			topology:      topology,
+		}
+		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+		assert.Equal(t, int64(2), targetCount, "4 QNs / 2 replicas = 2 segments for parallelism")
+		assert.InDelta(t, 1*1024*1024*1024, maxSafeSize, 1024*1024)
+	})
+
+	t.Run("6 QueryNodes with 3 replicas - adjust to 2 segments", func(t *testing.T) {
+		topology := &CollectionTopology{
+			NumReplicas: 3,
+			QueryNodeMemory: map[int64]uint64{
+				1: 8 * 1024 * 1024 * 1024,
+				2: 8 * 1024 * 1024 * 1024,
+				3: 8 * 1024 * 1024 * 1024,
+				4: 8 * 1024 * 1024 * 1024,
+				5: 8 * 1024 * 1024 * 1024,
+				6: 8 * 1024 * 1024 * 1024,
+			},
+			DataNodeMemory: map[int64]uint64{1: 8 * 1024 * 1024 * 1024},
+		}
+		view := &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments: []*SegmentView{
+				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
+				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
+			},
+			triggerID:     1,
+			configMaxSize: 100 * 1024 * 1024,
+			topology:      topology,
+		}
+		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+		assert.Equal(t, int64(2), targetCount, "6 QNs / 3 replicas = 2 segments for parallelism")
+		assert.InDelta(t, 1*1024*1024*1024, maxSafeSize, 1024*1024)
+	})
+
+	t.Run("3 QueryNodes with 2 replicas - perShardParallelism rounds to 1", func(t *testing.T) {
+		topology := &CollectionTopology{
+			NumReplicas: 2,
+			QueryNodeMemory: map[int64]uint64{
+				1: 8 * 1024 * 1024 * 1024,
+				2: 8 * 1024 * 1024 * 1024,
+				3: 8 * 1024 * 1024 * 1024,
+			},
+			DataNodeMemory: map[int64]uint64{1: 8 * 1024 * 1024 * 1024},
+		}
+		view := &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments: []*SegmentView{
+				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
+				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
+			},
+			triggerID:     1,
+			configMaxSize: 100 * 1024 * 1024,
+			topology:      topology,
+		}
+		_, targetCount := view.calculateTargetSizeCount()
+		assert.Equal(t, int64(1), targetCount, "3 QNs / 2 replicas = 1 (rounded down), no adjustment")
+	})
+
+	t.Run("8 QueryNodes, 2 replicas, 2 shards - 2 segments per shard", func(t *testing.T) {
+		topology := &CollectionTopology{
+			NumReplicas: 2,
+			NumShards:   2,
+			QueryNodeMemory: map[int64]uint64{
+				1: 8 * 1024 * 1024 * 1024,
+				2: 8 * 1024 * 1024 * 1024,
+				3: 8 * 1024 * 1024 * 1024,
+				4: 8 * 1024 * 1024 * 1024,
+				5: 8 * 1024 * 1024 * 1024,
+				6: 8 * 1024 * 1024 * 1024,
+				7: 8 * 1024 * 1024 * 1024,
+				8: 8 * 1024 * 1024 * 1024,
+			},
+			DataNodeMemory: map[int64]uint64{1: 8 * 1024 * 1024 * 1024},
+		}
+		view := &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments: []*SegmentView{
+				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
+				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
+			},
+			triggerID:     1,
+			configMaxSize: 100 * 1024 * 1024,
+			topology:      topology,
+		}
+		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+		assert.Equal(t, int64(2), targetCount, "8 QNs / (2 replicas * 2 shards) = 2 segments per shard")
+		assert.InDelta(t, 1*1024*1024*1024, maxSafeSize, 1024*1024)
+	})
+
+	t.Run("4 QueryNodes, 1 replica, 4 shards - 1 segment per shard", func(t *testing.T) {
+		topology := &CollectionTopology{
+			NumReplicas: 1,
+			NumShards:   4,
+			QueryNodeMemory: map[int64]uint64{
+				1: 8 * 1024 * 1024 * 1024,
+				2: 8 * 1024 * 1024 * 1024,
+				3: 8 * 1024 * 1024 * 1024,
+				4: 8 * 1024 * 1024 * 1024,
+			},
+			DataNodeMemory: map[int64]uint64{1: 8 * 1024 * 1024 * 1024},
+		}
+		view := &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments: []*SegmentView{
+				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
+				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
+			},
+			triggerID:     1,
+			configMaxSize: 100 * 1024 * 1024,
+			topology:      topology,
+		}
+		_, targetCount := view.calculateTargetSizeCount()
+		assert.Equal(t, int64(1), targetCount, "4 QNs / (1 replica * 4 shards) = 1 segment per shard (each shard has 1 QN)")
+	})
+
+	t.Run("12 QueryNodes, 2 replicas, 3 shards - 2 segments per shard", func(t *testing.T) {
+		topology := &CollectionTopology{
+			NumReplicas: 2,
+			NumShards:   3,
+			QueryNodeMemory: map[int64]uint64{
+				1:  8 * 1024 * 1024 * 1024,
+				2:  8 * 1024 * 1024 * 1024,
+				3:  8 * 1024 * 1024 * 1024,
+				4:  8 * 1024 * 1024 * 1024,
+				5:  8 * 1024 * 1024 * 1024,
+				6:  8 * 1024 * 1024 * 1024,
+				7:  8 * 1024 * 1024 * 1024,
+				8:  8 * 1024 * 1024 * 1024,
+				9:  8 * 1024 * 1024 * 1024,
+				10: 8 * 1024 * 1024 * 1024,
+				11: 8 * 1024 * 1024 * 1024,
+				12: 8 * 1024 * 1024 * 1024,
+			},
+			DataNodeMemory: map[int64]uint64{1: 8 * 1024 * 1024 * 1024},
+		}
+		view := &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments: []*SegmentView{
+				{ID: 1, Size: 1 * 1024 * 1024 * 1024},
+				{ID: 2, Size: 1 * 1024 * 1024 * 1024},
+			},
+			triggerID:     1,
+			configMaxSize: 100 * 1024 * 1024,
+			topology:      topology,
+		}
+		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+		assert.Equal(t, int64(2), targetCount, "12 QNs / (2 replicas * 3 shards) = 2 segments per shard")
+		assert.InDelta(t, 1*1024*1024*1024, maxSafeSize, 1024*1024)
+	})
+
+	t.Run("adjusts target count and max safe size when perShardParallelism conditions met", func(t *testing.T) {
+		topology := &CollectionTopology{
+			NumReplicas: 1,
+			NumShards:   1,
+			QueryNodeMemory: map[int64]uint64{
+				1: 8 * 1024 * 1024 * 1024,
+				2: 8 * 1024 * 1024 * 1024,
+				3: 8 * 1024 * 1024 * 1024,
+			},
+			DataNodeMemory: map[int64]uint64{1: 8 * 1024 * 1024 * 1024},
+		}
+		view := &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments: []*SegmentView{
+				{ID: 1, Size: 400 * 1024 * 1024},
+				{ID: 2, Size: 500 * 1024 * 1024},
+			},
+			triggerID:     1,
+			configMaxSize: 100 * 1024 * 1024,
+			topology:      topology,
+		}
+
+		maxSafeSize, targetCount := view.calculateTargetSizeCount()
+
+		assert.Equal(t, int64(3), targetCount, "targetCount should be adjusted to perShardParallelism (3)")
+		expectedMaxSafeSize := (400.0 + 500.0) * 1024 * 1024 / 3.0
+		assert.InDelta(t, expectedMaxSafeSize, maxSafeSize, 1024*1024, "maxSafeSize should be totalSize / targetCount")
+	})
+
+	t.Run("does not adjust when totalSize/desiredCount < configMaxSize", func(t *testing.T) {
+		topology := &CollectionTopology{
+			NumReplicas: 1,
+			NumShards:   1,
+			QueryNodeMemory: map[int64]uint64{
+				1: 8 * 1024 * 1024 * 1024,
+				2: 8 * 1024 * 1024 * 1024,
+				3: 8 * 1024 * 1024 * 1024,
+			},
+			DataNodeMemory: map[int64]uint64{1: 8 * 1024 * 1024 * 1024},
+		}
+		view := &ForceMergeSegmentView{
+			label: &CompactionGroupLabel{
+				CollectionID: 1,
+				PartitionID:  1,
+				Channel:      "ch1",
+			},
+			segments: []*SegmentView{
+				{ID: 1, Size: 100 * 1024 * 1024},
+				{ID: 2, Size: 150 * 1024 * 1024},
+			},
+			triggerID:     1,
+			configMaxSize: 100 * 1024 * 1024,
+			topology:      topology,
+		}
+
+		_, targetCount := view.calculateTargetSizeCount()
+
+		assert.Equal(t, int64(1), targetCount, "targetCount should not be adjusted when totalSize/desiredCount < configMaxSize")
+	})
 }

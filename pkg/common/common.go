@@ -190,6 +190,7 @@ const (
 	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
 	CollectionDescription       = "collection.description"
 	CollectionTTLFieldKey       = "ttl_field"
+	MaxTTLSeconds               = 3155760000 // 100 years
 
 	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
 	CollectionOnTruncatingKey = "collection.on.truncating" // when collection is on truncating, forbid the compaction of current collection.
@@ -233,6 +234,16 @@ const (
 	// collection level load properties
 	CollectionReplicaNumber  = "collection.replica.number"
 	CollectionResourceGroups = "collection.resource_groups"
+
+	// CMEK related property keys, used in db and collection properties
+	EncryptionEnabledKey = "cipher.enabled"
+	EncryptionRootKeyKey = "cipher.key"
+	EncryptionEzIDKey    = "cipher.ezID"
+)
+
+// Field properties key
+const (
+	FieldDescriptionKey = "field.description"
 )
 
 // common properties

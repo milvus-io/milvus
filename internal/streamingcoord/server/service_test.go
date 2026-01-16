@@ -31,8 +31,9 @@ func TestServer(t *testing.T) {
 
 	b := NewServerBuilder()
 	metaKV := etcdkv.NewEtcdKV(c, "test")
-	s := sessionutil.NewMockSession(t)
 	f := syncutil.NewFuture[types.MixCoordClient]()
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 	newServer := b.WithETCD(c).
 		WithMetaKV(metaKV).
 		WithSession(s).

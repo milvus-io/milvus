@@ -3383,9 +3383,9 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     def test_struct_with_unsupported_vector_field(self):
         """
-        target: test creating struct with BinaryVector field (should fail)
-        method: attempt to create struct with BinaryVector field
-        expected: creation should fail
+        target: test creating struct with SparseFloatVector field (should fail)
+        method: attempt to create struct with SparseFloatVector field
+        expected: creation should fail (sparse vectors not supported in struct)
         """
         collection_name = cf.gen_unique_str(f"{prefix}_invalid")
 
@@ -3399,7 +3399,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         )
 
         struct_schema = client.create_struct_field_schema()
-        struct_schema.add_field("binary_vector_field", DataType.BINARY_VECTOR, dim=default_dim)
+        struct_schema.add_field("sparse_vector_field", DataType.SPARSE_FLOAT_VECTOR)
         schema.add_field(
             "struct_array",
             datatype=DataType.ARRAY,
@@ -3409,7 +3409,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         )
         error = {
             ct.err_code: 65535,
-            ct.err_msg: "now only float vector is supported",
+            ct.err_msg: "only fixed dimension vector types are supported",
         }
         self.create_collection(
             client,
@@ -3672,22 +3672,12 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize(
-        "vector_type",
-        [
-            DataType.BINARY_VECTOR,
-            DataType.FLOAT16_VECTOR,
-            DataType.BFLOAT16_VECTOR,
-            DataType.SPARSE_FLOAT_VECTOR,
-            DataType.INT8_VECTOR,
-        ],
-    )
-    def test_struct_array_with_unsupported_vector_types(self, vector_type):
+    def test_struct_array_with_unsupported_vector_types(self):
         """
-        target: test creating struct array with unsupported vector types (non-FLOAT_VECTOR)
-        method: attempt to create struct array with BINARY_VECTOR, FLOAT16_VECTOR,
-                BFLOAT16_VECTOR, SPARSE_FLOAT_VECTOR, INT8_VECTOR vector types
-        expected: creation should fail as only FLOAT_VECTOR is supported in struct array
+        target: test creating struct array with unsupported vector types
+        method: attempt to create struct array with SPARSE_FLOAT_VECTOR
+        expected: creation should fail as only fixed dimension vector types are supported
+        note: FLOAT_VECTOR, FLOAT16_VECTOR, BFLOAT16_VECTOR, BINARY_VECTOR, INT8_VECTOR are supported
         """
         collection_name = cf.gen_unique_str(f"{prefix}_invalid")
 
@@ -3700,20 +3690,9 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
         )
 
-        # Try to create struct with unsupported vector type
+        # Try to create struct with unsupported vector type (sparse vector)
         struct_schema = client.create_struct_field_schema()
-
-        # SPARSE_FLOAT_VECTOR doesn't need dim parameter
-        if vector_type == DataType.SPARSE_FLOAT_VECTOR:
-            struct_schema.add_field("unsupported_vector", vector_type)
-        else:
-            # BINARY_VECTOR needs dim to be multiple of 8
-            if vector_type == DataType.BINARY_VECTOR:
-                struct_schema.add_field("unsupported_vector", vector_type, dim=128)
-            else:
-                struct_schema.add_field(
-                    "unsupported_vector", vector_type, dim=default_dim
-                )
+        struct_schema.add_field("unsupported_vector", DataType.SPARSE_FLOAT_VECTOR)
 
         schema.add_field(
             "struct_array",
@@ -3723,8 +3702,8 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             max_capacity=100,
         )
 
-        # Should fail - only FLOAT_VECTOR is supported in struct array
-        error = {ct.err_code: 65535, ct.err_msg: "now only float vector is supported"}
+        # Should fail - sparse vectors are not supported in struct array
+        error = {ct.err_code: 65535, ct.err_msg: "only fixed dimension vector types are supported"}
         self.create_collection(
             client,
             collection_name,
@@ -4280,7 +4259,6 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
     @pytest.mark.parametrize("entities", [1000])
     @pytest.mark.parametrize("array_capacity", [100])
     @pytest.mark.parametrize("file_type", ["PARQUET", "JSON"])
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/pymilvus/issues/3050")
     def test_import_struct_array_with_local_bulk_writer(self, dim, entities, array_capacity, file_type):
         """
         Test bulk import of struct array data using LocalBulkWriter
@@ -4364,23 +4342,29 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         # Step 2: Generate insert-format data with all supported types
         log.info(f"Generating {entities} rows of insert-format data")
         insert_data = []
+        empty_array_count = 0
         for i in range(entities):
-            # Generate random number of struct elements (1-5)
-            arr_len = random.randint(1, 5)
-            struct_list = []
-            for j in range(arr_len):
-                struct_obj = {
-                    "struct_varchar": f"varchar_{i}_{j}_{cf.gen_unique_str()}",
-                    "struct_int8": random.randint(-128, 127),
-                    "struct_int16": random.randint(-32768, 32767),
-                    "struct_int32": random.randint(-2147483648, 2147483647),
-                    "struct_int64": random.randint(-9223372036854775808, 9223372036854775807),
-                    "struct_float": random.random() * 100,
-                    "struct_double": random.random() * 1000,
-                    "struct_bool": random.choice([True, False]),
-                    "struct_float_vec": [random.random() for _ in range(dim)]
-                }
-                struct_list.append(struct_obj)
+            # 10% probability to generate empty array
+            if random.random() < 0.1:
+                struct_list = []
+                empty_array_count += 1
+            else:
+                # Generate random number of struct elements (1-5)
+                arr_len = random.randint(1, 5)
+                struct_list = []
+                for j in range(arr_len):
+                    struct_obj = {
+                        "struct_varchar": f"varchar_{i}_{j}_{cf.gen_unique_str()}",
+                        "struct_int8": random.randint(-128, 127),
+                        "struct_int16": random.randint(-32768, 32767),
+                        "struct_int32": random.randint(-2147483648, 2147483647),
+                        "struct_int64": random.randint(-9223372036854775808, 9223372036854775807),
+                        "struct_float": random.random() * 100,
+                        "struct_double": random.random() * 1000,
+                        "struct_bool": random.choice([True, False]),
+                        "struct_float_vec": [random.random() for _ in range(dim)]
+                    }
+                    struct_list.append(struct_obj)
 
             row = {
                 "id": i,
@@ -4388,6 +4372,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
                 "struct_array": struct_list
             }
             insert_data.append(row)
+        log.info(f"Generated {empty_array_count} rows with empty struct_array")
 
         # Step 3: Use LocalBulkWriter to convert data to import files
         log.info(f"Using LocalBulkWriter to generate {file_type} files")

@@ -244,6 +244,30 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                         }
                         break;
                     }
+                    case DataType::VECTOR_FLOAT16: {
+                        for (auto& e : obj) {
+                            result += e.float16_vector().size();
+                        }
+                        break;
+                    }
+                    case DataType::VECTOR_BFLOAT16: {
+                        for (auto& e : obj) {
+                            result += e.bfloat16_vector().size();
+                        }
+                        break;
+                    }
+                    case DataType::VECTOR_INT8: {
+                        for (auto& e : obj) {
+                            result += e.int8_vector().size();
+                        }
+                        break;
+                    }
+                    case DataType::VECTOR_BINARY: {
+                        for (auto& e : obj) {
+                            result += e.binary_vector().size();
+                        }
+                        break;
+                    }
                     default: {
                         ThrowInfo(NotImplemented,
                                   fmt::format("not implemented vector type {}",
@@ -1208,8 +1232,10 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
 
         auto codec_futures = storage::GetObjectData(
             rcm.get(), remote_files, milvus::PriorityForLoad(priority), false);
-        for (auto& codec_future : codec_futures) {
-            auto reader = codec_future.get()->GetReader();
+        // Wait for all futures to ensure all threads complete
+        auto codecs = storage::WaitAllFutures(std::move(codec_futures));
+        for (auto& codec : codecs) {
+            auto reader = codec->GetReader();
             channel->push(reader);
         }
         channel->close();
@@ -1228,8 +1254,10 @@ LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                        .GetRemoteChunkManager();
         auto codec_futures = storage::GetObjectData(
             rcm.get(), remote_files, milvus::PriorityForLoad(priority));
-        for (auto& codec_future : codec_futures) {
-            auto field_data = codec_future.get()->GetFieldData();
+        // Wait for all futures to ensure all threads complete
+        auto codecs = storage::WaitAllFutures(std::move(codec_futures));
+        for (auto& codec : codecs) {
+            auto field_data = codec->GetFieldData();
             channel->push(field_data);
         }
         channel->close();

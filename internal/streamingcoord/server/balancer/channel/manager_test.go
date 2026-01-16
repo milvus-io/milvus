@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -26,8 +27,10 @@ func TestChannelManager(t *testing.T) {
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
-	resource.InitForTest(resource.OptStreamingCatalog(catalog))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
 
 	ctx := context.Background()
 	// Test recover failure.
@@ -362,7 +365,9 @@ func TestAllocVirtualChannels(t *testing.T) {
 	RecoverPChannelStatsManager([]string{})
 
 	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
-	resource.InitForTest(resource.OptStreamingCatalog(catalog))
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
 	// Test recover failure.
 	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
 		Pchannel: "test-channel",
@@ -405,7 +410,9 @@ func TestStreamingEnableChecker(t *testing.T) {
 	RecoverPChannelStatsManager([]string{})
 
 	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
-	resource.InitForTest(resource.OptStreamingCatalog(catalog))
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
 	// Test recover failure.
 	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
 		Pchannel: "test-channel",
@@ -443,7 +450,9 @@ func TestChannelManagerWatch(t *testing.T) {
 	RecoverPChannelStatsManager([]string{})
 
 	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
-	resource.InitForTest(resource.OptStreamingCatalog(catalog))
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
 	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
 		Pchannel: "test-channel",
 	}, nil)

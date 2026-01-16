@@ -594,7 +594,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{
 			cli: mockChunkManager,
 		})
-		mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoaded).Return(true).Build()
+		mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
 		defer mockIsRefIndexLoaded.UnPatch()
 		mockGetSnapshotByIndex := mockey.Mock((*snapshotMeta).GetSnapshotByIndex).Return([]UniqueID{}).Build()
 		defer mockGetSnapshotByIndex.UnPatch()
@@ -616,7 +616,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{
 			cli: mockChunkManager,
 		})
-		mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoaded).Return(true).Build()
+		mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
 		defer mockIsRefIndexLoaded.UnPatch()
 		mockGetSnapshotByIndex := mockey.Mock((*snapshotMeta).GetSnapshotByIndex).Return([]UniqueID{}).Build()
 		defer mockGetSnapshotByIndex.UnPatch()
@@ -1409,7 +1409,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 			cli:           cm,
 			dropTolerance: 1,
 		})
-	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoaded).Return(true).Build()
+	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
 	defer mockIsRefIndexLoaded.UnPatch()
 	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).Return([]UniqueID{}).Build()
 	defer mockGetSnapshotBySegment.UnPatch()
@@ -1894,7 +1894,7 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T)
 	mock1 := mockey.Mock(meta.GetSnapshotMeta).Return(smMeta).Build()
 	defer mock1.UnPatch()
 
-	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoaded).Return(true).Build()
+	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
 	defer mockIsRefIndexLoaded.UnPatch()
 
 	mock2 := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).To(func(ctx context.Context, collectionID, segmentID int64) []int64 {
@@ -2016,7 +2016,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes_SnapshotReference(t *testing.T
 	}
 
 	// Setup mocks
-	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoaded).Return(true).Build()
+	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
 	defer mockIsRefIndexLoaded.UnPatch()
 
 	mock1 := mockey.Mock((*snapshotMeta).GetSnapshotByIndex).To(func(ctx context.Context, collectionID, indexID int64) []int64 {

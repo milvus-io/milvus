@@ -54,6 +54,10 @@ const (
 
 	// PrivilegeGroupPrefix prefix for privilege group
 	PrivilegeGroupPrefix = ComponentPrefix + "/privilege-group"
+
+	// prefix for file resource meta
+	FileResourceMetaPrefix = ComponentPrefix + "/file_resource_info"
+	FileResourceVersionKey = ComponentPrefix + "/file_resource_version"
 )
 
 func BuildDatabasePrefixWithDBID(dbID int64) string {

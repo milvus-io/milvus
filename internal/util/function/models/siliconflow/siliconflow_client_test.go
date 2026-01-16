@@ -74,7 +74,7 @@ func TestEmbeddingOK(t *testing.T) {
 
 	{
 		c, _ := NewSiliconflowClient("mock_key")
-		ret, err := c.Embedding(url, "BAAI/bge-large-zh-v1.5", []string{"sentence"}, "float", 0)
+		ret, err := c.Embedding(url, "BAAI/bge-large-zh-v1.5", []string{"sentence"}, "float", 0, 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret.Data[0].Index, 0)
 		assert.Equal(t, ret.Data[1].Index, 1)
@@ -95,7 +95,7 @@ func TestEmbeddingFailed(t *testing.T) {
 
 	{
 		c, _ := NewSiliconflowClient("mock_key")
-		_, err := c.Embedding(url, "BAAI/bge-large-zh-v1.5", []string{"sentence"}, "float", 0)
+		_, err := c.Embedding(url, "BAAI/bge-large-zh-v1.5", []string{"sentence"}, "float", 0, 0)
 		assert.True(t, err != nil)
 	}
 }

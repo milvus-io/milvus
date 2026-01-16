@@ -82,6 +82,7 @@ message HighlightRequest {
 
 message HighlightResult {
     repeated string sentences = 1;
+    repeated float scores = 2;
 }
 
 message HighlightResponse {

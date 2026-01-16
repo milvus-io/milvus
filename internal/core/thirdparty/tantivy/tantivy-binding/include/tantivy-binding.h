@@ -27,11 +27,19 @@ struct RustArrayI64 {
   size_t cap;
 };
 
+/// Array of C strings (char*) for returning Vec<String> to C++
+struct RustStringArray {
+  char **array;
+  size_t len;
+  size_t cap;
+};
+
 struct Value {
   enum class Tag {
     None,
     RustArray,
     RustArrayI64,
+    RustStringArray,
     U32,
     U64,
     Ptr,
@@ -47,6 +55,10 @@ struct Value {
 
   struct RustArrayI64_Body {
     RustArrayI64 _0;
+  };
+
+  struct RustStringArray_Body {
+    RustStringArray _0;
   };
 
   struct U32_Body {
@@ -66,6 +78,7 @@ struct Value {
     None_Body none;
     RustArray_Body rust_array;
     RustArrayI64_Body rust_array_i64;
+    RustStringArray_Body rust_string_array;
     U32_Body u32;
     U64_Body u64;
     Ptr_Body ptr;
@@ -93,6 +106,8 @@ extern "C" {
 void free_rust_array(RustArray array);
 
 void free_rust_array_i64(RustArrayI64 array);
+
+void free_rust_string_array(RustStringArray array);
 
 void free_rust_result(RustResult result);
 
@@ -292,6 +307,14 @@ RustResult tantivy_ngram_match_query(void *ptr,
                                      uintptr_t min_gram,
                                      uintptr_t max_gram,
                                      void *bitset);
+
+RustResult tantivy_ngram_tokenize(void *ptr,
+                                  const char *const *literals,
+                                  uintptr_t literals_len,
+                                  uintptr_t min_gram,
+                                  uintptr_t max_gram);
+
+RustResult tantivy_ngram_term_posting_list(void *ptr, const char *term, void *bitset);
 
 RustResult tantivy_match_query(void *ptr,
                                const char *query,

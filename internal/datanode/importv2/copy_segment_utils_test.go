@@ -204,6 +204,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 					TimestampTo:   200,
 					LogPath:       "files/insert_log/111/222/333/100/log1.log",
 					LogSize:       1024,
+					MemorySize:    1024,
 				},
 			},
 		},
@@ -216,6 +217,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 					TimestampTo:   250,
 					LogPath:       "files/insert_log/111/222/333/101/log2.log",
 					LogSize:       2048,
+					MemorySize:    2048,
 				},
 			},
 		},
@@ -233,6 +235,7 @@ func TestTransformFieldBinlogs(t *testing.T) {
 		assert.Equal(t, int64(1000), result[0].Binlogs[0].EntriesNum)
 		assert.Equal(t, "files/insert_log/444/555/666/100/log1.log", result[0].Binlogs[0].LogPath)
 		assert.Equal(t, int64(1024), result[0].Binlogs[0].LogSize)
+		assert.Equal(t, int64(1024), result[0].Binlogs[0].MemorySize)
 
 		// Verify second field binlog
 		assert.Equal(t, int64(101), result[1].FieldID)

@@ -1316,9 +1316,10 @@ FetchFieldData(ChunkManager* cm, const std::vector<std::string>& remote_files) {
     std::vector<std::string> batch_files;
     auto FetchRawData = [&]() {
         auto fds = GetObjectData(cm, batch_files);
-        for (size_t i = 0; i < batch_files.size(); ++i) {
-            auto data = fds[i].get()->GetFieldData();
-            field_datas.emplace_back(data);
+        // Wait for all futures and collect exceptions to ensure all threads complete
+        auto codecs = storage::WaitAllFutures(std::move(fds));
+        for (auto& codec : codecs) {
+            field_datas.emplace_back(codec->GetFieldData());
         }
     };
 
@@ -1602,11 +1603,6 @@ CacheRawDataAndFillMissing(const MemFileManagerImplPtr& file_manager,
                            const Config& config) {
     // download field data
     auto field_datas = file_manager->CacheRawDataToMemory(config);
-
-    // check storage version
-    auto storage_version =
-        index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
-            .value_or(0);
 
     int64_t lack_binlog_rows =
         index::GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY)

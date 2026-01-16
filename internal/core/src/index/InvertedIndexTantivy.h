@@ -79,7 +79,8 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     explicit InvertedIndexTantivy(uint32_t tantivy_index_version,
                                   const storage::FileManagerContext& ctx,
                                   bool inverted_index_single_segment = false,
-                                  bool user_specified_doc_id = true);
+                                  bool user_specified_doc_id = true,
+                                  bool is_nested_index = false);
 
     ~InvertedIndexTantivy();
 
@@ -204,6 +205,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         this->cached_byte_size_ = total;
     }
 
+    bool
+    IsNestedIndex() const override {
+        return is_nested_index_;
+    }
+
     virtual const TargetBitmap
     PrefixMatch(const std::string_view prefix);
 
@@ -274,6 +280,10 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     build_index_for_array(
         const std::vector<std::shared_ptr<FieldDataBase>>& field_datas);
 
+    void
+    build_index_for_array_nested(
+        const std::vector<std::shared_ptr<FieldDataBase>>& field_datas);
+
     virtual void
     build_index_for_json(
         const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
@@ -337,5 +347,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     // for now, only TextMatchIndex  can be built for growing segment,
     // and can read and insert concurrently.
     bool is_growing_{false};
+
+    // `is_nested_index_` can only be true for array data type. When it's true,
+    // every element in the array is treated as a separate document in the index.
+    bool is_nested_index_{false};
 };
 }  // namespace milvus::index

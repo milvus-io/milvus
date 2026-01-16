@@ -47,6 +47,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/KeyRetriever.h"
 #include "common/TypeTraits.h"
+#include "knowhere/comp/index_param.h"
 
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -247,6 +248,212 @@ SegmentGrowingImpl::try_remove_chunks(FieldId fieldId) {
     }
 }
 
+ResourceUsage
+SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
+    int64_t num_rows = get_row_count();
+    if (num_rows == 0) {
+        return ResourceUsage{0, 0};
+    }
+
+    bool growing_mmap_enabled = storage::MmapManager::GetInstance()
+                                    .GetMmapConfig()
+                                    .GetEnableGrowingMmap();
+
+    int64_t memory_bytes = 0;
+    int64_t disk_bytes = 0;
+
+    // 1. Timestamps: always in memory for now
+    memory_bytes += num_rows * sizeof(Timestamp);
+
+    // 2. pk2offset_ map: always in memory
+    // Use actual allocated memory from the tracking allocator
+    memory_bytes += insert_record_.pk2offset_->memory_size();
+
+    // 3. Field data and interim index
+    // For vector fields with interim index:
+    //   - IVF_FLAT_CC: index stores raw data, so count index_size = raw_size * memExpansionRate (memory)
+    //   - SCANN_DVR: index doesn't store raw data, so count raw_size (memory or mmap)
+    // For other fields: count raw_size based on mmap setting
+    bool interim_index_enabled =
+        segcore_config_.get_enable_interim_segment_index();
+    bool is_ivf_flat_cc =
+        segcore_config_.get_dense_vector_intermin_index_type() ==
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
+
+    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+        if (field_id.get() < START_USER_FIELDID) {
+            continue;
+        }
+
+        int64_t field_bytes = 0;
+        auto data_type = field_meta.get_data_type();
+
+        if (field_meta.is_vector()) {
+            // Calculate raw vector size
+            // Note: get_dim() cannot be called on sparse vectors, so handle that case separately
+            if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
+                field_bytes =
+                    num_rows *
+                    SegmentInternalInterface::get_field_avg_size(field_id);
+            } else {
+                int64_t dim = field_meta.get_dim();
+                switch (data_type) {
+                    case DataType::VECTOR_FLOAT:
+                        field_bytes = num_rows * dim * sizeof(float);
+                        break;
+                    case DataType::VECTOR_FLOAT16:
+                        field_bytes = num_rows * dim * sizeof(float16);
+                        break;
+                    case DataType::VECTOR_BFLOAT16:
+                        field_bytes = num_rows * dim * sizeof(bfloat16);
+                        break;
+                    case DataType::VECTOR_BINARY:
+                        field_bytes = num_rows * (dim / 8);
+                        break;
+                    case DataType::VECTOR_INT8:
+                        field_bytes = num_rows * dim * sizeof(int8_t);
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            // Check if this field has interim index
+            bool has_interim_index =
+                interim_index_enabled && indexing_record_.is_in(field_id);
+
+            if (has_interim_index) {
+                if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
+                    // sparse vector interim index does not support file mmap
+                    // index memory + raw data memory ~ 2x raw data memory
+                    memory_bytes += field_bytes * 2;
+                } else {
+                    // Dense vector interim index estimation based on index type
+                    if (is_ivf_flat_cc) {
+                        // IVF_FLAT_CC: index stores raw data
+                        // Index memory = raw_size * memExpansionRate
+                        memory_bytes += static_cast<int64_t>(
+                            field_bytes *
+                            segcore_config_
+                                .get_interim_index_mem_expansion_rate());
+                    } else {
+                        // SCANN_DVR or no interim index
+                        if (growing_mmap_enabled) {
+                            disk_bytes += field_bytes;
+                        } else {
+                            memory_bytes += field_bytes;
+                        }
+                    }
+                }
+            } else {
+                if (growing_mmap_enabled) {
+                    disk_bytes += field_bytes;
+                } else {
+                    memory_bytes += field_bytes;
+                }
+            }
+        } else {
+            // Scalar fields
+            switch (data_type) {
+                case DataType::BOOL:
+                    field_bytes = num_rows * sizeof(bool);
+                    break;
+                case DataType::INT8:
+                    field_bytes = num_rows * sizeof(int8_t);
+                    break;
+                case DataType::INT16:
+                    field_bytes = num_rows * sizeof(int16_t);
+                    break;
+                case DataType::INT32:
+                    field_bytes = num_rows * sizeof(int32_t);
+                    break;
+                case DataType::INT64:
+                case DataType::TIMESTAMPTZ:
+                    field_bytes = num_rows * sizeof(int64_t);
+                    break;
+                case DataType::FLOAT:
+                    field_bytes = num_rows * sizeof(float);
+                    break;
+                case DataType::DOUBLE:
+                    field_bytes = num_rows * sizeof(double);
+                    break;
+                case DataType::VARCHAR:
+                case DataType::TEXT:
+                case DataType::GEOMETRY: {
+                    auto avg_size =
+                        SegmentInternalInterface::get_field_avg_size(field_id);
+                    field_bytes = num_rows * avg_size;
+                    break;
+                }
+                case DataType::JSON: {
+                    auto avg_size =
+                        SegmentInternalInterface::get_field_avg_size(field_id);
+                    field_bytes = num_rows * avg_size;
+                    break;
+                }
+                case DataType::ARRAY: {
+                    auto avg_size =
+                        SegmentInternalInterface::get_field_avg_size(field_id);
+                    field_bytes = num_rows * avg_size;
+                    break;
+                }
+                default:
+                    break;
+            }
+
+            // Scalar fields: memory or disk based on mmap setting
+            if (growing_mmap_enabled) {
+                disk_bytes += field_bytes;
+            } else {
+                memory_bytes += field_bytes;
+            }
+        }
+    }
+
+    // 4. Text index (Tantivy)
+    {
+        std::shared_lock lock(mutex_);
+        for (const auto& [field_id, index_variant] : text_indexes_) {
+            if (auto* ptr = std::get_if<std::unique_ptr<index::TextMatchIndex>>(
+                    &index_variant)) {
+                memory_bytes += (*ptr)->ByteSize();
+            }
+        }
+    }
+
+    // 5. Deleted records overhead
+    memory_bytes += deleted_record_.mem_size();
+
+    // Apply safety margin
+    constexpr double kResourceSafetyMargin = 1.2;
+    memory_bytes = static_cast<int64_t>(memory_bytes * kResourceSafetyMargin);
+    disk_bytes = static_cast<int64_t>(disk_bytes * kResourceSafetyMargin);
+
+    return ResourceUsage{memory_bytes, disk_bytes};
+}
+
+void
+SegmentGrowingImpl::UpdateResourceTracking() {
+    auto new_resource = EstimateSegmentResourceUsage();
+
+    // Lock to ensure refund-then-charge is atomic
+    std::lock_guard<std::mutex> lock(resource_tracking_mutex_);
+
+    auto old_resource = tracked_resource_;
+
+    if (old_resource.AnyGTZero()) {
+        Manager::GetInstance().RefundLoadedResource(
+            old_resource, fmt::format("growing_segment_{}_refund", id_));
+    }
+
+    if (new_resource.AnyGTZero()) {
+        Manager::GetInstance().ChargeLoadedResource(
+            new_resource, fmt::format("growing_segment_{}_charge", id_));
+    }
+
+    tracked_resource_ = new_resource;
+}
+
 void
 SegmentGrowingImpl::Insert(int64_t reserved_offset,
                            int64_t num_rows,
@@ -263,13 +470,12 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     // step 1: check insert data if valid
     std::unordered_map<FieldId, int64_t> field_id_to_offset;
     int64_t field_offset = 0;
-    int64_t exist_rows = stats_.mem_size / (sizeof(Timestamp) + sizeof(idx_t));
 
     for (const auto& field : insert_record_proto->fields_data()) {
         auto field_id = FieldId(field.field_id());
         AssertInfo(!field_id_to_offset.count(field_id), "duplicate field data");
         field_id_to_offset.emplace(field_id, field_offset++);
-        AssertInfo(exist_rows == 0 || insert_record_.is_data_exist(field_id),
+        AssertInfo(insert_record_.is_data_exist(field_id),
                    "unexpected new field in growing segment {}, field id {}",
                    id_,
                    field.field_id());
@@ -299,12 +505,11 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     // step 2: sort timestamp
     // query node already guarantees that the timestamp is ordered, avoid field data copy in c++
 
-    // step 3: fill into Segment.ConcurrentVector
+    // step 3: fill into Segment.ConcurrentVector, no mmap_descriptor is used for timestamps
     insert_record_.timestamps_.set_data_raw(
         reserved_offset, timestamps_raw, num_rows);
+    stats_.mem_size += num_rows * sizeof(Timestamp);
 
-    // update the mem size of timestamps and row IDs
-    stats_.mem_size += num_rows * (sizeof(Timestamp) + sizeof(idx_t));
     for (auto& [field_id, field_meta] : schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
@@ -325,6 +530,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 &insert_record_proto->fields_data(data_offset),
                 field_meta);
         }
+
         //insert vector data into index
         if (segcore_config_.get_enable_interim_segment_index()) {
             indexing_record_.AppendingIndex(
@@ -413,7 +619,10 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         insert_record_.insert_pk(pks[i], reserved_offset + i);
     }
 
-    // step 5: update small indexes
+    // step 5: update the resource usage
+    UpdateResourceTracking();
+
+    // step 6: update small indexes
     insert_record_.ack_responder_.AddSegment(reserved_offset,
                                              reserved_offset + num_rows);
 }
@@ -755,7 +964,6 @@ SegmentGrowingImpl::Delete(int64_t size,
     }
 
     // step 1: sort timestamp
-
     std::sort(ordering.begin(), ordering.end());
     std::vector<PkType> sort_pks(size);
     std::vector<Timestamp> sort_timestamps(size);
@@ -768,6 +976,10 @@ SegmentGrowingImpl::Delete(int64_t size,
 
     // step 2: fill delete record
     deleted_record_.StreamPush(sort_pks, sort_timestamps.data());
+
+    // step 3: update resource tracking
+    UpdateResourceTracking();
+
     return SegcoreError::success();
 }
 
@@ -1229,22 +1441,10 @@ SegmentGrowingImpl::bulk_subscript_ptr_impl(
     google::protobuf::RepeatedPtrField<std::string>* dst) const {
     auto vec = dynamic_cast<const ConcurrentVector<S>*>(vec_raw);
     auto& src = *vec;
-    if constexpr (std::is_same_v<S, Json>) {
-        // For Json type, we must use operator[] instead of view_element()
-        // to ensure the Json object lives long enough. view_element() returns
-        // a string_view that may point to memory owned by a temporary Json
-        // object, which gets destroyed before we can construct std::string.
-        // Using operator[] copies the Json object, extending its lifetime.
-        for (int64_t i = 0; i < count; ++i) {
-            auto offset = seg_offsets[i];
-            Json json = src[offset];  // Copy Json object to extend lifetime
-            dst->at(i) = std::string(json.data());
-        }
-    } else {
-        for (int64_t i = 0; i < count; ++i) {
-            auto offset = seg_offsets[i];
-            dst->at(i) = std::string(src.view_element(offset));
-        }
+    for (int64_t i = 0; i < count; ++i) {
+        auto offset = seg_offsets[i];
+        auto view = src.view_element(offset);
+        dst->at(i).assign(view.data(), view.size());
     }
 }
 
@@ -1678,6 +1878,8 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
 
         schema_ = sch;
     }
+
+    UpdateResourceTracking();
 }
 
 void
@@ -1754,6 +1956,9 @@ SegmentGrowingImpl::FinishLoad() {
             fill_empty_field(field_meta);
         }
     }
+
+    // Update resource tracking
+    UpdateResourceTracking();
 }
 
 void
@@ -1921,7 +2126,7 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
             field_id, field_meta, size_per_chunk(), mmap_descriptor_);
     }
 
-    auto total_row_num = insert_record_.size();
+    auto total_row_num = insert_record_.row_count();
 
     auto data = bulk_subscript_not_exist_field(field_meta, total_row_num);
     insert_record_.get_valid_data(field_id)->set_data_raw(

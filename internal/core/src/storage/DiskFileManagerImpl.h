@@ -281,6 +281,18 @@ class DiskFileManagerImpl : public FileManagerImpl {
         int64_t& write_offset,
         std::vector<size_t>* offsets = nullptr);
 
+    inline void
+    set_bit(std::vector<uint8_t>& bitmap, int64_t bit_pos) {
+        bitmap[bit_pos >> 3] |= (1 << (bit_pos & 0x07));
+    }
+
+    void
+    write_valid_data_file(
+        const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
+        const std::string& valid_data_path,
+        std::vector<uint8_t>& valid_bitmap,
+        uint64_t total_num_rows);
+
  private:
     // local file path (abs path)
     std::vector<std::string> local_paths_;

@@ -53,6 +53,7 @@ add_subdirectory( bitset )
 add_subdirectory( futures )
 add_subdirectory( rescores )
 add_subdirectory( plan )
+add_subdirectory( minhash )
 
 milvus_add_pkg_config("milvus_core")
 
@@ -72,6 +73,7 @@ add_library(milvus_core SHARED
     $<TARGET_OBJECTS:milvus_futures>
     $<TARGET_OBJECTS:milvus_rescores>
     $<TARGET_OBJECTS:milvus_plan>
+    $<TARGET_OBJECTS:milvus_minhash>
 )
 
 set(LINK_TARGETS

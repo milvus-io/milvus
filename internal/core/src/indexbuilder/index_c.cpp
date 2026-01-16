@@ -175,7 +175,8 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     }
     config[INDEX_NUM_ROWS_KEY] = info->num_rows();
     config[STORAGE_VERSION_KEY] = info->storage_version();
-    if (info->storage_version() == STORAGE_V2) {
+    if (info->storage_version() == STORAGE_V2 ||
+        info->storage_version() == STORAGE_V3) {
         config[SEGMENT_INSERT_FILES_KEY] =
             get_segment_insert_files(info->segment_insert_files());
         config[SEGMENT_MANIFEST_KEY] = info->manifest();

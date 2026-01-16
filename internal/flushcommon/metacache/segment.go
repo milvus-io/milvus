@@ -167,7 +167,7 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *Se
 	// legacy split also share same field here
 	// shall be checked by caller
 	var currentSplit []storagecommon.ColumnGroup
-	if info.GetStorageVersion() == storage.StorageV2 && len(info.Binlogs) > 0 {
+	if info.GetStorageVersion() >= storage.StorageV2 && len(info.Binlogs) > 0 {
 		currentSplit = make([]storagecommon.ColumnGroup, 0, len(info.Binlogs))
 		for _, group := range info.Binlogs {
 			currentSplit = append(currentSplit, storagecommon.ColumnGroup{

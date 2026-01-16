@@ -4,6 +4,9 @@ import (
 	"io"
 	"sync"
 
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/encoding/protojson"
+
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -147,9 +150,15 @@ func (c *assignmentDiscoverClient) recvLoop() (err error) {
 		}
 		switch resp := resp.Response.(type) {
 		case *streamingpb.AssignmentDiscoverResponse_FullAssignment:
+			if resp.FullAssignment.VersionByRevision == nil {
+				marshaledFullAssignment, _ := protojson.Marshal(resp.FullAssignment)
+				c.logger.Warn("VersionByRevision is nil, from legacy mixcoord server, skipping", zap.String("assignment", string(marshaledFullAssignment)))
+				continue
+			}
 			newIncomingVersion := typeutil.VersionInt64Pair{
-				Global: resp.FullAssignment.Version.Global,
-				Local:  resp.FullAssignment.Version.Local,
+				// Version field is wrong implementation, so using VersionByRevision instead here.
+				Global: resp.FullAssignment.VersionByRevision.Global,
+				Local:  resp.FullAssignment.VersionByRevision.Local,
 			}
 			newIncomingAssignments := make(map[int64]types.StreamingNodeAssignment, len(resp.FullAssignment.Assignments))
 			for _, assignment := range resp.FullAssignment.Assignments {

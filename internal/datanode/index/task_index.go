@@ -306,7 +306,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		LackBinlogRows:            it.req.GetLackBinlogRows(),
 		StorageVersion:            it.req.GetStorageVersion(),
 	}
-	if buildIndexParams.StorageVersion == storage.StorageV2 {
+	if buildIndexParams.StorageVersion == storage.StorageV2 || buildIndexParams.StorageVersion == storage.StorageV3 {
 		buildIndexParams.SegmentInsertFiles = util.GetSegmentInsertFiles(
 			it.req.GetInsertLogs(),
 			it.req.GetStorageConfig(),

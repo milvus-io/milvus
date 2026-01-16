@@ -151,6 +151,11 @@ class ScalarIndex : public IndexBase {
                index_type_ == milvus::index::ASCENDING_SORT;
     }
 
+    virtual bool
+    IsNestedIndex() const {
+        return false;
+    }
+
     virtual int64_t
     Size() = 0;
 

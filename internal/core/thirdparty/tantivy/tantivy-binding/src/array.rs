@@ -98,12 +98,76 @@ pub extern "C" fn free_rust_array_i64(array: RustArrayI64) {
     }
 }
 
+/// Array of C strings (char*) for returning Vec<String> to C++
+#[repr(C)]
+pub struct RustStringArray {
+    pub array: *mut *mut c_char,
+    pub len: size_t,
+    pub cap: size_t,
+}
+
+impl RustStringArray {
+    pub fn from_vec(vec: Vec<String>) -> RustStringArray {
+        let len = vec.len();
+        let cap = vec.capacity();
+
+        // Convert Vec<String> to Vec<*mut c_char>
+        let c_strings: Vec<*mut c_char> = vec
+            .into_iter()
+            .map(|s| create_string(&s) as *mut c_char)
+            .collect();
+
+        let c_len = c_strings.len();
+        let c_cap = c_strings.capacity();
+        let ptr = c_strings.leak().as_mut_ptr();
+
+        RustStringArray {
+            array: ptr,
+            len: c_len,
+            cap: c_cap,
+        }
+    }
+}
+
+impl std::default::Default for RustStringArray {
+    fn default() -> Self {
+        RustStringArray {
+            array: std::ptr::null_mut(),
+            len: 0,
+            cap: 0,
+        }
+    }
+}
+
+impl From<Vec<String>> for RustStringArray {
+    fn from(vec: Vec<String>) -> Self {
+        RustStringArray::from_vec(vec)
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn free_rust_string_array(array: RustStringArray) {
+    let RustStringArray { array, len, cap } = array;
+    if array.is_null() {
+        return;
+    }
+    unsafe {
+        let vec = Vec::from_raw_parts(array, len, cap);
+        for s in vec {
+            if !s.is_null() {
+                free_rust_string(s);
+            }
+        }
+    }
+}
+
 #[allow(dead_code)]
 #[repr(C)]
 pub enum Value {
     None(()),
     RustArray(RustArray),
     RustArrayI64(RustArrayI64),
+    RustStringArray(RustStringArray),
     U32(u32),
     U64(u64),
     Ptr(*mut c_void),
@@ -121,7 +185,7 @@ macro_rules! impl_from_for_enum {
     };
 }
 
-impl_from_for_enum!(Value, None => (), RustArrayI64 => RustArrayI64, RustArrayI64 => Vec<i64>, RustArray => RustArray, RustArray => Vec<u32>, U32 => u32, U64 => u64, Ptr => *mut c_void);
+impl_from_for_enum!(Value, None => (), RustArrayI64 => RustArrayI64, RustArrayI64 => Vec<i64>, RustArray => RustArray, RustArray => Vec<u32>, RustStringArray => RustStringArray, RustStringArray => Vec<String>, U32 => u32, U64 => u64, Ptr => *mut c_void);
 
 #[repr(C)]
 pub struct RustResult {
@@ -195,6 +259,11 @@ pub extern "C" fn free_rust_result(result: RustResult) {
         Value::RustArrayI64(array) => {
             if !array.array.is_null() {
                 free_rust_array_i64(array);
+            }
+        }
+        Value::RustStringArray(array) => {
+            if !array.array.is_null() {
+                free_rust_string_array(array);
             }
         }
         _ => {}

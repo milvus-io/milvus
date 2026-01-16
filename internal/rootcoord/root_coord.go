@@ -44,6 +44,7 @@ import (
 	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/rootcoord/tombstone"
+	"github.com/milvus-io/milvus/internal/storage"
 	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
@@ -118,6 +119,7 @@ type Core struct {
 	mixCoord       types.MixCoord
 	streamingCoord *streamingcoord.Server
 	quotaCenter    *QuotaCenter
+	keyManager     *KeyManager
 
 	stateCode atomic.Int32
 	initOnce  sync.Once
@@ -131,6 +133,7 @@ type Core struct {
 	metricsRequest *metricsinfo.MetricsRequest
 
 	tombstoneSweeper tombstone.TombstoneSweeper
+	storage          storage.ChunkManager // used to check file resource existence
 }
 
 // --------------------- function --------------------------
@@ -161,6 +164,14 @@ func (c *Core) UpdateStateCode(code commonpb.StateCode) {
 
 func (c *Core) GetStateCode() commonpb.StateCode {
 	return commonpb.StateCode(c.stateCode.Load())
+}
+
+func (c *Core) GetMetaTable() IMetaTable {
+	return c.meta
+}
+
+func (c *Core) GetQuotaCenter() *QuotaCenter {
+	return c.quotaCenter
 }
 
 func (c *Core) sendTimeTick(t Timestamp, reason string) error {
@@ -453,6 +464,11 @@ func (c *Core) initInternal() error {
 	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.mixCoord, c.tsoAllocator, c.meta)
 	log.Debug("RootCoord init QuotaCenter done")
 
+	// Initialize KeyManager for KMS key state management
+	c.keyManager = NewKeyManager(c.ctx, c.meta)
+	c.quotaCenter.SetKeyManager(c.keyManager)
+	log.Debug("RootCoord init KeyManager done")
+
 	if err := c.initCredentials(initCtx); err != nil {
 		return err
 	}
@@ -462,6 +478,11 @@ func (c *Core) initInternal() error {
 		return err
 	}
 
+	cli, err := c.newChunkManagerFactory()
+	if err != nil {
+		return err
+	}
+	c.storage = cli
 	log.Info("init rootcoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", c.address))
 	return nil
 }
@@ -1078,6 +1099,8 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		EnableDynamicField: collInfo.EnableDynamicField,
 		Properties:         collInfo.Properties,
 		FileResourceIds:    collInfo.FileResourceIds,
+		ExternalSource:     collInfo.ExternalSource,
+		ExternalSpec:       collInfo.ExternalSpec,
 	}
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
@@ -2930,6 +2953,99 @@ func (c *Core) OperatePrivilegeGroup(ctx context.Context, in *milvuspb.OperatePr
 	return merr.Success(), nil
 }
 
+// AddFileResource add file resource to rootcoord
+func (c *Core) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
+	method := "AddFileResource"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", req))
+	ctxLog.Debug(method)
+
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	if exist, err := c.storage.Exist(ctx, req.GetPath()); err != nil {
+		return merr.Status(err), nil
+	} else if !exist {
+		return merr.Status(merr.WrapErrAsInputError(errors.Errorf("file resource path not exist"))), nil
+	}
+
+	id, err := c.tsoAllocator.GenerateTSO(1)
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	resource := &internalpb.FileResourceInfo{
+		Id:   int64(id),
+		Name: req.GetName(),
+		Path: req.GetPath(),
+	}
+	err = c.meta.AddFileResource(ctx, resource)
+	if err != nil {
+		return merr.Status(err), nil
+	}
+
+	resources, version := c.meta.ListFileResource(ctx)
+	c.mixCoord.SyncQcFileResource(ctx, resources, version)
+	c.mixCoord.SyncDcFileResource(ctx, resources, version)
+	ctxLog.Debug(method + " success")
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return merr.Success(), nil
+}
+
+// RemoveFileResource remove file resource from rootcoord
+func (c *Core) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error) {
+	method := "RemoveFileResource"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", req))
+	ctxLog.Debug(method)
+
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	err, exist := c.meta.RemoveFileResource(ctx, req.GetName())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+
+	if exist {
+		resources, version := c.meta.ListFileResource(ctx)
+		c.mixCoord.SyncQcFileResource(ctx, resources, version)
+		c.mixCoord.SyncDcFileResource(ctx, resources, version)
+	}
+
+	ctxLog.Debug(method + " success")
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return merr.Success(), nil
+}
+
+// ListFileResources list file resources from rootcoord
+func (c *Core) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
+	method := "ListFileResource"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.Any("in", req))
+	ctxLog.Debug(method)
+
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &milvuspb.ListFileResourcesResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	ctxLog.Debug(method + " success")
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	return &milvuspb.ListFileResourcesResponse{
+		Status:    merr.Success(),
+		Resources: []*milvuspb.FileResourceInfo{},
+	}, nil
+}
+
 func (c *Core) expandPrivilegeGroups(ctx context.Context, grants []*milvuspb.GrantEntity, groups map[string][]*milvuspb.PrivilegeEntity) ([]*milvuspb.GrantEntity, error) {
 	newGrants := []*milvuspb.GrantEntity{}
 	createGrantEntity := func(grant *milvuspb.GrantEntity, privilegeName string) (*milvuspb.GrantEntity, error) {
@@ -3036,6 +3152,16 @@ func (c *Core) getCurrentUserVisibleDatabases(ctx context.Context) (typeutil.Set
 		}
 	}
 	return privilegeDatabases, nil
+}
+
+func (c *Core) newChunkManagerFactory() (storage.ChunkManager, error) {
+	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(Params)
+	cli, err := chunkManagerFactory.NewPersistentStorageChunkManager(c.ctx)
+	if err != nil {
+		log.Error("chunk manager init failed", zap.Error(err))
+		return nil, err
+	}
+	return cli, err
 }
 
 func isVisibleDatabaseForCurUser(currentDatabase string, visibleDatabases typeutil.Set[string]) bool {
@@ -3169,4 +3295,18 @@ func (c *Core) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest) 
 		Status: merr.Success(),
 		Ezk:    ezkJSON,
 	}, nil
+}
+
+func (c *Core) InitFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) error {
+	resources, version := c.meta.ListFileResource(ctx)
+	err := c.mixCoord.SyncQcFileResource(ctx, resources, version)
+	if err != nil {
+		return err
+	}
+
+	err = c.mixCoord.SyncDcFileResource(ctx, resources, version)
+	if err != nil {
+		return err
+	}
+	return nil
 }

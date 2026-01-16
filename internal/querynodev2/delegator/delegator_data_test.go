@@ -519,6 +519,8 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	s.True(s.delegator.distribution.Serviceable())
 
 	s.delegator.Close()
+	// After Close(), pkOracle is cleared, so ProcessDelete becomes a no-op.
+	// This is expected behavior - the delegator is being decommissioned.
 	s.delegator.ProcessDelete([]*DeleteData{
 		{
 			PartitionID: 500,
@@ -528,7 +530,6 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		},
 	}, 10)
 	s.Require().NoError(err)
-	s.False(s.delegator.distribution.Serviceable())
 }
 
 func (s *DelegatorDataSuite) TestLoadGrowingWithBM25() {
@@ -618,6 +619,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 			s.loader.ExpectedCalls = nil
 		}()
 
+		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).Return(nil, nil)
 		s.loader.EXPECT().LoadBM25Stats(mock.Anything, s.collectionID, mock.Anything).Return(nil, errors.New("mock error"))
 
 		workers := make(map[int64]*cluster.MockWorker)
@@ -1009,7 +1011,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		sealedSegs := []int64{1, 2, 3, 4}
 		for _, segID := range sealedSegs {
 			// every segment stats only has one token, avgdl = 1
-			s.delegator.idfOracle.Register(segID, genBM25Stats(uint32(segID), uint32(segID)+1), commonpb.SegmentState_Sealed)
+			s.delegator.idfOracle.RegisterSealed(segID, genBM25Stats(uint32(segID), uint32(segID)+1))
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 
@@ -1166,7 +1168,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		sealedSegs := []int64{1, 2, 3, 4}
 		for _, segID := range sealedSegs {
 			// every segment stats only has one token, avgdl = 1
-			s.delegator.idfOracle.Register(segID, genBM25Stats(uint32(segID), uint32(segID)+1), commonpb.SegmentState_Sealed)
+			s.delegator.idfOracle.RegisterSealed(segID, genBM25Stats(uint32(segID), uint32(segID)+1))
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 

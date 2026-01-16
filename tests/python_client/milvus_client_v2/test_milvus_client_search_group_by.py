@@ -176,13 +176,16 @@ class TestGroupSearch(TestMilvusClientV2Base):
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("group_by_field", [DataType.VARCHAR.name, inverted_string_field_name
-                                                # TODO: need to run after #46605 $46614 #46616 fixed
-                                                # , DataType.JSON.name, indexed_json_field_name
-                                                # , f"{DataType.JSON.name}['number']"
-                                                # , dyna_filed_name1, f"{dyna_filed_name2}['string']"
-                                                ])
-    def test_search_group_size(self, group_by_field):
+    @pytest.mark.parametrize("group_by_field, output_field", [
+        (DataType.VARCHAR.name, DataType.VARCHAR.name),
+        (inverted_string_field_name, inverted_string_field_name),
+        (DataType.JSON.name, DataType.JSON.name),
+        (indexed_json_field_name, indexed_json_field_name),
+        (f"{DataType.JSON.name}['number']", DataType.JSON.name),
+        (dyna_filed_name1, dyna_filed_name1),
+        (f"{dyna_filed_name2}['string']", dyna_filed_name2),
+    ])
+    def test_search_group_size(self, group_by_field, output_field):
         """
         target:
             1. search on 4 different float vector fields with group by varchar field with group size
@@ -192,12 +195,6 @@ class TestGroupSearch(TestMilvusClientV2Base):
         nq = 2
         limit = 50
         group_size = 5
-        # we can group by json key instead of a real field, so output a real field name
-        output_field = group_by_field
-        if "number" in group_by_field:
-            output_field = DataType.JSON.name
-        if "string" in group_by_field:
-            output_field = dyna_filed_name2
         client = self._client()
         collection_info = self.describe_collection(client, self.collection_name)[0]
         for j in range(len(self.vector_fields)):

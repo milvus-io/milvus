@@ -207,13 +207,7 @@ class FileManagerImpl : public milvus::FileManager {
 
     virtual std::string
     GetRemoteIndexFilePrefixV2() const {
-        boost::filesystem::path bucket = rcm_->GetBucketName();
-        std::string v1_prefix = GetRemoteIndexObjectPrefix();
-        if (bucket.empty()) {
-            return v1_prefix;
-        } else {
-            return NormalizePath(bucket / v1_prefix);
-        }
+        return GetRemoteIndexObjectPrefixV2();
     }
 
     virtual std::string

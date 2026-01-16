@@ -86,6 +86,9 @@ const (
 	RootCoord_AlterDatabase_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/AlterDatabase"
 	RootCoord_GetQuotaMetrics_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/GetQuotaMetrics"
 	RootCoord_BackupEzk_FullMethodName                     = "/milvus.proto.rootcoord.RootCoord/BackupEzk"
+	RootCoord_AddFileResource_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/AddFileResource"
+	RootCoord_RemoveFileResource_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/RemoveFileResource"
+	RootCoord_ListFileResources_FullMethodName             = "/milvus.proto.rootcoord.RootCoord/ListFileResources"
 )
 
 // RootCoordClient is the client API for RootCoord service.
@@ -217,6 +220,10 @@ type RootCoordClient interface {
 	AlterDatabase(ctx context.Context, in *AlterDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error)
 	BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error)
+	// File Resource Management
+	AddFileResource(ctx context.Context, in *milvuspb.AddFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	RemoveFileResource(ctx context.Context, in *milvuspb.RemoveFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	ListFileResources(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*milvuspb.ListFileResourcesResponse, error)
 }
 
 type rootCoordClient struct {
@@ -794,6 +801,33 @@ func (c *rootCoordClient) BackupEzk(ctx context.Context, in *internalpb.BackupEz
 	return out, nil
 }
 
+func (c *rootCoordClient) AddFileResource(ctx context.Context, in *milvuspb.AddFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_AddFileResource_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) RemoveFileResource(ctx context.Context, in *milvuspb.RemoveFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_RemoveFileResource_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) ListFileResources(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*milvuspb.ListFileResourcesResponse, error) {
+	out := new(milvuspb.ListFileResourcesResponse)
+	err := c.cc.Invoke(ctx, RootCoord_ListFileResources_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RootCoordServer is the server API for RootCoord service.
 // All implementations should embed UnimplementedRootCoordServer
 // for forward compatibility
@@ -923,6 +957,10 @@ type RootCoordServer interface {
 	AlterDatabase(context.Context, *AlterDatabaseRequest) (*commonpb.Status, error)
 	GetQuotaMetrics(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)
 	BackupEzk(context.Context, *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error)
+	// File Resource Management
+	AddFileResource(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error)
+	RemoveFileResource(context.Context, *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error)
+	ListFileResources(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error)
 }
 
 // UnimplementedRootCoordServer should be embedded to have forward compatible implementations.
@@ -1117,6 +1155,15 @@ func (UnimplementedRootCoordServer) GetQuotaMetrics(context.Context, *internalpb
 }
 func (UnimplementedRootCoordServer) BackupEzk(context.Context, *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BackupEzk not implemented")
+}
+func (UnimplementedRootCoordServer) AddFileResource(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AddFileResource not implemented")
+}
+func (UnimplementedRootCoordServer) RemoveFileResource(context.Context, *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemoveFileResource not implemented")
+}
+func (UnimplementedRootCoordServer) ListFileResources(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListFileResources not implemented")
 }
 
 // UnsafeRootCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -2264,6 +2311,60 @@ func _RootCoord_BackupEzk_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RootCoord_AddFileResource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.AddFileResourceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).AddFileResource(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_AddFileResource_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).AddFileResource(ctx, req.(*milvuspb.AddFileResourceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_RemoveFileResource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.RemoveFileResourceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).RemoveFileResource(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_RemoveFileResource_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).RemoveFileResource(ctx, req.(*milvuspb.RemoveFileResourceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_ListFileResources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.ListFileResourcesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).ListFileResources(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_ListFileResources_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).ListFileResources(ctx, req.(*milvuspb.ListFileResourcesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RootCoord_ServiceDesc is the grpc.ServiceDesc for RootCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2522,6 +2623,18 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BackupEzk",
 			Handler:    _RootCoord_BackupEzk_Handler,
+		},
+		{
+			MethodName: "AddFileResource",
+			Handler:    _RootCoord_AddFileResource_Handler,
+		},
+		{
+			MethodName: "RemoveFileResource",
+			Handler:    _RootCoord_RemoveFileResource_Handler,
+		},
+		{
+			MethodName: "ListFileResources",
+			Handler:    _RootCoord_ListFileResources_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

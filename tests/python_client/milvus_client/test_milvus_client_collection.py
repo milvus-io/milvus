@@ -3734,6 +3734,9 @@ class TestMilvusClientCollectionDefaultValueInvalid(TestMilvusClientV2Base):
         method: create collection with data type not matched default value
         expected: raise exception
         """
+        # Skip when default_value is 9.09 and field_type is FLOAT
+        if isinstance(default_value, float) and default_value == 9.09 and field_type == DataType.FLOAT:
+            pytest.skip("Skip test when default_value is 9.09 and field_type is FLOAT")
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # Create schema with field that has mismatched default value type

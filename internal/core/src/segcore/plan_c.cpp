@@ -21,13 +21,28 @@ CreateSearchPlanByExpr(CCollection c_col,
                        const int64_t size,
                        CSearchPlan* res_plan) {
     auto col = static_cast<milvus::segcore::Collection*>(c_col);
+    auto schema = col->get_schema();
 
     try {
         auto res = milvus::query::CreateSearchPlanByExpr(
-            col->get_schema(), serialized_expr_plan, size);
+            schema, serialized_expr_plan, size);
         auto col_index_meta = col->get_index_meta();
         auto field_id = milvus::query::GetFieldID(res.get());
         AssertInfo(col_index_meta != nullptr, "index meta not exist");
+
+        if (!col_index_meta->HasField(milvus::FieldId(field_id))) {
+            auto status = CStatus();
+            status.error_code = milvus::FieldNotLoaded;
+            auto field_name =
+                (*schema)[milvus::FieldId(field_id)].get_name().get();
+            std::string err_msg =
+                "field " + field_name +
+                " is not loaded, please reload the collection";
+            status.error_msg = strdup(err_msg.c_str());
+            *res_plan = nullptr;
+            return status;
+        }
+
         auto field_index_meta =
             col_index_meta->GetFieldIndexMeta(milvus::FieldId(field_id));
         res->plan_node_->search_info_.metric_type_ =

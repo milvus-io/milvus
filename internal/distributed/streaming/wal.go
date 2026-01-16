@@ -105,7 +105,7 @@ func (w *walAccesserImpl) RawAppend(ctx context.Context, msg message.MutableMess
 // Read returns a scanner for reading records from the wal.
 func (w *walAccesserImpl) Read(ctx context.Context, opts ReadOption) Scanner {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
-		newErrScanner(ErrWALAccesserClosed)
+		return newErrScanner(ErrWALAccesserClosed)
 	}
 	defer w.lifetime.Done()
 

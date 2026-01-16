@@ -757,7 +757,7 @@ JsonKeyStats::BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas,
 
     // for storage v2, we need to add bucket name to remote prefix
     auto remote_prefix =
-        AddBucketName(disk_file_manager_->GetRemoteJsonStatsShreddingPrefix());
+        disk_file_manager_->GetRemoteJsonStatsShreddingPrefix();
     LOG_INFO(
         "init parquet writer with shredding remote prefix: {} for segment {}",
         remote_prefix,
@@ -905,7 +905,7 @@ JsonKeyStats::LoadShreddingMeta(
     }
 
     auto remote_prefix =
-        AddBucketName(disk_file_manager_->GetRemoteJsonStatsShreddingPrefix());
+        disk_file_manager_->GetRemoteJsonStatsShreddingPrefix();
 
     // load common meta from parquet only if key_field_map_ is not already populated
     // (for backward compatibility with old data that doesn't have separate meta file)
@@ -938,7 +938,7 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
     int64_t num_rows = 0;
 
     auto remote_prefix =
-        AddBucketName(disk_file_manager_->GetRemoteJsonStatsShreddingPrefix());
+        disk_file_manager_->GetRemoteJsonStatsShreddingPrefix();
 
     std::vector<std::string> files;
     for (const auto& file_id : file_ids) {

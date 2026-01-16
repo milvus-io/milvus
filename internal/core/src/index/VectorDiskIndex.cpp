@@ -28,6 +28,7 @@
 #include "common/RangeSearchHelper.h"
 #include "indexbuilder/types.h"
 #include "filemanager/FileManager.h"
+#include "log/Log.h"
 
 namespace milvus::index {
 
@@ -160,6 +161,9 @@ VectorDiskAnnIndex<T>::Upload(const Config& config) {
 template <typename T>
 void
 VectorDiskAnnIndex<T>::Build(const Config& config) {
+    LOG_INFO("start build disk index, build_id: {}",
+             config.value("build_id", "unknown"));
+
     auto local_chunk_manager =
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     knowhere::Json build_config;
@@ -181,6 +185,11 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
         config_with_emb_list[EMB_LIST_OFFSETS_PATH] = offsets_path;
     }
 
+    // Set valid data path to track nullable vector fields
+    auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
+    auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
+    config_with_emb_list[VALID_DATA_PATH_KEY] = valid_data_path;
+
     auto local_data_path =
         file_manager_->CacheRawDataToDisk<T>(config_with_emb_list);
     build_config[DISK_ANN_RAW_DATA_PATH] = local_data_path;
@@ -195,7 +204,6 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
         build_config[EMB_LIST_OFFSETS_PATH] = offsets_path;
     }
 
-    auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
     build_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
 
     if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
@@ -227,8 +235,16 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
         ThrowInfo(ErrorCode::IndexBuildError,
                   "failed to build disk index, " + KnowhereStatusString(stat));
 
+    // Add valid_data file to index if it was created (nullable vector field)
+    if (local_chunk_manager->Exist(valid_data_path)) {
+        file_manager_->AddFile(valid_data_path);
+    }
+
     local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
         local_chunk_manager, segment_id, field_id));
+
+    LOG_INFO("build disk index done, build_id: {}",
+             config.value("build_id", "unknown"));
 }
 
 template <typename T>

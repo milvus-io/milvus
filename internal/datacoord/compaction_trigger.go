@@ -230,6 +230,13 @@ func (t *compactionTrigger) getCollection(collectionID UniqueID) (*collectionInf
 }
 
 func isCollectionAutoCompactionEnabled(coll *collectionInfo) bool {
+	if coll == nil {
+		return false
+	}
+	if coll.IsExternal() {
+		log.Debug("collection auto compaction disabled for external collection", zap.Int64("collectionID", coll.ID))
+		return false
+	}
 	enabled, err := getCollectionAutoCompactionEnabled(coll.Properties)
 	if err != nil {
 		log.Warn("collection properties auto compaction not valid, returning false", zap.Error(err))

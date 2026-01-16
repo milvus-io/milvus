@@ -1489,6 +1489,10 @@ func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{}
 		return err
 	}
 
+	if typeutil.IsVectorType(column.DataType) {
+		return fmt.Errorf("IsNull/IsNotNull operations are not supported on vector fields")
+	}
+
 	if len(column.NestedPath) != 0 {
 		// convert json not null expr to exists expr, eg: json['a'] is not null -> exists json['a']
 		expr := &planpb.Expr{
@@ -1527,6 +1531,10 @@ func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
 	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil)
 	if err != nil {
 		return err
+	}
+
+	if typeutil.IsVectorType(column.DataType) {
+		return fmt.Errorf("IsNull/IsNotNull operations are not supported on vector fields")
 	}
 
 	if len(column.NestedPath) != 0 {

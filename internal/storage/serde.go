@@ -877,7 +877,7 @@ func getArrayOfVectorArrowType(elementType schemapb.DataType, dim int) arrow.Dat
 }
 
 // deserializeArrayOfVector deserializes ArrayOfVector data with known element type
-func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataType, dim int64, shouldCopy bool) (any, bool) {
+func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataType, dim int64, _ bool) (any, bool) {
 	if a.IsNull(i) {
 		return nil, true
 	}
@@ -889,15 +889,44 @@ func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataTyp
 
 	start, end := arr.ValueOffsets(i)
 	totalElements := end - start
+
+	// Handle empty vector array - return empty VectorField based on element type
 	if totalElements == 0 {
-		return nil, false
+		switch elementType {
+		case schemapb.DataType_FloatVector:
+			return &schemapb.VectorField{
+				Dim:  dim,
+				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{}}},
+			}, true
+		case schemapb.DataType_BinaryVector:
+			return &schemapb.VectorField{
+				Dim:  dim,
+				Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}},
+			}, true
+		case schemapb.DataType_Float16Vector:
+			return &schemapb.VectorField{
+				Dim:  dim,
+				Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{}},
+			}, true
+		case schemapb.DataType_BFloat16Vector:
+			return &schemapb.VectorField{
+				Dim:  dim,
+				Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{}},
+			}, true
+		case schemapb.DataType_Int8Vector:
+			return &schemapb.VectorField{
+				Dim:  dim,
+				Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{}},
+			}, true
+		default:
+			return nil, false
+		}
 	}
 
 	valuesArray := arr.ListValues()
 	binaryArray, ok := valuesArray.(*array.FixedSizeBinary)
 	if !ok {
-		// empty array
-		return nil, true
+		return nil, false
 	}
 
 	numVectors := int(totalElements)

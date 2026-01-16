@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -453,6 +454,10 @@ func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
 	if err := RunBm25Function(task, data); err != nil {
 		return err
 	}
+
+	if err := RunMinHashFunction(task, data); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -467,8 +472,8 @@ func RunDenseEmbedding(task *ImportTask, data *storage.InsertData) error {
 		return err
 	}
 	log.Info("needProcessFunctions", zap.Any("needProcessFunctions", needProcessFunctions))
-	if embedding.HasNonBM25Functions(schema.Functions, []int64{}) {
-		log.Info("has non bm25 functions")
+	if embedding.HasNonBM25AndMinHashFunctions(schema.Functions, []int64{}) {
+		log.Info("has non bm25/minhash functions")
 		extraInfo := &models.ModelExtraInfo{
 			ClusterID: task.req.ClusterID,
 			DBName:    task.req.Schema.DbName,
@@ -489,6 +494,9 @@ func RunBm25Function(task *ImportTask, data *storage.InsertData) error {
 	log.Info("start to run bm25 function")
 	fns := task.GetSchema().GetFunctions()
 	for _, fn := range fns {
+		if fn.GetType() != schemapb.FunctionType_BM25 {
+			continue
+		}
 		runner, err := function.NewFunctionRunner(task.GetSchema(), fn)
 		if err != nil {
 			return err
@@ -533,6 +541,69 @@ func RunBm25Function(task *ImportTask, data *storage.InsertData) error {
 			default:
 				return fmt.Errorf("unsupported output data type for embedding function: %s", outputField.GetDataType().String())
 			}
+		}
+	}
+	return nil
+}
+
+func RunMinHashFunction(task *ImportTask, data *storage.InsertData) error {
+	fns := task.GetSchema().GetFunctions()
+	for _, fn := range fns {
+		if fn.GetType() != schemapb.FunctionType_MinHash {
+			continue
+		}
+		runner, err := function.NewFunctionRunner(task.GetSchema(), fn)
+		if err != nil {
+			return err
+		}
+
+		if runner == nil {
+			continue
+		}
+
+		defer runner.Close()
+
+		inputFieldIDs := lo.Map(runner.GetInputFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })
+		inputDatas := make([]any, 0, len(inputFieldIDs))
+		for _, inputFieldID := range inputFieldIDs {
+			inputDatas = append(inputDatas, data.Data[inputFieldID].GetDataRows())
+		}
+
+		output, err := runner.BatchRun(inputDatas...)
+		if err != nil {
+			return err
+		}
+
+		// Sanity check: ensure BatchRun returned at least one output
+		if len(output) == 0 {
+			return errors.New("MinHash embedding failed: runner.BatchRun returned empty output")
+		}
+
+		// MinHash function has only one output field
+		fieldData, ok := output[0].(*schemapb.FieldData)
+		if !ok {
+			return errors.New("MinHash embedding failed: MinHash runner output not FieldData")
+		}
+
+		vectorField := fieldData.GetVectors()
+		if vectorField == nil {
+			return errors.New("MinHash embedding failed: output is not a vector field")
+		}
+
+		binaryVector := vectorField.GetBinaryVector()
+		if binaryVector == nil {
+			return errors.New("MinHash embedding failed: output is not a binary vector")
+		}
+
+		outputFields := runner.GetOutputFields()
+		if len(outputFields) == 0 {
+			return errors.New("MinHash embedding failed: runner has no output fields")
+		}
+
+		outputFieldId := outputFields[0].GetFieldID()
+		data.Data[outputFieldId] = &storage.BinaryVectorFieldData{
+			Data: binaryVector,
+			Dim:  int(vectorField.GetDim()),
 		}
 	}
 	return nil

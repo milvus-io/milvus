@@ -901,6 +901,107 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		err := task.validateSchema(context.TODO(), schema)
 		assert.NoError(t, err)
 	})
+
+	t.Run("external schema valid case", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name:           collectionName,
+			ExternalSource: "s3://bucket/object",
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "text_field",
+					DataType:      schemapb.DataType_VarChar,
+					ExternalField: "text_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "64"},
+					},
+				},
+				{
+					Name:          "vec_field",
+					DataType:      schemapb.DataType_FloatVector,
+					ExternalField: "vec_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "16"},
+					},
+				},
+			},
+		}
+		err := task.validateSchema(context.TODO(), schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("external schema reject primary key", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name:           collectionName,
+			ExternalSource: "s3://bucket/object",
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "pk",
+					DataType:      schemapb.DataType_Int64,
+					IsPrimaryKey:  true,
+					ExternalField: "pk_col",
+				},
+				{
+					Name:          "vec_field",
+					DataType:      schemapb.DataType_FloatVector,
+					ExternalField: "vec_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "16"},
+					},
+				},
+			},
+		}
+		err := task.validateSchema(context.TODO(), schema)
+		assert.Error(t, err)
+	})
+
+	t.Run("external schema reject functions", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name:           collectionName,
+			ExternalSource: "s3://bucket/object",
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "text_field",
+					DataType:      schemapb.DataType_VarChar,
+					ExternalField: "text_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "64"},
+					},
+				},
+				{
+					Name:          "vec_field",
+					DataType:      schemapb.DataType_FloatVector,
+					ExternalField: "vec_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "16"},
+					},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{{Name: "test_func"}},
+		}
+		err := task.validateSchema(context.TODO(), schema)
+		assert.Error(t, err)
+	})
 }
 
 func Test_createCollectionTask_prepareSchema(t *testing.T) {
@@ -1770,6 +1871,53 @@ func TestNamespaceProperty(t *testing.T) {
 			DataType:       schemapb.DataType_Int64,
 			IsPartitionKey: true,
 		})
+
+		task := &createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				CollectionName: collectionName,
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.NamespaceEnabledKey,
+						Value: "true",
+					},
+				},
+			},
+			header: &message.CreateCollectionMessageHeader{},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
+		}
+
+		err := task.handleNamespaceField(ctx, schema)
+		assert.Error(t, err)
+	})
+
+	t.Run("test namespace enabled with external collection", func(t *testing.T) {
+		// External collection is identified by having ExternalField set on fields
+		schema := &schemapb.CollectionSchema{
+			Name:           collectionName,
+			ExternalSource: "s3://bucket/path",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:       100,
+					Name:          "text",
+					DataType:      schemapb.DataType_VarChar,
+					ExternalField: "text_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "256"},
+					},
+				},
+				{
+					FieldID:       101,
+					Name:          "vector",
+					DataType:      schemapb.DataType_FloatVector,
+					ExternalField: "vector_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "1024"},
+					},
+				},
+			},
+		}
 
 		task := &createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{

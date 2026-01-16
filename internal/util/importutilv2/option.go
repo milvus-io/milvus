@@ -147,10 +147,16 @@ func GetStorageVersion(options Options) (int64, error) {
 	if err != nil {
 		return 0, merr.WrapErrImportFailed(fmt.Sprintf("parse storage_version failed, value=%s, err=%s", storageVersion, err))
 	}
-	if version == storage.StorageV2 {
+	switch version {
+	case storage.StorageV2:
 		return storage.StorageV2, nil
+	case storage.StorageV3:
+		return storage.StorageV3, nil
+	case storage.StorageV1:
+		fallthrough
+	default:
+		return storage.StorageV1, nil
 	}
-	return storage.StorageV1, nil
 }
 
 // SkipDiskQuotaCheck indicates whether the import skips the disk quota check.

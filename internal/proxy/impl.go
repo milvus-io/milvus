@@ -77,6 +77,17 @@ import (
 
 const moduleName = "Proxy"
 
+// checkExternalCollectionBlockedForWrite checks if the collection is external and returns error if so.
+// External collections do not support write operations (insert, delete, upsert, flush, etc).
+func checkExternalCollectionBlockedForWrite(ctx context.Context, dbName, collName, operation string) error {
+	collSchema, _ := globalMetaCache.GetCollectionSchema(ctx, dbName, collName)
+	if collSchema != nil && typeutil.IsExternalCollection(collSchema.CollectionSchema) {
+		return merr.WrapErrParameterInvalidMsg(
+			"%s operation is not supported for external collection %s", operation, collName)
+	}
+	return nil
+}
+
 // GetComponentStates gets the state of Proxy.
 func (node *Proxy) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	stats := &milvuspb.ComponentStates{
@@ -940,6 +951,13 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 	if err := merr.CheckRPCCall(dresp, err); err != nil {
 		return merr.Status(err), nil
 	}
+
+	// Check for external collection - add field is not supported
+	if typeutil.IsExternalCollection(dresp.GetSchema()) {
+		return merr.Status(merr.WrapErrParameterInvalidMsg(
+			"add field operation is not supported for external collection %s", request.GetCollectionName())), nil
+	}
+
 	task := &addCollectionFieldTask{
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
@@ -1415,6 +1433,11 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 	method := "AlterCollectionField"
 	tr := timerecord.NewTimeRecorder(method)
 
+	// Check for external collection - alter field is not supported
+	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "alter field"); err != nil {
+		return merr.Status(err), nil
+	}
+
 	act := &alterCollectionFieldTask{
 		ctx:                         ctx,
 		Condition:                   NewTaskCondition(ctx),
@@ -1467,6 +1490,11 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 // CreatePartition create a partition in specific collection.
 func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	// Check for external collection - create partition is not supported
+	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "create partition"); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -1526,6 +1554,11 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 // DropPartition drop a partition in specific collection.
 func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	// Check for external collection - drop partition is not supported
+	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "drop partition"); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -2530,6 +2563,13 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		}, nil
 	}
 
+	// Check for external collection - insert is not supported
+	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "insert"); err != nil {
+		return &milvuspb.MutationResult{
+			Status: merr.Status(err),
+		}, nil
+	}
+
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
@@ -2676,6 +2716,13 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
+	// Check for external collection - delete is not supported
+	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "delete"); err != nil {
+		return &milvuspb.MutationResult{
+			Status: merr.Status(err),
+		}, nil
+	}
+
 	tr := timerecord.NewTimeRecorder(method)
 
 	var limiter types.Limiter
@@ -2772,6 +2819,14 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 			Status: merr.Status(err),
 		}, nil
 	}
+
+	// Check for external collection - upsert is not supported
+	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "upsert"); err != nil {
+		return &milvuspb.MutationResult{
+			Status: merr.Status(err),
+		}, nil
+	}
+
 	method := "Upsert"
 	tr := timerecord.NewTimeRecorder(method)
 
@@ -3044,16 +3099,19 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		zap.Bool("useDefaultConsistency", request.GetUseDefaultConsistency()),
 	)
 
+	succeeded := false
 	defer func() {
+		if !succeeded {
+			return
+		}
 		span := tr.ElapseSpan()
 		spanPerNq := span
 		if qt.SearchRequest.GetNq() > 0 {
 			spanPerNq = span / time.Duration(qt.SearchRequest.GetNq())
 		}
-		if spanPerNq >= paramtable.Get().ProxyCfg.SlowLogSpanInSeconds.GetAsDuration(time.Second) {
+		if spanPerNq >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			log.Info(rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
 				zap.Int64("nq", qt.SearchRequest.GetNq()), zap.Duration("duration", span), zap.Duration("durationPerNq", spanPerNq))
-			// WebUI slow query shall use slow log as well.
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -3062,8 +3120,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			if node.slowQueries != nil {
 				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithSearchRequest(request, user, span, traceID))
 			}
-		}
-		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			metrics.ProxySlowQueryCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -3166,6 +3222,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
 	}
+	succeeded = true
 	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, qt.isRecallEvaluation, nil
 }
 
@@ -3275,11 +3332,23 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		zap.Stringer("dsls", &hybridSearchRequestExprLogger{HybridSearchRequest: request}),
 	)
 
+	succeeded := false
 	defer func() {
+		if !succeeded {
+			return
+		}
 		span := tr.ElapseSpan()
-		if span >= paramtable.Get().ProxyCfg.SlowLogSpanInSeconds.GetAsDuration(time.Second) {
-			log.Info(rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()), zap.Duration("duration", span))
-			// WebUI slow query shall use slow log as well.
+		spanPerNq := span
+		var totalNq int64
+		for _, subReq := range request.GetRequests() {
+			totalNq += subReq.GetNq()
+		}
+		if totalNq > 0 {
+			spanPerNq = span / time.Duration(totalNq)
+		}
+		if spanPerNq >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
+			log.Info(rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
+				zap.Int64("totalNq", totalNq), zap.Duration("duration", span), zap.Duration("durationPerNq", spanPerNq))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -3288,8 +3357,6 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			if node.slowQueries != nil {
 				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithSearchRequest(newSearchReq, user, span, traceID))
 			}
-		}
-		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			metrics.ProxySlowQueryCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.HybridSearchLabel,
@@ -3391,6 +3458,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeHybridSearch, dbName, username).Add(float64(v))
 		}
 	}
+	succeeded = true
 	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, nil
 }
 
@@ -3472,8 +3540,23 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		return merr.WrapErrParameterInvalidMsg("array of vector is not supported for search by IDs")
 	}
 
-	if !typeutil.IsVectorType(annField.GetDataType()) {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field (%s) to search is not of vector data type", annsFieldName))
+	// Check if this is a BM25 function-based search
+	bm25Function, isBM25Search := getBM25FunctionOfAnnsField(annField.GetFieldID(), collectionInfo.schema.CollectionSchema.Functions)
+
+	// For BM25 search, we need to fetch text field; for vector search, we need vector field
+	var fieldToFetch string
+	if isBM25Search {
+		// BM25 search: fetch the input text field of the BM25 function
+		if len(bm25Function.InputFieldNames) == 0 {
+			return merr.WrapErrParameterInvalidMsg("BM25 function has no input field")
+		}
+		fieldToFetch = bm25Function.InputFieldNames[0]
+	} else {
+		// Vector search: validate and fetch the vector field
+		if !typeutil.IsVectorType(annField.GetDataType()) {
+			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field (%s) to search is not of vector data type", annsFieldName))
+		}
+		fieldToFetch = annsFieldName
 	}
 
 	// Get primary key field
@@ -3490,12 +3573,13 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	// Create requery plan using IDs (no expr parsing overhead)
 	plan := planparserv2.CreateRequeryPlan(pkField, ids)
 
-	// Build query request to fetch vectors by IDs
+	// Build query request to fetch data by IDs
+	// For BM25: fetch text field; for vector search: fetch vector field
 	queryReq := &milvuspb.QueryRequest{
 		Base:                  request.Base,
 		DbName:                request.DbName,
 		CollectionName:        request.CollectionName,
-		OutputFields:          []string{pkField.GetName(), annsFieldName}, // Only need the vector field
+		OutputFields:          []string{pkField.GetName(), fieldToFetch},
 		PartitionNames:        request.PartitionNames,
 		TravelTimestamp:       request.TravelTimestamp,
 		GuaranteeTimestamp:    request.GuaranteeTimestamp,
@@ -3580,20 +3664,28 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 			fmt.Sprintf("some of the provided primary key IDs do not exist: missing IDs = %v", missingIDs))
 	}
 
-	// Extract vector field from query result
-	vectorFieldData := lo.FindOrElse(queryResult.GetFieldsData(), nil, func(f *schemapb.FieldData) bool {
-		return f.GetFieldName() == annsFieldName || f.GetType() == schemapb.DataType_ArrayOfStruct
+	// Extract the field data from query result
+	// For BM25: extract text field; for vector search: extract vector field
+	fieldData := lo.FindOrElse(queryResult.GetFieldsData(), nil, func(f *schemapb.FieldData) bool {
+		return f.GetFieldName() == fieldToFetch || f.GetType() == schemapb.DataType_ArrayOfStruct
 	})
 
-	if vectorFieldData == nil {
-		return merr.WrapErrFieldNotFound(annsFieldName, "vector field not found in query result")
+	if fieldData == nil {
+		return merr.WrapErrFieldNotFound(fieldToFetch, "field not found in query result")
 	}
 
-	// Convert to PlaceholderGroup
-	placeholderBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(vectorFieldData)
+	// For BM25: converts VarChar to VarChar placeholder (text input for BM25 function)
+	// For vector search: converts vector to vector placeholder
+	placeholderBytes, vectorCount, err := funcutil.FieldDataToPlaceholderGroupBytesWithCount(fieldData)
 	if err != nil {
 		return err
 	}
+
+	if vectorCount == 0 {
+		return merr.WrapErrParameterInvalidMsg("cannot search: all provided IDs have null vector values in field '%s'", annsFieldName)
+	}
+
+	request.Nq = int64(vectorCount)
 
 	// Transform request: replace IDs with PlaceholderGroup
 	// Now the request is ready for normal search pipeline
@@ -3612,6 +3704,14 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
+	}
+
+	// Check for external collection - flush is not supported
+	for _, collName := range request.GetCollectionNames() {
+		if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), collName, "flush"); err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
 	}
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Flush")
@@ -3697,9 +3797,13 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 	tr := timerecord.NewTimeRecorder(method)
 
+	succeeded := false
 	defer func() {
+		if !succeeded {
+			return
+		}
 		span := tr.ElapseSpan()
-		if span >= paramtable.Get().ProxyCfg.SlowLogSpanInSeconds.GetAsDuration(time.Second) {
+		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			log.Info(
 				rpcSlow(method),
 				zap.String("expr", request.Expr),
@@ -3707,18 +3811,14 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 				zap.Uint64("travel_timestamp", request.TravelTimestamp),
 				zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
 				zap.Duration("duration", span))
-			// WebUI slow query shall use slow log as well.
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
 				traceID = sp.SpanContext().TraceID().String()
 			}
-
 			if node.slowQueries != nil {
 				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithQueryRequest(request, user, span, traceID))
 			}
-		}
-		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			metrics.ProxySlowQueryCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.QueryLabel,
@@ -3772,6 +3872,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}
 
+	succeeded = true
 	return qt.result, qt.storageCost, nil
 }
 
@@ -4801,7 +4902,29 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 		}
 	}
 
-	resp, err := node.mixCoord.ManualCompaction(ctx, req)
+	// Check for external collection - manual compaction is not supported
+	// Only check if we have collection identifier (collectionID > 0 or collectionName not empty)
+	if req.GetCollectionID() > 0 || req.GetCollectionName() != "" {
+		collInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), req.GetCollectionID())
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		if typeutil.IsExternalCollection(collInfo.schema.CollectionSchema) {
+			var collIdentifier string
+			if req.GetCollectionName() != "" {
+				collIdentifier = fmt.Sprintf("name=%s", req.GetCollectionName())
+			} else {
+				collIdentifier = fmt.Sprintf("id=%d", req.GetCollectionID())
+			}
+			resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg(
+				"manual compaction is not supported for external collection (%s)", collIdentifier))
+			return resp, nil
+		}
+	}
+
+	var err error
+	resp, err = node.mixCoord.ManualCompaction(ctx, req)
 	log.Info("received ManualCompaction response",
 		zap.Any("resp", resp),
 		zap.Error(err))
@@ -6386,6 +6509,12 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
 	}
+
+	// Check for external collection - import is not supported
+	if err := checkExternalCollectionBlockedForWrite(ctx, req.GetDbName(), req.GetCollectionName(), "import"); err != nil {
+		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
+	}
+
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("collectionName", req.GetCollectionName()),
@@ -6792,20 +6921,19 @@ func (node *Proxy) AddFileResource(ctx context.Context, req *milvuspb.AddFileRes
 	}
 
 	log.Info("receive AddFileResource request")
-	return merr.Status(errors.New("AddFileResource is not implemented")), nil
 
-	// status, err := node.mixCoord.AddFileResource(ctx, req)
-	// if err != nil {
-	// 	log.Warn("AddFileResource fail", zap.Error(err))
-	// 	return merr.Status(err), nil
-	// }
-	// if err = merr.Error(status); err != nil {
-	// 	log.Warn("AddFileResource fail", zap.Error(err))
-	// 	return merr.Status(err), nil
-	// }
+	status, err := node.mixCoord.AddFileResource(ctx, req)
+	if err != nil {
+		log.Warn("AddFileResource fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	if err = merr.Error(status); err != nil {
+		log.Warn("AddFileResource fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
 
-	// log.Info("AddFileResource success")
-	// return status, nil
+	log.Info("AddFileResource success")
+	return status, nil
 }
 
 // RemoveFileResource remove file resource from rootcoord
@@ -6822,20 +6950,19 @@ func (node *Proxy) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveF
 	}
 
 	log.Info("receive RemoveFileResource request")
-	return merr.Status(errors.New("RemoveFileResource is not implemented")), nil
 
-	// status, err := node.mixCoord.RemoveFileResource(ctx, req)
-	// if err != nil {
-	// 	log.Warn("RemoveFileResource fail", zap.Error(err))
-	// 	return merr.Status(err), nil
-	// }
-	// if err = merr.Error(status); err != nil {
-	// 	log.Warn("RemoveFileResource fail", zap.Error(err))
-	// 	return merr.Status(err), nil
-	// }
+	status, err := node.mixCoord.RemoveFileResource(ctx, req)
+	if err != nil {
+		log.Warn("RemoveFileResource fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	if err = merr.Error(status); err != nil {
+		log.Warn("RemoveFileResource fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
 
-	// log.Info("RemoveFileResource success")
-	// return status, nil
+	log.Info("RemoveFileResource success")
+	return status, nil
 }
 
 // ListFileResources list file resources from rootcoord
@@ -6852,26 +6979,23 @@ func (node *Proxy) ListFileResources(ctx context.Context, req *milvuspb.ListFile
 	}
 
 	log.Info("receive ListFileResources request")
-	return &milvuspb.ListFileResourcesResponse{
-		Status: merr.Status(errors.New("ListFileResources is not implemented")),
-	}, nil
 
-	// resp, err := node.mixCoord.ListFileResources(ctx, req)
-	// if err != nil {
-	// 	log.Warn("ListFileResources fail", zap.Error(err))
-	// 	return &milvuspb.ListFileResourcesResponse{
-	// 		Status: merr.Status(err),
-	// 	}, nil
-	// }
-	// if err = merr.Error(resp.GetStatus()); err != nil {
-	// 	log.Warn("ListFileResources fail", zap.Error(err))
-	// 	return &milvuspb.ListFileResourcesResponse{
-	// 		Status: merr.Status(err),
-	// 	}, nil
-	// }
+	resp, err := node.mixCoord.ListFileResources(ctx, req)
+	if err != nil {
+		log.Warn("ListFileResources fail", zap.Error(err))
+		return &milvuspb.ListFileResourcesResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	if err = merr.Error(resp.GetStatus()); err != nil {
+		log.Warn("ListFileResources fail", zap.Error(err))
+		return &milvuspb.ListFileResourcesResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
 
-	// log.Info("ListFileResources success", zap.Int("count", len(resp.GetResources())))
-	// return resp, nil
+	log.Info("ListFileResources success", zap.Int("count", len(resp.GetResources())))
+	return resp, nil
 }
 
 // UpdateReplicateConfiguration applies a full replacement of the current replication configuration across Milvus clusters.
