@@ -94,6 +94,8 @@ type copySegmentChecker struct {
 
 	closeOnce sync.Once     // Ensures Close is called only once
 	closeChan chan struct{} // Channel for signaling shutdown
+
+	statsRatedLogger *log.MLogger // Rated logger for stats (print every 60s when idle)
 }
 
 // NewCopySegmentChecker creates a new copy segment job checker.
@@ -117,7 +119,7 @@ func NewCopySegmentChecker(
 	alloc allocator.Allocator,
 	copyMeta CopySegmentMeta,
 ) CopySegmentChecker {
-	return &copySegmentChecker{
+	checker := &copySegmentChecker{
 		ctx:       ctx,
 		meta:      meta,
 		broker:    broker,
@@ -125,6 +127,9 @@ func NewCopySegmentChecker(
 		copyMeta:  copyMeta,
 		closeChan: make(chan struct{}),
 	}
+	// Initialize rated logger for stats (1 log per 30 seconds when active)
+	checker.statsRatedLogger = log.WithRateGroup("copy_segment_stats", 1.0/30.0, 1)
+	return checker
 }
 
 // Start begins the background checker loop that drives job state transitions.
@@ -198,6 +203,7 @@ func (c *copySegmentChecker) Close() {
 //
 // This logs the count of jobs in each state and reports metrics for monitoring.
 // Called on every checker tick to provide visibility into job progress.
+// When there are active jobs, logs every 30 seconds; when idle, does not log.
 //
 // Metrics reported:
 //   - CopySegmentJobs gauge with state label
@@ -210,6 +216,7 @@ func (c *copySegmentChecker) LogJobStats(jobs []CopySegmentJob) {
 
 	// Count jobs in each state and report metrics
 	stateNum := make(map[string]int)
+	hasActiveJobs := false
 	for state := range datapb.CopySegmentJobState_value {
 		if state == datapb.CopySegmentJobState_CopySegmentJobNone.String() {
 			continue
@@ -217,14 +224,22 @@ func (c *copySegmentChecker) LogJobStats(jobs []CopySegmentJob) {
 		num := len(byState[state])
 		stateNum[state] = num
 		metrics.CopySegmentJobs.WithLabelValues(state).Set(float64(num))
+		if num > 0 {
+			hasActiveJobs = true
+		}
 	}
-	log.Info("copy segment job stats", zap.Any("stateNum", stateNum))
+
+	// Only log when there are active jobs, rate limited to every 30 seconds
+	if hasActiveJobs {
+		c.statsRatedLogger.Info("copy segment job stats", zap.Any("stateNum", stateNum))
+	}
 }
 
 // LogTaskStats reports task statistics grouped by state.
 //
 // This logs the count of tasks in each state and reports metrics for monitoring.
 // Called on every checker tick to provide visibility into task execution.
+// When there are active tasks, logs every 30 seconds; when idle, does not log.
 //
 // Metrics reported:
 //   - CopySegmentTasks gauge with state label
@@ -244,9 +259,13 @@ func (c *copySegmentChecker) LogTaskStats() {
 	completed := len(byState[datapb.CopySegmentTaskState_CopySegmentTaskCompleted])
 	failed := len(byState[datapb.CopySegmentTaskState_CopySegmentTaskFailed])
 
-	log.Info("copy segment task stats",
-		zap.Int("pending", pending), zap.Int("inProgress", inProgress),
-		zap.Int("completed", completed), zap.Int("failed", failed))
+	// Only log when there are active tasks, rate limited to every 30 seconds
+	hasActiveTasks := pending > 0 || inProgress > 0
+	if hasActiveTasks {
+		c.statsRatedLogger.Info("copy segment task stats",
+			zap.Int("pending", pending), zap.Int("inProgress", inProgress),
+			zap.Int("completed", completed), zap.Int("failed", failed))
+	}
 
 	// Report metrics
 	metrics.CopySegmentTasks.WithLabelValues(datapb.CopySegmentTaskState_CopySegmentTaskPending.String()).Set(float64(pending))
