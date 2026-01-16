@@ -247,8 +247,8 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             // If this field doesn't exist in current, mark the column group for loading
             if (iter == cur_field_ids.end() || iter->second != i) {
                 if (schema_->ShouldLoadField(FieldId(field_id)) &&
-                    index_has_raw_data_.find(FieldId(field_id)) ==
-                        index_has_raw_data_.end()) {
+                    field_index_has_raw_data_.find(FieldId(field_id)) ==
+                        field_index_has_raw_data_.end()) {
                     fields.emplace_back(field_id);
                 } else {
                     // put lazy load & index_has_raw_data field in lazy_fields
@@ -277,11 +277,11 @@ SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
                                          SegmentLoadInfo& new_info) {
     // Find fields that were previously skipped (index had raw data)
     // but now need loading (index no longer has raw data or was dropped)
-    for (const auto& field_id : index_has_raw_data_) {
+    for (const auto& field_id : field_index_has_raw_data_) {
         // If new_info doesn't have this field in index_has_raw_data_,
         // we need to reload the field data
-        if (new_info.index_has_raw_data_.find(field_id) ==
-            new_info.index_has_raw_data_.end()) {
+        if (new_info.field_index_has_raw_data_.find(field_id) ==
+            new_info.field_index_has_raw_data_.end()) {
             diff.fields_to_reload.emplace_back(field_id);
         }
     }

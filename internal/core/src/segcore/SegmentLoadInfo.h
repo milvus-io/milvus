@@ -61,7 +61,7 @@ struct LoadDiff {
 
     // Field data that need to be dropped (field_id set)
     // Only populated when both current and new use binlog mode
-    std::set<FieldId> field_data_to_drop;
+    std::unordered_set<FieldId> field_data_to_drop;
 
     // Whether manifest path has changed (only when both use manifest mode)
     bool manifest_updated = false;

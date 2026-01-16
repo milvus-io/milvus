@@ -978,7 +978,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     LoadBatchIndexes(milvus::tracer::TraceContext& trace_ctx,
-                     const std::map<FieldId, std::vector<LoadIndexInfo>>&
+                     std::unordered_map<FieldId, std::vector<LoadIndexInfo>>&
                          field_id_to_index_info);
 
     void

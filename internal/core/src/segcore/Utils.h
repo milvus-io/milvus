@@ -189,7 +189,7 @@ getCellDataType(bool is_vector, bool is_index);
 
 void
 LoadIndexData(milvus::tracer::TraceContext& ctx,
-              milvus::segcore::LoadIndexInfo* load_index_info);
+              const milvus::segcore::LoadIndexInfo* load_index_info);
 
 /**
  * Convert Milvus timestamp to physical time in milliseconds.
