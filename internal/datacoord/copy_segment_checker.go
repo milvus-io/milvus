@@ -95,7 +95,7 @@ type copySegmentChecker struct {
 	closeOnce sync.Once     // Ensures Close is called only once
 	closeChan chan struct{} // Channel for signaling shutdown
 
-	statsRatedLogger *log.MLogger // Rated logger for stats (print every 60s when idle)
+	statsRatedLogger *log.MLogger // Rated logger for stats (rate-limited to 1 log per 30s)
 }
 
 // NewCopySegmentChecker creates a new copy segment job checker.
