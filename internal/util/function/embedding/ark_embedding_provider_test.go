@@ -188,3 +188,24 @@ func (s *ArkTextEmbeddingProviderSuite) TestNewArkEmbeddingProvider() {
 	s.Equal(provider.FieldDim(), int64(4))
 	s.True(provider.MaxBatch() > 0)
 }
+
+func (s *ArkTextEmbeddingProviderSuite) TestNewArkEmbeddingProviderWithBatchSize() {
+	functionSchema := &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_Unknown,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+		Params: []*commonpb.KeyValuePair{
+			{Key: models.ModelNameParamKey, Value: TestModel},
+			{Key: models.CredentialParamKey, Value: "mock"},
+			{Key: "batch_size", Value: "64"},
+		},
+	}
+	provider, err := NewArkEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{models.URLParamKey: "mock"}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: 5})
+	s.NoError(err)
+	s.Equal(provider.FieldDim(), int64(4))
+	// 320 = 64 * 5
+	s.Equal(320, provider.MaxBatch())
+}

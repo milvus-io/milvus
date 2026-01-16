@@ -32,9 +32,9 @@ import (
 )
 
 const (
-	arkDefaultURL           = "https://ark.cn-beijing.volces.com/api/v3"
-	arkDefaultBatchSize     = 128
-	arkMultimodalBatchSize  = 1
+	arkDefaultURL          = "https://ark.cn-beijing.volces.com/api/v3"
+	arkDefaultBatchSize    = 128
+	arkMultimodalBatchSize = 1
 )
 
 // ArkEmbeddingProvider implements the text embedding provider for Volcengine Ark/Doubao models.
@@ -83,6 +83,7 @@ func NewArkEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 	var user string
 	var dim int
 	var isMultimodal bool
+	var maxBatch int
 
 	for _, param := range functionSchema.Params {
 		switch strings.ToLower(param.Key) {
@@ -103,6 +104,15 @@ func NewArkEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 			if strings.ToLower(param.Value) == "multimodal" {
 				isMultimodal = true
 			}
+		case "batch_size":
+			var err error
+			maxBatch, err = strconv.Atoi(param.Value)
+			if err != nil {
+				return nil, fmt.Errorf("invalid 'batch_size' parameter value %q: expected integer: %w", param.Value, err)
+			}
+			if maxBatch <= 0 {
+				return nil, fmt.Errorf("invalid 'batch_size' parameter value %d: must be positive", maxBatch)
+			}
 		default:
 		}
 	}
@@ -116,9 +126,12 @@ func NewArkEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 		return nil, err
 	}
 
-	maxBatch := arkDefaultBatchSize
-	if isMultimodal {
-		maxBatch = arkMultimodalBatchSize
+	if maxBatch == 0 {
+		if isMultimodal {
+			maxBatch = arkMultimodalBatchSize
+		} else {
+			maxBatch = arkDefaultBatchSize
+		}
 	}
 
 	provider := ArkEmbeddingProvider{
