@@ -36,7 +36,9 @@ SegmentLoadInfo::GetColumnGroups() {
     auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                           .GetProperties();
 
-    column_groups_ = ::GetColumnGroups(manifest_path, properties);
+    auto loon_manifest = ::GetLoonManifest(manifest_path, properties);
+    column_groups_ = std::make_shared<milvus_storage::api::ColumnGroups>(
+        loon_manifest->columnGroups());
     return column_groups_;
 }
 
@@ -248,7 +250,7 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
     // Build a set of current FieldIds from current column groups
     std::map<int64_t, int> cur_field_ids;
     for (int i = 0; i < cur_column_group->size(); i++) {
-        auto cg = cur_column_group->get_column_group(i);
+        auto cg = cur_column_group->at(i);
         for (const auto& column : cg->columns) {
             auto field_id = std::stoll(column);
             cur_field_ids.emplace(field_id, i);
@@ -258,7 +260,7 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
     // Build a set of new FieldIds and find column groups to load
     std::map<int64_t, int> new_field_ids;
     for (int i = 0; i < new_column_group->size(); i++) {
-        auto cg = new_column_group->get_column_group(i);
+        auto cg = new_column_group->at(i);
         std::vector<FieldId> fields;
         for (const auto& column : cg->columns) {
             auto field_id = std::stoll(column);

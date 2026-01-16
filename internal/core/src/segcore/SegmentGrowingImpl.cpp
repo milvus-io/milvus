@@ -1971,7 +1971,9 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         schema_->get_primary_field_id().value_or(FieldId(-1));
     auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                           .GetProperties();
-    auto column_groups = GetColumnGroups(manifest_path, properties);
+    auto loon_manifest = GetLoonManifest(manifest_path, properties);
+    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
+        loon_manifest->columnGroups());
 
     auto arrow_schema = schema_->ConvertToArrowSchema();
     reader_ = milvus_storage::api::Reader::create(
@@ -2039,7 +2041,7 @@ SegmentGrowingImpl::LoadColumnGroup(
     int64_t index) {
     AssertInfo(index < column_groups->size(),
                "load column group index out of range");
-    auto column_group = column_groups->get_column_group(index);
+    auto column_group = column_groups->at(index);
     LOG_INFO("Loading segment {} column group {}", id_, index);
 
     auto chunk_reader_result = reader_->get_chunk_reader(index);

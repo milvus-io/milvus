@@ -2997,7 +2997,7 @@ ChunkedSegmentSealedImpl::LoadManifest(const std::string& manifest_path) {
 
     std::vector<std::pair<int, std::vector<FieldId>>> cg_field_ids;
     for (int i = 0; i < column_groups->size(); ++i) {
-        auto column_group = column_groups->get_column_group(i);
+        auto column_group = column_groups->at(i);
         std::vector<FieldId> milvus_field_ids;
         for (auto& column : column_group->columns) {
             auto field_id = std::stoll(column);
@@ -3055,7 +3055,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     const std::vector<FieldId>& milvus_field_ids) {
     AssertInfo(index < column_groups->size(),
                "load column group index out of range");
-    auto column_group = column_groups->get_column_group(index);
+    auto column_group = column_groups->at(index);
 
     auto field_metas = schema_->get_field_metas(milvus_field_ids);
 

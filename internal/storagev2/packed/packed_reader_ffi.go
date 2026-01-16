@@ -40,7 +40,7 @@ import (
 )
 
 func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns []string, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*FFIPackedReader, error) {
-	cColumnGroups, err := GetColumnGroups(manifestPath, storageConfig)
+	cLoonManifest, err := GetManifestHandle(manifestPath, storageConfig)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get manifest")
 	}
@@ -106,7 +106,7 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 		cNeededColumnArray := (**C.char)(unsafe.Pointer(&cNeededColumn[0]))
 		cNumColumns := C.int64_t(len(neededColumns))
 
-		status = C.NewPackedFFIReaderWithManifest(cColumnGroups, cSchema, cNeededColumnArray, cNumColumns, &cPackedReader, cStorageConfig, pluginContextPtr)
+		status = C.NewPackedFFIReaderWithManifest(cLoonManifest, cSchema, cNeededColumnArray, cNumColumns, &cPackedReader, cStorageConfig, pluginContextPtr)
 	} else {
 		return nil, fmt.Errorf("storageConfig is required")
 	}
@@ -184,28 +184,36 @@ func (r *FFIPackedReader) Release() {
 	r.Close()
 }
 
-func GetColumnGroups(manifestPath string, storageConfig *indexpb.StorageConfig) (columnGroups C.ColumnGroupsHandle, err error) {
-	var cColumnGroups C.ColumnGroupsHandle
+func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig) (loonManifestHandle *C.LoonManifest, err error) {
+	var cManifestHandle *C.LoonManifest
 	basePath, version, err := UnmarshalManfestPath(manifestPath)
 	if err != nil {
-		return cColumnGroups, err
+		return cManifestHandle, err
 	}
 	log.Info("GetManifest", zap.String("manifestPath", manifestPath), zap.String("basePath", basePath), zap.Int64("version", version))
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return cColumnGroups, err
+		return cManifestHandle, err
 	}
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 
-	result := C.get_column_groups_by_version(cBasePath, cProperties, C.int64_t(version), &cColumnGroups)
-	err = HandleFFIResult(result)
+	var cTransactionHandle C.LoonTransactionHandle
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), 1, &cTransactionHandle)
+	err = HandleLoonFFIResult(result)
 	if err != nil {
-		return cColumnGroups, err
+		return cManifestHandle, err
+	}
+	defer C.loon_transaction_destroy(cTransactionHandle)
+
+	result = C.loon_transaction_get_manifest(cTransactionHandle, &cManifestHandle)
+	err = HandleLoonFFIResult(result)
+	if err != nil {
+		return cManifestHandle, err
 	}
 
-	return cColumnGroups, nil
+	return cManifestHandle, nil
 }
 
 // Ensure FFIPackedReader implements array.RecordReader interface
