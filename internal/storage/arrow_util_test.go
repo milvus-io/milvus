@@ -222,9 +222,9 @@ func TestGenerateEmptyArray(t *testing.T) {
 				assert.NoError(t, err)
 				assert.EqualValues(t, rowNum, a.Len())
 				for i := range rowNum {
-					value, ok := serdeMap[tc.field.DataType].deserialize(a, i, schemapb.DataType_None, 0, false)
+					value, deserErr := serdeMap[tc.field.DataType].deserialize(a, i, schemapb.DataType_None, 0, false)
 					assert.True(t, a.IsValid(i))
-					assert.True(t, ok)
+					assert.NoError(t, deserErr)
 					assert.Equal(t, tc.expectValue, value)
 				}
 			}
