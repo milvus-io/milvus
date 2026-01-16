@@ -575,7 +575,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		if v, ok := v.([]byte); ok {
 			if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
 				builder.Append(v)
-				return true
+				return nil
 			}
 			if builder, ok := b.(*array.BinaryBuilder); ok {
 				builder.Append(v)
@@ -637,15 +637,15 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			} else if vv, ok := v.([]int8); ok {
 				bytesData = arrow.Int8Traits.CastToBytes(vv)
 			} else {
-				return false
+				return fmt.Errorf("expected []byte or []int8 value, got %T", v)
 			}
 			if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
 				builder.Append(bytesData)
-				return true
+				return nil
 			}
 			if builder, ok := b.(*array.BinaryBuilder); ok {
 				builder.Append(bytesData)
-				return true
+				return nil
 			}
 			return fmt.Errorf("expected *array.FixedSizeBinaryBuilder, got %T", b)
 		},
@@ -684,13 +684,13 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				}
 				if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
 					builder.Append(bytesData)
-					return true
+					return nil
 				}
 				if builder, ok := b.(*array.BinaryBuilder); ok {
 					builder.Append(bytesData)
 					return nil
 				}
-				return fmt.Errorf("expected []float32 value, got %T", v)
+				return fmt.Errorf("expected *array.FixedSizeBinaryBuilder or *array.BinaryBuilder, got %T", b)
 			}
 			return fmt.Errorf("expected *array.FixedSizeBinaryBuilder, got %T", b)
 		},

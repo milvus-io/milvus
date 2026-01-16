@@ -546,15 +546,15 @@ func TestArrayOfVectorEmptyArray(t *testing.T) {
 			defer builder.Release()
 
 			// Serialize empty vector
-			ok := entry.serialize(builder, emptyVector, tt.elementType)
-			assert.True(t, ok)
+			err := entry.serialize(builder, emptyVector, tt.elementType)
+			assert.NoError(t, err)
 
 			arr := builder.NewArray()
 			defer arr.Release()
 
 			// Deserialize and verify
-			result, ok := entry.deserialize(arr, 0, tt.elementType, tt.dim, false)
-			assert.True(t, ok, "deserialize should succeed for empty array")
+			result, err := entry.deserialize(arr, 0, tt.elementType, tt.dim, false)
+			assert.NoError(t, err)
 			assert.NotNil(t, result)
 
 			resultVector, ok := result.(*schemapb.VectorField)
