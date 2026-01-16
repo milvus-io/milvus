@@ -41,7 +41,7 @@ ENV MALLOC_CONF=background_thread:true
 # protobuf 5.x RepeatedField adds container annotations that trigger ASAN
 # container-overflow false positives during static initialization, disable it.
 ENV ASAN_OPTIONS=detect_leaks=0:detect_container_overflow=0
-RUN groupadd -r milvus && useradd -r -g milvus milvus && \
+RUN useradd -r -g root milvus && \
     mkdir -p /var/lib/milvus && \
     chown -R milvus:root /milvus /var/lib/milvus && \
     chmod -R g=u /milvus /var/lib/milvus
