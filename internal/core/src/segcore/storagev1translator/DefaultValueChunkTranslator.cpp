@@ -14,6 +14,7 @@
 #include "common/ChunkWriter.h"
 #include "common/Types.h"
 #include "segcore/Utils.h"
+#include "segcore/Utils.h"
 #include "storage/Util.h"
 
 namespace milvus::segcore::storagev1translator {
@@ -124,6 +125,7 @@ DefaultValueChunkTranslator::key() const {
 std::vector<
     std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
 DefaultValueChunkTranslator::get_cells(
+    milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
     AssertInfo(cids.size() == 1 && cids[0] == 0,
                "DefaultValueChunkTranslator only supports one cell");

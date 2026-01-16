@@ -66,8 +66,43 @@ NewSegmentWithLoadInfo(CCollection collection,
  * @param c_segment: segment handle indicate which segment to load
  * @return CStatus indicating success or failure
  */
+/**
+ * @brief Opaque handle to a cancellation source for load operations
+ */
+typedef void* CLoadCancellationSource;
+
+/**
+ * @brief Create a new cancellation source for load operations
+ * @return Handle to the cancellation source
+ */
+CLoadCancellationSource
+NewLoadCancellationSource();
+
+/**
+ * @brief Request cancellation through the source
+ * @param source: The cancellation source handle
+ */
+void
+CancelLoadCancellationSource(CLoadCancellationSource source);
+
+/**
+ * @brief Release the cancellation source
+ * @param source: The cancellation source handle to release
+ */
+void
+ReleaseLoadCancellationSource(CLoadCancellationSource source);
+
+/**
+ * @brief Load segment with cancellation support
+ * @param c_trace: tracing context param
+ * @param c_segment: segment handle indicate which segment to load
+ * @param source: cancellation source for cancelling the load operation (can be NULL)
+ * @return CStatus indicating success or failure
+ */
 CStatus
-SegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment);
+SegmentLoad(CTraceContext c_trace,
+            CSegmentInterface c_segment,
+            CLoadCancellationSource source);
 
 /**
  * @brief Reopen an existing segment with updated load information
@@ -175,13 +210,15 @@ UpdateSealedSegmentIndex(CSegmentInterface c_segment,
 CStatus
 LoadTextIndex(CSegmentInterface c_segment,
               const uint8_t* serialized_load_text_index_info,
-              const uint64_t len);
+              const uint64_t len,
+              CLoadCancellationSource source);
 
 CStatus
 LoadJsonKeyIndex(CTraceContext c_trace,
                  CSegmentInterface c_segment,
                  const uint8_t* serialied_load_json_key_index_info,
-                 const uint64_t len);
+                 const uint64_t len,
+                 CLoadCancellationSource source);
 
 CStatus
 UpdateFieldRawDataSize(CSegmentInterface c_segment,
@@ -224,7 +261,9 @@ void
 RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id);
 
 CStatus
-CreateTextIndex(CSegmentInterface c_segment, int64_t field_id);
+CreateTextIndex(CSegmentInterface c_segment,
+                int64_t field_id,
+                CLoadCancellationSource source);
 
 CStatus
 FinishLoad(CSegmentInterface c_segment);
