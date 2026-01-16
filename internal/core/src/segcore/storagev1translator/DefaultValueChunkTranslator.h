@@ -48,7 +48,8 @@ class DefaultValueChunkTranslator
     key() const override;
     std::vector<
         std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
-    get_cells(const std::vector<milvus::cachinglayer::cid_t>& cids) override;
+    get_cells(milvus::OpContext* ctx,
+              const std::vector<milvus::cachinglayer::cid_t>& cids) override;
 
     milvus::cachinglayer::Meta*
     meta() override {

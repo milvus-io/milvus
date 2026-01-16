@@ -1313,7 +1313,8 @@ getCellDataType(bool is_vector, bool is_index) {
 
 void
 LoadIndexData(milvus::tracer::TraceContext& ctx,
-              milvus::segcore::LoadIndexInfo* load_index_info) {
+              milvus::segcore::LoadIndexInfo* load_index_info,
+              milvus::OpContext* op_ctx) {
     auto& index_params = load_index_info->index_params;
     auto field_type = load_index_info->field_type;
     auto engine_version = load_index_info->index_engine_version;
@@ -1420,7 +1421,7 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
 
     load_index_info->cache_index =
         milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
-            std::move(translator));
+            std::move(translator), op_ctx);
 }
 
 FieldDataPtr

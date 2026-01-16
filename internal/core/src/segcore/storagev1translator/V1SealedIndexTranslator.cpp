@@ -1,8 +1,11 @@
 #include "segcore/storagev1translator/V1SealedIndexTranslator.h"
+
+#include <utility>
+
 #include "index/IndexFactory.h"
+#include "segcore/Utils.h"
 #include "segcore/load_index_c.h"
 #include "segcore/Utils.h"
-#include <utility>
 #include "storage/RemoteChunkManagerSingleton.h"
 
 namespace milvus::segcore::storagev1translator {
@@ -68,7 +71,13 @@ V1SealedIndexTranslator::key() const {
 std::vector<std::pair<milvus::cachinglayer::cid_t,
                       std::unique_ptr<milvus::index::IndexBase>>>
 V1SealedIndexTranslator::get_cells(
+    milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    // Check for cancellation before loading index
+    CheckCancellation(ctx,
+                      index_load_info_.segment_id,
+                      "V1SealedIndexTranslator::get_cells()");
+
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
         result;
     if (milvus::IsVectorDataType(index_load_info_.field_type)) {

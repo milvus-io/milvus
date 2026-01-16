@@ -1,5 +1,7 @@
 #include "segcore/storagev1translator/InterimSealedIndexTranslator.h"
+
 #include "index/VectorMemIndex.h"
+#include "segcore/Utils.h"
 #include "segcore/Utils.h"
 
 namespace milvus::segcore::storagev1translator {
@@ -89,7 +91,13 @@ InterimSealedIndexTranslator::key() const {
 std::vector<std::pair<milvus::cachinglayer::cid_t,
                       std::unique_ptr<milvus::index::IndexBase>>>
 InterimSealedIndexTranslator::get_cells(
+    milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    // Check for cancellation before building interim index
+    CheckCancellation(ctx,
+                      std::stoll(segment_id_),
+                      "InterimSealedIndexTranslator::get_cells()");
+
     std::unique_ptr<index::VectorIndex> vec_index = nullptr;
     if (!is_sparse_) {
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
