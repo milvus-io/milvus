@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -55,6 +55,9 @@ func (suite *ChannelCheckerTestSuite) SetupSuite() {
 }
 
 func (suite *ChannelCheckerTestSuite) SetupTest() {
+	// Reset factory first to ensure clean state for each test
+	assign.ResetGlobalAssignPolicyFactoryForTest()
+
 	snmanager.ResetDoNothingStreamingNodeManager(suite.T())
 
 	var err error
@@ -80,13 +83,18 @@ func (suite *ChannelCheckerTestSuite) SetupTest() {
 
 	distManager := meta.NewDistributionManager(suite.nodeMgr)
 
-	balancer := suite.createMockBalancer()
-	suite.checker = NewChannelChecker(suite.meta, distManager, targetManager, suite.nodeMgr, func() balance.Balance { return balancer })
+	scheduler := task.NewMockScheduler(suite.T())
+
+	// Initialize global assign policy factory before creating checker
+	assign.InitGlobalAssignPolicyFactory(scheduler, suite.nodeMgr, distManager, suite.meta, targetManager)
+
+	suite.checker = NewChannelChecker(suite.meta, distManager, targetManager, suite.nodeMgr, scheduler)
 
 	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 }
 
 func (suite *ChannelCheckerTestSuite) TearDownTest() {
+	assign.ResetGlobalAssignPolicyFactoryForTest()
 	suite.kv.Close()
 }
 
@@ -100,24 +108,6 @@ func (suite *ChannelCheckerTestSuite) setNodeAvailable(nodes ...int64) {
 		nodeInfo.SetLastHeartbeat(time.Now())
 		suite.nodeMgr.Add(nodeInfo)
 	}
-}
-
-func (suite *ChannelCheckerTestSuite) createMockBalancer() balance.Balance {
-	balancer := balance.NewMockBalancer(suite.T())
-	balancer.EXPECT().AssignChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe().Return(func(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64, _ bool) []balance.ChannelAssignPlan {
-		plans := make([]balance.ChannelAssignPlan, 0, len(channels))
-		for i, c := range channels {
-			plan := balance.ChannelAssignPlan{
-				Channel: c,
-				From:    -1,
-				To:      nodes[i%len(nodes)],
-				Replica: meta.NilReplica,
-			}
-			plans = append(plans, plan)
-		}
-		return plans
-	})
-	return balancer
 }
 
 func (suite *ChannelCheckerTestSuite) TestLoadChannel() {
