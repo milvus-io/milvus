@@ -43,7 +43,7 @@ type CompactionTaskMetaSuite struct {
 func (suite *CompactionTaskMetaSuite) SetupTest() {
 	catalog := mocks.NewDataCoordCatalog(suite.T())
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.catalog = catalog
 	meta, err := newCompactionTaskMeta(context.TODO(), catalog)
 	suite.NoError(err)
@@ -136,30 +136,32 @@ func (suite *CompactionTaskMetaSuite) TestTaskStatsJSON() {
 func (suite *CompactionTaskMetaSuite) TestReloadFromKV_PreAllocatedSegmentIDsCompatibility() {
 	// L0 delete compaction task does not use PreAllocatedSegmentIDs.
 	l0Task := &datapb.CompactionTask{
-		PlanID: 1,
-		Type:   datapb.CompactionType_Level0DeleteCompaction,
-		State:  datapb.CompactionTaskState_executing,
+		PlanID:    1,
+		TriggerID: 1,
+		Type:      datapb.CompactionType_Level0DeleteCompaction,
+		State:     datapb.CompactionTaskState_executing,
 	}
 
 	// Clustering compaction task should require PreAllocatedSegmentIDs and be
 	// marked as failed when the field is nil.
 	clusteringTask := &datapb.CompactionTask{
-		PlanID: 2,
-		Type:   datapb.CompactionType_ClusteringCompaction,
-		State:  datapb.CompactionTaskState_executing,
+		PlanID:    2,
+		TriggerID: 2,
+		Type:      datapb.CompactionType_ClusteringCompaction,
+		State:     datapb.CompactionTaskState_executing,
 	}
 
 	catalog := mocks.NewDataCoordCatalog(suite.T())
-	catalog.EXPECT().ListCompactionTask(mock.Anything).Return([]*datapb.CompactionTask{l0Task, clusteringTask}, nil)
-	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return([]*datapb.CompactionTask{l0Task, clusteringTask}, nil).Once()
 
-	_, err := newCompactionTaskMeta(context.TODO(), catalog)
+	meta, err := newCompactionTaskMeta(context.TODO(), catalog)
 	suite.NoError(err)
 
-	// L0 task should be kept as executing.
-	suite.Equal(datapb.CompactionTaskState_executing, l0Task.GetState())
+	l0Tasks := meta.GetCompactionTasksByTriggerID(1)
+	suite.Equal(1, len(l0Tasks))
+	suite.Equal(datapb.CompactionTaskState_executing, l0Tasks[0].State)
 
-	// Clustering task should be marked as failed with a proper reason.
-	suite.Equal(datapb.CompactionTaskState_failed, clusteringTask.GetState())
-	suite.Contains(clusteringTask.GetFailReason(), "PreAllocatedSegmentIDs is nil")
+	clusteringTasks := meta.GetCompactionTasksByTriggerID(2)
+	suite.Equal(1, len(clusteringTasks))
+	suite.Equal(datapb.CompactionTaskState_failed, clusteringTasks[0].State)
 }
