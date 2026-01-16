@@ -101,11 +101,11 @@ func (s *CipherSuite) TestTidyDBCipherProperties() {
 	}
 	result, err := TidyDBCipherProperties(1, dbPropertiesWithRootKey)
 	s.NoError(err)
-	s.Equal(3, len(result))
+	s.Equal(2, len(result))
 	for _, kv := range result {
 		switch kv.Key {
 		case common.EncryptionEnabledKey:
-			s.Equal(kv.Value, "true")
+			s.Fail("unexpected key")
 		case common.EncryptionEzIDKey:
 			s.Equal(kv.Value, "1")
 		case common.EncryptionRootKeyKey:
@@ -137,10 +137,16 @@ func (s *CipherSuite) TestIsDBEncryptionEnabled() {
 	dbProperties := []*commonpb.KeyValuePair{
 		{Key: common.EncryptionEnabledKey, Value: "true"},
 	}
-	s.True(IsDBEncrypted(dbProperties))
+	s.False(IsDBEncrypted(dbProperties))
 
 	dbProperties = []*commonpb.KeyValuePair{}
 	s.False(IsDBEncrypted(dbProperties))
+
+	dbProperties = []*commonpb.KeyValuePair{
+		{Key: common.EncryptionEzIDKey, Value: "1"},
+		{Key: common.EncryptionRootKeyKey, Value: "abc"},
+	}
+	s.True(IsDBEncrypted(dbProperties))
 }
 
 func (s *CipherSuite) TestTidyDBCipherPropertiesError() {
@@ -298,11 +304,6 @@ func (s *CipherSuite) TestGetEzByCollPropertiesInvalidValue() {
 	s.Equal(int64(456), result.CollectionID)
 }
 
-func (s *CipherSuite) TestIsDBEncryptionEnabledCaseInsensitive() {
-	props := []*commonpb.KeyValuePair{{Key: common.EncryptionEnabledKey, Value: "True"}}
-	s.True(IsDBEncrypted(props))
-}
-
 func (s *CipherSuite) TestTidyDBCipherPropertiesWithDefaultKey() {
 	InitTestCipher()
 
@@ -336,6 +337,7 @@ func (s *CipherSuite) TestTidyDBCipherPropertiesWithDefaultKey() {
 	result, err = TidyDBCipherProperties(101, props)
 	s.NoError(err)
 	// Verify no cipher properties
+	s.False(IsDBEncrypted(result))
 	for _, prop := range result {
 		s.NotEqual(common.EncryptionEnabledKey, prop.Key)
 		s.NotEqual(common.EncryptionEzIDKey, prop.Key)
@@ -350,7 +352,8 @@ func (s *CipherSuite) TestTidyDBCipherPropertiesWithDefaultKey() {
 	}
 	result, err = TidyDBCipherProperties(102, props)
 	s.NoError(err)
-	s.True(hasKeyValue(result, common.EncryptionEnabledKey, "true"))
+	// only has ezID and key
+	s.False(hasKeyValue(result, common.EncryptionEnabledKey, "true"))
 	s.True(hasKeyValue(result, common.EncryptionEzIDKey, "102"))
 	s.True(hasKeyValue(result, common.EncryptionRootKeyKey, "user-key"))
 	s.True(hasKeyValue(result, "other.key", "other.value"))
@@ -370,7 +373,8 @@ func (s *CipherSuite) TestTidyDBCipherPropertiesWithDefaultKey() {
 	}
 	result, err = TidyDBCipherProperties(104, props)
 	s.NoError(err)
-	s.True(hasKeyValue(result, common.EncryptionEnabledKey, "true"))
+	s.True(IsDBEncrypted(result))
+	s.False(hasKeyValue(result, common.EncryptionEnabledKey, "true"))
 	s.True(hasKeyValue(result, common.EncryptionEzIDKey, "104"))
 	s.True(hasKeyValue(result, common.EncryptionRootKeyKey, "default-kms-key"))
 	s.True(hasKeyValue(result, "other.key", "other.value"))
@@ -383,8 +387,8 @@ func (s *CipherSuite) TestTidyDBCipherPropertiesWithDefaultKey() {
 	result, err = TidyDBCipherProperties(105, props)
 	s.NoError(err)
 	// Verify no cipher properties
+	s.False(IsDBEncrypted(result))
 	for _, prop := range result {
-		s.NotEqual(common.EncryptionEnabledKey, prop.Key)
 		s.NotEqual(common.EncryptionEzIDKey, prop.Key)
 		s.NotEqual(common.EncryptionRootKeyKey, prop.Key)
 	}
@@ -398,7 +402,8 @@ func (s *CipherSuite) TestTidyDBCipherPropertiesWithDefaultKey() {
 	}
 	result, err = TidyDBCipherProperties(106, props)
 	s.NoError(err)
-	s.True(hasKeyValue(result, common.EncryptionEnabledKey, "true"))
+	s.True(IsDBEncrypted(result))
+	s.False(hasKeyValue(result, common.EncryptionEnabledKey, "true"))
 	s.True(hasKeyValue(result, common.EncryptionEzIDKey, "106"))
 	s.True(hasKeyValue(result, common.EncryptionRootKeyKey, "user-override-key"))
 	s.True(hasKeyValue(result, "other.key", "other.value"))
@@ -410,7 +415,8 @@ func (s *CipherSuite) TestTidyDBCipherPropertiesWithDefaultKey() {
 	}
 	result, err = TidyDBCipherProperties(107, props)
 	s.NoError(err)
-	s.True(hasKeyValue(result, common.EncryptionEnabledKey, "true"))
+	s.True(IsDBEncrypted(result))
+	s.False(hasKeyValue(result, common.EncryptionEnabledKey, "true"))
 	s.True(hasKeyValue(result, common.EncryptionEzIDKey, "107"))
 	s.True(hasKeyValue(result, common.EncryptionRootKeyKey, "default-kms-key"))
 	s.True(hasKeyValue(result, "other.key", "other.value"))
@@ -424,14 +430,6 @@ func hasKeyValue(props []*commonpb.KeyValuePair, key, value string) bool {
 		}
 	}
 	return false
-}
-
-func (s *CipherSuite) TestIsDBEncryptionEnabledVariousCases() {
-	props := []*commonpb.KeyValuePair{{Key: common.EncryptionEnabledKey, Value: "TRUE"}}
-	s.True(IsDBEncrypted(props))
-
-	props = []*commonpb.KeyValuePair{{Key: common.EncryptionEnabledKey, Value: "false"}}
-	s.False(IsDBEncrypted(props))
 }
 
 func (s *CipherSuite) TestRegisterCallback() {
@@ -469,22 +467,23 @@ func (s *CipherSuite) TestBackupEZ() {
 func (s *CipherSuite) TestBackupEZKFromDBProperties() {
 	storeCipher(nil)
 	props := []*commonpb.KeyValuePair{
-		{Key: common.EncryptionEnabledKey, Value: "true"},
 		{Key: common.EncryptionEzIDKey, Value: "123"},
+		{Key: common.EncryptionRootKeyKey, Value: "abc-key"},
 	}
 	_, err := BackupEZKFromDBProperties(props)
 	s.Error(err)
 	s.Equal(ErrCipherPluginMissing, err)
 
 	props = []*commonpb.KeyValuePair{
-		{Key: common.EncryptionEnabledKey, Value: "false"},
+		{Key: common.EncryptionRootKeyKey, Value: "abc-key"},
 	}
 	_, err = BackupEZKFromDBProperties(props)
 	s.Error(err)
 	s.Contains(err.Error(), "not an encryption zone")
 
 	props = []*commonpb.KeyValuePair{
-		{Key: common.EncryptionEnabledKey, Value: "true"},
+		{Key: common.EncryptionRootKeyKey, Value: "abc-key"},
+		{Key: common.EncryptionEzIDKey, Value: "fack"},
 	}
 	_, err = BackupEZKFromDBProperties(props)
 	s.Error(err)

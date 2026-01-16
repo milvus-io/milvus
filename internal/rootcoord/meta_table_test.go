@@ -1990,13 +1990,7 @@ func TestCreateDefaultDb(t *testing.T) {
 		assert.Equal(t, util.DefaultDBName, db.Name)
 
 		// Verify no encryption properties
-		hasEncryption := false
-		for _, prop := range db.Properties {
-			if prop.Key == common.EncryptionEnabledKey {
-				hasEncryption = true
-				break
-			}
-		}
+		hasEncryption := hookutil.IsDBEncrypted(db.Properties)
 		assert.False(t, hasEncryption, "default DB should not be encrypted when defaultKey is empty")
 	})
 
@@ -2031,13 +2025,9 @@ func TestCreateDefaultDb(t *testing.T) {
 		assert.Equal(t, util.DefaultDBName, db.Name)
 
 		// Verify encryption properties are present
-		hasEncryption := false
 		hasEzID := false
 		hasRootKey := false
 		for _, prop := range db.Properties {
-			if prop.Key == common.EncryptionEnabledKey && prop.Value == "true" {
-				hasEncryption = true
-			}
 			if prop.Key == common.EncryptionEzIDKey {
 				hasEzID = true
 				assert.Equal(t, prop.GetValue(), "199")
@@ -2047,7 +2037,6 @@ func TestCreateDefaultDb(t *testing.T) {
 			}
 		}
 		assert.True(t, hasRootKey, "default DB should have root key when encrypted")
-		assert.True(t, hasEncryption, "default DB should be encrypted when defaultKey is set")
 		assert.True(t, hasEzID, "default DB should have ezID when encrypted")
 	})
 
