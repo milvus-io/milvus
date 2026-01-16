@@ -190,48 +190,28 @@ func CreateEZByDBProperties(dbProperties []*commonpb.KeyValuePair) error {
 // - Encrypted DB: has cipher.ezID and cipher.Key are not empty
 // - Non-encrypted DB: no cipher.* key in properties
 func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
-	// Parse user intent from properties
-	var explicitlyEnabled, explicitlyDisabled bool
+	encryptionEnabled := true
 	var userProvidedKey string
 
 	for _, property := range dbProperties {
 		if property.Key == common.EncryptionEnabledKey {
-			value := strings.ToLower(property.Value)
-			if value == "true" {
-				explicitlyEnabled = true
-			} else if value == "false" {
-				explicitlyDisabled = true
-			}
-		}
-		if property.Key == common.EncryptionRootKeyKey {
+			encryptionEnabled = strings.ToLower(property.Value) == "true"
+		} else if property.Key == common.EncryptionRootKeyKey {
 			userProvidedKey = property.Value
 		}
 	}
 
 	cipher := GetCipher()
-
-	// No cipher plugin loaded, raise error if explicitly enabled
 	if cipher == nil {
-		if explicitlyEnabled || IsDBEncrypted(dbProperties) {
+		if encryptionEnabled || IsDBEncrypted(dbProperties) {
 			return nil, ErrCipherPluginMissing
 		}
 		return dbProperties, nil
 	}
 
 	defaultRootKey := paramtable.GetCipherParams().DefaultRootKey.GetValue()
+	shouldEncrypt := encryptionEnabled && (userProvidedKey != "" || defaultRootKey != "")
 
-	// Determine if encryption should be enabled based on decision matrix
-	shouldEncrypt := false
-	if explicitlyDisabled {
-		shouldEncrypt = false
-	} else if explicitlyEnabled {
-		shouldEncrypt = true
-	} else if defaultRootKey != "" {
-		// Implicitly enable encryption when defaultKey is set
-		shouldEncrypt = true
-	}
-
-	// Build result properties (filter out existing cipher properties)
 	result := make([]*commonpb.KeyValuePair, 0, len(dbProperties))
 	for _, property := range dbProperties {
 		if property.Key != common.EncryptionEnabledKey &&
@@ -242,18 +222,16 @@ func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) (
 	}
 
 	if !shouldEncrypt {
-		// Non-encrypted DB: no cipher.* keys in properties
 		return result, nil
 	}
 
-	// Encrypted DB: add cipher.ezID, cipher.key
-	var keyToUse string
-	if userProvidedKey != "" {
-		keyToUse = userProvidedKey
-	} else if defaultRootKey != "" {
-		keyToUse = defaultRootKey
-	} else {
+	// encryption enabled
+	if userProvidedKey == "" && defaultRootKey == "" {
 		return nil, fmt.Errorf("encryption enabled but no key provided and no default key configured")
+	}
+
+	if userProvidedKey == "" {
+		userProvidedKey = defaultRootKey
 	}
 
 	result = append(result,
@@ -263,7 +241,7 @@ func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) (
 		},
 		&commonpb.KeyValuePair{
 			Key:   common.EncryptionRootKeyKey,
-			Value: keyToUse,
+			Value: userProvidedKey,
 		},
 	)
 
