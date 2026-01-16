@@ -128,3 +128,38 @@ func (suite *CompactionTaskMetaSuite) TestTaskStatsJSON() {
 	actualJSON = suite.meta.TaskStatsJSON()
 	suite.JSONEq(string(expectedJSON), actualJSON)
 }
+
+// TestReloadFromKV_PreAllocatedSegmentIDsCompatibility verifies that compatibility
+// logic in reloadFromKV does NOT mark Level0DeleteCompaction tasks as failed when
+// PreAllocatedSegmentIDs is nil, while still failing other unfinished tasks that
+// require pre-allocated segment IDs.
+func (suite *CompactionTaskMetaSuite) TestReloadFromKV_PreAllocatedSegmentIDsCompatibility() {
+	// L0 delete compaction task does not use PreAllocatedSegmentIDs.
+	l0Task := &datapb.CompactionTask{
+		PlanID: 1,
+		Type:   datapb.CompactionType_Level0DeleteCompaction,
+		State:  datapb.CompactionTaskState_executing,
+	}
+
+	// Clustering compaction task should require PreAllocatedSegmentIDs and be
+	// marked as failed when the field is nil.
+	clusteringTask := &datapb.CompactionTask{
+		PlanID: 2,
+		Type:   datapb.CompactionType_ClusteringCompaction,
+		State:  datapb.CompactionTaskState_executing,
+	}
+
+	catalog := mocks.NewDataCoordCatalog(suite.T())
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return([]*datapb.CompactionTask{l0Task, clusteringTask}, nil)
+	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	_, err := newCompactionTaskMeta(context.TODO(), catalog)
+	suite.NoError(err)
+
+	// L0 task should be kept as executing.
+	suite.Equal(datapb.CompactionTaskState_executing, l0Task.GetState())
+
+	// Clustering task should be marked as failed with a proper reason.
+	suite.Equal(datapb.CompactionTaskState_failed, clusteringTask.GetState())
+	suite.Contains(clusteringTask.GetFailReason(), "PreAllocatedSegmentIDs is nil")
+}
