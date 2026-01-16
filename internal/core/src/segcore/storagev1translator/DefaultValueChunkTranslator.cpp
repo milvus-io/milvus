@@ -229,6 +229,7 @@ DefaultValueChunkTranslator::key() const {
 std::vector<
     std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
 DefaultValueChunkTranslator::get_cells(
+    milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
     AssertInfo(primary_buffer_.has_value(),
                "primary buffer is not initialized");

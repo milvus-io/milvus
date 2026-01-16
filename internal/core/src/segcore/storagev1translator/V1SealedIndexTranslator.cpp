@@ -68,6 +68,7 @@ V1SealedIndexTranslator::key() const {
 std::vector<std::pair<milvus::cachinglayer::cid_t,
                       std::unique_ptr<milvus::index::IndexBase>>>
 V1SealedIndexTranslator::get_cells(
+    milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
         result;

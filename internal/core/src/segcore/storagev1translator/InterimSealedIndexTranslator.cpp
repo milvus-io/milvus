@@ -89,6 +89,7 @@ InterimSealedIndexTranslator::key() const {
 std::vector<std::pair<milvus::cachinglayer::cid_t,
                       std::unique_ptr<milvus::index::IndexBase>>>
 InterimSealedIndexTranslator::get_cells(
+    milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
     std::unique_ptr<index::VectorIndex> vec_index = nullptr;
     if (!is_sparse_) {

@@ -279,7 +279,8 @@ GroupChunkTranslator::get_global_row_group_idx(size_t file_idx,
 }
 
 std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>>
-GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
+GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
+                                const std::vector<cachinglayer::cid_t>& cids) {
     std::vector<std::pair<milvus::cachinglayer::cid_t,
                           std::unique_ptr<milvus::GroupChunk>>>
         cells;

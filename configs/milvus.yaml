@@ -509,6 +509,7 @@ queryNode:
       # If a cached data hasn't been accessed again after this time since its last access, it will be evicted.
       # If set to 0, time based eviction is disabled.
       cacheTtl: 0
+      loadingTimeoutMs: 0 # Loading timeout in milliseconds for cache slot loading. 0 means no timeout.
       storageUsageTrackingEnabled: false # Enable storage usage tracking for Tiered Storage. Defaults to false.
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
     deleteDumpBatchSize: 10000 # Batch size for delete snapshot dump in segcore.
