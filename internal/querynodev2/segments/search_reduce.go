@@ -259,9 +259,10 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 	return ret, nil
 }
 
-// buildOrderByIterators creates iterators for order_by fields from OrderByFieldValue
-// Similar to how GroupByFieldValue is used, OrderByFieldValue contains the order_by field data
-// even if it's not in output_fields
+// buildOrderByIterators creates iterators for order_by fields from OrderByFieldValue.
+// OrderByFieldValue is a repeated field containing data for ALL order_by fields.
+// Each element in the slice corresponds to one order_by field in order.
+// This is separate from FieldsData (output_fields) and GroupByFieldValue.
 func buildOrderByIterators(
 	searchResultData []*schemapb.SearchResultData,
 	orderByFields []*planpb.OrderByField,
@@ -273,50 +274,25 @@ func buildOrderByIterators(
 	iterators := make([][]func(int) any, len(searchResultData))
 	for i, srd := range searchResultData {
 		iterators[i] = make([]func(int) any, len(orderByFields))
-		// Use OrderByFieldValue (similar to GroupByFieldValue)
-		// This contains the first order_by field's data (since OrderByFieldValue is a single FieldData)
-		if srd.OrderByFieldValue != nil {
-			// For now, use the first order_by field from OrderByFieldValue
-			// If there are multiple order_by fields, only the first one is available in OrderByFieldValue
-			if len(orderByFields) > 0 {
-				// Check if the first order_by field matches the OrderByFieldValue
-				// Since OrderByFieldValue is populated for the first order_by field
-				iterators[i][0] = typeutil.GetDataIterator(srd.OrderByFieldValue)
-				// For additional order_by fields, try to find them in FieldsData as fallback
-				for fieldIdx := 1; fieldIdx < len(orderByFields); fieldIdx++ {
-					fieldData := getOrderByFieldData(srd.FieldsData, orderByFields[fieldIdx].FieldId)
-					if fieldData != nil {
-						iterators[i][fieldIdx] = typeutil.GetDataIterator(fieldData)
-					} else {
-						// Field not found, return nil iterator
-						iterators[i][fieldIdx] = func(int) any { return nil }
-					}
-				}
-			}
-		} else {
-			// Fallback: try to find order_by fields in FieldsData (for backward compatibility)
-			for fieldIdx, field := range orderByFields {
-				fieldData := getOrderByFieldData(srd.FieldsData, field.FieldId)
-				if fieldData != nil {
-					iterators[i][fieldIdx] = typeutil.GetDataIterator(fieldData)
-				} else {
-					// Field not found, return nil iterator
-					iterators[i][fieldIdx] = func(int) any { return nil }
-				}
+		orderByFieldValues := srd.GetOrderByFieldValue()
+
+		// Build iterator for each order_by field from the repeated OrderByFieldValue
+		for fieldIdx := range orderByFields {
+			if fieldIdx < len(orderByFieldValues) && orderByFieldValues[fieldIdx] != nil {
+				iterators[i][fieldIdx] = typeutil.GetDataIterator(orderByFieldValues[fieldIdx])
+			} else {
+				// Field data not present - this indicates a data consistency issue
+				// Log warning and return nil iterator (comparison will treat as null)
+				log.Warn("OrderByFieldValue missing for segment, ordering may be affected",
+					zap.Int("segmentIdx", i),
+					zap.Int("fieldIdx", fieldIdx),
+					zap.Int("expectedFields", len(orderByFields)),
+					zap.Int("actualFields", len(orderByFieldValues)))
+				iterators[i][fieldIdx] = func(int) any { return nil }
 			}
 		}
 	}
 	return iterators
-}
-
-// getOrderByFieldData finds the FieldData for a given order_by field_id (fallback helper)
-func getOrderByFieldData(fieldsData []*schemapb.FieldData, fieldId int64) *schemapb.FieldData {
-	for _, fieldData := range fieldsData {
-		if fieldData != nil && fieldData.FieldId == fieldId {
-			return fieldData
-		}
-	}
-	return nil
 }
 
 type groupReduceInfo struct {
@@ -386,6 +362,33 @@ func (sor *SearchOrderByReduce) ReduceSearchResultData(ctx context.Context, sear
 	// Build order_by iterators
 	orderByIterators := buildOrderByIterators(searchResultData, orderByFields)
 
+	// Create order_by field builders for each order_by field
+	// Find the first non-empty OrderByFieldValue across all segments to get type information
+	var orderByFieldBuilders []*typeutil.FieldDataBuilder
+	if len(orderByFields) > 0 {
+		var orderByFieldValues []*schemapb.FieldData
+		for _, srd := range searchResultData {
+			if vals := srd.GetOrderByFieldValue(); len(vals) > 0 {
+				orderByFieldValues = vals
+				break
+			}
+		}
+		if len(orderByFieldValues) > 0 {
+			orderByFieldBuilders = make([]*typeutil.FieldDataBuilder, len(orderByFieldValues))
+			for fieldIdx, fieldData := range orderByFieldValues {
+				if fieldData != nil {
+					builder, err := typeutil.NewFieldDataBuilder(fieldData.GetType(), true, int(info.GetTopK()*info.GetNq()))
+					if err != nil {
+						log.Warn("failed to construct order by field data builder", zap.Error(err), zap.Int("fieldIdx", fieldIdx))
+						continue
+					}
+					builder.SetFieldId(fieldData.GetFieldId())
+					orderByFieldBuilders[fieldIdx] = builder
+				}
+			}
+		}
+	}
+
 	idxComputers := make([]*typeutil.FieldDataIdxComputer, len(searchResultData))
 	for i, srd := range searchResultData {
 		idxComputers[i] = typeutil.NewFieldDataIdxComputer(srd.FieldsData)
@@ -418,6 +421,18 @@ func (sor *SearchOrderByReduce) ReduceSearchResultData(ctx context.Context, sear
 				if searchResultData[sel].ElementIndices != nil && ret.ElementIndices != nil {
 					ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[sel].ElementIndices.Data[idx])
 				}
+
+				// Add order_by field values
+				if len(orderByFieldBuilders) > 0 && orderByIterators != nil && sel < len(orderByIterators) {
+					iterators := orderByIterators[sel]
+					for fieldIdx, builder := range orderByFieldBuilders {
+						if builder != nil && fieldIdx < len(iterators) && iterators[fieldIdx] != nil {
+							orderByVal := iterators[fieldIdx](int(idx))
+							builder.Add(orderByVal)
+						}
+					}
+				}
+
 				idSet[id] = struct{}{}
 				j++
 			} else {
@@ -434,6 +449,17 @@ func (sor *SearchOrderByReduce) ReduceSearchResultData(ctx context.Context, sear
 			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
+
+	// Set OrderByFieldValue in result
+	if len(orderByFieldBuilders) > 0 {
+		ret.OrderByFieldValue = make([]*schemapb.FieldData, len(orderByFieldBuilders))
+		for fieldIdx, builder := range orderByFieldBuilders {
+			if builder != nil {
+				ret.OrderByFieldValue[fieldIdx] = builder.Build()
+			}
+		}
+	}
+
 	log.Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
 	return ret, nil
 }
@@ -504,6 +530,33 @@ func (sgor *SearchGroupOrderByReduce) ReduceSearchResultData(ctx context.Context
 
 	// Build order_by iterators
 	orderByIterators := buildOrderByIterators(searchResultData, orderByFields)
+
+	// Create order_by field builders for each order_by field
+	// Find the first non-empty OrderByFieldValue across all segments to get type information
+	var orderByFieldBuilders []*typeutil.FieldDataBuilder
+	if len(orderByFields) > 0 {
+		var orderByFieldValues []*schemapb.FieldData
+		for _, srd := range searchResultData {
+			if vals := srd.GetOrderByFieldValue(); len(vals) > 0 {
+				orderByFieldValues = vals
+				break
+			}
+		}
+		if len(orderByFieldValues) > 0 {
+			orderByFieldBuilders = make([]*typeutil.FieldDataBuilder, len(orderByFieldValues))
+			for fieldIdx, fieldData := range orderByFieldValues {
+				if fieldData != nil {
+					builder, err := typeutil.NewFieldDataBuilder(fieldData.GetType(), true, int(info.GetTopK()*info.GetNq()*info.GetGroupSize()))
+					if err != nil {
+						log.Warn("failed to construct order by field data builder", zap.Error(err), zap.Int("fieldIdx", fieldIdx))
+						continue
+					}
+					builder.SetFieldId(fieldData.GetFieldId())
+					orderByFieldBuilders[fieldIdx] = builder
+				}
+			}
+		}
+	}
 
 	idxComputers := make([]*typeutil.FieldDataIdxComputer, len(searchResultData))
 	for i, srd := range searchResultData {
@@ -606,6 +659,18 @@ func (sgor *SearchGroupOrderByReduce) ReduceSearchResultData(ctx context.Context
 					ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[groupEntity.subSearchIdx].ElementIndices.Data[groupEntity.resultIdx])
 				}
 				gpFieldBuilder.Add(group.groupVal)
+
+				// Add order_by field values
+				if len(orderByFieldBuilders) > 0 && orderByIterators != nil && groupEntity.subSearchIdx < len(orderByIterators) {
+					iterators := orderByIterators[groupEntity.subSearchIdx]
+					for fieldIdx, builder := range orderByFieldBuilders {
+						if builder != nil && fieldIdx < len(iterators) && iterators[fieldIdx] != nil {
+							orderByVal := iterators[fieldIdx](int(groupEntity.resultIdx))
+							builder.Add(orderByVal)
+						}
+					}
+				}
+
 				outputCount++
 			}
 		}
@@ -617,6 +682,17 @@ func (sgor *SearchGroupOrderByReduce) ReduceSearchResultData(ctx context.Context
 		}
 	}
 	ret.GroupByFieldValue = gpFieldBuilder.Build()
+
+	// Set OrderByFieldValue in result
+	if len(orderByFieldBuilders) > 0 {
+		ret.OrderByFieldValue = make([]*schemapb.FieldData, len(orderByFieldBuilders))
+		for fieldIdx, builder := range orderByFieldBuilders {
+			if builder != nil {
+				ret.OrderByFieldValue[fieldIdx] = builder.Build()
+			}
+		}
+	}
+
 	if float64(filteredCount) >= 0.3*float64(groupBound) {
 		log.Warn("GroupOrderBy reduce filtered too many results, "+
 			"this may influence the final result seriously",

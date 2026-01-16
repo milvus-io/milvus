@@ -17,95 +17,15 @@
 #include "SearchOrderByOperator.h"
 #include "common/EasyAssert.h"
 #include "exec/operator/search-groupby/SearchGroupByOperator.h"
+#include "segcore/ReduceUtils.h"
 #include <algorithm>
-#include <cmath>
 #include <unordered_map>
 
 namespace milvus {
 namespace exec {
 
-// Helper to compare OrderByValueType (optional<variant>)
-int
-CompareOrderByValue(const OrderByValueType& lhs, const OrderByValueType& rhs) {
-    if (!lhs.has_value() && !rhs.has_value()) {
-        return 0;
-    }
-    if (!lhs.has_value()) {
-        return -1;  // null < non-null
-    }
-    if (!rhs.has_value()) {
-        return 1;  // non-null > null
-    }
-
-    const auto& lv = lhs.value();
-    const auto& rv = rhs.value();
-
-    // Compare based on variant type
-    if (std::holds_alternative<bool>(lv) && std::holds_alternative<bool>(rv)) {
-        auto l = std::get<bool>(lv);
-        auto r = std::get<bool>(rv);
-        if (l < r) return -1;
-        if (l > r) return 1;
-        return 0;
-    }
-    if (std::holds_alternative<int8_t>(lv) && std::holds_alternative<int8_t>(rv)) {
-        auto l = std::get<int8_t>(lv);
-        auto r = std::get<int8_t>(rv);
-        if (l < r) return -1;
-        if (l > r) return 1;
-        return 0;
-    }
-    if (std::holds_alternative<int16_t>(lv) && std::holds_alternative<int16_t>(rv)) {
-        auto l = std::get<int16_t>(lv);
-        auto r = std::get<int16_t>(rv);
-        if (l < r) return -1;
-        if (l > r) return 1;
-        return 0;
-    }
-    if (std::holds_alternative<int32_t>(lv) && std::holds_alternative<int32_t>(rv)) {
-        auto l = std::get<int32_t>(lv);
-        auto r = std::get<int32_t>(rv);
-        if (l < r) return -1;
-        if (l > r) return 1;
-        return 0;
-    }
-    if (std::holds_alternative<int64_t>(lv) && std::holds_alternative<int64_t>(rv)) {
-        auto l = std::get<int64_t>(lv);
-        auto r = std::get<int64_t>(rv);
-        if (l < r) return -1;
-        if (l > r) return 1;
-        return 0;
-    }
-    if (std::holds_alternative<float>(lv) && std::holds_alternative<float>(rv)) {
-        auto l = std::get<float>(lv);
-        auto r = std::get<float>(rv);
-        if (std::isnan(l) && std::isnan(r)) return 0;
-        if (std::isnan(l)) return -1;  // NaN < non-NaN
-        if (std::isnan(r)) return 1;   // non-NaN > NaN
-        if (l < r) return -1;
-        if (l > r) return 1;
-        return 0;
-    }
-    if (std::holds_alternative<double>(lv) && std::holds_alternative<double>(rv)) {
-        auto l = std::get<double>(lv);
-        auto r = std::get<double>(rv);
-        if (std::isnan(l) && std::isnan(r)) return 0;
-        if (std::isnan(l)) return -1;  // NaN < non-NaN
-        if (std::isnan(r)) return 1;   // non-NaN > NaN
-        if (l < r) return -1;
-        if (l > r) return 1;
-        return 0;
-    }
-    if (std::holds_alternative<std::string>(lv) && std::holds_alternative<std::string>(rv)) {
-        auto l = std::get<std::string>(lv);
-        auto r = std::get<std::string>(rv);
-        if (l < r) return -1;
-        if (l > r) return 1;
-        return 0;
-    }
-    // Type mismatch or unsupported
-    return 0;
-}
+// Use the shared CompareOrderByValue from segcore::ReduceUtils
+using segcore::CompareOrderByValue;
 
 void
 SearchOrderBy(milvus::OpContext* op_ctx,
@@ -145,7 +65,16 @@ SearchOrderBy(milvus::OpContext* op_ctx,
                     if (!val.has_value()) {
                         return std::nullopt;
                     }
-                    return std::make_optional(std::variant<std::monostate, int8_t, int16_t, int32_t, int64_t, bool, float, double, std::string>(val.value()));
+                    return std::make_optional(
+                        std::variant<std::monostate,
+                                     int8_t,
+                                     int16_t,
+                                     int32_t,
+                                     int64_t,
+                                     bool,
+                                     float,
+                                     double,
+                                     std::string>(val.value()));
                 };
                 break;
             }
@@ -157,7 +86,16 @@ SearchOrderBy(milvus::OpContext* op_ctx,
                     if (!val.has_value()) {
                         return std::nullopt;
                     }
-                    return std::make_optional(std::variant<std::monostate, int8_t, int16_t, int32_t, int64_t, bool, float, double, std::string>(val.value()));
+                    return std::make_optional(
+                        std::variant<std::monostate,
+                                     int8_t,
+                                     int16_t,
+                                     int32_t,
+                                     int64_t,
+                                     bool,
+                                     float,
+                                     double,
+                                     std::string>(val.value()));
                 };
                 break;
             }
@@ -169,7 +107,16 @@ SearchOrderBy(milvus::OpContext* op_ctx,
                     if (!val.has_value()) {
                         return std::nullopt;
                     }
-                    return std::make_optional(std::variant<std::monostate, int8_t, int16_t, int32_t, int64_t, bool, float, double, std::string>(val.value()));
+                    return std::make_optional(
+                        std::variant<std::monostate,
+                                     int8_t,
+                                     int16_t,
+                                     int32_t,
+                                     int64_t,
+                                     bool,
+                                     float,
+                                     double,
+                                     std::string>(val.value()));
                 };
                 break;
             }
@@ -181,7 +128,16 @@ SearchOrderBy(milvus::OpContext* op_ctx,
                     if (!val.has_value()) {
                         return std::nullopt;
                     }
-                    return std::make_optional(std::variant<std::monostate, int8_t, int16_t, int32_t, int64_t, bool, float, double, std::string>(val.value()));
+                    return std::make_optional(
+                        std::variant<std::monostate,
+                                     int8_t,
+                                     int16_t,
+                                     int32_t,
+                                     int64_t,
+                                     bool,
+                                     float,
+                                     double,
+                                     std::string>(val.value()));
                 };
                 break;
             }
@@ -193,7 +149,16 @@ SearchOrderBy(milvus::OpContext* op_ctx,
                     if (!val.has_value()) {
                         return std::nullopt;
                     }
-                    return std::make_optional(std::variant<std::monostate, int8_t, int16_t, int32_t, int64_t, bool, float, double, std::string>(val.value()));
+                    return std::make_optional(
+                        std::variant<std::monostate,
+                                     int8_t,
+                                     int16_t,
+                                     int32_t,
+                                     int64_t,
+                                     bool,
+                                     float,
+                                     double,
+                                     std::string>(val.value()));
                 };
                 break;
             }
@@ -205,7 +170,16 @@ SearchOrderBy(milvus::OpContext* op_ctx,
                     if (!val.has_value()) {
                         return std::nullopt;
                     }
-                    return std::make_optional(std::variant<std::monostate, int8_t, int16_t, int32_t, int64_t, bool, float, double, std::string>(val.value()));
+                    return std::make_optional(
+                        std::variant<std::monostate,
+                                     int8_t,
+                                     int16_t,
+                                     int32_t,
+                                     int64_t,
+                                     bool,
+                                     float,
+                                     double,
+                                     std::string>(val.value()));
                 };
                 break;
             }
@@ -217,7 +191,16 @@ SearchOrderBy(milvus::OpContext* op_ctx,
                     if (!val.has_value()) {
                         return std::nullopt;
                     }
-                    return std::make_optional(std::variant<std::monostate, int8_t, int16_t, int32_t, int64_t, bool, float, double, std::string>(val.value()));
+                    return std::make_optional(
+                        std::variant<std::monostate,
+                                     int8_t,
+                                     int16_t,
+                                     int32_t,
+                                     int64_t,
+                                     bool,
+                                     float,
+                                     double,
+                                     std::string>(val.value()));
                 };
                 break;
             }
@@ -230,7 +213,16 @@ SearchOrderBy(milvus::OpContext* op_ctx,
                     if (!val.has_value()) {
                         return std::nullopt;
                     }
-                    return std::make_optional(std::variant<std::monostate, int8_t, int16_t, int32_t, int64_t, bool, float, double, std::string>(val.value()));
+                    return std::make_optional(
+                        std::variant<std::monostate,
+                                     int8_t,
+                                     int16_t,
+                                     int32_t,
+                                     int64_t,
+                                     bool,
+                                     float,
+                                     double,
+                                     std::string>(val.value()));
                 };
                 break;
             }
@@ -239,27 +231,28 @@ SearchOrderBy(milvus::OpContext* op_ctx,
                     ThrowInfo(UnexpectedError,
                               "Order by JSON requires json_path");
                 }
-                auto dg = GetDataGetter<std::string, milvus::Json>(
-                    op_ctx,
-                    segment,
-                    field.field_id_,
-                    field.json_path_,
-                    std::nullopt,
-                    false);
+                auto dg =
+                    GetDataGetter<std::string, milvus::Json>(op_ctx,
+                                                             segment,
+                                                             field.field_id_,
+                                                             field.json_path_,
+                                                             std::nullopt,
+                                                             false);
                 getter = [dg](int64_t idx) -> OrderByValueType {
                     auto val = dg->Get(idx);
                     if (!val.has_value()) {
                         return std::nullopt;
                     }
-                    return std::make_optional(std::variant<std::monostate,
-                                                          int8_t,
-                                                          int16_t,
-                                                          int32_t,
-                                                          int64_t,
-                                                          bool,
-                                                          float,
-                                                          double,
-                                                          std::string>(val.value()));
+                    return std::make_optional(
+                        std::variant<std::monostate,
+                                     int8_t,
+                                     int16_t,
+                                     int32_t,
+                                     int64_t,
+                                     bool,
+                                     float,
+                                     double,
+                                     std::string>(val.value()));
                 };
                 break;
             }
@@ -311,8 +304,17 @@ SearchOrderBy(milvus::OpContext* op_ctx,
 
     // Sort by query groups if has group_by
     if (has_group_by) {
-        // OrderBy sorts groups, not items within groups
-        // Use the first item's order_by field value to represent each group
+        // Group + OrderBy Behavior:
+        // When both group_by and order_by are specified, groups are sorted by the order_by
+        // field value of the FIRST (best-scoring) item within each group. This means:
+        //   - Items within each group are first selected by their similarity score (distance)
+        //   - The first item (highest score) in each group represents the group for ordering
+        //   - Groups are then sorted based on this representative item's order_by field value
+        //
+        // Example: With group_by=category, order_by=price ASC
+        //   - Group "Electronics" first item has price $999
+        //   - Group "Books" first item has price $15
+        //   - Result: Books group comes first because $15 < $999
         size_t start_idx = 0;
         for (size_t i = 0; i < topk_per_nq_prefix_sum.size() - 1; ++i) {
             size_t end_idx = topk_per_nq_prefix_sum[i + 1];
@@ -342,7 +344,8 @@ SearchOrderBy(milvus::OpContext* op_ctx,
 
                 // Get order_by field values from the first item in this group
                 size_t first_idx = group_info.indices[0];
-                for (size_t field_idx = 0; field_idx < order_by_fields.size(); ++field_idx) {
+                for (size_t field_idx = 0; field_idx < order_by_fields.size();
+                     ++field_idx) {
                     group_info.first_item_order_by_values.push_back(
                         getters[field_idx](seg_offsets[first_idx]));
                 }
@@ -350,11 +353,15 @@ SearchOrderBy(milvus::OpContext* op_ctx,
             }
 
             // Sort groups by their first item's order_by field values
-            auto group_comparator = [&](const GroupInfo& lhs, const GroupInfo& rhs) -> bool {
-                for (size_t field_idx = 0; field_idx < order_by_fields.size(); ++field_idx) {
+            auto group_comparator = [&](const GroupInfo& lhs,
+                                        const GroupInfo& rhs) -> bool {
+                for (size_t field_idx = 0; field_idx < order_by_fields.size();
+                     ++field_idx) {
                     const auto& field = order_by_fields[field_idx];
-                    const auto& lhs_val = lhs.first_item_order_by_values[field_idx];
-                    const auto& rhs_val = rhs.first_item_order_by_values[field_idx];
+                    const auto& lhs_val =
+                        lhs.first_item_order_by_values[field_idx];
+                    const auto& rhs_val =
+                        rhs.first_item_order_by_values[field_idx];
 
                     // Handle null values: nulls are considered less than non-nulls
                     if (!lhs_val.has_value() && !rhs_val.has_value()) {

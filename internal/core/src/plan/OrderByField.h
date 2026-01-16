@@ -25,7 +25,7 @@ namespace plan {
 
 struct OrderByField {
     FieldId field_id_;
-    bool ascending_;  // true for asc, false for desc
+    bool ascending_;                        // true for asc, false for desc
     std::optional<std::string> json_path_;  // for JSON field access
 
     OrderByField(FieldId field_id,
@@ -39,4 +39,3 @@ struct OrderByField {
 
 }  // namespace plan
 }  // namespace milvus
-

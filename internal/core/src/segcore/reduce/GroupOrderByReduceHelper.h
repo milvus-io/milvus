@@ -11,30 +11,31 @@
 
 #pragma once
 #include "GroupReduce.h"
-#include "OrderByReduceHelper.h"
 #include "common/QueryResult.h"
 #include "query/PlanImpl.h"
-#include "exec/operator/search-groupby/SearchGroupByOperator.h"
+#include "segcore/ReduceUtils.h"
 
 namespace milvus::segcore {
 class GroupOrderByReduceHelper : public GroupReduceHelper {
  public:
-    explicit GroupOrderByReduceHelper(std::vector<SearchResult*>& search_results,
-                                      milvus::query::Plan* plan,
-                                      int64_t* slice_nqs,
-                                      int64_t* slice_topKs,
-                                      int64_t slice_num,
-                                      tracer::TraceContext* trace_ctx)
+    explicit GroupOrderByReduceHelper(
+        std::vector<SearchResult*>& search_results,
+        milvus::query::Plan* plan,
+        int64_t* slice_nqs,
+        int64_t* slice_topKs,
+        int64_t slice_num,
+        tracer::TraceContext* trace_ctx)
         : GroupReduceHelper(search_results,
                             plan,
                             slice_nqs,
                             slice_topKs,
                             slice_num,
-                            trace_ctx) {
-        // Extract order_by_fields from plan
-        if (plan->plan_node_->search_info_.order_by_fields_.has_value()) {
-            order_by_fields_ = plan->plan_node_->search_info_.order_by_fields_.value();
-        }
+                            trace_ctx),
+          order_by_fields_(
+              plan->plan_node_->search_info_.order_by_fields_.has_value()
+                  ? plan->plan_node_->search_info_.order_by_fields_.value()
+                  : std::vector<plan::OrderByField>{}),
+          field_reader_(order_by_fields_) {
     }
 
  protected:
@@ -45,13 +46,16 @@ class GroupOrderByReduceHelper : public GroupReduceHelper {
 
     void
     FillOtherData(int result_count,
-                   int64_t nq_begin,
-                   int64_t nq_end,
-                   std::unique_ptr<milvus::proto::schema::SearchResultData>&
-                       search_res_data) override;
+                  int64_t nq_begin,
+                  int64_t nq_end,
+                  std::unique_ptr<milvus::proto::schema::SearchResultData>&
+                      search_res_data) override;
 
  private:
     std::vector<plan::OrderByField> order_by_fields_;
+
+    // Cached reader for order_by field values
+    OrderByFieldReader field_reader_;
 
     // Helper to read order_by field values for a SearchResultPair
     void

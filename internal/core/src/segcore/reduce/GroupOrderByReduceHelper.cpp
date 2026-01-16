@@ -15,19 +15,17 @@
 #include "segcore/ReduceUtils.h"
 #include "common/EasyAssert.h"
 #include "log/Log.h"
-#include "exec/operator/search-groupby/SearchGroupByOperator.h"
 #include <algorithm>
 #include <map>
 #include <functional>
 
 namespace milvus::segcore {
-using milvus::exec::GetDataGetter;
 
 int64_t
 GroupOrderByReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
-                                                      int64_t topk,
-                                                      int64_t& offset) {
-    if (order_by_fields_.empty()) {
+                                                     int64_t topk,
+                                                     int64_t& offset) {
+    if (field_reader_.Empty()) {
         // Fallback to base class implementation if no order_by fields
         return GroupReduceHelper::ReduceSearchResultForOneNQ(qi, topk, offset);
     }
@@ -113,10 +111,8 @@ GroupOrderByReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
 
         // judge filter
         if (!should_filtered(pk, group_by_val)) {
-            selected_items.push_back(SelectedItem{index,
-                                                  pilot->offset_,
-                                                  group_by_val,
-                                                  pilot->search_result_});
+            selected_items.push_back(SelectedItem{
+                index, pilot->offset_, group_by_val, pilot->search_result_});
             pk_set_.insert(pk);
             group_by_map[group_by_val] += 1;
         } else {
@@ -156,13 +152,14 @@ GroupOrderByReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
     for (const auto& group_val : group_list) {
         const auto& indices = group_item_map[group_val];
         const auto& first_item = selected_items[indices[0]];
-        SearchResultPair temp_pair(first_item.search_result->primary_keys_[first_item.offset],
-                                   first_item.search_result->distances_[first_item.offset],
-                                   first_item.search_result,
-                                   first_item.segment_index,
-                                   first_item.offset,
-                                   first_item.offset + 1,
-                                   first_item.group_by_val);
+        SearchResultPair temp_pair(
+            first_item.search_result->primary_keys_[first_item.offset],
+            first_item.search_result->distances_[first_item.offset],
+            first_item.search_result,
+            first_item.segment_index,
+            first_item.offset,
+            first_item.offset + 1,
+            first_item.group_by_val);
         ReadOrderByValues(&temp_pair);
         std::vector<OrderByValueType> order_by_vals;
         if (temp_pair.order_by_values_.has_value()) {
@@ -209,7 +206,8 @@ GroupOrderByReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
         for (auto idx : indices) {
             const auto& item = selected_items[idx];
             item.search_result->result_offsets_.push_back(loc++);
-            final_search_records_[item.segment_index][qi].push_back(item.offset);
+            final_search_records_[item.segment_index][qi].push_back(
+                item.offset);
         }
     }
     return filtered_count;
@@ -217,7 +215,7 @@ GroupOrderByReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
 
 void
 GroupOrderByReduceHelper::ReadOrderByValues(SearchResultPair* pair) {
-    if (order_by_fields_.empty() || pair->offset_ >= pair->offset_rb_) {
+    if (field_reader_.Empty() || pair->offset_ >= pair->offset_rb_) {
         pair->order_by_values_ = std::nullopt;
         return;
     }
@@ -231,143 +229,7 @@ GroupOrderByReduceHelper::ReadOrderByValues(SearchResultPair* pair) {
                "Failed to cast SegmentInterface to SegmentInternalInterface");
     auto seg_offset = search_result->seg_offsets_[pair->offset_];
 
-    milvus::OpContext op_ctx;
-    std::vector<milvus::OrderByValueType> order_by_vals;
-    order_by_vals.reserve(order_by_fields_.size());
-
-    for (const auto& field : order_by_fields_) {
-        auto data_type = segment->GetFieldDataType(field.field_id_);
-        milvus::OrderByValueType val = std::nullopt;
-
-        // Read field value based on type (same logic as OrderByReduceHelper)
-        switch (data_type) {
-            case DataType::BOOL: {
-                auto getter = GetDataGetter<bool>(
-                    &op_ctx, *segment, field.field_id_, field.json_path_);
-                auto bool_val = getter->Get(seg_offset);
-                if (bool_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(bool_val.value())));
-                }
-                break;
-            }
-            case DataType::INT8: {
-                auto getter = GetDataGetter<int8_t>(
-                    &op_ctx, *segment, field.field_id_, field.json_path_);
-                auto int8_val = getter->Get(seg_offset);
-                if (int8_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(int8_val.value())));
-                }
-                break;
-            }
-            case DataType::INT16: {
-                auto getter = GetDataGetter<int16_t>(
-                    &op_ctx, *segment, field.field_id_, field.json_path_);
-                auto int16_val = getter->Get(seg_offset);
-                if (int16_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(int16_val.value())));
-                }
-                break;
-            }
-            case DataType::INT32: {
-                auto getter = GetDataGetter<int32_t>(
-                    &op_ctx, *segment, field.field_id_, field.json_path_);
-                auto int32_val = getter->Get(seg_offset);
-                if (int32_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(int32_val.value())));
-                }
-                break;
-            }
-            case DataType::INT64: {
-                auto getter = GetDataGetter<int64_t>(
-                    &op_ctx, *segment, field.field_id_, field.json_path_);
-                auto int64_val = getter->Get(seg_offset);
-                if (int64_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(int64_val.value())));
-                }
-                break;
-            }
-            case DataType::FLOAT: {
-                auto getter = GetDataGetter<float>(
-                    &op_ctx, *segment, field.field_id_, field.json_path_);
-                auto float_val = getter->Get(seg_offset);
-                if (float_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(float_val.value())));
-                }
-                break;
-            }
-            case DataType::DOUBLE: {
-                auto getter = GetDataGetter<double>(
-                    &op_ctx, *segment, field.field_id_, field.json_path_);
-                auto double_val = getter->Get(seg_offset);
-                if (double_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(double_val.value())));
-                }
-                break;
-            }
-            case DataType::VARCHAR:
-            case DataType::STRING: {
-                auto getter = GetDataGetter<std::string>(
-                    &op_ctx, *segment, field.field_id_, field.json_path_);
-                auto str_val = getter->Get(seg_offset);
-                if (str_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(str_val.value())));
-                }
-                break;
-            }
-            case DataType::JSON: {
-                if (!field.json_path_.has_value()) {
-                    val = std::nullopt;
-                    break;
-                }
-                auto getter = GetDataGetter<std::string, milvus::Json>(
-                    &op_ctx,
-                    *segment,
-                    field.field_id_,
-                    field.json_path_,
-                    std::nullopt,
-                    false);
-                auto str_val = getter->Get(seg_offset);
-                if (str_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(str_val.value())));
-                }
-                break;
-            }
-            default:
-                // Unsupported type, use null
-                val = std::nullopt;
-                break;
-        }
-        order_by_vals.push_back(val);
-    }
-
-    pair->order_by_values_ = std::move(order_by_vals);
+    pair->order_by_values_ = field_reader_.Read(*segment, seg_offset);
 }
 
 std::vector<milvus::OrderByValueType>
@@ -379,24 +241,27 @@ GroupOrderByReduceHelper::GetFirstItemOrderByValues(
     // Since results are already grouped by group_by_value in Pipeline,
     // we need to find the first occurrence of this group_by_value
     // within the current query's range
-    
+
     // Get the query index from offset_beg
     // Find which query this offset belongs to
     int64_t qi = 0;
-    for (size_t i = 0; i < search_result->topk_per_nq_prefix_sum_.size() - 1; ++i) {
+    for (size_t i = 0; i < search_result->topk_per_nq_prefix_sum_.size() - 1;
+         ++i) {
         if (offset_beg >= search_result->topk_per_nq_prefix_sum_[i] &&
             offset_beg < search_result->topk_per_nq_prefix_sum_[i + 1]) {
             qi = i;
             break;
         }
     }
-    
+
     int64_t query_start = search_result->topk_per_nq_prefix_sum_[qi];
     int64_t query_end = search_result->topk_per_nq_prefix_sum_[qi + 1];
-    
+
     // Find the first item with this group_by_value in the current query's results
     int64_t first_item_offset = offset_beg;
-    for (int64_t i = query_start; i < query_end && i < search_result->group_by_values_.value().size(); ++i) {
+    for (int64_t i = query_start;
+         i < query_end && i < search_result->group_by_values_.value().size();
+         ++i) {
         if (search_result->group_by_values_.value()[i] == group_by_val) {
             first_item_offset = i;
             break;
@@ -404,14 +269,13 @@ GroupOrderByReduceHelper::GetFirstItemOrderByValues(
     }
 
     // Create a temporary SearchResultPair to read order_by values
-    SearchResultPair temp_pair(
-        search_result->primary_keys_[first_item_offset],
-        search_result->distances_[first_item_offset],
-        search_result,
-        0,  // segment_index not used here
-        first_item_offset,
-        first_item_offset + 1,
-        group_by_val);
+    SearchResultPair temp_pair(search_result->primary_keys_[first_item_offset],
+                               search_result->distances_[first_item_offset],
+                               search_result,
+                               0,  // segment_index not used here
+                               first_item_offset,
+                               first_item_offset + 1,
+                               group_by_val);
 
     ReadOrderByValues(&temp_pair);
     if (temp_pair.order_by_values_.has_value()) {
@@ -427,9 +291,10 @@ GroupOrderByReduceHelper::FillOtherData(
     int64_t nq_end,
     std::unique_ptr<milvus::proto::schema::SearchResultData>& search_res_data) {
     // First call base class to fill group_by values
-    GroupReduceHelper::FillOtherData(result_count, nq_begin, nq_end, search_res_data);
+    GroupReduceHelper::FillOtherData(
+        result_count, nq_begin, nq_end, search_res_data);
 
-    if (order_by_fields_.empty()) {
+    if (field_reader_.Empty()) {
         return;
     }
 
@@ -437,7 +302,6 @@ GroupOrderByReduceHelper::FillOtherData(
     std::vector<std::vector<OrderByValueType>> order_by_vals_list;
     order_by_vals_list.resize(result_count);
 
-    milvus::OpContext op_ctx;
     for (auto qi = nq_begin; qi < nq_end; qi++) {
         for (auto search_result : search_results_) {
             AssertInfo(search_result != nullptr,
@@ -451,13 +315,15 @@ GroupOrderByReduceHelper::FillOtherData(
 
             auto segment_interface =
                 static_cast<const SegmentInterface*>(search_result->segment_);
-            auto segment =
-                dynamic_cast<const SegmentInternalInterface*>(segment_interface);
-            AssertInfo(segment != nullptr,
-                       "Failed to cast SegmentInterface to SegmentInternalInterface");
+            auto segment = dynamic_cast<const SegmentInternalInterface*>(
+                segment_interface);
+            AssertInfo(
+                segment != nullptr,
+                "Failed to cast SegmentInterface to SegmentInternalInterface");
 
             // Track which groups we've already processed (to get first item's order_by values)
-            std::unordered_map<GroupByValueType, std::vector<OrderByValueType>> group_order_by_map;
+            std::unordered_map<GroupByValueType, std::vector<OrderByValueType>>
+                group_order_by_map;
 
             for (auto ki = topk_start; ki < topk_end; ki++) {
                 auto loc = search_result->result_offsets_[ki];
@@ -465,7 +331,8 @@ GroupOrderByReduceHelper::FillOtherData(
 
                 // Get or compute the first item's order_by values for this group
                 std::vector<OrderByValueType> order_by_vals;
-                if (group_order_by_map.find(group_by_val) != group_order_by_map.end()) {
+                if (group_order_by_map.find(group_by_val) !=
+                    group_order_by_map.end()) {
                     order_by_vals = group_order_by_map[group_by_val];
                 } else {
                     // Get first item's order_by values for this group

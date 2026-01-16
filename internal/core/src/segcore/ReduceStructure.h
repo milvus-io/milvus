@@ -20,14 +20,12 @@
 #include "common/Types.h"
 #include "common/QueryResult.h"
 #include "plan/PlanNode.h"
+#include "segcore/ReduceUtils.h"
 
-using milvus::SearchResult;
-
-// Forward declarations
-int CompareGroupByValue(const milvus::GroupByValueType& lhs,
-                       const milvus::GroupByValueType& rhs);
-int CompareOrderByValue(const milvus::OrderByValueType& lhs,
-                       const milvus::OrderByValueType& rhs);
+// Forward declaration for CompareGroupByValue (defined in ReduceStructure.cpp)
+int
+CompareGroupByValue(const milvus::GroupByValueType& lhs,
+                    const milvus::GroupByValueType& rhs);
 
 struct SearchResultPair {
     milvus::PkType primary_key_;
@@ -42,7 +40,7 @@ struct SearchResultPair {
 
     SearchResultPair(milvus::PkType primary_key,
                      float distance,
-                     SearchResult* result,
+                     milvus::SearchResult* result,
                      int64_t index,
                      int64_t lb,
                      int64_t rb)
@@ -52,7 +50,7 @@ struct SearchResultPair {
 
     SearchResultPair(milvus::PkType primary_key,
                      float distance,
-                     SearchResult* result,
+                     milvus::SearchResult* result,
                      int64_t index,
                      int64_t lb,
                      int64_t rb,
@@ -96,12 +94,10 @@ struct SearchResultPair {
 };
 
 struct SearchResultPairComparator {
-    std::optional<std::vector<milvus::plan::OrderByField>>
-        order_by_fields_;
+    std::optional<std::vector<milvus::plan::OrderByField>> order_by_fields_;
     bool has_order_by_;
 
-    SearchResultPairComparator()
-        : has_order_by_(false) {
+    SearchResultPairComparator() : has_order_by_(false) {
     }
 
     explicit SearchResultPairComparator(
@@ -140,7 +136,8 @@ struct SearchResultPairComparator {
                 }
 
                 // Compare values using OrderByValueType comparison
-                int cmp = CompareOrderByValue(lhs_val, rhs_val);
+                int cmp =
+                    milvus::segcore::CompareOrderByValue(lhs_val, rhs_val);
                 if (cmp < 0) {
                     return field.ascending_;
                 }
@@ -163,5 +160,5 @@ struct SearchResultPairComparator {
  private:
     static int
     CompareGroupByValue(const milvus::GroupByValueType& lhs,
-                       const milvus::GroupByValueType& rhs);
+                        const milvus::GroupByValueType& rhs);
 };

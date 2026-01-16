@@ -13,7 +13,7 @@
 #include "Reduce.h"
 #include "common/QueryResult.h"
 #include "query/PlanImpl.h"
-#include "exec/operator/search-groupby/SearchGroupByOperator.h"
+#include "segcore/ReduceUtils.h"
 
 namespace milvus::segcore {
 class OrderByReduceHelper : public ReduceHelper {
@@ -29,11 +29,12 @@ class OrderByReduceHelper : public ReduceHelper {
                        slice_nqs,
                        slice_topKs,
                        slice_num,
-                       trace_ctx) {
-        // Extract order_by_fields from plan
-        if (plan->plan_node_->search_info_.order_by_fields_.has_value()) {
-            order_by_fields_ = plan->plan_node_->search_info_.order_by_fields_.value();
-        }
+                       trace_ctx),
+          order_by_fields_(
+              plan->plan_node_->search_info_.order_by_fields_.has_value()
+                  ? plan->plan_node_->search_info_.order_by_fields_.value()
+                  : std::vector<plan::OrderByField>{}),
+          field_reader_(order_by_fields_) {
     }
 
  protected:
@@ -49,16 +50,15 @@ class OrderByReduceHelper : public ReduceHelper {
                   std::unique_ptr<milvus::proto::schema::SearchResultData>&
                       search_res_data) override;
 
- private:
+ protected:
     std::vector<plan::OrderByField> order_by_fields_;
+
+    // Cached reader for order_by field values
+    OrderByFieldReader field_reader_;
 
     // Helper to read order_by field values for a SearchResultPair
     void
     ReadOrderByValues(SearchResultPair* pair);
-
-    // Helper to create DataGetters for order_by fields
-    void
-    InitializeDataGetters(SearchResult* search_result);
 };
 
 }  // namespace milvus::segcore

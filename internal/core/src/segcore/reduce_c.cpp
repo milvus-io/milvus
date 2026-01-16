@@ -110,8 +110,9 @@ ReduceSearchResultsAndFillData(CTraceContext c_trace,
         std::shared_ptr<milvus::segcore::ReduceHelper> reduce_helper;
         bool has_group_by =
             plan->plan_node_->search_info_.group_by_field_id_.has_value();
-        bool has_order_by = plan->plan_node_->search_info_.order_by_fields_.has_value() &&
-                            !plan->plan_node_->search_info_.order_by_fields_.value().empty();
+        bool has_order_by =
+            plan->plan_node_->search_info_.order_by_fields_.has_value() &&
+            !plan->plan_node_->search_info_.order_by_fields_.value().empty();
 
         if (has_group_by && has_order_by) {
             reduce_helper =

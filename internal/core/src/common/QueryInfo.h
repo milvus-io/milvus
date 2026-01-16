@@ -52,8 +52,7 @@ struct SearchInfo {
     bool strict_cast_{false};
     std::shared_ptr<const IArrayOffsets> array_offsets_{
         nullptr};  // For element-level search
-    std::optional<std::vector<plan::OrderByField>>
-        order_by_fields_;
+    std::optional<std::vector<plan::OrderByField>> order_by_fields_;
 
     bool
     element_level() const {

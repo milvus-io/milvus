@@ -90,4 +90,3 @@ PhySearchOrderByNode::IsFinished() {
 
 }  // namespace exec
 }  // namespace milvus
-

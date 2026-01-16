@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 )
 
 type SearchReduceUtilTestSuite struct {
@@ -340,6 +341,485 @@ func (s *SearchReduceUtilTestSuite) TestReduceMaxSimMetricsComparison() {
 		s.Equal([]float32{1, 2, 3, 4}, results.Results.GetScores(),
 			"metric %s: Scores should be distances in ascending order", metricType)
 	}
+}
+
+// ====================================================================================
+// Order By Tests
+// ====================================================================================
+
+// genTestDataWithOrderByValues generates test data with order_by field values
+func genTestDataWithOrderByValues() []*schemapb.SearchResultData {
+	// Segment 1: IDs 1-5 with prices [100, 50, 200, 75, 150]
+	searchResultData1 := &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{1, 2, 3, 4, 5},
+				},
+			},
+		},
+		Scores:     []float32{0.9, 0.85, 0.8, 0.75, 0.7},
+		Topks:      []int64{5},
+		NumQueries: 1,
+		TopK:       5,
+		FieldsData: []*schemapb.FieldData{},
+		OrderByFieldValue: []*schemapb.FieldData{{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "price",
+			FieldId:   102,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{100, 50, 200, 75, 150},
+						},
+					},
+				},
+			},
+		}},
+	}
+
+	// Segment 2: IDs 6-10 with prices [80, 120, 30, 180, 90]
+	searchResultData2 := &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{6, 7, 8, 9, 10},
+				},
+			},
+		},
+		Scores:     []float32{0.88, 0.82, 0.78, 0.72, 0.68},
+		Topks:      []int64{5},
+		NumQueries: 1,
+		TopK:       5,
+		FieldsData: []*schemapb.FieldData{},
+		OrderByFieldValue: []*schemapb.FieldData{{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "price",
+			FieldId:   102,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{80, 120, 30, 180, 90},
+						},
+					},
+				},
+			},
+		}},
+	}
+
+	return []*schemapb.SearchResultData{searchResultData1, searchResultData2}
+}
+
+// TestReduceSearchResultDataWithOrderBy tests basic order_by reduce functionality
+func (s *SearchReduceUtilTestSuite) TestReduceSearchResultDataWithOrderBy() {
+	ctx := context.Background()
+	nq := int64(1)
+	topK := int64(5)
+	offset := int64(0)
+
+	data := genTestDataWithOrderByValues()
+
+	// Test ascending order by price
+	orderByFields := []*planpb.OrderByField{
+		{
+			FieldId:   102,
+			Ascending: true,
+		},
+	}
+
+	results, err := reduceSearchResultDataWithOrderBy(ctx, data, nq, topK, "L2", schemapb.DataType_Int64, offset, orderByFields)
+	s.NoError(err)
+	s.NotNil(results)
+
+	// Expected order by price ASC: 30(ID8), 50(ID2), 75(ID4), 80(ID6), 90(ID10)
+	expectedIDs := []int64{8, 2, 4, 6, 10}
+	s.Equal(expectedIDs, results.Results.GetIds().GetIntId().GetData())
+
+	// Verify OrderByFieldValue is set in result
+	s.NotNil(results.Results.OrderByFieldValue)
+}
+
+// TestReduceSearchResultDataWithOrderByDescending tests descending order
+func (s *SearchReduceUtilTestSuite) TestReduceSearchResultDataWithOrderByDescending() {
+	ctx := context.Background()
+	nq := int64(1)
+	topK := int64(5)
+	offset := int64(0)
+
+	data := genTestDataWithOrderByValues()
+
+	// Test descending order by price
+	orderByFields := []*planpb.OrderByField{
+		{
+			FieldId:   102,
+			Ascending: false,
+		},
+	}
+
+	results, err := reduceSearchResultDataWithOrderBy(ctx, data, nq, topK, "L2", schemapb.DataType_Int64, offset, orderByFields)
+	s.NoError(err)
+	s.NotNil(results)
+
+	// Expected order by price DESC: 200(ID3), 180(ID9), 150(ID5), 120(ID7), 100(ID1)
+	expectedIDs := []int64{3, 9, 5, 7, 1}
+	s.Equal(expectedIDs, results.Results.GetIds().GetIntId().GetData())
+}
+
+// TestReduceSearchResultDataWithOrderByNoOrderByFields tests when no order_by fields (fallback to score)
+func (s *SearchReduceUtilTestSuite) TestReduceSearchResultDataWithOrderByNoOrderByFields() {
+	ctx := context.Background()
+	nq := int64(1)
+	topK := int64(5)
+	offset := int64(0)
+
+	data := genTestDataWithOrderByValues()
+
+	// Empty order_by fields - should sort by score
+	orderByFields := []*planpb.OrderByField{}
+
+	results, err := reduceSearchResultDataWithOrderBy(ctx, data, nq, topK, "L2", schemapb.DataType_Int64, offset, orderByFields)
+	s.NoError(err)
+	s.NotNil(results)
+
+	// Should be sorted by score (descending): 0.9(ID1), 0.88(ID6), 0.85(ID2), 0.82(ID7), 0.8(ID3)
+	expectedIDs := []int64{1, 6, 2, 7, 3}
+	s.Equal(expectedIDs, results.Results.GetIds().GetIntId().GetData())
+}
+
+// TestReduceSearchResultDataWithOrderByWithOffset tests order_by with offset
+func (s *SearchReduceUtilTestSuite) TestReduceSearchResultDataWithOrderByWithOffset() {
+	ctx := context.Background()
+	nq := int64(1)
+	topK := int64(5)
+	offset := int64(2) // Skip first 2 results
+
+	data := genTestDataWithOrderByValues()
+
+	orderByFields := []*planpb.OrderByField{
+		{
+			FieldId:   102,
+			Ascending: true,
+		},
+	}
+
+	results, err := reduceSearchResultDataWithOrderBy(ctx, data, nq, topK, "L2", schemapb.DataType_Int64, offset, orderByFields)
+	s.NoError(err)
+	s.NotNil(results)
+
+	// After offset=2, expected: 75(ID4), 80(ID6), 90(ID10) (only 3 results since topK-offset=3)
+	expectedIDs := []int64{4, 6, 10}
+	s.Equal(expectedIDs, results.Results.GetIds().GetIntId().GetData())
+}
+
+// genTestDataWithGroupByAndOrderBy generates test data with both group_by and order_by values
+func genTestDataWithGroupByAndOrderBy() []*schemapb.SearchResultData {
+	// Segment 1: Items with category groups and prices
+	// Categories: [A, B, A, B, C] Prices: [100, 50, 80, 120, 60]
+	searchResultData1 := &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{1, 2, 3, 4, 5},
+				},
+			},
+		},
+		Scores:     []float32{0.9, 0.85, 0.8, 0.75, 0.7},
+		Topks:      []int64{5},
+		NumQueries: 1,
+		TopK:       5,
+		FieldsData: []*schemapb.FieldData{},
+		GroupByFieldValue: &schemapb.FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldName: "category",
+			FieldId:   101,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"A", "B", "A", "B", "C"},
+						},
+					},
+				},
+			},
+		},
+		OrderByFieldValue: []*schemapb.FieldData{{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "price",
+			FieldId:   102,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{100, 50, 80, 120, 60},
+						},
+					},
+				},
+			},
+		}},
+	}
+
+	// Segment 2: More items
+	// Categories: [C, A, B, C, A] Prices: [40, 90, 70, 110, 55]
+	searchResultData2 := &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{6, 7, 8, 9, 10},
+				},
+			},
+		},
+		Scores:     []float32{0.88, 0.82, 0.78, 0.72, 0.68},
+		Topks:      []int64{5},
+		NumQueries: 1,
+		TopK:       5,
+		FieldsData: []*schemapb.FieldData{},
+		GroupByFieldValue: &schemapb.FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldName: "category",
+			FieldId:   101,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"C", "A", "B", "C", "A"},
+						},
+					},
+				},
+			},
+		},
+		OrderByFieldValue: []*schemapb.FieldData{{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "price",
+			FieldId:   102,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{40, 90, 70, 110, 55},
+						},
+					},
+				},
+			},
+		}},
+		},
+	}
+
+	return []*schemapb.SearchResultData{searchResultData1, searchResultData2}
+}
+
+// TestReduceSearchResultDataWithGroupOrderBy tests combined group_by + order_by
+func (s *SearchReduceUtilTestSuite) TestReduceSearchResultDataWithGroupOrderBy() {
+	ctx := context.Background()
+	nq := int64(1)
+	topK := int64(3) // 3 groups
+	offset := int64(0)
+	groupSize := int64(2) // 2 items per group
+
+	data := genTestDataWithGroupByAndOrderBy()
+
+	// Order groups by price ASC (using first item's price in each group)
+	orderByFields := []*planpb.OrderByField{
+		{
+			FieldId:   102,
+			Ascending: true,
+		},
+	}
+
+	results, err := reduceSearchResultDataWithGroupOrderBy(ctx, data, nq, topK, "L2", schemapb.DataType_Int64, offset, groupSize, orderByFields)
+	s.NoError(err)
+	s.NotNil(results)
+
+	// Groups by first item's price:
+	// Group B: first item ID2 has price 50 (lowest)
+	// Group C: first item ID5 has price 60
+	// Group A: first item ID1 has price 100
+	// Expected group order: B, C, A
+
+	// Verify GroupByFieldValue is set
+	s.NotNil(results.Results.GroupByFieldValue)
+
+	// Verify OrderByFieldValue is set
+	s.NotNil(results.Results.OrderByFieldValue)
+}
+
+// TestReduceSearchResultDataWithGroupOrderByDescending tests group_by + order_by DESC
+func (s *SearchReduceUtilTestSuite) TestReduceSearchResultDataWithGroupOrderByDescending() {
+	ctx := context.Background()
+	nq := int64(1)
+	topK := int64(3)
+	offset := int64(0)
+	groupSize := int64(1)
+
+	data := genTestDataWithGroupByAndOrderBy()
+
+	// Order groups by price DESC
+	orderByFields := []*planpb.OrderByField{
+		{
+			FieldId:   102,
+			Ascending: false,
+		},
+	}
+
+	results, err := reduceSearchResultDataWithGroupOrderBy(ctx, data, nq, topK, "L2", schemapb.DataType_Int64, offset, groupSize, orderByFields)
+	s.NoError(err)
+	s.NotNil(results)
+
+	// Groups by first item's price DESC:
+	// Group A: first item ID1 has price 100 (highest)
+	// Group C: first item ID5 has price 60
+	// Group B: first item ID2 has price 50
+	// Expected group order: A, C, B
+
+	s.NotNil(results.Results.GroupByFieldValue)
+	s.NotNil(results.Results.OrderByFieldValue)
+}
+
+// TestCompareOrderByValuesProxy tests the comparison function for order_by values
+func (s *SearchReduceUtilTestSuite) TestCompareOrderByValuesProxy() {
+	// Test int64 comparison
+	{
+		lhsVals := []any{int64(100)}
+		rhsVals := []any{int64(200)}
+		orderByFields := []*planpb.OrderByField{{FieldId: 1, Ascending: true}}
+
+		result := compareOrderByValuesProxy(lhsVals, rhsVals, orderByFields)
+		s.Equal(-1, result, "100 < 200 with ASC should return -1")
+
+		result = compareOrderByValuesProxy(rhsVals, lhsVals, orderByFields)
+		s.Equal(1, result, "200 > 100 with ASC should return 1")
+
+		result = compareOrderByValuesProxy(lhsVals, lhsVals, orderByFields)
+		s.Equal(0, result, "100 == 100 should return 0")
+	}
+
+	// Test descending order
+	{
+		lhsVals := []any{int64(100)}
+		rhsVals := []any{int64(200)}
+		orderByFields := []*planpb.OrderByField{{FieldId: 1, Ascending: false}}
+
+		result := compareOrderByValuesProxy(lhsVals, rhsVals, orderByFields)
+		s.Equal(1, result, "100 < 200 with DESC should return 1 (reversed)")
+
+		result = compareOrderByValuesProxy(rhsVals, lhsVals, orderByFields)
+		s.Equal(-1, result, "200 > 100 with DESC should return -1 (reversed)")
+	}
+
+	// Test string comparison
+	{
+		lhsVals := []any{"apple"}
+		rhsVals := []any{"banana"}
+		orderByFields := []*planpb.OrderByField{{FieldId: 1, Ascending: true}}
+
+		result := compareOrderByValuesProxy(lhsVals, rhsVals, orderByFields)
+		s.Equal(-1, result, "apple < banana should return -1")
+	}
+
+	// Test nil handling
+	{
+		lhsVals := []any{nil}
+		rhsVals := []any{int64(100)}
+		orderByFields := []*planpb.OrderByField{{FieldId: 1, Ascending: true}}
+
+		result := compareOrderByValuesProxy(lhsVals, rhsVals, orderByFields)
+		s.Equal(-1, result, "nil < non-nil with ASC should return -1")
+
+		result = compareOrderByValuesProxy(rhsVals, lhsVals, orderByFields)
+		s.Equal(1, result, "non-nil > nil with ASC should return 1")
+	}
+
+	// Test float comparison
+	{
+		lhsVals := []any{float64(1.5)}
+		rhsVals := []any{float64(2.5)}
+		orderByFields := []*planpb.OrderByField{{FieldId: 1, Ascending: true}}
+
+		result := compareOrderByValuesProxy(lhsVals, rhsVals, orderByFields)
+		s.Equal(-1, result, "1.5 < 2.5 should return -1")
+	}
+}
+
+// TestBuildOrderByIterators tests the iterator construction for order_by fields
+func (s *SearchReduceUtilTestSuite) TestBuildOrderByIterators() {
+	data := genTestDataWithOrderByValues()
+
+	orderByFields := []*planpb.OrderByField{
+		{FieldId: 102, Ascending: true},
+	}
+
+	iterators := buildOrderByIterators(data, orderByFields)
+
+	// Should have iterators for both search results
+	s.Equal(2, len(iterators))
+
+	// Each should have one iterator (for one order_by field)
+	s.Equal(1, len(iterators[0]))
+	s.Equal(1, len(iterators[1]))
+
+	// Test first iterator returns correct values
+	// Segment 1 prices: [100, 50, 200, 75, 150]
+	s.NotNil(iterators[0][0])
+	val0 := iterators[0][0](0)
+	s.Equal(int64(100), val0)
+	val1 := iterators[0][0](1)
+	s.Equal(int64(50), val1)
+}
+
+// TestReduceSearchResultDataWithOrderBySingleShard tests single shard optimization
+func (s *SearchReduceUtilTestSuite) TestReduceSearchResultDataWithOrderBySingleShard() {
+	ctx := context.Background()
+	nq := int64(1)
+	topK := int64(5)
+	offset := int64(0)
+
+	// Only one shard
+	data := genTestDataWithOrderByValues()[:1]
+
+	orderByFields := []*planpb.OrderByField{
+		{FieldId: 102, Ascending: true},
+	}
+
+	results, err := reduceSearchResultDataWithOrderBy(ctx, data, nq, topK, "L2", schemapb.DataType_Int64, offset, orderByFields)
+	s.NoError(err)
+	s.NotNil(results)
+
+	// Single shard should still be sorted by order_by field
+	// Prices: [100, 50, 200, 75, 150] -> sorted ASC: [50, 75, 100, 150, 200]
+	// IDs:    [1,   2,  3,   4,  5]   -> sorted:     [2,  4,  1,   5,   3]
+	expectedIDs := []int64{2, 4, 1, 5, 3}
+	s.Equal(expectedIDs, results.Results.GetIds().GetIntId().GetData())
+}
+
+// TestReduceSearchResultDataWithOrderByEmptyData tests handling of empty data
+func (s *SearchReduceUtilTestSuite) TestReduceSearchResultDataWithOrderByEmptyData() {
+	ctx := context.Background()
+	nq := int64(1)
+	topK := int64(5)
+	offset := int64(0)
+
+	emptyData := &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{}},
+			},
+		},
+		Scores:     []float32{},
+		Topks:      []int64{0},
+		NumQueries: nq,
+		TopK:       topK,
+		FieldsData: []*schemapb.FieldData{},
+	}
+
+	orderByFields := []*planpb.OrderByField{
+		{FieldId: 102, Ascending: true},
+	}
+
+	results, err := reduceSearchResultDataWithOrderBy(ctx, []*schemapb.SearchResultData{emptyData}, nq, topK, "L2", schemapb.DataType_Int64, offset, orderByFields)
+	s.NoError(err)
+	s.NotNil(results)
+	s.Equal(0, len(results.Results.GetIds().GetIntId().GetData()))
 }
 
 func TestSearchReduceUtilTestSuite(t *testing.T) {

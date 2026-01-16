@@ -15,15 +15,13 @@
 #include "segcore/ReduceUtils.h"
 #include "common/EasyAssert.h"
 #include "log/Log.h"
-#include "exec/operator/search-groupby/SearchGroupByOperator.h"
 
 namespace milvus::segcore {
-using milvus::exec::GetDataGetter;
 
 int64_t
 OrderByReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
-                                                 int64_t topk,
-                                                 int64_t& offset) {
+                                                int64_t topk,
+                                                int64_t& offset) {
     if (order_by_fields_.empty()) {
         // Fallback to base class implementation if no order_by fields
         return ReduceHelper::ReduceSearchResultForOneNQ(qi, topk, offset);
@@ -39,9 +37,6 @@ OrderByReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
     pk_set_.clear();
     pairs_.clear();
     pairs_.reserve(num_segments_);
-
-    // Initialize OpContext for reading field values
-    milvus::OpContext op_ctx;
 
     for (int i = 0; i < num_segments_; i++) {
         auto search_result = search_results_[i];
@@ -101,7 +96,7 @@ OrderByReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
 
 void
 OrderByReduceHelper::ReadOrderByValues(SearchResultPair* pair) {
-    if (order_by_fields_.empty() || pair->offset_ >= pair->offset_rb_) {
+    if (field_reader_.Empty() || pair->offset_ >= pair->offset_rb_) {
         pair->order_by_values_ = std::nullopt;
         return;
     }
@@ -115,149 +110,7 @@ OrderByReduceHelper::ReadOrderByValues(SearchResultPair* pair) {
                "Failed to cast SegmentInterface to SegmentInternalInterface");
     auto seg_offset = search_result->seg_offsets_[pair->offset_];
 
-    milvus::OpContext op_ctx;
-    std::vector<milvus::OrderByValueType> order_by_vals;
-    order_by_vals.reserve(order_by_fields_.size());
-
-    for (const auto& field : order_by_fields_) {
-        auto data_type = segment->GetFieldDataType(field.field_id_);
-        milvus::OrderByValueType val = std::nullopt;
-
-        // Read field value based on type
-        switch (data_type) {
-            case DataType::BOOL: {
-                auto getter = GetDataGetter<bool>(
-                    &op_ctx, *segment, field.field_id_, field.json_path_);
-                auto bool_val = getter->Get(seg_offset);
-                if (bool_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(bool_val.value())));
-                }
-                break;
-            }
-            case DataType::INT8: {
-                auto getter = GetDataGetter<int8_t>(
-                    &op_ctx, *segment, field.field_id_, field.json_path_);
-                auto int8_val = getter->Get(seg_offset);
-                if (int8_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(int8_val.value())));
-                }
-                break;
-            }
-            case DataType::INT16: {
-                auto getter = GetDataGetter<int16_t>(
-                    &op_ctx, *segment, field.field_id_, field.json_path_);
-                auto int16_val = getter->Get(seg_offset);
-                if (int16_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(int16_val.value())));
-                }
-                break;
-            }
-            case DataType::INT32: {
-                auto getter = GetDataGetter<int32_t>(
-                    &op_ctx, *segment, field.field_id_, field.json_path_);
-                auto int32_val = getter->Get(seg_offset);
-                if (int32_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(int32_val.value())));
-                }
-                break;
-            }
-            case DataType::INT64: {
-                auto getter = GetDataGetter<int64_t>(
-                    &op_ctx, *segment, field.field_id_, field.json_path_);
-                auto int64_val = getter->Get(seg_offset);
-                if (int64_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(int64_val.value())));
-                }
-                break;
-            }
-            case DataType::FLOAT: {
-                auto getter = GetDataGetter<float>(
-                    &op_ctx, *segment, field.field_id_, field.json_path_);
-                auto float_val = getter->Get(seg_offset);
-                if (float_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(float_val.value())));
-                }
-                break;
-            }
-            case DataType::DOUBLE: {
-                auto getter = GetDataGetter<double>(
-                    &op_ctx, *segment, field.field_id_, field.json_path_);
-                auto double_val = getter->Get(seg_offset);
-                if (double_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(double_val.value())));
-                }
-                break;
-            }
-            case DataType::VARCHAR:
-            case DataType::STRING: {
-                auto getter = GetDataGetter<std::string>(
-                    &op_ctx, *segment, field.field_id_, field.json_path_);
-                auto str_val = getter->Get(seg_offset);
-                if (str_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(str_val.value())));
-                }
-                break;
-            }
-            case DataType::JSON: {
-                if (!field.json_path_.has_value()) {
-                    val = std::nullopt;
-                    break;
-                }
-                auto getter = GetDataGetter<std::string, milvus::Json>(
-                    &op_ctx,
-                    *segment,
-                    field.field_id_,
-                    field.json_path_,
-                    std::nullopt,
-                    false);
-                auto str_val = getter->Get(seg_offset);
-                if (str_val.has_value()) {
-                    val = milvus::OrderByValueType(
-                        std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                         int32_t, int64_t, bool, float, double,
-                                                         std::string>(str_val.value())));
-                }
-                break;
-            }
-            default:
-                // Unsupported type, use null
-                val = std::nullopt;
-                break;
-        }
-        order_by_vals.push_back(val);
-    }
-
-    pair->order_by_values_ = std::move(order_by_vals);
-}
-
-void
-OrderByReduceHelper::InitializeDataGetters(SearchResult* search_result) {
-    // This method is reserved for future optimization (caching DataGetters)
-    (void)search_result;
+    pair->order_by_values_ = field_reader_.Read(*segment, seg_offset);
 }
 
 void
@@ -266,9 +119,10 @@ OrderByReduceHelper::FillOtherData(
     int64_t nq_begin,
     int64_t nq_end,
     std::unique_ptr<milvus::proto::schema::SearchResultData>& search_res_data) {
-    if (order_by_fields_.empty()) {
+    if (field_reader_.Empty()) {
         // No order_by fields, call base class implementation
-        ReduceHelper::FillOtherData(result_count, nq_begin, nq_end, search_res_data);
+        ReduceHelper::FillOtherData(
+            result_count, nq_begin, nq_end, search_res_data);
         return;
     }
 
@@ -276,7 +130,6 @@ OrderByReduceHelper::FillOtherData(
     std::vector<std::vector<OrderByValueType>> order_by_vals_list;
     order_by_vals_list.resize(result_count);
 
-    milvus::OpContext op_ctx;
     for (auto qi = nq_begin; qi < nq_end; qi++) {
         for (auto search_result : search_results_) {
             AssertInfo(search_result != nullptr,
@@ -290,150 +143,18 @@ OrderByReduceHelper::FillOtherData(
 
             auto segment_interface =
                 static_cast<const SegmentInterface*>(search_result->segment_);
-            auto segment =
-                dynamic_cast<const SegmentInternalInterface*>(segment_interface);
-            AssertInfo(segment != nullptr,
-                       "Failed to cast SegmentInterface to SegmentInternalInterface");
+            auto segment = dynamic_cast<const SegmentInternalInterface*>(
+                segment_interface);
+            AssertInfo(
+                segment != nullptr,
+                "Failed to cast SegmentInterface to SegmentInternalInterface");
 
             for (auto ki = topk_start; ki < topk_end; ki++) {
                 auto loc = search_result->result_offsets_[ki];
                 auto seg_offset = search_result->seg_offsets_[ki];
 
-                // Read order_by field values for this result
-                std::vector<OrderByValueType> order_by_vals;
-                order_by_vals.reserve(order_by_fields_.size());
-
-                for (const auto& field : order_by_fields_) {
-                    auto data_type = segment->GetFieldDataType(field.field_id_);
-                    OrderByValueType val = std::nullopt;
-
-                    // Read field value based on type (same logic as ReadOrderByValues)
-                    switch (data_type) {
-                        case DataType::BOOL: {
-                            auto getter = GetDataGetter<bool>(
-                                &op_ctx, *segment, field.field_id_, field.json_path_);
-                            auto bool_val = getter->Get(seg_offset);
-                            if (bool_val.has_value()) {
-                                val = OrderByValueType(
-                                    std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                                     int32_t, int64_t, bool, float, double,
-                                                                     std::string>(bool_val.value())));
-                            }
-                            break;
-                        }
-                        case DataType::INT8: {
-                            auto getter = GetDataGetter<int8_t>(
-                                &op_ctx, *segment, field.field_id_, field.json_path_);
-                            auto int8_val = getter->Get(seg_offset);
-                            if (int8_val.has_value()) {
-                                val = OrderByValueType(
-                                    std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                                     int32_t, int64_t, bool, float, double,
-                                                                     std::string>(int8_val.value())));
-                            }
-                            break;
-                        }
-                        case DataType::INT16: {
-                            auto getter = GetDataGetter<int16_t>(
-                                &op_ctx, *segment, field.field_id_, field.json_path_);
-                            auto int16_val = getter->Get(seg_offset);
-                            if (int16_val.has_value()) {
-                                val = OrderByValueType(
-                                    std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                                     int32_t, int64_t, bool, float, double,
-                                                                     std::string>(int16_val.value())));
-                            }
-                            break;
-                        }
-                        case DataType::INT32: {
-                            auto getter = GetDataGetter<int32_t>(
-                                &op_ctx, *segment, field.field_id_, field.json_path_);
-                            auto int32_val = getter->Get(seg_offset);
-                            if (int32_val.has_value()) {
-                                val = OrderByValueType(
-                                    std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                                     int32_t, int64_t, bool, float, double,
-                                                                     std::string>(int32_val.value())));
-                            }
-                            break;
-                        }
-                        case DataType::INT64: {
-                            auto getter = GetDataGetter<int64_t>(
-                                &op_ctx, *segment, field.field_id_, field.json_path_);
-                            auto int64_val = getter->Get(seg_offset);
-                            if (int64_val.has_value()) {
-                                val = OrderByValueType(
-                                    std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                                     int32_t, int64_t, bool, float, double,
-                                                                     std::string>(int64_val.value())));
-                            }
-                            break;
-                        }
-                        case DataType::FLOAT: {
-                            auto getter = GetDataGetter<float>(
-                                &op_ctx, *segment, field.field_id_, field.json_path_);
-                            auto float_val = getter->Get(seg_offset);
-                            if (float_val.has_value()) {
-                                val = OrderByValueType(
-                                    std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                                     int32_t, int64_t, bool, float, double,
-                                                                     std::string>(float_val.value())));
-                            }
-                            break;
-                        }
-                        case DataType::DOUBLE: {
-                            auto getter = GetDataGetter<double>(
-                                &op_ctx, *segment, field.field_id_, field.json_path_);
-                            auto double_val = getter->Get(seg_offset);
-                            if (double_val.has_value()) {
-                                val = OrderByValueType(
-                                    std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                                     int32_t, int64_t, bool, float, double,
-                                                                     std::string>(double_val.value())));
-                            }
-                            break;
-                        }
-                        case DataType::VARCHAR:
-                        case DataType::STRING: {
-                            auto getter = GetDataGetter<std::string>(
-                                &op_ctx, *segment, field.field_id_, field.json_path_);
-                            auto str_val = getter->Get(seg_offset);
-                            if (str_val.has_value()) {
-                                val = OrderByValueType(
-                                    std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                                     int32_t, int64_t, bool, float, double,
-                                                                     std::string>(str_val.value())));
-                            }
-                            break;
-                        }
-                        case DataType::JSON: {
-                            if (!field.json_path_.has_value()) {
-                                val = std::nullopt;
-                                break;
-                            }
-                            auto getter = GetDataGetter<std::string, milvus::Json>(
-                                &op_ctx,
-                                *segment,
-                                field.field_id_,
-                                field.json_path_,
-                                std::nullopt,
-                                false);
-                            auto str_val = getter->Get(seg_offset);
-                            if (str_val.has_value()) {
-                                val = OrderByValueType(
-                                    std::make_optional(std::variant<std::monostate, int8_t, int16_t,
-                                                                     int32_t, int64_t, bool, float, double,
-                                                                     std::string>(str_val.value())));
-                            }
-                            break;
-                        }
-                        default:
-                            val = std::nullopt;
-                            break;
-                    }
-                    order_by_vals.push_back(val);
-                }
-                order_by_vals_list[loc] = std::move(order_by_vals);
+                order_by_vals_list[loc] =
+                    field_reader_.Read(*segment, seg_offset);
             }
         }
     }

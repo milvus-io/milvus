@@ -297,6 +297,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 	var retSize int64
 
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
+	selectionBound := groupSize * topk
 	// reducing nq * topk results
 	for i := int64(0); i < nq; i++ {
 		var (
@@ -311,7 +312,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 			groupByValIdx  = 0
 		)
 
-		for j = 0; j < groupBound; {
+		for j = 0; j < selectionBound; {
 			subSearchIdx, resultDataIdx := selectHighestScoreIndex(ctx, subSearchResultData, subSearchNqOffset, cursors, i)
 			if subSearchIdx == -1 {
 				break
@@ -614,6 +615,33 @@ func reduceSearchResultDataWithOrderBy(ctx context.Context, subSearchResultData 
 		// Build order_by iterators
 		orderByIterators := buildOrderByIterators(subSearchResultData, orderByFields)
 
+		// Create order_by field builders for each order_by field
+		// Find the first non-empty OrderByFieldValue across all shards to get type information
+		var orderByFieldBuilders []*typeutil.FieldDataBuilder
+		if len(orderByFields) > 0 && len(subSearchResultData) > 0 {
+			var orderByFieldValues []*schemapb.FieldData
+			for _, srd := range subSearchResultData {
+				if vals := srd.GetOrderByFieldValue(); len(vals) > 0 {
+					orderByFieldValues = vals
+					break
+				}
+			}
+			if len(orderByFieldValues) > 0 {
+				orderByFieldBuilders = make([]*typeutil.FieldDataBuilder, len(orderByFieldValues))
+				for fieldIdx, fieldData := range orderByFieldValues {
+					if fieldData != nil {
+						builder, err := typeutil.NewFieldDataBuilder(fieldData.GetType(), true, int(limit*nq))
+						if err != nil {
+							log.Ctx(ctx).Warn("failed to construct order by field data builder", zap.Error(err), zap.Int("fieldIdx", fieldIdx))
+							continue
+						}
+						builder.SetFieldId(fieldData.GetFieldId())
+						orderByFieldBuilders[fieldIdx] = builder
+					}
+				}
+			}
+		}
+
 		idxComputers := make([]*typeutil.FieldDataIdxComputer, subSearchNum)
 		for i, srd := range subSearchResultData {
 			idxComputers[i] = typeutil.NewFieldDataIdxComputer(srd.FieldsData)
@@ -663,6 +691,17 @@ func reduceSearchResultDataWithOrderBy(ctx context.Context, subSearchResultData 
 					ret.Results.ElementIndices.Data = append(ret.Results.ElementIndices.Data, elemIdx)
 				}
 
+				// Handle OrderByFieldValue if present - add values for all order_by fields
+				if len(orderByFieldBuilders) > 0 && orderByIterators != nil && subSearchIdx < len(orderByIterators) {
+					iterators := orderByIterators[subSearchIdx]
+					for fieldIdx, builder := range orderByFieldBuilders {
+						if builder != nil && fieldIdx < len(iterators) && iterators[fieldIdx] != nil {
+							orderByVal := iterators[fieldIdx](int(resultDataIdx))
+							builder.Add(orderByVal)
+						}
+					}
+				}
+
 				cursors[subSearchIdx]++
 			}
 			if realTopK != -1 && realTopK != j {
@@ -677,6 +716,16 @@ func reduceSearchResultDataWithOrderBy(ctx context.Context, subSearchResultData 
 			}
 		}
 		ret.Results.TopK = realTopK
+
+		// Set OrderByFieldValue in result - build all field data
+		if len(orderByFieldBuilders) > 0 {
+			ret.Results.OrderByFieldValue = make([]*schemapb.FieldData, len(orderByFieldBuilders))
+			for fieldIdx, builder := range orderByFieldBuilders {
+				if builder != nil {
+					ret.Results.OrderByFieldValue[fieldIdx] = builder.Build()
+				}
+			}
+		}
 	}
 
 	if !metric.PositivelyRelated(metricType) {
@@ -687,7 +736,21 @@ func reduceSearchResultDataWithOrderBy(ctx context.Context, subSearchResultData 
 	return ret, nil
 }
 
-// reduceSearchResultDataWithGroupOrderBy reduces search results with both group_by and order_by
+// reduceSearchResultDataWithGroupOrderBy reduces search results with both group_by and order_by.
+//
+// Group + OrderBy Behavior:
+// When both group_by and order_by are specified, groups are sorted by the order_by field value
+// of the FIRST (best-scoring) item within each group. This means:
+//   - Items within each group are first selected by their similarity score (distance)
+//   - The first item (highest score) in each group represents the group for ordering purposes
+//   - Groups are then sorted based on this representative item's order_by field value
+//
+// Example: With group_by=category, order_by=price ASC, group_size=3
+//   - Group "Electronics" has items with prices [$999, $799, $1299] (ordered by score)
+//   - Group "Books" has items with prices [$15, $25, $10] (ordered by score)
+//   - Electronics group is represented by $999 (first item's price)
+//   - Books group is represented by $15 (first item's price)
+//   - Result: Books group comes first because $15 < $999
 func reduceSearchResultDataWithGroupOrderBy(ctx context.Context, subSearchResultData []*schemapb.SearchResultData,
 	nq int64, topk int64, metricType string, pkType schemapb.DataType, offset int64, groupSize int64,
 	orderByFields []*planpb.OrderByField,
@@ -757,6 +820,33 @@ func reduceSearchResultDataWithGroupOrderBy(ctx context.Context, subSearchResult
 	// Build order_by iterators
 	orderByIterators := buildOrderByIterators(subSearchResultData, orderByFields)
 
+	// Create order_by field builders for each order_by field
+	// Find the first non-empty OrderByFieldValue across all shards to get type information
+	var orderByFieldBuilders []*typeutil.FieldDataBuilder
+	if len(orderByFields) > 0 && len(subSearchResultData) > 0 {
+		var orderByFieldValues []*schemapb.FieldData
+		for _, srd := range subSearchResultData {
+			if vals := srd.GetOrderByFieldValue(); len(vals) > 0 {
+				orderByFieldValues = vals
+				break
+			}
+		}
+		if len(orderByFieldValues) > 0 {
+			orderByFieldBuilders = make([]*typeutil.FieldDataBuilder, len(orderByFieldValues))
+			for fieldIdx, fieldData := range orderByFieldValues {
+				if fieldData != nil {
+					builder, err := typeutil.NewFieldDataBuilder(fieldData.GetType(), true, int(outputBound))
+					if err != nil {
+						log.Ctx(ctx).Warn("failed to construct order by field data builder", zap.Error(err), zap.Int("fieldIdx", fieldIdx))
+						continue
+					}
+					builder.SetFieldId(fieldData.GetFieldId())
+					orderByFieldBuilders[fieldIdx] = builder
+				}
+			}
+		}
+	}
+
 	idxComputers := make([]*typeutil.FieldDataIdxComputer, subSearchNum)
 	for i, srd := range subSearchResultData {
 		idxComputers[i] = typeutil.NewFieldDataIdxComputer(srd.FieldsData)
@@ -821,9 +911,13 @@ func reduceSearchResultDataWithGroupOrderBy(ctx context.Context, subSearchResult
 			}
 			first := groupEntities[0]
 			orderByVals := make([]any, len(orderByFields))
-			for fieldIdx := range orderByFields {
-				if fieldIdx < len(orderByIterators[first.subSearchIdx]) {
-					orderByVals[fieldIdx] = orderByIterators[first.subSearchIdx][fieldIdx](int(first.resultIdx))
+			// Defensive checks for nil iterators
+			if orderByIterators != nil && first.subSearchIdx < len(orderByIterators) {
+				iterators := orderByIterators[first.subSearchIdx]
+				for fieldIdx := range orderByFields {
+					if iterators != nil && fieldIdx < len(iterators) && iterators[fieldIdx] != nil {
+						orderByVals[fieldIdx] = iterators[fieldIdx](int(first.resultIdx))
+					}
 				}
 			}
 			groupInfos = append(groupInfos, groupOrderByInfo{
@@ -868,6 +962,18 @@ func reduceSearchResultDataWithGroupOrderBy(ctx context.Context, subSearchResult
 				}
 
 				gpFieldBuilder.Add(group.groupVal)
+
+				// Handle OrderByFieldValue if present - add values for all order_by fields
+				if len(orderByFieldBuilders) > 0 && orderByIterators != nil && groupEntity.subSearchIdx < len(orderByIterators) {
+					iterators := orderByIterators[groupEntity.subSearchIdx]
+					for fieldIdx, builder := range orderByFieldBuilders {
+						if builder != nil && fieldIdx < len(iterators) && iterators[fieldIdx] != nil {
+							orderByVal := iterators[fieldIdx](int(groupEntity.resultIdx))
+							builder.Add(orderByVal)
+						}
+					}
+				}
+
 				outputCount++
 			}
 		}
@@ -885,6 +991,17 @@ func reduceSearchResultDataWithGroupOrderBy(ctx context.Context, subSearchResult
 		}
 	}
 	ret.Results.TopK = realTopK
+
+	// Set OrderByFieldValue in result - build all field data
+	if len(orderByFieldBuilders) > 0 {
+		ret.Results.OrderByFieldValue = make([]*schemapb.FieldData, len(orderByFieldBuilders))
+		for fieldIdx, builder := range orderByFieldBuilders {
+			if builder != nil {
+				ret.Results.OrderByFieldValue[fieldIdx] = builder.Build()
+			}
+		}
+	}
+
 	if !metric.PositivelyRelated(metricType) {
 		for k := range ret.Results.Scores {
 			ret.Results.Scores[k] *= -1
@@ -1093,9 +1210,10 @@ func selectHighestScoreIndex(ctx context.Context, subSearchResultData []*schemap
 	return subSearchIdx, resultDataIdx
 }
 
-// buildOrderByIterators creates iterators for order_by fields from OrderByFieldValue
-// Similar to how GroupByFieldValue is used, OrderByFieldValue contains the order_by field data
-// even if it's not in output_fields
+// buildOrderByIterators creates iterators for order_by fields from OrderByFieldValue.
+// OrderByFieldValue is a repeated field containing data for ALL order_by fields.
+// Each element in the slice corresponds to one order_by field in order.
+// This is separate from FieldsData (output_fields) and GroupByFieldValue.
 func buildOrderByIterators(
 	subSearchResultData []*schemapb.SearchResultData,
 	orderByFields []*planpb.OrderByField,
@@ -1107,50 +1225,25 @@ func buildOrderByIterators(
 	iterators := make([][]func(int) any, len(subSearchResultData))
 	for i, srd := range subSearchResultData {
 		iterators[i] = make([]func(int) any, len(orderByFields))
-		// Use OrderByFieldValue (similar to GroupByFieldValue)
-		// This contains the first order_by field's data (since OrderByFieldValue is a single FieldData)
-		if srd.OrderByFieldValue != nil {
-			// For now, use the first order_by field from OrderByFieldValue
-			// If there are multiple order_by fields, only the first one is available in OrderByFieldValue
-			if len(orderByFields) > 0 {
-				// Check if the first order_by field matches the OrderByFieldValue
-				// Since OrderByFieldValue is populated for the first order_by field
-				iterators[i][0] = typeutil.GetDataIterator(srd.OrderByFieldValue)
-				// For additional order_by fields, try to find them in FieldsData as fallback
-				for fieldIdx := 1; fieldIdx < len(orderByFields); fieldIdx++ {
-					fieldData := getOrderByFieldData(srd.FieldsData, orderByFields[fieldIdx].FieldId)
-					if fieldData != nil {
-						iterators[i][fieldIdx] = typeutil.GetDataIterator(fieldData)
-					} else {
-						// Field not found, return nil iterator
-						iterators[i][fieldIdx] = func(int) any { return nil }
-					}
-				}
-			}
-		} else {
-			// Fallback: try to find order_by fields in FieldsData (for backward compatibility)
-			for fieldIdx, field := range orderByFields {
-				fieldData := getOrderByFieldData(srd.FieldsData, field.FieldId)
-				if fieldData != nil {
-					iterators[i][fieldIdx] = typeutil.GetDataIterator(fieldData)
-				} else {
-					// Field not found, return nil iterator
-					iterators[i][fieldIdx] = func(int) any { return nil }
-				}
+		orderByFieldValues := srd.GetOrderByFieldValue()
+
+		// Build iterator for each order_by field from the repeated OrderByFieldValue
+		for fieldIdx := range orderByFields {
+			if fieldIdx < len(orderByFieldValues) && orderByFieldValues[fieldIdx] != nil {
+				iterators[i][fieldIdx] = typeutil.GetDataIterator(orderByFieldValues[fieldIdx])
+			} else {
+				// Field data not present - this indicates a data consistency issue
+				// Log warning and return nil iterator (comparison will treat as null)
+				log.Warn("OrderByFieldValue missing for shard, ordering may be affected",
+					zap.Int("shardIdx", i),
+					zap.Int("fieldIdx", fieldIdx),
+					zap.Int("expectedFields", len(orderByFields)),
+					zap.Int("actualFields", len(orderByFieldValues)))
+				iterators[i][fieldIdx] = func(int) any { return nil }
 			}
 		}
 	}
 	return iterators
-}
-
-// getOrderByFieldData finds the FieldData for a given order_by field_id (fallback helper)
-func getOrderByFieldData(fieldsData []*schemapb.FieldData, fieldId int64) *schemapb.FieldData {
-	for _, fieldData := range fieldsData {
-		if fieldData != nil && fieldData.FieldId == fieldId {
-			return fieldData
-		}
-	}
-	return nil
 }
 
 // selectIndexByOrderBy selects the next result index based on order_by field values
@@ -1235,8 +1328,14 @@ func compareByOrderByFieldsProxy(
 			break
 		}
 
-		lhsVal := lhsIterators[fieldIdx](int(lhsIdx))
-		rhsVal := rhsIterators[fieldIdx](int(rhsIdx))
+		// Defensive nil checks for iterator functions
+		var lhsVal, rhsVal any
+		if lhsIterators[fieldIdx] != nil {
+			lhsVal = lhsIterators[fieldIdx](int(lhsIdx))
+		}
+		if rhsIterators[fieldIdx] != nil {
+			rhsVal = rhsIterators[fieldIdx](int(rhsIdx))
+		}
 
 		// Handle null values: null < non-null
 		if lhsVal == nil && rhsVal == nil {

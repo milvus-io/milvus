@@ -34,6 +34,7 @@
 #include "exec/operator/ElementFilterNode.h"
 #include "exec/operator/ElementFilterBitsNode.h"
 #include "exec/operator/SearchGroupByNode.h"
+#include "exec/operator/SearchOrderByNode.h"
 #include "exec/operator/AggregationNode.h"
 #include "exec/operator/ProjectNode.h"
 #include "exec/Task.h"
@@ -90,6 +91,12 @@ DriverFactory::CreateDriver(std::unique_ptr<DriverContext> ctx,
             tracer::AddEvent("create_operator: SearchGroupByNode");
             operators.push_back(std::make_unique<PhySearchGroupByNode>(
                 id, ctx.get(), searchGroupByNode));
+        } else if (auto searchOrderByNode =
+                       std::dynamic_pointer_cast<const plan::SearchOrderByNode>(
+                           plannode)) {
+            tracer::AddEvent("create_operator: SearchOrderByNode");
+            operators.push_back(std::make_unique<PhySearchOrderByNode>(
+                id, ctx.get(), searchOrderByNode));
         } else if (auto queryGroupByNode =
                        std::dynamic_pointer_cast<const plan::AggregationNode>(
                            plannode)) {
