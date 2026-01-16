@@ -578,6 +578,12 @@ func TestInsertTaskForSchemaMismatch(t *testing.T) {
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
 			updateTimestamp: 100,
+			schema: newSchemaInfo(&schemapb.CollectionSchema{
+				Name: "fooooo",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				},
+			}),
 		}, nil)
 		err := it.PreExecute(ctx)
 		assert.Error(t, err)

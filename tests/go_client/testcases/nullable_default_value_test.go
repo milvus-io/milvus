@@ -1732,43 +1732,44 @@ func TestNullableVectorUpsert(t *testing.T) {
 			ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 			mc := hp.CreateDefaultMilvusClient(ctx, t)
 
-			collName := common.GenRandomString("nullable_vec_ups", 5)
+			// Create collection with pk, scalar, and nullable vector fields
+			collName := common.GenRandomString("nullable_vec_upsert", 5)
 			pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
 			if autoID {
 				pkField.AutoID = true
 			}
+			scalarField := entity.NewField().WithName("scalar").WithDataType(entity.FieldTypeInt32).WithNullable(true)
 			vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim).WithNullable(true)
-			schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField)
+			schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(scalarField).WithField(vecField)
 
 			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 			common.CheckErr(t, err, true)
 
-			// insert initial data with 50% null
+			// Insert initial data: 100 rows
+			// Rows 0 to nullPercent-1: valid vector, scalar = i*10
+			// Rows nullPercent to nb-1: null vector, scalar = i*10
 			nb := 100
 			nullPercent := 50
 			validData := make([]bool, nb)
 			validCount := 0
 			for i := range nb {
-				validData[i] = (i % 100) >= nullPercent
+				validData[i] = i < nullPercent
 				if validData[i] {
 					validCount++
 				}
 			}
 
 			pkData := make([]int64, nb)
+			scalarData := make([]int32, nb)
+			scalarValidData := make([]bool, nb)
 			for i := range nb {
 				pkData[i] = int64(i)
+				scalarData[i] = int32(i * 10)
+				scalarValidData[i] = true
 			}
 			pkColumn := column.NewColumnInt64(common.DefaultInt64FieldName, pkData)
-
-			pkToVecIdx := make(map[int64]int)
-			vecIdx := 0
-			for i := range nb {
-				if validData[i] {
-					pkToVecIdx[int64(i)] = vecIdx
-					vecIdx++
-				}
-			}
+			scalarColumn, err := column.NewNullableColumnInt32("scalar", scalarData, scalarValidData)
+			common.CheckErr(t, err, true)
 
 			vectors := make([][]float32, validCount)
 			for i := range validCount {
@@ -1783,9 +1784,9 @@ func TestNullableVectorUpsert(t *testing.T) {
 
 			var insertRes client.InsertResult
 			if autoID {
-				insertRes, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(vecColumn))
+				insertRes, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(scalarColumn, vecColumn))
 			} else {
-				insertRes, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(pkColumn, vecColumn))
+				insertRes, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, pkColumn, scalarColumn, vecColumn))
 			}
 			common.CheckErr(t, err, true)
 			require.EqualValues(t, nb, insertRes.InsertCount)
@@ -1814,125 +1815,214 @@ func TestNullableVectorUpsert(t *testing.T) {
 			err = loadTask.Await(ctx)
 			common.CheckErr(t, err, true)
 
-			// upsert: change first 25 rows (originally null) to valid, change rows 50-74 (originally valid) to null
-			upsertNb := 50
-			upsertValidData := make([]bool, upsertNb)
-			for i := range upsertNb {
-				upsertValidData[i] = i < 25
-			}
-
-			upsertPkData := make([]int64, upsertNb)
-			for i := range upsertNb {
-				if i < 25 {
-					upsertPkData[i] = actualPkData[i]
-				} else {
-					upsertPkData[i] = actualPkData[i+25]
-				}
-			}
-			upsertPkColumn := column.NewColumnInt64(common.DefaultInt64FieldName, upsertPkData)
-
-			upsertVectors := make([][]float32, 25)
-			for i := range 25 {
-				vec := make([]float32, common.DefaultDim)
-				for j := range common.DefaultDim {
-					vec[j] = float32((i+100)*common.DefaultDim+j) / 10000.0
-				}
-				upsertVectors[i] = vec
-			}
-			upsertVecColumn, err := column.NewNullableColumnFloatVector(common.DefaultFloatVecFieldName, common.DefaultDim, upsertVectors, upsertValidData)
-			common.CheckErr(t, err, true)
-
-			upsertRes, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName, upsertPkColumn, upsertVecColumn))
-			common.CheckErr(t, err, true)
-			require.EqualValues(t, upsertNb, upsertRes.UpsertCount)
-
-			var upsertedPks []int64
-			if autoID {
-				upsertedIDs := upsertRes.IDs.(*column.ColumnInt64)
-				upsertedPks = upsertedIDs.Data()
-				require.EqualValues(t, upsertNb, len(upsertedPks), "upserted PK count should match")
-			} else {
-				upsertedPks = upsertPkData
-			}
-
+			// Track expected state
 			expectedVectorMap := make(map[int64][]float32)
-			for i := 0; i < 25; i++ {
-				expectedVectorMap[upsertedPks[i]] = upsertVectors[i]
-			}
-			for i := 25; i < 50; i++ {
-				expectedVectorMap[upsertedPks[i]] = nil
-			}
-			for i := 25; i < 50; i++ {
-				expectedVectorMap[actualPkData[i]] = nil
-			}
-			for i := 75; i < 100; i++ {
-				vecIdx := i - 50
-				expectedVectorMap[actualPkData[i]] = vectors[vecIdx]
+			expectedScalarMap := make(map[int64]int32)
+			for i := range nb {
+				expectedScalarMap[actualPkData[i]] = scalarData[i]
+				if i < nullPercent {
+					expectedVectorMap[actualPkData[i]] = vectors[i]
+				} else {
+					expectedVectorMap[actualPkData[i]] = nil
+				}
 			}
 
-			time.Sleep(10 * time.Second)
-			flushTask, err = mc.Flush(ctx, client.NewFlushOption(collName))
-			common.CheckErr(t, err, true)
-			err = flushTask.Await(ctx)
-			common.CheckErr(t, err, true)
+			// Helper: flush, reload, search and query verify
+			flushAndVerify := func(expectedValidCount int, context string) {
+				time.Sleep(10 * time.Second)
+				flushTask, err := mc.Flush(ctx, client.NewFlushOption(collName))
+				common.CheckErr(t, err, true)
+				err = flushTask.Await(ctx)
+				common.CheckErr(t, err, true)
 
-			err = mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(collName))
-			common.CheckErr(t, err, true)
+				err = mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(collName))
+				common.CheckErr(t, err, true)
 
-			loadTask, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
-			common.CheckErr(t, err, true)
-			err = loadTask.Await(ctx)
-			common.CheckErr(t, err, true)
+				loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+				common.CheckErr(t, err, true)
+				err = loadTask.Await(ctx)
+				common.CheckErr(t, err, true)
 
-			expectedValidCount := 50
-			searchVec := entity.FloatVector(common.GenFloatVector(common.DefaultDim))
-			searchRes, err := mc.Search(ctx, client.NewSearchOption(collName, 50, []entity.Vector{searchVec}).WithANNSField(common.DefaultFloatVecFieldName))
-			common.CheckErr(t, err, true)
-			require.EqualValues(t, 1, len(searchRes))
-			searchIDs := searchRes[0].IDs.(*column.ColumnInt64).Data()
-			require.EqualValues(t, expectedValidCount, len(searchIDs), "search should return all 50 valid vectors")
+				// Search verify
+				searchVec := entity.FloatVector(common.GenFloatVector(common.DefaultDim))
+				searchRes, err := mc.Search(ctx, client.NewSearchOption(collName, 100, []entity.Vector{searchVec}).WithANNSField(common.DefaultFloatVecFieldName))
+				common.CheckErr(t, err, true)
+				require.EqualValues(t, 1, len(searchRes))
+				require.EqualValues(t, expectedValidCount, searchRes[0].ResultCount, "%s: search should return %d valid vectors", context, expectedValidCount)
 
-			verifyVectorData := func(queryResult client.ResultSet, context string) {
-				pkCol := queryResult.GetColumn(common.DefaultInt64FieldName).(*column.ColumnInt64)
-				vecCol := queryResult.GetColumn(common.DefaultFloatVecFieldName).(*column.ColumnFloatVector)
-				for i := 0; i < queryResult.ResultCount; i++ {
+				// Query verify all rows
+				queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter(fmt.Sprintf("int64 in [%s]", int64SliceToString(actualPkData))).WithOutputFields("scalar", common.DefaultFloatVecFieldName))
+				common.CheckErr(t, err, true)
+				require.EqualValues(t, nb, queryRes.ResultCount, "%s: query should return %d rows", context, nb)
+
+				pkCol := queryRes.GetColumn(common.DefaultInt64FieldName).(*column.ColumnInt64)
+				scalarCol := queryRes.GetColumn("scalar").(*column.ColumnInt32)
+				vecCol := queryRes.GetColumn(common.DefaultFloatVecFieldName).(*column.ColumnFloatVector)
+
+				for i := 0; i < queryRes.ResultCount; i++ {
 					pk, _ := pkCol.GetAsInt64(i)
+					scalarVal, _ := scalarCol.GetAsInt64(i)
 					isNull, _ := vecCol.IsNull(i)
 
-					expectedVec, exists := expectedVectorMap[pk]
-					require.True(t, exists, "%s: unexpected PK %d in query results", context, pk)
+					expectedScalar := expectedScalarMap[pk]
+					require.EqualValues(t, expectedScalar, scalarVal, "%s: scalar mismatch for pk %d", context, pk)
 
+					expectedVec := expectedVectorMap[pk]
 					if expectedVec != nil {
 						require.False(t, isNull, "%s: vector should not be null for pk %d", context, pk)
 						vecData, _ := vecCol.Get(i)
 						queriedVec := []float32(vecData.(entity.FloatVector))
-						require.EqualValues(t, common.DefaultDim, len(queriedVec), "%s: vector dimension should match for pk %d", context, pk)
 						for j := range expectedVec {
-							require.InDelta(t, expectedVec[j], queriedVec[j], 1e-6, "%s: vector element %d should match for pk %d", context, j, pk)
+							require.InDelta(t, expectedVec[j], queriedVec[j], 1e-6, "%s: vector element %d mismatch for pk %d", context, j, pk)
 						}
 					} else {
 						require.True(t, isNull, "%s: vector should be null for pk %d", context, pk)
-						vecData, _ := vecCol.Get(i)
-						require.Nil(t, vecData, "%s: null vector data should be nil for pk %d", context, pk)
 					}
 				}
 			}
 
-			searchQueryRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter(fmt.Sprintf("int64 in [%s]", int64SliceToString(searchIDs))).WithOutputFields(common.DefaultFloatVecFieldName))
-			common.CheckErr(t, err, true)
-			verifyVectorData(searchQueryRes, "All valid vectors after upsert")
+			// Upsert 1: Update all 100 rows to null vectors
+			upsert1PkData := make([]int64, nb)
+			for i := range nb {
+				upsert1PkData[i] = actualPkData[i]
+			}
+			upsert1PkColumn := column.NewColumnInt64(common.DefaultInt64FieldName, upsert1PkData)
 
-			upsertedToValidPKs := upsertedPks[0:25]
-			queryUpsertedRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter(fmt.Sprintf("int64 in [%s]", int64SliceToString(upsertedToValidPKs))).WithOutputFields(common.DefaultFloatVecFieldName))
+			allNullValidData := make([]bool, nb)
+			upsert1VecColumn, err := column.NewNullableColumnFloatVector(common.DefaultFloatVecFieldName, common.DefaultDim, [][]float32{}, allNullValidData)
 			common.CheckErr(t, err, true)
-			require.EqualValues(t, 25, queryUpsertedRes.ResultCount, "should have 25 rows for upserted to valid")
-			verifyVectorData(queryUpsertedRes, "Upserted valid rows")
 
-			countRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter("").WithOutputFields("count(*)"))
+			upsert1ScalarData := make([]int32, nb)
+			upsert1ScalarValidData := make([]bool, nb)
+			for i := range nb {
+				upsert1ScalarData[i] = int32(i * 100)
+				upsert1ScalarValidData[i] = true
+			}
+			upsert1ScalarColumn, err := column.NewNullableColumnInt32("scalar", upsert1ScalarData, upsert1ScalarValidData)
 			common.CheckErr(t, err, true)
-			totalCount, err := countRes.Fields[0].GetAsInt64(0)
+
+			upsertRes1, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName, upsert1PkColumn, upsert1ScalarColumn, upsert1VecColumn))
 			common.CheckErr(t, err, true)
-			require.EqualValues(t, nb, totalCount, "total count after upsert should still be %d", nb)
+			require.EqualValues(t, nb, upsertRes1.UpsertCount)
+
+			// For AutoID=true, upsert returns new IDs, need to update actualPkData
+			if autoID {
+				upsertedIDs := upsertRes1.IDs.(*column.ColumnInt64)
+				newPkData := upsertedIDs.Data()
+				// Clear old expected state
+				expectedVectorMap = make(map[int64][]float32)
+				expectedScalarMap = make(map[int64]int32)
+				// Update actualPkData with new IDs
+				actualPkData = newPkData
+			}
+
+			// Update expected state: all vectors null
+			for i := range nb {
+				expectedVectorMap[actualPkData[i]] = nil
+				expectedScalarMap[actualPkData[i]] = upsert1ScalarData[i]
+			}
+
+			// Verify after upsert 1: search should return 0 (all null)
+			flushAndVerify(0, "After Upsert1-AllNull")
+
+			// Upsert 2: Update rows nullPercent to nb-1 to valid vectors
+			upsert2Nb := nb - nullPercent
+			upsert2PkData := make([]int64, upsert2Nb)
+			for i := range upsert2Nb {
+				upsert2PkData[i] = actualPkData[i+nullPercent]
+			}
+			upsert2PkColumn := column.NewColumnInt64(common.DefaultInt64FieldName, upsert2PkData)
+
+			upsert2Vectors := make([][]float32, upsert2Nb)
+			upsert2ValidData := make([]bool, upsert2Nb)
+			for i := range upsert2Nb {
+				vec := make([]float32, common.DefaultDim)
+				for j := range common.DefaultDim {
+					vec[j] = float32((i+500)*common.DefaultDim+j) / 10000.0
+				}
+				upsert2Vectors[i] = vec
+				upsert2ValidData[i] = true
+			}
+			upsert2VecColumn, err := column.NewNullableColumnFloatVector(common.DefaultFloatVecFieldName, common.DefaultDim, upsert2Vectors, upsert2ValidData)
+			common.CheckErr(t, err, true)
+
+			upsert2ScalarData := make([]int32, upsert2Nb)
+			upsert2ScalarValidData := make([]bool, upsert2Nb)
+			for i := range upsert2Nb {
+				upsert2ScalarData[i] = int32((i + nullPercent) * 200)
+				upsert2ScalarValidData[i] = true
+			}
+			upsert2ScalarColumn, err := column.NewNullableColumnInt32("scalar", upsert2ScalarData, upsert2ScalarValidData)
+			common.CheckErr(t, err, true)
+
+			upsertRes2, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName, upsert2PkColumn, upsert2ScalarColumn, upsert2VecColumn))
+			common.CheckErr(t, err, true)
+			require.EqualValues(t, upsert2Nb, upsertRes2.UpsertCount)
+
+			// For AutoID=true, upsert returns new IDs for the upserted rows
+			if autoID {
+				upsertedIDs := upsertRes2.IDs.(*column.ColumnInt64)
+				newPkData := upsertedIDs.Data()
+				// Update actualPkData for rows nullPercent to nb-1
+				for i := range upsert2Nb {
+					// Remove old expected state
+					delete(expectedVectorMap, actualPkData[i+nullPercent])
+					delete(expectedScalarMap, actualPkData[i+nullPercent])
+					// Update to new PK
+					actualPkData[i+nullPercent] = newPkData[i]
+				}
+			}
+
+			// Update expected state: rows nullPercent to nb-1 now have valid vectors
+			for i := range upsert2Nb {
+				expectedVectorMap[actualPkData[i+nullPercent]] = upsert2Vectors[i]
+				expectedScalarMap[actualPkData[i+nullPercent]] = upsert2ScalarData[i]
+			}
+
+			// Verify after upsert 2: search should return upsert2Nb (rows nullPercent to nb-1 valid)
+			flushAndVerify(upsert2Nb, "After Upsert2-NullToValid")
+
+			// Upsert 3: Partial update rows 0 to nullPercent-1 (only scalar), vector preserved (still null)
+			upsert3Nb := nullPercent
+			upsert3PkData := make([]int64, upsert3Nb)
+			upsert3ScalarData := make([]int32, upsert3Nb)
+			upsert3ScalarValidData := make([]bool, upsert3Nb)
+			for i := range upsert3Nb {
+				upsert3PkData[i] = actualPkData[i]
+				upsert3ScalarData[i] = int32(i * 1000)
+				upsert3ScalarValidData[i] = true
+			}
+			upsert3PkColumn := column.NewColumnInt64(common.DefaultInt64FieldName, upsert3PkData)
+			upsert3ScalarColumn, err := column.NewNullableColumnInt32("scalar", upsert3ScalarData, upsert3ScalarValidData)
+			common.CheckErr(t, err, true)
+
+			upsertRes3, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName, upsert3PkColumn, upsert3ScalarColumn).WithPartialUpdate(true))
+			common.CheckErr(t, err, true)
+			require.EqualValues(t, upsert3Nb, upsertRes3.UpsertCount)
+
+			// For AutoID=true, upsert returns new IDs for the upserted rows
+			if autoID {
+				upsertedIDs := upsertRes3.IDs.(*column.ColumnInt64)
+				newPkData := upsertedIDs.Data()
+				// Update actualPkData for rows 0 to nullPercent-1
+				for i := range upsert3Nb {
+					// Remove old expected state
+					delete(expectedVectorMap, actualPkData[i])
+					delete(expectedScalarMap, actualPkData[i])
+					// Update to new PK
+					actualPkData[i] = newPkData[i]
+				}
+			}
+
+			// Update expected state: rows 0 to nullPercent-1 scalar updated, vector preserved (null)
+			for i := range upsert3Nb {
+				expectedScalarMap[actualPkData[i]] = upsert3ScalarData[i]
+				// Vector remains null (preserved from before)
+				expectedVectorMap[actualPkData[i]] = nil
+			}
+
+			// Verify after upsert 3: search should still return upsert2Nb (only rows nullPercent to nb-1 valid)
+			flushAndVerify(upsert2Nb, "After Upsert3-PartialUpdate")
 
 			// clean up
 			err = mc.DropCollection(ctx, client.NewDropCollectionOption(collName))

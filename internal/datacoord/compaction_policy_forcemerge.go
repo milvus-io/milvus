@@ -30,6 +30,7 @@ const (
 type CollectionTopology struct {
 	CollectionID     int64
 	NumReplicas      int
+	NumShards        int
 	IsStandaloneMode bool
 	IsPooling        bool
 
@@ -86,6 +87,9 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 	}
 
 	configMaxSize := getExpectedSegmentSize(policy.meta, collectionID, collection.Schema)
+	if targetSize < configMaxSize {
+		return nil, 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("targetSize %d should be greater than or equal to configMaxSize %d", targetSize, configMaxSize))
+	}
 
 	segments := policy.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
@@ -104,6 +108,7 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 	if err != nil {
 		return nil, 0, err
 	}
+	topology.NumShards = len(collection.VChannelNames)
 
 	views := []CompactionView{}
 	for label, groups := range groupByPartitionChannel(GetViewsByInfo(segments...)) {
@@ -113,8 +118,9 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 			triggerID:     triggerID,
 			collectionTTL: collectionTTL,
 
-			configMaxSize: float64(configMaxSize),
-			topology:      topology,
+			configMaxSize:      float64(configMaxSize),
+			expectedTargetSize: float64(targetSize),
+			topology:           topology,
 		}
 		views = append(views, view)
 	}
