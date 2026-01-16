@@ -16,6 +16,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -38,7 +39,7 @@ namespace milvus::segcore {
  */
 struct LoadDiff {
     // Indexes that need to be loaded (field_id -> list of LoadIndexInfo)
-    std::map<FieldId, std::vector<LoadIndexInfo>> indexes_to_load;
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes_to_load;
 
     // Field binlog paths that need to be loaded [field_ids,FieldBinlog]
     // Only populated when both current and new use binlog mode
@@ -756,7 +757,7 @@ class SegmentLoadInfo {
         // Convert index infos to LoadIndexInfo and build per-field cache
         converted_index_infos_.clear();
         converted_field_index_cache_.clear();
-        index_has_raw_data_.clear();
+        field_index_has_raw_data_.clear();
         for (int i = 0; i < info_.index_infos_size(); i++) {
             const auto& index_info = info_.index_infos(i);
             if (index_info.index_file_paths_size() == 0) {
@@ -768,7 +769,7 @@ class SegmentLoadInfo {
             auto field_id = FieldId(index_info.fieldid());
             // Check if index has raw data before moving
             if (CheckIndexHasRawData(load_index_info)) {
-                index_has_raw_data_.insert(field_id);
+                field_index_has_raw_data_.insert(field_id);
             }
             converted_field_index_cache_[field_id].push_back(
                 std::move(load_index_info));
@@ -794,10 +795,11 @@ class SegmentLoadInfo {
     std::vector<LoadIndexInfo> converted_index_infos_;
 
     // Cache for quick field -> converted LoadIndexInfo lookup
-    std::map<FieldId, std::vector<LoadIndexInfo>> converted_field_index_cache_;
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>>
+        converted_field_index_cache_;
 
     // set of field ids that corresponding index has raw data
-    std::set<FieldId> index_has_raw_data_;
+    std::set<FieldId> field_index_has_raw_data_;
 
     // Cache for quick field -> binlog lookup
     std::map<FieldId, const proto::segcore::FieldBinlog*> field_binlog_cache_;

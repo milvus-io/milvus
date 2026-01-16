@@ -91,8 +91,9 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                     }
                     return false;
                 }(),
-                /* is_index */ false),
-            /* in_load_list */ eager_load),
+                /* is_index */ false,
+                /* in_load_list*/ eager_load),
+            /* support_eviction */ true),
       use_mmap_(use_mmap),
       mmap_populate_(mmap_populate),
       load_priority_(load_priority) {

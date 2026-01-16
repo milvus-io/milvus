@@ -977,9 +977,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     load_column_group_data_internal(const LoadFieldDataInfo& load_info);
 
     void
-    LoadBatchIndexes(
-        milvus::tracer::TraceContext& trace_ctx,
-        std::map<FieldId, std::vector<LoadIndexInfo>>& field_id_to_index_info);
+    LoadBatchIndexes(milvus::tracer::TraceContext& trace_ctx,
+                     const std::map<FieldId, std::vector<LoadIndexInfo>>&
+                         field_id_to_index_info);
 
     void
     LoadBatchFieldData(milvus::tracer::TraceContext& trace_ctx,

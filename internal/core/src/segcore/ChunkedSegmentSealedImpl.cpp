@@ -3177,7 +3177,8 @@ ChunkedSegmentSealedImpl::ReloadColumns(const std::vector<FieldId>& field_ids) {
 void
 ChunkedSegmentSealedImpl::LoadBatchIndexes(
     milvus::tracer::TraceContext& trace_ctx,
-    std::map<FieldId, std::vector<LoadIndexInfo>>& field_id_to_index_info) {
+    const std::map<FieldId, std::vector<LoadIndexInfo>>&
+        field_id_to_index_info) {
     auto num_rows = segment_load_info_.GetNumOfRows();
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
     std::vector<std::future<void>> load_index_futures;
