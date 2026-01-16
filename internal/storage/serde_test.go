@@ -116,12 +116,13 @@ func TestSerDe(t *testing.T) {
 			serdeMap[dt].serialize(builder, v, schemapb.DataType_None)
 			// assert.True(t, ok)
 			a := builder.NewArray()
-			got, got1 := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, false)
+			got, err := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, false)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("deserialize() got = %v, want %v", got, tt.want)
 			}
-			if got1 != tt.want1 {
-				t.Errorf("deserialize() got1 = %v, want %v", got1, tt.want1)
+			gotOk := err == nil
+			if gotOk != tt.want1 {
+				t.Errorf("deserialize() got error = %v, want success = %v", err, tt.want1)
 			}
 		})
 	}
@@ -151,9 +152,9 @@ func TestSerDeCopy(t *testing.T) {
 			a := builder.NewArray()
 
 			// Test deserialize with shouldCopy parameter
-			copy, got1 := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, true)
-			if !got1 {
-				t.Errorf("deserialize() failed for %s", tt.name)
+			copy, err := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, true)
+			if err != nil {
+				t.Errorf("deserialize() failed for %s: %v", tt.name, err)
 			}
 			if !reflect.DeepEqual(copy, tt.v) {
 				t.Errorf("deserialize() got = %v, want %v", copy, tt.v)
@@ -443,16 +444,16 @@ func TestArrayOfVectorSerialization(t *testing.T) {
 			defer builder.Release()
 
 			for _, vector := range tt.vectors {
-				ok := entry.serialize(builder, vector, tt.elementType)
-				assert.True(t, ok)
+				err := entry.serialize(builder, vector, tt.elementType)
+				assert.NoError(t, err)
 			}
 
 			arr := builder.NewArray()
 			defer arr.Release()
 
 			for i, expectedVector := range tt.vectors {
-				result, ok := entry.deserialize(arr, i, tt.elementType, tt.dim, false)
-				assert.True(t, ok)
+				result, err := entry.deserialize(arr, i, tt.elementType, tt.dim, false)
+				assert.NoError(t, err)
 
 				if expectedVector == nil {
 					assert.Nil(t, result)
