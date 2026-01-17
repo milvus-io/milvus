@@ -536,6 +536,10 @@ func (s *Server) AlterCollectionField(ctx context.Context, request *milvuspb.Alt
 	return s.mixCoord.AlterCollectionField(ctx, request)
 }
 
+func (s *Server) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	return s.mixCoord.AlterCollectionSchema(ctx, request)
+}
+
 func (s *Server) AddCollectionFunction(ctx context.Context, request *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
 	return s.mixCoord.AddCollectionFunction(ctx, request)
 }
