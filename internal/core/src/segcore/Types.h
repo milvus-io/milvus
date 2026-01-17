@@ -58,6 +58,71 @@ struct LoadIndexInfo {
     int64_t dim;
     std::string
         warmup_policy;  // "disable" or "sync", empty means use global config
+
+    // Default constructor
+    LoadIndexInfo() = default;
+
+    // Move constructor and assignment - use defaults
+    LoadIndexInfo(LoadIndexInfo&&) = default;
+    LoadIndexInfo&
+    operator=(LoadIndexInfo&&) = default;
+
+    // Copy constructor - copies metadata, leaves index pointers as nullptr
+    // since they are populated later during actual index loading
+    LoadIndexInfo(const LoadIndexInfo& other)
+        : collection_id(other.collection_id),
+          partition_id(other.partition_id),
+          segment_id(other.segment_id),
+          field_id(other.field_id),
+          field_type(other.field_type),
+          element_type(other.element_type),
+          enable_mmap(other.enable_mmap),
+          mmap_dir_path(other.mmap_dir_path),
+          index_id(other.index_id),
+          index_build_id(other.index_build_id),
+          index_version(other.index_version),
+          index_params(other.index_params),
+          index_files(other.index_files),
+          index(nullptr),
+          cache_index(nullptr),
+          uri(other.uri),
+          index_store_version(other.index_store_version),
+          index_engine_version(other.index_engine_version),
+          schema(other.schema),
+          index_size(other.index_size),
+          num_rows(other.num_rows),
+          dim(other.dim) {
+    }
+
+    // Copy assignment operator
+    LoadIndexInfo&
+    operator=(const LoadIndexInfo& other) {
+        if (this != &other) {
+            collection_id = other.collection_id;
+            partition_id = other.partition_id;
+            segment_id = other.segment_id;
+            field_id = other.field_id;
+            field_type = other.field_type;
+            element_type = other.element_type;
+            enable_mmap = other.enable_mmap;
+            mmap_dir_path = other.mmap_dir_path;
+            index_id = other.index_id;
+            index_build_id = other.index_build_id;
+            index_version = other.index_version;
+            index_params = other.index_params;
+            index_files = other.index_files;
+            index = nullptr;
+            cache_index = nullptr;
+            uri = other.uri;
+            index_store_version = other.index_store_version;
+            index_engine_version = other.index_engine_version;
+            schema = other.schema;
+            index_size = other.index_size;
+            num_rows = other.num_rows;
+            dim = other.dim;
+        }
+        return *this;
+    }
 };
 
 }  // namespace milvus::segcore
