@@ -936,8 +936,8 @@ common:
     BeamWidthRatio: 4
   gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
-  namespace:
-    enabled: false # whether to enable namespace, this parameter may be deprecated in the future. Just keep it for compatibility.
+  parquetStatsSkipIndex:
+    enabled: false # whether to skip parquet stats index when reading; set true to enable skipping.
   storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
