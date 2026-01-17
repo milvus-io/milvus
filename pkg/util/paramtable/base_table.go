@@ -283,29 +283,76 @@ func (bt *BaseTable) GetWithDefault(key, defaultValue string) string {
 
 // Remove Config by key
 func (bt *BaseTable) Remove(key string) error {
+	normalizedKey := strings.ToLower(strings.TrimPrefix(key, "milvus."))
 	bt.mgr.DeleteConfig(key)
 	bt.mgr.EvictCachedValue(key)
+	// Fire runtime config update event so watchers (e.g. tracing) can react immediately.
+	bt.mgr.OnEvent(&config.Event{
+		EventSource: config.RuntimeSource,
+		EventType:   config.DeleteType,
+		Key:         normalizedKey,
+		Value:       "",
+		HasUpdated:  true,
+	})
 	return nil
 }
 
 // Update Config
 func (bt *BaseTable) Save(key, value string) error {
+	normalizedKey := strings.ToLower(strings.TrimPrefix(key, "milvus."))
 	bt.mgr.SetConfig(key, value)
 	bt.mgr.EvictCachedValue(key)
+	// Fire runtime config update event so watchers (e.g. tracing) can react immediately.
+	bt.mgr.OnEvent(&config.Event{
+		EventSource: config.RuntimeSource,
+		EventType:   config.UpdateType,
+		Key:         normalizedKey,
+		Value:       value,
+		HasUpdated:  true,
+	})
 	return nil
 }
 
 func (bt *BaseTable) SaveGroup(group map[string]string) error {
 	for key, value := range group {
+		normalizedKey := strings.ToLower(strings.TrimPrefix(key, "milvus."))
 		bt.mgr.SetMapConfig(key, value)
+		// Fire runtime config update event so watchers (e.g. tracing) can react immediately.
+		bt.mgr.OnEvent(&config.Event{
+			EventSource: config.RuntimeSource,
+			EventType:   config.UpdateType,
+			Key:         normalizedKey,
+			Value:       value,
+			HasUpdated:  true,
+		})
 	}
 	return nil
 }
 
 // Reset Config to default value
 func (bt *BaseTable) Reset(key string) error {
+	normalizedKey := strings.ToLower(strings.TrimPrefix(key, "milvus."))
 	bt.mgr.ResetConfig(key)
 	bt.mgr.EvictCachedValue(key)
+	// Fire runtime config update event so watchers can refresh their derived state.
+	// If the key is not found in any source after reset, emit a DELETE event.
+	if _, v, err := bt.mgr.GetConfig(key); err == nil {
+		bt.mgr.OnEvent(&config.Event{
+			EventSource: config.RuntimeSource,
+			EventType:   config.UpdateType,
+			Key:         normalizedKey,
+			Value:       v,
+			HasUpdated:  true,
+		})
+	} else {
+		bt.mgr.OnEvent(&config.Event{
+			EventSource: config.RuntimeSource,
+			EventType:   config.DeleteType,
+			Key:         normalizedKey,
+			Value:       "",
+			HasUpdated:  true,
+		})
+	}
 	return nil
 }
 
