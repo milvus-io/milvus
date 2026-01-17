@@ -138,12 +138,7 @@ func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	switch result.GetState() {
 	case datapb.CompactionTaskState_completed:
 		if len(result.GetSegments()) == 0 {
-			log.Info("illegal compaction results")
-			err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
-			if err != nil {
-				log.Warn("mixCompactionTask failed to setState failed", zap.Error(err))
-			}
-			return
+			log.Info("compaction result is empty, all data may have been deleted")
 		}
 		err = t.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t.GetTaskProto())
 		if err != nil {
