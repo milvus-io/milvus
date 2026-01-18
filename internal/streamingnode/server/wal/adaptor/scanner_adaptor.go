@@ -72,6 +72,7 @@ func newScannerAdaptor(
 	readOption wal.ReadOption,
 	scanMetrics *metricsutil.ScannerMetrics,
 	cleanup func(),
+	recovery bool,
 ) *scannerAdaptorImpl {
 	if readOption.MesasgeHandler == nil {
 		readOption.MesasgeHandler = adaptor.ChanMessageHandler(make(chan message.ImmutableMessage))
@@ -84,7 +85,7 @@ func newScannerAdaptor(
 	)
 	s := &scannerAdaptorImpl{
 		logger:        logger,
-		recovery:      false,
+		recovery:      recovery,
 		innerWAL:      l,
 		readOption:    readOption,
 		filterFunc:    options.GetFilterFunc(readOption.MessageFilter),

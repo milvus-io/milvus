@@ -119,15 +119,16 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 
 func (c *DDLCallback) createCollectionShard(ctx context.Context, header *message.CreateCollectionMessageHeader, body *message.CreateCollectionRequest, vchannel string, appendResult *message.AppendResult) error {
 	// TODO: redundant channel watch by now, remove it in future.
-	startPosition := adaptor.MustGetMQWrapperIDFromMessage(appendResult.MessageID).Serialize()
+	startPosition, walName := adaptor.MustGetMQWrapperIDAndWALNameFromMessage(appendResult.MessageID)
 	// semantically, we should use the last confirmed message id to setup the start position.
 	// same as following `newCollectionModelWithMessage`.
 	resp, err := c.mixCoord.WatchChannels(ctx, &datapb.WatchChannelsRequest{
 		CollectionID:    header.CollectionId,
 		ChannelNames:    []string{vchannel},
-		StartPositions:  []*commonpb.KeyDataPair{{Key: funcutil.ToPhysicalChannel(vchannel), Data: startPosition}},
+		StartPositions:  []*commonpb.KeyDataPair{{Key: funcutil.ToPhysicalChannel(vchannel), Data: startPosition.Serialize()}},
 		Schema:          body.CollectionSchema,
 		CreateTimestamp: appendResult.TimeTick,
+		ChannelWalNames: map[string]commonpb.WALName{funcutil.ToPhysicalChannel(vchannel): walName},
 	})
 	return merr.CheckRPCCall(resp.GetStatus(), err)
 }

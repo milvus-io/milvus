@@ -61,6 +61,9 @@ enum MessageType {
     FlushAll             = 37;
     TruncateCollection   = 38;
 
+    // AlterWAL is used to alter the wal configuration to the current cluster.
+    AlterWAL             = 700;
+
     // AlterReplicateConfig is used to alter the replicate configuration to the current cluster.
     // When the AlterReplicateConfig message is received, the replication topology is changed.
     // Maybe some cluster give up the leader role, no any other message will be received from this cluster.
@@ -552,6 +555,13 @@ message DropIndexMessageHeader {
 
 // DropIndexMessageBody is the body of drop index message.
 message DropIndexMessageBody {}
+
+message AlterWALMessageHeader {
+    common.WALName target_wal_name = 1; // Specifies the target WALName for the alter operation.
+    map<string, string> config = 2; // Contains additional configuration parameters for the WAL alter operation.
+}
+
+message AlterWALMessageBody {}
 
 // CacheExpirations is the cache expirations of proxy collection meta cache.
 message CacheExpirations {
