@@ -62,6 +62,7 @@ func TestWAL(t *testing.T) {
 		timetick.NewInterceptorBuilder(),
 		shard.NewInterceptorBuilder(),
 	)
+	message.RegisterDefaultWALName(message.WALNameTest)
 	f := &walTestFramework{
 		b:            b,
 		t:            t,

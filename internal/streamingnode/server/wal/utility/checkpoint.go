@@ -22,6 +22,7 @@ func NewWALCheckpointFromProto(cp *streamingpb.WALCheckpoint) *WALCheckpoint {
 		Magic:               cp.RecoveryMagic,
 		ReplicateConfig:     cp.ReplicateConfig,
 		ReplicateCheckpoint: NewReplicateCheckpointFromProto(cp.ReplicateCheckpoint),
+		AlterWalState:       cp.AlterWalState,
 	}
 }
 
@@ -32,6 +33,7 @@ type WALCheckpoint struct {
 	Magic               int64
 	ReplicateCheckpoint *ReplicateCheckpoint
 	ReplicateConfig     *commonpb.ReplicateConfiguration
+	AlterWalState       *streamingpb.AlterWALState
 }
 
 // IntoProto converts the WALCheckpoint to a protobuf message.
@@ -45,6 +47,7 @@ func (c *WALCheckpoint) IntoProto() *streamingpb.WALCheckpoint {
 		RecoveryMagic:       c.Magic,
 		ReplicateConfig:     c.ReplicateConfig,
 		ReplicateCheckpoint: c.ReplicateCheckpoint.IntoProto(),
+		AlterWalState:       c.AlterWalState,
 	}
 }
 
@@ -56,6 +59,7 @@ func (c *WALCheckpoint) Clone() *WALCheckpoint {
 		Magic:               c.Magic,
 		ReplicateConfig:     c.ReplicateConfig,
 		ReplicateCheckpoint: c.ReplicateCheckpoint.Clone(),
+		AlterWalState:       c.AlterWalState,
 	}
 }
 

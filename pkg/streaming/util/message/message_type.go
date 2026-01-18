@@ -110,6 +110,9 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeFlushAll: {
 		ExclusiveRequired: true,
 	},
+	MessageTypeAlterWAL: {
+		ExclusiveRequired: true,
+	},
 }
 
 // String implements fmt.Stringer interface.
