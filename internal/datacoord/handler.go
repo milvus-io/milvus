@@ -474,6 +474,7 @@ func (h *ServerHandler) GetChannelSeekPosition(channel RWChannel, partitionIDs .
 	if seekPosition != nil {
 		log.Info("channel seek position set from channel checkpoint meta",
 			zap.Uint64("posTs", seekPosition.Timestamp),
+			zap.Stringer("posWALName", seekPosition.WALName),
 			zap.Time("posTime", tsoutil.PhysicalTime(seekPosition.GetTimestamp())))
 		return seekPosition
 	}
@@ -498,6 +499,7 @@ func (h *ServerHandler) GetChannelSeekPosition(channel RWChannel, partitionIDs .
 	return nil
 }
 
+// Deprecated: use toMsgPositionWithWALNames
 func toMsgPosition(channel string, startPositions []*commonpb.KeyDataPair) *msgpb.MsgPosition {
 	for _, sp := range startPositions {
 		if sp.GetKey() != funcutil.ToPhysicalChannel(channel) {
@@ -506,6 +508,21 @@ func toMsgPosition(channel string, startPositions []*commonpb.KeyDataPair) *msgp
 		return &msgpb.MsgPosition{
 			ChannelName: channel,
 			MsgID:       sp.GetData(),
+		}
+	}
+	return nil
+}
+
+func toMsgPositionWithWALNames(channel string, startPositions []*commonpb.KeyDataPair, channelWALNames map[string]commonpb.WALName) *msgpb.MsgPosition {
+	for _, sp := range startPositions {
+		pChannel := funcutil.ToPhysicalChannel(channel)
+		if sp.GetKey() != pChannel {
+			continue
+		}
+		return &msgpb.MsgPosition{
+			ChannelName: channel,
+			MsgID:       sp.GetData(),
+			WALName:     channelWALNames[pChannel],
 		}
 	}
 	return nil
