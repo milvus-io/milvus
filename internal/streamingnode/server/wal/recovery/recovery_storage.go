@@ -3,6 +3,7 @@ package recovery
 import (
 	"context"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -21,6 +22,16 @@ type RecoverySnapshot struct {
 	SegmentAssignments map[int64]*streamingpb.SegmentAssignmentMeta
 	Checkpoint         *WALCheckpoint
 	TxnBuffer          *utility.TxnBuffer
+	// Used during WAL alteration process
+	AlterWALInfo *AlterWALInfo
+}
+
+// AlterWALInfo contains information about WAL alteration process.
+type AlterWALInfo struct {
+	FoundAlterWALMsg bool
+	TargetWALName    commonpb.WALName
+	AlterWALConfig   map[string]string
+	AlterWALTs       uint64
 }
 
 type BuildRecoveryStreamParam struct {
@@ -83,6 +94,9 @@ type RecoveryStorage interface {
 	// UpdateFlusherCheckpoint updates the checkpoint of flusher.
 	// TODO: should be removed in future, after merge the flusher logic into recovery storage.
 	UpdateFlusherCheckpoint(vchannel string, checkpoint *WALCheckpoint)
+
+	// GetFlusherCheckpointByTimeTick returns the minimum flush checkpoint among all vchannels based on time tick.
+	GetFlusherCheckpointByTimeTick(ctx context.Context) *WALCheckpoint
 
 	// Close closes the recovery storage.
 	Close()

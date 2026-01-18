@@ -82,6 +82,10 @@ const (
 	StreamingNodeDistributionPath = "/management/streaming/nodes/distribution"
 	StreamingTransferPath         = "/management/streaming/transfer"
 
+	WALAlterPath = "/management/wal/alter"
+
+	ConfigAlterPath = "/management/config/alter"
+
 	DataGCPath = "/management/data_gc"
 )
 

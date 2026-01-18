@@ -17,11 +17,17 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // this file contains proxy management restful API handler
@@ -48,6 +54,10 @@ func RegisterMgrRoute(s *mixCoordImpl) {
 			{management.StreamingNodeDistributionPath, s.GetStreamingNodeDistribution},
 			{management.StreamingTransferPath, s.TransferStreamingChannel},
 			{management.DataGCPath, s.HandleDatacoordGC}, // This route is unique, so it's included here.
+			// WAL
+			{management.WALAlterPath, s.HandleAlterWAL},
+			// config
+			{management.ConfigAlterPath, s.HandleAlterConfig},
 		}
 
 		// Loop through the slice and register each route.
@@ -1119,4 +1129,234 @@ func (s *mixCoordImpl) TransferStreamingChannel(w http.ResponseWriter, req *http
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"msg": "OK"}`))
+}
+
+// HandleAlterWAL handles POST requests to alter the Write-Ahead Log (WAL) implementation.
+// This endpoint broadcasts an AlterWALMessage to all active pChannels to switch WAL across the cluster.
+func (s *mixCoordImpl) HandleAlterWAL(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, `{"msg": "Method not allowed, use POST"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	logger := log.With(zap.String("Scope", "WAL"))
+
+	var requestBody struct {
+		TargetWALName string            `json:"target_wal_name"`  // e.g., "woodpecker", "kafka", "pulsar", "rocksmq"
+		Config        map[string]string `json:"config,omitempty"` // Optional config for target WAL
+	}
+
+	if err := json.NewDecoder(req.Body).Decode(&requestBody); err != nil {
+		logger.Info("HandleAlterWAL failed to decode request body", zap.Error(err))
+		http.Error(w, `{"msg": "Invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+
+	if requestBody.TargetWALName == "" {
+		logger.Info("HandleAlterWAL missing target_wal_name")
+		http.Error(w, `{"msg": "target_wal_name is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	targetWAL := message.NewWALName(strings.ToLower(requestBody.TargetWALName))
+	if targetWAL == message.WALNameUnknown {
+		logger.Info("HandleAlterWAL unknown target_wal_name")
+		http.Error(w, `{"msg": "unknown target_wal_name"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Check if targetWALName is the same as current mq.type
+	// GetValue() will automatically resolve from all config sources including etcd
+	currentMQType := paramtable.Get().MQCfg.Type.GetValue()
+	if currentMQType != "" && currentMQType != "default" {
+		// Convert persisted mq.type string to WALName
+		currentWALFromConfig := message.NewWALName(strings.ToLower(currentMQType))
+		if currentWALFromConfig != message.WALNameUnknown && currentWALFromConfig == targetWAL {
+			logger.Info("HandleAlterWAL target WAL is same as current mq.type",
+				zap.String("currentMQType", currentMQType),
+				zap.String("targetWAL", requestBody.TargetWALName))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`{"msg": "target WAL type '%s' is already configured, no change needed"}`, currentMQType)))
+			return
+		}
+	}
+
+	logger.Info("HandleAlterWAL start",
+		zap.String("targetWAL", requestBody.TargetWALName),
+		zap.Any("config", requestBody.Config))
+
+	if err := s.broadcastAlterWALMessage(req.Context(), commonpb.WALName(targetWAL), requestBody.Config); err != nil {
+		logger.Info("HandleAlterWAL failed to broadcast AlterWALMessage",
+			zap.String("targetWAL", requestBody.TargetWALName),
+			zap.Error(err))
+		http.Error(w, fmt.Sprintf(`{"msg": "failed to broadcast AlterWALMessage, %s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	logger.Info("HandleAlterWAL success", zap.String("targetWAL", requestBody.TargetWALName))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"msg": "OK"}`))
+}
+
+// broadcastAlterWALMessage broadcasts an AlterWALMessage to all active pChannels.
+func (s *mixCoordImpl) broadcastAlterWALMessage(ctx context.Context, targetWALName commonpb.WALName, config map[string]string) error {
+	logger := log.With(zap.String("Scope", "WAL"), zap.Stringer("targetWAL", targetWALName))
+
+	// Start broadcast with an exclusive cluster resource key to ensure only one WAL switch operation at a time
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
+	if err != nil {
+		if errors.Is(err, broadcast.ErrNotPrimary) {
+			logger.Info("broadcastAlterWALMessage failed, current cluster is not primary", zap.Error(err))
+			return errors.Wrap(err, "current cluster is not primary, cannot perform WAL switch")
+		}
+		logger.Info("broadcastAlterWALMessage failed to start broadcast", zap.Error(err))
+		return errors.Wrap(err, "failed to start broadcast")
+	}
+	defer broadcaster.Close()
+
+	// Get balancer to access channel assignments
+	balancer, err := balance.GetWithContext(ctx)
+	if err != nil {
+		logger.Info("broadcastAlterWALMessage failed to get balancer", zap.Error(err))
+		return errors.Wrap(err, "failed to get balancer")
+	}
+
+	// Get all pChannels from the latest channel assignment
+	latestAssignment, err := balancer.GetLatestChannelAssignment()
+	if err != nil {
+		logger.Info("broadcastAlterWALMessage failed to get latest channel assignment", zap.Error(err))
+		return errors.Wrap(err, "failed to get channel assignment")
+	}
+
+	controlChannel := streaming.WAL().ControlChannel()
+	pChannels := lo.MapToSlice(latestAssignment.PChannelView.Channels, func(_ channel.ChannelID, channel *channel.PChannelMeta) string {
+		return channel.Name()
+	})
+	broadcastPChannels := lo.Map(pChannels, func(pChannel string, _ int) string {
+		if funcutil.IsOnPhysicalChannel(controlChannel, pChannel) {
+			// return control channel if the control channel is on the pChannel.
+			return controlChannel
+		}
+		return pChannel
+	})
+
+	if len(broadcastPChannels) == 0 {
+		logger.Info("broadcastAlterWALMessage failed, no active pChannel found")
+		return errors.New("no active pChannels found")
+	}
+
+	logger.Info("broadcastAlterWALMessage preparing",
+		zap.Int("pChannelCount", len(broadcastPChannels)),
+		zap.Strings("pChannels", broadcastPChannels),
+		zap.Any("config", config))
+
+	// Create AlterWAL broadcast message
+	broadcastMsg, err := message.NewAlterWALMessageBuilderV2().
+		WithHeader(&message.AlterWALMessageHeader{
+			TargetWalName: targetWALName,
+			Config:        config,
+		}).
+		WithBody(&message.AlterWALMessageBody{}).
+		WithBroadcast(broadcastPChannels).
+		BuildBroadcast()
+	if err != nil {
+		logger.Info("broadcastAlterWALMessage failed to build broadcast message", zap.Error(err))
+		return errors.Wrap(err, "failed to build broadcast message")
+	}
+
+	// Broadcast the message to all pChannels
+	result, err := broadcaster.Broadcast(ctx, broadcastMsg)
+	if err != nil {
+		logger.Info("broadcastAlterWALMessage failed to broadcast message", zap.Error(err))
+		return errors.Wrap(err, "failed to broadcast message")
+	}
+
+	logger.Info("broadcastAlterWALMessage success",
+		zap.Int("pChannelCount", len(result.AppendResults)),
+		zap.Uint64("broadcastID", result.BroadcastID))
+
+	return nil
+}
+
+// HandleAlterConfig handles POST requests to alter immutable configuration items.
+// Only immutable configurations can be modified through this endpoint.
+// Non-immutable configurations should be modified directly in the configuration file.
+// For mqtype modifications, use the alterWAL endpoint instead.
+func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		http.Error(writer, `{"msg": "Method not allowed, use POST"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	logger := log.With(zap.String("Scope", "Config"))
+	paramMgr := paramtable.GetBaseTable().Manager()
+
+	var requestBody struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	}
+
+	if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
+		logger.Info("HandleAlterConfig failed to decode request body", zap.Error(err))
+		http.Error(writer, `{"msg": "Invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+
+	if requestBody.Key == "" {
+		logger.Info("HandleAlterConfig missing key")
+		http.Error(writer, `{"msg": "key is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if requestBody.Value == "" {
+		logger.Info("HandleAlterConfig missing value")
+		http.Error(writer, `{"msg": "value is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Check if it's mqtype configuration
+	normalizedKey := strings.ToLower(strings.ReplaceAll(requestBody.Key, "/", "."))
+	if strings.Contains(normalizedKey, "mqtype") || strings.Contains(normalizedKey, "mq.type") {
+		logger.Info("HandleAlterConfig attempted to modify mqtype",
+			zap.String("key", requestBody.Key))
+		http.Error(writer, `{"msg": "mqtype configuration cannot be modified through this endpoint. Please use the alterWAL endpoint instead"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Check if the configuration is immutable
+	if !paramMgr.IsImmutable(requestBody.Key) {
+		logger.Info("HandleAlterConfig attempted to modify non-immutable config",
+			zap.String("key", requestBody.Key))
+		http.Error(writer, `{"msg": "only immutable configurations can be modified through this endpoint. Non-immutable configurations should be modified directly in the configuration file"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Get EtcdSource to save the configuration
+	etcdSource, ok := paramMgr.GetEtcdSource()
+	if !ok {
+		logger.Info("HandleAlterConfig failed, etcd source not enabled")
+		http.Error(writer, `{"msg": "etcd source is not enabled"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Save configuration to etcd
+	// Use the original key format, SaveConfigToEtcd will handle normalization internally
+	if err := paramMgr.SaveConfigToEtcd(etcdSource, requestBody.Key, requestBody.Value); err != nil {
+		logger.Info("HandleAlterConfig failed to save config to etcd",
+			zap.String("key", requestBody.Key),
+			zap.String("value", requestBody.Value),
+			zap.Error(err))
+		http.Error(writer, fmt.Sprintf(`{"msg": "failed to save configuration to etcd: %s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	logger.Info("HandleAlterConfig success",
+		zap.String("key", requestBody.Key),
+		zap.String("value", requestBody.Value))
+
+	writer.Header().Set("Content-Type", "application/json")
+	writer.WriteHeader(http.StatusOK)
+	writer.Write([]byte(`{"msg": "OK"}`))
 }
