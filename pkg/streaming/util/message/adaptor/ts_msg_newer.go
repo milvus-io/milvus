@@ -201,3 +201,28 @@ func NewAlterCollectionMessageBody(msg message.ImmutableMessage) (msgstream.TsMs
 		AlterCollectionMessage: alterCollMsg,
 	}, nil
 }
+
+type AlterWALMessageBody struct {
+	*tsMsgImpl
+	AlterWALMessage message.ImmutableAlterWALMessageV2
+}
+
+func (p *AlterWALMessageBody) ID() msgstream.UniqueID {
+	return 0
+}
+
+func NewAlterWALMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+	alterWALMsg := message.MustAsImmutableAlterWALMessageV2(msg)
+	return &AlterWALMessageBody{
+		tsMsgImpl: &tsMsgImpl{
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: msg.TimeTick(),
+				EndTimestamp:   msg.TimeTick(),
+			},
+			ts:      msg.TimeTick(),
+			sz:      msg.EstimateSize(),
+			msgType: MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()),
+		},
+		AlterWALMessage: alterWALMsg,
+	}, nil
+}

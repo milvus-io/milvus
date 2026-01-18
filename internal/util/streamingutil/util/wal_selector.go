@@ -23,6 +23,11 @@ type walEnable struct {
 func InitAndSelectWALName() {
 	walName := MustSelectWALName()
 	message.RegisterDefaultWALName(walName)
+	mqTypeKey := paramtable.Get().MQCfg.Type.Key
+	err := paramtable.Get().Save(mqTypeKey, walName.String())
+	if err != nil {
+		panic(err)
+	}
 }
 
 // MustSelectWALName select wal name.
