@@ -137,3 +137,29 @@ func (impl *msgHandlerImpl) HandleTruncateCollection(flushMsg message.ImmutableT
 	}
 	return nil
 }
+
+// HandleAlterWAL handles Alter WAL message by sealing all segments and flushing the channel.
+// This ensures all buffered data is persisted before switching to the new WAL implementation.
+func (impl *msgHandlerImpl) HandleAlterWAL(ctx context.Context, alterWALMsg message.ImmutableAlterWALMessageV2, currentVChannel string) error {
+	vchannel := currentVChannel
+	logger := log.With(
+		zap.String("vchannel", vchannel),
+		zap.Uint64("alterWALTimeTick", alterWALMsg.TimeTick()),
+		zap.String("currentWALName", alterWALMsg.WALName().String()),
+		zap.Stringer("targetWALName", alterWALMsg.Header().TargetWalName))
+
+	// Seal all segments in the current vchannel before WAL switch
+	if err := impl.wbMgr.SealAllSegments(ctx, vchannel); err != nil {
+		logger.Warn("failed to seal all segments for WAL switch", zap.Error(err))
+		return errors.Wrap(err, "failed to seal all segments")
+	}
+	logger.Info("sealed all segments for WAL switch")
+
+	// Flush channel to persist buffered data before switching WAL
+	if err := impl.wbMgr.FlushChannel(ctx, vchannel, alterWALMsg.TimeTick()); err != nil {
+		logger.Warn("failed to flush channel for WAL switch", zap.Error(err))
+		return errors.Wrap(err, "failed to flush channel")
+	}
+	logger.Info("flushed channel for WAL switch")
+	return nil
+}

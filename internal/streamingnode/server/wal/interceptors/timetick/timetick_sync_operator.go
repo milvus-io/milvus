@@ -2,6 +2,7 @@ package timetick
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -14,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -47,6 +49,7 @@ type timeTickSyncOperator struct {
 	ackDetails            *ack.AckDetails                     // all acknowledged details, all acked messages but not sent to wal will be kept here.
 	sourceID              int64                               // source id of the time tick sync operator.
 	metrics               *metricsutil.TimeTickMetrics
+	walShutdownOrFenced   atomic.Bool
 }
 
 // Channel returns the pchannel info.
@@ -67,6 +70,11 @@ func (impl *timeTickSyncOperator) MVCCManager() *mvcc.MVCCManager {
 // Sync trigger a sync operation.
 // Sync operation is not thread safe, so call it in a single goroutine.
 func (impl *timeTickSyncOperator) Sync(ctx context.Context, persisted bool) {
+	if impl.walShutdownOrFenced.Load() {
+		// skip append tt msg to a shutdown or fenced wal
+		return
+	}
+
 	// Sync operation cannot trigger until isReady.
 	wal, err := impl.interceptorBuildParam.WAL.GetWithContext(ctx)
 	if err != nil {
@@ -83,6 +91,9 @@ func (impl *timeTickSyncOperator) Sync(ctx context.Context, persisted bool) {
 	}, persisted)
 	if err != nil {
 		impl.logger.Warn("send time tick sync message failed", zap.Error(err))
+		if s := status.AsStreamingError(err); s.IsFenced() || s.IsOnShutdown() {
+			impl.walShutdownOrFenced.Store(true)
+		}
 	}
 }
 

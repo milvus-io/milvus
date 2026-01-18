@@ -118,10 +118,12 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 	}
 
 	res := FlowGraphMsg{
-		TimeRange:      fgMsg.TimeRange,
-		StartPositions: fgMsg.StartPositions,
-		EndPositions:   fgMsg.EndPositions,
-		dropCollection: fgMsg.dropCollection,
+		TimeRange:        fgMsg.TimeRange,
+		StartPositions:   fgMsg.StartPositions,
+		EndPositions:     fgMsg.EndPositions,
+		dropCollection:   fgMsg.dropCollection,
+		isAlterWal:       fgMsg.isAlterWal,
+		alterWalTimeTick: fgMsg.alterWalTimeTick,
 	}
 
 	if fgMsg.dropCollection {

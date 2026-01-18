@@ -38,6 +38,8 @@ type MsgHandler interface {
 	HandleAlterCollection(ctx context.Context, alterCollectionMsg message.ImmutableAlterCollectionMessageV2) error
 
 	HandleTruncateCollection(truncateCollectionMsg message.ImmutableTruncateCollectionMessageV2) error
+
+	HandleAlterWAL(ctx context.Context, alterWALMsg message.ImmutableAlterWALMessageV2, vchannel string) error
 }
 
 func ConvertInternalImportFile(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
