@@ -1381,6 +1381,11 @@ func TestMetaTable_reload(t *testing.T) {
 					[]*model.Alias{},
 					nil)
 			},
+			func(catalog *mocks.RootCoordCatalog) {
+				catalog.On("ListFileResource",
+					mock.Anything,
+				).Return(nil, uint64(0), nil)
+			},
 		)
 		channel.ResetStaticPChannelStatsManager()
 		err := meta.reload()
@@ -1414,6 +1419,9 @@ func TestMetaTable_reload(t *testing.T) {
 		).Return(
 			[]*model.Alias{{Name: "alias", CollectionID: 100}},
 			nil)
+		catalog.On("ListFileResource",
+			mock.Anything,
+		).Return(nil, uint64(0), nil)
 
 		meta := &MetaTable{catalog: catalog}
 		channel.ResetStaticPChannelStatsManager()
@@ -1447,6 +1455,11 @@ func TestMetaTable_reload(t *testing.T) {
 				).Return(
 					[]*model.Alias{{Name: "alias", CollectionID: 100}},
 					nil)
+			},
+			func(catalog *mocks.RootCoordCatalog) {
+				catalog.On("ListFileResource",
+					mock.Anything,
+				).Return(nil, uint64(0), nil)
 			},
 		)
 

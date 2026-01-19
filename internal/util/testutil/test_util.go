@@ -271,6 +271,14 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int, nullPercent .
 			switch f.GetElementType() {
 			case schemapb.DataType_FloatVector:
 				insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateArrayOfFloatVectorArray(rows, int(dim)))
+			case schemapb.DataType_Float16Vector:
+				insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateArrayOfFloat16VectorArray(rows, int(dim)))
+			case schemapb.DataType_BFloat16Vector:
+				insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateArrayOfBFloat16VectorArray(rows, int(dim)))
+			case schemapb.DataType_Int8Vector:
+				insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateArrayOfInt8VectorArray(rows, int(dim)))
+			case schemapb.DataType_BinaryVector:
+				insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateArrayOfBinaryVectorArray(rows, int(dim)))
 			default:
 				panic(fmt.Sprintf("unimplemented data type: %s", f.GetElementType().String()))
 			}
@@ -1060,7 +1068,7 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 				case schemapb.DataType_BinaryVector:
 					arrType = arrow.ListOf(arrow.PrimitiveTypes.Uint8)
 				case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-					arrType = arrow.ListOf(arrow.PrimitiveTypes.Float32)
+					arrType = arrow.ListOf(arrow.PrimitiveTypes.Uint8)
 				case schemapb.DataType_Int8Vector:
 					arrType = arrow.ListOf(arrow.PrimitiveTypes.Int8)
 				default:
@@ -1118,9 +1126,31 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 				}
 			case schemapb.DataType_ArrayOfVector:
 				vectorField := rowData.(*schemapb.VectorField)
-				if vectorField.GetFloatVector() != nil {
-					dim, _ := typeutil.GetDim(subField)
-					arrayLen = len(vectorField.GetFloatVector().Data) / int(dim)
+				dim, _ := typeutil.GetDim(subField)
+				switch subField.ElementType {
+				case schemapb.DataType_FloatVector:
+					if vectorField.GetFloatVector() != nil {
+						arrayLen = len(vectorField.GetFloatVector().Data) / int(dim)
+					}
+				case schemapb.DataType_BinaryVector:
+					if vectorField.GetBinaryVector() != nil {
+						bytesPerVector := int(dim) / 8
+						arrayLen = len(vectorField.GetBinaryVector()) / bytesPerVector
+					}
+				case schemapb.DataType_Float16Vector:
+					if vectorField.GetFloat16Vector() != nil {
+						bytesPerVector := int(dim) * 2
+						arrayLen = len(vectorField.GetFloat16Vector()) / bytesPerVector
+					}
+				case schemapb.DataType_BFloat16Vector:
+					if vectorField.GetBfloat16Vector() != nil {
+						bytesPerVector := int(dim) * 2
+						arrayLen = len(vectorField.GetBfloat16Vector()) / bytesPerVector
+					}
+				case schemapb.DataType_Int8Vector:
+					if vectorField.GetInt8Vector() != nil {
+						arrayLen = len(vectorField.GetInt8Vector()) / int(dim)
+					}
 				}
 			}
 
@@ -1179,15 +1209,65 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 						vectorField := rowData.(*schemapb.VectorField)
 						listBuilder := fieldBuilder.(*array.ListBuilder)
 						listBuilder.Append(true)
+						dim, _ := typeutil.GetDim(subField)
 
-						if floatVectors := vectorField.GetFloatVector(); floatVectors != nil {
-							dim, _ := typeutil.GetDim(subField)
-							floatBuilder := listBuilder.ValueBuilder().(*array.Float32Builder)
-							start := j * int(dim)
-							end := start + int(dim)
-							if end <= len(floatVectors.Data) {
-								for k := start; k < end; k++ {
-									floatBuilder.Append(floatVectors.Data[k])
+						switch subField.ElementType {
+						case schemapb.DataType_FloatVector:
+							if floatVectors := vectorField.GetFloatVector(); floatVectors != nil {
+								floatBuilder := listBuilder.ValueBuilder().(*array.Float32Builder)
+								start := j * int(dim)
+								end := start + int(dim)
+								if end <= len(floatVectors.Data) {
+									for k := start; k < end; k++ {
+										floatBuilder.Append(floatVectors.Data[k])
+									}
+								}
+							}
+						case schemapb.DataType_BinaryVector:
+							if binaryVectors := vectorField.GetBinaryVector(); binaryVectors != nil {
+								uint8Builder := listBuilder.ValueBuilder().(*array.Uint8Builder)
+								bytesPerVector := int(dim) / 8
+								start := j * bytesPerVector
+								end := start + bytesPerVector
+								if end <= len(binaryVectors) {
+									for k := start; k < end; k++ {
+										uint8Builder.Append(binaryVectors[k])
+									}
+								}
+							}
+						case schemapb.DataType_Float16Vector:
+							if float16Vectors := vectorField.GetFloat16Vector(); float16Vectors != nil {
+								uint8Builder := listBuilder.ValueBuilder().(*array.Uint8Builder)
+								bytesPerVector := int(dim) * 2
+								start := j * bytesPerVector
+								end := start + bytesPerVector
+								if end <= len(float16Vectors) {
+									for k := start; k < end; k++ {
+										uint8Builder.Append(float16Vectors[k])
+									}
+								}
+							}
+						case schemapb.DataType_BFloat16Vector:
+							if bfloat16Vectors := vectorField.GetBfloat16Vector(); bfloat16Vectors != nil {
+								uint8Builder := listBuilder.ValueBuilder().(*array.Uint8Builder)
+								bytesPerVector := int(dim) * 2
+								start := j * bytesPerVector
+								end := start + bytesPerVector
+								if end <= len(bfloat16Vectors) {
+									for k := start; k < end; k++ {
+										uint8Builder.Append(bfloat16Vectors[k])
+									}
+								}
+							}
+						case schemapb.DataType_Int8Vector:
+							if int8Vectors := vectorField.GetInt8Vector(); int8Vectors != nil {
+								int8Builder := listBuilder.ValueBuilder().(*array.Int8Builder)
+								start := j * int(dim)
+								end := start + int(dim)
+								if end <= len(int8Vectors) {
+									for k := start; k < end; k++ {
+										int8Builder.Append(int8(int8Vectors[k]))
+									}
 								}
 							}
 						}
@@ -1372,8 +1452,7 @@ func reconstructStructArrayForJSON(structField *schemapb.StructArrayFieldSchema,
 									startIdx := j * bytesPerVector
 									endIdx := startIdx + bytesPerVector
 									if endIdx <= len(data) {
-										// Convert Float16 bytes to float32 for JSON representation
-										structElem[subField.GetName()] = typeutil.Float16BytesToFloat32Vector(data[startIdx:endIdx])
+										structElem[subField.GetName()] = data[startIdx:endIdx]
 									}
 								}
 							}
@@ -1385,8 +1464,7 @@ func reconstructStructArrayForJSON(structField *schemapb.StructArrayFieldSchema,
 									startIdx := j * bytesPerVector
 									endIdx := startIdx + bytesPerVector
 									if endIdx <= len(data) {
-										// Convert BFloat16 bytes to float32 for JSON representation
-										structElem[subField.GetName()] = typeutil.BFloat16BytesToFloat32Vector(data[startIdx:endIdx])
+										structElem[subField.GetName()] = data[startIdx:endIdx]
 									}
 								}
 							}

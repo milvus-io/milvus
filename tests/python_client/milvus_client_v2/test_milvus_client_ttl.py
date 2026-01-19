@@ -217,3 +217,53 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
                 assert res[0].get('count(*)', 0) >= insert_times * nb
             else:
                 assert res[0].get('count(*)', 0) == insert_times * nb * 2
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("not stable")
+    def test_milvus_client_ttl_edge(self):
+        """
+        Test case for verifying edge case of TTL (Time To Live) functionality in Milvus client.
+        
+        This test verifies that:
+        1. Creating a collection with an extremely large TTL value should fail
+        2. The system should reject TTL values that are too large (e.g., 8,640,000,000,007,819,008 seconds)
+        
+        The test performs the following steps:
+        1. Attempt to create a collection with a very large TTL value
+        2. Verify that the creation fails with an appropriate error
+        
+        Expected behavior:
+        - Collection creation should fail when TTL is set to an extremely large value
+        - An error should be raised indicating the TTL value is invalid
+        """
+        client = self._client()
+        dim = 65
+        # Set an extremely large TTL value that should cause an error
+        ttl = 9223372036854775800
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=dim)
+        
+        # Attempt to create collection with extremely large TTL, expecting it to fail
+        # Use force_teardown=False since collection creation should fail
+        self.create_collection(client, collection_name, schema=schema, 
+                               properties={"collection.ttl.seconds": ttl})
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="embeddings", index_type="IVF_FLAT", metric_type="COSINE", nlist=128)
+        self.create_index(client, collection_name, index_params=index_params)
+
+        # insert data
+        vectors = cf.gen_vectors(1000, dim=dim)
+        rows = []
+        for i in range(1000):
+            row = {"id": i, "embeddings": list(vectors[i])}
+            rows.append(row)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        self.describe_collection(client, collection_name)
+
+        self.query(client, collection_name, output_fields=["count(*)"])
+

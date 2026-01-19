@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -373,8 +374,19 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collection
 		zap.Bool("is l0", isL0),
 		zap.Int64("targetSize", targetSize))
 
+	collection, err := m.handler.GetCollection(ctx, collectionID)
+	if err != nil {
+		return 0, err
+	}
+	if collection == nil {
+		return 0, merr.WrapErrCollectionNotFound(collectionID)
+	}
+	if collection.IsExternal() {
+		return 0, merr.WrapErrParameterInvalidMsg(
+			"compaction is not supported for external collection")
+	}
+
 	var triggerID UniqueID
-	var err error
 	var views []CompactionView
 
 	events := make(map[CompactionTriggerType][]CompactionView, 0)
@@ -461,6 +473,14 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
 	if err != nil {
 		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.Error(err))
+		return
+	}
+	if collection == nil {
+		log.Warn("collection not found when submitting l0 compaction view", zap.Int64("collectionID", view.GetGroupLabel().CollectionID))
+		return
+	}
+	if collection.IsExternal() {
+		log.Info("skip submitting l0 compaction for external collection", zap.Int64("collectionID", collection.ID))
 		return
 	}
 
@@ -594,6 +614,14 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.Error(err))
 		return
 	}
+	if collection == nil {
+		log.Warn("collection not found when submitting clustering compaction", zap.Int64("collectionID", view.GetGroupLabel().CollectionID))
+		return
+	}
+	if collection.IsExternal() {
+		log.Info("skip submitting clustering compaction for external collection", zap.Int64("collectionID", collection.ID))
+		return
+	}
 
 	expectedSegmentSize := getExpectedSegmentSize(m.meta, collection.ID, collection.Schema)
 	totalRows, maxSegmentRows, preferSegmentRows, err := calculateClusteringCompactionConfig(collection, view, expectedSegmentSize)
@@ -670,6 +698,14 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.Error(err))
 		return
 	}
+	if collection == nil {
+		log.Warn("collection not found when submitting single compaction", zap.Int64("collectionID", view.GetGroupLabel().CollectionID))
+		return
+	}
+	if collection.IsExternal() {
+		log.Info("skip submitting single compaction for external collection", zap.Int64("collectionID", collection.ID))
+		return
+	}
 	var totalRows int64 = 0
 	for _, s := range view.GetSegmentsView() {
 		totalRows += s.NumOfRows
@@ -731,7 +767,7 @@ func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.C
 
 	totalRows := lo.SumBy(view.GetSegmentsView(), func(v *SegmentView) int64 { return v.NumOfRows })
 
-	targetCount := view.(*ForceMergeSegmentView).targetCount
+	targetCount := view.(*ForceMergeSegmentView).targetSegmentCount
 	n := targetCount * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
 	startID, endID, err := m.allocator.AllocN(n)
 	if err != nil {
@@ -754,7 +790,7 @@ func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.C
 		ResultSegments:     []int64{},
 		TotalRows:          totalRows,
 		LastStateStartTime: time.Now().Unix(),
-		MaxSize:            int64(view.(*ForceMergeSegmentView).targetSize),
+		MaxSize:            int64(view.(*ForceMergeSegmentView).targetSegmentSize),
 		PreAllocatedSegmentIDs: &datapb.IDRange{
 			Begin: startID + 1,
 			End:   endID,

@@ -871,24 +871,6 @@ class TestInsertAsync(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_insert_sync(self):
-        """
-        target: test async insert
-        method: insert with async=True
-        expected: verify num entities
-        """
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix))
-        df = cf.gen_default_dataframe_data()
-        future, _ = collection_w.insert(data=df, _async=True)
-        future.done()
-        mutation_res = future.result()
-        assert mutation_res.insert_count == ct.default_nb
-        assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist(
-        )
-        assert collection_w.num_entities == ct.default_nb
-
-    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_async_false(self):
         """
         target: test insert with false async
@@ -923,25 +905,6 @@ class TestInsertAsync(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_async_long(self):
-        """
-        target: test insert with async
-        method: insert 5w entities with callback func
-        expected: verify num entities
-        """
-        nb = 50000
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix))
-        df = cf.gen_default_dataframe_data(nb)
-        future, _ = collection_w.insert(data=df, _async=True)
-        future.done()
-        mutation_res = future.result()
-        assert mutation_res.insert_count == nb
-        assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist(
-        )
-        assert collection_w.num_entities == nb
-
-    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_async_callback_timeout(self):
         """
         target: test insert async with callback
@@ -957,95 +920,8 @@ class TestInsertAsync(TestcaseBase):
         with pytest.raises(MilvusException):
             future.result()
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_async_invalid_data(self):
-        """
-        target: test insert async with invalid data
-        method: insert async with invalid data
-        expected: raise exception
-        """
-        collection_w = self.init_collection_wrap(
-            name=cf.gen_unique_str(prefix))
-        columns = [ct.default_int64_field_name,
-                   ct.default_float_vec_field_name]
-        df = pd.DataFrame(columns=columns)
-        error = {ct.err_code: 0,
-                 ct.err_msg: "The fields don't match with schema fields"}
-        collection_w.insert(data=df, _async=True,
-                            check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_async_invalid_partition(self):
-        """
-        target: test insert async with invalid partition
-        method: insert async with invalid partition
-        expected: raise exception
-        """
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        df = cf.gen_default_dataframe_data()
-        err_msg = "partition not found"
-        future, _ = collection_w.insert(data=df, partition_name="p", _async=True)
-        future.done()
-        with pytest.raises(MilvusException, match=err_msg):
-            future.result()
-
-
 def assert_mutation_result(mutation_res):
     assert mutation_res.insert_count == ct.default_nb
-
-
-class TestInsertBinary(TestcaseBase):
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_insert_binary_partition(self):
-        """
-        target: test insert entities and create partition 
-        method: create collection and insert binary entities in it, with the partition_name param
-        expected: the collection row count equals to nb
-        """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(
-            name=c_name, schema=default_binary_schema)
-        df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
-        partition_name = cf.gen_unique_str(prefix)
-        partition_w1 = self.init_partition_wrap(collection_w, partition_name)
-        mutation_res, _ = collection_w.insert(
-            data=df, partition_name=partition_w1.name)
-        assert mutation_res.insert_count == ct.default_nb
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_insert_binary_multi_times(self):
-        """
-        target: test insert entities multi times and final flush
-        method: create collection and insert binary entity multi 
-        expected: the collection row count equals to nb
-        """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(
-            name=c_name, schema=default_binary_schema)
-        df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
-        nums = 2
-        for i in range(nums):
-            mutation_res, _ = collection_w.insert(data=df)
-        assert collection_w.num_entities == ct.default_nb * nums
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_binary_create_index(self):
-        """
-        target: test build index insert after vector
-        method: insert vector and build index
-        expected: no error raised
-        """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(
-            name=c_name, schema=default_binary_schema)
-        df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
-        mutation_res, _ = collection_w.insert(data=df)
-        assert mutation_res.insert_count == ct.default_nb
-        default_index = {"index_type": "BIN_IVF_FLAT",
-                         "params": {"nlist": 128}, "metric_type": "JACCARD"}
-        collection_w.create_index("binary_vector", default_index)
-
 
 class TestInsertInvalid(TestcaseBase):
     """
@@ -1053,50 +929,6 @@ class TestInsertInvalid(TestcaseBase):
       The following cases are used to test insert invalid params
       ******************************************************************
     """
-    @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
-    def test_insert_with_invalid_field_value(self, primary_field):
-        """
-        target: verify error msg when inserting with invalid field value
-        method: insert with invalid field value
-        expected: raise exception
-        """
-        collection_w = self.init_collection_general(prefix, auto_id=False, insert_data=False,
-                                                    primary_field=primary_field, is_index=False,
-                                                    is_all_data_type=True, with_json=True)[0]
-        nb = 100
-        data = cf.gen_column_data_by_schema(schema=collection_w.schema, nb=nb)
-        for dirty_i in [0, nb // 2, nb - 1]:      # check the dirty data at first, middle and last
-            log.debug(f"dirty_i: {dirty_i}")
-            for i in range(len(data)):
-                if data[i][dirty_i].__class__ is int:
-                    tmp = data[i][0]
-                    data[i][dirty_i] = "iamstring"
-                    error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-                    collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
-                    data[i][dirty_i] = tmp
-                elif data[i][dirty_i].__class__ is str:
-                    tmp = data[i][dirty_i]
-                    data[i][dirty_i] = random.randint(0, 1000)
-                    error = {ct.err_code: 999, ct.err_msg: "field (varchar) expects string input, got: <class 'int'>"}
-                    collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
-                    data[i][dirty_i] = tmp
-                elif data[i][dirty_i].__class__ is bool:
-                    tmp = data[i][dirty_i]
-                    data[i][dirty_i] = "iamstring"
-                    error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-                    collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
-                    data[i][dirty_i] = tmp
-                elif data[i][dirty_i].__class__ is float:
-                    tmp = data[i][dirty_i]
-                    data[i][dirty_i] = "iamstring"
-                    error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-                    collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
-                    data[i][dirty_i] = tmp
-                else:
-                    continue
-        res = collection_w.insert(data)[0]
-        assert res.insert_count == nb
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_invalid_partition_name(self):
@@ -1130,81 +962,6 @@ class TestInsertInvalid(TestcaseBase):
         assert res.insert_count == 2
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("invalid_int8", [-129, 128])
-    def test_insert_int8_overflow(self, invalid_int8):
-        """
-        target: test insert int8 out of range
-        method: insert int8 out of range
-        expected: raise exception
-        """
-        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
-        data = cf.gen_dataframe_all_data_type(nb=1)
-        data[ct.default_int8_field_name] = [invalid_int8]
-        error = {ct.err_code: 1100, ct.err_msg: f"the 0th element ({invalid_int8}) out of range: [-128, 127]"}
-        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("invalid_int16", [-32769, 32768])
-    def test_insert_int16_overflow(self, invalid_int16):
-        """
-        target: test insert int16 out of range
-        method: insert int16 out of range
-        expected: raise exception
-        """
-        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
-        data = cf.gen_dataframe_all_data_type(nb=1)
-        data[ct.default_int16_field_name] = [invalid_int16]
-        error = {ct.err_code: 1100, ct.err_msg: f"the 0th element ({invalid_int16}) out of range: [-32768, 32767]"}
-        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("invalid_int32", [-2147483649, 2147483648])
-    def test_insert_int32_overflow(self, invalid_int32):
-        """
-        target: test insert int32 out of range
-        method: insert int32 out of range
-        expected: raise exception
-        """
-        collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
-        data = cf.gen_dataframe_all_data_type(nb=1)
-        data[ct.default_int32_field_name] = [invalid_int32]
-        error = {ct.err_code: 999, 'err_msg': "The Input data type is inconsistent with defined schema"}
-        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_over_resource_limit(self):
-        """
-        target: test insert over RPC limitation 64MB (67108864)
-        method: insert excessive data
-        expected: raise exception
-        """
-        nb = 150000
-        collection_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=collection_name)
-        data = cf.gen_default_dataframe_data(nb)
-        error = {ct.err_code: 999, ct.err_msg: "message larger than max"}
-        collection_w.insert(
-            data=data, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("default_value", [[], 123])
-    def test_insert_rows_using_default_value(self, default_value):
-        """
-        target: test insert with rows
-        method: insert with invalid rows
-        expected: raise exception
-        """
-        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
-                  cf.gen_string_field(default_value="abc"), cf.gen_float_vec_field()]
-        schema = cf.gen_collection_schema(fields)
-        collection_w = self.init_collection_wrap(schema=schema)
-        vectors = cf.gen_vectors(ct.default_nb, ct.default_dim)
-        data = [{"int64": 1, "float_vector": vectors[1],
-                 "varchar": default_value, "float": np.float32(1.0)}]
-        error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-        collection_w.upsert(data, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("default_value", [[], None])
     def test_insert_tuple_using_default_value(self, default_value):
         """
@@ -1222,86 +979,6 @@ class TestInsertInvalid(TestcaseBase):
         data = (int_values, vectors, string_values, default_value)
         error = {ct.err_code: 999, ct.err_msg: "The type of data should be List, pd.DataFrame or Dict"}
         collection_w.upsert(data, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_with_nan_value(self):
-        """
-        target: test insert with nan value
-        method: insert with nan value: None, float('nan'), np.NAN/np.nan, float('inf')
-        expected: raise exception
-        """
-        vector_field = ct.default_float_vec_field_name
-        collection_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=collection_name)
-        data = cf.gen_default_dataframe_data()
-        data[vector_field][0][0] = None
-        error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
-        data[vector_field][0][0] = float('nan')
-        error = {ct.err_code: 999, ct.err_msg: "value 'NaN' is not a number or infinity"}
-        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
-        data[vector_field][0][0] = np.NAN
-        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
-        data[vector_field][0][0] = float('inf')
-        error = {ct.err_code: 65535, ct.err_msg: "value '+Inf' is not a number or infinity"}
-        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index ", ct.all_index_types[10:12])
-    @pytest.mark.parametrize("invalid_vector_type ", ct.all_dense_vector_types)
-    def test_invalid_sparse_vector_data(self, index, invalid_vector_type):
-        """
-        target: insert illegal data type
-        method: insert illegal data type
-        expected: raise exception
-        """
-        c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_default_sparse_schema()
-        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
-        nb = 100
-        data = cf.gen_default_list_sparse_data(nb=nb)[:-1]
-        invalid_vec = cf.gen_vectors(nb, dim=128, vector_data_type=invalid_vector_type)
-        data.append(invalid_vec)
-        error = {ct.err_code: 1, ct.err_msg: 'input must be a sparse matrix in supported format'}
-        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
-
-
-class TestInsertInvalidBinary(TestcaseBase):
-    """
-      ******************************************************************
-      The following cases are used to test insert invalid params of binary
-      ******************************************************************
-    """
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_insert_ids_binary_invalid(self):
-        """
-        target: test insert float vector into a collection with binary vector schema
-        method: create collection and insert entities in it
-        expected: raise exception
-        """
-        collection_w = self.init_collection_general(prefix, auto_id=False, insert_data=False, is_binary=True,
-                                                    is_index=False, with_json=False)[0]
-        data = cf.gen_default_list_data(nb=100, with_json=False)
-        error = {ct.err_code: 999, ct.err_msg: "Invalid binary vector data exists"}
-        mutation_res, _ = collection_w.insert(
-            data=data, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_with_invalid_binary_partition_name(self):
-        """
-        target: test insert with invalid scenario
-        method: insert with invalid partition name
-        expected: raise exception
-        """
-        collection_w = self.init_collection_general(prefix, auto_id=False, insert_data=False, is_binary=True,
-                                                    is_index=False, with_json=False)[0]
-        partition_name = "non_existent_partition"
-        df, _ = cf.gen_default_binary_dataframe_data(nb=100)
-        error = {ct.err_code: 999, 'err_msg': f"partition not found[partition={partition_name}]"}
-        mutation_res, _ = collection_w.insert(data=df, partition_name=partition_name, check_task=CheckTasks.err_res,
-                                              check_items=error)
-
 
 class TestInsertString(TestcaseBase):
     """

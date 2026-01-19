@@ -98,6 +98,15 @@ func (policy *l0CompactionPolicy) Trigger(ctx context.Context) (events map[Compa
 			continue
 		}
 
+		collection := policy.meta.GetCollection(collID)
+		if collection == nil {
+			continue
+		}
+		if collection.IsExternal() {
+			log.Ctx(ctx).Info("skip l0 compaction for external collection", zap.Int64("collectionID", collID))
+			continue
+		}
+
 		policy.activeCollections.Read(collID)
 		levelZeroSegments := lo.Filter(segments, func(info *SegmentInfo, _ int) bool {
 			return info.GetLevel() == datapb.SegmentLevel_L0
@@ -128,6 +137,15 @@ func (policy *l0CompactionPolicy) triggerOneCollection(ctx context.Context, coll
 	log.Info("start trigger collection l0 compaction")
 	if policy.isSkipCollection(collectionID) {
 		return nil, 0, merr.WrapErrCollectionNotLoaded(collectionID, "the collection being paused by importing cannot do force l0 compaction")
+	}
+	collection := policy.meta.GetCollection(collectionID)
+	if collection == nil {
+		log.Warn("collection not found in meta")
+		return nil, 0, merr.WrapErrCollectionNotLoaded(collectionID, "collection not found")
+	}
+	if collection.IsExternal() {
+		log.Info("skip trigger l0 compaction for external collection")
+		return nil, 0, nil
 	}
 	allL0Segments := policy.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&

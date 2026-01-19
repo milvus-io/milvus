@@ -3243,3 +3243,234 @@ func TestRBACPrefixMatch(t *testing.T) {
 		assert.Contains(t, privileges, util.PrivilegeNameForAPI("Delete"))
 	})
 }
+
+func TestCatalog_FileResource(t *testing.T) {
+	ctx := context.Background()
+	mockErr := errors.New("mock error")
+
+	t.Run("BuildFileResourceKey", func(t *testing.T) {
+		key := BuildFileResourceKey(12345)
+		assert.Equal(t, fmt.Sprintf("%s/%d", FileResourceMetaPrefix, 12345), key)
+	})
+
+	t.Run("SaveFileResource success", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+
+		resource := &internalpb.FileResourceInfo{
+			Id:   1,
+			Name: "test_resource",
+			Path: "/path/to/resource",
+		}
+
+		kvmock.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil)
+
+		err := c.SaveFileResource(ctx, resource, 1)
+		assert.NoError(t, err)
+	})
+
+	t.Run("SaveFileResource write error", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+
+		// nil resource will cause proto marshal to handle gracefully, test MultiSave error instead
+		resource := &internalpb.FileResourceInfo{
+			Id:   1,
+			Name: "test_resource",
+			Path: "/path/to/resource",
+		}
+
+		kvmock.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(mockErr)
+
+		err := c.SaveFileResource(ctx, resource, 1)
+		assert.Error(t, err)
+	})
+
+	t.Run("RemoveFileResource success", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+		err := c.RemoveFileResource(ctx, 1, 1)
+		assert.NoError(t, err)
+	})
+
+	t.Run("RemoveFileResource error", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
+
+		err := c.RemoveFileResource(ctx, 1, 1)
+		assert.Error(t, err)
+	})
+
+	t.Run("ListFileResource success with version", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+
+		resource := &internalpb.FileResourceInfo{
+			Id:   1,
+			Name: "test_resource",
+			Path: "/path/to/resource",
+		}
+		value, err := proto.Marshal(resource)
+		assert.NoError(t, err)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return(
+			[]string{BuildFileResourceKey(1)},
+			[]string{string(value)},
+			nil,
+		)
+		kvmock.EXPECT().Has(mock.Anything, FileResourceVersionKey).Return(true, nil)
+		kvmock.EXPECT().Load(mock.Anything, FileResourceVersionKey).Return("123", nil)
+
+		resources, version, err := c.ListFileResource(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, uint64(123), version)
+		assert.Equal(t, 1, len(resources))
+		assert.Equal(t, int64(1), resources[0].Id)
+		assert.Equal(t, "test_resource", resources[0].Name)
+		assert.Equal(t, "/path/to/resource", resources[0].Path)
+	})
+
+	t.Run("ListFileResource success without version", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+
+		resource := &internalpb.FileResourceInfo{
+			Id:   2,
+			Name: "test_resource_2",
+			Path: "/path/to/resource2",
+		}
+		value, err := proto.Marshal(resource)
+		assert.NoError(t, err)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return(
+			[]string{BuildFileResourceKey(2)},
+			[]string{string(value)},
+			nil,
+		)
+		kvmock.EXPECT().Has(mock.Anything, FileResourceVersionKey).Return(false, nil)
+
+		resources, version, err := c.ListFileResource(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, uint64(0), version)
+		assert.Equal(t, 1, len(resources))
+	})
+
+	t.Run("ListFileResource LoadWithPrefix error", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return(nil, nil, mockErr)
+
+		resources, version, err := c.ListFileResource(ctx)
+		assert.Error(t, err)
+		assert.Nil(t, resources)
+		assert.Equal(t, uint64(0), version)
+	})
+
+	t.Run("ListFileResource Has error", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return([]string{}, []string{}, nil)
+		kvmock.EXPECT().Has(mock.Anything, FileResourceVersionKey).Return(false, mockErr)
+
+		resources, version, err := c.ListFileResource(ctx)
+		assert.Error(t, err)
+		assert.Nil(t, resources)
+		assert.Equal(t, uint64(0), version)
+	})
+
+	t.Run("ListFileResource Load version error", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return([]string{}, []string{}, nil)
+		kvmock.EXPECT().Has(mock.Anything, FileResourceVersionKey).Return(true, nil)
+		kvmock.EXPECT().Load(mock.Anything, FileResourceVersionKey).Return("", mockErr)
+
+		resources, version, err := c.ListFileResource(ctx)
+		assert.Error(t, err)
+		assert.Nil(t, resources)
+		assert.Equal(t, uint64(0), version)
+	})
+
+	t.Run("ListFileResource parse version error", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return([]string{}, []string{}, nil)
+		kvmock.EXPECT().Has(mock.Anything, FileResourceVersionKey).Return(true, nil)
+		kvmock.EXPECT().Load(mock.Anything, FileResourceVersionKey).Return("invalid_version", nil)
+
+		resources, version, err := c.ListFileResource(ctx)
+		assert.Error(t, err)
+		assert.Nil(t, resources)
+		assert.Equal(t, uint64(0), version)
+	})
+
+	t.Run("ListFileResource unmarshal error", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return(
+			[]string{BuildFileResourceKey(1)},
+			[]string{"invalid_proto_data"},
+			nil,
+		)
+		kvmock.EXPECT().Has(mock.Anything, FileResourceVersionKey).Return(false, nil)
+
+		resources, version, err := c.ListFileResource(ctx)
+		assert.Error(t, err)
+		assert.Nil(t, resources)
+		assert.Equal(t, uint64(0), version)
+	})
+
+	t.Run("ListFileResource empty", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return([]string{}, []string{}, nil)
+		kvmock.EXPECT().Has(mock.Anything, FileResourceVersionKey).Return(false, nil)
+
+		resources, version, err := c.ListFileResource(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, uint64(0), version)
+		assert.Equal(t, 0, len(resources))
+	})
+
+	t.Run("ListFileResource multiple resources", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+
+		resource1 := &internalpb.FileResourceInfo{
+			Id:   1,
+			Name: "resource1",
+			Path: "/path/1",
+		}
+		resource2 := &internalpb.FileResourceInfo{
+			Id:   2,
+			Name: "resource2",
+			Path: "/path/2",
+		}
+		value1, _ := proto.Marshal(resource1)
+		value2, _ := proto.Marshal(resource2)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return(
+			[]string{BuildFileResourceKey(1), BuildFileResourceKey(2)},
+			[]string{string(value1), string(value2)},
+			nil,
+		)
+		kvmock.EXPECT().Has(mock.Anything, FileResourceVersionKey).Return(true, nil)
+		kvmock.EXPECT().Load(mock.Anything, FileResourceVersionKey).Return("456", nil)
+
+		resources, version, err := c.ListFileResource(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, uint64(456), version)
+		assert.Equal(t, 2, len(resources))
+	})
+}

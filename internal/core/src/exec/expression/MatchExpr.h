@@ -43,6 +43,7 @@ class PhyMatchFilterExpr : public Expr {
           segment_(segment),
           active_count_(active_count),
           batch_size_(batch_size) {
+        size_per_chunk_ = segment_->size_per_chunk();
     }
 
     void
@@ -80,6 +81,7 @@ class PhyMatchFilterExpr : public Expr {
     int64_t active_count_;
     int64_t current_pos_{0};
     int64_t batch_size_;
+    int64_t size_per_chunk_;
 };
 
 }  // namespace exec

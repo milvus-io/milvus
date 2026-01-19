@@ -572,4 +572,9 @@ Align(int32_t number, int32_t alignment) {
     return (number + alignment - 1) & ~(alignment - 1);
 }
 
+inline bool
+IsStructSubField(const std::string& fieldName) {
+    return fieldName.find('[') != std::string::npos;
+}
+
 }  // namespace milvus

@@ -144,9 +144,10 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                               query_offsets};
         int32_t current_chunk_id = 0;
 
-        // get K1 and B from index for bm25 brute force
+        // get index params for bm25 and minhash brute force
         std::map<std::string, std::string> index_info;
-        if (metric_type == knowhere::metric::BM25) {
+        if (metric_type == knowhere::metric::BM25 ||
+            metric_type == knowhere::metric::MHJACCARD) {
             index_info = segment.get_indexing_record()
                              .get_field_index_meta(vecfield_id)
                              .GetIndexParams();

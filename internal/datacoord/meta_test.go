@@ -47,7 +47,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -135,7 +134,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 			},
 		}, nil)
 
-		suite.catalog.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{}, 0, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -182,7 +180,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 			},
 		}, nil)
 
-		suite.catalog.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{}, 0, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -302,6 +299,46 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	}
 
 	mockChMgr := mocks.NewChunkManager(suite.T())
+
+	suite.Run("test complete with empty result segments", func() {
+		// Test case: when all data is deleted, compaction result should have empty Segments slice
+		// This verifies that completeMixCompactionMutation correctly handles the case
+		// where no output segments are produced (all data deleted during compaction)
+		latestSegments := getLatestSegments()
+
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{}, // Empty - all data deleted
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []UniqueID{1, 2},
+			Type:          datapb.CompactionType_MixCompaction,
+		}
+		m := &meta{
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+
+		infos, mutation, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		suite.NoError(err)
+		suite.Empty(infos) // No output segments when all data deleted
+		suite.NotNil(mutation)
+
+		// check compactFrom segments are marked as Dropped
+		for _, segID := range []int64{1, 2} {
+			seg := m.GetSegment(context.TODO(), segID)
+			suite.Equal(commonpb.SegmentState_Dropped, seg.GetState())
+			suite.NotEmpty(seg.GetDroppedAt())
+			suite.True(seg.GetCompacted())
+		}
+
+		// check mutation metrics - only input segments changed to Dropped
+		suite.EqualValues(-4, mutation.rowCountChange)
+		flushedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Flushed.String()][getSortStatus(false)]["0"]
+		suite.EqualValues(-2, flushedUnsorted)
+		droppedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Dropped.String()][getSortStatus(false)]["0"]
+		suite.EqualValues(2, droppedUnsorted)
+	})
 
 	suite.Run("test complete with compactTo 0 num of rows", func() {
 		latestSegments := getLatestSegments()

@@ -319,6 +319,22 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			} else {
 				logger.Info("handle truncate collection message success")
 			}
+		case commonpb.MsgType_AlterWAL:
+			alterWALMsg := msg.(*adaptor.AlterWALMessageBody)
+			logger := log.With(
+				zap.String("pchannel", alterWALMsg.AlterWALMessage.VChannel()), // pchannel that received the alter wal message
+				zap.String("vchannel", ddn.vChannelName),                       // vchannel of the current flow graph pipeline
+				zap.Stringer("targetWalName", alterWALMsg.AlterWALMessage.Header().TargetWalName),
+				zap.Uint64("timetick", alterWALMsg.AlterWALMessage.TimeTick()),
+			)
+			logger.Info("receive alter wal message")
+			if err := ddn.msgHandler.HandleAlterWAL(ddn.ctx, alterWALMsg.AlterWALMessage, ddn.vChannelName); err != nil {
+				logger.Warn("handle alter wal message failed", zap.Error(err))
+			} else {
+				logger.Info("handle alter wal message success")
+			}
+			fgMsg.isAlterWal = true
+			fgMsg.alterWalTimeTick = alterWALMsg.AlterWALMessage.TimeTick()
 		}
 	}
 

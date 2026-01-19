@@ -139,6 +139,9 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
                                    src.length(),
                                    src.byte_size(),
                                    src.get_element_type());
+        } else if constexpr (std::is_same_v<Json, Type>) {
+            return Json(chunk[chunk_offset].c_str(),
+                        chunk[chunk_offset].size());
         } else {
             return chunk[chunk_offset];
         }
