@@ -324,7 +324,7 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
             res = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
             if time.time() - start_time <= ttl_time:
                 assert res[0][0].get('count(*)') == default_nb
-            elif time.time() - start_time >= ttl_time and time.time() - start_time <= new_ttl_time:
+            elif time.time() - start_time > ttl_time and time.time() - start_time <= new_ttl_time:
                 assert res[0][0].get('count(*)') == update_nb
             else:
                 assert res[0][0].get('count(*)') == 0
