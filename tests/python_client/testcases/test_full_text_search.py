@@ -2436,19 +2436,18 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                     f"query text: {search_text}, \ntext: {result_text} \n overlap: {overlap} \n word freq a: {word_freq_a} \n word freq b: {word_freq_b}\n result: {r}"
                 )
 
-        # verify full text searching does not support for search by pk
-        error = {ct.err_code: 100,
-                 ct.err_msg: f"not allowed to retrieve raw data of field text_sparse_emb"}
-        collection_w.search(
+        # verify full text search supports search by pk
+        pk_search_res, _ = collection_w.search(
             ids=[0, 1],
             anns_field="text_sparse_emb",
             expr=filter,
             param={},
             limit=limit,
-            offset=offset,
+            offset=0,
             output_fields=["id", "text"],
-            check_task=CheckTasks.err_res, check_items=error
         )
+        # search by pk should return results (may be empty if filtered out or no overlap)
+        assert len(pk_search_res) == 2  # nq=2 for two PKs
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("nq", [2])
