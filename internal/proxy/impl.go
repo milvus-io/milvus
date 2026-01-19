@@ -3681,8 +3681,10 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		return err
 	}
 
-	if vectorCount == 0 {
-		return merr.WrapErrParameterInvalidMsg("cannot search: all provided IDs have null vector values in field '%s'", annsFieldName)
+	// Check if any ID has null vector value - this is not allowed
+	if vectorCount != inputIDsCount {
+		nullCount := inputIDsCount - vectorCount
+		return merr.WrapErrParameterInvalidMsg("cannot search: %d out of %d provided IDs have null vector values in field '%s'", nullCount, inputIDsCount, annsFieldName)
 	}
 
 	request.Nq = int64(vectorCount)
