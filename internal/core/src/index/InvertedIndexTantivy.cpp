@@ -318,6 +318,13 @@ InvertedIndexTantivy<T>::IsNull() {
     int64_t count = Count();
     TargetBitmap bitset(count);
 
+    // For nested index, null rows don't have elements in the index,
+    // so all elements in the index are valid (none are null).
+    // null_offset_ stores row offsets, not element offsets.
+    if (is_nested_index_) {
+        return bitset;  // All false - no element is null
+    }
+
     auto fill_bitset = [this, count, &bitset]() {
         auto end =
             std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
@@ -343,6 +350,13 @@ InvertedIndexTantivy<T>::IsNotNull() {
                           tracer::GetRootSpan());
     int64_t count = Count();
     TargetBitmap bitset(count, true);
+
+    // For nested index, null rows don't have elements in the index,
+    // so all elements in the index are valid.
+    // null_offset_ stores row offsets, not element offsets.
+    if (is_nested_index_) {
+        return bitset;  // All true - all elements are valid
+    }
 
     auto fill_bitset = [this, count, &bitset]() {
         auto end =

@@ -1995,31 +1995,60 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
         elements.insert(GetValueWithCastNumber<GetType>(element));
     }
     boost::container::vector<GetType> elems(elements.begin(), elements.end());
+
+    // Get array offsets for nested index (needed for element-to-row conversion)
+    auto array_offsets = segment_->GetArrayOffsets(expr_->column_.field_id_);
+
     auto execute_sub_batch =
-        [this](Index* index_ptr,
-               const boost::container::vector<GetType>& vals) {
-            switch (expr_->op_) {
-                case proto::plan::JSONContainsExpr_JSONOp_Contains:
-                case proto::plan::JSONContainsExpr_JSONOp_ContainsAny: {
-                    return index_ptr->In(vals.size(), vals.data());
-                }
-                case proto::plan::JSONContainsExpr_JSONOp_ContainsAll: {
-                    TargetBitmap result(index_ptr->Count());
-                    result.set();
-                    for (size_t i = 0; i < vals.size(); i++) {
-                        auto sub = index_ptr->In(1, &vals[i]);
-                        result &= sub;
-                    }
-                    return result;
-                }
-                default:
-                    ThrowInfo(
-                        ExprInvalid,
-                        "unsupported array contains type {}",
-                        proto::plan::JSONContainsExpr_JSONOp_Name(expr_->op_));
+        [this, &array_offsets](
+            Index* index_ptr,
+            const boost::container::vector<GetType>& vals) -> TargetBitmap {
+        // Query helper: for nested index, convert element-level to row-level
+        auto query_in = [&](size_t n, const GetType* data) -> TargetBitmap {
+            auto element_bitset = index_ptr->In(n, data);
+            if (!index_ptr->IsNestedIndex()) {
+                return element_bitset;
             }
+            AssertInfo(array_offsets != nullptr,
+                       "array offsets not found for field {}",
+                       expr_->column_.field_id_.get());
+            return array_offsets->ForEachRowElementRange(
+                [&element_bitset](int32_t elem_start, int32_t elem_end) {
+                    for (int32_t i = elem_start; i < elem_end; ++i) {
+                        if (element_bitset[i]) {
+                            return true;
+                        }
+                    }
+                    return false;
+                },
+                0,
+                active_count_);
         };
-    auto res = ProcessIndexChunks<GetType>(execute_sub_batch, elems);
+
+        switch (expr_->op_) {
+            case proto::plan::JSONContainsExpr_JSONOp_Contains:
+            case proto::plan::JSONContainsExpr_JSONOp_ContainsAny:
+                return query_in(vals.size(), vals.data());
+
+            case proto::plan::JSONContainsExpr_JSONOp_ContainsAll: {
+                TargetBitmap result(active_count_);
+                result.set();
+                for (size_t i = 0; i < vals.size(); i++) {
+                    result &= query_in(1, &vals[i]);
+                }
+                return result;
+            }
+            default:
+                ThrowInfo(
+                    ExprInvalid,
+                    "unsupported array contains type {}",
+                    proto::plan::JSONContainsExpr_JSONOp_Name(expr_->op_));
+        }
+    };
+
+    // Use WithRowLevel version since func handles element-to-row conversion for nested index
+    auto res =
+        ProcessIndexChunksWithRowLevel<GetType>(execute_sub_batch, elems);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",

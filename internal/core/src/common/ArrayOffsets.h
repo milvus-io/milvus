@@ -21,6 +21,7 @@
 #include <map>
 #include <memory>
 #include <shared_mutex>
+#include <functional>
 #include "cachinglayer/Manager.h"
 #include "common/Types.h"
 #include "common/EasyAssert.h"
@@ -68,6 +69,19 @@ class IArrayOffsets {
     virtual FixedVector<int32_t>
     RowOffsetsToElementOffsets(
         const FixedVector<int32_t>& row_offsets) const = 0;
+
+    // Iterate over rows and apply predicate with element range
+    // predicate: function(element_start, element_end) -> bool
+    //   element_start: first element ID of the row (inclusive)
+    //   element_end: last element ID of the row (exclusive)
+    // Returns: bitmap where bit[i] = predicate result for row (row_start + i)
+    using ElementRangePredicate =
+        std::function<bool(int32_t elem_start, int32_t elem_end)>;
+
+    virtual TargetBitmap
+    ForEachRowElementRange(const ElementRangePredicate& predicate,
+                           int64_t row_start,
+                           int64_t row_count) const = 0;
 };
 
 class ArrayOffsetsSealed : public IArrayOffsets {
@@ -119,6 +133,11 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     RowOffsetsToElementOffsets(
         const FixedVector<int32_t>& row_offsets) const override;
 
+    TargetBitmap
+    ForEachRowElementRange(const ElementRangePredicate& predicate,
+                           int64_t row_start,
+                           int64_t row_count) const override;
+
     static std::shared_ptr<ArrayOffsetsSealed>
     BuildFromSegment(const void* segment, const FieldMeta& field_meta);
 
@@ -165,6 +184,11 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
     FixedVector<int32_t>
     RowOffsetsToElementOffsets(
         const FixedVector<int32_t>& row_offsets) const override;
+
+    TargetBitmap
+    ForEachRowElementRange(const ElementRangePredicate& predicate,
+                           int64_t row_start,
+                           int64_t row_count) const override;
 
  private:
     struct PendingRow {

@@ -10,8 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <boost/container/vector.hpp>
 #include <boost/format.hpp>
-#include <boost/filesystem.hpp>
 #include <cstdint>
 #include <memory>
 #include <random>
@@ -23,7 +23,7 @@
 #include "common/Types.h"
 #include "expr/ITypeExpr.h"
 #include "index/IndexFactory.h"
-#include "indexbuilder/IndexFactory.h"
+#include "index/InvertedIndexTantivy.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
 #include "query/Plan.h"
@@ -31,8 +31,6 @@
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "simdjson/padded_string.h"
-#include "storage/Util.h"
-#include "storage/InsertData.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/storage_test_utils.h"
@@ -3011,8 +3009,7 @@ TEST(Expr, TestArrayContainsForStruct) {
     // Step 5: Test with array contains filter
     // Query: Search array elements, filter by array contains specific value
     {
-        std::string raw_plan =
-            boost::str(boost::format(R"(vector_anns: <
+        std::string raw_plan = boost::str(boost::format(R"(vector_anns: <
                                         field_id: %1%
                                         predicates: <
                                           json_contains_expr: <
@@ -3033,7 +3030,7 @@ TEST(Expr, TestArrayContainsForStruct) {
                                           search_params: "{\"ef\": 50}"
                                         >
                                         placeholder_tag: "$0">)") %
-                       vec_fid.get() % int_array_fid.get());
+                                          vec_fid.get() % int_array_fid.get());
 
         proto::plan::PlanNode plan_node;
         auto ok =
@@ -3088,106 +3085,32 @@ TEST(Expr, TestArrayContainsForStruct) {
     {
         std::cout << "\n=== Testing with Array Scalar Index ===" << std::endl;
 
-        // Setup storage for index building
-        std::string root_path = "/tmp/test-array-contains-index/";
-        storage::StorageConfig storage_config;
-        storage_config.storage_type = "local";
-        storage_config.root_path = root_path;
-        auto chunk_manager = storage::CreateChunkManager(storage_config);
-        auto fs = storage::InitArrowFileSystem(storage_config);
-
-        int64_t collection_id = 1;
-        int64_t partition_id = 2;
-        int64_t segment_id = 3;
-        int64_t index_build_id = 2001;
-        int64_t index_version = 2001;
-
-        // Prepare field schema for array
-        proto::schema::FieldSchema field_schema;
-        field_schema.set_data_type(proto::schema::DataType::Array);
-        field_schema.set_nullable(false);
-        field_schema.set_element_type(proto::schema::DataType::Int32);
-
-        auto field_meta = storage::FieldDataMeta{collection_id,
-                                                  partition_id,
-                                                  segment_id,
-                                                  int_array_fid.get(),
-                                                  field_schema};
-        auto index_meta = storage::IndexMeta{
-            segment_id, int_array_fid.get(), index_build_id, index_version};
-
-        // Get array data from raw_data
-        auto array_field_data = raw_data.get_col<ScalarArray>(int_array_fid);
-
-        // Convert to milvus::Array format
-        std::vector<milvus::Array> array_data;
-        array_data.reserve(N);
-        for (size_t row = 0; row < N; row++) {
-            array_data.push_back(milvus::Array(array_field_data[row]));
+        // Get array data from raw_data and convert to boost::container::vector format
+        // (required by InvertedIndexTantivy::BuildWithRawDataForUT)
+        auto array_col =
+            raw_data.get_col(int_array_fid)->scalars().array_data().data();
+        std::vector<boost::container::vector<int32_t>> vec_of_array;
+        vec_of_array.reserve(N);
+        for (size_t i = 0; i < N; i++) {
+            boost::container::vector<int32_t> arr;
+            for (size_t j = 0; j < array_col[i].int_data().data_size(); j++) {
+                arr.push_back(array_col[i].int_data().data(j));
+            }
+            vec_of_array.push_back(arr);
         }
 
-        // Create field data and fill
-        auto field_data =
-            storage::CreateFieldData(DataType::ARRAY, DataType::NONE, false);
-        field_data->FillFieldData(array_data.data(), array_data.size());
-
-        // Create insert data
-        auto payload_reader =
-            std::make_shared<milvus::storage::PayloadReader>(field_data);
-        storage::InsertData insert_data(payload_reader);
-        insert_data.SetFieldDataMeta(field_meta);
-        insert_data.SetTimestamps(0, 100);
-
-        auto serialized_bytes = insert_data.Serialize(storage::Remote);
-
-        // Write to file
-        auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
-                                    root_path,
-                                    collection_id,
-                                    partition_id,
-                                    segment_id,
-                                    int_array_fid.get(),
-                                    0);
-        chunk_manager->Write(
-            log_path, serialized_bytes.data(), serialized_bytes.size());
-
-        // Build index
-        storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
-        std::vector<std::string> index_files;
-
-        Config config;
-        config["index_type"] = milvus::index::HYBRID_INDEX_TYPE;
-        config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
-        config["bitmap_cardinality_limit"] = "100";
-        config[INDEX_NUM_ROWS_KEY] = N;
-
-        {
-            auto build_index =
-                indexbuilder::IndexFactory::GetInstance().CreateIndex(
-                    DataType::ARRAY, config, ctx);
-            build_index->Build();
-            auto create_index_result = build_index->Upload();
-            index_files = create_index_result->GetIndexFiles();
-        }
-
-        // Load index
-        index::CreateIndexInfo index_info{};
-        index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
-        index_info.field_type = DataType::ARRAY;
-
-        config["index_files"] = index_files;
-        config[milvus::LOAD_PRIORITY] =
-            milvus::proto::common::LoadPriority::HIGH;
-        ctx.set_for_loading_index(true);
+        // Build inverted index using simplified API
         auto arr_index =
-            index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
-        arr_index->Load(milvus::tracer::TraceContext{}, config);
+            std::make_unique<index::InvertedIndexTantivy<int32_t>>();
+        Config cfg;
+        cfg["is_array"] = true;
+        cfg["is_nested_index"] = true;
+        arr_index->BuildWithRawDataForUT(N, vec_of_array.data(), cfg);
 
         // Load index into segment
         LoadIndexInfo arr_index_info;
         arr_index_info.field_id = int_array_fid.get();
-        arr_index_info.field_type = DataType::ARRAY;
-        arr_index_info.index_params["index_type"] = milvus::index::HYBRID_INDEX_TYPE;
+        arr_index_info.index_params = GenIndexParams(arr_index.get());
         arr_index_info.cache_index =
             CreateTestCacheIndex("test_array", std::move(arr_index));
         segment->LoadIndex(arr_index_info);
@@ -3195,8 +3118,7 @@ TEST(Expr, TestArrayContainsForStruct) {
         std::cout << "Loaded scalar index for price_array field" << std::endl;
 
         // Now search with index
-        std::string raw_plan =
-            boost::str(boost::format(R"(vector_anns: <
+        std::string raw_plan = boost::str(boost::format(R"(vector_anns: <
                                         field_id: %1%
                                         predicates: <
                                           json_contains_expr: <
@@ -3217,7 +3139,7 @@ TEST(Expr, TestArrayContainsForStruct) {
                                           search_params: "{\"ef\": 50}"
                                         >
                                         placeholder_tag: "$0">)") %
-                       vec_fid.get() % int_array_fid.get());
+                                          vec_fid.get() % int_array_fid.get());
 
         proto::plan::PlanNode plan_node;
         auto ok =
@@ -3263,8 +3185,5 @@ TEST(Expr, TestArrayContainsForStruct) {
                       search_result->distances_[i])
                 << "Distances should be sorted in ascending order (with index)";
         }
-
-        // Cleanup
-        boost::filesystem::remove_all(root_path);
     }
 }

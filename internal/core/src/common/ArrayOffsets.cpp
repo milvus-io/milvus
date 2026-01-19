@@ -139,6 +139,30 @@ ArrayOffsetsSealed::RowOffsetsToElementOffsets(
     return element_offsets;
 }
 
+TargetBitmap
+ArrayOffsetsSealed::ForEachRowElementRange(
+    const ElementRangePredicate& predicate,
+    int64_t row_start,
+    int64_t row_count) const {
+    AssertInfo(row_start >= 0 && row_start + row_count <= GetRowCount(),
+               "row range out of bounds: row_start={}, row_count={}, "
+               "total_rows={}",
+               row_start,
+               row_count,
+               GetRowCount());
+
+    TargetBitmap result(row_count);
+
+    for (int64_t i = 0; i < row_count; ++i) {
+        int64_t row_id = row_start + i;
+        int32_t elem_start = row_to_element_start_[row_id];
+        int32_t elem_end = row_to_element_start_[row_id + 1];
+        result[i] = predicate(elem_start, elem_end);
+    }
+
+    return result;
+}
+
 std::shared_ptr<ArrayOffsetsSealed>
 ArrayOffsetsSealed::BuildFromSegment(const void* segment,
                                      const FieldMeta& field_meta) {
@@ -361,6 +385,32 @@ ArrayOffsetsGrowing::RowOffsetsToElementOffsets(
     }
 
     return element_offsets;
+}
+
+TargetBitmap
+ArrayOffsetsGrowing::ForEachRowElementRange(
+    const ElementRangePredicate& predicate,
+    int64_t row_start,
+    int64_t row_count) const {
+    std::shared_lock lock(mutex_);
+
+    AssertInfo(row_start >= 0 && row_start + row_count <= committed_row_count_,
+               "row range out of bounds: row_start={}, row_count={}, "
+               "committed_rows={}",
+               row_start,
+               row_count,
+               committed_row_count_);
+
+    TargetBitmap result(row_count);
+
+    for (int64_t i = 0; i < row_count; ++i) {
+        int64_t row_id = row_start + i;
+        int32_t elem_start = row_to_element_start_[row_id];
+        int32_t elem_end = row_to_element_start_[row_id + 1];
+        result[i] = predicate(elem_start, elem_end);
+    }
+
+    return result;
 }
 
 void
