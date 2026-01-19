@@ -118,8 +118,9 @@ const FieldMeta FieldMeta::RowIdMeta(
 const ArrowSchemaPtr
 Schema::ConvertToArrowSchema() const {
     arrow::FieldVector arrow_fields;
-    for (auto& field : fields_) {
-        auto meta = field.second;
+    arrow_fields.reserve(fields_.size());
+    for (const auto& field : fields_) {
+        const auto& meta = field.second;
         int dim = IsVectorDataType(meta.get_data_type()) &&
                           !IsSparseFloatVectorDataType(meta.get_data_type())
                       ? meta.get_dim()
@@ -171,6 +172,7 @@ Schema::ToProto() const {
 std::unique_ptr<std::vector<FieldMeta>>
 Schema::AbsentFields(Schema& old_schema) const {
     std::vector<FieldMeta> result;
+    result.reserve(fields_.size());
     for (const auto& [field_id, field_meta] : fields_) {
         auto it = old_schema.fields_.find(field_id);
         if (it == old_schema.fields_.end()) {
@@ -178,7 +180,7 @@ Schema::AbsentFields(Schema& old_schema) const {
         }
     }
 
-    return std::make_unique<std::vector<FieldMeta>>(result);
+    return std::make_unique<std::vector<FieldMeta>>(std::move(result));
 }
 
 std::pair<bool, bool>
