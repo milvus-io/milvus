@@ -119,6 +119,7 @@ func fromMessageToTsMsgV1(msg message.ImmutableMessage) (msgstream.TsMsg, error)
 		MsgID:     MustGetMQWrapperIDFromMessage(msg.LastConfirmedMessageID()).Serialize(),
 		MsgGroup:  "", // Not important any more.
 		Timestamp: msg.TimeTick(),
+		WALName:   commonpb.WALName(msg.WALName()),
 	})
 
 	return recoverMessageFromHeader(tsMsg, msg)
@@ -143,6 +144,8 @@ func fromMessageToTsMsgV2(msg message.ImmutableMessage) (msgstream.TsMsg, error)
 		tsMsg, err = NewAlterCollectionMessageBody(msg)
 	case message.MessageTypeTruncateCollection:
 		tsMsg, err = NewTruncateCollectionMessageBody(msg)
+	case message.MessageTypeAlterWAL:
+		tsMsg, err = NewAlterWALMessageBody(msg)
 	default:
 		panic("unsupported message type")
 	}
@@ -156,6 +159,7 @@ func fromMessageToTsMsgV2(msg message.ImmutableMessage) (msgstream.TsMsg, error)
 		MsgID:     MustGetMQWrapperIDFromMessage(msg.LastConfirmedMessageID()).Serialize(),
 		MsgGroup:  "", // Not important any more.
 		Timestamp: msg.TimeTick(),
+		WALName:   commonpb.WALName(msg.WALName()),
 	})
 	return tsMsg, nil
 }

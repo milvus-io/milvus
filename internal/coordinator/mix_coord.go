@@ -161,6 +161,9 @@ func (s *mixCoordImpl) initInternal() error {
 	s.datacoordServer.SetMixCoord(s)
 	s.queryCoordServer.SetMixCoord(s)
 
+	// Register WAL callbacks
+	RegisterWALCallbacks(s)
+
 	if err := s.streamingCoord.Start(s.ctx); err != nil {
 		log.Error("streamCoord start failed", zap.Error(err))
 		return err

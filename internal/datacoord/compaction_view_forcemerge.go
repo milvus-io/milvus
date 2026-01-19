@@ -39,11 +39,21 @@ type ForceMergeSegmentView struct {
 	triggerID     int64
 	collectionTTL time.Duration
 
-	configMaxSize float64
-	topology      *CollectionTopology
+	configMaxSize      float64
+	expectedTargetSize float64
 
-	targetSize  float64
-	targetCount int64
+	topology *CollectionTopology
+
+	targetSegmentSize  float64
+	targetSegmentCount int64
+}
+
+func (v *ForceMergeSegmentView) GetTargetSegmentSize() float64 {
+	return v.targetSegmentSize
+}
+
+func (v *ForceMergeSegmentView) GetTargetSegmentCount() int64 {
+	return v.targetSegmentCount
 }
 
 func (v *ForceMergeSegmentView) GetGroupLabel() *CompactionGroupLabel {
@@ -80,15 +90,64 @@ func (v *ForceMergeSegmentView) calculateTargetSizeCount() (maxSafeSize float64,
 	maxSafeSize = v.calculateMaxSafeSize()
 	if maxSafeSize < v.configMaxSize {
 		log.Info("maxSafeSize is less than configMaxSize, set to configMaxSize",
-			zap.Float64("targetSize", maxSafeSize),
+			zap.Float64("maxSafeSize", maxSafeSize),
 			zap.Float64("configMaxSize", v.configMaxSize))
 		maxSafeSize = v.configMaxSize
 	}
 
-	targetCount = max(1, int64(sumSegmentSize(v.segments)/maxSafeSize))
+	if v.expectedTargetSize > 0 {
+		if v.expectedTargetSize <= maxSafeSize {
+			log.Info("using user-provided target size",
+				zap.Float64("expectedTargetSize", v.expectedTargetSize),
+				zap.Float64("maxSafeSize", maxSafeSize))
+			maxSafeSize = v.expectedTargetSize
+		} else {
+			log.Warn("user-provided target size exceeds maxSafeSize, using maxSafeSize",
+				zap.Float64("expectedTargetSize", v.expectedTargetSize),
+				zap.Float64("maxSafeSize", maxSafeSize))
+		}
+	}
+
+	totalSize := sumSegmentSize(v.segments)
+	targetCount = max(1, int64(totalSize/maxSafeSize))
+
+	queryNodeCount := int64(len(v.topology.QueryNodeMemory))
+	numReplicas := int64(v.topology.NumReplicas)
+	if numReplicas == 0 {
+		numReplicas = 1
+	}
+	numShards := int64(v.topology.NumShards)
+	if numShards == 0 {
+		numShards = 1
+	}
+
+	perShardParallelism := queryNodeCount / (numReplicas * numShards)
+	if perShardParallelism < 1 {
+		perShardParallelism = 1
+	}
+
+	if perShardParallelism > 1 && targetCount < perShardParallelism {
+		desiredCount := perShardParallelism
+		if totalSize/float64(desiredCount) >= v.configMaxSize {
+			targetCount = desiredCount
+			maxSafeSize = totalSize / float64(targetCount)
+			log.Info("adjusted target count for parallel loading per shard",
+				zap.Int64("queryNodeCount", queryNodeCount),
+				zap.Int64("numReplicas", numReplicas),
+				zap.Int64("numShards", numShards),
+				zap.Int64("perShardParallelism", perShardParallelism),
+				zap.Int64("adjustedTargetCount", targetCount),
+				zap.Float64("adjustedTargetSize", maxSafeSize))
+		}
+	}
+
 	log.Info("topology-aware force merge calculation",
 		zap.Int64("targetSegmentCount", targetCount),
-		zap.Float64("maxSafeSize", maxSafeSize))
+		zap.Float64("targetSegmentSize", maxSafeSize),
+		zap.Int64("queryNodeCount", queryNodeCount),
+		zap.Int64("numReplicas", numReplicas),
+		zap.Int64("numShards", numShards),
+		zap.Int64("perShardParallelism", perShardParallelism))
 	return maxSafeSize, targetCount
 }
 
@@ -99,14 +158,15 @@ func (v *ForceMergeSegmentView) ForceTriggerAll() ([]CompactionView, string) {
 	results := make([]CompactionView, 0, len(groups))
 	for _, group := range groups {
 		results = append(results, &ForceMergeSegmentView{
-			label:         v.label,
-			segments:      group,
-			triggerID:     v.triggerID,
-			collectionTTL: v.collectionTTL,
-			configMaxSize: v.configMaxSize,
-			targetSize:    targetSizePerSegment,
-			targetCount:   targetCount,
-			topology:      v.topology,
+			label:              v.label,
+			segments:           group,
+			triggerID:          v.triggerID,
+			collectionTTL:      v.collectionTTL,
+			configMaxSize:      v.configMaxSize,
+			expectedTargetSize: v.expectedTargetSize,
+			targetSegmentSize:  targetSizePerSegment,
+			targetSegmentCount: targetCount,
+			topology:           v.topology,
 		})
 	}
 	return results, "force merge trigger"

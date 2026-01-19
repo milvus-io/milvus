@@ -132,11 +132,11 @@ func NewFFIPackedWriter(basePath string, baseVersion int64, schema *arrow.Schema
 		return nil, err
 	}
 
-	var writerHandle C.WriterHandle
+	var writerHandle C.LoonWriterHandle
 
-	result := C.writer_new(cBasePath, cSchema, cProperties, &writerHandle)
+	result := C.loon_writer_new(cBasePath, cSchema, cProperties, &writerHandle)
 
-	err = HandleFFIResult(result)
+	err = HandleLoonFFIResult(result)
 	if err != nil {
 		return nil, err
 	}
@@ -161,44 +161,41 @@ func (pw *FFIPackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 	// Convert to C struct
 	cArray := (*C.struct_ArrowArray)(unsafe.Pointer(&caa))
 
-	result := C.writer_write(pw.cWriterHandle, cArray)
-	return HandleFFIResult(result)
+	result := C.loon_writer_write(pw.cWriterHandle, cArray)
+	return HandleLoonFFIResult(result)
 }
 
 func (pw *FFIPackedWriter) Close() (string, error) {
-	var cColumnGroups C.ColumnGroupsHandle
+	var cColumnGroups *C.LoonColumnGroups
 
-	result := C.writer_close(pw.cWriterHandle, nil, nil, 0, &cColumnGroups)
-	if err := HandleFFIResult(result); err != nil {
+	result := C.loon_writer_close(pw.cWriterHandle, nil, nil, 0, &cColumnGroups)
+	if err := HandleLoonFFIResult(result); err != nil {
 		return "", err
 	}
 
 	cBasePath := C.CString(pw.basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
-	var transationHandle C.TransactionHandle
+	var transationHandle C.LoonTransactionHandle
 
-	result = C.transaction_begin(cBasePath, pw.cProperties, &transationHandle, C.int64_t(pw.baseVersion))
-	if err := HandleFFIResult(result); err != nil {
+	result = C.loon_transaction_begin(cBasePath, pw.cProperties, C.int64_t(pw.baseVersion), 1, &transationHandle)
+	if err := HandleLoonFFIResult(result); err != nil {
 		return "", err
 	}
-	defer C.transaction_destroy(transationHandle)
+	defer C.loon_transaction_destroy(transationHandle)
 
-	// #define LOON_TRANSACTION_UPDATE_ADDFILES 0
-	// #define LOON_TRANSACTION_UPDATE_ADDFEILD 1
-	// #define LOON_TRANSACTION_UPDATE_MAX 2
-
-	// #define LOON_TRANSACTION_RESOLVE_FAIL 0
-	// #define LOON_TRANSACTION_RESOLVE_MERGE 1
-	// #define LOON_TRANSACTION_RESOLVE_MAX 2
-
-	var commitResult C.TransactionCommitResult
-	result = C.transaction_commit(transationHandle, C.int16_t(0), C.int16_t(0), cColumnGroups, &commitResult)
-	if err := HandleFFIResult(result); err != nil {
+	result = C.loon_transaction_append_files(transationHandle, cColumnGroups)
+	if err := HandleLoonFFIResult(result); err != nil {
 		return "", err
 	}
 
-	log.Info("FFI writer closed", zap.Int64("version", int64(commitResult.committed_version)))
+	var cCommitVersion C.int64_t
+	result = C.loon_transaction_commit(transationHandle, &cCommitVersion)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return "", err
+	}
 
-	defer C.properties_free(pw.cProperties)
-	return MarshalManifestPath(pw.basePath, int64(commitResult.committed_version)), nil
+	log.Info("FFI writer closed", zap.Int64("version", int64(cCommitVersion)))
+
+	defer C.loon_properties_free(pw.cProperties)
+	return MarshalManifestPath(pw.basePath, int64(cCommitVersion)), nil
 }

@@ -568,12 +568,11 @@ class SealedMatchExprTest : public ::testing::Test {
             cfg["is_array"] = true;
             cfg["is_nested_index"] = true;
             index->BuildWithRawDataForUT(N_, sub_str_arrays_.data(), cfg);
-            LoadIndexInfo info{
-                .field_id = sub_str_fid_.get(),
-                .index_params = GenIndexParams(index.get()),
-                .cache_index =
-                    CreateTestCacheIndex("sub_str", std::move(index)),
-            };
+            LoadIndexInfo info{};
+            info.field_id = sub_str_fid_.get();
+            info.index_params = GenIndexParams(index.get());
+            info.cache_index =
+                CreateTestCacheIndex("sub_str", std::move(index));
             seg_->LoadIndex(info);
         }
 
@@ -585,12 +584,11 @@ class SealedMatchExprTest : public ::testing::Test {
             cfg["is_array"] = true;
             cfg["is_nested_index"] = true;
             index->BuildWithRawDataForUT(N_, sub_int_arrays_.data(), cfg);
-            LoadIndexInfo info{
-                .field_id = sub_int_fid_.get(),
-                .index_params = GenIndexParams(index.get()),
-                .cache_index =
-                    CreateTestCacheIndex("sub_int", std::move(index)),
-            };
+            LoadIndexInfo info{};
+            info.field_id = sub_int_fid_.get();
+            info.index_params = GenIndexParams(index.get());
+            info.cache_index =
+                CreateTestCacheIndex("sub_int", std::move(index));
             seg_->LoadIndex(info);
         }
     }
@@ -1209,11 +1207,10 @@ class SealedMatchExprTestPartialIndex : public SealedMatchExprTest {
         cfg["is_array"] = true;
         cfg["is_nested_index"] = true;
         index->BuildWithRawDataForUT(N_, sub_str_arrays_.data(), cfg);
-        LoadIndexInfo info{
-            .field_id = sub_str_fid_.get(),
-            .index_params = GenIndexParams(index.get()),
-            .cache_index = CreateTestCacheIndex("sub_str", std::move(index)),
-        };
+        LoadIndexInfo info{};
+        info.field_id = sub_str_fid_.get();
+        info.index_params = GenIndexParams(index.get());
+        info.cache_index = CreateTestCacheIndex("sub_str", std::move(index));
         seg_->LoadIndex(info);
         // sub_int field has NO index - will use brute force
     }

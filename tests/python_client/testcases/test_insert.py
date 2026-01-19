@@ -929,50 +929,6 @@ class TestInsertInvalid(TestcaseBase):
       The following cases are used to test insert invalid params
       ******************************************************************
     """
-    @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
-    def test_insert_with_invalid_field_value(self, primary_field):
-        """
-        target: verify error msg when inserting with invalid field value
-        method: insert with invalid field value
-        expected: raise exception
-        """
-        collection_w = self.init_collection_general(prefix, auto_id=False, insert_data=False,
-                                                    primary_field=primary_field, is_index=False,
-                                                    is_all_data_type=True, with_json=True)[0]
-        nb = 100
-        data = cf.gen_column_data_by_schema(schema=collection_w.schema, nb=nb)
-        for dirty_i in [0, nb // 2, nb - 1]:      # check the dirty data at first, middle and last
-            log.debug(f"dirty_i: {dirty_i}")
-            for i in range(len(data)):
-                if data[i][dirty_i].__class__ is int:
-                    tmp = data[i][0]
-                    data[i][dirty_i] = "iamstring"
-                    error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-                    collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
-                    data[i][dirty_i] = tmp
-                elif data[i][dirty_i].__class__ is str:
-                    tmp = data[i][dirty_i]
-                    data[i][dirty_i] = random.randint(0, 1000)
-                    error = {ct.err_code: 999, ct.err_msg: "field (varchar) expects string input, got: <class 'int'>"}
-                    collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
-                    data[i][dirty_i] = tmp
-                elif data[i][dirty_i].__class__ is bool:
-                    tmp = data[i][dirty_i]
-                    data[i][dirty_i] = "iamstring"
-                    error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-                    collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
-                    data[i][dirty_i] = tmp
-                elif data[i][dirty_i].__class__ is float:
-                    tmp = data[i][dirty_i]
-                    data[i][dirty_i] = "iamstring"
-                    error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-                    collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
-                    data[i][dirty_i] = tmp
-                else:
-                    continue
-        res = collection_w.insert(data)[0]
-        assert res.insert_count == nb
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_invalid_partition_name(self):
@@ -1006,39 +962,6 @@ class TestInsertInvalid(TestcaseBase):
         assert res.insert_count == 2
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_over_resource_limit(self):
-        """
-        target: test insert over RPC limitation 64MB (67108864)
-        method: insert excessive data
-        expected: raise exception
-        """
-        nb = 150000
-        collection_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=collection_name)
-        data = cf.gen_default_dataframe_data(nb)
-        error = {ct.err_code: 999, ct.err_msg: "message larger than max"}
-        collection_w.insert(
-            data=data, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("default_value", [[], 123])
-    def test_insert_rows_using_default_value(self, default_value):
-        """
-        target: test insert with rows
-        method: insert with invalid rows
-        expected: raise exception
-        """
-        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
-                  cf.gen_string_field(default_value="abc"), cf.gen_float_vec_field()]
-        schema = cf.gen_collection_schema(fields)
-        collection_w = self.init_collection_wrap(schema=schema)
-        vectors = cf.gen_vectors(ct.default_nb, ct.default_dim)
-        data = [{"int64": 1, "float_vector": vectors[1],
-                 "varchar": default_value, "float": np.float32(1.0)}]
-        error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-        collection_w.upsert(data, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("default_value", [[], None])
     def test_insert_tuple_using_default_value(self, default_value):
         """
@@ -1057,47 +980,112 @@ class TestInsertInvalid(TestcaseBase):
         error = {ct.err_code: 999, ct.err_msg: "The type of data should be List, pd.DataFrame or Dict"}
         collection_w.upsert(data, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_with_nan_value(self):
-        """
-        target: test insert with nan value
-        method: insert with nan value: None, float('nan'), np.NAN/np.nan, float('inf')
-        expected: raise exception
-        """
-        vector_field = ct.default_float_vec_field_name
-        collection_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=collection_name)
-        data = cf.gen_default_dataframe_data()
-        data[vector_field][0][0] = None
-        error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
-        data[vector_field][0][0] = float('nan')
-        error = {ct.err_code: 999, ct.err_msg: "value 'NaN' is not a number or infinity"}
-        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
-        data[vector_field][0][0] = np.NAN
-        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
-        data[vector_field][0][0] = float('inf')
-        error = {ct.err_code: 65535, ct.err_msg: "value '+Inf' is not a number or infinity"}
-        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
+class TestInsertString(TestcaseBase):
+    """
+      ******************************************************************
+      The following cases are used to test insert string
+      ******************************************************************
+    """
 
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index ", ct.all_index_types[10:12])
-    @pytest.mark.parametrize("invalid_vector_type ", ct.all_dense_vector_types)
-    def test_invalid_sparse_vector_data(self, index, invalid_vector_type):
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_insert_string_field_is_primary(self):
         """
-        target: insert illegal data type
-        method: insert illegal data type
-        expected: raise exception
+        target: test insert string is primary
+        method: 1.create a collection and string field is primary
+                2.insert string field data
+        expected: Insert Successfully
         """
         c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_default_sparse_schema()
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        data = cf.gen_default_list_data(ct.default_nb)
+        mutation_res, _ = collection_w.insert(data=data)
+        assert mutation_res.insert_count == ct.default_nb
+        assert mutation_res.primary_keys == data[2].tolist()
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("string_fields", [[cf.gen_string_field(name="string_field1")],
+                                               [cf.gen_string_field(
+                                                   name="string_field2")],
+                                               [cf.gen_string_field(name="string_field3")]])
+    def test_insert_multi_string_fields(self, string_fields):
+        """
+        target: test insert multi string fields
+        method: 1.create a collection
+                2.Insert multi string fields
+        expected: Insert Successfully
+        """
+        schema = cf.gen_schema_multi_string_fields(string_fields)
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix), schema=schema)
+        df = cf.gen_dataframe_multi_string_fields(string_fields=string_fields)
+        collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_insert_string_field_length_exceed(self):
+        """
+        target: test insert string field exceed the maximum length
+        method: 1.create a collection  
+                2.Insert string field length is exceeded maximum value of 65535
+        expected: Raise exceptions
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        max = 65535
+        data = []
+        for field in collection_w.schema.fields:
+            field_data = cf.gen_data_by_collection_field(field, nb=1)
+            if field.dtype == DataType.VARCHAR:
+                field_data = [cf.gen_str_by_length(length=max + 1)]
+            data.append(field_data)
+
+        error = {ct.err_code: 999, ct.err_msg: 'length of string exceeds max length'}
+        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("str_field_value", ["", "    "])
+    def test_insert_string_field_space_empty(self, str_field_value):
+        """
+        target: test create collection with string field 
+        method: 1.create a collection  
+                2.Insert string field  with space
+        expected: Insert successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        nb = 100
+        data = []
+        for field in collection_w.schema.fields:
+            field_data = cf.gen_data_by_collection_field(field, nb=nb)
+            if field.dtype == DataType.VARCHAR:
+                field_data = [str_field_value for _ in range(nb)]
+            data.append(field_data)
+
+        collection_w.insert(data)
+        assert collection_w.num_entities == nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("str_field_value", ["", "    "])
+    def test_insert_string_field_is_pk_and_empty(self, str_field_value):
+        """
+        target: test create collection with string field is primary
+        method: 1.create a collection  
+                2.Insert string field with empty, string field is pk
+        expected: Insert successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_string_pk_default_collection_schema()
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
         nb = 100
-        data = cf.gen_default_list_sparse_data(nb=nb)[:-1]
-        invalid_vec = cf.gen_vectors(nb, dim=128, vector_data_type=invalid_vector_type)
-        data.append(invalid_vec)
-        error = {ct.err_code: 1, ct.err_msg: 'input must be a sparse matrix in supported format'}
-        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
+        data = []
+        for field in collection_w.schema.fields:
+            field_data = cf.gen_data_by_collection_field(field, nb=nb)
+            if field.dtype == DataType.VARCHAR:
+                field_data = [str_field_value for _ in range(nb)]
+            data.append(field_data)
+        collection_w.insert(data)
+        assert collection_w.num_entities == nb
 
 
 class TestUpsertValid(TestcaseBase):

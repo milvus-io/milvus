@@ -5,10 +5,11 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	rawKafka "github.com/confluentinc/confluent-kafka-go/kafka"
-	"github.com/zilliztech/woodpecker/woodpecker/log"
+	rawWP "github.com/zilliztech/woodpecker/woodpecker/log"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
+	rawRocksmq "github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/client"
 	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
 	mqkafka "github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/kafka"
 	mqpulsar "github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/pulsar"
@@ -22,6 +23,7 @@ import (
 
 // MustGetMQWrapperIDFromMessage converts message.MessageID to common.MessageID
 // TODO: should be removed in future after common.MessageID is removed
+// Deprecated
 func MustGetMQWrapperIDFromMessage(messageID message.MessageID) common.MessageID {
 	if id, ok := messageID.(interface{ PulsarID() pulsar.MessageID }); ok {
 		return mqpulsar.NewPulsarID(id.PulsarID())
@@ -29,8 +31,21 @@ func MustGetMQWrapperIDFromMessage(messageID message.MessageID) common.MessageID
 		return &server.RmqID{MessageID: id.RmqID()}
 	} else if id, ok := messageID.(interface{ KafkaID() rawKafka.Offset }); ok {
 		return mqkafka.NewKafkaID(int64(id.KafkaID()))
-	} else if id, ok := messageID.(interface{ WoodpeckerID() *log.LogMessageId }); ok {
+	} else if id, ok := messageID.(interface{ WoodpeckerID() *rawWP.LogMessageId }); ok {
 		return mqwoodpecker.NewWoodpeckerID(id.WoodpeckerID())
+	}
+	panic("unsupported now")
+}
+
+func MustGetMQWrapperIDAndWALNameFromMessage(messageID message.MessageID) (common.MessageID, commonpb.WALName) {
+	if id, ok := messageID.(interface{ PulsarID() pulsar.MessageID }); ok {
+		return mqpulsar.NewPulsarID(id.PulsarID()), commonpb.WALName_Pulsar
+	} else if id, ok := messageID.(interface{ RmqID() int64 }); ok {
+		return &server.RmqID{MessageID: id.RmqID()}, commonpb.WALName_RocksMQ
+	} else if id, ok := messageID.(interface{ KafkaID() rawKafka.Offset }); ok {
+		return mqkafka.NewKafkaID(int64(id.KafkaID())), commonpb.WALName_Kafka
+	} else if id, ok := messageID.(interface{ WoodpeckerID() *rawWP.LogMessageId }); ok {
+		return mqwoodpecker.NewWoodpeckerID(id.WoodpeckerID()), commonpb.WALName_WoodPecker
 	}
 	panic("unsupported now")
 }
@@ -44,7 +59,7 @@ func MustGetMessageIDFromMQWrapperID(commonMessageID common.MessageID) message.M
 		return rmq.NewRmqID(id.MessageID)
 	} else if id, ok := commonMessageID.(*mqkafka.KafkaID); ok {
 		return msgkafka.NewKafkaID(rawKafka.Offset(id.MessageID))
-	} else if id, ok := commonMessageID.(interface{ WoodpeckerID() *log.LogMessageId }); ok {
+	} else if id, ok := commonMessageID.(interface{ WoodpeckerID() *rawWP.LogMessageId }); ok {
 		return msgwoodpecker.NewWpID(id.WoodpeckerID())
 	}
 	return nil
@@ -77,8 +92,11 @@ func DeserializeToMQWrapperID(msgID []byte, walName string) (common.MessageID, e
 	}
 }
 
-func MustGetMessageIDFromMQWrapperIDBytes(msgIDBytes []byte) message.MessageID {
-	walName := message.MustGetDefaultWALName()
+func MustGetMessageIDFromMQWrapperIDBytesWithWALName(walName message.WALName, msgIDBytes []byte) message.MessageID {
+	wName := walName
+	if wName == message.WALNameUnknown {
+		walName = message.MustGetDefaultWALName()
+	}
 	var commonMsgID common.MessageID
 	switch walName {
 	case message.WALNameRocksmq:
@@ -103,4 +121,23 @@ func MustGetMessageIDFromMQWrapperIDBytes(msgIDBytes []byte) message.MessageID {
 		panic("unsupported now")
 	}
 	return MustGetMessageIDFromMQWrapperID(commonMsgID)
+}
+
+func MustGetEarliestMessageIDFromMQType(walName commonpb.WALName) (common.MessageID, commonpb.WALName) {
+	switch walName {
+	case commonpb.WALName_Pulsar:
+		pulsarID := pulsar.EarliestMessageID()
+		return mqpulsar.NewPulsarID(pulsarID), commonpb.WALName_Pulsar
+	case commonpb.WALName_RocksMQ:
+		rID := rawRocksmq.EarliestMessageID()
+		return &server.RmqID{MessageID: rID}, commonpb.WALName_RocksMQ
+	case commonpb.WALName_Kafka:
+		kID := int64(rawKafka.OffsetBeginning)
+		return mqkafka.NewKafkaID(kID), commonpb.WALName_Kafka
+	case commonpb.WALName_WoodPecker:
+		wID := rawWP.EarliestLogMessageID()
+		return mqwoodpecker.NewWoodpeckerID(&wID), commonpb.WALName_WoodPecker
+	default:
+		panic(fmt.Sprintf("unsupported mq type %s", walName))
+	}
 }
