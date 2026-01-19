@@ -10,15 +10,20 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <boost/container/vector.hpp>
+#include <boost/format.hpp>
 #include <cstdint>
 #include <memory>
+#include <random>
 #include <regex>
+#include <set>
 #include <vector>
 #include <chrono>
 
 #include "common/Types.h"
 #include "expr/ITypeExpr.h"
 #include "index/IndexFactory.h"
+#include "index/InvertedIndexTantivy.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
 #include "query/Plan.h"
@@ -28,6 +33,8 @@
 #include "simdjson/padded_string.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/storage_test_utils.h"
+#include "test_utils/cachinglayer_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -2905,6 +2912,278 @@ TEST(Expr, TestTermInArray) {
             if (i % 2 == 0) {
                 ASSERT_EQ(view[int(i / 2)], testcase.check_func(array));
             }
+        }
+    }
+}
+
+TEST(Expr, TestArrayContainsForStruct) {
+    // Step 1: Prepare schema with array field
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    size_t N = 500;
+    int array_len = 3;
+
+    // Step 2: Generate test data
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    // Use random values between 1-20 for array elements
+    std::mt19937 rng(42);  // Fixed seed for reproducibility
+    std::uniform_int_distribution<int> dist(1, 20);
+
+    // Track which rows contain value 5 for verification
+    std::set<int> rows_containing_5;
+
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
+
+            for (int row = 0; row < N; row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
+
+                for (int elem = 0; elem < array_len; elem++) {
+                    int value = dist(rng);  // Random value between 1-20
+                    array_data->mutable_int_data()->mutable_data()->Add(value);
+                    if (value == 5) {
+                        rows_containing_5.insert(row);
+                    }
+                }
+            }
+            break;
+        }
+    }
+
+    // Step 3: Create sealed segment with field data
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    // Step 4: Load vector index for element-level search
+    auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
+
+    // DataGen generates VECTOR_ARRAY with data in float_vector (flattened),
+    // not in vector_array (nested structure)
+    std::vector<float> vector_data(dim * N * array_len);
+    for (int i = 0; i < N; i++) {
+        const auto& float_vec = array_vec_values[i].float_vector().data();
+        // float_vec contains array_len * dim floats
+        for (int j = 0; j < array_len * dim; j++) {
+            vector_data[i * array_len * dim + j] = float_vec[j];
+        }
+    }
+
+    // For element-level search, index all elements (N * array_len vectors)
+    auto indexing = GenVecIndexing(N * array_len,
+                                   dim,
+                                   vector_data.data(),
+                                   knowhere::IndexEnum::INDEX_HNSW);
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = vec_fid.get();
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index_params["metric_type"] = knowhere::metric::L2;
+    load_index_info.field_type = DataType::VECTOR_ARRAY;
+    load_index_info.element_type = DataType::VECTOR_FLOAT;
+    segment->LoadIndex(load_index_info);
+
+    int topK = 5;
+
+    std::cout << "Rows containing value 5: " << rows_containing_5.size()
+              << " out of " << N << std::endl;
+
+    // Step 5: Test with array contains filter
+    // Query: Search array elements, filter by array contains specific value
+    {
+        std::string raw_plan = boost::str(boost::format(R"(vector_anns: <
+                                        field_id: %1%
+                                        predicates: <
+                                          json_contains_expr: <
+                                            column_info: <
+                                              field_id: %2%
+                                              data_type: Array
+                                              element_type: Int32
+                                            >
+                                            elements:<int64_val:5>
+                                            op: ContainsAny
+                                            elements_same_type: true
+                                          >
+                                        >
+                                        query_info: <
+                                          topk: 5
+                                          round_decimal: 3
+                                          metric_type: "L2"
+                                          search_params: "{\"ef\": 50}"
+                                        >
+                                        placeholder_tag: "$0">)") %
+                                          vec_fid.get() % int_array_fid.get());
+
+        proto::plan::PlanNode plan_node;
+        auto ok =
+            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
+        ASSERT_TRUE(ok) << "Failed to parse element-level filter plan";
+
+        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        ASSERT_NE(plan, nullptr);
+
+        auto num_queries = 1;
+        auto seed = 1024;
+        auto ph_group_raw =
+            CreatePlaceholderGroup(num_queries, dim, seed, true);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+        auto search_result =
+            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+
+        // Verify results
+        ASSERT_NE(search_result, nullptr);
+
+        // Array contains is a regular filter, not element-level search
+        ASSERT_FALSE(search_result->seg_offsets_.empty());
+
+        // Should have topK results per query
+        ASSERT_LE(search_result->seg_offsets_.size(),
+                  static_cast<size_t>(topK * num_queries));
+
+        std::cout << "Array contains search returned:" << std::endl;
+        for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
+            int64_t doc_id = search_result->seg_offsets_[i];
+            float distance = search_result->distances_[i];
+
+            std::cout << "doc_id: " << doc_id << ", distance: " << distance
+                      << std::endl;
+
+            // Verify the doc's array contains value 5 using our tracked set
+            ASSERT_TRUE(rows_containing_5.count(doc_id) > 0)
+                << "Result doc_id " << doc_id << " should contain value 5";
+        }
+
+        // Verify distances are sorted (ascending for L2)
+        for (size_t i = 1; i < search_result->distances_.size(); ++i) {
+            ASSERT_LE(search_result->distances_[i - 1],
+                      search_result->distances_[i])
+                << "Distances should be sorted in ascending order";
+        }
+    }
+
+    // Step 6: Test with scalar index on price_array field
+    {
+        std::cout << "\n=== Testing with Array Scalar Index ===" << std::endl;
+
+        // Get array data from raw_data and convert to boost::container::vector format
+        // (required by InvertedIndexTantivy::BuildWithRawDataForUT)
+        auto array_col =
+            raw_data.get_col(int_array_fid)->scalars().array_data().data();
+        std::vector<boost::container::vector<int32_t>> vec_of_array;
+        vec_of_array.reserve(N);
+        for (size_t i = 0; i < N; i++) {
+            boost::container::vector<int32_t> arr;
+            for (size_t j = 0; j < array_col[i].int_data().data_size(); j++) {
+                arr.push_back(array_col[i].int_data().data(j));
+            }
+            vec_of_array.push_back(arr);
+        }
+
+        // Build inverted index using simplified API
+        auto arr_index =
+            std::make_unique<index::InvertedIndexTantivy<int32_t>>();
+        Config cfg;
+        cfg["is_array"] = true;
+        cfg["is_nested_index"] = true;
+        arr_index->BuildWithRawDataForUT(N, vec_of_array.data(), cfg);
+
+        // Load index into segment
+        LoadIndexInfo arr_index_info;
+        arr_index_info.field_id = int_array_fid.get();
+        arr_index_info.index_params = GenIndexParams(arr_index.get());
+        arr_index_info.cache_index =
+            CreateTestCacheIndex("test_array", std::move(arr_index));
+        segment->LoadIndex(arr_index_info);
+
+        std::cout << "Loaded scalar index for price_array field" << std::endl;
+
+        // Now search with index
+        std::string raw_plan = boost::str(boost::format(R"(vector_anns: <
+                                        field_id: %1%
+                                        predicates: <
+                                          json_contains_expr: <
+                                            column_info: <
+                                              field_id: %2%
+                                              data_type: Array
+                                              element_type: Int32
+                                            >
+                                            elements:<int64_val:5>
+                                            op: ContainsAny
+                                            elements_same_type: true
+                                          >
+                                        >
+                                        query_info: <
+                                          topk: 5
+                                          round_decimal: 3
+                                          metric_type: "L2"
+                                          search_params: "{\"ef\": 50}"
+                                        >
+                                        placeholder_tag: "$0">)") %
+                                          vec_fid.get() % int_array_fid.get());
+
+        proto::plan::PlanNode plan_node;
+        auto ok =
+            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
+        ASSERT_TRUE(ok) << "Failed to parse plan with index";
+
+        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        ASSERT_NE(plan, nullptr);
+
+        auto num_queries = 1;
+        auto seed = 1024;
+        auto ph_group_raw =
+            CreatePlaceholderGroup(num_queries, dim, seed, true);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+        auto search_result =
+            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+
+        // Verify results with index
+        ASSERT_NE(search_result, nullptr);
+        ASSERT_FALSE(search_result->seg_offsets_.empty());
+        ASSERT_LE(search_result->seg_offsets_.size(),
+                  static_cast<size_t>(topK * num_queries));
+
+        std::cout << "Array contains search with index returned:" << std::endl;
+        for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
+            int64_t doc_id = search_result->seg_offsets_[i];
+            float distance = search_result->distances_[i];
+
+            std::cout << "doc_id: " << doc_id << ", distance: " << distance
+                      << std::endl;
+
+            // Verify the doc's array contains value 5
+            ASSERT_TRUE(rows_containing_5.count(doc_id) > 0)
+                << "Result doc_id " << doc_id
+                << " should contain value 5 (with index)";
+        }
+
+        // Verify distances are sorted (ascending for L2)
+        for (size_t i = 1; i < search_result->distances_.size(); ++i) {
+            ASSERT_LE(search_result->distances_[i - 1],
+                      search_result->distances_[i])
+                << "Distances should be sorted in ascending order (with index)";
         }
     }
 }

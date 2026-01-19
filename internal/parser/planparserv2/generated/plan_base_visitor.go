@@ -147,6 +147,10 @@ func (v *BasePlanVisitor) VisitMulDivMod(ctx *MulDivModContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitStructField(ctx *StructFieldContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitLogicalAnd(ctx *LogicalAndContext) interface{} {
 	return v.VisitChildren(ctx)
 }

@@ -1503,9 +1503,27 @@ class SegmentExpr : public Expr {
         return processed_size;
     }
 
+    // ProcessIndexChunks: execute index query and batch results
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
     ProcessIndexChunks(FUNC func, const ValTypes&... values) {
+        return ProcessIndexChunksImpl<T>(func, false, values...);
+    }
+
+    // ProcessIndexChunks with func_returns_row_level flag
+    // func_returns_row_level: if true, func returns row-level bitset even for nested index
+    //   (used when func already handles element-to-row conversion internally)
+    template <typename T, typename FUNC, typename... ValTypes>
+    VectorPtr
+    ProcessIndexChunksWithRowLevel(FUNC func, const ValTypes&... values) {
+        return ProcessIndexChunksImpl<T>(func, true, values...);
+    }
+
+    template <typename T, typename FUNC, typename... ValTypes>
+    VectorPtr
+    ProcessIndexChunksImpl(FUNC func,
+                           bool func_returns_row_level,
+                           const ValTypes&... values) {
         typedef std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
                 IndexInnerType;
@@ -1548,17 +1566,29 @@ class SegmentExpr : public Expr {
 
             cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
                 std::move(func(index_ptr, values...)));
-            cached_index_chunk_valid_res_ =
-                std::make_shared<TargetBitmap>(index_ptr->IsNotNull());
             cached_index_chunk_id_ = 0;
             cached_is_nested_index_ = index_ptr->IsNestedIndex();
+
+            if (cached_is_nested_index_ && func_returns_row_level) {
+                // TODO(SpadeA): now, nested index is only supported for Struct which
+                // does not support null now.
+                cached_index_chunk_valid_res_ =
+                    std::make_shared<TargetBitmap>(active_count_, true);
+            } else {
+                cached_index_chunk_valid_res_ =
+                    std::make_shared<TargetBitmap>(index_ptr->IsNotNull());
+            }
         }
 
         TargetBitmap result;
         TargetBitmap valid_result;
 
-        if (cached_is_nested_index_) {
-            // Nested index: batch by rows, return corresponding elements
+        // If func already returns row-level bitset, skip element-to-row conversion
+        bool need_element_slicing =
+            cached_is_nested_index_ && !func_returns_row_level;
+
+        if (need_element_slicing) {
+            // Nested index with element-level result: batch by rows, slice elements
             auto array_offsets = segment_->GetArrayOffsets(field_id_);
 
             auto data_pos = current_index_chunk_pos_;
@@ -1576,7 +1606,7 @@ class SegmentExpr : public Expr {
 
             current_index_chunk_pos_ = data_pos + batch_rows;
         } else {
-            // Normal index: batch by rows
+            // Normal index or row-level result: batch by rows directly
             auto data_pos = current_index_chunk_pos_;
             auto size =
                 std::min(std::min(size_per_chunk_ - data_pos, batch_size_),

@@ -2716,3 +2716,19 @@ func TestExpr_Match(t *testing.T) {
 		assertInvalidExpr(t, helper, expr)
 	}
 }
+
+func TestExpr_ArrayContains(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// Valid ArrayContains expressions
+	validExprs := []string{
+		`array_contains(struct_array[sub_int], 1)`,
+		`array_contains(struct_array[sub_int], 1) && array_contains(struct_array[sub_int], 2)`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, helper, expr)
+	}
+}

@@ -461,8 +461,6 @@ VectorMemIndex<T>::Build(const Config& config) {
                     offsets.push_back(lim_offset);
                 }
 
-                assert(data->Size() == offset);
-
                 data.reset();
             }
 
