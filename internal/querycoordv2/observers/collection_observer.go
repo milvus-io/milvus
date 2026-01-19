@@ -150,6 +150,10 @@ func (ob *CollectionObserver) LoadCollection(ctx context.Context, collectionID i
 		key = fmt.Sprintf("LoadCollection_%d", collectionID)
 	}
 
+	log.Ctx(ctx).Debug("registering load collection task",
+		zap.Int64("collectionID", collectionID),
+		zap.String("traceID", key),
+	)
 	ob.loadTasks.Insert(key, LoadTask{LoadType: querypb.LoadType_LoadCollection, CollectionID: collectionID})
 	ob.checkerController.Check()
 }
@@ -163,6 +167,11 @@ func (ob *CollectionObserver) LoadPartitions(ctx context.Context, collectionID i
 		key = fmt.Sprintf("LoadPartition_%d_%v", collectionID, partitionIDs)
 	}
 
+	log.Ctx(ctx).Debug("registering load partitions task",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64s("partitionIDs", partitionIDs),
+		zap.String("traceID", key),
+	)
 	ob.loadTasks.Insert(key, LoadTask{LoadType: querypb.LoadType_LoadPartition, CollectionID: collectionID, PartitionIDs: partitionIDs})
 	ob.checkerController.Check()
 }
