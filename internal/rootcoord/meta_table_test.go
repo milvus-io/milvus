@@ -35,6 +35,8 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -1932,6 +1934,139 @@ func TestMetaTable_CreateDatabase(t *testing.T) {
 		assert.True(t, meta.aliases.exist("exist"))
 		assert.True(t, meta.names.empty("exist"))
 		assert.True(t, meta.aliases.empty("exist"))
+	})
+}
+
+func TestCreateDefaultDb(t *testing.T) {
+	hookutil.InitTestCipher()
+
+	// Save original config and restore after test
+	originalDefaultKey := paramtable.GetCipherParams().DefaultRootKey.GetValue()
+	defer func() {
+		paramtable.GetCipherParams().Save("cipherPlugin.kms.defaultKey", originalDefaultKey)
+	}()
+
+	t.Run("default db without encryption when defaultKey is empty", func(t *testing.T) {
+		paramtable.GetCipherParams().Save("cipherPlugin.kms.defaultKey", "")
+
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("CreateDatabase",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+
+		tsoAllocator := mocktso.NewAllocator(t)
+		tsoAllocator.On("GenerateTSO", mock.Anything).Return(uint64(100), nil)
+
+		meta := &MetaTable{
+			ctx:          context.Background(),
+			dbName2Meta:  make(map[string]*model.Database),
+			names:        newNameDb(),
+			aliases:      newNameDb(),
+			catalog:      catalog,
+			tsoAllocator: tsoAllocator,
+		}
+
+		err := meta.createDefaultDb()
+		assert.NoError(t, err)
+
+		// Verify default database was created
+		db, ok := meta.dbName2Meta[util.DefaultDBName]
+		assert.True(t, ok)
+		assert.Equal(t, util.DefaultDBName, db.Name)
+
+		// Verify no encryption properties
+		hasEncryption := hookutil.IsDBEncrypted(db.Properties)
+		assert.False(t, hasEncryption, "default DB should not be encrypted when defaultKey is empty")
+	})
+
+	t.Run("default db with encryption when defaultKey is set", func(t *testing.T) {
+		paramtable.GetCipherParams().Save("cipherPlugin.kms.defaultKey", "default-test-key")
+
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("CreateDatabase",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+
+		tsoAllocator := mocktso.NewAllocator(t)
+		tsoAllocator.On("GenerateTSO", mock.Anything).Return(uint64(200), nil)
+
+		meta := &MetaTable{
+			ctx:          context.Background(),
+			dbName2Meta:  make(map[string]*model.Database),
+			names:        newNameDb(),
+			aliases:      newNameDb(),
+			catalog:      catalog,
+			tsoAllocator: tsoAllocator,
+		}
+
+		err := meta.createDefaultDb()
+		assert.NoError(t, err)
+
+		// Verify default database was created
+		db, ok := meta.dbName2Meta[util.DefaultDBName]
+		assert.True(t, ok)
+		assert.Equal(t, util.DefaultDBName, db.Name)
+
+		// Verify encryption properties are present
+		hasEzID := false
+		hasRootKey := false
+		for _, prop := range db.Properties {
+			if prop.Key == common.EncryptionEzIDKey {
+				hasEzID = true
+				assert.Equal(t, prop.GetValue(), "199")
+			}
+			if prop.Key == common.EncryptionRootKeyKey && prop.Value == "default-test-key" {
+				hasRootKey = true
+			}
+		}
+		assert.True(t, hasRootKey, "default DB should have root key when encrypted")
+		assert.True(t, hasEzID, "default DB should have ezID when encrypted")
+	})
+
+	t.Run("TSO allocation failure", func(t *testing.T) {
+		tsoAllocator := mocktso.NewAllocator(t)
+		tsoAllocator.On("GenerateTSO", mock.Anything).Return(uint64(0), errors.New("TSO allocation failed"))
+
+		meta := &MetaTable{
+			ctx:          context.Background(),
+			dbName2Meta:  make(map[string]*model.Database),
+			tsoAllocator: tsoAllocator,
+		}
+
+		err := meta.createDefaultDb()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "TSO allocation failed")
+	})
+
+	t.Run("catalog CreateDatabase failure", func(t *testing.T) {
+		paramtable.GetCipherParams().Save("cipherPlugin.kms.defaultKey", "")
+
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("CreateDatabase",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(errors.New("catalog error"))
+
+		tsoAllocator := mocktso.NewAllocator(t)
+		tsoAllocator.On("GenerateTSO", mock.Anything).Return(uint64(300), nil)
+
+		meta := &MetaTable{
+			ctx:          context.Background(),
+			dbName2Meta:  make(map[string]*model.Database),
+			names:        newNameDb(),
+			aliases:      newNameDb(),
+			catalog:      catalog,
+			tsoAllocator: tsoAllocator,
+		}
+
+		err := meta.createDefaultDb()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "catalog error")
 	})
 }
 

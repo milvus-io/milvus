@@ -28,3 +28,14 @@ var QuotaErrorString = map[commonpb.ErrorCode]string{
 func GetQuotaErrorString(errCode commonpb.ErrorCode) string {
 	return QuotaErrorString[errCode]
 }
+
+func GetQuotaErrorStringWithReason(errCode commonpb.ErrorCode, reason string) string {
+	baseMsg := QuotaErrorString[errCode]
+	if baseMsg == "" {
+		baseMsg = "quota exceeded"
+	}
+	if reason != "" {
+		return baseMsg + ": " + reason
+	}
+	return baseMsg
+}
