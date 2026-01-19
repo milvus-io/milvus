@@ -288,76 +288,6 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
 }
 
 CStatus
-AppendIndexFilePath(CLoadIndexInfo c_load_index_info, const char* c_file_path) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto load_index_info =
-            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        std::string index_file_path(c_file_path);
-        load_index_info->index_files.emplace_back(index_file_path);
-
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
-    }
-}
-
-CStatus
-AppendIndexInfo(CLoadIndexInfo c_load_index_info,
-                int64_t index_id,
-                int64_t build_id,
-                int64_t version) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto load_index_info =
-            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        load_index_info->index_id = index_id;
-        load_index_info->index_build_id = build_id;
-        load_index_info->index_version = version;
-
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
-    }
-}
-
-CStatus
-AppendIndexEngineVersionToLoadInfo(CLoadIndexInfo c_load_index_info,
-                                   int32_t index_engine_version) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto load_index_info =
-            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        load_index_info->index_engine_version = index_engine_version;
-
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
-    }
-}
-
-CStatus
 CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
     SCOPE_CGO_CALL_METRIC();
 
@@ -385,17 +315,6 @@ CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
         status.error_msg = strdup(e.what());
         return status;
     }
-}
-
-void
-AppendStorageInfo(CLoadIndexInfo c_load_index_info,
-                  const char* uri,
-                  int64_t version) {
-    SCOPE_CGO_CALL_METRIC();
-
-    auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-    load_index_info->uri = uri;
-    load_index_info->index_store_version = version;
 }
 
 CStatus
@@ -430,8 +349,6 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
                 info_proto->index_files().begin(),
                 info_proto->index_files().end());
             load_index_info->uri = info_proto->uri();
-            load_index_info->index_store_version =
-                info_proto->index_store_version();
             load_index_info->index_engine_version =
                 info_proto->index_engine_version();
             load_index_info->schema = info_proto->field();
