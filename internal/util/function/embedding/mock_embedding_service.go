@@ -31,6 +31,8 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 
+	arkmodel "github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/models/ali"
 	"github.com/milvus-io/milvus/internal/util/function/models/cohere"
@@ -233,6 +235,34 @@ func CreateTEIEmbeddingServer(dim int) *httptest.Server {
 		embs := mockEmbedding[float32](req.Inputs, dim)
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(embs)
+		w.Write(data)
+	}))
+	return ts
+}
+
+func CreateArkEmbeddingServer(dim int) *httptest.Server {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req arkmodel.EmbeddingRequestStrings
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		json.Unmarshal(body, &req)
+		embs := mockEmbedding[float32](req.Input, dim)
+		var res arkmodel.EmbeddingResponse
+		res.Object = "list"
+		res.Model = req.Model
+		for i := 0; i < len(req.Input); i++ {
+			res.Data = append(res.Data, arkmodel.Embedding{
+				Object:    "embedding",
+				Embedding: embs[i],
+				Index:     i,
+			})
+		}
+
+		res.Usage = arkmodel.Usage{
+			TotalTokens: 100,
+		}
+		w.WriteHeader(http.StatusOK)
+		data, _ := json.Marshal(res)
 		w.Write(data)
 	}))
 	return ts
