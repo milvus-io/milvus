@@ -89,7 +89,16 @@ func (csm *compactionTaskMeta) reloadFromKV() error {
 	for _, task := range compactionTasks {
 		// Compatibility handling: for milvus ≤v2.4, since compaction task has no PreAllocatedSegmentIDs field,
 		// here we just mark the task as failed and wait for the compaction trigger to generate a new one.
-		if !isCompactionTaskFinished(task) && task.PreAllocatedSegmentIDs == nil {
+		//
+		// NOTE:
+		// - Only compaction tasks that require pre-allocated segment IDs (clustering/mix/sort, etc.)
+		//   should be marked as failed when PreAllocatedSegmentIDs is nil.
+		// - Level0DeleteCompaction tasks never use PreAllocatedSegmentIDs and must be ignored here,
+		//   otherwise unfinished L0 delete compaction tasks created before upgrade will be
+		//   incorrectly marked as failed on reload.
+		if !isCompactionTaskFinished(task) &&
+			task.PreAllocatedSegmentIDs == nil &&
+			task.GetType() != datapb.CompactionType_Level0DeleteCompaction {
 			log.Warn("PreAllocatedSegmentIDs is nil, mark the task as failed",
 				zap.Int64("taskID", task.GetPlanID()),
 				zap.String("type", task.GetType().String()),

@@ -80,6 +80,21 @@ PrepareBFSearchParams(const SearchInfo& search_info,
         search_cfg[knowhere::meta::BM25_B] =
             std::stof(index_info.at(knowhere::meta::BM25_B));
     }
+
+    if (search_info.metric_type_ == knowhere::metric::MHJACCARD) {
+        auto it_band = index_info.find(knowhere::indexparam::MH_LSH_BAND);
+        if (it_band != index_info.end()) {
+            search_cfg[knowhere::indexparam::MH_LSH_BAND] =
+                std::stoi(it_band->second);
+        }
+
+        auto it_width =
+            index_info.find(knowhere::indexparam::MH_ELEMENT_BIT_WIDTH);
+        if (it_width != index_info.end()) {
+            search_cfg[knowhere::indexparam::MH_ELEMENT_BIT_WIDTH] =
+                std::stoi(it_width->second);
+        }
+    }
     return search_cfg;
 }
 

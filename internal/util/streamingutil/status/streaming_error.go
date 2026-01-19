@@ -65,6 +65,11 @@ func (e *StreamingError) IsReplicateViolation() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_REPLICATE_VIOLATION
 }
 
+// IsWALNameMismatch returns true if the error is caused by wal name mismatch.
+func (e *StreamingError) IsWALNameMismatch() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_WALNAME_MISMATCH
+}
+
 // IsTxnUnavilable returns true if the transaction is unavailable.
 func (e *StreamingError) IsTxnUnavilable() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED ||
@@ -149,6 +154,11 @@ func NewUnrecoverableError(format string, args ...interface{}) *StreamingError {
 // NewReplicateViolation creates a new StreamingError with code STREAMING_CODE_REPLICATE_VIOLATION.
 func NewReplicateViolation(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_REPLICATE_VIOLATION, format, args...)
+}
+
+// NewWALNameMismatchError creates a new StreamingError with code STREAMING_CODE_WALNAME_MISMATCH.
+func NewWALNameMismatchError(expectedWALName string, actualWALName string) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_WALNAME_MISMATCH, "wal name mismatch, expected %s, actual %s", expectedWALName, actualWALName)
 }
 
 // NewResourceAcquired creates a new StreamingError with code STREAMING_CODE_RESOURCE_ACQUIRED.

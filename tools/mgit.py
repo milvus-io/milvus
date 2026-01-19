@@ -7,13 +7,16 @@ A smart Git workflow automation tool that:
 - Automates fork → issue → PR → cherry-pick workflow
 - Syncs with master and squashes commits for clean history
 - Ensures DCO compliance
+- Cherry-picks PRs to release branches with proper formatting
 
 Usage:
-    mgit.py --commit     # Smart commit workflow
-    mgit.py --rebase     # Rebase onto master and squash commits
-    mgit.py --pr         # PR creation workflow
-    mgit.py --all        # Complete workflow (rebase + commit + PR)
-    mgit.py              # Same as --all
+    mgit.py --commit       # Smart commit workflow
+    mgit.py --rebase       # Rebase onto master and squash commits
+    mgit.py --pr           # PR creation workflow
+    mgit.py --search       # Search GitHub issues and PRs by keyword
+    mgit.py --cherry-pick  # Cherry-pick a merged PR to release branch
+    mgit.py --all          # Complete workflow (rebase + commit + PR)
+    mgit.py                # Same as --all
 """
 
 import subprocess
@@ -26,6 +29,7 @@ import time
 import shutil
 import tempfile
 from typing import Dict, List, Tuple, Optional
+from dataclasses import dataclass
 import urllib.request
 import urllib.error
 
@@ -93,6 +97,11 @@ class GitOperations:
                 continue
             status = line[:2]
             filepath = line[3:]
+
+            # Handle rename/copy: "R  old -> new" or "C  old -> new"
+            # We want the new path for git operations
+            if ' -> ' in filepath:
+                filepath = filepath.split(' -> ', 1)[1]
 
             # Staged changes (first character is not space)
             if status[0] != ' ' and status[0] != '?':
@@ -361,6 +370,85 @@ class GitOperations:
         )
         return [msg.strip() for msg in output.split('\n\n') if msg.strip()]
 
+    @staticmethod
+    def checkout_branch(branch: str, create: bool = False):
+        """Checkout a branch"""
+        cmd = ['git', 'checkout']
+        if create:
+            cmd.append('-b')
+        cmd.append(branch)
+        GitOperations.run_command(cmd)
+
+    @staticmethod
+    def checkout_remote_branch(remote: str, branch: str, local_name: str = None):
+        """Checkout a remote branch to a local branch"""
+        if local_name is None:
+            local_name = branch
+        GitOperations.run_command(['git', 'checkout', '-b', local_name, f'{remote}/{branch}'])
+
+    @staticmethod
+    def cherry_pick(commit_sha: str) -> Tuple[bool, str, List[str]]:
+        """
+        Cherry-pick a commit
+
+        Returns: (success, error_message, conflict_files)
+        """
+        try:
+            GitOperations.run_command(['git', 'cherry-pick', commit_sha])
+            return True, "", []
+        except Exception as e:
+            error_msg = str(e)
+            # Get list of conflicting files
+            conflict_files = []
+            try:
+                status_output = GitOperations.run_command(['git', 'status', '--porcelain'])
+                for line in status_output.splitlines():
+                    if line.startswith('UU ') or line.startswith('AA ') or line.startswith('DD '):
+                        conflict_files.append(line[3:])
+            except Exception:
+                pass
+            return False, error_msg, conflict_files
+
+    @staticmethod
+    def cherry_pick_abort():
+        """Abort an in-progress cherry-pick"""
+        GitOperations.run_command(['git', 'cherry-pick', '--abort'], check=False)
+
+    @staticmethod
+    def cherry_pick_continue():
+        """Continue cherry-pick after resolving conflicts"""
+        GitOperations.run_command(['git', 'cherry-pick', '--continue'])
+
+    @staticmethod
+    def is_cherry_pick_in_progress() -> bool:
+        """Check if a cherry-pick is in progress"""
+        git_dir = GitOperations.run_command(['git', 'rev-parse', '--git-dir'])
+        return os.path.exists(os.path.join(git_dir, 'CHERRY_PICK_HEAD'))
+
+    @staticmethod
+    def get_conflict_diff(file_path: str) -> str:
+        """Get the conflict markers content for a file"""
+        try:
+            with open(file_path, 'r') as f:
+                return f.read()
+        except Exception:
+            return ""
+
+    @staticmethod
+    def remote_branch_exists(remote: str, branch: str) -> bool:
+        """Check if a remote branch exists"""
+        try:
+            output = GitOperations.run_command(['git', 'ls-remote', '--heads', remote, branch])
+            return bool(output.strip())
+        except Exception:
+            return False
+
+    @staticmethod
+    def delete_branch(branch: str, force: bool = False):
+        """Delete a local branch"""
+        cmd = ['git', 'branch', '-D' if force else '-d', branch]
+        GitOperations.run_command(cmd, check=False)
+
 
 # ============================================================================
 # AI Module - Claude and OpenAI API integration
@@ -400,9 +488,10 @@ class AIService:
             }
         """
         # Limit diff size to avoid API limits
-        max_diff_lines = 500
+        max_diff_lines = 10000
         diff_lines = diff.splitlines()
         if len(diff_lines) > max_diff_lines:
+            print_warning(f"Diff has {len(diff_lines)} lines (>{max_diff_lines}). Consider splitting into smaller PRs.")
             truncated_diff = '\n'.join(diff_lines[:max_diff_lines])
             truncated_diff += f"\n\n... (truncated {len(diff_lines) - max_diff_lines} lines)"
         else:
@@ -467,6 +556,7 @@ Examples of good Milvus commits:
 - refactor: Simplify go unit tests
 - test: Add planparserv2 benchmarks
 """
+        files_list = '\n'.join(f'  - {f}' for f in files)
 
         return f"""You are a commit message generator for the Milvus vector database project.
 
@@ -482,7 +572,7 @@ Generate a commit message following these guidelines:
 {examples}
 
 Changed Files:
-{chr(10).join(f'  - {f}' for f in files)}
+{files_list}
 
 Statistics: {stats}
 
@@ -693,9 +783,10 @@ Ensure title is concise and ≤80 characters.
             }
         """
         # Limit diff size
-        max_diff_lines = 500
+        max_diff_lines = 10000
         diff_lines = diff.splitlines()
         if len(diff_lines) > max_diff_lines:
+            print_warning(f"Diff has {len(diff_lines)} lines (>{max_diff_lines}). Consider splitting into smaller PRs.")
             truncated_diff = '\n'.join(diff_lines[:max_diff_lines])
             truncated_diff += f"\n\n... (truncated {len(diff_lines) - max_diff_lines} lines)"
         else:
@@ -748,6 +839,7 @@ Ensure title is concise and ≤80 characters.
         config = type_config.get(issue_type, {'prefix': '[Feature]', 'desc': 'a change'})
         prefix = config['prefix']
         type_desc = config['desc']
+        files_list = '\n'.join(f'  - {f}' for f in files)
 
         return f"""You are generating a GitHub issue for the Milvus vector database project.
 This issue is for {type_desc}.
@@ -764,7 +856,7 @@ Based on the code changes below, generate:
    - Brief technical approach (if relevant)
 
 Changed Files:
-{chr(10).join(f'  - {f}' for f in files)}
+{files_list}
 
 Statistics: {stats}
 
@@ -846,6 +938,114 @@ Use markdown formatting in the body where appropriate.
             return data
         except json.JSONDecodeError as e:
             raise Exception(f"Failed to parse AI response: {e}")
+
+    def analyze_conflict(self, conflict_files: List[str], original_pr_title: str) -> str:
+        """
+        Analyze cherry-pick conflicts using AI
+
+        Args:
+            conflict_files: List of file paths with conflicts
+            original_pr_title: Title of the original PR being cherry-picked
+
+        Returns: AI analysis and suggestions
+        """
+        if not self.has_api_key:
+            return "No AI available for conflict analysis."
+
+        # Read conflict content from files
+        conflict_contents = []
+        for file_path in conflict_files[:5]:  # Limit to 5 files
+            try:
+                content = GitOperations.get_conflict_diff(file_path)
+                if content:
+                    # Limit content size
+                    if len(content) > 2000:
+                        content = content[:2000] + "\n... (truncated)"
+                    conflict_contents.append(f"=== {file_path} ===\n{content}")
+            except Exception:
+                pass
+
+        if not conflict_contents:
+            return "Could not read conflict content from files."
+
+        conflicts_text = '\n'.join(conflict_contents)
+        prompt = f"""You are analyzing a git cherry-pick conflict for the Milvus vector database project.
+
+Original PR being cherry-picked: {original_pr_title}
+
+The following files have merge conflicts:
+
+{conflicts_text}
+
+Please analyze:
+1. What is causing the conflict (e.g., code structure changes, variable renames, etc.)
+2. Which version should likely be kept (HEAD or the cherry-picked commit)
+3. Specific suggestions for resolving each conflict
+
+Keep the response concise and actionable. Focus on the most important conflicts first.
+"""
+
+        # Try available AI providers
+        try:
+            if self.has_claude_cli:
+                result = subprocess.run(
+                    ['claude', '-p', prompt],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+                if result.returncode == 0:
+                    return result.stdout.strip()
+
+            if self.gemini_key:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={self.gemini_key}"
+                data = {
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2048}
+                }
+                req = urllib.request.Request(url, data=json.dumps(data).encode('utf-8'),
+                                             headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    result = json.loads(response.read().decode('utf-8'))
+                    return result['candidates'][0]['content']['parts'][0]['text']
+
+            if self.anthropic_key:
+                url = "https://api.anthropic.com/v1/messages"
+                data = {
+                    "model": "claude-3-5-sonnet-20241022",
+                    "max_tokens": 2048,
+                    "messages": [{"role": "user", "content": prompt}]
+                }
+                req = urllib.request.Request(url, data=json.dumps(data).encode('utf-8'),
+                                             headers={
+                                                 "x-api-key": self.anthropic_key,
+                                                 "anthropic-version": "2023-06-01",
+                                                 "content-type": "application/json"
+                                             })
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    result = json.loads(response.read().decode('utf-8'))
+                    return result['content'][0]['text']
+
+            if self.openai_key:
+                url = "https://api.openai.com/v1/chat/completions"
+                data = {
+                    "model": "gpt-4",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.3
+                }
+                req = urllib.request.Request(url, data=json.dumps(data).encode('utf-8'),
+                                             headers={
+                                                 "Authorization": f"Bearer {self.openai_key}",
+                                                 "Content-Type": "application/json"
+                                             })
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    result = json.loads(response.read().decode('utf-8'))
+                    return result['choices'][0]['message']['content']
+
+        except Exception as e:
+            return f"AI analysis failed: {e}"
+
+        return "No AI provider available for conflict analysis."
 
 
 # ============================================================================
@@ -938,6 +1138,297 @@ class GitHubOperations:
             return sorted(branches, reverse=True)
         except Exception:
             return []
+
+    @staticmethod
+    def search_merged_prs(query: str, limit: int = 20, days: int = 60) -> List[Dict]:
+        """
+        Search for merged PRs in milvus-io/milvus master branch
+
+        Args:
+            query: Search keyword or issue number (e.g., "TTL" or "#46716")
+            limit: Maximum number of results
+            days: Search PRs merged within the last N days (default 60)
+
+        Returns: List of PR info dicts sorted by relevance
+        """
+        try:
+            # Check if query is an issue number (must be purely numeric, optionally with #)
+            issue_match = re.match(r'^#?(\d+)$', query.strip())
+
+            if issue_match:
+                issue_num = issue_match.group(1)
+                # Search for PRs that reference this issue
+                cmd = [
+                    'gh', 'pr', 'list',
+                    '--repo', 'milvus-io/milvus',
+                    '--base', 'master',
+                    '--state', 'merged',
+                    '--search', f'issue: #{issue_num}',
+                    '--limit', str(limit),
+                    '--json', 'number,title,body,mergeCommit,mergedAt,headRefName'
+                ]
+                output = GitOperations.run_command(cmd)
+                if not output:
+                    return []
+                return json.loads(output)
+            else:
+                # Keyword search using gh pr list with --search flag
+                # GitHub search is case-insensitive by default
+                from datetime import datetime, timedelta
+                since_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+
+                # Build search query with date filter
+                search_query = f'{query} merged:>={since_date}'
+
+                cmd = [
+                    'gh', 'pr', 'list',
+                    '--repo', 'milvus-io/milvus',
+                    '--base', 'master',
+                    '--state', 'merged',
+                    '--search', search_query,
+                    '--limit', str(limit * 2),  # Get more results for ranking
+                    '--json', 'number,title,body,mergeCommit,mergedAt,headRefName'
+                ]
+
+                output = GitOperations.run_command(cmd)
+                if not output:
+                    return []
+
+                prs = json.loads(output)
+
+                # Rank results by relevance (title match > body match)
+                query_lower = query.strip().lower()
+                keywords = query_lower.split()
+
+                def relevance_score(pr: Dict) -> int:
+                    """Calculate relevance score: higher = better match"""
+                    title = (pr.get('title') or '').lower()
+                    body = (pr.get('body') or '').lower()
+                    score = 0
+
+                    for kw in keywords:
+                        # Exact keyword in title: +10 per match
+                        if kw in title:
+                            score += 10
+                        # Partial keyword in title (e.g., 'mac' in 'macos'): +5
+                        elif any(kw in word or word in kw for word in title.split()):
+                            score += 5
+                        # Keyword in body: +2
+                        if kw in body:
+                            score += 2
+
+                    return score
+
+                # Sort by relevance (highest first), then by PR number (newest first)
+                prs_with_score = [(pr, relevance_score(pr)) for pr in prs]
+                prs_with_score.sort(key=lambda x: (-x[1], -x[0].get('number', 0)))
+
+                # Return all results sorted by relevance, let user choose
+                # (removed score > 0 filter to allow partial matches like 'mac' finding 'mac14')
+                sorted_prs = [pr for pr, score in prs_with_score]
+
+                return sorted_prs[:limit]
+
+        except Exception as e:
+            print_warning(f"Search failed: {e}")
+            return []
+
+    @staticmethod
+    def get_pr_details(pr_number: int) -> Optional[Dict]:
+        """Get detailed PR information"""
+        try:
+            cmd = [
+                'gh', 'pr', 'view', str(pr_number),
+                '--repo', 'milvus-io/milvus',
+                '--json', 'number,title,body,mergeCommit,mergedAt,headRefName,baseRefName'
+            ]
+            output = GitOperations.run_command(cmd)
+            return json.loads(output) if output else None
+        except Exception as e:
+            print_warning(f"Failed to get PR details: {e}")
+            return None
+
+    @staticmethod
+    def search_issues(query: str, limit: int = 100, days: int = 30) -> List[Dict]:
+        """
+        Search GitHub issues by keyword using gh CLI
+
+        Args:
+            query: Search keyword
+            limit: Maximum number of results
+            days: Search issues created within the last N days
+
+        Returns: List of issue info dicts
+        """
+        try:
+            from datetime import datetime, timedelta
+            since_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+
+            # Use gh search issues for better search capability
+            cmd = [
+                'gh', 'search', 'issues',
+                '--repo', 'milvus-io/milvus',
+                '--limit', str(limit),
+                '--json', 'number,title,state,createdAt,url',
+                '--', f'{query} created:>={since_date}'
+            ]
+
+            output = GitOperations.run_command(cmd, check=False)
+            if not output:
+                return []
+            return json.loads(output)
+        except Exception as e:
+            print_warning(f"Issue search failed: {e}")
+            return []
+
+    @staticmethod
+    def search_prs(query: str, limit: int = 100, days: int = 30, state: str = 'all') -> List[Dict]:
+        """
+        Search GitHub PRs by keyword using gh CLI
+
+        Args:
+            query: Search keyword
+            limit: Maximum number of results
+            days: Search PRs created within the last N days
+            state: PR state filter ('all', 'open', 'closed', 'merged')
+
+        Returns: List of PR info dicts
+        """
+        try:
+            from datetime import datetime, timedelta
+            since_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+
+            # Use gh search prs for better search capability
+            cmd = [
+                'gh', 'search', 'prs',
+                '--repo', 'milvus-io/milvus',
+                '--limit', str(limit),
+                '--json', 'number,title,state,createdAt,url',
+            ]
+
+            # Add state filter if not 'all'
+            if state != 'all':
+                cmd.extend(['--state', state])
+
+            cmd.extend(['--', f'{query} created:>={since_date}'])
+
+            output = GitOperations.run_command(cmd, check=False)
+            if not output:
+                return []
+            return json.loads(output)
+        except Exception as e:
+            print_warning(f"PR search failed: {e}")
+            return []
+
+    @staticmethod
+    def extract_related_issue(pr_body: str) -> Optional[str]:
+        """Extract related issue number from PR body"""
+        if not pr_body:
+            return None
+
+        # Common patterns: "Related to #123", "issue: #123", "Fixes #123", etc.
+        patterns = [
+            r'[Rr]elated\s+(?:to\s+)?#(\d+)',
+            r'[Ii]ssue:\s*#(\d+)',
+            r'[Ff]ixes\s+#(\d+)',
+            r'[Cc]loses\s+#(\d+)',
+            r'[Rr]esolves\s+#(\d+)',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, pr_body)
+            if match:
+                return match.group(1)
+
+        return None
+
+    @staticmethod
+    def create_cherry_pick_pr(title: str, body: str, branch: str, target_branch: str) -> str:
+        """
+        Create cherry-pick PR from fork to milvus-io/milvus release branch
+
+        Args:
+            title: PR title
+            body: PR body
+            branch: Source branch name (e.g., cp26/46997)
+            target_branch: Target branch (e.g., 2.6)
+
+        Returns: PR URL
+        """
+        _, fork_owner = GitOperations.get_fork_info()
+
+        # Milvus uses plain version numbers as branch names (e.g., "2.6", not "branch-2.6")
+        # Strip any "branch-" prefix if present
+        if target_branch.startswith('branch-'):
+            base = target_branch.replace('branch-', '')
+        else:
+            base = target_branch
+
+        cmd = [
+            'gh', 'pr', 'create',
+            '--repo', 'milvus-io/milvus',
+            '--head', f'{fork_owner}:{branch}',
+            '--base', base,
+            '--title', title,
+            '--body', body
+        ]
+
+        return GitOperations.run_command(cmd)
+
+    @staticmethod
+    def get_milestones(version_prefix: str = None) -> List[Dict]:
+        """
+        Get milestones from milvus-io/milvus repo, optionally filtered by version prefix.
+
+        Args:
+            version_prefix: Version prefix to filter (e.g., "2.6" will match "2.6.9", "2.6.10")
+
+        Returns: List of milestone dicts with 'number' and 'title'
+        """
+        try:
+            output = GitOperations.run_command([
+                'gh', 'api', 'repos/milvus-io/milvus/milestones',
+                '--jq', '[.[] | {number: .number, title: .title}]'
+            ])
+
+            milestones = json.loads(output) if output.strip() else []
+
+            # Filter by version prefix if provided
+            if version_prefix:
+                filtered = []
+                for m in milestones:
+                    title = m.get('title', '')
+                    # Match milestones that start with the version prefix
+                    # e.g., "2.6" matches "2.6.9", "2.6.10", etc.
+                    if title.startswith(version_prefix):
+                        filtered.append(m)
+                return sorted(filtered, key=lambda x: x.get('title', ''))
+
+            return sorted(milestones, key=lambda x: x.get('title', ''))
+
+        except Exception as e:
+            print_warning(f"Failed to fetch milestones: {e}")
+            return []
+
+    @staticmethod
+    def set_pr_milestone(pr_number: str, milestone_number: int):
+        """
+        Set milestone on a PR.
+
+        Args:
+            pr_number: PR number (extracted from URL or direct number)
+            milestone_number: Milestone number from GitHub
+        """
+        # Extract PR number if URL is provided
+        if '/' in str(pr_number):
+            pr_number = pr_number.rstrip('/').split('/')[-1]
+
+        cmd = [
+            'gh', 'pr', 'edit', pr_number,
+            '--repo', 'milvus-io/milvus',
+            '--milestone', str(milestone_number)
+        ]
+        GitOperations.run_command(cmd)
 
 
 # ============================================================================
@@ -1313,6 +1804,8 @@ def workflow_commit():
             if selected:
                 GitOperations.stage_files(selected)
                 print_success(f"Staged {len(selected)} file(s)")
+            else:
+                print_warning("No files selected for staging")
         # choice == 'c': continue with only staged files
 
     # Re-check staged files
@@ -1437,6 +1930,17 @@ def workflow_commit():
         full_message = UserInteraction.prompt_multiline("Enter commit message:")
 
     # 6. Create commit
+    # Final verification that files are staged before attempting commit
+    staged_final, _ = GitOperations.get_status()
+    if not staged_final:
+        print_error("No files staged for commit. Please stage files first.")
+        if UserInteraction.confirm("Stage all changes now?", default=True):
+            GitOperations.stage_all()
+            print_success("All files staged")
+        else:
+            print_warning("Commit cancelled - no files staged")
+            return None
+
     try:
         GitOperations.commit(full_message)
         commit_hash = GitOperations.get_commit_hash()
@@ -1452,14 +1956,32 @@ def workflow_commit():
                 try:
                     print_info("Running code review with Claude Code...")
 
-                    # Run claude with review prompt
-                    review_prompt = "Review the most recent commit for potential issues, bugs, or improvements. Focus on code quality, security, and best practices."
+                    # Get the commit patch for context
+                    patch = GitOperations.run_command(['git', 'show', '-1', '--patch'])
+
+                    # Limit patch size to avoid token limits
+                    max_patch_lines = 10000
+                    patch_lines = patch.splitlines()
+                    if len(patch_lines) > max_patch_lines:
+                        print_warning(f"Patch has {len(patch_lines)} lines (>{max_patch_lines}). Consider splitting into smaller PRs.")
+                        truncated_patch = '\n'.join(patch_lines[:max_patch_lines])
+                        truncated_patch += f"\n\n... (truncated {len(patch_lines) - max_patch_lines} lines)"
+                    else:
+                        truncated_patch = patch
+
+                    # Build review prompt with the actual diff
+                    review_prompt = f"""Review the following commit for potential issues, bugs, or improvements.
+Focus on code quality, security, and best practices.
+
+Commit diff:
+{truncated_patch}
+"""
 
                     result = subprocess.run(
                         ['claude', '-p', review_prompt],
                         capture_output=True,
                         text=True,
-                        timeout=60
+                        timeout=120  # Increase timeout since we're sending more data
                     )
 
                     if result.returncode == 0:
@@ -1781,6 +2303,518 @@ def workflow_all():
     workflow_pr()
 
 
+def workflow_search():
+    """Search GitHub issues and PRs by keyword"""
+    print_header("🔍 GitHub Search")
+
+    # Get search parameters
+    query = UserInteraction.prompt("Enter search keyword:")
+    if not query:
+        print_error("Search keyword is required")
+        return
+
+    # Ask for search type
+    search_type = UserInteraction.select_option(
+        "What do you want to search?",
+        [
+            ('i', 'Issues only'),
+            ('p', 'PRs only'),
+            ('b', 'Both issues and PRs'),
+        ]
+    )
+
+    # Ask for time range
+    days_input = UserInteraction.prompt("Search within last N days (default: 30):")
+    try:
+        days = int(days_input) if days_input else 30
+    except ValueError:
+        days = 30
+
+    # Ask for limit
+    limit_input = UserInteraction.prompt("Max results (default: 100):")
+    try:
+        limit = int(limit_input) if limit_input else 100
+    except ValueError:
+        limit = 100
+
+    print_info(f"Searching for: '{query}' (last {days} days, limit {limit})")
+
+    # Execute search
+    if search_type in ['i', 'b']:
+        print_header("\n📋 Issues")
+        issues = GitHubOperations.search_issues(query, limit=limit, days=days)
+        if issues:
+            for issue in issues:
+                created = issue.get('createdAt', '')[:10]
+                state = issue.get('state', 'UNKNOWN')
+                state_color = Colors.GREEN if state == 'OPEN' else Colors.RED
+                print(f"  #{issue['number']} [{state_color}{state}{Colors.RESET}] {issue['title']} ({created})")
+            print(f"\n  Total: {len(issues)} issues")
+        else:
+            print_warning("No issues found")
+
+    if search_type in ['p', 'b']:
+        print_header("\n🔀 Pull Requests")
+        prs = GitHubOperations.search_prs(query, limit=limit, days=days)
+        if prs:
+            for pr in prs:
+                created = pr.get('createdAt', '')[:10]
+                state = pr.get('state', 'UNKNOWN')
+                if state == 'MERGED':
+                    state_color = Colors.BLUE
+                elif state == 'OPEN':
+                    state_color = Colors.GREEN
+                else:
+                    state_color = Colors.RED
+                print(f"  #{pr['number']} [{state_color}{state}{Colors.RESET}] {pr['title']} ({created})")
+            print(f"\n  Total: {len(prs)} PRs")
+        else:
+            print_warning("No PRs found")
+
+    print_success("\nSearch complete!")
+
+
+# ============================================================================
+# Cherry-Pick Workflow Helpers
+# ============================================================================
+
+@dataclass
+class CherryPickContext:
+    """Context object for cherry-pick workflow state"""
+    original_branch: str = ""
+    pr_details: Optional[Dict] = None
+    commit_sha: str = ""
+    related_issue: Optional[str] = None
+    target_branch: str = ""
+    version_num: str = ""
+    cp_branch: str = ""
+    upstream_remote: str = ""
+    fork_remote: str = ""
+    fork_owner: str = ""
+    pr_url: str = ""
+
+
+def _cp_preflight_checks() -> str:
+    """Run pre-flight checks for cherry-pick workflow.
+
+    Returns: Original branch name
+    Raises: SystemExit on failure
+    """
+    print_info("Running pre-flight checks...")
+
+    try:
+        GitHubOperations.check_gh_cli()
+    except Exception as e:
+        print_error(str(e))
+        sys.exit(1)
+
+    staged, unstaged = GitOperations.get_status()
+    if staged or unstaged:
+        print_error("You have uncommitted changes. Please commit or stash them first.")
+        sys.exit(1)
+
+    original_branch = GitOperations.get_current_branch()
+    print_success(f"Current branch: {original_branch}")
+    return original_branch
+
+
+def _cp_select_pr() -> Tuple[Dict, str, Optional[str]]:
+    """Select PR to cherry-pick.
+
+    Returns: (pr_details, commit_sha, related_issue)
+    Raises: SystemExit on failure
+    """
+    print_header("\n🔍 Select PR to cherry-pick")
+
+    pr_input = UserInteraction.prompt("Enter PR number or issue number (e.g., '46716' or '#46716'):")
+    if not pr_input:
+        print_error("PR or issue number is required")
+        print_info("Tip: Use 'mgit --search' to find PRs by keyword first")
+        sys.exit(1)
+
+    num_match = re.match(r'^#?(\d+)$', pr_input.strip())
+    if not num_match:
+        print_error("Invalid input. Please enter a valid PR or issue number (e.g., '46716' or '#46716').")
+        print_info("Tip: Use 'mgit --search' to find PRs by keyword first")
+        sys.exit(1)
+
+    input_num = int(num_match.group(1))
+
+    print_info(f"Looking up #{input_num}...")
+    pr_details = GitHubOperations.get_pr_details(input_num)
+
+    if not pr_details:
+        print_info(f"#{input_num} is not a PR, searching for PRs related to issue #{input_num}...")
+        prs = GitHubOperations.search_merged_prs(f"#{input_num}")
+        if prs:
+            print(f"\n{Colors.BOLD}PRs related to issue #{input_num}:{Colors.RESET}")
+            for i, pr in enumerate(prs):
+                merged_at = pr.get('mergedAt', 'Unknown')[:10] if pr.get('mergedAt') else 'Unknown'
+                print(f"  [{i}] #{pr['number']} {pr['title']} (Merged: {merged_at})")
+
+            selection = UserInteraction.prompt("\nSelect PR index (0, 1, ...):")
+            try:
+                idx = int(selection)
+                if idx < 0 or idx >= len(prs):
+                    print_error("Invalid selection")
+                    sys.exit(1)
+                pr_details = GitHubOperations.get_pr_details(prs[idx]['number'])
+            except ValueError:
+                print_error("Invalid input")
+                sys.exit(1)
+        else:
+            print_error(f"No merged PRs found related to issue #{input_num}")
+            sys.exit(1)
+
+    if not pr_details:
+        print_error("Failed to get PR details")
+        sys.exit(1)
+
+    merge_commit = pr_details.get('mergeCommit', {})
+    commit_sha = merge_commit.get('oid') if merge_commit else None
+
+    if not commit_sha:
+        print_error("Could not find merge commit SHA for this PR")
+        sys.exit(1)
+
+    print_success(f"Selected: #{pr_details['number']} - {pr_details['title']}")
+    print_info(f"Merge commit: {commit_sha[:12]}")
+
+    related_issue = GitHubOperations.extract_related_issue(pr_details.get('body', ''))
+    if related_issue:
+        print_info(f"Related issue: #{related_issue}")
+
+    return pr_details, commit_sha, related_issue
+
+
+def _cp_get_target_branch() -> Tuple[str, str, str]:
+    """Get and validate target branch.
+
+    Returns: (target_branch, version_num, upstream_remote)
+    Raises: SystemExit on failure
+    """
+    print_header("\n🎯 Target Branch")
+
+    target_version = UserInteraction.prompt("Enter target version (e.g., '2.6'):")
+    if not target_version:
+        print_error("Target version is required")
+        sys.exit(1)
+
+    if target_version.startswith('branch-'):
+        target_branch = target_version.replace('branch-', '')
+        version_num = target_branch
+    else:
+        target_branch = target_version
+        version_num = target_version
+
+    upstream_remote = GitOperations.get_upstream_remote()
+    print_info(f"Fetching {upstream_remote}/{target_branch}...")
+
+    try:
+        GitOperations.fetch(upstream_remote, target_branch)
+    except Exception as e:
+        print_error(f"Failed to fetch target branch: {e}")
+        print_info(f"Make sure branch '{target_branch}' exists in milvus-io/milvus")
+        sys.exit(1)
+
+    try:
+        GitOperations.fetch(upstream_remote, 'master')
+    except Exception:
+        pass
+
+    print_success(f"Target branch: {target_branch}")
+    return target_branch, version_num, upstream_remote
+
+
+def _cp_setup_branch(ctx: CherryPickContext) -> str:
+    """Create or switch to cherry-pick branch.
+
+    Returns: Cherry-pick branch name
+    Raises: SystemExit on failure or cancel
+    """
+    cp_branch = f"cp{ctx.version_num.replace('.', '')}/{ctx.pr_details['number']}"
+    print_info(f"Cherry-pick branch: {cp_branch}")
+
+    if GitOperations.branch_exists(cp_branch):
+        print_warning(f"Branch {cp_branch} already exists")
+        choice = UserInteraction.select_option(
+            "What do you want to do?",
+            [
+                ('d', 'Delete and recreate'),
+                ('u', 'Use existing branch'),
+                ('c', 'Cancel'),
+            ]
+        )
+        if choice == 'c':
+            print_warning("Cherry-pick cancelled")
+            sys.exit(0)
+        elif choice == 'd':
+            GitOperations.delete_branch(cp_branch, force=True)
+            print_success(f"Deleted branch {cp_branch}")
+
+    if not GitOperations.branch_exists(cp_branch):
+        print_info(f"Creating branch {cp_branch} from {ctx.upstream_remote}/{ctx.target_branch}...")
+        try:
+            GitOperations.checkout_remote_branch(ctx.upstream_remote, ctx.target_branch, cp_branch)
+            print_success(f"Created and switched to branch: {cp_branch}")
+        except Exception as e:
+            print_error(f"Failed to create branch: {e}")
+            sys.exit(1)
+    else:
+        GitOperations.checkout_branch(cp_branch)
+        print_success(f"Switched to existing branch: {cp_branch}")
+
+    return cp_branch
+
+
+def _cp_execute_cherry_pick(ctx: CherryPickContext) -> bool:
+    """Execute cherry-pick operation and handle conflicts.
+
+    Returns: True if successful, exits on abort or wait
+    """
+    print_header("\n🍒 Executing Cherry-Pick")
+
+    print_info(f"Cherry-picking commit {ctx.commit_sha[:12]}...")
+    success, error_msg, conflict_files = GitOperations.cherry_pick(ctx.commit_sha)
+
+    if not success:
+        print_warning("Cherry-pick encountered conflicts!")
+        print(f"\n{Colors.RED}Conflicting files:{Colors.RESET}")
+        for f in conflict_files:
+            print(f"  - {f}")
+
+        print_header("\n🤖 AI Conflict Analysis")
+        ai_service = AIService()
+        if ai_service.has_api_key:
+            print_info("Analyzing conflicts with AI...")
+            analysis = ai_service.analyze_conflict(conflict_files, ctx.pr_details['title'])
+            print(f"\n{Colors.BLUE}Analysis:{Colors.RESET}")
+            print(analysis)
+        else:
+            print_warning("No AI available for conflict analysis")
+
+        print_header("\n⚠️ Conflict Resolution Required")
+        print_info("Please resolve the conflicts manually:")
+        print("  1. Edit the conflicting files to resolve conflicts")
+        print("  2. Run: git add <resolved-files>")
+        print("  3. Run: git cherry-pick --continue")
+        print("")
+        print("Or run: git cherry-pick --abort to cancel")
+
+        choice = UserInteraction.select_option(
+            "Options:",
+            [
+                ('w', 'Wait - I will resolve conflicts and continue later'),
+                ('a', 'Abort cherry-pick and return to original branch'),
+            ]
+        )
+
+        if choice == 'a':
+            GitOperations.cherry_pick_abort()
+            GitOperations.checkout_branch(ctx.original_branch)
+            GitOperations.delete_branch(ctx.cp_branch, force=True)
+            print_warning("Cherry-pick aborted")
+            sys.exit(1)
+        else:
+            print_info("\nAfter resolving conflicts, run:")
+            print("  git add <files>")
+            print("  git cherry-pick --continue")
+            print("  python3 tools/mgit.py --cherry-pick  # To continue with PR creation")
+            sys.exit(0)
+
+    print_success("Cherry-pick successful!")
+
+    diff_stat = GitOperations.run_command(['git', 'diff', '--stat', 'HEAD~1'])
+    print(f"\n{Colors.BLUE}Changes:{Colors.RESET}")
+    print(diff_stat)
+    return True
+
+
+def _cp_push_to_fork(ctx: CherryPickContext) -> Tuple[str, str]:
+    """Push cherry-pick branch to fork.
+
+    Returns: (fork_remote, fork_owner)
+    Raises: SystemExit on failure or cancel
+    """
+    print_header("\n📤 Push to Fork")
+
+    if not UserInteraction.confirm("Push to your fork?", default=True):
+        print_warning("Push cancelled. You can push manually later.")
+        print(f"  Branch: {ctx.cp_branch}")
+        sys.exit(0)
+
+    fork_remote, fork_owner = GitOperations.get_fork_info()
+    print_info(f"Pushing {ctx.cp_branch} to {fork_remote}...")
+
+    try:
+        GitOperations.push(ctx.cp_branch, force=False, remote=fork_remote)
+        print_success(f"Pushed to {fork_remote}/{ctx.cp_branch}")
+    except Exception as e:
+        print_warning(f"Push failed: {e}")
+        if UserInteraction.confirm("Force push?"):
+            GitOperations.push(ctx.cp_branch, force=True, remote=fork_remote)
+            print_success(f"Force pushed to {fork_remote}/{ctx.cp_branch}")
+        else:
+            print_warning("Push cancelled")
+            sys.exit(1)
+
+    return fork_remote, fork_owner
+
+
+def _cp_create_pr(ctx: CherryPickContext) -> str:
+    """Create cherry-pick PR.
+
+    Returns: PR URL
+    Raises: SystemExit on failure or cancel
+    """
+    print_header("\n🔀 Create Cherry-Pick PR")
+
+    original_title = ctx.pr_details['title']
+    type_match = re.match(r'^(\w+):\s*(.+)$', original_title)
+    if type_match:
+        pr_type = type_match.group(1)
+        title_rest = type_match.group(2)
+    else:
+        pr_type = 'fix'
+        title_rest = original_title
+
+    cp_pr_title = f"{pr_type}: [{ctx.version_num}] {title_rest} (#{ctx.pr_details['number']})"
+
+    cp_pr_body = f"""Cherry-pick from master
+pr: #{ctx.pr_details['number']}"""
+
+    if ctx.related_issue:
+        cp_pr_body += f"\nRelated to #{ctx.related_issue}"
+
+    original_body = ctx.pr_details.get('body', '')
+    if original_body:
+        cleaned_body = re.sub(r'[Ii]ssue:\s*#\d+\s*\n?', '', original_body)
+        cleaned_body = cleaned_body.strip()
+        if cleaned_body:
+            if len(cleaned_body) > 1000:
+                cleaned_body = cleaned_body[:1000] + "\n\n... (truncated)"
+            cp_pr_body += f"\n\n{cleaned_body}"
+
+    print(f"\n{Colors.BOLD}{'='*60}{Colors.RESET}")
+    print(f"{Colors.BOLD}PR Title:{Colors.RESET} {cp_pr_title}")
+    print(f"\n{Colors.BOLD}PR Body:{Colors.RESET}")
+    print(cp_pr_body)
+    print(f"\n{Colors.BOLD}{'='*60}{Colors.RESET}")
+
+    choice = UserInteraction.select_option(
+        "Options:",
+        [
+            ('y', 'Create PR'),
+            ('e', 'Edit title/body'),
+            ('n', 'Cancel (branch already pushed)'),
+        ]
+    )
+
+    if choice == 'n':
+        print_warning("PR creation cancelled")
+        print(f"Branch {ctx.cp_branch} has been pushed. You can create PR manually.")
+        sys.exit(0)
+    elif choice == 'e':
+        cp_pr_title = UserInteraction.prompt(f"PR title [{cp_pr_title}]:") or cp_pr_title
+        print("Enter PR body (Enter empty line to finish):")
+        new_body = UserInteraction.prompt_multiline("PR body:")
+        if new_body:
+            cp_pr_body = new_body
+
+    print_info("Creating cherry-pick PR...")
+    try:
+        pr_url = GitHubOperations.create_cherry_pick_pr(
+            cp_pr_title, cp_pr_body, ctx.cp_branch, ctx.target_branch
+        )
+        print_success(f"PR created: {pr_url}")
+        return pr_url
+    except Exception as e:
+        print_error(f"Failed to create PR: {e}")
+        print_info(f"You can create PR manually from branch: {ctx.cp_branch}")
+        sys.exit(1)
+
+
+def _cp_set_milestone(ctx: CherryPickContext):
+    """Set milestone for the cherry-pick PR."""
+    print_header("\n🎯 Set Milestone (Roadmap)")
+
+    milestones = GitHubOperations.get_milestones(ctx.version_num)
+
+    if not milestones:
+        print_warning(f"No milestones found for version {ctx.version_num}")
+        return
+
+    print("Available milestones:")
+    for i, m in enumerate(milestones):
+        print(f"  [{i}] {m['title']}")
+    print("  [s] Skip - don't set milestone")
+
+    selection = UserInteraction.prompt("\nSelect milestone index:")
+
+    if selection.lower() == 's' or not selection.strip():
+        print_info("Skipping milestone")
+        return
+
+    try:
+        idx = int(selection)
+        if 0 <= idx < len(milestones):
+            selected_milestone = milestones[idx]
+            print_info(f"Setting milestone to {selected_milestone['title']}...")
+            try:
+                GitHubOperations.set_pr_milestone(ctx.pr_url, selected_milestone['number'])
+                print_success(f"Milestone set: {selected_milestone['title']}")
+            except Exception as e:
+                print_warning(f"Failed to set milestone: {e}")
+        else:
+            print_warning("Invalid selection, skipping milestone")
+    except ValueError:
+        print_warning("Invalid input, skipping milestone")
+
+
+def workflow_cherry_pick():
+    """Cherry-pick workflow: PR/issue number → cherry-pick → create PR"""
+    print_header("🍒 Cherry-Pick Workflow")
+
+    # Initialize context
+    ctx = CherryPickContext()
+
+    # Step 1: Pre-flight checks
+    ctx.original_branch = _cp_preflight_checks()
+
+    # Step 2: Select PR to cherry-pick
+    ctx.pr_details, ctx.commit_sha, ctx.related_issue = _cp_select_pr()
+
+    # Step 3: Get target branch
+    ctx.target_branch, ctx.version_num, ctx.upstream_remote = _cp_get_target_branch()
+
+    # Step 4: Setup cherry-pick branch
+    ctx.cp_branch = _cp_setup_branch(ctx)
+
+    # Step 5: Execute cherry-pick
+    _cp_execute_cherry_pick(ctx)
+
+    # Step 6: Push to fork
+    ctx.fork_remote, ctx.fork_owner = _cp_push_to_fork(ctx)
+
+    # Step 7: Create PR
+    ctx.pr_url = _cp_create_pr(ctx)
+
+    # Step 8: Set milestone
+    _cp_set_milestone(ctx)
+
+    # Done!
+    print_header("\n✅ Cherry-Pick Complete!")
+    print(f"  Original PR: #{ctx.pr_details['number']}")
+    print(f"  Target:      {ctx.target_branch}")
+    print(f"  Branch:      {ctx.cp_branch}")
+    print(f"  PR:          {ctx.pr_url}")
+
+    # Optionally return to original branch
+    if UserInteraction.confirm(f"\nReturn to original branch ({ctx.original_branch})?", default=True):
+        GitOperations.checkout_branch(ctx.original_branch)
+        print_success(f"Switched back to {ctx.original_branch}")
+
+
 # ============================================================================
 # Main Entry Point
 # ============================================================================
@@ -1791,10 +2825,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  mgit.py --commit     Smart commit workflow
-  mgit.py --rebase     Rebase onto master and squash commits
-  mgit.py --pr         PR creation workflow
-  mgit.py --all        Complete workflow (default)
+  mgit.py --commit       Smart commit workflow
+  mgit.py --rebase       Rebase onto master and squash commits
+  mgit.py --pr           PR creation workflow
+  mgit.py --search       Search GitHub issues and PRs by keyword
+  mgit.py --cherry-pick  Cherry-pick PR to release branch (by PR/issue number)
+  mgit.py --all          Complete workflow (default)
         """
     )
 
@@ -1822,10 +2858,23 @@ Examples:
         help='Run rebase and squash workflow (sync with master, squash commits)'
     )
 
+    parser.add_argument(
+        '--cherry-pick',
+        action='store_true',
+        dest='cherry_pick',
+        help='Cherry-pick a merged PR to a release branch'
+    )
+
+    parser.add_argument(
+        '--search',
+        action='store_true',
+        help='Search GitHub issues and PRs by keyword'
+    )
+
     args = parser.parse_args()
 
-    # Default to --all if no arguments
-    if not (args.commit or args.pr or args.all or args.rebase):
+    # Default to --all if no arguments (except cherry-pick and search which are standalone)
+    if not (args.commit or args.pr or args.all or args.rebase or args.cherry_pick or args.search):
         args.all = True
 
     try:
@@ -1835,7 +2884,11 @@ Examples:
         print("╚═══════════════════════════════════════╝")
         print(f"{Colors.RESET}")
 
-        if args.rebase:
+        if args.search:
+            workflow_search()
+        elif args.cherry_pick:
+            workflow_cherry_pick()
+        elif args.rebase:
             workflow_rebase()
         elif args.commit:
             workflow_commit()

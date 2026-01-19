@@ -161,6 +161,9 @@ func (s *mixCoordImpl) initInternal() error {
 	s.datacoordServer.SetMixCoord(s)
 	s.queryCoordServer.SetMixCoord(s)
 
+	// Register WAL callbacks
+	RegisterWALCallbacks(s)
+
 	if err := s.streamingCoord.Start(s.ctx); err != nil {
 		log.Error("streamCoord start failed", zap.Error(err))
 		return err
@@ -196,8 +199,9 @@ func (s *mixCoordImpl) initInternal() error {
 		return err
 	}
 
-	if err := s.datacoordServer.SyncFileResources(s.ctx); err != nil {
-		log.Error("init file resources failed", zap.Error(err))
+	if err := s.rootcoordServer.InitFileResources(s.ctx, &milvuspb.ListFileResourcesRequest{}); err != nil {
+		log.Error("init file resource failed", zap.Error(err))
+		return err
 	}
 	return nil
 }
@@ -873,6 +877,10 @@ func (s *mixCoordImpl) SyncQcFileResource(ctx context.Context, resources []*inte
 	return s.queryCoordServer.SyncFileResource(ctx, resources, version)
 }
 
+func (s *mixCoordImpl) SyncDcFileResource(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
+	return s.datacoordServer.SyncFileResource(ctx, resources, version)
+}
+
 // QueryCoordServer
 func (s *mixCoordImpl) ActivateChecker(ctx context.Context, req *querypb.ActivateCheckerRequest) (*commonpb.Status, error) {
 	return s.queryCoordServer.ActivateChecker(ctx, req)
@@ -1214,17 +1222,17 @@ func (s *mixCoordImpl) FlushAll(ctx context.Context, req *datapb.FlushAllRequest
 
 // AddFileResource add file resource
 func (s *mixCoordImpl) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
-	return s.datacoordServer.AddFileResource(ctx, req)
+	return s.rootcoordServer.AddFileResource(ctx, req)
 }
 
 // RemoveFileResource remove file resource
 func (s *mixCoordImpl) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error) {
-	return s.datacoordServer.RemoveFileResource(ctx, req)
+	return s.rootcoordServer.RemoveFileResource(ctx, req)
 }
 
 // ListFileResources list file resources
 func (s *mixCoordImpl) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
-	return s.datacoordServer.ListFileResources(ctx, req)
+	return s.rootcoordServer.ListFileResources(ctx, req)
 }
 
 // CreateExternalCollection creates an external collection

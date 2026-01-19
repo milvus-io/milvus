@@ -45,6 +45,7 @@ type ParamItem struct {
 
 	Formatter func(originValue string) string
 	Forbidden bool
+	Immutable bool
 
 	manager *config.Manager
 
@@ -59,6 +60,9 @@ func (pi *ParamItem) Init(manager *config.Manager) {
 	pi.manager = manager
 	if pi.Forbidden {
 		pi.manager.ForbidUpdate(pi.Key)
+	}
+	if pi.Immutable {
+		pi.manager.ImmutableUpdate(pi.Key)
 	}
 
 	currentValue := pi.GetValue()

@@ -372,6 +372,382 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
         self.insert(client, collection_name, data=rows, partition_name=partition_name,
                     check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_insert_ids_binary_invalid(self):
+        """
+        target: test insert float vector into a collection with binary vector schema
+        method: create binary vector collection and insert float vector data
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create binary vector collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
+
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 2. Generate float vector data (invalid for binary vector collection)
+        rng = np.random.default_rng(seed=19530)
+        rows = [
+            {default_primary_key_field_name: i, default_binary_vec_field_name: list(rng.random((1, default_dim))[0]),
+             default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+
+        # 3. Verify error on insert
+        error = {ct.err_code: 999,
+                 ct.err_msg: "The Input data type is inconsistent with defined schema, {binary_vector} field should be a binary_vector, but got a {<class 'list'>} instead."}
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_with_invalid_binary_partition_name(self):
+        """
+        target: test insert with invalid scenario
+        method: insert binary vector data with invalid partition name
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = "non_existent_partition"
+        nb = 100
+
+        # 1. Create binary vector collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
+
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 2. Generate binary vector data
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
+
+        # 3. Verify error on insert with non-existent partition
+        error = {ct.err_code: 999, ct.err_msg: f"partition not found[partition={partition_name}]"}
+        self.insert(client, collection_name, data=rows, partition_name=partition_name, check_task=CheckTasks.err_res,
+                    check_items=error)
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("invalid_int8", [-129, 128])
+    def test_insert_int8_overflow(self, invalid_int8):
+        """
+        target: test insert int8 out of range
+        method: insert int8 out of range
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create schema with INT8 field
+        schema = cf.gen_all_datatype_collection_schema(
+            dim=default_dim,
+            enable_dynamic_field=True,
+            enable_struct_array_field=False
+        )
+        # Add INT8 field
+        schema.add_field(ct.default_int8_field_name, DataType.INT8)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 3. Generate row data
+        rows = cf.gen_row_data_by_schema(nb=1, schema=schema)
+
+        # 4. Set invalid INT8 value (out of range: [-128, 127])
+        rows[0][ct.default_int8_field_name] = invalid_int8
+
+        # 5. Verify error on insert
+        error = {ct.err_code: 1100, ct.err_msg: f"the 0th element ({invalid_int8}) out of range: [-128, 127]"}
+        self.insert(client, collection_name, data=rows,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("invalid_int16", [-32769, 32768])
+    def test_insert_int16_overflow(self, invalid_int16):
+        """
+        target: test insert int16 out of range
+        method: insert int16 out of range
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create schema with INT16 field
+        schema = cf.gen_all_datatype_collection_schema(
+            dim=default_dim,
+            enable_dynamic_field=True,
+            enable_struct_array_field=False
+        )
+        # Add INT16 field
+        schema.add_field(ct.default_int16_field_name, DataType.INT16)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 3. Generate row data
+        rows = cf.gen_row_data_by_schema(nb=1, schema=schema)
+
+        # 4. Set invalid INT16 value (out of range: [-32768, 32767])
+        rows[0][ct.default_int16_field_name] = invalid_int16
+
+        # 5. Verify error on insert
+        error = {ct.err_code: 1100, ct.err_msg: f"the 0th element ({invalid_int16}) out of range: [-32768, 32767]"}
+        self.insert(client, collection_name, data=rows,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("invalid_int32", [-2147483649, 2147483648])
+    def test_insert_int32_overflow(self, invalid_int32):
+        """
+        target: test insert int32 out of range
+        method: insert int32 out of range
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create schema with INT32 field
+        schema = cf.gen_all_datatype_collection_schema(
+            dim=default_dim,
+            enable_dynamic_field=True,
+            enable_struct_array_field=False
+        )
+        # Add INT32 field
+        schema.add_field(ct.default_int32_field_name, DataType.INT32)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 3. Generate row data
+        rows = cf.gen_row_data_by_schema(nb=1, schema=schema)
+
+        # 4. Set invalid INT32 value (out of range: [-2147483648, 2147483647])
+        rows[0][ct.default_int32_field_name] = invalid_int32
+
+        # 5. Verify error on insert
+        error = {ct.err_code: 1, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+        self.insert(client, collection_name, data=rows,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
+    def test_insert_with_invalid_field_value(self, primary_field):
+        """
+        target: verify error msg when inserting with invalid field value
+        method: insert with invalid field value
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 100
+
+        # 1. Create schema
+        schema = self.create_schema(client)[0]
+        if primary_field == ct.default_int64_field_name:
+            schema.add_field(primary_field, DataType.INT64, is_primary=True, auto_id=True)
+        else:
+            schema.add_field(primary_field, DataType.VARCHAR, max_length=ct.default_length, is_primary=True, auto_id=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_bool_field_name, DataType.BOOL)
+        if primary_field != ct.default_string_field_name:
+            schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 3. Generate row data
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
+
+        # 4. Test invalid field values at different positions
+        for dirty_i in [0, nb // 2, nb - 1]:  # check the dirty data at first, middle and last
+            # Iterate through all fields in the row
+            for field_name, field_value in rows[dirty_i].items():
+                # Get the actual value type
+                value_type = type(field_value)
+                error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+
+                # Inject type errors based on value type (only for simple scalar types)
+                if value_type in (int, bool, float):
+                    tmp = rows[dirty_i][field_name]
+                    rows[dirty_i][field_name] = "iamstring"
+                    self.insert(client, collection_name, data=rows,
+                                check_task=CheckTasks.err_res, check_items=error)
+                    rows[dirty_i][field_name] = tmp
+                elif value_type is str:
+                    tmp = rows[dirty_i][field_name]
+                    rows[dirty_i][field_name] = random.randint(0, 1000)
+                    self.insert(client, collection_name, data=rows,
+                                check_task=CheckTasks.err_res, check_items=error)
+                    rows[dirty_i][field_name] = tmp
+                else:
+                    continue
+
+        # 5. Verify correct data can be inserted
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == nb
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_over_resource_limit(self):
+        """
+        target: test insert over RPC limitation 64MB (67108864)
+        method: insert excessive data
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 150000
+
+        # 1. Create collection
+        self.create_collection(client, collection_name, default_dim, auto_id=False)
+
+        # 2. Generate row data (150000 rows, which exceeds 64MB RPC limit)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(nb)]
+
+        # 3. Verify error on insert
+        error = {ct.err_code: 999, ct.err_msg: "message larger than max"}
+        self.insert(client, collection_name, data=rows,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("default_value", [[], 123])
+    def test_insert_type_mismatch_with_default_value_field(self, default_value):
+        """
+        target: test insert with type mismatch for field that has default value
+        method: insert data with wrong type for varchar field that has default_value
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create schema with default value field
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length, default_value="abc")
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 3. Generate vectors
+        vectors = cf.gen_vectors(ct.default_nb, ct.default_dim)
+
+        # 4. Prepare test data with invalid type for varchar field
+        data = [{default_primary_key_field_name: 1, default_float_field_name: 1.0,
+                 default_string_field_name: default_value, default_vector_field_name: vectors[0]}]
+
+        # 5. Verify error on upsert
+        error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+        self.upsert(client, collection_name, data=data,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_with_nan_value(self):
+        """
+        target: test insert with nan value
+        method: insert with nan value: None, float('nan'), np.NAN/np.nan, float('inf')
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create collection
+        self.create_collection(client, collection_name, default_dim, auto_id=False)
+
+        # 2. Generate row data
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+
+        # 3. Test None value in vector field
+        rows[0][default_vector_field_name][0] = None
+        error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+        self.insert(client, collection_name, data=rows,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+        # 4. Test float('nan') in vector field
+        rows[0][default_vector_field_name][0] = float('nan')
+        error = {ct.err_code: 999, ct.err_msg: "value 'NaN' is not a number or infinity"}
+        self.insert(client, collection_name, data=rows,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+        # 5. Test np.NAN in vector field
+        rows[0][default_vector_field_name][0] = np.NAN
+        self.insert(client, collection_name, data=rows,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+        # 6. Test float('inf') in vector field
+        rows[0][default_vector_field_name][0] = float('inf')
+        error = {ct.err_code: 65535, ct.err_msg: "value '+Inf' is not a number or infinity"}
+        self.insert(client, collection_name, data=rows,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("invalid_vector_type", ct.all_dense_vector_types)
+    def test_invalid_sparse_vector_data(self, invalid_vector_type):
+        """
+        target: insert illegal data type
+        method: insert illegal dense vector type into sparse vector field
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 100
+
+        # 1. Create schema with sparse vector field
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
+        schema.add_field(ct.default_sparse_vec_field_name, DataType.SPARSE_FLOAT_VECTOR)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 3. Generate valid sparse vector data
+        sparse_vectors = cf.gen_sparse_vectors(nb, dim=128)
+        rows = []
+        for i in range(nb - 1):
+            row = {ct.default_int64_field_name: i, ct.default_float_field_name: np.float32(i),
+                   ct.default_string_field_name: str(i), ct.default_sparse_vec_field_name: sparse_vectors[i]}
+            rows.append(row)
+
+        # 4. Add invalid dense vector type as the last row
+        invalid_vec = cf.gen_vectors(1, dim=128, vector_data_type=invalid_vector_type)
+        invalid_row = {ct.default_int64_field_name: nb - 1, ct.default_float_field_name: np.float32(nb - 1),
+                       ct.default_string_field_name: str(nb - 1), ct.default_sparse_vec_field_name: invalid_vec[0]}
+        rows.append(invalid_row)
+
+        # 5. Verify error on insert
+        error = {ct.err_code: 1, ct.err_msg: 'invalid input for sparse float vector'}
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)
 
 class TestMilvusClientInsertValid(TestMilvusClientV2Base):
     """ Test case of search interface """
@@ -629,6 +1005,43 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
             self.drop_partition(client, collection_name, partition_name)
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_insert_binary_partition(self):
+        """
+        target: test insert entities and create partition
+        method: create collection and insert binary entities in it, with the partition_name param
+        expected: the collection row count equals to nb
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = cf.gen_unique_str('partition')
+
+        # 1. Create binary vector collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
+
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 2. Create partition
+        self.create_partition(client, collection_name, partition_name)
+        partitions = self.list_partitions(client, collection_name)[0]
+        assert partition_name in partitions
+
+        # 3. Insert binary data into partition
+        rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
+        results = self.insert(client, collection_name, rows, partition_name=partition_name)[0]
+        assert results['insert_count'] == ct.default_nb
+
+        # 4. Verify row count
+        self.flush(client, collection_name)
+        num_entities = self.get_collection_stats(client, collection_name)[0]
+        assert num_entities.get("row_count", None) == ct.default_nb
+
+        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("default_value", ["a" * 64, "aa"])
@@ -966,6 +1379,46 @@ class TestInsertOperation(TestMilvusClientV2Base):
         
         indexes = self.list_indexes(client, collection_name)[0]
         assert default_vector_field_name in indexes
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_binary_create_index(self):
+        """
+        target: test build index insert after vector
+        method: insert binary vector and build index
+        expected: no error raised
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create binary vector collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
+
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 2. Insert binary data first
+        rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == ct.default_nb
+
+        self.flush(client, collection_name)
+
+        num_entities = self.get_collection_stats(client, collection_name)[0]
+        assert num_entities.get("row_count", None) == ct.default_nb
+
+        # 3. Create index after insert
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(ct.default_binary_vec_field_name, index_type="BIN_IVF_FLAT",metric_type="JACCARD")
+        self.create_index(client, collection_name, index_params)
+
+        # 4. Verify index created
+        indexes = self.list_indexes(client, collection_name)[0]
+        assert ct.default_binary_vec_field_name in indexes
+
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1429,6 +1882,42 @@ class TestInsertOperation(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_insert_binary_multi_times(self):
+        """
+        target: test insert entities multi times and final flush
+        method: create collection and insert binary entity multi times
+        expected: the collection row count equals to nb * nums
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create binary vector collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
+
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 2. Insert binary data multiple times
+        nums = 2
+        start_id = 0
+        for _ in range(nums):
+            # Generate data with unique primary keys for each insert
+            rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema, start=start_id)
+            results = self.insert(client, collection_name, rows)[0]
+            assert results['insert_count'] == ct.default_nb
+            start_id += ct.default_nb
+
+        # 3. Verify row count
+        self.flush(client, collection_name)
+        num_entities = self.get_collection_stats(client, collection_name)[0]
+        assert num_entities.get("row_count", None) == ct.default_nb * nums
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_all_datatype_collection(self):
         """
         target: test insert into collection that contains all datatype fields
@@ -1464,7 +1953,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         """
         target: test insert data equal to RPC limitation 64MB (67108864)
         method: calculated critical value and insert equivalent data
-        expected: raise exception
+        expected: insert succeeds
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1588,5 +2077,211 @@ class TestInsertOperation(TestMilvusClientV2Base):
 
         res, _ = self.query(client, collection_name, filter=f"int32_array is null")
         assert len(res) == nb
+
+        self.drop_collection(client, collection_name)
+
+
+class TestMilvusClientInsertString(TestMilvusClientV2Base):
+    """
+      ******************************************************************
+      The following cases are used to test insert string
+      ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_insert_string_field_is_primary(self):
+        """
+        target: test insert string is primary
+        method: 1.create a collection and string field is primary
+                2.insert string field data
+        expected: Insert Successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create schema with string field as primary key
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 3. Generate row data
+        rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
+
+        # 4. Extract primary keys (string field values) for verification
+        expected_primary_keys = [row[ct.default_string_field_name] for row in rows]
+
+        # 5. Insert data
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == ct.default_nb
+        assert results['ids'] == expected_primary_keys
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("string_fields", [[cf.gen_string_field(name="string_field1"),
+                                                cf.gen_string_field(name="string_field2"),
+                                                cf.gen_string_field(name="string_field3")]])
+    def test_milvus_client_insert_multi_string_fields(self, string_fields):
+        """
+        target: test insert multi string fields
+        method: 1.create a collection
+                2.Insert multi string fields
+        expected: Insert Successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create schema with multiple string fields
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        # Add additional string fields
+        for field in string_fields:
+            schema.add_field(field.name, DataType.VARCHAR, max_length=ct.default_length)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 3. Generate row data
+        rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
+
+        # 4. Add random string values for additional string fields (matching gen_dataframe_multi_string_fields behavior)
+        for field in string_fields:
+            if field.dtype == DataType.VARCHAR:
+                string_values = cf.gen_string(default_nb)
+                for i, row in enumerate(rows):
+                    row[field.name] = string_values[i]
+
+        # 5. Insert data
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == ct.default_nb
+
+        # 6. Verify num entities
+        self.flush(client, collection_name)
+        num_entities = self.get_collection_stats(client, collection_name)[0]
+        assert num_entities.get("row_count", None) == ct.default_nb
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_insert_string_field_length_exceed(self):
+        """
+        target: test insert string field exceed the maximum length
+        method: 1.create a collection with VARCHAR field max_length=65535
+                2.Insert string field length is exceeded maximum value of 65535
+        expected: Raise exceptions
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create collection with explicit schema (VARCHAR field max_length=65535)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=65535)
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 2. Generate row data with string field exceeding max length (65535)
+        max_length = 65535
+        rng = np.random.default_rng(seed=19530)
+        # Generate a string that exceeds max length
+        long_string = cf.gen_str_by_length(length=max_length + 1)
+
+        # Generate normal data for one row
+        rows = [{default_primary_key_field_name: 0, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: 0.0, default_string_field_name: long_string}]
+
+        # 3. Verify error on insert
+        error = {ct.err_code: 1100, ct.err_msg: 'length of varchar field varchar exceeds max length'}
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("str_field_value", ["", "    "])
+    def test_milvus_client_insert_string_field_space_empty(self, str_field_value):
+        """
+        target: test create collection with string field
+        method: 1.create a collection
+                2.Insert string field with space or empty string
+        expected: Insert successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 100
+
+        # 1. Create collection with default schema
+        self.create_collection(client, collection_name, default_dim)
+
+        # 2. Generate row data with string field set to empty or space-only string
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random((1, default_dim))[0]),
+            default_float_field_name: i * 1.0,
+            default_string_field_name: str_field_value  # Empty string or space-only string
+        } for i in range(nb)]
+
+        # 3. Insert data
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == nb
+
+        # 4. Verify num entities
+        self.flush(client, collection_name)
+        num_entities = self.get_collection_stats(client, collection_name)[0]
+        assert num_entities.get("row_count", None) == nb
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("str_field_value", ["", "    "])
+    def test_milvus_client_insert_string_field_is_pk_and_empty(self, str_field_value):
+        """
+        target: test create collection with string field is primary
+        method: 1.create a collection
+                2.Insert string field with empty or space-only string, string field is pk
+        expected: Insert successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 100
+
+        # 1. Create schema with string field as primary key (matching gen_string_pk_default_collection_schema)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 3. Generate row data with string field (primary key) set to empty or space-only string
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            ct.default_int64_field_name: i,
+            default_float_field_name: i * 1.0,
+            ct.default_string_field_name: str_field_value,  # Empty string or space-only string as primary key
+            default_vector_field_name: list(rng.random((1, default_dim))[0])
+        } for i in range(nb)]
+
+        # 4. Insert data
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == nb
+
+        # 5. Verify num entities
+        self.flush(client, collection_name)
+        num_entities = self.get_collection_stats(client, collection_name)[0]
+        assert num_entities.get("row_count", None) == nb
 
         self.drop_collection(client, collection_name)

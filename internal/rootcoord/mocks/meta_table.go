@@ -79,6 +79,53 @@ func (_c *IMetaTable_AddCollection_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// AddFileResource provides a mock function with given fields: ctx, resource
+func (_m *IMetaTable) AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error {
+	ret := _m.Called(ctx, resource)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddFileResource")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.FileResourceInfo) error); ok {
+		r0 = rf(ctx, resource)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_AddFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddFileResource'
+type IMetaTable_AddFileResource_Call struct {
+	*mock.Call
+}
+
+// AddFileResource is a helper method to define mock.On call
+//   - ctx context.Context
+//   - resource *internalpb.FileResourceInfo
+func (_e *IMetaTable_Expecter) AddFileResource(ctx interface{}, resource interface{}) *IMetaTable_AddFileResource_Call {
+	return &IMetaTable_AddFileResource_Call{Call: _e.mock.On("AddFileResource", ctx, resource)}
+}
+
+func (_c *IMetaTable_AddFileResource_Call) Run(run func(ctx context.Context, resource *internalpb.FileResourceInfo)) *IMetaTable_AddFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.FileResourceInfo))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_AddFileResource_Call) Return(_a0 error) *IMetaTable_AddFileResource_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_AddFileResource_Call) RunAndReturn(run func(context.Context, *internalpb.FileResourceInfo) error) *IMetaTable_AddFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AddPartition provides a mock function with given fields: ctx, partition
 func (_m *IMetaTable) AddPartition(ctx context.Context, partition *model.Partition) error {
 	ret := _m.Called(ctx, partition)
@@ -2960,6 +3007,64 @@ func (_c *IMetaTable_ListDatabases_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// ListFileResource provides a mock function with given fields: ctx
+func (_m *IMetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListFileResource")
+	}
+
+	var r0 []*internalpb.FileResourceInfo
+	var r1 uint64
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*internalpb.FileResourceInfo, uint64)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []*internalpb.FileResourceInfo); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*internalpb.FileResourceInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) uint64); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Get(1).(uint64)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_ListFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListFileResource'
+type IMetaTable_ListFileResource_Call struct {
+	*mock.Call
+}
+
+// ListFileResource is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *IMetaTable_Expecter) ListFileResource(ctx interface{}) *IMetaTable_ListFileResource_Call {
+	return &IMetaTable_ListFileResource_Call{Call: _e.mock.On("ListFileResource", ctx)}
+}
+
+func (_c *IMetaTable_ListFileResource_Call) Run(run func(ctx context.Context)) *IMetaTable_ListFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ListFileResource_Call) Return(_a0 []*internalpb.FileResourceInfo, _a1 uint64) *IMetaTable_ListFileResource_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_ListFileResource_Call) RunAndReturn(run func(context.Context) ([]*internalpb.FileResourceInfo, uint64)) *IMetaTable_ListFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListPolicy provides a mock function with given fields: ctx, tenant
 func (_m *IMetaTable) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {
 	ret := _m.Called(ctx, tenant)
@@ -3328,6 +3433,63 @@ func (_c *IMetaTable_RemoveCollection_Call) Return(_a0 error) *IMetaTable_Remove
 }
 
 func (_c *IMetaTable_RemoveCollection_Call) RunAndReturn(run func(context.Context, int64, uint64) error) *IMetaTable_RemoveCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveFileResource provides a mock function with given fields: ctx, name
+func (_m *IMetaTable) RemoveFileResource(ctx context.Context, name string) (error, bool) {
+	ret := _m.Called(ctx, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveFileResource")
+	}
+
+	var r0 error
+	var r1 bool
+	if rf, ok := ret.Get(0).(func(context.Context, string) (error, bool)); ok {
+		return rf(ctx, name)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, name)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) bool); ok {
+		r1 = rf(ctx, name)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_RemoveFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveFileResource'
+type IMetaTable_RemoveFileResource_Call struct {
+	*mock.Call
+}
+
+// RemoveFileResource is a helper method to define mock.On call
+//   - ctx context.Context
+//   - name string
+func (_e *IMetaTable_Expecter) RemoveFileResource(ctx interface{}, name interface{}) *IMetaTable_RemoveFileResource_Call {
+	return &IMetaTable_RemoveFileResource_Call{Call: _e.mock.On("RemoveFileResource", ctx, name)}
+}
+
+func (_c *IMetaTable_RemoveFileResource_Call) Run(run func(ctx context.Context, name string)) *IMetaTable_RemoveFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_RemoveFileResource_Call) Return(_a0 error, _a1 bool) *IMetaTable_RemoveFileResource_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_RemoveFileResource_Call) RunAndReturn(run func(context.Context, string) (error, bool)) *IMetaTable_RemoveFileResource_Call {
 	_c.Call.Return(run)
 	return _c
 }

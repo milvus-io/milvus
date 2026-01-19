@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/rootcoord/mock_tombstone"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -1082,5 +1083,11 @@ func newMockDdlTsLockManager() *mockDdlTsLockManager {
 func withDdlTsLockManager(m DdlTsLockManager) Opt {
 	return func(c *Core) {
 		c.ddlTsLockManager = m
+	}
+}
+
+func withStorage(s storage.ChunkManager) Opt {
+	return func(c *Core) {
+		c.storage = s
 	}
 }

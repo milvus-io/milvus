@@ -107,6 +107,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.schema = schema
+
 	channels, err := node.chMgr.getVChannels(collectionID)
 	if err != nil {
 		return err

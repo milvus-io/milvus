@@ -62,6 +62,12 @@ class IArrayOffsets {
     virtual FixedVector<int32_t>
     RowBitsetToElementOffsets(const TargetBitmapView& row_bitset,
                               int64_t row_start) const = 0;
+
+    // Convert row offsets to element offsets
+    // Returns element IDs for all specified rows
+    virtual FixedVector<int32_t>
+    RowOffsetsToElementOffsets(
+        const FixedVector<int32_t>& row_offsets) const = 0;
 };
 
 class ArrayOffsetsSealed : public IArrayOffsets {
@@ -109,6 +115,10 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     RowBitsetToElementOffsets(const TargetBitmapView& row_bitset,
                               int64_t row_start) const override;
 
+    FixedVector<int32_t>
+    RowOffsetsToElementOffsets(
+        const FixedVector<int32_t>& row_offsets) const override;
+
     static std::shared_ptr<ArrayOffsetsSealed>
     BuildFromSegment(const void* segment, const FieldMeta& field_meta);
 
@@ -151,6 +161,10 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
     FixedVector<int32_t>
     RowBitsetToElementOffsets(const TargetBitmapView& row_bitset,
                               int64_t row_start) const override;
+
+    FixedVector<int32_t>
+    RowOffsetsToElementOffsets(
+        const FixedVector<int32_t>& row_offsets) const override;
 
  private:
     struct PendingRow {

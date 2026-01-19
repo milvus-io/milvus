@@ -69,7 +69,7 @@ func TestEmbeddingOK(t *testing.T) {
 
 	{
 		c, _ := NewCohereClient("mock_key")
-		ret, err := c.Embedding(url, "cohere-3", []string{"sentence"}, "search_document", "float", "END", 0)
+		ret, err := c.Embedding(url, "cohere-3", []string{"sentence"}, "search_document", "float", "END", 0, 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret.Embeddings.Float[0], []float32{0.0, 0.1})
 		assert.Equal(t, ret.Embeddings.Float[1], []float32{1.0, 1.1})
@@ -86,7 +86,7 @@ func TestEmbeddingFailed(t *testing.T) {
 
 	{
 		c, _ := NewCohereClient("mock_key")
-		_, err := c.Embedding(url, "cohere-3", []string{"sentence"}, "search_document", "float", "END", 0)
+		_, err := c.Embedding(url, "cohere-3", []string{"sentence"}, "search_document", "float", "END", 0, 0)
 		assert.True(t, err != nil)
 	}
 }

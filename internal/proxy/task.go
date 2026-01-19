@@ -612,6 +612,7 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 	if t.oldSchema == nil {
 		return merr.WrapErrParameterInvalidMsg("empty old schema in add field task")
 	}
+
 	t.fieldSchema = &schemapb.FieldSchema{}
 	err := proto.Unmarshal(t.GetSchema(), t.fieldSchema)
 	if err != nil {
@@ -1564,6 +1565,7 @@ var allowedAlterProps = []string{
 	common.MaxLengthKey,
 	common.MmapEnabledKey,
 	common.MaxCapacityKey,
+	common.FieldDescriptionKey,
 }
 
 var allowedDropProps = []string{
@@ -1790,11 +1792,12 @@ func (t *createPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, t.GetDbName(), collName)
+	// Check partition key mode
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), collName)
 	if err != nil {
 		return err
 	}
-	if partitionKeyMode {
+	if typeutil.HasPartitionKey(collSchema.CollectionSchema) {
 		return errors.New("disable create partition if partition key mode is used")
 	}
 
@@ -1889,11 +1892,12 @@ func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	partitionKeyMode, err := isPartitionKeyMode(ctx, t.GetDbName(), collName)
+	// Check partition key mode
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), collName)
 	if err != nil {
 		return err
 	}
-	if partitionKeyMode {
+	if typeutil.HasPartitionKey(collSchema.CollectionSchema) {
 		return errors.New("disable drop partition if partition key mode is used")
 	}
 

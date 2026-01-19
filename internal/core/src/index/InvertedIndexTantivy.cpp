@@ -68,12 +68,14 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
     uint32_t tantivy_index_version,
     const storage::FileManagerContext& ctx,
     bool inverted_index_single_segment,
-    bool user_specified_doc_id)
+    bool user_specified_doc_id,
+    bool is_nested_index)
     : ScalarIndex<T>(INVERTED_INDEX_TYPE),
       schema_(ctx.fieldDataMeta.field_schema),
       tantivy_index_version_(tantivy_index_version),
       inverted_index_single_segment_(inverted_index_single_segment),
-      user_specified_doc_id_(user_specified_doc_id) {
+      user_specified_doc_id_(user_specified_doc_id),
+      is_nested_index_(is_nested_index) {
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
     // push init wrapper to load process
@@ -548,13 +550,25 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
             tantivy_index_version_,
             inverted_index_single_segment_);
     }
+    bool is_nested_index = config.find("is_nested_index") != config.end();
     if (!inverted_index_single_segment_) {
         if (config.find("is_array") != config.end()) {
             // only used in ut.
             auto arr = static_cast<const boost::container::vector<T>*>(values);
-            for (size_t i = 0; i < n; i++) {
-                wrapper_->template add_array_data(
-                    arr[i].data(), arr[i].size(), i);
+            if (is_nested_index) {
+                is_nested_index_ = true;
+                // For nested index, each array element is a separate document
+                int64_t offset = 0;
+                for (size_t i = 0; i < n; i++) {
+                    wrapper_->template add_data<T>(
+                        arr[i].data(), arr[i].size(), offset);
+                    offset += arr[i].size();
+                }
+            } else {
+                for (size_t i = 0; i < n; i++) {
+                    wrapper_->template add_array_data(
+                        arr[i].data(), arr[i].size(), i);
+                }
             }
         } else {
             wrapper_->add_data<T>(static_cast<const T*>(values), n, 0);
@@ -647,7 +661,11 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
         }
 
         case proto::schema::DataType::Array: {
-            build_index_for_array(field_datas);
+            if (is_nested_index_) {
+                build_index_for_array_nested(field_datas);
+            } else {
+                build_index_for_array(field_datas);
+            }
             break;
         }
 
@@ -726,6 +744,68 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
                 wrapper_->template add_array_data_by_single_segment_writer(
                     output.data(), length);
             }
+        }
+    }
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::build_index_for_array_nested(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+    using ElementType = std::conditional_t<std::is_same<T, int8_t>::value ||
+                                               std::is_same<T, int16_t>::value,
+                                           int32_t,
+                                           T>;
+
+    int64_t offset = 0;
+    int64_t row_offset = 0;
+    for (const auto& data : field_datas) {
+        auto n = data->get_num_rows();
+        auto array_column = static_cast<const Array*>(data->Data());
+        for (int64_t i = 0; i < n; i++, row_offset++) {
+            if (schema_.nullable() && !data->is_valid(i)) {
+                // Record null row offset, no elements to add
+                null_offset_.push_back(row_offset);
+                continue;
+            }
+            auto length = array_column[i].length();
+            wrapper_->template add_data<ElementType>(
+                reinterpret_cast<const ElementType*>(array_column[i].data()),
+                length,
+                offset);
+            offset += length;
+        }
+    }
+}
+
+template <>
+void
+InvertedIndexTantivy<std::string>::build_index_for_array_nested(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+    int64_t offset = 0;
+    int64_t row_offset = 0;
+    for (const auto& data : field_datas) {
+        auto n = data->get_num_rows();
+        auto array_column = static_cast<const Array*>(data->Data());
+        for (int64_t i = 0; i < n; i++, row_offset++) {
+            if (schema_.nullable() && !data->is_valid(i)) {
+                // Record null row offset, no elements to add
+                null_offset_.push_back(row_offset);
+                continue;
+            }
+            Assert(IsStringDataType(array_column[i].get_element_type()));
+            Assert(IsStringDataType(
+                static_cast<DataType>(schema_.element_type())));
+
+            std::vector<std::string> output;
+            auto length = array_column[i].length();
+            output.reserve(length);
+            for (int64_t j = 0; j < length; j++) {
+                output.push_back(
+                    array_column[i].template get_data<std::string>(j));
+            }
+            wrapper_->add_data(output.data(), length, offset);
+            offset += length;
         }
     }
 }

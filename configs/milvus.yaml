@@ -361,7 +361,7 @@ proxy:
   connectionClientInfoTTLSeconds: 86400 # inactive client info TTL duration, in seconds
   maxConnectionNum: 10000 # the max client info numbers that proxy should manage, avoid too many client infos
   gracefulStopTimeout: 30 # seconds. force stop node without graceful stop
-  slowQuerySpanInSeconds: 5 # query whose executed time exceeds the `slowQuerySpanInSeconds` can be considered slow, in seconds.
+  slowQuerySpanInSeconds: 1 # threshold for slow query detection in seconds. For Search/HybridSearch requests, the time is divided by nq for more accurate per-query measurement. Triggers slow log, WebUI display, and metrics.
   queryNodePooling:
     size: 10 # the size for shardleader(querynode) client pool
   partialResultRequiredDataRatio: 1 # partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result
@@ -436,6 +436,7 @@ queryCoord:
   checkNodeSessionInterval: 60 # the interval(in seconds) of check querynode cluster session
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   enableStoppingBalance: true # whether enable stopping balance
+  stoppingBalanceAssignPolicy: ScoreBased # assign policy for stopping balance, options: RoundRobin, RowCount, ScoreBased
   channelExclusiveNodeFactor: 4 # the least node number for enable channel's exclusive mode
   collectionObserverInterval: 200 # the interval of collection observer
   checkExecutedFlagInterval: 100 # the interval of check executed flag to force to pull dist

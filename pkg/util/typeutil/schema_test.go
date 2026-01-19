@@ -4893,6 +4893,91 @@ func TestIsBm25FunctionInputField(t *testing.T) {
 	assert.False(t, IsBm25FunctionInputField(nilSchema, nilSchema.Fields[0]))
 }
 
+func TestIsMinHashFunctionOutputField(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+			{Name: "output_field", DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "minhash_func",
+				Type:             schemapb.FunctionType_MinHash,
+				InputFieldNames:  []string{"input_field"},
+				OutputFieldNames: []string{"output_field"},
+			},
+		},
+	}
+	assert.False(t, IsMinHashFunctionOutputField(schema.Fields[0], schema))
+	assert.True(t, IsMinHashFunctionOutputField(schema.Fields[1], schema))
+
+	schemaWithIds := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", FieldID: 100, DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+			{Name: "output_field", FieldID: 101, DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:           "minhash_func",
+				Type:           schemapb.FunctionType_MinHash,
+				InputFieldIds:  []int64{100},
+				OutputFieldIds: []int64{101},
+			},
+		},
+	}
+	assert.False(t, IsMinHashFunctionOutputField(schemaWithIds.Fields[0], schemaWithIds))
+	assert.True(t, IsMinHashFunctionOutputField(schemaWithIds.Fields[1], schemaWithIds))
+
+	nonMinHashSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", DataType: schemapb.DataType_VarChar},
+			{Name: "output_field", DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "other_func",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"input_field"},
+				OutputFieldNames: []string{"output_field"},
+			},
+		},
+	}
+	assert.False(t, IsMinHashFunctionOutputField(nonMinHashSchema.Fields[1], nonMinHashSchema))
+
+	nonBinarySchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", DataType: schemapb.DataType_VarChar},
+			{Name: "output_field", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "minhash_func",
+				Type:             schemapb.FunctionType_MinHash,
+				InputFieldNames:  []string{"input_field"},
+				OutputFieldNames: []string{"output_field"},
+			},
+		},
+	}
+	assert.False(t, IsMinHashFunctionOutputField(nonBinarySchema.Fields[1], nonBinarySchema))
+
+	// Test with field not marked as function output
+	nonFunctionOutputSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", DataType: schemapb.DataType_VarChar},
+			{Name: "output_field", DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: false},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "minhash_func",
+				Type:             schemapb.FunctionType_MinHash,
+				InputFieldNames:  []string{"input_field"},
+				OutputFieldNames: []string{"output_field"},
+			},
+		},
+	}
+	assert.False(t, IsMinHashFunctionOutputField(nonFunctionOutputSchema.Fields[1], nonFunctionOutputSchema))
+}
+
 func TestSchemaHelper_GetFunctionByOutputField(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{

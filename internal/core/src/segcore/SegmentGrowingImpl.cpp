@@ -1441,22 +1441,10 @@ SegmentGrowingImpl::bulk_subscript_ptr_impl(
     google::protobuf::RepeatedPtrField<std::string>* dst) const {
     auto vec = dynamic_cast<const ConcurrentVector<S>*>(vec_raw);
     auto& src = *vec;
-    if constexpr (std::is_same_v<S, Json>) {
-        // For Json type, we must use operator[] instead of view_element()
-        // to ensure the Json object lives long enough. view_element() returns
-        // a string_view that may point to memory owned by a temporary Json
-        // object, which gets destroyed before we can construct std::string.
-        // Using operator[] copies the Json object, extending its lifetime.
-        for (int64_t i = 0; i < count; ++i) {
-            auto offset = seg_offsets[i];
-            Json json = src[offset];  // Copy Json object to extend lifetime
-            dst->at(i) = std::string(json.data());
-        }
-    } else {
-        for (int64_t i = 0; i < count; ++i) {
-            auto offset = seg_offsets[i];
-            dst->at(i) = std::string(src.view_element(offset));
-        }
+    for (int64_t i = 0; i < count; ++i) {
+        auto offset = seg_offsets[i];
+        auto view = src.view_element(offset);
+        dst->at(i).assign(view.data(), view.size());
     }
 }
 
@@ -1983,7 +1971,9 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         schema_->get_primary_field_id().value_or(FieldId(-1));
     auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                           .GetProperties();
-    auto column_groups = GetColumnGroups(manifest_path, properties);
+    auto loon_manifest = GetLoonManifest(manifest_path, properties);
+    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
+        loon_manifest->columnGroups());
 
     auto arrow_schema = schema_->ConvertToArrowSchema();
     reader_ = milvus_storage::api::Reader::create(
@@ -2051,7 +2041,7 @@ SegmentGrowingImpl::LoadColumnGroup(
     int64_t index) {
     AssertInfo(index < column_groups->size(),
                "load column group index out of range");
-    auto column_group = column_groups->get_column_group(index);
+    auto column_group = column_groups->at(index);
     LOG_INFO("Loading segment {} column group {}", id_, index);
 
     auto chunk_reader_result = reader_->get_chunk_reader(index);
