@@ -231,7 +231,6 @@ func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 					IndexVersion:        1,
 					NumRows:             1000,
 					CurrentIndexVersion: 2,
-					IndexStoreVersion:   3,
 				},
 			},
 			SegmentSize:     8192,
@@ -332,7 +331,6 @@ func TestConvertToSegcoreSegmentLoadInfo(t *testing.T) {
 		assert.Equal(t, src.IndexInfos[0].IndexVersion, result.IndexInfos[0].IndexVersion)
 		assert.Equal(t, src.IndexInfos[0].NumRows, result.IndexInfos[0].NumRows)
 		assert.Equal(t, src.IndexInfos[0].CurrentIndexVersion, result.IndexInfos[0].CurrentIndexVersion)
-		assert.Equal(t, src.IndexInfos[0].IndexStoreVersion, result.IndexInfos[0].IndexStoreVersion)
 
 		// Validate TextStatsLogs conversion
 		assert.Equal(t, len(src.TextStatsLogs), len(result.TextStatsLogs))

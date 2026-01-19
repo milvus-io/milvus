@@ -79,7 +79,7 @@ message SegmentIndex {
     uint64 serialize_size = 14; // the total size of index file at oos. (may be compress)
     bool write_handoff = 15;
     int32 current_index_version = 16;
-    int64 index_store_version = 17;
+    int64 index_store_version = 17 [deprecated = true];
     uint64 finished_time = 18;
     uint64 mem_size = 19; // the total size of index file at local (disk or memory) before loading by knowhere. (not compress)
     int32 current_scalar_index_version = 20;

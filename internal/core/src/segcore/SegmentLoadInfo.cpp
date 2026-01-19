@@ -64,8 +64,6 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     load_index_info.index_id = field_index_info->indexid();
     load_index_info.index_build_id = field_index_info->buildid();
     load_index_info.index_version = field_index_info->index_version();
-    load_index_info.index_store_version =
-        field_index_info->index_store_version();
     load_index_info.index_engine_version =
         static_cast<IndexVersion>(field_index_info->current_index_version());
     load_index_info.index_size = field_index_info->index_size();
