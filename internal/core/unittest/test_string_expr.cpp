@@ -1664,3 +1664,181 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFieldsNullable) {
               N / 2);
     ASSERT_EQ(retrieved->fields_data(0).valid_data().size(), N / 2);
 }
+
+// Test: NOT (a IS NOT NULL) - verifies that the result valid bits are always true
+// because IsNull/IsNotNull expressions always produce valid (non-NULL) results,
+// and NOT applied to valid results also produces valid results.
+TEST(StringExpr, NotIsNotNullExpr) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("str", DataType::VARCHAR, true);
+    schema->AddDebugField(
+        "fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto pk = schema->AddDebugField("int64", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    const auto& str_meta = schema->operator[](FieldName("str"));
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 1000;
+    FixedVector<bool> valid_data;
+    int num_iters = 10;
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter);
+        auto new_str_valid_col = raw_data.get_col_valid(str_meta.get_id());
+        valid_data.insert(valid_data.end(),
+                          new_str_valid_col.begin(),
+                          new_str_valid_col.end());
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+
+    // Create NullExpr for IS NOT NULL
+    auto null_expr = std::make_shared<milvus::expr::NullExpr>(
+        expr::ColumnInfo(str_meta.get_id(), DataType::VARCHAR, {}, true),
+        NullExprType::NullExpr_NullOp_IsNotNull);
+
+    // Wrap with LogicalUnaryExpr (NOT)
+    auto not_expr = std::make_shared<milvus::expr::LogicalUnaryExpr>(
+        milvus::expr::LogicalUnaryExpr::OpType::LogicalNot, null_expr);
+
+    // Execute the expression using ExecuteQueryExpr
+    auto plan = milvus::test::CreateRetrievePlanByExpr(not_expr);
+    auto filter_node = plan->sources()[0];  // MvccNode -> FilterBitsNode
+    BitsetType final = ExecuteQueryExpr(
+        filter_node, seg_promote, N * num_iters, MAX_TIMESTAMP);
+
+    EXPECT_EQ(final.size(), N * num_iters);
+
+    for (int i = 0; i < N * num_iters; ++i) {
+        // NOT (IS NOT NULL) should equal IS NULL
+        // data[i] should be true if original was null, false if original was valid
+        bool expected_data = !valid_data[i];
+        ASSERT_EQ(final[i], expected_data) << "Data mismatch at index " << i;
+    }
+}
+
+// Test: NOT (a IS NULL) - verifies that the result valid bits are always true
+TEST(StringExpr, NotIsNullExpr) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("str", DataType::VARCHAR, true);
+    schema->AddDebugField(
+        "fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto pk = schema->AddDebugField("int64", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    const auto& str_meta = schema->operator[](FieldName("str"));
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 1000;
+    FixedVector<bool> valid_data;
+    int num_iters = 10;
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter);
+        auto new_str_valid_col = raw_data.get_col_valid(str_meta.get_id());
+        valid_data.insert(valid_data.end(),
+                          new_str_valid_col.begin(),
+                          new_str_valid_col.end());
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+
+    // Create NullExpr for IS NULL
+    auto null_expr = std::make_shared<milvus::expr::NullExpr>(
+        expr::ColumnInfo(str_meta.get_id(), DataType::VARCHAR, {}, true),
+        NullExprType::NullExpr_NullOp_IsNull);
+
+    // Wrap with LogicalUnaryExpr (NOT)
+    auto not_expr = std::make_shared<milvus::expr::LogicalUnaryExpr>(
+        milvus::expr::LogicalUnaryExpr::OpType::LogicalNot, null_expr);
+
+    // Execute the expression using ExecuteQueryExpr
+    auto plan = milvus::test::CreateRetrievePlanByExpr(not_expr);
+    auto filter_node = plan->sources()[0];  // MvccNode -> FilterBitsNode
+    BitsetType final = ExecuteQueryExpr(
+        filter_node, seg_promote, N * num_iters, MAX_TIMESTAMP);
+
+    EXPECT_EQ(final.size(), N * num_iters);
+
+    for (int i = 0; i < N * num_iters; ++i) {
+        // NOT (IS NULL) should equal IS NOT NULL
+        // data[i] should be true if original was valid, false if original was null
+        bool expected_data = valid_data[i];
+        ASSERT_EQ(final[i], expected_data) << "Data mismatch at index " << i;
+    }
+}
+
+// Test: (a IS NOT NULL) AND (b IS NOT NULL)
+// This tests the interaction between NullExpr and three-valued logic
+TEST(StringExpr, IsNotNullAndNullCondition) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("str", DataType::VARCHAR, true);
+    schema->AddDebugField("int_val", DataType::INT64, true);  // nullable int
+    schema->AddDebugField(
+        "fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    const auto& str_meta = schema->operator[](FieldName("str"));
+    const auto& int_meta = schema->operator[](FieldName("int_val"));
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 1000;
+    FixedVector<bool> str_valid_data;
+    FixedVector<bool> int_valid_data;
+    int num_iters = 10;
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter);
+        auto new_str_valid = raw_data.get_col_valid(str_meta.get_id());
+        auto new_int_valid = raw_data.get_col_valid(int_meta.get_id());
+        str_valid_data.insert(
+            str_valid_data.end(), new_str_valid.begin(), new_str_valid.end());
+        int_valid_data.insert(
+            int_valid_data.end(), new_int_valid.begin(), new_int_valid.end());
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+
+    // Create: (str IS NOT NULL) AND (int_val IS NOT NULL)
+    auto str_is_not_null = std::make_shared<milvus::expr::NullExpr>(
+        expr::ColumnInfo(str_meta.get_id(), DataType::VARCHAR, {}, true),
+        NullExprType::NullExpr_NullOp_IsNotNull);
+
+    auto int_is_not_null = std::make_shared<milvus::expr::NullExpr>(
+        expr::ColumnInfo(int_meta.get_id(), DataType::INT64, {}, true),
+        NullExprType::NullExpr_NullOp_IsNotNull);
+
+    auto and_expr = std::make_shared<milvus::expr::LogicalBinaryExpr>(
+        milvus::expr::LogicalBinaryExpr::OpType::And,
+        str_is_not_null,
+        int_is_not_null);
+
+    // Execute the expression using ExecuteQueryExpr
+    auto plan = milvus::test::CreateRetrievePlanByExpr(and_expr);
+    auto filter_node = plan->sources()[0];  // MvccNode -> FilterBitsNode
+    BitsetType final = ExecuteQueryExpr(
+        filter_node, seg_promote, N * num_iters, MAX_TIMESTAMP);
+
+    EXPECT_EQ(final.size(), N * num_iters);
+
+    for (int i = 0; i < N * num_iters; ++i) {
+        // (str IS NOT NULL) AND (int IS NOT NULL)
+        // Both operands always have valid=true, so result is always valid
+        bool expected_data = str_valid_data[i] && int_valid_data[i];
+        ASSERT_EQ(final[i], expected_data) << "Data mismatch at index " << i;
+    }
+}
