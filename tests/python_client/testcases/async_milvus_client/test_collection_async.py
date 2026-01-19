@@ -227,7 +227,6 @@ class TestAsyncMilvusClientCollectionValid(TestMilvusClientV2Base):
         """
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
-        client = self._client()
         
         # 1. create collection
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -244,7 +243,7 @@ class TestAsyncMilvusClientCollectionValid(TestMilvusClientV2Base):
         # 4. query
         result = await async_client.query(collection_name, filter=default_search_exp, output_fields=["count(*)"])
         assert result[0][0].get("count(*)", -1) == 0
-        seg = self.list_persistent_segments(client, collection_name)
+        seg = await async_client.list_persistent_segments(collection_name)
         assert len(seg[0]) == 0
         # 5. drop collection
         await async_client.drop_collection(collection_name)
