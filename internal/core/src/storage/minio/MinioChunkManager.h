@@ -43,9 +43,9 @@
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
 #include "log/Log.h"
-#include "storage/HuaweiCloudCredentialsProvider.h"
-#include "storage/AliyunCredentialsProvider.h"
-#include "storage/TencentCloudCredentialsProvider.h"
+#include "storage/huawei/HuaweiCloudCredentialsProvider.h"
+#include "storage/aliyun/AliyunCredentialsProvider.h"
+#include "storage/tencent/TencentCloudCredentialsProvider.h"
 
 namespace milvus::storage {
 
