@@ -98,7 +98,10 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", ut.ID()))
 	collID := ut.upsertMsg.DeleteMsg.CollectionID
-	ut.upsertMsg.DeleteMsg.PrimaryKeys = ut.oldIDs
+	if ut.upsertMsg.DeleteMsg.PrimaryKeys == nil {
+		// if primary keys are not set by queryPreExecute, use oldIDs to delete all given records
+		ut.upsertMsg.DeleteMsg.PrimaryKeys = ut.oldIDs
+	}
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collID))
 	// hash primary keys to channels

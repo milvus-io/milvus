@@ -78,9 +78,7 @@ NewPackedFFIReader(const char* manifest_path,
  * as a string instead of reading from a file path. This is useful when the
  * manifest has already been loaded or is generated dynamically.
  *
- * @param manifest_content      The manifest content as a null-terminated string.
- *                              Must be valid JSON or protobuf text format containing
- *                              the manifest data.
+ * @param loon_manifest         Loon Manifest to open FFI reader with
  * @param schema                Arrow schema defining the structure of the data.
  *                              Must be a valid ArrowSchema pointer conforming to
  *                              the Arrow C data interface specification.
@@ -105,7 +103,7 @@ NewPackedFFIReader(const char* manifest_path,
  *       be freed after this call returns.
  */
 CStatus
-NewPackedFFIReaderWithManifest(const ColumnGroupsHandle column_groups_handle,
+NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
                                struct ArrowSchema* schema,
                                char** needed_columns,
                                int64_t needed_columns_size,

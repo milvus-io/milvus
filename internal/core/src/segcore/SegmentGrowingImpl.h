@@ -37,6 +37,7 @@
 #include "query/PlanNode.h"
 #include "common/GeometryCache.h"
 #include "common/ArrayOffsets.h"
+#include "milvus-storage/reader.h"
 
 namespace milvus::segcore {
 

@@ -288,6 +288,18 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	s.Equal(internalpb.ImportJobState_Completed, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 }
 
+func (s *ImportCheckerSuite) manuallyUpdateJob(jobID int64, actions ...UpdateJobAction) {
+	meta := s.importMeta.(*importMeta)
+	meta.mu.Lock()
+	defer meta.mu.Unlock()
+	current := meta.jobs[jobID].(*importJob)
+	cloned := current.Clone().(*importJob)
+	for _, action := range actions {
+		action(cloned)
+	}
+	meta.jobs[jobID] = cloned
+}
+
 func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	mockErr := errors.New("mock err")
 	job := s.importMeta.GetJob(context.TODO(), s.jobID)
@@ -342,8 +354,7 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 
 	alloc.ExpectedCalls = nil
 	alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, mockErr)
-	err := s.importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
-	s.NoError(err)
+	s.manuallyUpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
 	s.checker.checkPreImportingJob(job)
 	importTasks = s.importMeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(ImportTaskType))
 	s.Equal(0, len(importTasks))
@@ -425,7 +436,7 @@ func (s *ImportCheckerSuite) TestCheckGC() {
 	taskProto := &datapb.ImportTaskV2{
 		JobID:            s.jobID,
 		TaskID:           1,
-		State:            datapb.ImportTaskStateV2_Failed,
+		State:            datapb.ImportTaskStateV2_InProgress,
 		SegmentIDs:       []int64{2},
 		SortedSegmentIDs: []int64{3},
 	}

@@ -606,7 +606,8 @@ func (p *MQConfig) Init(base *BaseTable) {
 		DefaultValue: "default",
 		Doc: `Default value: "default"
 Valid values: [default, pulsar, kafka, rocksmq, woodpecker]`,
-		Export: true,
+		Export:    true,
+		Immutable: true,
 	}
 	p.Type.Init(base.mgr)
 

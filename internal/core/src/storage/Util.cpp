@@ -1503,13 +1503,15 @@ GetFieldDatasFromManifest(
     std::optional<DataType> data_type,
     int64_t dim,
     std::optional<DataType> element_type) {
-    auto column_groups = GetColumnGroups(manifest_path, loon_ffi_properties);
+    auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
+    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
+        loon_manifest->columnGroups());
 
     // TODO remove manual check after loon support read null for non-exists field
     bool field_exists = false;
     const auto field_id_to_find = std::to_string(field_meta.field_id);
     for (size_t i = 0; i < column_groups->size() && !field_exists; i++) {
-        auto column_group = column_groups->get_column_group(i);
+        auto column_group = column_groups->at(i);
         for (const auto& column : column_group->columns) {
             if (column == field_id_to_find) {
                 field_exists = true;
