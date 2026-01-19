@@ -1568,12 +1568,7 @@ class SegmentExpr : public Expr {
                 std::move(func(index_ptr, values...)));
             cached_index_chunk_id_ = 0;
             cached_is_nested_index_ = index_ptr->IsNestedIndex();
-            cached_func_returns_row_level_ = func_returns_row_level;
 
-            // Get valid bitset
-            // For nested index, IsNotNull() returns element-level bitset (all true,
-            // since null rows don't have elements in the index).
-            // When func_returns_row_level=true, we need row-level valid bitset.
             if (cached_is_nested_index_ && func_returns_row_level) {
                 // TODO(SpadeA): now, nested index is only supported for Struct which
                 // does not support null now.
@@ -1590,7 +1585,7 @@ class SegmentExpr : public Expr {
 
         // If func already returns row-level bitset, skip element-to-row conversion
         bool need_element_slicing =
-            cached_is_nested_index_ && !cached_func_returns_row_level_;
+            cached_is_nested_index_ && !func_returns_row_level;
 
         if (need_element_slicing) {
             // Nested index with element-level result: batch by rows, slice elements
@@ -2107,8 +2102,6 @@ class SegmentExpr : public Expr {
     std::shared_ptr<TargetBitmap> cached_index_chunk_valid_res_{nullptr};
     // Cache whether index is nested index
     bool cached_is_nested_index_{false};
-    // Cache whether func returns row-level bitset (skip element slicing)
-    bool cached_func_returns_row_level_{false};
 
     // Cache for text match.
     std::shared_ptr<TargetBitmap> cached_match_res_{nullptr};
