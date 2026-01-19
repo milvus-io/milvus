@@ -78,7 +78,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceSearchResultWithEmtpyGroupDat
 		PrimaryFieldName: "",
 	}
 	results, err := reduceSearchResultDataWithGroupBy(context.Background(), []*schemapb.SearchResultData{emptyData},
-		nq, topk, "L2", schemapb.DataType_Int64, 0, 1)
+		nq, topk, "L2", schemapb.DataType_Int64, 0, 1, false)
 	struts.Error(err)
 	struts.ErrorContains(err, "failed to construct group by field data builder")
 	struts.Nil(results.Results.GetGroupByFieldValue())
@@ -165,7 +165,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceWithEmptyFieldsData() {
 			},
 		}
 
-		results, err := reduceSearchResultDataWithGroupBy(ctx, []*schemapb.SearchResultData{searchResultData1, searchResultData2}, nq, topK, "L2", schemapb.DataType_Int64, offset, int64(2))
+		results, err := reduceSearchResultDataWithGroupBy(ctx, []*schemapb.SearchResultData{searchResultData1, searchResultData2}, nq, topK, "L2", schemapb.DataType_Int64, offset, int64(2), false)
 		struts.NoError(err)
 		struts.NotNil(results)
 		// FieldsData should be empty since all inputs were empty
@@ -340,6 +340,110 @@ func (s *SearchReduceUtilTestSuite) TestReduceMaxSimMetricsComparison() {
 		s.Equal([]float32{1, 2, 3, 4}, results.Results.GetScores(),
 			"metric %s: Scores should be distances in ascending order", metricType)
 	}
+}
+
+func (struts *SearchReduceUtilTestSuite) TestReduceSearchResultWithStrictGroupSize() {
+	ctx := context.Background()
+	nq := int64(1)
+	topK := int64(10)
+	offset := int64(0)
+	groupSize := int64(2)
+
+	// Create search results where some groups have complete data and some don't
+	// Group "a" has 3 elements (ids 1, 4, 7) - complete (has >= groupSize)
+	// Group "b" has 2 elements (ids 2, 5) - complete (has == groupSize)
+	// Group "c" has 1 element (id 3) - incomplete (has < groupSize)
+	// Group "d" has 1 element (id 6) - incomplete (has < groupSize)
+	searchResultData1 := &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{1, 2, 3},
+				},
+			},
+		},
+		Scores:     []float32{0.9, 0.8, 0.7},
+		Topks:      []int64{3},
+		NumQueries: nq,
+		TopK:       topK,
+		FieldsData: []*schemapb.FieldData{},
+		GroupByFieldValue: &schemapb.FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldName: "group",
+			FieldId:   101,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"a", "b", "c"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	searchResultData2 := &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{4, 5, 6, 7},
+				},
+			},
+		},
+		Scores:     []float32{0.85, 0.75, 0.65, 0.55},
+		Topks:      []int64{4},
+		NumQueries: nq,
+		TopK:       topK,
+		FieldsData: []*schemapb.FieldData{},
+		GroupByFieldValue: &schemapb.FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldName: "group",
+			FieldId:   101,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"a", "b", "d", "a"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	struts.Run("strict_group_size_true_filters_incomplete", func() {
+		// With strictGroupSize=true, only groups with >= groupSize elements should be returned
+		results, err := reduceSearchResultDataWithGroupBy(ctx,
+			[]*schemapb.SearchResultData{searchResultData1, searchResultData2},
+			nq, topK, "L2", schemapb.DataType_Int64, offset, groupSize, true)
+
+		struts.NoError(err)
+		struts.NotNil(results)
+		// Group "a" has 3 elements (keep first 2: ids 1, 4)
+		// Group "b" has 2 elements (keep both: ids 2, 5)
+		// Groups "c" and "d" have only 1 element each, should be filtered out
+		// Total expected: 4 results
+		struts.Equal(4, len(results.Results.GetIds().GetIntId().GetData()))
+		struts.ElementsMatch([]int64{1, 4, 2, 5}, results.Results.GetIds().GetIntId().GetData())
+	})
+
+	struts.Run("strict_group_size_false_includes_incomplete", func() {
+		// With strictGroupSize=false, all groups should be returned
+		results, err := reduceSearchResultDataWithGroupBy(ctx,
+			[]*schemapb.SearchResultData{searchResultData1, searchResultData2},
+			nq, topK, "L2", schemapb.DataType_Int64, offset, groupSize, false)
+
+		struts.NoError(err)
+		struts.NotNil(results)
+		// Group "a" has 3 elements (keep first 2: ids 1, 4)
+		// Group "b" has 2 elements (keep both: ids 2, 5)
+		// Group "c" has 1 element (id 3)
+		// Group "d" has 1 element (id 6)
+		// Total expected: 6 results
+		struts.Equal(6, len(results.Results.GetIds().GetIntId().GetData()))
+		struts.ElementsMatch([]int64{1, 4, 2, 5, 3, 6}, results.Results.GetIds().GetIntId().GetData())
+	})
 }
 
 func TestSearchReduceUtilTestSuite(t *testing.T) {

@@ -5,14 +5,15 @@ import (
 )
 
 type ResultInfo struct {
-	nq             int64
-	topK           int64
-	metricType     string
-	pkType         schemapb.DataType
-	offset         int64
-	groupByFieldId int64
-	groupSize      int64
-	isAdvance      bool
+	nq              int64
+	topK            int64
+	metricType      string
+	pkType          schemapb.DataType
+	offset          int64
+	groupByFieldId  int64
+	groupSize       int64
+	strictGroupSize bool
+	isAdvance       bool
 }
 
 func NewReduceSearchResultInfo(
@@ -50,6 +51,11 @@ func (r *ResultInfo) WithGroupSize(groupSize int64) *ResultInfo {
 	return r
 }
 
+func (r *ResultInfo) WithStrictGroupSize(strictGroupSize bool) *ResultInfo {
+	r.strictGroupSize = strictGroupSize
+	return r
+}
+
 func (r *ResultInfo) WithAdvance(advance bool) *ResultInfo {
 	r.isAdvance = advance
 	return r
@@ -81,6 +87,10 @@ func (r *ResultInfo) GetGroupByFieldId() int64 {
 
 func (r *ResultInfo) GetGroupSize() int64 {
 	return r.groupSize
+}
+
+func (r *ResultInfo) GetStrictGroupSize() bool {
+	return r.strictGroupSize
 }
 
 func (r *ResultInfo) GetIsAdvance() bool {
