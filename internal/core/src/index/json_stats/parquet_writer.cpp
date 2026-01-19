@@ -81,12 +81,13 @@ JsonStatsParquetWriter::WriteCurrentBatch() {
     }
 
     std::vector<std::shared_ptr<arrow::Array>> arrays;
+    arrays.reserve(builders_.size());
     for (auto& builder : builders_) {
         std::shared_ptr<arrow::Array> array;
         auto status = builder->Finish(&array);
         AssertInfo(
             status.ok(), "failed to finish builder: {}", status.ToString());
-        arrays.push_back(array);
+        arrays.push_back(std::move(array));
         builder->Reset();
     }
 
