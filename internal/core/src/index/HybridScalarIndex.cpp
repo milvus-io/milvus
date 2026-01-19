@@ -21,7 +21,6 @@
 #include "common/Common.h"
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
-#include "index/StringIndexSort.h"
 #include "index/Utils.h"
 #include "storage/Util.h"
 
@@ -55,9 +54,13 @@ HybridScalarIndex<T>::SelectIndexBuildType(size_t n, const T* values) {
         distinct_vals.insert(values[i]);
     }
 
-    // Decide whether to select bitmap index or stlsort
+    // Decide whether to select bitmap index or inverted sort
     if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
-        internal_index_type_ = ScalarIndexType::STLSORT;
+        if constexpr (std::is_integral_v<T>) {
+            internal_index_type_ = ScalarIndexType::STLSORT;
+        } else {
+            internal_index_type_ = ScalarIndexType::INVERTED;
+        }
     } else {
         internal_index_type_ = ScalarIndexType::BITMAP;
     }
@@ -76,9 +79,9 @@ HybridScalarIndex<std::string>::SelectIndexBuildType(
         }
     }
 
-    // Decide whether to select bitmap index or stlsort
+    // Decide whether to select bitmap index or inverted index
     if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
-        internal_index_type_ = ScalarIndexType::STLSORT;
+        internal_index_type_ = ScalarIndexType::INVERTED;
     } else {
         internal_index_type_ = ScalarIndexType::BITMAP;
     }
@@ -101,9 +104,13 @@ HybridScalarIndex<T>::SelectBuildTypeForPrimitiveType(
         }
     }
 
-    // Decide whether to select bitmap index or stlsort
+    // Decide whether to select bitmap index or inverted sort
     if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
-        internal_index_type_ = ScalarIndexType::STLSORT;
+        if constexpr (std::is_integral_v<T>) {
+            internal_index_type_ = ScalarIndexType::STLSORT;
+        } else {
+            internal_index_type_ = ScalarIndexType::INVERTED;
+        }
     } else {
         internal_index_type_ = ScalarIndexType::BITMAP;
     }
@@ -126,9 +133,9 @@ HybridScalarIndex<std::string>::SelectBuildTypeForPrimitiveType(
         }
     }
 
-    // Decide whether to select bitmap index or stlsort
+    // Decide whether to select bitmap index or inverted sort
     if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
-        internal_index_type_ = ScalarIndexType::STLSORT;
+        internal_index_type_ = ScalarIndexType::INVERTED;
     } else {
         internal_index_type_ = ScalarIndexType::BITMAP;
     }
@@ -216,9 +223,6 @@ HybridScalarIndex<std::string>::GetInternalIndex() {
     } else if (internal_index_type_ == ScalarIndexType::MARISA) {
         internal_index_ =
             std::make_shared<StringIndexMarisa>(file_manager_context_);
-    } else if (internal_index_type_ == ScalarIndexType::STLSORT) {
-        internal_index_ =
-            std::make_shared<StringIndexSort>(file_manager_context_);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
         internal_index_ = std::make_shared<InvertedIndexTantivy<std::string>>(
             tantivy_index_version_, file_manager_context_);
