@@ -104,6 +104,7 @@ PhyFilterBitsNode::GetOutput() {
         }
     }
     bitset.flip();
+
     AssertInfo(bitset.size() == need_process_rows_,
                "bitset size: {}, need_process_rows_: {}",
                bitset.size(),

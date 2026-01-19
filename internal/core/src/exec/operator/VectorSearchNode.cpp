@@ -96,8 +96,10 @@ PhyVectorSearchNode::GetOutput() {
     //
     // When embedding search embedding on embedding list is used, which means element_level_ is true, we need to transform doc-level
     // bitset to element-level bitset. In pre-filter path, ElementFilterBitsNode already transforms the bitset. We need to transform it
-    // in iterative filter path.
-    if (milvus::exec::UseVectorIterator(search_info_) && ph.element_level_) {
+    // in iterative filter path or when ElementFilterBitsNode is not present (e.g., only doc-level filter without element-level filter).
+    //
+    // Check if bitset needs conversion: element_level search is requested but bitset hasn't been converted yet
+    if (ph.element_level_ && !query_context_->bitset_is_element_level()) {
         auto col_input = GetColumnVector(input_);
         TargetBitmapView view(col_input->GetRawData(), col_input->size());
         TargetBitmapView valid_view(col_input->GetValidRawData(),

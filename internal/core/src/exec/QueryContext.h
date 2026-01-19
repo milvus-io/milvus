@@ -362,6 +362,16 @@ class QueryContext : public Context {
         return element_level_bitset_.has_value();
     }
 
+    void
+    set_bitset_is_element_level(bool is_element_level) {
+        bitset_is_element_level_ = is_element_level;
+    }
+
+    bool
+    bitset_is_element_level() const {
+        return bitset_is_element_level_;
+    }
+
  private:
     folly::Executor* executor_;
     //folly::Executor::KeepAlive<> executor_keepalive_;
@@ -396,6 +406,9 @@ class QueryContext : public Context {
     std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
     int64_t active_element_count_{0};  // Total elements in active documents
     std::optional<TargetBitmap> element_level_bitset_;
+    // Whether the current bitset has been converted to element-level
+    // Set by ElementFilterBitsNode after conversion, checked by VectorSearchNode
+    bool bitset_is_element_level_{false};
 };
 
 // Represent the state of one thread of query execution.

@@ -112,6 +112,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#MulDivMod.
 	VisitMulDivMod(ctx *MulDivModContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#StructField.
+	VisitStructField(ctx *StructFieldContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#LogicalAnd.
 	VisitLogicalAnd(ctx *LogicalAndContext) interface{}
 

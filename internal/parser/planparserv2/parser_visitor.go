@@ -1377,6 +1377,34 @@ func (v *ParserVisitor) VisitJSONIdentifier(ctx *parser.JSONIdentifierContext) i
 	}
 }
 
+// VisitStructField handles struct_array[sub_field] syntax for struct sub-field access.
+func (v *ParserVisitor) VisitStructField(ctx *parser.StructFieldContext) interface{} {
+	// Get the full identifier text, e.g., "struct_array[sub_int]"
+	identifier := ctx.StructFieldIdentifier().GetText()
+
+	// Look up the field directly by its full name
+	field, err := v.schema.GetFieldFromName(identifier)
+	if err != nil {
+		return fmt.Errorf("struct field not found: %s, error: %s", identifier, err)
+	}
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ColumnExpr{
+				ColumnExpr: &planpb.ColumnExpr{
+					Info: &planpb.ColumnInfo{
+						FieldId:     field.FieldID,
+						DataType:    field.DataType,
+						ElementType: field.GetElementType(),
+					},
+				},
+			},
+		},
+		dataType:      field.DataType,
+		nodeDependent: true,
+	}
+}
+
 func (v *ParserVisitor) VisitExists(ctx *parser.ExistsContext) interface{} {
 	child := ctx.Expr().Accept(v)
 	if err := getError(child); err != nil {

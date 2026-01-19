@@ -9,6 +9,7 @@ expr:
 	| StringLiteral											                                                # String
 	| (Identifier|Meta)           			      							                                # Identifier
 	| JSONIdentifier                                                                                        # JSONIdentifier
+	| StructFieldIdentifier                                                                                 # StructField
 	| StructSubFieldIdentifier                                                                              # StructSubField
 	| LBRACE Identifier RBRACE                                                                              # TemplateVariable
 	| '(' expr ')'											                                                # Parens
@@ -157,6 +158,7 @@ Meta: '$meta';
 
 StringLiteral: EncodingPrefix? ('"' DoubleSCharSequence? '"' | '\'' SingleSCharSequence? '\'');
 JSONIdentifier: (Identifier | Meta)('[' (StringLiteral | DecimalConstant) ']')+;
+StructFieldIdentifier: Identifier '[' Identifier ']';
 StructSubFieldIdentifier: '$[' Identifier ']';
 
 fragment EncodingPrefix: 'u8' | 'u' | 'U' | 'L';
