@@ -160,6 +160,33 @@ func (s *CipherSuite) TestTidyDBCipherPropertiesError() {
 	s.Equal(ErrCipherPluginMissing, err)
 }
 
+func (s *CipherSuite) TestTidyDBCipherPropertiesInvalidValue() {
+	InitTestCipher()
+
+	// Test invalid cipher.enabled values
+	invalidValues := []string{"1", "0", "yes", "no", "enabled", "disabled", "on", "off", ""}
+	for _, invalidValue := range invalidValues {
+		props := []*commonpb.KeyValuePair{
+			{Key: common.EncryptionEnabledKey, Value: invalidValue},
+		}
+		_, err := TidyDBCipherProperties(1, props)
+		s.Error(err, "expected error for invalid value: %q", invalidValue)
+		s.Contains(err.Error(), "invalid value")
+		s.Contains(err.Error(), invalidValue)
+	}
+
+	// Test valid values should work (case-insensitive)
+	validValues := []string{"true", "false", "True", "False", "TRUE", "FALSE", "TrUe", "FaLsE"}
+	for _, validValue := range validValues {
+		props := []*commonpb.KeyValuePair{
+			{Key: common.EncryptionEnabledKey, Value: validValue},
+			{Key: common.EncryptionRootKeyKey, Value: "some-key"},
+		}
+		_, err := TidyDBCipherProperties(1, props)
+		s.NoError(err, "expected no error for valid value: %q", validValue)
+	}
+}
+
 func (s *CipherSuite) TestTestCipherInit() {
 	cipher := testCipher{}
 	err := cipher.Init(map[string]string{"key": "value"})
@@ -419,6 +446,20 @@ func (s *CipherSuite) TestTidyDBCipherPropertiesWithDefaultKey() {
 	s.False(hasKeyValue(result, common.EncryptionEnabledKey, "true"))
 	s.True(hasKeyValue(result, common.EncryptionEzIDKey, "107"))
 	s.True(hasKeyValue(result, common.EncryptionRootKeyKey, "default-kms-key"))
+	s.True(hasKeyValue(result, "other.key", "other.value"))
+
+	// Test 9: defaultKey is set, user provides key, no cipher.enabled -> encrypted with user key
+	// This tests that user key overrides defaultKey even when cipher.enabled is not specified
+	props = []*commonpb.KeyValuePair{
+		{Key: common.EncryptionRootKeyKey, Value: "user-custom-key"},
+		{Key: "other.key", Value: "other.value"},
+	}
+	result, err = TidyDBCipherProperties(108, props)
+	s.NoError(err)
+	s.True(IsDBEncrypted(result))
+	s.False(hasKeyValue(result, common.EncryptionEnabledKey, "true"))
+	s.True(hasKeyValue(result, common.EncryptionEzIDKey, "108"))
+	s.True(hasKeyValue(result, common.EncryptionRootKeyKey, "user-custom-key"))
 	s.True(hasKeyValue(result, "other.key", "other.value"))
 }
 

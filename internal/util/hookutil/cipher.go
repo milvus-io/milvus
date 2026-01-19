@@ -181,59 +181,52 @@ func CreateEZByDBProperties(dbProperties []*commonpb.KeyValuePair) error {
 	return nil
 }
 
-// When creating a new database with encryption eabled, set the ezID to the dbProperties,
-// and try to use the the config rootKey if rootKey not provided
-// An encrypted DB's properties will contain three properties:
-// cipher.enabled, cipher.ezID, cipher.key
+// When creating a new database
+// System will encrypt the DB If defaultKey is not empty.
+// However, if user controls with "cipher.enabled" and "cipher.key", respect the user's choice.
+// An encrypted DB's properties will contain two properties:
+// cipher.ezID, cipher.key
 //
 // Property consistency: DB without cipher.ezID and cipher.Key is NOT encrypted
-// - Encrypted DB: has cipher.ezID and cipher.Key are not empty
+// - Encrypted DB: cipher.ezID and cipher.key are not empty
 // - Non-encrypted DB: no cipher.* key in properties
 func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
-	encryptionEnabled := true
-	var userProvidedKey string
+	defaultRootKey := paramtable.GetCipherParams().DefaultRootKey.GetValue()
+	defaultEncrypt := len(defaultRootKey) > 0
 
 	for _, property := range dbProperties {
-		if property.Key == common.EncryptionEnabledKey {
-			encryptionEnabled = strings.ToLower(property.Value) == "true"
-		} else if property.Key == common.EncryptionRootKeyKey {
-			userProvidedKey = property.Value
+		switch property.Key {
+		case common.EncryptionEnabledKey:
+			value := strings.ToLower(property.Value)
+			if value != "true" && value != "false" {
+				return nil, fmt.Errorf("invalid value for %s: %q, must be \"true\" or \"false\"",
+					common.EncryptionEnabledKey, property.Value)
+			}
+			defaultEncrypt = value == "true"
+			log.Info("User explicitly controls encryption", zap.Int64("ezID", ezID), zap.Bool("value", defaultEncrypt))
+
+		case common.EncryptionRootKeyKey:
+			defaultRootKey = property.Value
+			log.Info("User explicitly set rootKey", zap.Int64("ezID", ezID), zap.String("value", property.GetValue()))
 		}
 	}
 
 	cipher := GetCipher()
-	if cipher == nil {
-		if encryptionEnabled || IsDBEncrypted(dbProperties) {
-			return nil, ErrCipherPluginMissing
-		}
-		return dbProperties, nil
+	// If cipher plugin is missing but encryption is requested, return error
+	if cipher == nil && defaultEncrypt {
+		return nil, ErrCipherPluginMissing
 	}
 
-	defaultRootKey := paramtable.GetCipherParams().DefaultRootKey.GetValue()
-	shouldEncrypt := encryptionEnabled && (userProvidedKey != "" || defaultRootKey != "")
-
-	result := make([]*commonpb.KeyValuePair, 0, len(dbProperties))
-	for _, property := range dbProperties {
-		if property.Key != common.EncryptionEnabledKey &&
-			property.Key != common.EncryptionEzIDKey &&
-			property.Key != common.EncryptionRootKeyKey {
-			result = append(result, property)
-		}
+	// No plugin or not encrypted
+	if cipher == nil || !defaultEncrypt {
+		return removeCipherProperties(dbProperties), nil
 	}
 
-	if !shouldEncrypt {
-		return result, nil
-	}
-
-	// encryption enabled
-	if userProvidedKey == "" && defaultRootKey == "" {
+	if defaultRootKey == "" {
 		return nil, fmt.Errorf("encryption enabled but no key provided and no default key configured")
 	}
 
-	if userProvidedKey == "" {
-		userProvidedKey = defaultRootKey
-	}
-
+	result := removeCipherProperties(dbProperties)
 	result = append(result,
 		&commonpb.KeyValuePair{
 			Key:   common.EncryptionEzIDKey,
@@ -241,11 +234,23 @@ func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) (
 		},
 		&commonpb.KeyValuePair{
 			Key:   common.EncryptionRootKeyKey,
-			Value: userProvidedKey,
+			Value: defaultRootKey,
 		},
 	)
 
 	return result, nil
+}
+
+func removeCipherProperties(properties []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+	result := make([]*commonpb.KeyValuePair, 0, len(properties))
+	for _, property := range properties {
+		if property.Key != common.EncryptionEnabledKey &&
+			property.Key != common.EncryptionEzIDKey &&
+			property.Key != common.EncryptionRootKeyKey {
+			result = append(result, property)
+		}
+	}
+	return result
 }
 
 func TidyCollPropsByDBProps(collProps, dbProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
