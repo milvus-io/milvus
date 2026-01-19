@@ -385,6 +385,30 @@ class TestMilvusClientV2Base(Base):
         return res, check_result
 
     @trace()
+    def truncate_collection(self, client, collection_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.truncate_collection, collection_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task,
+                                       check_items, check,
+                                       collection_name=collection_name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def list_persistent_segments(self, client, collection_name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.list_persistent_segments, collection_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task,
+                                       check_items, check,
+                                       collection_name=collection_name, **kwargs).run()
+        return res, check_result
+
+    @trace()
     def load_partitions(self, client, collection_name, partition_names, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
