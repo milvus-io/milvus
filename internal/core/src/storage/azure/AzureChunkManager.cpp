@@ -79,6 +79,8 @@ AzureChunkManager::AzureChunkManager(const StorageConfig& storage_config)
                 ? DEFAULT_CHUNK_MANAGER_REQUEST_TIMEOUT_MS
                 : storage_config.requestTimeoutMs,
             storage_config.useIAM);
+        
+        client_->BucketExists(storage_config.bucket_name);
     } catch (std::exception& err) {
         ThrowAzureError(
             "PreCheck",
