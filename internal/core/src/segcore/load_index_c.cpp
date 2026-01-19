@@ -326,6 +326,13 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
             load_index_info->uri = info_proto->uri();
             load_index_info->index_engine_version =
                 info_proto->index_engine_version();
+            // Inject scalar index version into index_params for scalar indexes
+            auto scalar_version = info_proto->current_scalar_index_version();
+            if (scalar_version > 0) {
+                load_index_info->index_params
+                    [milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
+                        std::to_string(scalar_version);
+            }
             load_index_info->schema = info_proto->field();
             load_index_info->index_size = info_proto->index_file_size();
             load_index_info->num_rows = info_proto->num_rows();
