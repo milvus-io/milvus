@@ -118,6 +118,11 @@ class Expr {
         return false;
     }
 
+    virtual bool
+    CanUseNestedIndex() const {
+        return false;
+    }
+
     virtual std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const {
         ThrowInfo(ErrorCode::NotImplemented, "not implemented");
@@ -1939,6 +1944,15 @@ class SegmentExpr : public Expr {
         }
 
         return true;
+    }
+
+    bool
+    CanUseNestedIndex() const override {
+        if (!CanUseIndex() || pinned_index_.empty()) {
+            return false;
+        }
+        auto* index_ptr = pinned_index_[0].get();
+        return index_ptr != nullptr && index_ptr->IsNestedIndex();
     }
 
     template <typename T>

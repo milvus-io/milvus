@@ -25,6 +25,7 @@
 #include <cstring>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <boost/container/vector.hpp>
 #include <folly/small_vector.h>
 
 #include "index/StringIndex.h"
@@ -47,7 +48,8 @@ class StringIndexSort : public StringIndex {
 
     explicit StringIndexSort(
         const storage::FileManagerContext& file_manager_context =
-            storage::FileManagerContext());
+            storage::FileManagerContext(),
+        bool is_nested_index = false);
 
     virtual ~StringIndexSort();
 
@@ -75,6 +77,14 @@ class StringIndexSort : public StringIndex {
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
+    void
+    BuildWithArrayDataNested(const std::vector<FieldDataPtr>& datas);
+
+    // For unit test only: build nested index with array data
+    void
+    BuildNestedForUT(size_t n,
+                     const boost::container::vector<std::string>* arrays);
+
     // See detailed format in StringIndexSortMemoryImpl::SerializeToBinary
     BinarySet
     Serialize(const Config& config) override;
@@ -91,6 +101,11 @@ class StringIndexSort : public StringIndex {
     void
     LoadWithoutAssemble(const BinarySet& binary_set,
                         const Config& config) override;
+
+    bool
+    IsNestedIndex() const override {
+        return is_nested_index_;
+    }
 
     // Query methods - delegated to impl
     const TargetBitmap
@@ -152,6 +167,8 @@ class StringIndexSort : public StringIndex {
 
     int64_t total_size_{0};
     std::unique_ptr<StringIndexSortImpl> impl_;
+
+    bool is_nested_index_ = false;
 };
 
 // Abstract interface for implementations
@@ -239,6 +256,12 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
                        size_t total_num_rows,
                        TargetBitmap& valid_bitset,
                        std::vector<int32_t>& idx_to_offsets);
+
+    void
+    BuildFromArrayDataNested(const std::vector<FieldDataPtr>& field_datas,
+                             size_t total_num_rows,
+                             TargetBitmap& valid_bitset,
+                             std::vector<int32_t>& idx_to_offsets);
 
     // Serialize to binary format
     // The binary format is : [unique_count][string_offsets][string_data][post_list_offsets][post_list_data][magic_code]
@@ -483,8 +506,10 @@ using StringIndexSortPtr = std::unique_ptr<StringIndexSort>;
 
 inline StringIndexSortPtr
 CreateStringIndexSort(const storage::FileManagerContext& file_manager_context =
-                          storage::FileManagerContext()) {
-    return std::make_unique<StringIndexSort>(file_manager_context);
+                          storage::FileManagerContext(),
+                      bool is_nested_index = false) {
+    return std::make_unique<StringIndexSort>(file_manager_context,
+                                             is_nested_index);
 }
 
 }  // namespace milvus::index
