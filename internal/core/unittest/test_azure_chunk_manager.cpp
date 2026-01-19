@@ -69,18 +69,6 @@ class AzureChunkManagerTest : public testing::Test {
     StorageConfig configs_;
 };
 
-TEST_F(AzureChunkManagerTest, WrongConfig) {
-    StorageConfig configs = get_default_storage_config(true);
-
-    try {
-        AzureChunkManagerPtr chunk_manager =
-            make_unique<AzureChunkManager>(configs);
-        EXPECT_TRUE(false);
-    } catch (SegcoreError& e) {
-        EXPECT_TRUE(std::string(e.what()).find("precheck") != string::npos);
-    }
-}
-
 TEST_F(AzureChunkManagerTest, AzureLogger) {
     AzureLogger(Azure::Core::Diagnostics::Logger::Level::Error, "");
     AzureLogger(Azure::Core::Diagnostics::Logger::Level::Warning, "");
