@@ -122,6 +122,7 @@ message LoadTextIndexInfo {
   common.LoadPriority load_priority = 8;
   bool enable_mmap = 9;
   int64 index_size = 10;
+  int32 current_scalar_index_version = 11;
 }
 
 message LoadJsonKeyIndexInfo {

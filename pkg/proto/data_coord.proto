@@ -526,6 +526,7 @@ message TextIndexStats {
   int64 log_size = 4;
   int64 memory_size = 5;
   int64 buildID = 6;
+  int32 current_scalar_index_version = 7;
 }
 
 message JsonKeyStats {

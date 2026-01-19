@@ -420,6 +420,7 @@ message FieldIndexInfo {
     int64 num_rows = 10;
     int32 current_index_version = 11;
     int64 index_store_version = 12;
+    int32 current_scalar_index_version = 13;
 }
 
 message JsonStatsInfo {
