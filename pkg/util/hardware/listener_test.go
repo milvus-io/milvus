@@ -9,7 +9,7 @@ import (
 )
 
 func TestListener(t *testing.T) {
-	w := NewSystemMetricsWatcher(20 * time.Millisecond)
+	w := newSystemMetricsWatcher(20 * time.Millisecond)
 	called := atomic.NewInt32(0)
 	l := &SystemMetricsListener{
 		Cooldown: 100 * time.Millisecond,
