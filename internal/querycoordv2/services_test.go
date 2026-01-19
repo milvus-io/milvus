@@ -705,7 +705,7 @@ func (suite *ServiceSuite) TestTransferNode() {
 
 	server.resourceObserver = observers.NewResourceObserver(server.meta)
 	server.resourceObserver.Start()
-	server.replicaObserver = observers.NewReplicaObserver(server.meta, server.dist)
+	server.replicaObserver = observers.NewReplicaObserver(server.meta, server.dist, server.targetMgr)
 	server.replicaObserver.Start()
 	defer server.resourceObserver.Stop()
 	defer server.replicaObserver.Stop()
@@ -1915,6 +1915,7 @@ func (suite *ServiceSuite) TestHandleNodeUp() {
 	suite.server.replicaObserver = observers.NewReplicaObserver(
 		suite.server.meta,
 		suite.server.dist,
+		suite.server.targetMgr,
 	)
 	suite.server.resourceObserver = observers.NewResourceObserver(
 		suite.server.meta,
