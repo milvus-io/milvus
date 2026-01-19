@@ -134,6 +134,19 @@ func (s *EventDispatcherSuite) TestDispatch() {
 
 		s.True(called.Load())
 	})
+
+	s.Run("dispatch_key_and_prefix_both_fire", func() {
+		keyCalled := atomic.NewBool(false)
+		prefixCalled := atomic.NewBool(false)
+
+		dispatcher.Register("trace.exporter", NewHandler("key_handler", func(*Event) { keyCalled.Store(true) }))
+		dispatcher.RegisterForKeyPrefix("trace", NewHandler("prefix_handler", func(*Event) { prefixCalled.Store(true) }))
+
+		dispatcher.Dispatch(newEvent("test", UpdateType, "trace.exporter", "stdout"))
+
+		s.True(keyCalled.Load())
+		s.True(prefixCalled.Load())
+	})
 }
 
 func TestEventDispatcher(t *testing.T) {
