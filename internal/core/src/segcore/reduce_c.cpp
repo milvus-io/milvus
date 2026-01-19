@@ -12,6 +12,8 @@
 #include <vector>
 #include "segcore/reduce/Reduce.h"
 #include "segcore/reduce/GroupReduce.h"
+#include "segcore/reduce/OrderByReduceHelper.h"
+#include "segcore/reduce/GroupOrderByReduceHelper.h"
 #include "common/QueryResult.h"
 #include "common/EasyAssert.h"
 #include "query/Plan.h"
@@ -106,7 +108,31 @@ ReduceSearchResultsAndFillData(CTraceContext c_trace,
         }
 
         std::shared_ptr<milvus::segcore::ReduceHelper> reduce_helper;
-        if (plan->plan_node_->search_info_.group_by_field_id_.has_value()) {
+        bool has_group_by =
+            plan->plan_node_->search_info_.group_by_field_id_.has_value();
+        bool has_order_by =
+            plan->plan_node_->search_info_.order_by_fields_.has_value() &&
+            !plan->plan_node_->search_info_.order_by_fields_.value().empty();
+
+        if (has_group_by && has_order_by) {
+            reduce_helper =
+                std::make_shared<milvus::segcore::GroupOrderByReduceHelper>(
+                    search_results,
+                    plan,
+                    slice_nqs,
+                    slice_topKs,
+                    num_slices,
+                    &trace_ctx);
+        } else if (has_order_by) {
+            reduce_helper =
+                std::make_shared<milvus::segcore::OrderByReduceHelper>(
+                    search_results,
+                    plan,
+                    slice_nqs,
+                    slice_topKs,
+                    num_slices,
+                    &trace_ctx);
+        } else if (has_group_by) {
             reduce_helper =
                 std::make_shared<milvus::segcore::GroupReduceHelper>(
                     search_results,

@@ -8,6 +8,7 @@ import (
 
 type FieldDataBuilder struct {
 	dt         schemapb.DataType
+	fieldId    int64
 	data       []any
 	valid      []bool
 	hasInvalid bool
@@ -19,6 +20,7 @@ func NewFieldDataBuilder(dt schemapb.DataType, fillZero bool, capacity int) (*Fi
 	switch dt {
 	case schemapb.DataType_Bool,
 		schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64,
+		schemapb.DataType_Float, schemapb.DataType_Double,
 		schemapb.DataType_Timestamptz, schemapb.DataType_VarChar:
 		return &FieldDataBuilder{
 			dt:       dt,
@@ -42,9 +44,15 @@ func (b *FieldDataBuilder) Add(data any) *FieldDataBuilder {
 	return b
 }
 
+func (b *FieldDataBuilder) SetFieldId(fieldId int64) *FieldDataBuilder {
+	b.fieldId = fieldId
+	return b
+}
+
 func (b *FieldDataBuilder) Build() *schemapb.FieldData {
 	field := &schemapb.FieldData{
-		Type: b.dt,
+		Type:    b.dt,
+		FieldId: b.fieldId,
 	}
 	if b.hasInvalid {
 		field.ValidData = b.valid
@@ -126,6 +134,46 @@ func (b *FieldDataBuilder) Build() *schemapb.FieldData {
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_TimestamptzData{
 					TimestamptzData: &schemapb.TimestamptzArray{
+						Data: val,
+					},
+				},
+			},
+		}
+	case schemapb.DataType_Float:
+		val := make([]float32, 0, len(b.valid))
+		validIdx := 0
+		for _, v := range b.valid {
+			if v {
+				val = append(val, b.data[validIdx].(float32))
+				validIdx++
+			} else if b.fillZero {
+				val = append(val, 0)
+			}
+		}
+		field.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_FloatData{
+					FloatData: &schemapb.FloatArray{
+						Data: val,
+					},
+				},
+			},
+		}
+	case schemapb.DataType_Double:
+		val := make([]float64, 0, len(b.valid))
+		validIdx := 0
+		for _, v := range b.valid {
+			if v {
+				val = append(val, b.data[validIdx].(float64))
+				validIdx++
+			} else if b.fillZero {
+				val = append(val, 0)
+			}
+		}
+		field.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_DoubleData{
+					DoubleData: &schemapb.DoubleArray{
 						Data: val,
 					},
 				},
