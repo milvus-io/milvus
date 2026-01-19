@@ -589,6 +589,9 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 		if !exist {
 			indexParams[common.BitmapCardinalityLimitKey] = paramtable.Get().AutoIndexConfig.BitmapCardinalityLimit.GetValue()
 		}
+		// Does not allow the user to specify the index type for hybrid index. This is by design.
+		indexParams[common.HybridLowCardinalityIndexTypeKey] = paramtable.Get().DataCoordCfg.HybridIndexLowCardinalityIndexType.GetValue()
+		indexParams[common.HybridHighCardinalityIndexTypeKey] = paramtable.Get().DataCoordCfg.HybridIndexHighCardinalityIndexType.GetValue()
 	}
 
 	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
