@@ -47,10 +47,11 @@ type ReplicaObserver struct {
 	stopOnce  sync.Once
 }
 
-func NewReplicaObserver(meta *meta.Meta, distMgr *meta.DistributionManager) *ReplicaObserver {
+func NewReplicaObserver(meta *meta.Meta, distMgr *meta.DistributionManager, targetMgr meta.TargetManagerInterface) *ReplicaObserver {
 	return &ReplicaObserver{
-		meta:    meta,
-		distMgr: distMgr,
+		meta:      meta,
+		distMgr:   distMgr,
+		targetMgr: targetMgr,
 	}
 }
 
