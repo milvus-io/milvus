@@ -2285,3 +2285,231 @@ class TestMilvusClientInsertString(TestMilvusClientV2Base):
         assert num_entities.get("row_count", None) == nb
 
         self.drop_collection(client, collection_name)
+
+class TestMilvusClientInsertArray(TestMilvusClientV2Base):
+    """
+      ******************************************************************
+      The following cases are used to test insert array
+      ******************************************************************
+    """
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("auto_id", [True, False])
+    def test_milvus_client_insert_array_data(self, auto_id):
+        """
+        target: test insert data with array fields
+        method: Insert data with array fields
+        expected: assert num entities
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        array_length = ct.default_max_capacity
+
+        # 1. Create schema with array fields using gen_array_collection_schema_by_client
+        schema = cf.gen_array_collection_schema_by_client(client, auto_id=auto_id, dim=default_dim,
+                                                          max_capacity=array_length, max_length=100,
+                                                          enable_dynamic_field=False, with_json=False)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 3. Generate row data with array fields
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+
+        # 4. Insert data
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == ct.default_nb
+
+        # 5. Verify num entities
+        self.flush(client, collection_name)
+        num_entities = self.get_collection_stats(client, collection_name)[0]
+        assert num_entities.get("row_count", None) == ct.default_nb
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_insert_array_empty_field(self):
+        """
+        target: test insert data with empty array field
+        method: 1.create collection with array fields
+                2.insert data with int32_array field set to empty list []
+        expected: insert successfully and verify num entities
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = ct.default_nb
+        array_length = ct.default_max_capacity
+
+        # 1. Create schema with array fields using gen_array_collection_schema_by_client
+        schema = cf.gen_array_collection_schema_by_client(client, auto_id=False, dim=default_dim,
+                                                          max_capacity=array_length, max_length=100,
+                                                          enable_dynamic_field=False, with_json=False)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 3. Generate row data with array fields, set int32_array to empty lists
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
+        # Set int32_array field to empty lists
+        for row in rows:
+            row[ct.default_int32_array_field_name] = []
+
+        # 4. Insert data
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == nb
+
+        # 5. Verify num entities
+        self.flush(client, collection_name)
+        num_entities = self.get_collection_stats(client, collection_name)[0]
+        assert num_entities.get("row_count", None) == nb
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_insert_array_length_differ(self):
+        """
+        target: test insert row data with different array lengths
+        method: 1.create collection with array fields
+                2.insert data with every row's array length differ
+        expected: insert successfully and verify num entities
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = ct.default_nb
+        array_length = ct.default_max_capacity
+
+        # 1. Create schema with array fields using gen_array_collection_schema_by_client
+        schema = cf.gen_array_collection_schema_by_client(client, auto_id=False, dim=default_dim,
+                                                          max_capacity=array_length, max_length=100,
+                                                          enable_dynamic_field=False, with_json=False)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 3. Generate row data with different array lengths for each row
+        rows = []
+        for i in range(nb):
+            arr_len1 = random.randint(0, array_length)
+            arr_len2 = random.randint(0, array_length)
+            row = {
+                ct.default_int64_field_name: i,
+                ct.default_float_vec_field_name: [random.random() for _ in range(default_dim)],
+                ct.default_int32_array_field_name: [np.int32(j) for j in range(arr_len1)],
+                ct.default_float_array_field_name: [np.float32(j) for j in range(arr_len2)],
+                ct.default_string_array_field_name: [str(j) for j in range(array_length)]
+            }
+            rows.append(row)
+
+        # 4. Insert data
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == nb
+
+        # 5. Verify num entities
+        self.flush(client, collection_name)
+        num_entities = self.get_collection_stats(client, collection_name)[0]
+        assert num_entities.get("row_count", None) == nb
+
+        # 6. Upsert 2 rows (matching original test)
+        upsert_data = cf.gen_row_data_by_schema(nb=2, schema=schema)
+        self.upsert(client, collection_name, upsert_data)
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_insert_array_length_invalid(self):
+        """
+        target: test insert array with length exceeding max_capacity
+        method: 1.create collection with array fields
+                2.insert data with array length > max_capacity
+        expected: raise error
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 11
+        dim = 32
+        array_length = ct.default_max_capacity
+
+        # 1. Create schema with array fields
+        schema = cf.gen_array_collection_schema_by_client(client, dim=dim)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, dimension=dim, schema=schema)
+
+        # 3. Generate row data
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
+
+        # 4. Set array length > max_capacity for the 2nd row (index 1)
+        arr_len = array_length + 1
+        rows[1][ct.default_float_array_field_name] = [np.float32(i) for i in range(arr_len)]
+
+        # 5. Verify error on insert
+        err_msg = f"the length ({arr_len}) of 1th array exceeds max capacity ({array_length})"
+        error = {ct.err_code: 1100, ct.err_msg: err_msg}
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_insert_array_type_invalid(self):
+        """
+        target: test insert array with invalid element type
+        method: 1.insert string values to an int array
+                2.upsert float values to a string array
+        expected: raise error
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        arr_len = 5
+        nb = 10
+        dim = 8
+
+        # 1. Create schema with array fields using gen_array_collection_schema_by_client
+        schema = cf.gen_array_collection_schema_by_client(client, dim=dim)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, dimension=dim, schema=schema)
+
+        # 3. Test 1: Insert string values to an int array
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
+        rows[1][ct.default_int32_array_field_name] = [str(i) for i in range(arr_len)]
+        err_msg = "The Input data type is inconsistent with defined schema"
+        error = {ct.err_code: 999, ct.err_msg: err_msg}
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
+
+        # 4. Test 2: Upsert float values to a string array
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
+        rows[1][ct.default_string_array_field_name] = [np.float32(i) for i in range(arr_len)]
+        self.upsert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_insert_array_mixed_value(self):
+        """
+        target: test insert array consisting of mixed values
+        method: insert array consisting of mixed values (string, int, list, bool)
+        expected: raise error
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 10
+        dim = 32
+        array_length = ct.default_max_capacity
+
+        # 1. Create schema with array fields using gen_array_collection_schema_by_client
+        schema = cf.gen_array_collection_schema_by_client(client, dim=dim)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, schema=schema)
+
+        # 3. Generate row data
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
+
+        # 4. Set array consisting of mixed values (string, int, list, bool) for the 2nd row (index 1)
+        rows[1][ct.default_string_array_field_name] = ["a", 1, [2.0, 3.0], False]
+
+        # 5. Verify error on insert
+        err_msg = "The Input data type is inconsistent with defined schema"
+        error = {ct.err_code: 999, ct.err_msg: err_msg}
+        self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)

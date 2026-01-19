@@ -1448,6 +1448,73 @@ def gen_array_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, auto
     return df
 
 
+def gen_array_collection_schema_by_client(client, description=ct.default_desc,
+                                          primary_field=ct.default_int64_field_name, auto_id=False,
+                                          dim=ct.default_dim, enable_dynamic_field=False,
+                                          max_capacity=ct.default_max_capacity,
+                                          max_length=100, with_json=False, **kwargs):
+    """
+    Generate array collection schema using MilvusClient API.
+
+    Args:
+        client: MilvusClient instance
+        description: collection description
+        primary_field: primary key field name (default_int64_field_name or default_string_field_name)
+        auto_id: whether to enable auto_id for primary key
+        dim: vector dimension
+        enable_dynamic_field: whether to enable dynamic field
+        max_capacity: max capacity for array fields
+        max_length: max length for VARCHAR array elements
+        with_json: whether to include JSON field (only when enable_dynamic_field=False)
+        **kwargs: additional keyword arguments
+
+    Returns:
+        schema: CollectionSchema object created using client.create_schema()
+    """
+    schema = client.create_schema(auto_id=auto_id, enable_dynamic_field=enable_dynamic_field, description=description,
+                                  **kwargs)
+
+    if enable_dynamic_field:
+        if primary_field is ct.default_int64_field_name:
+            schema.add_field(field_name=ct.default_int64_field_name, datatype=DataType.INT64, is_primary=True,
+                             auto_id=auto_id)
+            schema.add_field(field_name=ct.default_float_vec_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
+        elif primary_field is ct.default_string_field_name:
+            schema.add_field(field_name=ct.default_string_field_name, datatype=DataType.VARCHAR,
+                             max_length=ct.default_length, is_primary=True, auto_id=auto_id)
+            schema.add_field(field_name=ct.default_float_vec_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
+        else:
+            log.error("Primary key only support int or varchar")
+            assert False
+    else:
+        # Add primary key field
+        if primary_field is ct.default_int64_field_name:
+            schema.add_field(field_name=ct.default_int64_field_name, datatype=DataType.INT64, is_primary=True,
+                             auto_id=auto_id)
+        elif primary_field is ct.default_string_field_name:
+            schema.add_field(field_name=ct.default_string_field_name, datatype=DataType.VARCHAR,
+                             max_length=ct.default_length, is_primary=True, auto_id=auto_id)
+        else:
+            log.error("Primary key only support int or varchar")
+            assert False
+
+        # Add vector field
+        schema.add_field(field_name=ct.default_float_vec_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
+
+        # Add JSON field if requested
+        if with_json:
+            schema.add_field(field_name=ct.default_json_field_name, datatype=DataType.JSON, nullable=True)
+
+        # Add array fields
+        schema.add_field(field_name=ct.default_int32_array_field_name, datatype=DataType.ARRAY,
+                         element_type=DataType.INT32, max_capacity=max_capacity)
+        schema.add_field(field_name=ct.default_float_array_field_name, datatype=DataType.ARRAY,
+                         element_type=DataType.FLOAT, max_capacity=max_capacity)
+        schema.add_field(field_name=ct.default_string_array_field_name, datatype=DataType.ARRAY,
+                         element_type=DataType.VARCHAR, max_capacity=max_capacity, max_length=max_length, nullable=True)
+
+    return schema
+
 def gen_dataframe_multi_vec_fields(vec_fields, nb=ct.default_nb):
     """
     gen dataframe data for fields: int64, float, float_vec and vec_fields
