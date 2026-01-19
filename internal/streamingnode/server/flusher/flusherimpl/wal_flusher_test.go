@@ -1,3 +1,6 @@
+//go:build test
+// +build test
+
 package flusherimpl
 
 import (
@@ -18,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -74,6 +78,8 @@ func TestWALFlusher(t *testing.T) {
 		resource.OptChunkManager(mock_storage.NewMockChunkManager(t)),
 	)
 	l := newMockWAL(t, false)
+	rateLimitComponent := rate.NewWALRateLimitComponent(l.Channel())
+	defer rateLimitComponent.Close()
 	param := &RecoverWALFlusherParam{
 		ChannelInfo: l.Channel(),
 		WAL:         syncutil.NewFuture[wal.WAL](),
@@ -99,7 +105,8 @@ func TestWALFlusher(t *testing.T) {
 				TimeTick: 0,
 			},
 		},
-		RecoveryStorage: rs,
+		RecoveryStorage:    rs,
+		RateLimitComponent: rateLimitComponent,
 	}
 	param.WAL.Set(l)
 	flusher := RecoverWALFlusher(param)

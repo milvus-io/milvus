@@ -38,7 +38,8 @@ func (s replicateService) Append(ctx context.Context, rmsg message.ReplicateMuta
 	if err != nil {
 		return nil, err
 	}
-	return s.appendToWAL(ctx, msg)
+	resp := s.AppendMessages(ctx, msg)
+	return resp.Responses[0].AppendResult, resp.Responses[0].Error
 }
 
 func (s replicateService) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {

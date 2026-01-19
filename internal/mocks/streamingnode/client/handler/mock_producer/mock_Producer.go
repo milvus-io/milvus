@@ -8,6 +8,8 @@ import (
 	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	mock "github.com/stretchr/testify/mock"
 
+	ratelimit "github.com/milvus-io/milvus/pkg/v2/streaming/util/ratelimit"
+
 	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
@@ -204,6 +206,72 @@ func (_c *MockProducer_IsAvailable_Call) Return(_a0 bool) *MockProducer_IsAvaila
 
 func (_c *MockProducer_IsAvailable_Call) RunAndReturn(run func() bool) *MockProducer_IsAvailable_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// Register provides a mock function with given fields: observer
+func (_m *MockProducer) Register(observer ratelimit.RateLimitObserver) {
+	_m.Called(observer)
+}
+
+// MockProducer_Register_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Register'
+type MockProducer_Register_Call struct {
+	*mock.Call
+}
+
+// Register is a helper method to define mock.On call
+//   - observer ratelimit.RateLimitObserver
+func (_e *MockProducer_Expecter) Register(observer interface{}) *MockProducer_Register_Call {
+	return &MockProducer_Register_Call{Call: _e.mock.On("Register", observer)}
+}
+
+func (_c *MockProducer_Register_Call) Run(run func(observer ratelimit.RateLimitObserver)) *MockProducer_Register_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(ratelimit.RateLimitObserver))
+	})
+	return _c
+}
+
+func (_c *MockProducer_Register_Call) Return() *MockProducer_Register_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockProducer_Register_Call) RunAndReturn(run func(ratelimit.RateLimitObserver)) *MockProducer_Register_Call {
+	_c.Run(run)
+	return _c
+}
+
+// Unregister provides a mock function with given fields: observer
+func (_m *MockProducer) Unregister(observer ratelimit.RateLimitObserver) {
+	_m.Called(observer)
+}
+
+// MockProducer_Unregister_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Unregister'
+type MockProducer_Unregister_Call struct {
+	*mock.Call
+}
+
+// Unregister is a helper method to define mock.On call
+//   - observer ratelimit.RateLimitObserver
+func (_e *MockProducer_Expecter) Unregister(observer interface{}) *MockProducer_Unregister_Call {
+	return &MockProducer_Unregister_Call{Call: _e.mock.On("Unregister", observer)}
+}
+
+func (_c *MockProducer_Unregister_Call) Run(run func(observer ratelimit.RateLimitObserver)) *MockProducer_Unregister_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(ratelimit.RateLimitObserver))
+	})
+	return _c
+}
+
+func (_c *MockProducer_Unregister_Call) Return() *MockProducer_Unregister_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockProducer_Unregister_Call) RunAndReturn(run func(ratelimit.RateLimitObserver)) *MockProducer_Unregister_Call {
+	_c.Run(run)
 	return _c
 }
 
