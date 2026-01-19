@@ -15,7 +15,14 @@
 #include <regex>
 #include <boost/regex.hpp>
 #include <utility>
+
+// fnmatch is POSIX-only, not available on Windows
+#ifndef _WIN32
 #include <fnmatch.h>
+#define MILVUS_USE_FNMATCH 1
+#else
+#define MILVUS_USE_FNMATCH 0
+#endif
 
 #include "common/EasyAssert.h"
 
@@ -65,6 +72,7 @@ struct RegexMatcher {
     static RegexMatcher
     FromLikePattern(const std::string& like_pattern) {
         RegexMatcher matcher;
+#if MILVUS_USE_FNMATCH
         matcher.use_fnmatch_ = is_simple_pattern(like_pattern);
         if (matcher.use_fnmatch_) {
             matcher.fnmatch_pattern_ =
@@ -73,6 +81,11 @@ struct RegexMatcher {
             auto regex_pattern = translate_pattern_match_to_regex(like_pattern);
             matcher.r_ = boost::regex(regex_pattern);
         }
+#else
+        // On Windows, always use regex (fnmatch is not available)
+        auto regex_pattern = translate_pattern_match_to_regex(like_pattern);
+        matcher.r_ = boost::regex(regex_pattern);
+#endif
         return matcher;
     }
 
@@ -87,10 +100,12 @@ struct RegexMatcher {
 template <>
 inline bool
 RegexMatcher::operator()(const std::string& operand) {
+#if MILVUS_USE_FNMATCH
     if (use_fnmatch_) {
         // fnmatch returns 0 on match, FNM_NOMATCH on no match
         return fnmatch(fnmatch_pattern_.c_str(), operand.c_str(), 0) == 0;
     }
+#endif
     // corner case:
     // . don't match \n, but .* match \n.
     // For example,
@@ -103,11 +118,13 @@ RegexMatcher::operator()(const std::string& operand) {
 template <>
 inline bool
 RegexMatcher::operator()(const std::string_view& operand) {
+#if MILVUS_USE_FNMATCH
     if (use_fnmatch_) {
         // fnmatch requires null-terminated string, so convert string_view to string
         std::string str(operand);
         return fnmatch(fnmatch_pattern_.c_str(), str.c_str(), 0) == 0;
     }
+#endif
     return boost::regex_match(operand.begin(), operand.end(), r_);
 }
 
