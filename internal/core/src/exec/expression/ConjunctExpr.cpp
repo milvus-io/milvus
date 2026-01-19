@@ -15,6 +15,10 @@
 // limitations under the License.
 
 #include "ConjunctExpr.h"
+#include "UnaryExpr.h"
+#include "LikeConjunctExpr.h"
+
+#include <algorithm>
 
 namespace milvus {
 namespace exec {
@@ -100,11 +104,62 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             input_order_[i] = i;
         }
     }
-    for (int i = 0; i < input_order_.size(); ++i) {
+
+    auto has_input_offset = context.get_offset_input() != nullptr;
+    if (!has_input_offset && !like_batch_initialized_ && is_and_ &&
+        like_indices_.size() > 1) {
+        like_batch_initialized_ = true;
+        // Collect LIKE expressions that can use ngram index at runtime
+        std::vector<std::shared_ptr<PhyUnaryRangeFilterExpr>> ngram_exprs;
+        for (size_t idx : like_indices_) {
+            auto unary_expr =
+                std::dynamic_pointer_cast<PhyUnaryRangeFilterExpr>(
+                    inputs_[idx]);
+            if (unary_expr && unary_expr->CanUseNgramIndex()) {
+                ngram_exprs.push_back(unary_expr);
+                batch_ngram_indices_.insert(idx);
+            }
+        }
+
+        // Create PhyLikeConjunctExpr and add to inputs_ if we have >= 2 eligible
+        if (ngram_exprs.size() >= 2) {
+            auto active_count = ngram_exprs[0]->GetActiveCount();
+            auto like_conjunct = std::make_shared<PhyLikeConjunctExpr>(
+                std::move(ngram_exprs),
+                op_ctx_,
+                active_count,
+                context.get_query_config()->get_expr_batch_size());
+            inputs_.push_back(like_conjunct);
+        } else {
+            batch_ngram_indices_.clear();
+            // Remove the like_conjunct index from input_order_ since we're not
+            // creating the batch expression. The index was reserved at compile
+            // time but the PhyLikeConjunctExpr is not being created at runtime.
+            auto original_size = inputs_.size();
+            input_order_.erase(std::remove_if(input_order_.begin(),
+                                              input_order_.end(),
+                                              [original_size](size_t idx) {
+                                                  return idx >= original_size;
+                                              }),
+                               input_order_.end());
+        }
+    }
+
+    bool has_result = false;
+    for (size_t i = 0; i < input_order_.size(); ++i) {
+        size_t idx = input_order_[i];
+
+        // Skip expressions already executed via batch ngram
+        if (batch_ngram_indices_.count(idx)) {
+            continue;
+        }
+
         VectorPtr input_result;
-        inputs_[input_order_[i]]->Eval(context, input_result);
-        if (i == 0) {
+        inputs_[idx]->Eval(context, input_result);
+
+        if (!has_result) {
             result = input_result;
+            has_result = true;
             auto all_flat_result = GetColumnVector(result);
             if (CanSkipFollowingExprs(all_flat_result)) {
                 SkipFollowingExprs(i + 1);
