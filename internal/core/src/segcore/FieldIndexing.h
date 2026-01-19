@@ -364,19 +364,17 @@ class IndexingRecord {
                             const IndexMetaPtr& indexMetaPtr,
                             const SegcoreConfig& segcore_config,
                             const InsertRecord<false>* insert_record)
-        : schema_(schema),
-          index_meta_(indexMetaPtr),
-          segcore_config_(segcore_config) {
-        Initialize(insert_record);
+        : index_meta_(indexMetaPtr), segcore_config_(segcore_config) {
+        Initialize(schema, insert_record);
     }
 
     void
-    Initialize(const InsertRecord<false>* insert_record) {
+    Initialize(const Schema& schema, const InsertRecord<false>* insert_record) {
         int offset_id = 0;
         auto enable_growing_mmap = storage::MmapManager::GetInstance()
                                        .GetMmapConfig()
                                        .GetEnableGrowingMmap();
-        for (auto& [field_id, field_meta] : schema_.get_fields()) {
+        for (auto& [field_id, field_meta] : schema.get_fields()) {
             ++offset_id;
             if (field_meta.is_vector() &&
                 segcore_config_.get_enable_interim_segment_index() &&
@@ -431,7 +429,7 @@ class IndexingRecord {
                 }
             }
         }
-        assert(offset_id == schema_.size());
+        assert(offset_id == schema.size());
     }
 
     // concurrent, reentrant
@@ -440,49 +438,8 @@ class IndexingRecord {
                    int64_t size,
                    FieldId fieldId,
                    const DataArray* stream_data,
-                   const InsertRecord<false>& record) {
-        if (!is_in(fieldId)) {
-            return;
-        }
-        auto& indexing = field_indexings_.at(fieldId);
-        auto type = indexing->get_data_type();
-        auto field_raw_data = record.get_data_base(fieldId);
-        if (type == DataType::VECTOR_FLOAT &&
-            reserved_offset + size >= indexing->get_build_threshold()) {
-            indexing->AppendSegmentIndexDense(
-                reserved_offset,
-                size,
-                field_raw_data,
-                stream_data->vectors().float_vector().data().data());
-        } else if (type == DataType::VECTOR_FLOAT16 &&
-                   reserved_offset + size >= indexing->get_build_threshold()) {
-            indexing->AppendSegmentIndexDense(
-                reserved_offset,
-                size,
-                field_raw_data,
-                stream_data->vectors().float16_vector().data());
-        } else if (type == DataType::VECTOR_BFLOAT16 &&
-                   reserved_offset + size >= indexing->get_build_threshold()) {
-            indexing->AppendSegmentIndexDense(
-                reserved_offset,
-                size,
-                field_raw_data,
-                stream_data->vectors().bfloat16_vector().data());
-        } else if (type == DataType::VECTOR_SPARSE_U32_F32) {
-            auto data = SparseBytesToRows(
-                stream_data->vectors().sparse_float_vector().contents());
-            indexing->AppendSegmentIndexSparse(
-                reserved_offset,
-                size,
-                stream_data->vectors().sparse_float_vector().dim(),
-                field_raw_data,
-                data.get());
-        } else if (type == DataType::GEOMETRY) {
-            // For geometry fields, append data incrementally to RTree index
-            indexing->AppendSegmentIndex(
-                reserved_offset, size, field_raw_data, stream_data);
-        }
-    }
+                   const InsertRecord<false>& record,
+                   const FieldMeta& field_meta);
 
     // concurrent, reentrant
     void
@@ -490,37 +447,8 @@ class IndexingRecord {
                    int64_t size,
                    FieldId fieldId,
                    const FieldDataPtr data,
-                   const InsertRecord<false>& record) {
-        if (!is_in(fieldId)) {
-            return;
-        }
-        auto& indexing = field_indexings_.at(fieldId);
-        auto type = indexing->get_data_type();
-        const void* p = data->Data();
-
-        if ((type == DataType::VECTOR_FLOAT ||
-             type == DataType::VECTOR_FLOAT16 ||
-             type == DataType::VECTOR_BFLOAT16) &&
-            reserved_offset + size >= indexing->get_build_threshold()) {
-            auto vec_base = record.get_data_base(fieldId);
-            indexing->AppendSegmentIndexDense(
-                reserved_offset, size, vec_base, data->Data());
-        } else if (type == DataType::VECTOR_SPARSE_U32_F32) {
-            auto vec_base = record.get_data_base(fieldId);
-            indexing->AppendSegmentIndexSparse(
-                reserved_offset,
-                size,
-                std::dynamic_pointer_cast<const FieldData<SparseFloatVector>>(
-                    data)
-                    ->Dim(),
-                vec_base,
-                p);
-        } else if (type == DataType::GEOMETRY) {
-            // For geometry fields, append data incrementally to RTree index
-            auto vec_base = record.get_data_base(fieldId);
-            indexing->AppendSegmentIndex(reserved_offset, size, vec_base, data);
-        }
-    }
+                   const InsertRecord<false>& record,
+                   const FieldMeta& field_meta);
 
     // for sparse float vector:
     //   * element_size is not used
@@ -560,7 +488,6 @@ class IndexingRecord {
             const FieldIndexing& indexing = get_field_indexing(fieldId);
             return indexing.has_raw_data();
         }
-        // if this field id not in IndexingRecord or not build index, we should find raw data in InsertRecord instead of IndexingRecord.
         return false;
     }
 
@@ -605,7 +532,6 @@ class IndexingRecord {
     }
 
  private:
-    const Schema& schema_;
     IndexMetaPtr index_meta_;
     const SegcoreConfig& segcore_config_;
 
@@ -613,7 +539,6 @@ class IndexingRecord {
     std::atomic<int64_t> resource_ack_ = 0;
     //    std::atomic<int64_t> finished_ack_ = 0;
     AckResponder finished_ack_;
-    std::mutex mutex_;
 
     // field_offset => indexing
     std::map<FieldId, std::unique_ptr<FieldIndexing>> field_indexings_;
