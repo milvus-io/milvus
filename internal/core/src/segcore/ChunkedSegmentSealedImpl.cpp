@@ -3000,27 +3000,22 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
     LOG_INFO("Loading segment {} with {} rows", id_, num_rows);
 
     // Step 1: Separate indexed and non-indexed fields
-    std::map<FieldId, const proto::segcore::FieldIndexInfo*>
-        field_id_to_index_info;
-    std::set<FieldId> indexed_fields;
+    std::vector<const proto::segcore::FieldIndexInfo*> index_infos;
 
     for (int i = 0; i < segment_load_info_.index_infos_size(); i++) {
         const auto& index_info = segment_load_info_.index_infos(i);
         if (index_info.index_file_paths_size() == 0) {
             continue;
         }
-        auto field_id = FieldId(index_info.fieldid());
-        field_id_to_index_info[field_id] = &index_info;
-        indexed_fields.insert(field_id);
+        index_infos.push_back(&index_info);
     }
 
     // Step 2: Load indexes in parallel using thread pool
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
     std::vector<std::future<void>> load_index_futures;
 
-    for (const auto& pair : field_id_to_index_info) {
-        auto field_id = pair.first;
-        auto index_info_ptr = pair.second;
+    for (const auto& index_info_ptr : index_infos) {
+        auto field_id = FieldId(index_info_ptr->fieldid());
         auto future = pool.Submit(
             [this, trace_ctx, field_id, index_info_ptr, num_rows]() mutable
             -> void {
@@ -3065,7 +3060,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
     }
 
     LOG_INFO("Finished loading {} indexes for segment {}",
-             field_id_to_index_info.size(),
+             index_infos.size(),
              id_);
 
     auto manifest_path = segment_load_info_.manifest_path();
