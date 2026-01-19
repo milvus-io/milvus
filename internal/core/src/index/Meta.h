@@ -70,6 +70,10 @@ constexpr const char* INDEX_VERSION = "index_version";
 constexpr const char* INDEX_ENGINE_VERSION = "index_engine_version";
 constexpr const char* BITMAP_INDEX_CARDINALITY_LIMIT =
     "bitmap_cardinality_limit";
+constexpr const char* HYBRID_LOW_CARDINALITY_INDEX_TYPE =
+    "hybrid_low_cardinality_index_type";
+constexpr const char* HYBRID_HIGH_CARDINALITY_INDEX_TYPE =
+    "hybrid_high_cardinality_index_type";
 
 // index config key
 constexpr const char* MMAP_FILE_PATH = "mmap_filepath";
