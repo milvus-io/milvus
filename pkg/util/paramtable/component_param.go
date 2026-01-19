@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -322,6 +323,8 @@ type commonConfig struct {
 
 	// Local RPC enabled for milvus internal communication when mix or standalone mode.
 	LocalRPCEnabled ParamItem `refreshable:"false"`
+
+	PreferIPv6LocalIP ParamItem `refreshable:"false"`
 
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
 
@@ -1218,6 +1221,17 @@ The default value is 1, which is enough for most cases.`,
 		Export:       true,
 	}
 	p.LocalRPCEnabled.Init(base.mgr)
+
+	p.PreferIPv6LocalIP = ParamItem{
+		Key:          "common.preferIPv6",
+		Version:      "2.5.10",
+		DefaultValue: "false",
+		Doc: `Prefer IPv6 addresses when automatically selecting the local IP.
+If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
+		Export: true,
+	}
+	p.PreferIPv6LocalIP.Init(base.mgr)
+	funcutil.PreferIPv6LocalIP.Store(p.PreferIPv6LocalIP.GetAsBool())
 
 	p.SyncTaskPoolReleaseTimeoutSeconds = ParamItem{
 		Key:          "common.sync.taskPoolReleaseTimeoutSeconds",
