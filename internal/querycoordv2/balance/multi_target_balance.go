@@ -1,3 +1,5 @@
+// multi_target_balance.go implements the MultiTargetBalancer which uses multiple optimization
+// strategies to achieve comprehensive load balancing across query nodes.
 package balance
 
 import (
@@ -11,6 +13,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -26,10 +29,14 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
+// rowCountCostModel calculates the cost based on row count distribution across nodes.
+// A lower cost indicates a more balanced distribution of rows.
 type rowCountCostModel struct {
 	nodeSegments map[int64][]*meta.Segment
 }
 
+// cost calculates the normalized cost of the current row distribution.
+// Returns a value between 0 (best case - perfectly balanced) and 1 (worst case - all on one node).
 func (m *rowCountCostModel) cost() float64 {
 	nodeCount := len(m.nodeSegments)
 	if nodeCount == 0 {
@@ -65,10 +72,14 @@ func (m *rowCountCostModel) cost() float64 {
 	return (currCost - best) / (worst - best)
 }
 
+// segmentCountCostModel calculates the cost based on segment count distribution across nodes.
+// A lower cost indicates a more balanced distribution of segments.
 type segmentCountCostModel struct {
 	nodeSegments map[int64][]*meta.Segment
 }
 
+// cost calculates the normalized cost of the current segment distribution.
+// Returns a value between 0 (best case - perfectly balanced) and 1 (worst case - all on one node).
 func (m *segmentCountCostModel) cost() float64 {
 	nodeCount := len(m.nodeSegments)
 	if nodeCount == 0 {
@@ -99,6 +110,8 @@ func (m *segmentCountCostModel) cost() float64 {
 	return (currCost - best) / (worst - best)
 }
 
+// cmpCost compares two cost values with a threshold for equality.
+// Returns -1 if f1 < f2, 0 if they're approximately equal, 1 if f1 > f2.
 func cmpCost(f1, f2 float64) int {
 	if math.Abs(f1-f2) < params.Params.QueryCoordCfg.BalanceCostThreshold.GetAsFloat() {
 		return 0
@@ -109,19 +122,23 @@ func cmpCost(f1, f2 float64) int {
 	return 1
 }
 
+// generator defines the interface for balance plan generators.
+// Each generator uses a different optimization strategy to generate segment assignment plans.
 type generator interface {
-	setPlans(plans []SegmentAssignPlan)
+	setPlans(plans []assign.SegmentAssignPlan)
 	setReplicaNodeSegments(replicaNodeSegments map[int64][]*meta.Segment)
 	setGlobalNodeSegments(globalNodeSegments map[int64][]*meta.Segment)
 	setCost(cost float64)
 	getReplicaNodeSegments() map[int64][]*meta.Segment
 	getGlobalNodeSegments() map[int64][]*meta.Segment
 	getCost() float64
-	generatePlans() []SegmentAssignPlan
+	generatePlans() []assign.SegmentAssignPlan
 }
 
+// basePlanGenerator provides common functionality for all plan generators.
+// It manages segment distributions and calculates cluster costs using weighted factors.
 type basePlanGenerator struct {
-	plans                        []SegmentAssignPlan
+	plans                        []assign.SegmentAssignPlan
 	currClusterCost              float64
 	replicaNodeSegments          map[int64][]*meta.Segment
 	globalNodeSegments           map[int64][]*meta.Segment
@@ -131,6 +148,7 @@ type basePlanGenerator struct {
 	globalSegmentCountCostWeight float64
 }
 
+// newBasePlanGenerator creates a new basePlanGenerator with cost weights from configuration.
 func newBasePlanGenerator() *basePlanGenerator {
 	return &basePlanGenerator{
 		rowCountCostWeight:           params.Params.QueryCoordCfg.RowCountFactor.GetAsFloat(),
@@ -140,7 +158,7 @@ func newBasePlanGenerator() *basePlanGenerator {
 	}
 }
 
-func (g *basePlanGenerator) setPlans(plans []SegmentAssignPlan) {
+func (g *basePlanGenerator) setPlans(plans []assign.SegmentAssignPlan) {
 	g.plans = plans
 }
 
@@ -168,7 +186,9 @@ func (g *basePlanGenerator) getCost() float64 {
 	return g.currClusterCost
 }
 
-func (g *basePlanGenerator) applyPlans(nodeSegments map[int64][]*meta.Segment, plans []SegmentAssignPlan) map[int64][]*meta.Segment {
+// applyPlans applies the given segment assignment plans to a node-segments map,
+// returning a new map with the updated distribution.
+func (g *basePlanGenerator) applyPlans(nodeSegments map[int64][]*meta.Segment, plans []assign.SegmentAssignPlan) map[int64][]*meta.Segment {
 	newCluster := make(map[int64][]*meta.Segment)
 	for k, v := range nodeSegments {
 		newCluster[k] = append(newCluster[k], v...)
@@ -185,6 +205,8 @@ func (g *basePlanGenerator) applyPlans(nodeSegments map[int64][]*meta.Segment, p
 	return newCluster
 }
 
+// calClusterCost calculates the total weighted cost of the cluster based on both
+// replica-level and global-level segment distributions.
 func (g *basePlanGenerator) calClusterCost(replicaNodeSegments, globalNodeSegments map[int64][]*meta.Segment) float64 {
 	replicaRowCountCostModel, replicaSegmentCountCostModel := &rowCountCostModel{replicaNodeSegments}, &segmentCountCostModel{replicaNodeSegments}
 	globalRowCountCostModel, globalSegmentCountCostModel := &rowCountCostModel{globalNodeSegments}, &segmentCountCostModel{globalNodeSegments}
@@ -195,14 +217,15 @@ func (g *basePlanGenerator) calClusterCost(replicaNodeSegments, globalNodeSegmen
 		globalCost1*g.globalRowCountCostWeight + globalCost2*g.globalSegmentCountCostWeight
 }
 
-func (g *basePlanGenerator) mergePlans(curr []SegmentAssignPlan, inc []SegmentAssignPlan) []SegmentAssignPlan {
-	// merge plans with the same segment
-	// eg, plan1 is move segment1 from node1 to node2, plan2 is move segment1 from node2 to node3
-	// we should merge plan1 and plan2 to one plan, which is move segment1 from node1 to node2
-	result := make([]SegmentAssignPlan, 0, len(curr)+len(inc))
+// mergePlans merges incremental plans with existing plans, combining movements of the same segment.
+// For example, if plan1 moves segment1 from node1 to node2, and plan2 moves segment1 from node2 to node3,
+// they are merged into a single plan moving segment1 from node1 to node3.
+// Plans that result in no movement (from == to) are filtered out.
+func (g *basePlanGenerator) mergePlans(curr []assign.SegmentAssignPlan, inc []assign.SegmentAssignPlan) []assign.SegmentAssignPlan {
+	result := make([]assign.SegmentAssignPlan, 0, len(curr)+len(inc))
 	processed := typeutil.NewSet[int]()
 	for _, p := range curr {
-		newPlan, idx, has := lo.FindIndexOf(inc, func(newPlan SegmentAssignPlan) bool {
+		newPlan, idx, has := lo.FindIndexOf(inc, func(newPlan assign.SegmentAssignPlan) bool {
 			return newPlan.Segment.GetID() == p.Segment.GetID() && newPlan.From == p.To
 		})
 
@@ -217,19 +240,25 @@ func (g *basePlanGenerator) mergePlans(curr []SegmentAssignPlan, inc []SegmentAs
 	}
 
 	// add not merged inc plans
-	result = append(result, lo.Filter(inc, func(_ SegmentAssignPlan, idx int) bool {
+	result = append(result, lo.Filter(inc, func(_ assign.SegmentAssignPlan, idx int) bool {
 		return !processed.Contain(idx)
 	})...)
 
 	return result
 }
 
+// rowCountBasedPlanGenerator generates balance plans by moving segments from nodes
+// with higher row counts to nodes with lower row counts. It uses a greedy approach,
+// iteratively selecting segments to move until the cost no longer decreases.
 type rowCountBasedPlanGenerator struct {
 	*basePlanGenerator
 	maxSteps int
-	isGlobal bool
+	isGlobal bool // if true, considers global distribution; otherwise replica-level
 }
 
+// newRowCountBasedPlanGenerator creates a new row count based plan generator.
+// maxSteps limits the number of optimization iterations.
+// isGlobal determines whether to optimize for global or replica-level balance.
 func newRowCountBasedPlanGenerator(maxSteps int, isGlobal bool) *rowCountBasedPlanGenerator {
 	return &rowCountBasedPlanGenerator{
 		basePlanGenerator: newBasePlanGenerator(),
@@ -238,7 +267,10 @@ func newRowCountBasedPlanGenerator(maxSteps int, isGlobal bool) *rowCountBasedPl
 	}
 }
 
-func (g *rowCountBasedPlanGenerator) generatePlans() []SegmentAssignPlan {
+// generatePlans generates segment assignment plans using row count optimization.
+// It iteratively moves segments from the node with highest row count to the node
+// with lowest row count, as long as it reduces the overall cluster cost.
+func (g *rowCountBasedPlanGenerator) generatePlans() []assign.SegmentAssignPlan {
 	type nodeWithRowCount struct {
 		id       int64
 		count    int
@@ -277,13 +309,13 @@ func (g *rowCountBasedPlanGenerator) generatePlans() []SegmentAssignPlan {
 			break
 		}
 		segment := maxNode.segments[rand.Intn(len(maxNode.segments))]
-		plan := SegmentAssignPlan{
+		plan := assign.SegmentAssignPlan{
 			Segment: segment,
 			From:    maxNode.id,
 			To:      minNode.id,
 		}
-		newCluster := g.applyPlans(g.replicaNodeSegments, []SegmentAssignPlan{plan})
-		newGlobalCluster := g.applyPlans(g.globalNodeSegments, []SegmentAssignPlan{plan})
+		newCluster := g.applyPlans(g.replicaNodeSegments, []assign.SegmentAssignPlan{plan})
+		newGlobalCluster := g.applyPlans(g.globalNodeSegments, []assign.SegmentAssignPlan{plan})
 		newCost := g.calClusterCost(newCluster, newGlobalCluster)
 		if cmpCost(newCost, g.currClusterCost) < 0 {
 			g.currClusterCost = newCost
@@ -298,7 +330,7 @@ func (g *rowCountBasedPlanGenerator) generatePlans() []SegmentAssignPlan {
 				}
 			}
 			minNode.segments = append(minNode.segments, segment)
-			g.plans = g.mergePlans(g.plans, []SegmentAssignPlan{plan})
+			g.plans = g.mergePlans(g.plans, []assign.SegmentAssignPlan{plan})
 			modified = true
 		} else {
 			modified = false
@@ -307,12 +339,18 @@ func (g *rowCountBasedPlanGenerator) generatePlans() []SegmentAssignPlan {
 	return g.plans
 }
 
+// segmentCountBasedPlanGenerator generates balance plans by moving segments from nodes
+// with higher segment counts to nodes with lower segment counts. It uses a greedy approach,
+// iteratively selecting segments to move until the cost no longer decreases.
 type segmentCountBasedPlanGenerator struct {
 	*basePlanGenerator
 	maxSteps int
-	isGlobal bool
+	isGlobal bool // if true, considers global distribution; otherwise replica-level
 }
 
+// newSegmentCountBasedPlanGenerator creates a new segment count based plan generator.
+// maxSteps limits the number of optimization iterations.
+// isGlobal determines whether to optimize for global or replica-level balance.
 func newSegmentCountBasedPlanGenerator(maxSteps int, isGlobal bool) *segmentCountBasedPlanGenerator {
 	return &segmentCountBasedPlanGenerator{
 		basePlanGenerator: newBasePlanGenerator(),
@@ -321,7 +359,10 @@ func newSegmentCountBasedPlanGenerator(maxSteps int, isGlobal bool) *segmentCoun
 	}
 }
 
-func (g *segmentCountBasedPlanGenerator) generatePlans() []SegmentAssignPlan {
+// generatePlans generates segment assignment plans using segment count optimization.
+// It iteratively moves segments from the node with highest segment count to the node
+// with lowest segment count, as long as it reduces the overall cluster cost.
+func (g *segmentCountBasedPlanGenerator) generatePlans() []assign.SegmentAssignPlan {
 	type nodeWithSegmentCount struct {
 		id       int64
 		count    int
@@ -357,13 +398,13 @@ func (g *segmentCountBasedPlanGenerator) generatePlans() []SegmentAssignPlan {
 			break
 		}
 		segment := maxNode.segments[rand.Intn(len(maxNode.segments))]
-		plan := SegmentAssignPlan{
+		plan := assign.SegmentAssignPlan{
 			Segment: segment,
 			From:    maxNode.id,
 			To:      minNode.id,
 		}
-		newCluster := g.applyPlans(g.replicaNodeSegments, []SegmentAssignPlan{plan})
-		newGlobalCluster := g.applyPlans(g.globalNodeSegments, []SegmentAssignPlan{plan})
+		newCluster := g.applyPlans(g.replicaNodeSegments, []assign.SegmentAssignPlan{plan})
+		newGlobalCluster := g.applyPlans(g.globalNodeSegments, []assign.SegmentAssignPlan{plan})
 		newCost := g.calClusterCost(newCluster, newGlobalCluster)
 		if cmpCost(newCost, g.currClusterCost) < 0 {
 			g.currClusterCost = newCost
@@ -378,7 +419,7 @@ func (g *segmentCountBasedPlanGenerator) generatePlans() []SegmentAssignPlan {
 				}
 			}
 			minNode.segments = append(minNode.segments, segment)
-			g.plans = g.mergePlans(g.plans, []SegmentAssignPlan{plan})
+			g.plans = g.mergePlans(g.plans, []assign.SegmentAssignPlan{plan})
 			modified = true
 		} else {
 			modified = false
@@ -387,18 +428,24 @@ func (g *segmentCountBasedPlanGenerator) generatePlans() []SegmentAssignPlan {
 	return g.plans
 }
 
+// planType represents the type of balance plan operation.
 type planType int
 
 const (
-	movePlan planType = iota + 1
-	swapPlan
+	movePlan planType = iota + 1 // move a segment from one node to another
+	swapPlan                     // swap segments between two nodes
 )
 
+// randomPlanGenerator generates balance plans by randomly selecting segments and nodes,
+// then applying moves or swaps if they reduce the overall cluster cost.
+// This stochastic approach helps escape local minima that greedy algorithms might get stuck in.
 type randomPlanGenerator struct {
 	*basePlanGenerator
 	maxSteps int
 }
 
+// newRandomPlanGenerator creates a new random plan generator.
+// maxSteps limits the number of random operations to try.
 func newRandomPlanGenerator(maxSteps int) *randomPlanGenerator {
 	return &randomPlanGenerator{
 		basePlanGenerator: newBasePlanGenerator(),
@@ -406,7 +453,10 @@ func newRandomPlanGenerator(maxSteps int) *randomPlanGenerator {
 	}
 }
 
-func (g *randomPlanGenerator) generatePlans() []SegmentAssignPlan {
+// generatePlans generates segment assignment plans using random optimization.
+// It randomly selects two nodes and tries either moving a segment or swapping segments,
+// accepting the change only if it reduces the cluster cost.
+func (g *randomPlanGenerator) generatePlans() []assign.SegmentAssignPlan {
 	g.currClusterCost = g.calClusterCost(g.replicaNodeSegments, g.globalNodeSegments)
 	nodes := lo.Keys(g.replicaNodeSegments)
 	if len(nodes) == 0 {
@@ -428,22 +478,22 @@ func (g *randomPlanGenerator) generatePlans() []SegmentAssignPlan {
 		segment2 := segments2[rand.Intn(len(segments2))]
 
 		// random select plan type, for move type, we move segment1 to node2; for swap type, we swap segment1 and segment2
-		plans := make([]SegmentAssignPlan, 0)
+		plans := make([]assign.SegmentAssignPlan, 0)
 		planType := planType(rand.Intn(2) + 1)
 		if planType == movePlan {
-			plan := SegmentAssignPlan{
+			plan := assign.SegmentAssignPlan{
 				From:    node1,
 				To:      node2,
 				Segment: segment1,
 			}
 			plans = append(plans, plan)
 		} else {
-			plan1 := SegmentAssignPlan{
+			plan1 := assign.SegmentAssignPlan{
 				From:    node1,
 				To:      node2,
 				Segment: segment1,
 			}
-			plan2 := SegmentAssignPlan{
+			plan2 := assign.SegmentAssignPlan{
 				From:    node2,
 				To:      node1,
 				Segment: segment2,
@@ -465,13 +515,21 @@ func (g *randomPlanGenerator) generatePlans() []SegmentAssignPlan {
 	return g.plans
 }
 
+// MultiTargetBalancer implements a multi-objective optimization balancer.
+// It combines multiple optimization strategies (row count, segment count, and random)
+// to achieve comprehensive load balancing. The generators run sequentially, each
+// improving upon the previous results, allowing the balancer to escape local minima
+// and find better global solutions.
 type MultiTargetBalancer struct {
 	*ScoreBasedBalancer
 	dist      *meta.DistributionManager
 	targetMgr meta.TargetManagerInterface
 }
 
-func (b *MultiTargetBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) (segmentPlans []SegmentAssignPlan, channelPlans []ChannelAssignPlan) {
+// BalanceReplica balances segments and channels across nodes using multi-target optimization.
+// It first attempts to balance channels if AutoBalanceChannel is enabled, then balances segments
+// using multiple optimization strategies in sequence.
+func (b *MultiTargetBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) (segmentPlans []assign.SegmentAssignPlan, channelPlans []assign.ChannelAssignPlan) {
 	log := log.With(
 		zap.Int64("collection", replica.GetCollectionID()),
 		zap.Int64("replica id", replica.GetID()),
@@ -487,66 +545,49 @@ func (b *MultiTargetBalancer) BalanceReplica(ctx context.Context, replica *meta.
 		}
 	}()
 
-	stoppingBalance := paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool()
-
-	channelPlans = b.balanceChannels(ctx, br, replica, stoppingBalance)
+	if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
+		channelPlans = b.balanceChannels(ctx, br, replica)
+	}
 	if len(channelPlans) == 0 {
-		segmentPlans = b.balanceSegments(ctx, replica, stoppingBalance)
+		segmentPlans = b.balanceSegments(ctx, br, replica)
 	}
 	return
 }
 
-func (b *MultiTargetBalancer) balanceChannels(ctx context.Context, br *balanceReport, replica *meta.Replica, stoppingBalance bool) []ChannelAssignPlan {
-	var rwNodes, roNodes []int64
+// balanceChannels generates channel balance plans for a replica.
+// It requires at least 2 RW nodes to perform balancing.
+func (b *MultiTargetBalancer) balanceChannels(ctx context.Context, br *balanceReport, replica *meta.Replica) []assign.ChannelAssignPlan {
+	var rwNodes []int64
 	if streamingutil.IsStreamingServiceEnabled() {
-		rwNodes, roNodes = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
+		rwNodes, _ = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
 	} else {
-		rwNodes, roNodes = replica.GetRWNodes(), replica.GetRONodes()
+		rwNodes = replica.GetRWNodes()
 	}
 
-	if len(rwNodes) == 0 {
+	if len(rwNodes) < 2 {
+		br.AddRecord(StrRecord("no enough rwNodes to balance channels"))
 		return nil
 	}
 
-	if len(roNodes) != 0 {
-		if !stoppingBalance {
-			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
-			return nil
-		}
-		return b.genStoppingChannelPlan(ctx, replica, rwNodes, roNodes)
-	}
-
-	if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
-		return b.genChannelPlan(ctx, br, replica, rwNodes)
-	}
-	return nil
+	return b.genChannelPlan(ctx, br, replica, rwNodes)
 }
 
-func (b *MultiTargetBalancer) balanceSegments(ctx context.Context, replica *meta.Replica, stoppingBalance bool) []SegmentAssignPlan {
+// balanceSegments generates segment balance plans for a replica.
+// It requires at least 2 RW nodes to perform balancing.
+func (b *MultiTargetBalancer) balanceSegments(ctx context.Context, br *balanceReport, replica *meta.Replica) []assign.SegmentAssignPlan {
 	rwNodes := replica.GetRWNodes()
-	roNodes := replica.GetRONodes()
-
-	if len(rwNodes) == 0 {
+	if len(rwNodes) < 2 {
+		br.AddRecord(StrRecord("no enough rwNodes to balance segments"))
 		return nil
 	}
-	// print current distribution before generating plans
-	if len(roNodes) != 0 {
-		if !stoppingBalance {
-			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
-			return nil
-		}
 
-		log.Info("Handle stopping nodes",
-			zap.Any("stopping nodes", roNodes),
-			zap.Any("available nodes", rwNodes),
-		)
-		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-		return b.genStoppingSegmentPlan(ctx, replica, rwNodes, roNodes)
-	}
 	return b.genSegmentPlan(ctx, replica, rwNodes)
 }
 
-func (b *MultiTargetBalancer) genSegmentPlan(ctx context.Context, replica *meta.Replica, rwNodes []int64) []SegmentAssignPlan {
+// genSegmentPlan generates segment balance plans using multi-target optimization.
+// It collects segment distributions at both replica and global levels, then applies
+// multiple optimization strategies sequentially to find an improved distribution.
+func (b *MultiTargetBalancer) genSegmentPlan(ctx context.Context, replica *meta.Replica, rwNodes []int64) []assign.SegmentAssignPlan {
 	// get segments distribution on replica level and global level
 	nodeSegments := make(map[int64][]*meta.Segment)
 	globalNodeSegments := make(map[int64][]*meta.Segment)
@@ -566,7 +607,11 @@ func (b *MultiTargetBalancer) genSegmentPlan(ctx context.Context, replica *meta.
 	return plans
 }
 
-func (b *MultiTargetBalancer) genPlanByDistributions(nodeSegments, globalNodeSegments map[int64][]*meta.Segment) []SegmentAssignPlan {
+// genPlanByDistributions generates segment assignment plans using multiple optimization generators.
+// It creates 5 generators: row count (replica), row count (global), segment count (replica),
+// segment count (global), and random. These generators run sequentially, each building upon
+// the previous results to progressively improve the distribution.
+func (b *MultiTargetBalancer) genPlanByDistributions(nodeSegments, globalNodeSegments map[int64][]*meta.Segment) []assign.SegmentAssignPlan {
 	// create generators
 	// we have 3 types of generators: row count, segment count, random
 	// for row count based and segment count based generator, we have 2 types of generators: replica level and global level
@@ -581,7 +626,7 @@ func (b *MultiTargetBalancer) genPlanByDistributions(nodeSegments, globalNodeSeg
 
 	// run generators sequentially to generate plans
 	var cost float64
-	var plans []SegmentAssignPlan
+	var plans []assign.SegmentAssignPlan
 	for _, generator := range generators {
 		generator.setCost(cost)
 		generator.setPlans(plans)
@@ -595,6 +640,8 @@ func (b *MultiTargetBalancer) genPlanByDistributions(nodeSegments, globalNodeSeg
 	return plans
 }
 
+// NewMultiTargetBalancer creates a new MultiTargetBalancer instance.
+// It embeds a ScoreBasedBalancer and adds multi-objective optimization capabilities.
 func NewMultiTargetBalancer(scheduler task.Scheduler, nodeManager *session.NodeManager, dist *meta.DistributionManager, meta *meta.Meta, targetMgr meta.TargetManagerInterface) *MultiTargetBalancer {
 	return &MultiTargetBalancer{
 		ScoreBasedBalancer: NewScoreBasedBalancer(scheduler, nodeManager, dist, meta, targetMgr),
