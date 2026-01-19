@@ -2,6 +2,7 @@ version: '3.5'
 
 services:
   etcd:
+    container_name: milvus-etcd
     image: quay.io/coreos/etcd:v3.5.25
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
@@ -15,8 +16,14 @@ services:
       - "2379:2379"
       - "2380:2380"
       - "4001:4001"
+    healthcheck:
+      test: [ "CMD", "etcdctl", "endpoint", "health" ]
+      interval: 30s
+      timeout: 20s
+      retries: 3
 
   pulsar:
+    container_name: milvus-pulsar
     image: milvusdb/pulsar:v2.8.2-m1
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/pulsar:/pulsar/data
@@ -34,6 +41,7 @@ services:
       - "18080:8080"
 
   minio:
+    container_name: milvus-minio
     image: minio/minio:RELEASE.2024-05-28T17-19-04Z
     ports:
       - "9000:9000"
@@ -45,7 +53,7 @@ services:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/minio:/minio_data
     command: minio server /minio_data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 30s
       timeout: 20s
       retries: 3
