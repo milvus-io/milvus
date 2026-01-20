@@ -304,6 +304,16 @@ func (wb *writeBufferBase) sealSegments(_ context.Context, segmentIDs []int64) e
 	return nil
 }
 
+func (wb *writeBufferBase) sealAllSegments(ctx context.Context) error {
+	allSegmentIds := wb.metaCache.GetSegmentIDsBy()
+	log.Ctx(ctx).Info("seal all segments", zap.Int64s("segmentIDs", allSegmentIds))
+	// mark segment flushing if segment was growing
+	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
+		metacache.WithSegmentIDs(allSegmentIds...),
+		metacache.WithSegmentState(commonpb.SegmentState_Growing))
+	return nil
+}
+
 func (wb *writeBufferBase) dropPartitions(partitionIDs []int64) {
 	// mark segment dropped if partition was dropped
 	segIDs := wb.metaCache.GetSegmentIDsBy(metacache.WithPartitionIDs(partitionIDs))

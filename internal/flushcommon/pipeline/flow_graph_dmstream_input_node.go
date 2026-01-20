@@ -75,7 +75,8 @@ func createNewInputFromDispatcher(initCtx context.Context,
 		start = time.Now()
 	)
 
-	if seekPos != nil && len(seekPos.MsgID) != 0 {
+	// Note: Only the earliest message ID in Woodpecker can be empty
+	if seekPos != nil && (len(seekPos.MsgID) != 0 || seekPos.WALName == commonpb.WALName_WoodPecker) {
 		input, err = dispatcherClient.Register(initCtx, &msgdispatcher.StreamConfig{
 			VChannel: vchannel,
 			Pos:      seekPos,
@@ -89,6 +90,7 @@ func createNewInputFromDispatcher(initCtx context.Context,
 
 		log.Info("datanode seek successfully when register to msgDispatcher",
 			zap.ByteString("msgID", seekPos.GetMsgID()),
+			zap.Stringer("walName", seekPos.WALName),
 			zap.Time("tsTime", tsoutil.PhysicalTime(seekPos.GetTimestamp())),
 			zap.Duration("tsLag", time.Since(tsoutil.PhysicalTime(seekPos.GetTimestamp()))),
 			zap.Duration("dur", time.Since(start)))

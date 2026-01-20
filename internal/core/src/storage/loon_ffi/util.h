@@ -15,8 +15,9 @@
 #include "common/common_type_c.h"
 #include "common/type_c.h"
 #include "milvus-storage/ffi_c.h"
+#include "milvus-storage/manifest.h"
 #include "milvus-storage/properties.h"
-#include "milvus-storage/transaction/manifest.h"
+#include "milvus-storage/column_groups.h"
 #include "storage/Types.h"
 
 /**
@@ -37,7 +38,7 @@
  * @return std::shared_ptr<Properties> Shared pointer to the created Properties
  * @throws std::runtime_error If properties_create fails with error message from FFI
  */
-std::shared_ptr<Properties>
+std::shared_ptr<LoonProperties>
 MakePropertiesFromStorageConfig(CStorageConfig c_storage_config);
 
 /**
@@ -87,7 +88,7 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config);
  * @return Shared pointer to ColumnGroups metadata
  * @throws std::runtime_error If JSON parsing or manifest fetch fails
  */
-std::shared_ptr<milvus_storage::api::ColumnGroups>
-GetColumnGroups(
+std::shared_ptr<milvus_storage::api::Manifest>
+GetLoonManifest(
     const std::string& path,
     const std::shared_ptr<milvus_storage::api::Properties>& properties);

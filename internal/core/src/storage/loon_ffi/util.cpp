@@ -21,13 +21,13 @@
 #include "common/common_type_c.h"
 #include "common/type_c.h"
 #include "milvus-storage/properties.h"
-#include "milvus-storage/transaction/manifest.h"
+#include "milvus-storage/manifest.h"
 #include "milvus-storage/transaction/transaction.h"
 #include "storage/loon_ffi/util.h"
 
 using json = nlohmann::json;
 
-std::shared_ptr<Properties>
+std::shared_ptr<LoonProperties>
 MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     // Prepare key-value pairs from CStorageConfig
     std::vector<const char*> keys;
@@ -108,19 +108,19 @@ MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     values.emplace_back(max_connections_str.c_str());
 
     // Create Properties using FFI
-    auto properties = std::make_shared<Properties>();
-    FFIResult result = properties_create(
+    auto properties = std::make_shared<LoonProperties>();
+    LoonFFIResult result = loon_properties_create(
         keys.data(), values.data(), keys.size(), properties.get());
 
-    if (!IsSuccess(&result)) {
-        auto message = GetErrorMessage(&result);
-        // Copy the error message before freeing the FFIResult
+    if (!loon_ffi_is_success(&result)) {
+        auto message = loon_ffi_get_errmsg(&result);
+        // Copy the error message before freeing the LoonFFIResult
         std::string error_msg = message ? message : "Unknown error";
-        FreeFFIResult(&result);
+        loon_ffi_free_result(&result);
         throw std::runtime_error(error_msg);
     }
 
-    FreeFFIResult(&result);
+    loon_ffi_free_result(&result);
     return properties;
 }
 
@@ -250,8 +250,8 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config) {
                           config.max_connections};
 }
 
-std::shared_ptr<milvus_storage::api::ColumnGroups>
-GetColumnGroups(
+std::shared_ptr<milvus_storage::api::Manifest>
+GetLoonManifest(
     const std::string& path,
     const std::shared_ptr<milvus_storage::api::Properties>& properties) {
     try {
@@ -262,19 +262,29 @@ GetColumnGroups(
         std::string base_path = j.at("base_path").get<std::string>();
         int64_t version = j.at("ver").get<int64_t>();
 
-        auto transaction =
-            std::make_unique<milvus_storage::api::transaction::TransactionImpl<
-                milvus_storage::api::ColumnGroups>>(*properties, base_path);
-        auto status = transaction->begin(version);
-        if (!status.ok()) {
-            throw(std::runtime_error(status.ToString()));
-        }
-        auto current_manifest_result = transaction->get_current_manifest();
-        if (!current_manifest_result.ok()) {
-            throw(std::runtime_error(
-                current_manifest_result.status().ToString()));
-        }
-        auto current_manifest = current_manifest_result.ValueOrDie();
+        auto fs_result =
+            milvus_storage::FilesystemCache::getInstance().get(*properties);
+        AssertInfo(fs_result.ok(),
+                   "Failed to get filesystem: {}",
+                   fs_result.status().ToString());
+        auto fs = std::move(fs_result.ValueOrDie());
+
+        auto transaction_result =
+            milvus_storage::api::transaction::Transaction::Open(
+                fs,
+                base_path,
+                version,
+                milvus_storage::api::transaction::FailResolver,
+                1);
+        AssertInfo(transaction_result.ok(),
+                   "Failed to open transaction: {}",
+                   transaction_result.status().ToString());
+        auto transaction = std::move(transaction_result.ValueOrDie());
+        auto manifest_result = transaction->GetManifest();
+        AssertInfo(manifest_result.ok(),
+                   "Failed to get manifest: {}",
+                   manifest_result.status().ToString());
+        auto current_manifest = manifest_result.ValueOrDie();
         return current_manifest;
     } catch (const json::parse_error& e) {
         throw std::runtime_error(

@@ -120,6 +120,7 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 		zap.String("pchannel", position.ChannelName),
 		zap.String("vchannel", p.vChannel),
 		zap.Time("checkpointTs", ts),
+		zap.Stringer("walName", position.WALName),
 		zap.Duration("tsLag", time.Since(ts)),
 		zap.Duration("elapse", time.Since(start)),
 	)

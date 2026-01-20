@@ -746,17 +746,8 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	// failed state
-	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(mockErr))
-	assert.NoError(t, err)
-
-	progress, state, _, _, reason := GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
-	assert.Equal(t, int64(0), progress)
-	assert.Equal(t, internalpb.ImportJobState_Failed, state)
-	assert.Equal(t, mockErr, reason)
-
 	// job does not exist
-	progress, state, _, _, reason = GetJobProgress(ctx, -1, importMeta, meta)
+	progress, state, _, _, reason := GetJobProgress(ctx, -1, importMeta, meta)
 	assert.Equal(t, int64(0), progress)
 	assert.Equal(t, internalpb.ImportJobState_Failed, state)
 	assert.NotEqual(t, "", reason)

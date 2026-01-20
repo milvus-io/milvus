@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
@@ -34,12 +35,21 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-// score based segment use (collection_row_count + global_row_count * factor) as node' score
-// and try to make each node has almost same score through balance segment.
+// ChannelLevelScoreBalancer extends ScoreBasedBalancer to provide channel-level balance awareness.
+// It balances segments and channels at the channel level, ensuring that segments belonging to
+// the same channel are balanced among the nodes assigned to that channel (exclusive mode).
+// When exclusive mode cannot be achieved (some channels have no assigned nodes), it falls back
+// to the ScoreBasedBalancer behavior.
+//
+// The score calculation uses (collection_row_count + global_row_count * factor) to determine
+// node scores, and attempts to equalize scores across nodes through segment redistribution.
 type ChannelLevelScoreBalancer struct {
 	*ScoreBasedBalancer
+	targetMgr meta.TargetManagerInterface
 }
 
+// NewChannelLevelScoreBalancer creates a new ChannelLevelScoreBalancer instance.
+// It embeds a ScoreBasedBalancer and adds channel-level balance awareness.
 func NewChannelLevelScoreBalancer(scheduler task.Scheduler,
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
@@ -48,10 +58,15 @@ func NewChannelLevelScoreBalancer(scheduler task.Scheduler,
 ) *ChannelLevelScoreBalancer {
 	return &ChannelLevelScoreBalancer{
 		ScoreBasedBalancer: NewScoreBasedBalancer(scheduler, nodeManager, dist, meta, targetMgr),
+		targetMgr:          targetMgr,
 	}
 }
 
-func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) (segmentPlans []SegmentAssignPlan, channelPlans []ChannelAssignPlan) {
+// BalanceReplica balances segments and channels at the channel level within a replica.
+// It first checks if exclusive mode can be enabled (all channels have assigned RW nodes).
+// In exclusive mode, it balances segments and channels per channel among the channel's assigned nodes.
+// If exclusive mode cannot be achieved, it delegates to ScoreBasedBalancer.
+func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) (segmentPlans []assign.SegmentAssignPlan, channelPlans []assign.ChannelAssignPlan) {
 	log := log.With(
 		zap.Int64("collection", replica.GetCollectionID()),
 		zap.Int64("replica id", replica.GetID()),
@@ -71,8 +86,7 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 	if streamingutil.IsStreamingServiceEnabled() {
 		// Make a plan to rebalance the channel first.
 		// The Streaming QueryNode doesn't make the channel level score, so just fallback to the ScoreBasedBalancer.
-		stoppingBalance := paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool()
-		channelPlan := b.ScoreBasedBalancer.balanceChannels(ctx, br, replica, stoppingBalance)
+		channelPlan := b.ScoreBasedBalancer.balanceChannels(ctx, br, replica)
 		// If the channelPlan is not empty, do it directly, don't do the segment balance.
 		if len(channelPlan) > 0 {
 			return nil, channelPlan
@@ -94,61 +108,50 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 	}
 
 	// TODO: assign by channel
-	channelPlans = make([]ChannelAssignPlan, 0)
-	segmentPlans = make([]SegmentAssignPlan, 0)
+	channelPlans = make([]assign.ChannelAssignPlan, 0)
+	segmentPlans = make([]assign.SegmentAssignPlan, 0)
 	for channelName := range channels {
 		if replica.NodesCount() == 0 {
 			return nil, nil
 		}
 
-		rwNodes := replica.GetChannelRWNodes(channelName)
-		roNodes := replica.GetRONodes()
-
+		channelRwNodes := replica.GetChannelRWNodes(channelName)
+		channelRONodes := make([]int64, 0)
 		// mark channel's outbound access node as offline
-		channelRWNode := typeutil.NewUniqueSet(rwNodes...)
+		channelRWNode := typeutil.NewUniqueSet(channelRwNodes...)
 		channelDist := b.dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channelName), meta.WithReplica2Channel(replica))
 		for _, channel := range channelDist {
 			if !channelRWNode.Contain(channel.Node) {
-				roNodes = append(roNodes, channel.Node)
+				channelRONodes = append(channelRONodes, channel.Node)
 			}
 		}
 		segmentDist := b.dist.SegmentDistManager.GetByFilter(meta.WithChannel(channelName), meta.WithReplica(replica))
 		for _, segment := range segmentDist {
 			if !channelRWNode.Contain(segment.Node) {
-				roNodes = append(roNodes, segment.Node)
+				channelRONodes = append(channelRONodes, segment.Node)
 			}
 		}
 
-		if len(rwNodes) == 0 {
+		if len(channelRwNodes) == 0 {
 			// no available nodes to balance
 			return nil, nil
 		}
 
-		if len(roNodes) != 0 {
-			if !paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
-				log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
-				return nil, nil
-			}
-
-			log.Info("Handle stopping nodes",
-				zap.Any("stopping nodes", roNodes),
-				zap.Any("available nodes", rwNodes),
-			)
-			// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
+		if len(channelRONodes) != 0 {
 			if !streamingutil.IsStreamingServiceEnabled() {
-				channelPlans = append(channelPlans, b.genStoppingChannelPlan(ctx, replica, channelName, rwNodes, roNodes)...)
+				channelPlans = append(channelPlans, b.genChannelPlanForOutboundNodes(ctx, replica, channelName, channelRwNodes, channelRONodes)...)
 			}
 
 			if len(channelPlans) == 0 {
-				segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(ctx, replica, channelName, rwNodes, roNodes)...)
+				segmentPlans = append(segmentPlans, b.genSegmentPlanForOutboundNodes(ctx, replica, channelName, channelRwNodes, channelRONodes)...)
 			}
 		} else {
 			if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && !streamingutil.IsStreamingServiceEnabled() {
-				channelPlans = append(channelPlans, b.genChannelPlan(ctx, replica, channelName, rwNodes)...)
+				channelPlans = append(channelPlans, b.genChannelPlan(ctx, replica, channelName, channelRwNodes)...)
 			}
 
 			if len(channelPlans) == 0 {
-				segmentPlans = append(segmentPlans, b.genSegmentPlan(ctx, br, replica, channelName, rwNodes)...)
+				segmentPlans = append(segmentPlans, b.genSegmentPlan(ctx, br, replica, channelName, channelRwNodes)...)
 			}
 		}
 	}
@@ -156,11 +159,13 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 	return segmentPlans, channelPlans
 }
 
-func (b *ChannelLevelScoreBalancer) genStoppingChannelPlan(ctx context.Context, replica *meta.Replica, channelName string, onlineNodes []int64, offlineNodes []int64) []ChannelAssignPlan {
-	channelPlans := make([]ChannelAssignPlan, 0)
+// genChannelPlanForOutboundNodes generates channel plans to move channels from outbound nodes
+// (nodes that are no longer in the channel's RW node list) to online nodes.
+func (b *ChannelLevelScoreBalancer) genChannelPlanForOutboundNodes(ctx context.Context, replica *meta.Replica, channelName string, onlineNodes []int64, offlineNodes []int64) []assign.ChannelAssignPlan {
+	channelPlans := make([]assign.ChannelAssignPlan, 0)
 	for _, nodeID := range offlineNodes {
 		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(nodeID), meta.WithChannelName2Channel(channelName))
-		plans := b.AssignChannel(ctx, replica.GetCollectionID(), dmChannels, onlineNodes, false)
+		plans := b.GetAssignPolicy().AssignChannel(ctx, replica.GetCollectionID(), dmChannels, onlineNodes, false)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].Replica = replica
@@ -170,14 +175,16 @@ func (b *ChannelLevelScoreBalancer) genStoppingChannelPlan(ctx context.Context, 
 	return channelPlans
 }
 
-func (b *ChannelLevelScoreBalancer) genStoppingSegmentPlan(ctx context.Context, replica *meta.Replica, channelName string, onlineNodes []int64, offlineNodes []int64) []SegmentAssignPlan {
-	segmentPlans := make([]SegmentAssignPlan, 0)
+// genSegmentPlanForOutboundNodes generates segment plans to move segments from outbound nodes
+// (nodes that are no longer in the channel's RW node list) to online nodes for a specific channel.
+func (b *ChannelLevelScoreBalancer) genSegmentPlanForOutboundNodes(ctx context.Context, replica *meta.Replica, channelName string, onlineNodes []int64, offlineNodes []int64) []assign.SegmentAssignPlan {
+	segmentPlans := make([]assign.SegmentAssignPlan, 0)
 	for _, nodeID := range offlineNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(nodeID), meta.WithChannel(channelName))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
 			return b.targetMgr.CanSegmentBeMoved(ctx, segment.GetCollectionID(), segment.GetID())
 		})
-		plans := b.AssignSegment(ctx, replica.GetCollectionID(), segments, onlineNodes, false)
+		plans := b.GetAssignPolicy().AssignSegment(ctx, replica.GetCollectionID(), segments, onlineNodes, false)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].Replica = replica
@@ -187,9 +194,22 @@ func (b *ChannelLevelScoreBalancer) genStoppingSegmentPlan(ctx context.Context, 
 	return segmentPlans
 }
 
-func (b *ChannelLevelScoreBalancer) genSegmentPlan(ctx context.Context, br *balanceReport, replica *meta.Replica, channelName string, onlineNodes []int64) []SegmentAssignPlan {
-	segmentDist := make(map[int64][]*meta.Segment)
-	nodeItemsMap := b.convertToNodeItemsBySegment(br, replica.GetCollectionID(), onlineNodes)
+// genSegmentPlan generates segment balance plans for a specific channel within a replica.
+// It identifies segments on nodes with higher-than-average scores and moves them to nodes
+// with lower scores, using the score-based assign policy.
+func (b *ChannelLevelScoreBalancer) genSegmentPlan(ctx context.Context, br *balanceReport, replica *meta.Replica, channelName string, onlineNodes []int64) []assign.SegmentAssignPlan {
+	// Delegate to the assign policy's implementation with safe type assertion
+	policy, ok := b.assignPolicy.(*assign.ScoreBasedAssignPolicy)
+	if !ok {
+		log.Error("invalid policy type for ScoreBasedBalancer",
+			zap.String("expected", "*assign.ScoreBasedAssignPolicy"),
+			zap.String("actual", fmt.Sprintf("%T", b.assignPolicy)))
+		return nil
+	}
+	nodeItemsMap := policy.ConvertToNodeItemsBySegment(replica.GetCollectionID(), onlineNodes)
+	for _, item := range nodeItemsMap {
+		br.AddNodeItem(item)
+	}
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
@@ -200,6 +220,7 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlan(ctx context.Context, br *bala
 			zap.Int64("replicaID", replica.GetID()),
 			zap.Stringers("nodes", lo.Values(nodeItemsMap)))
 
+	segmentDist := make(map[int64][]*meta.Segment)
 	// list all segment which could be balanced, and calculate node's score
 	for _, node := range onlineNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node), meta.WithChannel(channelName))
@@ -212,8 +233,8 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlan(ctx context.Context, br *bala
 	// find the segment from the node which has more score than the average
 	segmentsToMove := make([]*meta.Segment, 0)
 	for node, segments := range segmentDist {
-		currentScore := nodeItemsMap[node].getCurrentScore()
-		assignedScore := nodeItemsMap[node].getAssignedScore()
+		currentScore := nodeItemsMap[node].GetCurrentScore()
+		assignedScore := nodeItemsMap[node].GetAssignedScore()
 		if currentScore <= assignedScore {
 			continue
 		}
@@ -223,7 +244,7 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlan(ctx context.Context, br *bala
 		})
 		for _, s := range segments {
 			segmentsToMove = append(segmentsToMove, s)
-			currentScore -= b.calculateSegmentScore(s)
+			currentScore -= policy.CalculateSegmentScore(s)
 			if currentScore <= assignedScore {
 				break
 			}
@@ -239,7 +260,7 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlan(ctx context.Context, br *bala
 		return nil
 	}
 
-	segmentPlans := b.AssignSegment(ctx, replica.GetCollectionID(), segmentsToMove, onlineNodes, false)
+	segmentPlans := b.GetAssignPolicy().AssignSegment(ctx, replica.GetCollectionID(), segmentsToMove, onlineNodes, false)
 	for i := range segmentPlans {
 		segmentPlans[i].From = segmentPlans[i].Segment.Node
 		segmentPlans[i].Replica = replica
@@ -248,8 +269,10 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlan(ctx context.Context, br *bala
 	return segmentPlans
 }
 
-func (b *ChannelLevelScoreBalancer) genChannelPlan(ctx context.Context, replica *meta.Replica, channelName string, onlineNodes []int64) []ChannelAssignPlan {
-	channelPlans := make([]ChannelAssignPlan, 0)
+// genChannelPlan generates channel balance plans for a specific channel within a replica.
+// It distributes channels evenly across online nodes based on channel count.
+func (b *ChannelLevelScoreBalancer) genChannelPlan(ctx context.Context, replica *meta.Replica, channelName string, onlineNodes []int64) []assign.ChannelAssignPlan {
+	channelPlans := make([]assign.ChannelAssignPlan, 0)
 	if len(onlineNodes) > 1 {
 		// start to balance channels on all available nodes
 		channelDist := b.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica), meta.WithChannelName2Channel(channelName))
@@ -277,7 +300,7 @@ func (b *ChannelLevelScoreBalancer) genChannelPlan(ctx context.Context, replica 
 			return nil
 		}
 
-		channelPlans := b.AssignChannel(ctx, replica.GetCollectionID(), channelsToMove, nodeWithLessChannel, false)
+		channelPlans := b.GetAssignPolicy().AssignChannel(ctx, replica.GetCollectionID(), channelsToMove, nodeWithLessChannel, false)
 		for i := range channelPlans {
 			channelPlans[i].From = channelPlans[i].Channel.Node
 			channelPlans[i].Replica = replica

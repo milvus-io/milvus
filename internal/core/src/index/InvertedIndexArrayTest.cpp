@@ -117,11 +117,10 @@ class ArrayInvertedIndexTest : public ::testing::Test {
         Config cfg;
         cfg["is_array"] = true;
         index->BuildWithRawDataForUT(N_, vec_of_array_.data(), cfg);
-        LoadIndexInfo info{
-            .field_id = schema_->get_field_id(FieldName("array")).get(),
-            .index_params = GenIndexParams(index.get()),
-            .cache_index = CreateTestCacheIndex("test", std::move(index)),
-        };
+        LoadIndexInfo info{};
+        info.field_id = schema_->get_field_id(FieldName("array")).get();
+        info.index_params = GenIndexParams(index.get());
+        info.cache_index = CreateTestCacheIndex("test", std::move(index));
         seg_->LoadIndex(info);
     }
 

@@ -64,7 +64,6 @@ type MultiSegmentWriter struct {
 	binLogMaxSize uint64
 
 	res []*datapb.CompactionSegment
-	// DONOT leave it empty of all segments are deleted, just return a segment with zero meta for datacoord
 
 	storageVersion int64
 	params         compaction.Params

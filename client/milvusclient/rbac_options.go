@@ -220,12 +220,14 @@ type DropRoleOption interface {
 }
 
 type dropDropRoleOption struct {
-	roleName string
+	roleName  string
+	forceDrop bool
 }
 
 func (opt *dropDropRoleOption) Request() *milvuspb.DropRoleRequest {
 	return &milvuspb.DropRoleRequest{
-		RoleName: opt.roleName,
+		RoleName:  opt.roleName,
+		ForceDrop: opt.forceDrop,
 	}
 }
 
@@ -233,6 +235,11 @@ func NewDropRoleOption(roleName string) *dropDropRoleOption {
 	return &dropDropRoleOption{
 		roleName: roleName,
 	}
+}
+
+func (opt *dropDropRoleOption) WithForce(force bool) *dropDropRoleOption {
+	opt.forceDrop = force
+	return opt
 }
 
 type DescribeRoleOption interface {

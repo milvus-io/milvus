@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -170,6 +171,11 @@ func (m *importMeta) UpdateJob(ctx context.Context, jobID int64, actions ...Upda
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if job, ok := m.jobs[jobID]; ok {
+		if job.GetState() == internalpb.ImportJobState_Completed ||
+			job.GetState() == internalpb.ImportJobState_Failed {
+			// import job is already completed or failed, no need to update
+			return nil
+		}
 		updatedJob := job.Clone()
 		for _, action := range actions {
 			action(updatedJob)

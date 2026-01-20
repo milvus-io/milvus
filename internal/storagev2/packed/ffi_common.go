@@ -53,7 +53,7 @@ const (
 // This function converts a StorageConfig structure into a Properties object by
 // calling the FFI properties_create function. All configuration fields from
 // StorageConfig are mapped to corresponding key-value pairs in Properties.
-func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extraKVs map[string]string) (*C.Properties, error) {
+func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extraKVs map[string]string) (*C.LoonProperties, error) {
 	if storageConfig == nil {
 		return nil, fmt.Errorf("storageConfig is required")
 	}
@@ -163,7 +163,7 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	}()
 
 	// Create Properties using FFI
-	properties := &C.Properties{}
+	properties := &C.LoonProperties{}
 	var cKeysPtr **C.char
 	var cValuesPtr **C.char
 	if len(cKeys) > 0 {
@@ -171,24 +171,24 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		cValuesPtr = &cValues[0]
 	}
 
-	result := C.properties_create(
+	result := C.loon_properties_create(
 		(**C.char)(unsafe.Pointer(cKeysPtr)),
 		(**C.char)(unsafe.Pointer(cValuesPtr)),
 		C.size_t(len(keys)),
 		properties,
 	)
 
-	err := HandleFFIResult(result)
+	err := HandleLoonFFIResult(result)
 	if err != nil {
 		return nil, err
 	}
 	return properties, nil
 }
 
-func HandleFFIResult(ffiResult C.FFIResult) error {
-	defer C.FreeFFIResult(&ffiResult)
-	if C.IsSuccess(&ffiResult) == 0 {
-		errMsg := C.GetErrorMessage(&ffiResult)
+func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
+	defer C.loon_ffi_free_result(&ffiResult)
+	if C.loon_ffi_is_success(&ffiResult) == 0 {
+		errMsg := C.loon_ffi_get_errmsg(&ffiResult)
 		errStr := "Unknown error"
 		if errMsg != nil {
 			errStr = C.GoString(errMsg)

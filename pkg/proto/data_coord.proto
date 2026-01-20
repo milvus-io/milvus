@@ -775,6 +775,7 @@ message WatchChannelsRequest {
   schema.CollectionSchema schema = 4;
   uint64 create_timestamp = 5;
   repeated common.KeyValuePair db_properties = 6;
+  map<string, common.WALName> channel_wal_names = 7;
 }
 
 message WatchChannelsResponse {

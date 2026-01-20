@@ -45,7 +45,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -353,7 +352,9 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 }
 
 func (mt *MetaTable) createDefaultDb() error {
-	ts, err := mt.tsoAllocator.GenerateTSO(1)
+	// Generate ezID and db ts for default database
+	// Use unique ID as ezID because the default dbID(1) for each cluster is the same
+	ts, err := mt.tsoAllocator.GenerateTSO(2)
 	if err != nil {
 		return err
 	}
@@ -364,21 +365,16 @@ func (mt *MetaTable) createDefaultDb() error {
 		return err
 	}
 
-	defaultRootKey := paramtable.GetCipherParams().DefaultRootKey.GetValue()
-	if hookutil.IsClusterEncryptionEnabled() && len(defaultRootKey) > 0 {
-		// Set unique ID as ezID because the default dbID for each cluster
-		// is the same
-		ezID, err := mt.tsoAllocator.GenerateTSO(1)
-		if err != nil {
-			return err
-		}
+	// Apply same encryption logic as regular database creation
+	// This respects the defaultKey setting
+	defaultProperties, err = hookutil.TidyDBCipherProperties(int64(ts-1), defaultProperties)
+	if err != nil {
+		return err
+	}
 
-		cipherProps := hookutil.GetDBCipherProperties(ezID, defaultRootKey)
-		defaultProperties = append(defaultProperties, cipherProps...)
-
-		if err := hookutil.CreateEZByDBProperties(defaultProperties); err != nil {
-			return err
-		}
+	// Create EZ if encryption is enabled
+	if err := hookutil.CreateEZByDBProperties(defaultProperties); err != nil {
+		return err
 	}
 
 	return mt.createDatabasePrivate(mt.ctx, model.NewDefaultDatabase(defaultProperties), ts)

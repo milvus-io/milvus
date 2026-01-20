@@ -43,7 +43,7 @@ type CompactionTaskMetaSuite struct {
 func (suite *CompactionTaskMetaSuite) SetupTest() {
 	catalog := mocks.NewDataCoordCatalog(suite.T())
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.catalog = catalog
 	meta, err := newCompactionTaskMeta(context.TODO(), catalog)
 	suite.NoError(err)
@@ -127,4 +127,41 @@ func (suite *CompactionTaskMetaSuite) TestTaskStatsJSON() {
 
 	actualJSON = suite.meta.TaskStatsJSON()
 	suite.JSONEq(string(expectedJSON), actualJSON)
+}
+
+// TestReloadFromKV_PreAllocatedSegmentIDsCompatibility verifies that compatibility
+// logic in reloadFromKV does NOT mark Level0DeleteCompaction tasks as failed when
+// PreAllocatedSegmentIDs is nil, while still failing other unfinished tasks that
+// require pre-allocated segment IDs.
+func (suite *CompactionTaskMetaSuite) TestReloadFromKV_PreAllocatedSegmentIDsCompatibility() {
+	// L0 delete compaction task does not use PreAllocatedSegmentIDs.
+	l0Task := &datapb.CompactionTask{
+		PlanID:    1,
+		TriggerID: 1,
+		Type:      datapb.CompactionType_Level0DeleteCompaction,
+		State:     datapb.CompactionTaskState_executing,
+	}
+
+	// Clustering compaction task should require PreAllocatedSegmentIDs and be
+	// marked as failed when the field is nil.
+	clusteringTask := &datapb.CompactionTask{
+		PlanID:    2,
+		TriggerID: 2,
+		Type:      datapb.CompactionType_ClusteringCompaction,
+		State:     datapb.CompactionTaskState_executing,
+	}
+
+	catalog := mocks.NewDataCoordCatalog(suite.T())
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return([]*datapb.CompactionTask{l0Task, clusteringTask}, nil).Once()
+
+	meta, err := newCompactionTaskMeta(context.TODO(), catalog)
+	suite.NoError(err)
+
+	l0Tasks := meta.GetCompactionTasksByTriggerID(1)
+	suite.Equal(1, len(l0Tasks))
+	suite.Equal(datapb.CompactionTaskState_executing, l0Tasks[0].State)
+
+	clusteringTasks := meta.GetCompactionTasksByTriggerID(2)
+	suite.Equal(1, len(clusteringTasks))
+	suite.Equal(datapb.CompactionTaskState_failed, clusteringTasks[0].State)
 }

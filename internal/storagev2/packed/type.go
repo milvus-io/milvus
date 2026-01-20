@@ -37,8 +37,8 @@ type PackedWriter struct {
 type FFIPackedWriter struct {
 	basePath      string
 	baseVersion   int64
-	cWriterHandle C.WriterHandle
-	cProperties   *C.Properties
+	cWriterHandle C.LoonWriterHandle
+	cProperties   *C.LoonProperties
 }
 
 type PackedReader struct {

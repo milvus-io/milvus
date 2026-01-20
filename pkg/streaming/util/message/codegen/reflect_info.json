@@ -474,6 +474,26 @@
                 "MessageType": "MessageTypeDropSnapshot",
                 "Version": 2
             }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.RestoreSnapshotMessageHeader",
+                "BodyType": "messagespb.RestoreSnapshotMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeRestoreSnapshot",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.AlterWALMessageHeader",
+                "BodyType": "messagespb.AlterWALMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeAlterWAL",
+                "Version": 2
+            }
         }
     ]
 }

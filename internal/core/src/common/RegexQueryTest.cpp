@@ -246,11 +246,10 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
     LoadStlSortIndex() {
         auto index = index::CreateScalarIndexSort<int64_t>();
         index->BuildWithRawDataForUT(N, raw_int.data());
-        LoadIndexInfo info{
-            .field_id = schema->get_field_id(FieldName("another_int64")).get(),
-            .index_params = GenIndexParams(index.get()),
-            .cache_index = CreateTestCacheIndex("test", std::move(index)),
-        };
+        LoadIndexInfo info{};
+        info.field_id = schema->get_field_id(FieldName("another_int64")).get();
+        info.index_params = GenIndexParams(index.get());
+        info.cache_index = CreateTestCacheIndex("test", std::move(index));
         seg->LoadIndex(info);
     }
 
@@ -259,11 +258,10 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
         auto index =
             std::make_unique<index::InvertedIndexTantivy<std::string>>();
         index->BuildWithRawDataForUT(N, raw_str.data());
-        LoadIndexInfo info{
-            .field_id = schema->get_field_id(FieldName("str")).get(),
-            .index_params = GenIndexParams(index.get()),
-            .cache_index = CreateTestCacheIndex("test", std::move(index)),
-        };
+        LoadIndexInfo info{};
+        info.field_id = schema->get_field_id(FieldName("str")).get();
+        info.index_params = GenIndexParams(index.get());
+        info.cache_index = CreateTestCacheIndex("test", std::move(index));
         seg->LoadIndex(info);
     }
 
@@ -277,11 +275,10 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
         std::vector<uint8_t> buffer(arr.ByteSizeLong());
         ASSERT_TRUE(arr.SerializeToArray(buffer.data(), arr.ByteSizeLong()));
         index->BuildWithRawDataForUT(arr.ByteSizeLong(), buffer.data());
-        LoadIndexInfo info{
-            .field_id = schema->get_field_id(FieldName("str")).get(),
-            .index_params = GenIndexParams(index.get()),
-            .cache_index = CreateTestCacheIndex("test", std::move(index)),
-        };
+        LoadIndexInfo info{};
+        info.field_id = schema->get_field_id(FieldName("str")).get();
+        info.index_params = GenIndexParams(index.get());
+        info.cache_index = CreateTestCacheIndex("test", std::move(index));
         seg->LoadIndex(info);
     }
 

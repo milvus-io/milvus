@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -43,11 +44,12 @@ const initialTargetVersion = int64(0)
 
 type SegmentChecker struct {
 	*checkerActivation
-	meta            *meta.Meta
-	dist            *meta.DistributionManager
-	targetMgr       meta.TargetManagerInterface
-	nodeMgr         *session.NodeManager
-	getBalancerFunc GetBalancerFunc
+	meta         *meta.Meta
+	dist         *meta.DistributionManager
+	targetMgr    meta.TargetManagerInterface
+	nodeMgr      *session.NodeManager
+	scheduler    task.Scheduler
+	assignPolicy assign.AssignPolicy
 }
 
 func NewSegmentChecker(
@@ -55,15 +57,20 @@ func NewSegmentChecker(
 	dist *meta.DistributionManager,
 	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
-	getBalancerFunc GetBalancerFunc,
+	scheduler task.Scheduler,
 ) *SegmentChecker {
+	// Create RoundRobin assign policy in constructor to maximize loading speed
+	// Note: RoundRobin may break short-term balance but prioritizes loading speed
+	assignPolicy := assign.GetGlobalAssignPolicyFactory().GetPolicy(assign.PolicyTypeRoundRobin)
+
 	return &SegmentChecker{
 		checkerActivation: newCheckerActivation(),
 		meta:              meta,
 		dist:              dist,
 		targetMgr:         targetMgr,
 		nodeMgr:           nodeMgr,
-		getBalancerFunc:   getBalancerFunc,
+		scheduler:         scheduler,
+		assignPolicy:      assignPolicy,
 	}
 }
 
@@ -394,7 +401,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		return s.GetInsertChannel()
 	})
 
-	plans := make([]balance.SegmentAssignPlan, 0)
+	plans := make([]assign.SegmentAssignPlan, 0)
 	for shard, segments := range shardSegments {
 		// if channel is not subscribed yet, skip load segments
 		leader := c.dist.ChannelDistManager.GetShardLeader(shard, replica)
@@ -414,7 +421,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 				SegmentInfo: s,
 			}
 		})
-		shardPlans := c.getBalancerFunc().AssignSegment(ctx, replica.GetCollectionID(), segmentInfos, rwNodes, true)
+		shardPlans := c.assignPolicy.AssignSegment(ctx, replica.GetCollectionID(), segmentInfos, rwNodes, true)
 		for i := range shardPlans {
 			shardPlans[i].Replica = replica
 			shardPlans[i].LoadPriority = priorityMap[shardPlans[i].Segment.GetID()]

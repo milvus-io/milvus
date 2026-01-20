@@ -280,7 +280,6 @@ func (suite *ServiceSuite) SetupTest() {
 		cluster:             suite.cluster,
 		jobScheduler:        suite.jobScheduler,
 		taskScheduler:       suite.taskScheduler,
-		getBalancerFunc:     func() balance.Balance { return suite.balancer },
 		distController:      suite.distController,
 		ctx:                 context.Background(),
 		metricsRequest:      metricsinfo.NewMetricsRequest(),
@@ -295,7 +294,6 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.nodeMgr,
 		suite.taskScheduler,
 		suite.broker,
-		suite.server.getBalancerFunc,
 	)
 
 	suite.server.registerMetricsRequest()
@@ -707,7 +705,7 @@ func (suite *ServiceSuite) TestTransferNode() {
 
 	server.resourceObserver = observers.NewResourceObserver(server.meta)
 	server.resourceObserver.Start()
-	server.replicaObserver = observers.NewReplicaObserver(server.meta, server.dist)
+	server.replicaObserver = observers.NewReplicaObserver(server.meta, server.dist, server.targetMgr)
 	server.replicaObserver.Start()
 	defer server.resourceObserver.Stop()
 	defer server.replicaObserver.Stop()
@@ -1917,6 +1915,7 @@ func (suite *ServiceSuite) TestHandleNodeUp() {
 	suite.server.replicaObserver = observers.NewReplicaObserver(
 		suite.server.meta,
 		suite.server.dist,
+		suite.server.targetMgr,
 	)
 	suite.server.resourceObserver = observers.NewResourceObserver(
 		suite.server.meta,
