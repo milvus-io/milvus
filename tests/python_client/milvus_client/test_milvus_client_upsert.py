@@ -168,10 +168,19 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         nb = 100
 
         # 1. Create schema
-        schema = cf.gen_default_schema_for_upsert(client, primary_field=primary_field,with_json=False)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        if primary_field == ct.default_int64_field_name:
+            schema.add_field(primary_field, DataType.INT64, is_primary=True, auto_id=False)
+        else:
+            schema.add_field(primary_field, DataType.VARCHAR, max_length=ct.default_length, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_bool_field_name, DataType.BOOL)
+        if primary_field != ct.default_string_field_name:
+            schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
 
         # 2. Create collection
-        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+        self.create_collection(client, collection_name, schema=schema)
 
         # 3. Generate row data
         rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
@@ -343,12 +352,17 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
 
         # 1. Create binary vector collection with default dim
-        schema = cf.gen_default_schema_for_upsert(client, is_binary=True, with_json=False)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
+
         self.create_collection(client, collection_name, schema=schema)
 
         # 2. Generate binary vector data with mismatched dim
-        _, binary_vectors = cf.gen_binary_vectors(default_nb, dim)
-        rows = [{ct.default_int64_field_name: i, ct.default_binary_vec_field_name: binary_vectors[i],
+        binary_vectors = cf.gen_binary_vectors(default_nb, dim)[1]
+        rows = [{default_primary_key_field_name: i, ct.default_binary_vec_field_name: binary_vectors[i],
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
 
         # 3. Verify error on upsert
