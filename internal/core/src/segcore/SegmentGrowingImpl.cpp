@@ -39,7 +39,6 @@
 #include "segcore/Utils.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentGrowing.h"
-#include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/loon_ffi/property_singleton.h"

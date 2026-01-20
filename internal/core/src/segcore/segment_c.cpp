@@ -677,32 +677,11 @@ LoadJsonKeyIndex(CTraceContext c_trace,
         milvus::storage::FileManagerContext file_ctx(
             field_meta, index_meta, remote_chunk_manager, fs);
 
-        // Check for cancellation before loading
-        if (source) {
-            auto cancellation_source =
-                static_cast<folly::CancellationSource*>(source);
-            if (cancellation_source->getToken().isCancellationRequested()) {
-                throw milvus::SegcoreError(
-                    milvus::ErrorCode::FollyCancel,
-                    fmt::format("Load cancelled for segment {} json stats",
-                                segment->get_segment_id()));
-            }
-        }
-
         std::unique_ptr<
             milvus::cachinglayer::Translator<milvus::index::JsonKeyStats>>
             translator = std::make_unique<
                 milvus::segcore::storagev2translator::JsonStatsTranslator>(
                 load_info, ctx, file_ctx, config);
-
-        milvus::OpContext op_ctx = [source]() {
-            if (source) {
-                auto cancellation_source =
-                    static_cast<folly::CancellationSource*>(source);
-                return milvus::OpContext(cancellation_source->getToken());
-            }
-            return milvus::OpContext(folly::CancellationToken());
-        }();
 
         if (source) {
             auto cancellation_source =
