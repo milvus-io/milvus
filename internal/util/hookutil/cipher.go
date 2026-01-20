@@ -251,7 +251,6 @@ func removeCipherProperties(properties []*commonpb.KeyValuePair) []*commonpb.Key
 		}
 	}
 	return result
->>>>>>> d09b8fad16 (enhance: encrypt all dbs when defaultKey is given (#47049))
 }
 
 func TidyCollPropsByDBProps(collProps, dbProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
