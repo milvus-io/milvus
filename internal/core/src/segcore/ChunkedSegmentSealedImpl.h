@@ -1014,6 +1014,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      * @param index Index of the column group to load
      * @param milvus_field_ids A vector of field IDs to load
      * @param eager_load Whether to eagerly load provided columns
+     * @param op_ctx The operation context
      */
     void
     LoadColumnGroup(
@@ -1028,9 +1029,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      * @brief Reloads columns from the specified field IDs
      *
      * @param field_ids_to_reload A vector of field IDs to reload
+     * @param op_ctx The operation context
      */
     void
-    ReloadColumns(const std::vector<FieldId>& field_ids_to_reload);
+    ReloadColumns(const std::vector<FieldId>& field_ids_to_reload,
+                  milvus::OpContext* op_ctx = nullptr);
 
     /**
      * @brief Apply load differences to update segment load information
@@ -1041,6 +1044,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      *
      * @param segment_load_info The segment load information to be updated
      * @param load_diff The differences to apply, containing fields and indexes to add/remove
+     * @param op_ctx The operation context
      */
     void
     ApplyLoadDiff(SegmentLoadInfo& segment_load_info,

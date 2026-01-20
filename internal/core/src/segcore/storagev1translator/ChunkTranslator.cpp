@@ -178,7 +178,8 @@ ChunkTranslator::get_cells(
 
     for (auto cid : cids) {
         // Check for cancellation before processing each chunk
-        CheckCancellation(ctx, segment_id_, field_id_, "ChunkTranslator::get_cells()");
+        CheckCancellation(
+            ctx, segment_id_, field_id_, "ChunkTranslator::get_cells()");
 
         std::unique_ptr<milvus::Chunk> chunk = nullptr;
         if (!use_mmap_) {

@@ -39,7 +39,6 @@
 #include "segcore/Utils.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentGrowing.h"
-#include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/loon_ffi/property_singleton.h"
@@ -1780,7 +1779,8 @@ void
 SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
                                     milvus::OpContext* op_ctx) {
     // Check for cancellation before starting
-    CheckCancellation(op_ctx, id_, field_id.get(), "SegmentGrowingImpl::CreateTextIndex()");
+    CheckCancellation(
+        op_ctx, id_, field_id.get(), "SegmentGrowingImpl::CreateTextIndex()");
 
     std::unique_lock lock(mutex_);
     const auto& field_meta = schema_->operator[](field_id);

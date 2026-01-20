@@ -2857,7 +2857,7 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
 
     // reload fields
     if (!diff.fields_to_reload.empty()) {
-        ReloadColumns(diff.fields_to_reload);
+        ReloadColumns(diff.fields_to_reload, op_ctx);
     }
 
     // drop index, must after reload binlog
@@ -3211,7 +3211,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 }
 
 void
-ChunkedSegmentSealedImpl::ReloadColumns(const std::vector<FieldId>& field_ids) {
+ChunkedSegmentSealedImpl::ReloadColumns(const std::vector<FieldId>& field_ids,
+                                        milvus::OpContext* op_ctx) {
     for (auto& field_id : field_ids) {
         auto column = get_column(field_id);
         AssertInfo(column != nullptr,
@@ -3222,7 +3223,7 @@ ChunkedSegmentSealedImpl::ReloadColumns(const std::vector<FieldId>& field_ids) {
         for (int64_t chunk_id = 0; chunk_id < num_chunks; chunk_id++) {
             chunk_ids[chunk_id] = chunk_id;
         }
-        column->PrefetchChunks(nullptr, chunk_ids);
+        column->PrefetchChunks(op_ctx, chunk_ids);
     }
 }
 
