@@ -211,7 +211,12 @@ func (s *ArkTextEmbeddingProviderSuite) TestNewArkEmbeddingProviderWithBatchSize
 }
 
 func (s *ArkTextEmbeddingProviderSuite) TestNewArkEmbeddingProvider_InvalidParams() {
-	schema := &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector}
+	schema := &schemapb.FieldSchema{
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: "dim", Value: "4"},
+		},
+	}
 
 	// Invalid dim (non-integer)
 	fs1 := &schemapb.FunctionSchema{
@@ -263,7 +268,12 @@ func (s *ArkTextEmbeddingProviderSuite) TestNewArkEmbeddingProvider_InvalidParam
 }
 
 func (s *ArkTextEmbeddingProviderSuite) TestNewArkEmbeddingProvider_Multimodal() {
-	schema := &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector}
+	schema := &schemapb.FieldSchema{
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: "dim", Value: "4"},
+		},
+	}
 	fs := &schemapb.FunctionSchema{
 		Params: []*commonpb.KeyValuePair{
 			{Key: models.ModelNameParamKey, Value: TestModel},
