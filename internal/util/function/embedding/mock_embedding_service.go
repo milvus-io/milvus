@@ -30,7 +30,6 @@ import (
 	"net/http/httptest"
 
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
-
 	arkmodel "github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
