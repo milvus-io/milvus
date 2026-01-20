@@ -20,10 +20,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/util/function/models"
-
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
+
+	"github.com/milvus-io/milvus/internal/util/function/models"
 )
 
 // ArkClient wraps the Volcengine Ark SDK client for embedding operations.
