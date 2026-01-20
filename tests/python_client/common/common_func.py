@@ -941,6 +941,7 @@ def gen_array_collection_schema(description=ct.default_desc, primary_field=ct.de
                                                                     enable_dynamic_field=enable_dynamic_field, **kwargs)
     return schema
 
+
 def gen_bulk_insert_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name, with_varchar_field=True,
                                       auto_id=False, dim=ct.default_dim, enable_dynamic_field=False, with_json=False):
     if enable_dynamic_field:
@@ -1445,7 +1446,6 @@ def gen_array_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, auto
         df.drop(ct.default_int64_field_name, axis=1, inplace=True)
 
     return df
-
 
 
 def gen_dataframe_multi_vec_fields(vec_fields, nb=ct.default_nb):
