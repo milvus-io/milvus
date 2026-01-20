@@ -2292,6 +2292,46 @@ class TestMilvusClientInsertArray(TestMilvusClientV2Base):
       The following cases are used to test insert array
       ******************************************************************
     """
+
+    def gen_array_collection_schema(self, description=ct.default_desc,
+                                      primary_field=ct.default_int64_field_name, auto_id=False,
+                                      dim=ct.default_dim, enable_dynamic_field=False,
+                                      max_capacity=ct.default_max_capacity,
+                                      max_length=100, with_json=False, **kwargs):
+        """
+        Generate array collection schema.
+        """
+        schema = MilvusClient.create_schema(auto_id=auto_id, enable_dynamic_field=enable_dynamic_field, description=description, **kwargs)
+
+        # Add primary key field
+        if primary_field == ct.default_int64_field_name:
+            schema.add_field(field_name=ct.default_int64_field_name, datatype=DataType.INT64, is_primary=True, auto_id=auto_id)
+        elif primary_field == ct.default_string_field_name:
+            schema.add_field(field_name=ct.default_string_field_name, datatype=DataType.VARCHAR,
+                             max_length=ct.default_length, is_primary=True, auto_id=auto_id)
+        else:
+            log.error("Primary key only support int or varchar")
+            assert False
+
+        # Add vector field
+        schema.add_field(field_name=ct.default_float_vec_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
+
+        if not enable_dynamic_field:
+            # Add JSON field if requested
+            if with_json:
+                schema.add_field(field_name=ct.default_json_field_name, datatype=DataType.JSON, nullable=True)
+
+            # Add array fields
+            schema.add_field(field_name=ct.default_int32_array_field_name, datatype=DataType.ARRAY,
+                             element_type=DataType.INT32, max_capacity=max_capacity)
+            schema.add_field(field_name=ct.default_float_array_field_name, datatype=DataType.ARRAY,
+                             element_type=DataType.FLOAT, max_capacity=max_capacity)
+            schema.add_field(field_name=ct.default_string_array_field_name, datatype=DataType.ARRAY,
+                             element_type=DataType.VARCHAR, max_capacity=max_capacity, max_length=max_length,
+                             nullable=True)
+
+        return schema
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("auto_id", [True, False])
     def test_milvus_client_insert_array_data(self, auto_id):
@@ -2302,15 +2342,12 @@ class TestMilvusClientInsertArray(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        array_length = ct.default_max_capacity
 
-        # 1. Create schema with array fields using gen_array_collection_schema_by_client
-        schema = cf.gen_array_collection_schema_by_client(client, auto_id=auto_id, dim=default_dim,
-                                                          max_capacity=array_length, max_length=100,
-                                                          enable_dynamic_field=False, with_json=False)
+        # 1. Create schema
+        schema = self.gen_array_collection_schema(auto_id=auto_id)
 
         # 2. Create collection
-        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+        self.create_collection(client, collection_name, schema=schema)
 
         # 3. Generate row data with array fields
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
@@ -2337,15 +2374,12 @@ class TestMilvusClientInsertArray(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         nb = ct.default_nb
-        array_length = ct.default_max_capacity
 
-        # 1. Create schema with array fields using gen_array_collection_schema_by_client
-        schema = cf.gen_array_collection_schema_by_client(client, auto_id=False, dim=default_dim,
-                                                          max_capacity=array_length, max_length=100,
-                                                          enable_dynamic_field=False, with_json=False)
+        # 1. Create schema
+        schema = self.gen_array_collection_schema()
 
         # 2. Create collection
-        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+        self.create_collection(client, collection_name, schema=schema)
 
         # 3. Generate row data with array fields, set int32_array to empty lists
         rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
@@ -2377,13 +2411,11 @@ class TestMilvusClientInsertArray(TestMilvusClientV2Base):
         nb = ct.default_nb
         array_length = ct.default_max_capacity
 
-        # 1. Create schema with array fields using gen_array_collection_schema_by_client
-        schema = cf.gen_array_collection_schema_by_client(client, auto_id=False, dim=default_dim,
-                                                          max_capacity=array_length, max_length=100,
-                                                          enable_dynamic_field=False, with_json=False)
+        # 1. Create schema
+        schema = self.gen_array_collection_schema(max_capacity=array_length)
 
         # 2. Create collection
-        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+        self.create_collection(client, collection_name, schema=schema)
 
         # 3. Generate row data with different array lengths for each row
         rows = []
@@ -2428,11 +2460,11 @@ class TestMilvusClientInsertArray(TestMilvusClientV2Base):
         dim = 32
         array_length = ct.default_max_capacity
 
-        # 1. Create schema with array fields
-        schema = cf.gen_array_collection_schema_by_client(client, dim=dim)
+        # 1. Create schema
+        schema = self.gen_array_collection_schema(dim=dim, max_capacity=array_length)
 
         # 2. Create collection
-        self.create_collection(client, collection_name, dimension=dim, schema=schema)
+        self.create_collection(client, collection_name, schema=schema)
 
         # 3. Generate row data
         rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
@@ -2462,11 +2494,11 @@ class TestMilvusClientInsertArray(TestMilvusClientV2Base):
         nb = 10
         dim = 8
 
-        # 1. Create schema with array fields using gen_array_collection_schema_by_client
-        schema = cf.gen_array_collection_schema_by_client(client, dim=dim)
+        # 1. Create schema
+        schema = self.gen_array_collection_schema(dim=dim)
 
         # 2. Create collection
-        self.create_collection(client, collection_name, dimension=dim, schema=schema)
+        self.create_collection(client, collection_name, schema=schema)
 
         # 3. Test 1: Insert string values to an int array
         rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
@@ -2493,10 +2525,9 @@ class TestMilvusClientInsertArray(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         nb = 10
         dim = 32
-        array_length = ct.default_max_capacity
 
-        # 1. Create schema with array fields using gen_array_collection_schema_by_client
-        schema = cf.gen_array_collection_schema_by_client(client, dim=dim)
+        # 1. Create schema
+        schema = self.gen_array_collection_schema(dim=dim)
 
         # 2. Create collection
         self.create_collection(client, collection_name, schema=schema)

@@ -941,46 +941,6 @@ def gen_array_collection_schema(description=ct.default_desc, primary_field=ct.de
                                                                     enable_dynamic_field=enable_dynamic_field, **kwargs)
     return schema
 
-def gen_array_collection_schema_by_client(client, description=ct.default_desc,
-                                          primary_field=ct.default_int64_field_name, auto_id=False,
-                                          dim=ct.default_dim, enable_dynamic_field=False,
-                                          max_capacity=ct.default_max_capacity,
-                                          max_length=100, with_json=False, **kwargs):
-    """
-    Generate array collection schema using MilvusClient API.
-    """
-
-    schema = client.create_schema(auto_id=auto_id, enable_dynamic_field=enable_dynamic_field, description=description, **kwargs)
-
-    # Add primary key field
-    if primary_field is ct.default_int64_field_name:
-        schema.add_field(field_name=ct.default_int64_field_name, datatype=DataType.INT64, is_primary=True,
-                         auto_id=auto_id)
-    elif primary_field is ct.default_string_field_name:
-        schema.add_field(field_name=ct.default_string_field_name, datatype=DataType.VARCHAR,
-                         max_length=ct.default_length, is_primary=True, auto_id=auto_id)
-    else:
-        log.error("Primary key only support int or varchar")
-        assert False
-
-    # Add vector field
-    schema.add_field(field_name=ct.default_float_vec_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
-
-    if not enable_dynamic_field:
-        # Add JSON field if requested
-        if with_json:
-            schema.add_field(field_name=ct.default_json_field_name, datatype=DataType.JSON, nullable=True)
-
-        # Add array fields
-        schema.add_field(field_name=ct.default_int32_array_field_name, datatype=DataType.ARRAY,
-                         element_type=DataType.INT32, max_capacity=max_capacity)
-        schema.add_field(field_name=ct.default_float_array_field_name, datatype=DataType.ARRAY,
-                         element_type=DataType.FLOAT, max_capacity=max_capacity)
-        schema.add_field(field_name=ct.default_string_array_field_name, datatype=DataType.ARRAY,
-                         element_type=DataType.VARCHAR, max_capacity=max_capacity, max_length=max_length, nullable=True)
-
-    return schema
-
 def gen_bulk_insert_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name, with_varchar_field=True,
                                       auto_id=False, dim=ct.default_dim, enable_dynamic_field=False, with_json=False):
     if enable_dynamic_field:
