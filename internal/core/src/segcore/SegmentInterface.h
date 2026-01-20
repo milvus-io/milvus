@@ -157,7 +157,8 @@ class SegmentInterface {
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) = 0;
 
     virtual void
-    LoadFieldData(const LoadFieldDataInfo& info) = 0;
+    LoadFieldData(const LoadFieldDataInfo& info,
+                  milvus::OpContext* op_ctx = nullptr) = 0;
 
     virtual int64_t
     get_segment_id() const = 0;
@@ -175,7 +176,7 @@ class SegmentInterface {
     is_nullable(FieldId field_id) const = 0;
 
     virtual void
-    CreateTextIndex(FieldId field_id) = 0;
+    CreateTextIndex(FieldId field_id, milvus::OpContext* op_ctx = nullptr) = 0;
 
     virtual PinWrapper<index::TextMatchIndex*>
     GetTextIndex(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
@@ -245,7 +246,8 @@ class SegmentInterface {
     SetLoadInfo(const milvus::proto::segcore::SegmentLoadInfo& load_info) = 0;
 
     virtual void
-    Load(milvus::tracer::TraceContext& trace_ctx) = 0;
+    Load(milvus::tracer::TraceContext& trace_ctx,
+         milvus::OpContext* op_ctx = nullptr) = 0;
 };
 
 // internal API for DSL calculation

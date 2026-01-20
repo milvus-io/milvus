@@ -76,7 +76,7 @@ JsonStatsTranslator::key() const {
 std::vector<std::pair<milvus::cachinglayer::cid_t,
                       std::unique_ptr<milvus::index::JsonKeyStats>>>
 JsonStatsTranslator::get_cells(
-    const std::vector<milvus::cachinglayer::cid_t>&) {
+    milvus::OpContext* ctx, const std::vector<milvus::cachinglayer::cid_t>&) {
     auto stats = std::make_unique<milvus::index::JsonKeyStats>(
         file_manager_context_, /* is_load */ true);
 

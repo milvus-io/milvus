@@ -36,6 +36,7 @@ SkipIndex::GetFieldChunkMetrics(milvus::FieldId field_id, int chunk_id) const {
 std::vector<
     std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<FieldChunkMetrics>>>
 FieldChunkMetricsTranslator::get_cells(
+    milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
     std::vector<std::pair<milvus::cachinglayer::cid_t,
                           std::unique_ptr<FieldChunkMetrics>>>

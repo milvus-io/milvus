@@ -117,12 +117,12 @@ std::pair<std::vector<milvus::cachinglayer::cid_t>,
 
 class ChunkedColumnBase : public ChunkedColumnInterface {
  public:
-    explicit ChunkedColumnBase(std::unique_ptr<Translator<Chunk>> translator,
+    explicit ChunkedColumnBase(std::shared_ptr<CacheSlot<Chunk>> slot,
                                const FieldMeta& field_meta)
         : nullable_(field_meta.is_nullable()),
           data_type_(field_meta.get_data_type()),
-          num_chunks_(translator->num_cells()),
-          slot_(Manager::GetInstance().CreateCacheSlot(std::move(translator))) {
+          num_chunks_(slot->num_cells()),
+          slot_(std::move(slot)) {
         num_rows_ = GetNumRowsUntilChunk().back();
     }
 
@@ -373,10 +373,9 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
 
 class ChunkedColumn : public ChunkedColumnBase {
  public:
-    // memory mode ctor
-    explicit ChunkedColumn(std::unique_ptr<Translator<Chunk>> translator,
+    explicit ChunkedColumn(std::shared_ptr<CacheSlot<Chunk>> slot,
                            const FieldMeta& field_meta)
-        : ChunkedColumnBase(std::move(translator), field_meta) {
+        : ChunkedColumnBase(std::move(slot), field_meta) {
     }
 
     // BulkValueAt() is used for custom data type in the future
@@ -498,11 +497,9 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
         std::is_same_v<T, std::string> || std::is_same_v<T, Json>,
         "ChunkedVariableColumn only supports std::string or Json types");
 
-    // memory mode ctor
-    explicit ChunkedVariableColumn(
-        std::unique_ptr<Translator<Chunk>> translator,
-        const FieldMeta& field_meta)
-        : ChunkedColumnBase(std::move(translator), field_meta) {
+    explicit ChunkedVariableColumn(std::shared_ptr<CacheSlot<Chunk>> slot,
+                                   const FieldMeta& field_meta)
+        : ChunkedColumnBase(std::move(slot), field_meta) {
     }
 
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
@@ -616,10 +613,9 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
 
 class ChunkedArrayColumn : public ChunkedColumnBase {
  public:
-    // memory mode ctor
-    explicit ChunkedArrayColumn(std::unique_ptr<Translator<Chunk>> translator,
+    explicit ChunkedArrayColumn(std::shared_ptr<CacheSlot<Chunk>> slot,
                                 const FieldMeta& field_meta)
-        : ChunkedColumnBase(std::move(translator), field_meta) {
+        : ChunkedColumnBase(std::move(slot), field_meta) {
     }
 
     void
@@ -661,10 +657,9 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
 
 class ChunkedVectorArrayColumn : public ChunkedColumnBase {
  public:
-    explicit ChunkedVectorArrayColumn(
-        std::unique_ptr<Translator<Chunk>> translator,
-        const FieldMeta& field_meta)
-        : ChunkedColumnBase(std::move(translator), field_meta) {
+    explicit ChunkedVectorArrayColumn(std::shared_ptr<CacheSlot<Chunk>> slot,
+                                      const FieldMeta& field_meta)
+        : ChunkedColumnBase(std::move(slot), field_meta) {
     }
 
     void
@@ -708,34 +703,34 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
 };
 
 inline std::shared_ptr<ChunkedColumnInterface>
-MakeChunkedColumnBase(DataType data_type,
-                      std::unique_ptr<Translator<milvus::Chunk>> translator,
-                      const FieldMeta& field_meta) {
+MakeChunkedColumnBase(
+    DataType data_type,
+    std::shared_ptr<cachinglayer::CacheSlot<milvus::Chunk>> slot,
+    const FieldMeta& field_meta) {
     if (ChunkedColumnInterface::IsChunkedVariableColumnDataType(data_type)) {
         if (data_type == DataType::JSON) {
             return std::static_pointer_cast<ChunkedColumnInterface>(
                 std::make_shared<ChunkedVariableColumn<milvus::Json>>(
-                    std::move(translator), field_meta));
+                    std::move(slot), field_meta));
         }
         return std::static_pointer_cast<ChunkedColumnInterface>(
             std::make_shared<ChunkedVariableColumn<std::string>>(
-                std::move(translator), field_meta));
+                std::move(slot), field_meta));
     }
 
     if (ChunkedColumnInterface::IsChunkedArrayColumnDataType(data_type)) {
         return std::static_pointer_cast<ChunkedColumnInterface>(
-            std::make_shared<ChunkedArrayColumn>(std::move(translator),
-                                                 field_meta));
+            std::make_shared<ChunkedArrayColumn>(std::move(slot), field_meta));
     }
 
     if (ChunkedColumnInterface::IsChunkedVectorArrayColumnDataType(data_type)) {
         return std::static_pointer_cast<ChunkedColumnInterface>(
-            std::make_shared<ChunkedVectorArrayColumn>(std::move(translator),
+            std::make_shared<ChunkedVectorArrayColumn>(std::move(slot),
                                                        field_meta));
     }
 
     return std::static_pointer_cast<ChunkedColumnInterface>(
-        std::make_shared<ChunkedColumn>(std::move(translator), field_meta));
+        std::make_shared<ChunkedColumn>(std::move(slot), field_meta));
 }
 
 }  // namespace milvus
