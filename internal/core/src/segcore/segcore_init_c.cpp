@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "pthread.h"
+#include <chrono>
 #include "config/ConfigKnowhere.h"
 #include "fmt/core.h"
 #include "log/Log.h"
@@ -211,7 +212,8 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
                        const float overloaded_memory_threshold_percentage,
                        const float loading_resource_factor,
                        const float max_disk_usage_percentage,
-                       const char* disk_path) {
+                       const char* disk_path,
+                       const int64_t loading_timeout_ms) {
     std::string disk_path_str(disk_path);
     milvus::cachinglayer::Manager::ConfigureTieredStorage(
         {scalarFieldCacheWarmupPolicy,
@@ -233,7 +235,8 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
          overloaded_memory_threshold_percentage,
          max_disk_usage_percentage,
          disk_path_str,
-         loading_resource_factor});
+         loading_resource_factor},
+        std::chrono::milliseconds(loading_timeout_ms));
 }
 
 }  // namespace milvus::segcore

@@ -39,7 +39,8 @@ main(int argc, char** argv) {
         {1024 * mb, 1024 * mb, 1024 * mb, 1024 * mb, 1024 * mb, 1024 * mb},
         true,
         true,
-        {10, true, 30});
+        {10, true, 30},
+        std::chrono::milliseconds(0));
 
     return RUN_ALL_TESTS();
 }

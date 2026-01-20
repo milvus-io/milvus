@@ -33,7 +33,10 @@ TEST(test_chunked_column, test_get_chunkid) {
         num_rows_per_chunk, "test", std::move(chunks));
     FieldMeta field_meta(
         FieldName("test"), FieldId(1), DataType::INT64, false, std::nullopt);
-    ChunkedColumn column(std::move(translator), field_meta);
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<milvus::Chunk>(
+            std::move(translator), nullptr);
+    ChunkedColumn column(std::move(slot), field_meta);
 
     int offset = 0;
     for (int i = 0; i < num_chunks; ++i) {
