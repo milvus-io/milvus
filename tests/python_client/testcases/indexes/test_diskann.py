@@ -81,15 +81,6 @@ class TestDiskannBuildParams(TestMilvusClientV2Base):
             schema.add_field(vector_field_name, datatype=vector_data_type, dim=dim, nullable=True)
         self.create_collection(client, collection_name, schema=schema)
         insert_times = 2
-        # random_vectors = list(cf.gen_vectors(default_nb*insert_times, default_dim, vector_data_type=vector_data_type)) \
-        #     if vector_data_type == DataType.FLOAT_VECTOR \
-        #     else cf.gen_vectors(default_nb*insert_times, default_dim, vector_data_type=vector_data_type)
-        # for j in range(insert_times):
-        #     start_pk = j * default_nb
-        #     rows = [{
-        #         pk_field_name: i + start_pk,
-        #         vector_field_name: random_vectors[i + start_pk]
-        #     } for i in range(default_nb)]
         rows = cf.gen_row_data_by_schema(insert_times * default_nb, schema=schema)
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
