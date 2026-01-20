@@ -71,7 +71,9 @@ func (p *RowCountBasedAssignPolicy) getWorkloadStatus() *rowcountWorkloadStatus 
 	allChannels := p.dist.ChannelDistManager.GetByFilter()
 	for _, ch := range allChannels {
 		status.nodeGlobalChannelCount[ch.Node]++
-		status.nodeGlobalChannelRowCount[ch.Node] += int(ch.View.NumOfGrowingRows)
+		if ch.View != nil {
+			status.nodeGlobalChannelRowCount[ch.Node] += int(ch.View.NumOfGrowingRows)
+		}
 	}
 
 	p.status = status

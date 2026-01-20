@@ -75,7 +75,9 @@ func (p *ScoreBasedAssignPolicy) getWorkloadStatus() *workloadStatus {
 	allChannels := p.dist.ChannelDistManager.GetByFilter()
 	for _, ch := range allChannels {
 		status.nodeGlobalChannels[ch.Node] = append(status.nodeGlobalChannels[ch.Node], ch)
-		status.nodeGlobalChannelRowCount[ch.Node] += int(float64(ch.View.NumOfGrowingRows))
+		if ch.View != nil {
+			status.nodeGlobalChannelRowCount[ch.Node] += int(ch.View.NumOfGrowingRows)
+		}
 	}
 
 	p.status = status
@@ -283,7 +285,7 @@ func (p *ScoreBasedAssignPolicy) calculateScoreBySegment(collectionID, nodeID in
 		meta.WithNodeID2Channel(nodeID),
 	)
 	for _, d := range collDelegatorList {
-		collectionRowCount += int(float64(d.View.NumOfGrowingRows))
+		collectionRowCount += int(d.View.NumOfGrowingRows)
 	}
 
 	// Calculate executing task cost for collection
