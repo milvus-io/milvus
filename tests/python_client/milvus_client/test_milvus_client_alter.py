@@ -616,3 +616,361 @@ class TestMilvusClientAlterDatabase(TestMilvusClientV2Base):
             assert len(res1.keys()) == 1
             # drop the user database
             self.drop_database(client, my_db)
+
+
+class TestMilvusClientAlterCollectionFieldDescriptionValid(TestMilvusClientV2Base):
+    """
+    Positive tests for alter_collection_field() to change field description
+    PR: https://github.com/milvus-io/milvus/pull/47057
+    Issue: https://github.com/milvus-io/milvus/issues/46896
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_alter_field_description_basic(self):
+        """
+        target: test basic functionality of altering field description
+        method: create collection, alter field description, verify change
+        expected: field description updated successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create collection with default schema
+        self.create_collection(client, collection_name, default_dim)
+
+        # 2. Alter field description
+        new_description = "This is a new description for vector field"
+        self.alter_collection_field(
+            client, collection_name,
+            field_name=default_vector_field_name,
+            field_params={"field.description": new_description}
+        )
+
+        # 3. Verify description changed
+        desc_res = self.describe_collection(client, collection_name)[0]
+        for field in desc_res.get("fields", []):
+            if field.get("name") == default_vector_field_name:
+                assert field.get("description") == new_description, \
+                    f"Expected description '{new_description}', got '{field.get('description')}'"
+                break
+
+        # 4. Cleanup
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_alter_primary_key_field_description(self):
+        """
+        target: test altering primary key field description
+        method: alter the description of primary key field
+        expected: description updated successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create collection
+        self.create_collection(client, collection_name, default_dim)
+
+        # 2. Alter primary key field description
+        new_description = "Primary key field for entity identification"
+        self.alter_collection_field(
+            client, collection_name,
+            field_name=default_primary_key_field_name,
+            field_params={"field.description": new_description}
+        )
+
+        # 3. Verify
+        desc_res = self.describe_collection(client, collection_name)[0]
+        for field in desc_res.get("fields", []):
+            if field.get("name") == default_primary_key_field_name:
+                assert field.get("description") == new_description
+                break
+
+        # 4. Cleanup
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_alter_vector_field_description(self):
+        """
+        target: test altering vector field description
+        method: alter the description of vector field
+        expected: description updated successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create collection with custom schema
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field("pk", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=default_dim,
+                         description="original description")
+        self.create_collection(client, collection_name, schema=schema)
+
+        # 2. Alter vector field description
+        new_description = "Dense embedding vector for similarity search"
+        self.alter_collection_field(
+            client, collection_name,
+            field_name="embedding",
+            field_params={"field.description": new_description}
+        )
+
+        # 3. Verify
+        desc_res = self.describe_collection(client, collection_name)[0]
+        for field in desc_res.get("fields", []):
+            if field.get("name") == "embedding":
+                assert field.get("description") == new_description
+                break
+
+        # 4. Cleanup
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_alter_scalar_field_description(self):
+        """
+        target: test altering scalar field description
+        method: alter the description of a scalar field (VarChar)
+        expected: description updated successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create collection with scalar field
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field("pk", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("title", DataType.VARCHAR, max_length=256,
+                         description="original title description")
+        self.create_collection(client, collection_name, schema=schema)
+
+        # 2. Alter scalar field description
+        new_description = "Title of the document"
+        self.alter_collection_field(
+            client, collection_name,
+            field_name="title",
+            field_params={"field.description": new_description}
+        )
+
+        # 3. Verify
+        desc_res = self.describe_collection(client, collection_name)[0]
+        for field in desc_res.get("fields", []):
+            if field.get("name") == "title":
+                assert field.get("description") == new_description
+                break
+
+        # 4. Cleanup
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_alter_field_description_multiple_times(self):
+        """
+        target: test altering field description multiple times
+        method: alter the same field description consecutively
+        expected: each alteration succeeds, idempotent behavior
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create collection
+        self.create_collection(client, collection_name, default_dim)
+
+        # 2. Alter description multiple times
+        descriptions = [
+            "First description",
+            "Second description",
+            "Third description",
+            "Final description"
+        ]
+
+        for desc in descriptions:
+            self.alter_collection_field(
+                client, collection_name,
+                field_name=default_vector_field_name,
+                field_params={"field.description": desc}
+            )
+
+            # Verify each change
+            desc_res = self.describe_collection(client, collection_name)[0]
+            for field in desc_res.get("fields", []):
+                if field.get("name") == default_vector_field_name:
+                    assert field.get("description") == desc
+                    break
+
+        # 3. Cleanup
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_alter_field_description_to_empty(self):
+        """
+        target: test altering field description to empty string
+        method: set field description to empty string
+        expected: description cleared successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create collection with field having description
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field("pk", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim,
+                         description="This field has a description")
+        self.create_collection(client, collection_name, schema=schema)
+
+        # 2. Clear description
+        self.alter_collection_field(
+            client, collection_name,
+            field_name=default_vector_field_name,
+            field_params={"field.description": ""}
+        )
+
+        # 3. Verify description is empty
+        desc_res = self.describe_collection(client, collection_name)[0]
+        for field in desc_res.get("fields", []):
+            if field.get("name") == default_vector_field_name:
+                assert field.get("description") == ""
+                break
+
+        # 4. Cleanup
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("description", [
+        "中文描述测试",
+        "Description with emoji 🚀🎉",
+        "Line1\nLine2\nLine3",
+        "Tab\tseparated\tvalues",
+        "Special chars: !@#$%^&*()_+-=[]{}|;':\",./<>?",
+        " " * 100,  # Many spaces
+    ])
+    def test_alter_field_description_special_characters(self, description):
+        """
+        target: test altering field description with special characters
+        method: set description containing unicode, emoji, newlines, etc.
+        expected: description updated successfully with special characters preserved
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create collection
+        self.create_collection(client, collection_name, default_dim)
+
+        # 2. Alter with special description
+        self.alter_collection_field(
+            client, collection_name,
+            field_name=default_vector_field_name,
+            field_params={"field.description": description}
+        )
+
+        # 3. Verify
+        desc_res = self.describe_collection(client, collection_name)[0]
+        for field in desc_res.get("fields", []):
+            if field.get("name") == default_vector_field_name:
+                assert field.get("description") == description
+                break
+
+        # 4. Cleanup
+        self.drop_collection(client, collection_name)
+
+
+class TestMilvusClientAlterCollectionFieldDescriptionInvalid(TestMilvusClientV2Base):
+    """
+    Negative tests for alter_collection_field() to change field description
+    PR: https://github.com/milvus-io/milvus/pull/47057
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_alter_field_description_nonexistent_collection(self):
+        """
+        target: test altering field description on non-existent collection
+        method: call alter_collection_field with non-existent collection name
+        expected: raise exception with error code 100
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # Do not create collection, directly alter
+        error = {ct.err_code: 100,
+                 ct.err_msg: "collection not found"}
+
+        self.alter_collection_field(
+            client, collection_name,
+            field_name=default_vector_field_name,
+            field_params={"field.description": "new description"},
+            check_task=CheckTasks.err_res,
+            check_items=error
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_alter_field_description_nonexistent_field(self):
+        """
+        target: test altering description of non-existent field
+        method: call alter_collection_field with non-existent field name
+        expected: raise exception indicating field not found
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create collection
+        self.create_collection(client, collection_name, default_dim)
+
+        # 2. Alter non-existent field
+        error = {ct.err_code: 1100,
+                 ct.err_msg: "does not exist in collection"}
+
+        self.alter_collection_field(
+            client, collection_name,
+            field_name="nonexistent_field",
+            field_params={"field.description": "new description"},
+            check_task=CheckTasks.err_res,
+            check_items=error
+        )
+
+        # 3. Cleanup
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_alter_field_description_empty_collection_name(self):
+        """
+        target: test altering field description with empty collection name
+        method: call alter_collection_field with empty string collection name
+        expected: raise exception with error code 1
+        """
+        client = self._client()
+        collection_name = ""
+
+        error = {ct.err_code: 1,
+                 ct.err_msg: f"`collection_name` value {collection_name} is illegal"}
+
+        self.alter_collection_field(
+            client, collection_name,
+            field_name=default_vector_field_name,
+            field_params={"field.description": "new description"},
+            check_task=CheckTasks.err_res,
+            check_items=error
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_alter_field_description_empty_field_name(self):
+        """
+        target: test altering field description with empty field name
+        method: call alter_collection_field with empty string field name
+        expected: raise exception indicating invalid field name
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create collection
+        self.create_collection(client, collection_name, default_dim)
+
+        # 2. Alter with empty field name
+        error = {ct.err_code: 1100,
+                 ct.err_msg: "does not exist in collection"}
+
+        self.alter_collection_field(
+            client, collection_name,
+            field_name="",
+            field_params={"field.description": "new description"},
+            check_task=CheckTasks.err_res,
+            check_items=error
+        )
+
+        # 3. Cleanup
+        self.drop_collection(client, collection_name)
