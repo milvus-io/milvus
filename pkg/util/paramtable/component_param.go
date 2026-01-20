@@ -2534,6 +2534,7 @@ type queryCoordConfig struct {
 	CheckNodeSessionInterval       ParamItem `refreshable:"false"`
 	GracefulStopTimeout            ParamItem `refreshable:"true"`
 	EnableStoppingBalance          ParamItem `refreshable:"true"`
+	StoppingBalanceAssignPolicy    ParamItem `refreshable:"true"`
 	ChannelExclusiveNodeFactor     ParamItem `refreshable:"true"`
 
 	CollectionObserverInterval         ParamItem `refreshable:"false"`
@@ -3078,6 +3079,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.EnableStoppingBalance.Init(base.mgr)
+
+	p.StoppingBalanceAssignPolicy = ParamItem{
+		Key:          "queryCoord.stoppingBalanceAssignPolicy",
+		Version:      "2.6.7",
+		DefaultValue: "ScoreBased",
+		Doc:          "assign policy for stopping balance, options: RoundRobin, RowCount, ScoreBased",
+		Export:       true,
+	}
+	p.StoppingBalanceAssignPolicy.Init(base.mgr)
 
 	p.ChannelExclusiveNodeFactor = ParamItem{
 		Key:          "queryCoord.channelExclusiveNodeFactor",
