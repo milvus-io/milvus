@@ -30,6 +30,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
@@ -118,6 +119,7 @@ func (suite *OpsServiceSuite) SetupTest() {
 	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	suite.jobScheduler.Start()
+	assign.InitGlobalAssignPolicyFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
 	suite.balancer = balance.NewScoreBasedBalancer(
 		suite.taskScheduler,
 		suite.nodeMgr,
@@ -130,7 +132,7 @@ func (suite *OpsServiceSuite) SetupTest() {
 	suite.distController = dist.NewMockController(suite.T())
 
 	suite.checkerController = checkers.NewCheckerController(suite.meta, suite.distMgr,
-		suite.targetMgr, suite.nodeMgr, suite.taskScheduler, suite.broker, func() balance.Balance { return suite.balancer })
+		suite.targetMgr, suite.nodeMgr, suite.taskScheduler, suite.broker)
 
 	suite.server = &Server{
 		kv:                  suite.kv,
@@ -146,7 +148,6 @@ func (suite *OpsServiceSuite) SetupTest() {
 		cluster:             suite.cluster,
 		jobScheduler:        suite.jobScheduler,
 		taskScheduler:       suite.taskScheduler,
-		getBalancerFunc:     func() balance.Balance { return suite.balancer },
 		distController:      suite.distController,
 		ctx:                 context.Background(),
 		checkerController:   suite.checkerController,
@@ -593,6 +594,8 @@ func (suite *OpsServiceSuite) TestTransferSegment() {
 	suite.dist.SegmentDistManager.Update(1, segmentInfos[0])
 
 	// test segment not exist in current target, expect no task assign and success
+	assign.InitGlobalAssignPolicyFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
+	balance.InitGlobalBalancerFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
 	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
 		SourceNodeID: nodes[0],
 		TargetNodeID: nodes[1],
@@ -844,6 +847,8 @@ func (suite *OpsServiceSuite) TestTransferChannel() {
 	suite.dist.ChannelDistManager.Update(1, chanenlInfos[0])
 
 	// test channel not exist in current target, expect no task assign and success
+	assign.InitGlobalAssignPolicyFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
+	balance.InitGlobalBalancerFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
 	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
 		SourceNodeID: nodes[0],
 		TargetNodeID: nodes[1],

@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/samber/lo"
+
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 )
 
 // balanceReport is the struct to store balance plan generation detail.
@@ -37,14 +39,14 @@ func (br *balanceReport) AddDetailRecord(record fmt.Stringer) {
 func (br *balanceReport) AddSegmentPlan() {
 }
 
-func (br *balanceReport) AddNodeItem(item *nodeItem) {
-	_, ok := br.nodeItems[item.nodeID]
+func (br *balanceReport) AddNodeItem(item *assign.NodeItem) {
+	_, ok := br.nodeItems[item.NodeID]
 	if !ok {
 		nodeItem := &nodeItemInfo{
 			nodeItem:     item,
 			memoryFactor: 1,
 		}
-		br.nodeItems[item.nodeID] = nodeItem
+		br.nodeItems[item.NodeID] = nodeItem
 	}
 }
 
@@ -69,7 +71,7 @@ func (br *balanceReport) NodesInfo() []fmt.Stringer {
 }
 
 type nodeItemInfo struct {
-	nodeItem       *nodeItem
+	nodeItem       *assign.NodeItem
 	delegatorScore float64
 	memoryFactor   float64
 }
