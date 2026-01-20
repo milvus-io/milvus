@@ -436,6 +436,7 @@ queryCoord:
   checkNodeSessionInterval: 60 # the interval(in seconds) of check querynode cluster session
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   enableStoppingBalance: true # whether enable stopping balance
+  stoppingBalanceAssignPolicy: ScoreBased # assign policy for stopping balance, options: RoundRobin, RowCount, ScoreBased
   channelExclusiveNodeFactor: 4 # the least node number for enable channel's exclusive mode
   collectionObserverInterval: 200 # the interval of collection observer
   checkExecutedFlagInterval: 100 # the interval of check executed flag to force to pull dist
@@ -1034,6 +1035,9 @@ common:
   useVectorAsClusteringKey: false # if true, do clustering compaction and segment prune on vector field
   enableVectorClusteringKey: false # if true, enable vector clustering key and vector clustering compaction
   localRPCEnabled: false # enable local rpc for internal communication when mix or standalone mode.
+  # Prefer IPv6 addresses when automatically selecting the local IP.
+  # If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.
+  preferIPv6: false
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr

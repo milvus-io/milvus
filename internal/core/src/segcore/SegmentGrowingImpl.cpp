@@ -538,7 +538,8 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 num_rows,
                 field_id,
                 &insert_record_proto->fields_data(data_offset),
-                insert_record_);
+                insert_record_,
+                field_meta);
         }
 
         // update ArrayOffsetsGrowing for struct fields
@@ -728,6 +729,8 @@ SegmentGrowingImpl::load_field_data_common(
         return;
     }
 
+    auto field_meta = (*schema_)[field_id];
+
     if (!indexing_record_.HasRawData(field_id)) {
         if (insert_record_.is_valid_data_exist(field_id)) {
             insert_record_.get_valid_data(field_id)->set_data_raw(field_data);
@@ -740,7 +743,7 @@ SegmentGrowingImpl::load_field_data_common(
         for (auto& data : field_data) {
             auto row_count = data->get_num_rows();
             indexing_record_.AppendingIndex(
-                offset, row_count, field_id, data, insert_record_);
+                offset, row_count, field_id, data, insert_record_, field_meta);
             offset += row_count;
         }
     }
@@ -751,7 +754,6 @@ SegmentGrowingImpl::load_field_data_common(
     }
 
     // update average row data size
-    auto field_meta = (*schema_)[field_id];
     if (IsVariableDataType(field_meta.get_data_type())) {
         SegmentInternalInterface::set_field_avg_size(
             field_id, num_rows, storage::GetByteSizeOfFieldDatas(field_data));
@@ -1971,7 +1973,9 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         schema_->get_primary_field_id().value_or(FieldId(-1));
     auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                           .GetProperties();
-    auto column_groups = GetColumnGroups(manifest_path, properties);
+    auto loon_manifest = GetLoonManifest(manifest_path, properties);
+    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
+        loon_manifest->columnGroups());
 
     auto arrow_schema = schema_->ConvertToArrowSchema();
     reader_ = milvus_storage::api::Reader::create(
@@ -2039,7 +2043,7 @@ SegmentGrowingImpl::LoadColumnGroup(
     int64_t index) {
     AssertInfo(index < column_groups->size(),
                "load column group index out of range");
-    auto column_group = column_groups->get_column_group(index);
+    auto column_group = column_groups->at(index);
     LOG_INFO("Loading segment {} column group {}", id_, index);
 
     auto chunk_reader_result = reader_->get_chunk_reader(index);
