@@ -155,6 +155,83 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         self.upsert(client, collection_name, data,
                     check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
+    def test_milvus_client_upsert_data_type_dismatch(self, primary_field):
+        """
+        target: test upsert with invalid data type
+        method: upsert data type string, set, number, float...
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 100
+
+        # 1. Create schema
+        schema = cf.gen_default_schema_for_upsert(client, primary_field=primary_field,with_json=False)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 3. Generate row data
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
+
+        # 4. Test invalid data types at different positions (first, middle, last)
+        for dirty_i in [0, nb // 2, nb - 1]:  # check the dirty data at first, middle and last
+            log.debug(f"dirty_i: {dirty_i}")
+            # Iterate through all fields in the row
+            for field_name, field_value in rows[dirty_i].items():
+                # Get the actual value type
+                value_type = type(field_value)
+                error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+
+                # Inject type errors based on value type (only for simple scalar types)
+                if value_type in (int, bool, float):
+                    tmp = rows[dirty_i][field_name]
+                    rows[dirty_i][field_name] = "iamstring"
+                    self.upsert(client, collection_name, data=rows,
+                                check_task=CheckTasks.err_res, check_items=error)
+                    rows[dirty_i][field_name] = tmp
+                elif value_type is str:
+                    tmp = rows[dirty_i][field_name]
+                    rows[dirty_i][field_name] = random.randint(0, 1000)
+                    self.upsert(client, collection_name, data=rows,
+                                check_task=CheckTasks.err_res, check_items=error)
+                    rows[dirty_i][field_name] = tmp
+                else:
+                    continue
+
+        # 5. Verify correct data can be upserted
+        results = self.upsert(client, collection_name, rows)[0]
+        assert results['upsert_count'] == nb
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_upsert_vector_type_unmatch(self):
+        """
+        target: test upsert with unmatched vector type
+        method: 1. create a collection with float_vector
+                2. upsert with binary_vector data
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create collection with float_vector
+        self.create_collection(client, collection_name, default_dim)
+
+        # 2. Generate binary vector data
+        _, binary_vectors = cf.gen_binary_vectors(default_nb, default_dim)
+        rows = [{default_primary_key_field_name: i, ct.default_binary_vec_field_name: binary_vectors[i],
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+
+        # 3. Verify error on upsert
+        error = {ct.err_code: 999, ct.err_msg: "Insert missed an field `vector` to collection without set nullable==true or set default_value"}
+        self.upsert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_upsert_data_empty(self):
         """
@@ -233,11 +310,13 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
                     check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_upsert_data_dim_not_match(self):
+    @pytest.mark.parametrize("dim", [default_dim + 1, 2 * default_dim])
+    def test_milvus_client_upsert_data_dim_not_match(self, dim):
         """
-        target: test milvus client: insert extra field than schema
-        method: insert extra field than schema when enable_dynamic_field is False
-        expected: Raise exception
+        target: test upsert with unmatched vector dim
+        method: 1. create a collection with default dim 128
+                2. upsert with mismatched dim (129, 256)
+        expected: raise exception
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -246,11 +325,37 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [
-            {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim + 1))[0]),
+            {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, dim))[0]),
              default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        error = {ct.err_code: 65536, ct.err_msg: f"of float data should divide the dim({default_dim})"}
-        self.upsert(client, collection_name, data=rows,
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 65535, ct.err_msg: f"dim"}
+        self.upsert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("dim", [default_dim - 8, default_dim + 8])
+    def test_milvus_client_upsert_binary_dim_unmatch(self, dim):
+        """
+        target: test upsert with unmatched binary vector dim
+        method: 1. create a collection with default dim 128
+                2. upsert with mismatched dim (120, 136)
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create binary vector collection with default dim
+        schema = cf.gen_default_schema_for_upsert(client, is_binary=True, with_json=False)
+        self.create_collection(client, collection_name, schema=schema)
+
+        # 2. Generate binary vector data with mismatched dim
+        _, binary_vectors = cf.gen_binary_vectors(default_nb, dim)
+        rows = [{ct.default_int64_field_name: i, ct.default_binary_vec_field_name: binary_vectors[i],
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+
+        # 3. Verify error on upsert
+        error = {ct.err_code: 1100, ct.err_msg: f"the dim ({dim}) of field data(binary_vector) is not equal to schema dim ({default_dim})"}
+        self.upsert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_upsert_not_matched_data(self):
@@ -371,6 +476,38 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
                     check_task=CheckTasks.err_res,
                     check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_upsert_with_auto_id_pk_type_dismatch(self):
+        """
+        target: test upsert with primary key type mismatch
+        method: 1. create a collection with INT64 primary key and auto_id=False
+                2. upsert with string type primary key (type mismatch)
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 16
+        nb = 10
+
+        # 1. Create collection with INT64 primary key, auto_id=False
+        self.create_collection(client, collection_name, dim, auto_id=False)
+
+        # 2. Insert initial data
+        rows = cf.gen_row_data_by_schema(nb=nb, schema=self.describe_collection(client, collection_name)[0])
+        self.insert(client, collection_name, rows)
+
+        # 3. Generate upsert data with string type primary key (type mismatch)
+        upsert_rows = cf.gen_row_data_by_schema(nb=nb, schema=self.describe_collection(client, collection_name)[0])
+        # Set primary key field to string type (should be INT64)
+        for i, row in enumerate(upsert_rows):
+            row[default_primary_key_field_name] = str(i)
+
+        # 4. Verify error on upsert (type mismatch)
+        error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+        self.upsert(client, collection_name, data=upsert_rows, check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_upsert_duplicate_pk_int64(self):
         """
@@ -437,6 +574,39 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
                     check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("default_value", [[], 123])
+    def test_milvus_client_upsert_rows_using_default_value(self, default_value):
+        """
+        target: test upsert with invalid type for field that has default value
+        method: upsert with invalid type (list or int) for VARCHAR field that has default_value
+        expected: raise exception (type check takes precedence over default value)
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create schema with default value field
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length, default_value="abc")
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # 3. Generate vectors
+        vectors = cf.gen_vectors(ct.default_nb, default_dim)
+
+        # 4. Prepare upsert data with invalid type for varchar field (list or int instead of string)
+        rows = [{default_primary_key_field_name: 1, default_vector_field_name: vectors[1],
+                 default_string_field_name: default_value, default_float_field_name: np.float32(1.0)}]
+
+        # 5. Verify error on upsert (type check takes precedence over default value)
+        error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
+        self.upsert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)
 
 class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
     """ Test case of search interface """

@@ -1678,97 +1678,6 @@ class TestUpsertValid(TestcaseBase):
 class TestUpsertInvalid(TestcaseBase):
     """ Invalid test case of Upsert interface """
 
-    @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
-    def test_upsert_data_type_dismatch(self, primary_field):
-        """
-        target: test upsert with invalid data type
-        method: upsert data type string, set, number, float...
-        expected: raise exception
-        """
-        collection_w = self.init_collection_general(pre_upsert, auto_id=False, insert_data=False,
-                                                    primary_field=primary_field, is_index=False,
-                                                    is_all_data_type=True, with_json=True)[0]
-        nb = 100
-        data = cf.gen_column_data_by_schema(schema=collection_w.schema, nb=nb)
-        for dirty_i in [0, nb // 2, nb - 1]:  # check the dirty data at first, middle and last
-            log.debug(f"dirty_i: {dirty_i}")
-            for i in range(len(data)):
-                if data[i][dirty_i].__class__ is int:
-                    tmp = data[i][dirty_i]
-                    data[i][dirty_i] = "iamstring"
-                    error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-                    collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
-                    data[i][dirty_i] = tmp
-                elif data[i][dirty_i].__class__ is str:
-                    tmp = data[i][dirty_i]
-                    data[i][dirty_i] = random.randint(0, 1000)
-                    error = {ct.err_code: 999, ct.err_msg: "field (varchar) expects string input, got: <class 'int'>"}
-                    collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
-                    data[i][dirty_i] = tmp
-                elif data[i][dirty_i].__class__ is bool:
-                    tmp = data[i][dirty_i]
-                    data[i][dirty_i] = "iamstring"
-                    error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-                    collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
-                    data[i][dirty_i] = tmp
-                elif data[i][dirty_i].__class__ is float:
-                    tmp = data[i][dirty_i]
-                    data[i][dirty_i] = "iamstring"
-                    error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-                    collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
-                    data[i][dirty_i] = tmp
-                else:
-                    continue
-        res = collection_w.upsert(data)[0]
-        assert res.insert_count == nb
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_upsert_vector_unmatch(self):
-        """
-        target: test upsert with unmatched data vector
-        method: 1. create a collection with dim=128
-                2. upsert with vector dim unmatch
-        expected: raise exception
-        """
-        c_name = cf.gen_unique_str(pre_upsert)
-        collection_w = self.init_collection_wrap(name=c_name, with_json=False)
-        data = cf.gen_default_binary_dataframe_data()[0]
-        error = {ct.err_code: 999,
-                 ct.err_msg: "The name of field doesn't match, expected: float_vector, got binary_vector"}
-        collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("dim", [128-8, 128+8])
-    def test_upsert_binary_dim_unmatch(self, dim):
-        """
-        target: test upsert with unmatched vector dim
-        method: 1. create a collection with default dim 128
-                2. upsert with mismatched dim
-        expected: raise exception
-        """
-        collection_w = self.init_collection_general(pre_upsert, True, is_binary=True)[0]
-        data = cf.gen_default_binary_dataframe_data(dim=dim)[0]
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"the dim ({dim}) of field data(binary_vector) is not equal to schema dim ({ct.default_dim})"}
-        collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("dim", [256])
-    def test_upsert_dim_unmatch(self, dim):
-        """
-        target: test upsert with unmatched vector dim
-        method: 1. create a collection with default dim 128
-                2. upsert with mismatched dim
-        expected: raise exception
-        """
-        nb = 10
-        collection_w = self.init_collection_general(pre_upsert, True, with_json=False)[0]
-        data = cf.gen_default_list_data(nb=nb, dim=dim, with_json=False)
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"the dim ({dim}) of field data(float_vector) is not equal to schema dim ({ct.default_dim})"}
-        collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
-
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("partition_name", ct.invalid_resource_names[4:])
     def test_upsert_partition_name_non_existing(self, partition_name):
@@ -1825,41 +1734,6 @@ class TestUpsertInvalid(TestcaseBase):
                                                "but expected one of: (<class 'bytes'>, <class 'str'>)"}
         collection_w.upsert(data=data, partition_name=["partition_1", "partition_2"],
                             check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_upsert_with_auto_id_pk_type_dismacth(self):
-        """
-        target: test upsert with auto_id and pk type dismatch
-        method: 1. create a collection with pk int64 and auto_id=True
-                2. upsert with pk string type dismatch
-        expected: raise exception
-        """
-        dim = 16
-        collection_w = self.init_collection_general(pre_upsert, auto_id=False,
-                                                    dim=dim, insert_data=True, with_json=False)[0]
-        nb = 10
-        data = cf.gen_default_list_data(dim=dim, nb=nb, with_json=False)
-        data[0] = [str(i) for i in range(nb)]
-        error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-        collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("default_value", [[], 123])
-    def test_upsert_rows_using_default_value(self, default_value):
-        """
-        target: test upsert with rows
-        method: upsert with invalid rows
-        expected: raise exception
-        """
-        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
-                  cf.gen_string_field(default_value="abc"), cf.gen_float_vec_field()]
-        schema = cf.gen_collection_schema(fields)
-        collection_w = self.init_collection_wrap(schema=schema)
-        vectors = cf.gen_vectors(ct.default_nb, ct.default_dim)
-        data = [{"int64": 1, "float_vector": vectors[1],
-                 "varchar": default_value, "float": np.float32(1.0)}]
-        error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
-        collection_w.upsert(data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("default_value", [[], None])
