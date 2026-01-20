@@ -72,7 +72,6 @@ require (
 	github.com/greatroar/blobloom v0.0.0-00010101000000-000000000000
 	github.com/hamba/avro/v2 v2.29.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/magiconair/properties v1.8.7
 	github.com/milvus-io/milvus/client/v2 v2.0.0-00010101000000-000000000000
 	github.com/milvus-io/milvus/pkg/v2 v2.6.4-0.20251104142533-a2ce70d25256
@@ -83,6 +82,7 @@ require (
 	github.com/tidwall/gjson v1.17.1
 	github.com/twpayne/go-geom v1.6.1
 	github.com/valyala/fastjson v1.6.4
+	github.com/volcengine/volcengine-go-sdk v1.2.4
 	github.com/zeebo/xxh3 v1.0.2
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.59.0
 	google.golang.org/api v0.224.0
@@ -200,6 +200,7 @@ require (
 	github.com/huaweicloud/huaweicloud-sdk-go-v3 v0.1.174 // indirect
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20221217025313-27d3c9f66b6a // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
+	github.com/jolestar/go-commons-pool/v2 v2.1.2 // indirect
 	github.com/jonboulle/clockwork v0.2.2 // indirect
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12 // indirect
 	github.com/klauspost/asmfmt v1.3.2 // indirect
@@ -265,7 +266,6 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.1 // indirect
 	github.com/volcengine/volc-sdk-golang v1.0.23 // indirect
-	github.com/volcengine/volcengine-go-sdk v1.2.4 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
