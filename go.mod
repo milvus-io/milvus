@@ -82,7 +82,7 @@ require (
 	github.com/tidwall/gjson v1.17.1
 	github.com/twpayne/go-geom v1.6.1
 	github.com/valyala/fastjson v1.6.4
-	github.com/volcengine/volcengine-go-sdk v1.2.4
+	github.com/volcengine/volcengine-go-sdk v1.2.7
 	github.com/zeebo/xxh3 v1.0.2
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.59.0
 	google.golang.org/api v0.224.0
