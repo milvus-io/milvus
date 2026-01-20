@@ -159,7 +159,11 @@ func (pc *Consumer) Close() {
 }
 
 func (pc *Consumer) GetLatestMsgID() (common.MessageID, error) {
-	msgID, err := pc.c.GetLastMessageID(pc.c.Name(), mqwrapper.DefaultPartitionIdx)
+	msgIDs, err := pc.c.GetLastMessageIDs()
+	if err != nil {
+		return nil, err
+	}
+	msgID := msgIDs[mqwrapper.DefaultPartitionIdx]
 	return &pulsarID{messageID: msgID}, err
 }
 
