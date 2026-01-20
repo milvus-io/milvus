@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
-	"github.com/milvus-io/milvus/internal/util/function/models/ark"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 )
 
