@@ -205,6 +205,92 @@ func (s *ArkTextEmbeddingProviderSuite) TestNewArkEmbeddingProviderWithBatchSize
 	provider, err := NewArkEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{models.URLParamKey: "mock"}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: 5})
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(4))
+
 	// 320 = 64 * 5
 	s.Equal(320, provider.MaxBatch())
+}
+
+func (s *ArkTextEmbeddingProviderSuite) TestNewArkEmbeddingProvider_InvalidParams() {
+	schema := &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector}
+
+	// Invalid dim (non-integer)
+	fs1 := &schemapb.FunctionSchema{
+		Params: []*commonpb.KeyValuePair{
+			{Key: models.ModelNameParamKey, Value: TestModel},
+			{Key: models.CredentialParamKey, Value: "mock"},
+			{Key: "dim", Value: "invalid"},
+		},
+	}
+	_, err := NewArkEmbeddingProvider(schema, fs1, map[string]string{models.URLParamKey: "mock"}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: 1})
+	s.Error(err)
+	s.Contains(err.Error(), "invalid 'dim' parameter value")
+
+	// Invalid dim (negative)
+	fs2 := &schemapb.FunctionSchema{
+		Params: []*commonpb.KeyValuePair{
+			{Key: models.ModelNameParamKey, Value: TestModel},
+			{Key: models.CredentialParamKey, Value: "mock"},
+			{Key: "dim", Value: "-1"},
+		},
+	}
+	_, err = NewArkEmbeddingProvider(schema, fs2, map[string]string{models.URLParamKey: "mock"}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: 1})
+	s.Error(err)
+	s.Contains(err.Error(), "must be non-negative")
+
+	// Invalid batch_size (non-integer)
+	fs3 := &schemapb.FunctionSchema{
+		Params: []*commonpb.KeyValuePair{
+			{Key: models.ModelNameParamKey, Value: TestModel},
+			{Key: models.CredentialParamKey, Value: "mock"},
+			{Key: "batch_size", Value: "invalid"},
+		},
+	}
+	_, err = NewArkEmbeddingProvider(schema, fs3, map[string]string{models.URLParamKey: "mock"}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: 1})
+	s.Error(err)
+	s.Contains(err.Error(), "invalid 'batch_size' parameter value")
+
+	// Invalid batch_size (negative)
+	fs4 := &schemapb.FunctionSchema{
+		Params: []*commonpb.KeyValuePair{
+			{Key: models.ModelNameParamKey, Value: TestModel},
+			{Key: models.CredentialParamKey, Value: "mock"},
+			{Key: "batch_size", Value: "-10"},
+		},
+	}
+	_, err = NewArkEmbeddingProvider(schema, fs4, map[string]string{models.URLParamKey: "mock"}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: 1})
+	s.Error(err)
+	s.Contains(err.Error(), "must be positive")
+}
+
+func (s *ArkTextEmbeddingProviderSuite) TestNewArkEmbeddingProvider_Multimodal() {
+	schema := &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector}
+	fs := &schemapb.FunctionSchema{
+		Params: []*commonpb.KeyValuePair{
+			{Key: models.ModelNameParamKey, Value: TestModel},
+			{Key: models.CredentialParamKey, Value: "mock"},
+			{Key: "model_type", Value: "multimodal"},
+		},
+	}
+	provider, err := NewArkEmbeddingProvider(schema, fs, map[string]string{models.URLParamKey: "mock"}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: 1})
+	s.NoError(err)
+	s.Equal(1, provider.maxBatch)
+}
+
+func (s *ArkTextEmbeddingProviderSuite) TestEmbedding_ClientError() {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	fs := &schemapb.FunctionSchema{
+		Params: []*commonpb.KeyValuePair{
+			{Key: models.ModelNameParamKey, Value: TestModel},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		},
+	}
+	provider, err := NewArkEmbeddingProvider(s.schema.Fields[2], fs, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: 1})
+	s.Require().NoError(err)
+
+	_, err = provider.CallEmbedding(context.Background(), []string{"test"}, models.SearchMode)
+	s.Error(err)
 }
