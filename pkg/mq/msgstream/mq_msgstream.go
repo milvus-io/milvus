@@ -526,6 +526,7 @@ func (ms *mqMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, in
 		messageID, err := ms.client.BytesToMsgID(mp.MsgID)
 		if err != nil {
 			if paramtable.Get().MQCfg.IgnoreBadPosition.GetAsBool() {
+				log.Ctx(ctx).Warn("Ignoring bad message id, trying to use latest message id", zap.String("channel", mp.ChannelName), zap.Error(err))
 				// try to use latest message ID first
 				messageID, err = consumer.GetLatestMsgID()
 				if err != nil {

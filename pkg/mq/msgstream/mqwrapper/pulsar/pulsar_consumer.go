@@ -167,7 +167,10 @@ func (pc *Consumer) GetLatestMsgID() (common.MessageID, error) {
 		return nil, err
 	}
 	msgID := msgIDs[mqwrapper.DefaultPartitionIdx]
-	return &pulsarID{messageID: msgID}, err
+	// the internal type is *pulsar.topicMessageID which could not be seeked
+	// use serde to convert it to pulsar.trackID
+	tid, err := pulsar.DeserializeMessageID(msgID.Serialize())
+	return &pulsarID{messageID: tid}, err
 }
 
 func (pc *Consumer) CheckTopicValid(topic string) error {
