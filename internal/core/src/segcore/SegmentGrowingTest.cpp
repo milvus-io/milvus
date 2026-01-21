@@ -451,7 +451,8 @@ class GrowingNullableTest : public ::testing::TestWithParam<
                                            /*metric_type*/ knowhere::MetricType,
                                            /*index_type*/ std::string,
                                            /*null_percent*/ int,
-                                           /*enable_interim_index*/ bool>> {
+                                           /*enable_interim_index*/ bool,
+                                           /*use_iterator*/ bool>> {
  public:
     void
     SetUp() override {
@@ -459,7 +460,8 @@ class GrowingNullableTest : public ::testing::TestWithParam<
                  metric_type,
                  index_type,
                  null_percent,
-                 enable_interim_index) = GetParam();
+                 enable_interim_index,
+                 use_iterator) = GetParam();
     }
 
     DataType data_type;
@@ -467,13 +469,15 @@ class GrowingNullableTest : public ::testing::TestWithParam<
     std::string index_type;
     int null_percent;
     bool enable_interim_index;
+    bool use_iterator;
 };
 
 static std::vector<
-    std::tuple<DataType, knowhere::MetricType, std::string, int, bool>>
+    std::tuple<DataType, knowhere::MetricType, std::string, int, bool, bool>>
 GenerateGrowingNullableTestParams() {
     std::vector<
-        std::tuple<DataType, knowhere::MetricType, std::string, int, bool>>
+        std::
+            tuple<DataType, knowhere::MetricType, std::string, int, bool, bool>>
         params;
 
     // Dense float vectors with IVF_FLAT
@@ -497,11 +501,23 @@ GenerateGrowingNullableTestParams() {
 
     std::vector<bool> interim_index_configs = {true, false};
 
+    std::vector<bool> iterator_configs = {false, true};
+
     for (const auto& [dtype, metric, idx_type] : base_configs) {
         for (int null_pct : null_percents) {
             for (bool enable_interim : interim_index_configs) {
-                params.push_back(
-                    {dtype, metric, idx_type, null_pct, enable_interim});
+                for (bool use_iter : iterator_configs) {
+                    // Skip iterator for sparse vectors (not supported)
+                    if (use_iter && dtype == DataType::VECTOR_SPARSE_U32_F32) {
+                        continue;
+                    }
+                    params.push_back({dtype,
+                                      metric,
+                                      idx_type,
+                                      null_pct,
+                                      enable_interim,
+                                      use_iter});
+                }
             }
         }
     }
@@ -554,7 +570,8 @@ TEST_P(GrowingNullableTest, SearchAndQueryNullableVectors) {
     int64_t batch_size = 2000;
     int64_t num_rounds = 10;
     int64_t topk = 5;
-    int64_t num_queries = 2;
+    // Iterator only supports single query
+    int64_t num_queries = use_iterator ? 1 : 2;
     Timestamp timestamp = 10000000;
 
     // Prepare search plan
@@ -568,6 +585,22 @@ TEST_P(GrowingNullableTest, SearchAndQueryNullableVectors) {
                     round_decimal: 3
                     metric_type: "{}"
                     search_params: "{{\"drop_ratio_search\": 0.1}}"
+                >
+                placeholder_tag: "$0"
+            >
+        )";
+    } else if (use_iterator) {
+        search_params_fmt = R"(
+            vector_anns:<
+                field_id: {}
+                query_info:<
+                    topk: {}
+                    round_decimal: 3
+                    metric_type: "{}"
+                    search_params: "{{\"nprobe\": 10}}"
+                    search_iterator_v2_info: <
+                        batch_size: {}
+                    >
                 >
                 placeholder_tag: "$0"
             >
@@ -587,8 +620,13 @@ TEST_P(GrowingNullableTest, SearchAndQueryNullableVectors) {
         )";
     }
 
-    auto raw_plan =
-        fmt::format(search_params_fmt, vec.get(), topk, metric_type);
+    std::string raw_plan;
+    if (use_iterator) {
+        raw_plan =
+            fmt::format(search_params_fmt, vec.get(), topk, metric_type, topk);
+    } else {
+        raw_plan = fmt::format(search_params_fmt, vec.get(), topk, metric_type);
+    }
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
