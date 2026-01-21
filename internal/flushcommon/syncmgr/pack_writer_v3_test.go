@@ -20,11 +20,10 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
+	"path"
 	"sync/atomic"
 	"testing"
 
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -41,15 +40,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func TestPackWriterV2Suite(t *testing.T) {
-	suite.Run(t, new(PackWriterV2Suite))
+func TestPackWriterV3Suite(t *testing.T) {
+	suite.Run(t, new(PackWriterV3Suite))
 }
 
-type PackWriterV2Suite struct {
+type PackWriterV3Suite struct {
 	suite.Suite
 
 	ctx          context.Context
@@ -65,14 +65,16 @@ type PackWriterV2Suite struct {
 	currentSplit []storagecommon.ColumnGroup
 }
 
-func (s *PackWriterV2Suite) SetupTest() {
+func (s *PackWriterV3Suite) SetupTest() {
 	s.ctx = context.Background()
 	s.logIDAlloc = allocator.NewLocalAllocator(1, math.MaxInt64)
 	s.rootPath = "/tmp"
 	initcore.InitLocalArrowFileSystem(s.rootPath)
 	paramtable.Get().Init(paramtable.NewBaseTable())
-	// force use v2
-	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	paramtable.Get().Save(paramtable.Get().MinioCfg.RootPath.Key, "/tmp")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	// force use v3
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
 
 	s.schema = &schemapb.CollectionSchema{
 		Name: "sync_task_test_col",
@@ -117,11 +119,13 @@ func (s *PackWriterV2Suite) SetupTest() {
 	s.cm = storage.NewLocalChunkManager(objectstorage.RootPath(s.rootPath))
 }
 
-func (s *PackWriterV2Suite) TearDownTest() {
+func (s *PackWriterV3Suite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	paramtable.Get().Reset(paramtable.Get().MinioCfg.RootPath.Key)
+	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
 }
 
-func (s *PackWriterV2Suite) TestPackWriterV2_Write() {
+func (s *PackWriterV3Suite) TestPackWriterV3_Write() {
 	collectionID := int64(123)
 	partitionID := int64(456)
 	segmentID := int64(789)
@@ -129,7 +133,14 @@ func (s *PackWriterV2Suite) TestPackWriterV2_Write() {
 	rows := 10
 
 	bfs := pkoracle.NewBloomFilterSet()
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
+
+	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
+	basePath := path.Join(common.SegmentInsertLogPath, k)
+	manifestPath := packed.MarshalManifestPath(basePath, -1)
+
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ManifestPath: manifestPath,
+	}, bfs, nil)
 	metacache.UpdateNumOfRows(1000)(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(collectionID).Maybe()
@@ -149,16 +160,18 @@ func (s *PackWriterV2Suite) TestPackWriterV2_Write() {
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema)).WithDeleteData(deletes)
 
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, manifestPath)
 
-	gotInserts, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	gotInserts, _, _, _, writtenManifestPath, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 	s.Equal(gotInserts[0].Binlogs[0].GetEntriesNum(), int64(rows))
-	s.Equal(gotInserts[0].Binlogs[0].GetLogPath(), "/tmp/insert_log/123/456/789/0/1")
-	s.Equal(gotInserts[101].Binlogs[0].GetLogPath(), "/tmp/insert_log/123/456/789/101/2")
+	writtenBasePath, revision, err := packed.UnmarshalManfestPath(writtenManifestPath)
+	s.NoError(err)
+	s.Equal(basePath, writtenBasePath)
+	s.Greater(revision, int64(0))
 }
 
-func (s *PackWriterV2Suite) TestWriteEmptyInsertData() {
+func (s *PackWriterV3Suite) TestWriteEmptyInsertData() {
 	s.logIDAlloc = allocator.NewLocalAllocator(1, 1)
 	collectionID := int64(123)
 	partitionID := int64(456)
@@ -167,14 +180,18 @@ func (s *PackWriterV2Suite) TestWriteEmptyInsertData() {
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 
+	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
+	basePath := path.Join(common.SegmentInsertLogPath, k)
+	manifestPath := packed.MarshalManifestPath(basePath, -1)
+
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName)
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, manifestPath)
 
 	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 }
 
-func (s *PackWriterV2Suite) TestNoPkField() {
+func (s *PackWriterV3Suite) TestNoPkField() {
 	s.schema = &schemapb.CollectionSchema{
 		Name: "no pk field",
 		Fields: []*schemapb.FieldSchema{
@@ -186,6 +203,11 @@ func (s *PackWriterV2Suite) TestNoPkField() {
 	collectionID := int64(123)
 	partitionID := int64(456)
 	segmentID := int64(789)
+
+	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
+	basePath := path.Join(common.SegmentInsertLogPath, k)
+	manifestPath := packed.MarshalManifestPath(basePath, -1)
+
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
@@ -197,35 +219,23 @@ func (s *PackWriterV2Suite) TestNoPkField() {
 	buf.Append(data)
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData([]*storage.InsertData{buf})
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, manifestPath)
 
 	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
 }
 
-func (s *PackWriterV2Suite) TestAllocIDExhausedError() {
-	s.logIDAlloc = allocator.NewLocalAllocator(1, 1)
-	collectionID := int64(123)
-	partitionID := int64(456)
-	segmentID := int64(789)
-	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
-	rows := 10
-	mc := metacache.NewMockMetaCache(s.T())
-	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
-
-	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema))
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
-
-	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
-	s.Error(err)
-}
-
-func (s *PackWriterV2Suite) TestWriteInsertDataError() {
+func (s *PackWriterV3Suite) TestWriteInsertDataError() {
 	s.logIDAlloc = allocator.NewLocalAllocator(1, math.MaxInt64)
 	collectionID := int64(123)
 	partitionID := int64(456)
 	segmentID := int64(789)
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
+
+	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
+	basePath := path.Join(common.SegmentInsertLogPath, k)
+	manifestPath := packed.MarshalManifestPath(basePath, -1)
+
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 
@@ -235,41 +245,8 @@ func (s *PackWriterV2Suite) TestWriteInsertDataError() {
 	buf.Append(data)
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData([]*storage.InsertData{buf})
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, manifestPath)
 
 	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
-}
-
-func genInsertData(size int, schema *schemapb.CollectionSchema) []*storage.InsertData {
-	buf, _ := storage.NewInsertData(schema)
-	for i := 0; i < size; i++ {
-		data := make(map[storage.FieldID]any)
-		data[common.RowIDField] = int64(i + 1)
-		data[common.TimeStampField] = int64(i + 1)
-		data[100] = int64(i + 1)
-
-		vector := lo.RepeatBy(128, func(_ int) float32 {
-			return rand.Float32()
-		})
-		data[101] = vector
-
-		arraySize := rand.Intn(3) + 2
-		vectorData := lo.RepeatBy(arraySize, func(_ int) float32 {
-			return rand.Float32()
-		})
-		vectorArray := &schemapb.VectorField{
-			Dim: 128,
-			Data: &schemapb.VectorField_FloatVector{
-				FloatVector: &schemapb.FloatArray{
-					Data: vectorData,
-				},
-			},
-		}
-
-		data[103] = vectorArray
-
-		buf.Append(data)
-	}
-	return []*storage.InsertData{buf}
 }
