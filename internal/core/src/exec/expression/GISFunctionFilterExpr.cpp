@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include "common/EasyAssert.h"
 #include "common/Geometry.h"
+#include "common/PreparedGeometry.h"
 #include "common/Types.h"
 #include "pb/plan.pb.h"
 #include <cmath>
@@ -222,7 +223,7 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
     }
 
     auto right_source =
-        Geometry(segment_->get_ctx(), expr_->geometry_wkt_.c_str());
+        Geometry(GetThreadLocalGEOSContext(), expr_->geometry_wkt_.c_str());
 
     // Choose underlying data type according to segment type to avoid element
     // size mismatch: Sealed segments and growing segments with mmap use std::string_view;
@@ -387,32 +388,52 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
         return nullptr;
     }
 
-    Geometry query_geometry =
-        Geometry(segment_->get_ctx(), expr_->geometry_wkt_.c_str());
+    // Use thread-local GEOS context for thread safety - segment_->get_ctx() is shared
+    // and not safe for concurrent access from multiple query threads
+    GEOSContextHandle_t ctx = GetThreadLocalGEOSContext();
+
+    Geometry query_geometry = Geometry(ctx, expr_->geometry_wkt_.c_str());
+
+    // Prepare the query geometry once for accelerated repeated predicate evaluation.
+    PreparedGeometry prepared_query(ctx, query_geometry);
 
     /* ------------------------------------------------------------------
      * Prefetch: if coarse results are not cached yet, run a single R-Tree
      * query for all index chunks and cache their coarse bitmaps.
      * ------------------------------------------------------------------*/
 
-    auto evaluate_geometry = [this](const Geometry& left,
-                                    const Geometry& query_geometry) -> bool {
+    // Evaluate geometry operation using PreparedGeometry for supported operations.
+    // Note on predicate semantics when using prepared query:
+    // - Symmetric predicates (intersects, touches, overlaps, crosses): prepared_query.op(left) == left.op(query)
+    // - contains/within swap: left.contains(query) == prepared_query.within(left)
+    //                         left.within(query) == prepared_query.contains(left)
+    // - equals, dwithin: no prepared version, fall back to regular Geometry
+    auto evaluate_geometry_prepared =
+        [this, &prepared_query, &query_geometry](const Geometry& left) -> bool {
         switch (expr_->op_) {
-            case proto::plan::GISFunctionFilterExpr_GISOp_Equals:
-                return left.equals(query_geometry);
-            case proto::plan::GISFunctionFilterExpr_GISOp_Touches:
-                return left.touches(query_geometry);
-            case proto::plan::GISFunctionFilterExpr_GISOp_Overlaps:
-                return left.overlaps(query_geometry);
-            case proto::plan::GISFunctionFilterExpr_GISOp_Crosses:
-                return left.crosses(query_geometry);
-            case proto::plan::GISFunctionFilterExpr_GISOp_Contains:
-                return left.contains(query_geometry);
             case proto::plan::GISFunctionFilterExpr_GISOp_Intersects:
-                return left.intersects(query_geometry);
+                // Symmetric: prepared_query.intersects(left) == left.intersects(query)
+                return prepared_query.intersects(left);
+            case proto::plan::GISFunctionFilterExpr_GISOp_Touches:
+                // Symmetric
+                return prepared_query.touches(left);
+            case proto::plan::GISFunctionFilterExpr_GISOp_Overlaps:
+                // Symmetric
+                return prepared_query.overlaps(left);
+            case proto::plan::GISFunctionFilterExpr_GISOp_Crosses:
+                // Symmetric
+                return prepared_query.crosses(left);
+            case proto::plan::GISFunctionFilterExpr_GISOp_Contains:
+                // left.contains(query) == query.within(left)
+                return prepared_query.within(left);
             case proto::plan::GISFunctionFilterExpr_GISOp_Within:
-                return left.within(query_geometry);
+                // left.within(query) == query.contains(left)
+                return prepared_query.contains(left);
+            case proto::plan::GISFunctionFilterExpr_GISOp_Equals:
+                // No prepared version - fall back to regular geometry
+                return left.equals(query_geometry);
             case proto::plan::GISFunctionFilterExpr_GISOp_DWithin:
+                // Distance-based operation - no prepared version
                 return left.dwithin(query_geometry, expr_->distance_);
             default:
                 ThrowInfo(NotImplemented, "unknown GIS op : {}", expr_->op_);
@@ -434,16 +455,15 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
         if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_DWithin) {
             // Create bounding box geometry for index coarse filtering
             Geometry bbox_geometry = create_bounding_box_for_dwithin(
-                segment_->get_ctx(), query_geometry, expr_->distance_);
+                ctx, query_geometry, expr_->distance_);
 
             ds->Set(milvus::index::MATCH_VALUE, bbox_geometry);
 
             // Note: Distance is not used for bounding box intersection query
         } else {
             // For other operations, use original geometry
-            ds->Set(
-                milvus::index::MATCH_VALUE,
-                Geometry(segment_->get_ctx(), expr_->geometry_wkt_.c_str()));
+            ds->Set(milvus::index::MATCH_VALUE,
+                    Geometry(ctx, expr_->geometry_wkt_.c_str()));
         }
 
         // Query segment-level R-Tree index **once** since each chunk shares the same index
@@ -504,8 +524,8 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                     if (cached_geometry == nullptr) {
                         continue;
                     }
-                    bool result =
-                        evaluate_geometry(*cached_geometry, query_geometry);
+                    // Use prepared geometry for faster evaluation
+                    bool result = evaluate_geometry_prepared(*cached_geometry);
 
                     if (result) {
                         refined.set(pos);
@@ -521,7 +541,7 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                         &data_array->scalars().geometry_data());
                 const auto& valid_data = data_array->valid_data();
 
-                GEOSContextHandle_t ctx = GEOS_init_r();
+                GEOSContextHandle_t local_ctx = GetThreadLocalGEOSContext();
                 for (size_t i = 0; i < hit_offsets.size(); ++i) {
                     const auto pos = hit_offsets[i];
 
@@ -531,14 +551,14 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                     }
 
                     const auto& wkb_data = geometry_array->data(i);
-                    Geometry left(ctx, wkb_data.data(), wkb_data.size());
-                    bool result = evaluate_geometry(left, query_geometry);
+                    Geometry left(local_ctx, wkb_data.data(), wkb_data.size());
+                    // Use prepared geometry for faster evaluation
+                    bool result = evaluate_geometry_prepared(left);
 
                     if (result) {
                         refined.set(pos);
                     }
                 }
-                GEOS_finish_r(ctx);
             }
         };
 
