@@ -76,7 +76,7 @@ func TestCancellationGuard_CloseBeforeContextCancel(t *testing.T) {
 
 	guard := NewCancellationGuard(ctx)
 
-	// Close the guard before context is cancelled
+	// Close the guard before context is canceled
 	guard.Close()
 
 	// Context cancel after guard close should not cause issues
@@ -143,7 +143,7 @@ func TestCancellationGuard_MultipleGuards(t *testing.T) {
 }
 
 func TestCancellationGuard_CancelledContext(t *testing.T) {
-	// Create an already cancelled context
+	// Create an already canceled context
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
