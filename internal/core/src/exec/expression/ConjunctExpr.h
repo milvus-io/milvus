@@ -17,6 +17,7 @@
 #pragma once
 
 #include <fmt/core.h>
+#include <set>
 
 #include "common/EasyAssert.h"
 #include "common/OpContext.h"
@@ -118,15 +119,25 @@ class PhyConjunctFilterExpr : public Expr {
     ToString() const {
         if (!input_order_.empty()) {
             std::vector<std::string> inputs;
-            for (auto& i : input_order_) {
-                inputs.push_back(inputs_[i]->ToString());
+            inputs.reserve(input_order_.size());
+            for (const auto& i : input_order_) {
+                if (i < inputs_.size()) {
+                    inputs.push_back(inputs_[i]->ToString());
+                } else {
+                    // Reserved position for runtime-created expressions (e.g., PhyLikeConjunctExpr)
+                    // This can happen during optimization phase before the expression is actually created
+                    inputs.push_back(
+                        fmt::format("[RuntimeExpr:index={}:pending]", i));
+                }
             }
             std::string input_str =
                 is_and_ ? Join(inputs, " && ") : Join(inputs, " || ");
             return fmt::format("[ConjuctExpr:{}]", input_str);
         }
+        // Fallback: no reordering applied yet
         std::vector<std::string> inputs;
-        for (auto& in : inputs_) {
+        inputs.reserve(inputs_.size());
+        for (const auto& in : inputs_) {
             inputs.push_back(in->ToString());
         }
         std::string input_str =
@@ -152,6 +163,13 @@ class PhyConjunctFilterExpr : public Expr {
     std::vector<size_t>
     GetReorder() {
         return input_order_;
+    }
+
+    // Add a new expression to inputs and return its index
+    size_t
+    AddInput(std::shared_ptr<Expr> expr) {
+        inputs_.push_back(std::move(expr));
+        return inputs_.size() - 1;
     }
 
     void
@@ -181,6 +199,16 @@ class PhyConjunctFilterExpr : public Expr {
         return !is_and_;
     }
 
+    void
+    SetLikeIndices(std::vector<size_t>&& indices) {
+        like_indices_ = std::move(indices);
+    }
+
+    const std::vector<size_t>&
+    GetLikeIndices() const {
+        return like_indices_;
+    }
+
  private:
     int64_t
     UpdateResult(ColumnVectorPtr& input_result,
@@ -198,6 +226,12 @@ class PhyConjunctFilterExpr : public Expr {
     // true if conjunction (and), false if disjunction (or).
     bool is_and_;
     std::vector<size_t> input_order_;
+    // Indices of LIKE expressions for potential batch ngram optimization (AND only)
+    std::vector<size_t> like_indices_;
+    // Flag to indicate if batch ngram optimization has been initialized
+    bool like_batch_initialized_{false};
+    // Indices of expressions executed via batch ngram (to skip in normal iteration)
+    std::set<size_t> batch_ngram_indices_;
 };
 }  //namespace exec
 }  // namespace milvus
