@@ -119,15 +119,25 @@ class PhyConjunctFilterExpr : public Expr {
     ToString() const {
         if (!input_order_.empty()) {
             std::vector<std::string> inputs;
-            for (auto& i : input_order_) {
-                inputs.push_back(inputs_[i]->ToString());
+            inputs.reserve(input_order_.size());
+            for (const auto& i : input_order_) {
+                if (i < inputs_.size()) {
+                    inputs.push_back(inputs_[i]->ToString());
+                } else {
+                    // Reserved position for runtime-created expressions (e.g., PhyLikeConjunctExpr)
+                    // This can happen during optimization phase before the expression is actually created
+                    inputs.push_back(
+                        fmt::format("[RuntimeExpr:index={}:pending]", i));
+                }
             }
             std::string input_str =
                 is_and_ ? Join(inputs, " && ") : Join(inputs, " || ");
             return fmt::format("[ConjuctExpr:{}]", input_str);
         }
+        // Fallback: no reordering applied yet
         std::vector<std::string> inputs;
-        for (auto& in : inputs_) {
+        inputs.reserve(inputs_.size());
+        for (const auto& in : inputs_) {
             inputs.push_back(in->ToString());
         }
         std::string input_str =
