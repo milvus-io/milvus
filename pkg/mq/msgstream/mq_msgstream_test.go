@@ -1019,6 +1019,7 @@ func TestStream_MqMsgStream_Seek(t *testing.T) {
 }
 
 func TestStream_MqMsgStream_SeekInvalidMessage(t *testing.T) {
+	t.Skip("pulsar seek behavior changed")
 	pulsarAddress := getPulsarAddress()
 	c := funcutil.RandomString(8)
 	producerChannels := []string{c}

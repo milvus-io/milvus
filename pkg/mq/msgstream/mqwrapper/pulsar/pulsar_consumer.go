@@ -61,7 +61,10 @@ func (pc *Consumer) Chan() <-chan common.Message {
 			if !pc.hasSeek && !pc.AtLatest {
 				// the concrete value of the MessageID is pulsar.messageID{-1,-1,-1,-1}
 				// but Seek function logic does not allow partitionID -1, See line 618-620 of github.com/apache/pulsar-client-go@v0.5.0 pulsar/consumer_impl.go
-				mid := pulsar.EarliestMessageID()
+				// data race here if we use pulsar.EarliestMessageID() directly because of patchEarliestMessageID,
+				// so we need to serilize then deserialize it
+				// unreachable error, so no need to check error
+				mid, _ := pulsar.DeserializeMessageID(pulsar.EarliestMessageID().Serialize())
 				// the patch function use unsafe pointer to set partitionIdx to 0, which is the valid default partition index of current use case
 				// NOTE: when pulsar client version check, do check this logic is fixed or offset is changed!!!
 				// NOTE: unsafe solution, check implementation asap
@@ -159,8 +162,15 @@ func (pc *Consumer) Close() {
 }
 
 func (pc *Consumer) GetLatestMsgID() (common.MessageID, error) {
-	msgID, err := pc.c.GetLastMessageID(pc.c.Name(), mqwrapper.DefaultPartitionIdx)
-	return &pulsarID{messageID: msgID}, err
+	msgIDs, err := pc.c.GetLastMessageIDs()
+	if err != nil {
+		return nil, err
+	}
+	msgID := msgIDs[mqwrapper.DefaultPartitionIdx]
+	// the internal type is *pulsar.topicMessageID which could not be seeked
+	// use serde to convert it to pulsar.trackID
+	tid, err := pulsar.DeserializeMessageID(msgID.Serialize())
+	return &pulsarID{messageID: tid}, err
 }
 
 func (pc *Consumer) CheckTopicValid(topic string) error {

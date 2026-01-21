@@ -38,7 +38,9 @@ func (c *testClientConn) NewSubConn(addrs []resolver.Address, opts balancer.NewS
 
 func (c *testClientConn) UpdateState(balancer.State) {}
 
-type testSubConn struct{}
+type testSubConn struct {
+	balancer.SubConn
+}
 
 func (sc *testSubConn) UpdateAddresses(addresses []resolver.Address) {}
 
@@ -47,6 +49,8 @@ func (sc *testSubConn) Connect() {}
 func (sc *testSubConn) GetOrBuildProducer(balancer.ProducerBuilder) (balancer.Producer, func()) {
 	return nil, nil
 }
+
+func (sc *testSubConn) RegisterHealthListener(func(balancer.SubConnState)) {}
 
 func (sc *testSubConn) Shutdown() {}
 

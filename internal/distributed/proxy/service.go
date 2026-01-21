@@ -91,6 +91,7 @@ const apiPathPrefix = "/api/v1"
 
 // Server is the Proxy Server
 type Server struct {
+	grpc_health_v1.UnimplementedHealthServer
 	milvuspb.UnimplementedMilvusServiceServer
 
 	ctx                context.Context
