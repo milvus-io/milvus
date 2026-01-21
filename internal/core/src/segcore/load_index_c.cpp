@@ -75,31 +75,6 @@ DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info) {
 }
 
 CStatus
-AppendIndexParam(CLoadIndexInfo c_load_index_info,
-                 const char* c_index_key,
-                 const char* c_index_value) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto load_index_info =
-            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        std::string index_key(c_index_key);
-        std::string index_value(c_index_value);
-        load_index_info->index_params[index_key] = index_value;
-
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
-    }
-}
-
-CStatus
 appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
     SCOPE_CGO_CALL_METRIC();
 

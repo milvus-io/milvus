@@ -33,12 +33,6 @@ NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info);
 void
 DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info);
 
-// no longer used.
-CStatus
-AppendIndexParam(CLoadIndexInfo c_load_index_info,
-                 const char* index_key,
-                 const char* index_value);
-
 LoadResourceRequest
 EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info);
 
