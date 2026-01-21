@@ -873,6 +873,8 @@ func (m *MetaCache) removeCollectionByID(ctx context.Context, collectionID Uniqu
 				if version == 0 || curVersion <= version {
 					delete(m.collInfo[database], k)
 					collNames = append(collNames, k)
+					m.sfGlobal.Forget(buildSfKeyByName(database, k))
+					m.sfGlobal.Forget(buildSfKeyById(database, v.collID))
 				}
 			}
 		}
