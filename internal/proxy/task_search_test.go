@@ -4015,6 +4015,332 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			})
 		}
 	})
+
+	// ====================================================================================
+	// parseOrderByFields Tests
+	// ====================================================================================
+
+	t.Run("parseSearchInfo with order_by_fields - basic ascending", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "price", DataType: schemapb.DataType_Int64},
+				{FieldID: 102, Name: "name", DataType: schemapb.DataType_VarChar},
+			},
+		}
+
+		params := getValidSearchParams()
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "order_by_fields",
+			Value: "price:asc",
+		})
+
+		searchInfo, err := parseSearchInfo(params, schema, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, searchInfo.planInfo)
+		assert.Equal(t, 1, len(searchInfo.planInfo.GetOrderByFields()))
+		assert.Equal(t, int64(101), searchInfo.planInfo.GetOrderByFields()[0].GetFieldId())
+		assert.True(t, searchInfo.planInfo.GetOrderByFields()[0].GetAscending())
+	})
+
+	t.Run("parseSearchInfo with order_by_fields - descending", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "price", DataType: schemapb.DataType_Int64},
+			},
+		}
+
+		params := getValidSearchParams()
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "order_by_fields",
+			Value: "price:desc",
+		})
+
+		searchInfo, err := parseSearchInfo(params, schema, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, searchInfo.planInfo)
+		assert.Equal(t, 1, len(searchInfo.planInfo.GetOrderByFields()))
+		assert.Equal(t, int64(101), searchInfo.planInfo.GetOrderByFields()[0].GetFieldId())
+		assert.False(t, searchInfo.planInfo.GetOrderByFields()[0].GetAscending())
+	})
+
+	t.Run("parseSearchInfo with order_by_fields - default ascending when no direction", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "price", DataType: schemapb.DataType_Int64},
+			},
+		}
+
+		params := getValidSearchParams()
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "order_by_fields",
+			Value: "price", // no direction specified, should default to ascending
+		})
+
+		searchInfo, err := parseSearchInfo(params, schema, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, searchInfo.planInfo)
+		assert.Equal(t, 1, len(searchInfo.planInfo.GetOrderByFields()))
+		assert.True(t, searchInfo.planInfo.GetOrderByFields()[0].GetAscending())
+	})
+
+	t.Run("parseSearchInfo with order_by_fields - multiple fields", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "price", DataType: schemapb.DataType_Int64},
+				{FieldID: 102, Name: "name", DataType: schemapb.DataType_VarChar},
+			},
+		}
+
+		params := getValidSearchParams()
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "order_by_fields",
+			Value: "price:asc,name:desc",
+		})
+
+		searchInfo, err := parseSearchInfo(params, schema, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, searchInfo.planInfo)
+		assert.Equal(t, 2, len(searchInfo.planInfo.GetOrderByFields()))
+		assert.Equal(t, int64(101), searchInfo.planInfo.GetOrderByFields()[0].GetFieldId())
+		assert.True(t, searchInfo.planInfo.GetOrderByFields()[0].GetAscending())
+		assert.Equal(t, int64(102), searchInfo.planInfo.GetOrderByFields()[1].GetFieldId())
+		assert.False(t, searchInfo.planInfo.GetOrderByFields()[1].GetAscending())
+	})
+
+	t.Run("parseSearchInfo with order_by_fields - field not found", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "price", DataType: schemapb.DataType_Int64},
+			},
+		}
+
+		params := getValidSearchParams()
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "order_by_fields",
+			Value: "non_existent_field:asc",
+		})
+
+		searchInfo, err := parseSearchInfo(params, schema, nil)
+		assert.Error(t, err)
+		assert.Nil(t, searchInfo)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("parseSearchInfo with order_by_fields - invalid direction", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "price", DataType: schemapb.DataType_Int64},
+			},
+		}
+
+		params := getValidSearchParams()
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "order_by_fields",
+			Value: "price:invalid_direction",
+		})
+
+		searchInfo, err := parseSearchInfo(params, schema, nil)
+		assert.Error(t, err)
+		assert.Nil(t, searchInfo)
+		assert.Contains(t, err.Error(), "invalid order direction")
+	})
+
+	t.Run("parseSearchInfo with order_by_fields - unsupported field type", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "embedding", DataType: schemapb.DataType_FloatVector},
+			},
+		}
+
+		params := getValidSearchParams()
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "order_by_fields",
+			Value: "embedding:asc",
+		})
+
+		searchInfo, err := parseSearchInfo(params, schema, nil)
+		assert.Error(t, err)
+		assert.Nil(t, searchInfo)
+		assert.Contains(t, err.Error(), "unsupported type")
+	})
+
+	t.Run("parseSearchInfo with order_by_fields - JSON field with path", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "metadata", DataType: schemapb.DataType_JSON},
+			},
+		}
+
+		params := getValidSearchParams()
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "order_by_fields",
+			Value: `metadata["price"]:asc`,
+		})
+
+		searchInfo, err := parseSearchInfo(params, schema, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, searchInfo.planInfo)
+		assert.Equal(t, 1, len(searchInfo.planInfo.GetOrderByFields()))
+		assert.Equal(t, int64(101), searchInfo.planInfo.GetOrderByFields()[0].GetFieldId())
+		assert.Equal(t, `metadata["price"]`, searchInfo.planInfo.GetOrderByFields()[0].GetJsonPath())
+	})
+
+	t.Run("parseSearchInfo with order_by_fields - dynamic field", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			EnableDynamicField: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+			},
+		}
+
+		params := getValidSearchParams()
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "order_by_fields",
+			Value: "dynamic_price:asc",
+		})
+
+		searchInfo, err := parseSearchInfo(params, schema, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, searchInfo.planInfo)
+		assert.Equal(t, 1, len(searchInfo.planInfo.GetOrderByFields()))
+		assert.Equal(t, int64(101), searchInfo.planInfo.GetOrderByFields()[0].GetFieldId())
+		assert.Equal(t, "dynamic_price", searchInfo.planInfo.GetOrderByFields()[0].GetJsonPath())
+	})
+
+	t.Run("parseSearchInfo with order_by_fields - empty value", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "price", DataType: schemapb.DataType_Int64},
+			},
+		}
+
+		params := getValidSearchParams()
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "order_by_fields",
+			Value: "",
+		})
+
+		searchInfo, err := parseSearchInfo(params, schema, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, searchInfo.planInfo)
+		// Empty order_by_fields should result in no order by fields
+		assert.Equal(t, 0, len(searchInfo.planInfo.GetOrderByFields()))
+	})
+
+	t.Run("parseSearchInfo with order_by_fields - ascending/descending full words", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "price", DataType: schemapb.DataType_Int64},
+				{FieldID: 102, Name: "name", DataType: schemapb.DataType_VarChar},
+			},
+		}
+
+		params := getValidSearchParams()
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "order_by_fields",
+			Value: "price:ascending,name:descending",
+		})
+
+		searchInfo, err := parseSearchInfo(params, schema, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, searchInfo.planInfo)
+		assert.Equal(t, 2, len(searchInfo.planInfo.GetOrderByFields()))
+		assert.True(t, searchInfo.planInfo.GetOrderByFields()[0].GetAscending())
+		assert.False(t, searchInfo.planInfo.GetOrderByFields()[1].GetAscending())
+	})
+
+	t.Run("parseSearchInfo with order_by_fields - supported data types", func(t *testing.T) {
+		// Test all supported data types
+		supportedTypes := []struct {
+			name     string
+			dataType schemapb.DataType
+		}{
+			{"bool_field", schemapb.DataType_Bool},
+			{"int8_field", schemapb.DataType_Int8},
+			{"int16_field", schemapb.DataType_Int16},
+			{"int32_field", schemapb.DataType_Int32},
+			{"int64_field", schemapb.DataType_Int64},
+			{"float_field", schemapb.DataType_Float},
+			{"double_field", schemapb.DataType_Double},
+			{"varchar_field", schemapb.DataType_VarChar},
+			{"string_field", schemapb.DataType_String},
+		}
+
+		for _, tc := range supportedTypes {
+			t.Run(fmt.Sprintf("order_by %s", tc.name), func(t *testing.T) {
+				schema := &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+						{FieldID: 101, Name: tc.name, DataType: tc.dataType},
+					},
+				}
+
+				params := getValidSearchParams()
+				params = append(params, &commonpb.KeyValuePair{
+					Key:   "order_by_fields",
+					Value: tc.name + ":asc",
+				})
+
+				searchInfo, err := parseSearchInfo(params, schema, nil)
+				assert.NoError(t, err)
+				assert.NotNil(t, searchInfo.planInfo)
+				assert.Equal(t, 1, len(searchInfo.planInfo.GetOrderByFields()))
+				assert.Equal(t, int64(101), searchInfo.planInfo.GetOrderByFields()[0].GetFieldId())
+			})
+		}
+	})
+
+	t.Run("parseSearchInfo with order_by_fields - invalid format too many colons", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "price", DataType: schemapb.DataType_Int64},
+			},
+		}
+
+		params := getValidSearchParams()
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "order_by_fields",
+			Value: "price:asc:extra",
+		})
+
+		searchInfo, err := parseSearchInfo(params, schema, nil)
+		assert.Error(t, err)
+		assert.Nil(t, searchInfo)
+		assert.Contains(t, err.Error(), "invalid order_by format")
+	})
+
+	t.Run("parseSearchInfo with order_by_fields - whitespace handling", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "price", DataType: schemapb.DataType_Int64},
+				{FieldID: 102, Name: "name", DataType: schemapb.DataType_VarChar},
+			},
+		}
+
+		params := getValidSearchParams()
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "order_by_fields",
+			Value: "  price : asc , name : desc  ",
+		})
+
+		searchInfo, err := parseSearchInfo(params, schema, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, searchInfo.planInfo)
+		assert.Equal(t, 2, len(searchInfo.planInfo.GetOrderByFields()))
+	})
 }
 
 func getSearchResultData(nq, topk int64) *schemapb.SearchResultData {

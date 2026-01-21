@@ -603,7 +603,6 @@ func genTestDataWithGroupByAndOrderBy() []*schemapb.SearchResultData {
 				},
 			},
 		}},
-		},
 	}
 
 	return []*schemapb.SearchResultData{searchResultData1, searchResultData2}
