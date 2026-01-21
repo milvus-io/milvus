@@ -1756,6 +1756,16 @@ func GetFieldByName(schema *schemapb.CollectionSchema, fieldName string) *schema
 	return nil
 }
 
+// GetFieldByID returns the field schema with the given field ID, or nil if not found.
+func GetFieldByID(schema *schemapb.CollectionSchema, fieldID int64) *schemapb.FieldSchema {
+	for _, field := range schema.GetFields() {
+		if field.GetFieldID() == fieldID {
+			return field
+		}
+	}
+	return nil
+}
+
 func IsPrimaryFieldDataExist(datas []*schemapb.FieldData, primaryFieldSchema *schemapb.FieldSchema) bool {
 	primaryFieldID := primaryFieldSchema.FieldID
 	primaryFieldName := primaryFieldSchema.Name
