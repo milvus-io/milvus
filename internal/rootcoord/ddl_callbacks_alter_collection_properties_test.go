@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -56,11 +55,27 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 
-	// hook related properties are not allowed to be altered.
+	// cipher related properties are not allowed to be altered.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
-		Properties:     []*commonpb.KeyValuePair{{Key: hookutil.EncryptionEnabledKey, Value: "1"}},
+		Properties:     []*commonpb.KeyValuePair{{Key: common.EncryptionEnabledKey, Value: "1"}},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
+	// cipher related properties are not allowed to be altered.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
+	// cipher related properties are not allowed to be altered.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.EncryptionRootKeyKey, Value: "1"}},
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 

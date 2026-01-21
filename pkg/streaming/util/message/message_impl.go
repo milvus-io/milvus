@@ -39,10 +39,12 @@ func (m *messageImpl) MessageTypeWithVersion() MessageTypeWithVersion {
 }
 
 // Payload returns payload of current message.
+// If the message is encrypted, it will be decrypted with automatic retry for transient KMS errors.
 func (m *messageImpl) Payload() []byte {
 	if ch := m.cipherHeader(); ch != nil {
-		cipher := mustGetCipher()
-		decryptor, err := cipher.GetDecryptor(ch.EzId, ch.CollectionId, ch.SafeKey)
+		// Use getDecryptorWithRetry for resilient decryption with automatic retry
+		// for transient KMS key errors (e.g., temporarily invalid/revoked keys)
+		decryptor, err := getDecryptorWithRetry(ch.EzId, ch.CollectionId, ch.SafeKey)
 		if err != nil {
 			panic(fmt.Sprintf("can not get decryptor for message: %s", err))
 		}
