@@ -1971,3 +1971,81 @@ func TestProxy_ListFileResources(t *testing.T) {
 	// 	assert.Error(t, merr.Error(resp.GetStatus()))
 	// })
 }
+
+func TestHandleIfSearchByPK_BM25Detection(t *testing.T) {
+	// Test that getBM25FunctionOfAnnsField correctly identifies BM25 functions
+	t.Run("detect BM25 function by output field ID", func(t *testing.T) {
+		functions := []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25_func",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"text_field"},
+				InputFieldIds:    []int64{100},
+				OutputFieldNames: []string{"sparse_field"},
+				OutputFieldIds:   []int64{101},
+			},
+		}
+
+		// Should find BM25 function when querying with output field ID
+		fn, found := getBM25FunctionOfAnnsField(101, functions)
+		assert.True(t, found)
+		assert.Equal(t, "bm25_func", fn.Name)
+		assert.Equal(t, schemapb.FunctionType_BM25, fn.Type)
+		assert.Equal(t, "text_field", fn.InputFieldNames[0])
+
+		// Should not find BM25 function when querying with input field ID
+		_, found = getBM25FunctionOfAnnsField(100, functions)
+		assert.False(t, found)
+
+		// Should not find BM25 function when querying with non-existent field ID
+		_, found = getBM25FunctionOfAnnsField(999, functions)
+		assert.False(t, found)
+	})
+
+	t.Run("non-BM25 function should not be detected", func(t *testing.T) {
+		functions := []*schemapb.FunctionSchema{
+			{
+				Name:             "embedding_func",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldNames:  []string{"text_field"},
+				InputFieldIds:    []int64{100},
+				OutputFieldNames: []string{"vector_field"},
+				OutputFieldIds:   []int64{101},
+			},
+		}
+
+		// Should not find BM25 function for non-BM25 function type
+		_, found := getBM25FunctionOfAnnsField(101, functions)
+		assert.False(t, found)
+	})
+
+	t.Run("multiple functions with one BM25", func(t *testing.T) {
+		functions := []*schemapb.FunctionSchema{
+			{
+				Name:             "embedding_func",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldNames:  []string{"text_field"},
+				InputFieldIds:    []int64{100},
+				OutputFieldNames: []string{"vector_field"},
+				OutputFieldIds:   []int64{102},
+			},
+			{
+				Name:             "bm25_func",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"text_field"},
+				InputFieldIds:    []int64{100},
+				OutputFieldNames: []string{"sparse_field"},
+				OutputFieldIds:   []int64{101},
+			},
+		}
+
+		// Should find BM25 function
+		fn, found := getBM25FunctionOfAnnsField(101, functions)
+		assert.True(t, found)
+		assert.Equal(t, "bm25_func", fn.Name)
+
+		// Should not find BM25 for embedding function output
+		_, found = getBM25FunctionOfAnnsField(102, functions)
+		assert.False(t, found)
+	})
+}
