@@ -92,7 +92,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestInt64WithDefaultValue) {
 
     // Test get_cells
     std::vector<cachinglayer::cid_t> cids = {0};
-    auto cells = translator->get_cells(cids);
+    auto cells = translator->get_cells(nullptr, cids);
     EXPECT_EQ(cells.size(), 1);
 
     auto& [cid, chunk] = cells[0];
@@ -130,7 +130,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestInt64WithoutDefaultValue) {
     EXPECT_GT(translator->num_cells(), 0);
 
     std::vector<cachinglayer::cid_t> cids = {0};
-    auto cells = translator->get_cells(cids);
+    auto cells = translator->get_cells(nullptr, cids);
     EXPECT_EQ(cells.size(), 1);
 
     auto& [cid, chunk] = cells[0];
@@ -242,7 +242,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestStringWithDefaultValue) {
     EXPECT_GT(translator->value_size(), 0);
 
     std::vector<cachinglayer::cid_t> cids = {0};
-    auto cells = translator->get_cells(cids);
+    auto cells = translator->get_cells(nullptr, cids);
     EXPECT_EQ(cells.size(), 1);
 
     auto& [cid, chunk] = cells[0];
@@ -274,7 +274,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestStringWithoutDefaultValue) {
     EXPECT_GT(translator->num_cells(), 0);
 
     std::vector<cachinglayer::cid_t> cids = {0};
-    auto cells = translator->get_cells(cids);
+    auto cells = translator->get_cells(nullptr, cids);
     EXPECT_EQ(cells.size(), 1);
 
     auto& [cid, chunk] = cells[0];
@@ -317,7 +317,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestMultipleCells) {
         cids.push_back(i);
     }
 
-    auto cells = translator->get_cells(cids);
+    auto cells = translator->get_cells(nullptr, cids);
     EXPECT_EQ(cells.size(), cids.size());
 
     int64_t total_rows = 0;
@@ -359,7 +359,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestSmallRowCount) {
     EXPECT_EQ(translator->num_cells(), 1);
 
     std::vector<cachinglayer::cid_t> cids = {0};
-    auto cells = translator->get_cells(cids);
+    auto cells = translator->get_cells(nullptr, cids);
     EXPECT_EQ(cells.size(), 1);
 
     auto& [cid, chunk] = cells[0];
@@ -417,7 +417,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestGetMultipleCells) {
             cids.push_back(i);
         }
 
-        auto cells = translator->get_cells(cids);
+        auto cells = translator->get_cells(nullptr, cids);
         EXPECT_EQ(cells.size(), cids.size());
 
         for (size_t i = 0; i < cells.size(); ++i) {
@@ -504,7 +504,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestTimestamptzType) {
     EXPECT_EQ(translator->value_size(), sizeof(int64_t));
 
     std::vector<cachinglayer::cid_t> cids = {0};
-    auto cells = translator->get_cells(cids);
+    auto cells = translator->get_cells(nullptr, cids);
     EXPECT_EQ(cells.size(), 1);
 
     auto& [cid, chunk] = cells[0];
@@ -626,7 +626,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapCreatesFile) {
 
     // Trigger cell creation
     std::vector<cachinglayer::cid_t> cids = {0};
-    auto cells = translator->get_cells(cids);
+    auto cells = translator->get_cells(nullptr, cids);
     ASSERT_EQ(cells.size(), 1);
 
     // Verify file was created
@@ -670,7 +670,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestNoMmapNoFile) {
 
     // Trigger cell creation
     std::vector<cachinglayer::cid_t> cids = {0};
-    auto cells = translator->get_cells(cids);
+    auto cells = translator->get_cells(nullptr, cids);
     ASSERT_EQ(cells.size(), 1);
 
     // Verify no file was created (memory-only mode)
@@ -713,7 +713,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapWithString) {
         segment_id_, field_meta, field_data_info, true /* use_mmap */, true);
 
     std::vector<cachinglayer::cid_t> cids = {0};
-    auto cells = translator->get_cells(cids);
+    auto cells = translator->get_cells(nullptr, cids);
     ASSERT_EQ(cells.size(), 1);
 
     // Verify file was created
@@ -750,7 +750,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapWithNullableField) {
         segment_id_, field_meta, field_data_info, true /* use_mmap */, true);
 
     std::vector<cachinglayer::cid_t> cids = {0};
-    auto cells = translator->get_cells(cids);
+    auto cells = translator->get_cells(nullptr, cids);
     ASSERT_EQ(cells.size(), 1);
 
     // Verify file was created
@@ -798,7 +798,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapMultipleCells) {
     for (size_t i = 0; i < std::min<size_t>(3, num_cells); ++i) {
         cids.push_back(i);
     }
-    auto cells = translator->get_cells(cids);
+    auto cells = translator->get_cells(nullptr, cids);
     ASSERT_EQ(cells.size(), cids.size());
 
     // Verify file was created (all cells share the same buffer/file)
@@ -841,7 +841,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapFileSize) {
         segment_id_, field_meta, field_data_info, true /* use_mmap */, true);
 
     std::vector<cachinglayer::cid_t> cids = {0};
-    auto cells = translator->get_cells(cids);
+    auto cells = translator->get_cells(nullptr, cids);
     ASSERT_EQ(cells.size(), 1);
 
     auto expected_file =
