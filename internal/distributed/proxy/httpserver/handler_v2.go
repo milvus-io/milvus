@@ -382,7 +382,6 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 
 		resp, err := v2(ctx, gCtx, req, dbName)
 		methodTag, ok := routeToMethod[gCtx.FullPath()]
-		log.Warn("CQX routeToMethod", zap.String("path", gCtx.FullPath()), zap.String("methodTag", methodTag))
 		if !ok {
 			return
 		}
