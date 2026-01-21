@@ -42,15 +42,13 @@ func (ed *EventDispatcher) Get(key string) []EventHandler {
 func (ed *EventDispatcher) Dispatch(event *Event) {
 	ed.mut.RLock()
 	defer ed.mut.RUnlock()
-	var hs []EventHandler
 	realKey := formatKey(event.Key)
-	hs, ok := ed.registry[realKey]
-	if !ok {
-		for _, v := range ed.keyPrefix {
-			if strings.HasPrefix(realKey, v) {
-				if _, exist := ed.registry[v]; exist {
-					hs = append(hs, ed.registry[v]...)
-				}
+	hs := append([]EventHandler(nil), ed.registry[realKey]...)
+	// Dispatch prefix handlers in addition to exact-key handlers.
+	for _, v := range ed.keyPrefix {
+		if strings.HasPrefix(realKey, v) {
+			if _, exist := ed.registry[v]; exist {
+				hs = append(hs, ed.registry[v]...)
 			}
 		}
 	}
