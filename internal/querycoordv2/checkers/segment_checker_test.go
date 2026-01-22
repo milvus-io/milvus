@@ -21,6 +21,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -684,7 +685,9 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriority() {
 	suite.checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 
 	// test getSealedSegmentDiff
-	toLoad, loadPriorities, toRelease, toUpdate := suite.checker.getSealedSegmentDiff(ctx, collectionID, replicaID)
+	// Pre-fetch segment distribution for the test
+	dist := suite.checker.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
+	toLoad, loadPriorities, toRelease, toUpdate := suite.checker.getSealedSegmentDiff(ctx, collectionID, replica, dist)
 
 	// verify results
 	suite.Equal(2, len(toLoad))
@@ -706,7 +709,8 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriority() {
 	// update current target to include segment2
 	suite.checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 	// test again
-	toLoad, loadPriorities, toRelease, toUpdate = suite.checker.getSealedSegmentDiff(ctx, collectionID, replicaID)
+	dist = suite.checker.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
+	toLoad, loadPriorities, toRelease, toUpdate = suite.checker.getSealedSegmentDiff(ctx, collectionID, replica, dist)
 	// verify results
 	suite.Equal(0, len(toLoad))
 	suite.Equal(0, len(loadPriorities))
@@ -737,8 +741,17 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutExistedOnLeader() {
 		utils.CreateTestSegment(collectionID, partitionID, segmentID3, nodeID1, 1, channel),
 	}
 
+	// Helper to get ch2DelegatorList
+	getCh2DelegatorList := func() map[string][]*meta.DmChannel {
+		delegatorList := checker.dist.ChannelDistManager.GetByCollectionAndFilter(collectionID, meta.WithReplica2Channel(replica))
+		return lo.GroupBy(delegatorList, func(d *meta.DmChannel) string {
+			return d.View.Channel
+		})
+	}
+
 	// Test case 1: No leader views - should skip releasing segments
-	result := checker.filterOutExistedOnLeader(replica, segments)
+	ch2DelegatorList := getCh2DelegatorList()
+	result := checker.filterOutExistedOnLeader(replica, segments, ch2DelegatorList)
 	suite.Equal(0, len(result), "Should return all segments when no leader views")
 
 	// Test case 2: Segment serving on leader - should be filtered out
@@ -753,7 +766,8 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutExistedOnLeader() {
 		View: leaderView1,
 	})
 
-	result = checker.filterOutExistedOnLeader(replica, segments)
+	ch2DelegatorList = getCh2DelegatorList()
+	result = checker.filterOutExistedOnLeader(replica, segments, ch2DelegatorList)
 	suite.Len(result, 2, "Should filter out segment serving on leader")
 
 	// Check that segmentID1 is filtered out
@@ -773,7 +787,8 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutExistedOnLeader() {
 		View: leaderView2,
 	})
 
-	result = checker.filterOutExistedOnLeader(replica, segments)
+	ch2DelegatorList = getCh2DelegatorList()
+	result = checker.filterOutExistedOnLeader(replica, segments, ch2DelegatorList)
 	suite.Len(result, 1, "Should filter out segments serving on their respective leaders")
 	suite.Equal(segmentID3, result[0].GetID(), "Only non-serving segment should remain")
 
@@ -789,7 +804,8 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutExistedOnLeader() {
 		View: leaderView3,
 	})
 
-	result = checker.filterOutExistedOnLeader(replica, []*meta.Segment{segments[2]}) // Only test segmentID3
+	ch2DelegatorList = getCh2DelegatorList()
+	result = checker.filterOutExistedOnLeader(replica, []*meta.Segment{segments[2]}, ch2DelegatorList) // Only test segmentID3
 	suite.Len(result, 1, "Segment not serving on its actual node should not be filtered")
 }
 
@@ -833,8 +849,17 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 	currentTargetVersion := checker.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
 
+	// Helper to get ch2DelegatorList
+	getCh2DelegatorList := func() map[string][]*meta.DmChannel {
+		delegatorList := checker.dist.ChannelDistManager.GetByCollectionAndFilter(collectionID, meta.WithReplica2Channel(replica))
+		return lo.GroupBy(delegatorList, func(d *meta.DmChannel) string {
+			return d.View.Channel
+		})
+	}
+
 	// Test case 1: No leader views - should skip releasing segments
-	result := checker.filterOutSegmentInUse(ctx, replica, segments)
+	ch2DelegatorList := getCh2DelegatorList()
+	result := checker.filterOutSegmentInUse(ctx, replica, segments, ch2DelegatorList)
 	suite.Equal(0, len(result), "Should return all segments when no leader views")
 
 	// Test case 2: Leader view with outdated target version - segment should be filtered (still in use)
@@ -850,7 +875,8 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 		View: leaderView1,
 	})
 
-	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]})
+	ch2DelegatorList = getCh2DelegatorList()
+	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]}, ch2DelegatorList)
 	suite.Len(result, 0, "Segment should be filtered out when delegator hasn't updated to latest version")
 
 	// Test case 3: Leader view with current target version - segment should not be filtered
@@ -866,7 +892,8 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 		View: leaderView2,
 	})
 
-	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]})
+	ch2DelegatorList = getCh2DelegatorList()
+	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]}, ch2DelegatorList)
 	suite.Len(result, 1, "Segment should not be filtered when delegator has updated to latest version")
 
 	// Test case 4: Leader view with initial target version - segment should not be filtered
@@ -882,7 +909,8 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 		View: leaderView3,
 	})
 
-	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[1]})
+	ch2DelegatorList = getCh2DelegatorList()
+	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[1]}, ch2DelegatorList)
 	suite.Len(result, 1, "Segment should not be filtered when leader has initial target version")
 
 	// Test case 5: Multiple leader views with mixed versions - segment should be filtered (still in use)
@@ -915,12 +943,14 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 		utils.CreateTestSegment(collectionID, partitionID, segmentID2, nodeID2, 1, channel),
 	}
 
-	result = checker.filterOutSegmentInUse(ctx, replica, testSegments)
+	ch2DelegatorList = getCh2DelegatorList()
+	result = checker.filterOutSegmentInUse(ctx, replica, testSegments, ch2DelegatorList)
 	suite.Len(result, 0, "Should release all segments when any delegator hasn't updated")
 
 	// Test case 6: Partition is nil - should release all segments (no partition info)
 	checker.meta.CollectionManager.RemovePartition(ctx, partitionID)
-	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]})
+	ch2DelegatorList = getCh2DelegatorList()
+	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]}, ch2DelegatorList)
 	suite.Len(result, 0, "Should release all segments when partition is nil")
 }
 
