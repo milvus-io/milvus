@@ -416,7 +416,7 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 					m.SubmitL0ViewToScheduler(ctx, outView)
 				case TriggerTypeClustering:
 					m.SubmitClusteringViewToScheduler(ctx, outView)
-				case TriggerTypeSingle, TriggerTypeSort:
+				case TriggerTypeSingle, TriggerTypeSort, TriggerTypeStorageVersionUpgrade:
 					m.SubmitSingleViewToScheduler(ctx, outView, eventType)
 				case TriggerTypeForceMerge:
 					m.SubmitForceMergeViewToScheduler(ctx, outView)
