@@ -180,12 +180,14 @@ func (s *ArkTextEmbeddingProviderSuite) TestNewArkEmbeddingProvider() {
 		Params: []*commonpb.KeyValuePair{
 			{Key: models.ModelNameParamKey, Value: TestModel},
 			{Key: models.CredentialParamKey, Value: "mock"},
+			{Key: "user", Value: "test_user"},
 		},
 	}
 	provider, err := NewArkEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{models.URLParamKey: "mock"}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: 5})
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(4))
 	s.True(provider.MaxBatch() > 0)
+	s.Equal("test_user", provider.user)
 }
 
 func (s *ArkTextEmbeddingProviderSuite) TestNewArkEmbeddingProviderWithBatchSize() {
@@ -303,4 +305,80 @@ func (s *ArkTextEmbeddingProviderSuite) TestEmbedding_ClientError() {
 
 	_, err = provider.CallEmbedding(context.Background(), []string{"test"}, models.SearchMode)
 	s.Error(err)
+}
+
+func (s *ArkTextEmbeddingProviderSuite) TestCallEmbedding_DefensiveMaxBatch() {
+	// Construct provider with invalid maxBatch
+	provider := &ArkEmbeddingProvider{
+		maxBatch:  0,
+		extraInfo: &models.ModelExtraInfo{BatchFactor: 1},
+	}
+	_, err := provider.CallEmbedding(context.Background(), []string{"test"}, models.SearchMode)
+	s.Error(err)
+	s.Contains(err.Error(), "invalid maxBatch value")
+}
+
+func (s *ArkTextEmbeddingProviderSuite) TestMultimodalEmbedding_Error() {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	schema := &schemapb.FieldSchema{
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: "dim", Value: "4"},
+		},
+	}
+	fs := &schemapb.FunctionSchema{
+		Params: []*commonpb.KeyValuePair{
+			{Key: models.ModelNameParamKey, Value: TestModel},
+			{Key: models.CredentialParamKey, Value: "mock"},
+			{Key: "model_type", Value: "multimodal"},
+		},
+	}
+	provider, err := NewArkEmbeddingProvider(schema, fs, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: 1})
+	s.Require().NoError(err)
+	s.True(provider.isMultimodal)
+
+	_, err = provider.CallEmbedding(context.Background(), []string{"test"}, models.SearchMode)
+	s.Error(err)
+	s.Contains(err.Error(), "multimodal embedding request failed")
+}
+
+func (s *ArkTextEmbeddingProviderSuite) TestNewArkEmbeddingProvider_InitializationErrors() {
+	// Case 1: Missing dim in fieldSchema
+	{
+		schema := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+			// No TypeParams with dim
+		}
+		fs := &schemapb.FunctionSchema{
+			Params: []*commonpb.KeyValuePair{
+				{Key: models.ModelNameParamKey, Value: TestModel},
+				{Key: models.CredentialParamKey, Value: "mock"}, // params ok
+			},
+		}
+		_, err := NewArkEmbeddingProvider(schema, fs, map[string]string{}, credentials.NewCredentials(map[string]string{}), &models.ModelExtraInfo{})
+		s.Error(err)
+	}
+
+	// Case 2: Missing credentials
+	{
+		schema := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "dim", Value: "4"},
+			},
+		}
+		fs := &schemapb.FunctionSchema{
+			Params: []*commonpb.KeyValuePair{
+				{Key: models.ModelNameParamKey, Value: TestModel},
+				// No credential param
+			},
+		}
+		// Empty credentials, empty config, empty env
+		_, err := NewArkEmbeddingProvider(schema, fs, map[string]string{}, credentials.NewCredentials(map[string]string{}), &models.ModelExtraInfo{})
+		s.Error(err)
+	}
 }
