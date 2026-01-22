@@ -99,6 +99,52 @@ func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
 	return nil
 }
 
+func validateMOLFieldSearchResult(fieldData **schemapb.FieldData) error {
+	if *fieldData == nil || (*fieldData).GetScalars() == nil || (*fieldData).GetScalars().Data == nil {
+		return nil
+	}
+	// Check if the field data already contains MolSmilesData
+	_, ok := (*fieldData).GetScalars().Data.(*schemapb.ScalarField_MolSmilesData)
+	if ok {
+		// Already in SMILES format, no conversion needed
+		log.Debug("MOL field data already contains SMILES data, skipping conversion",
+			zap.String("fieldName", (*fieldData).GetFieldName()))
+		return nil
+	}
+	pickleArray := (*fieldData).GetScalars().GetMolData().GetData()
+	smilesArray := make([]string, len(pickleArray))
+	validData := (*fieldData).GetValidData()
+	for i, data := range pickleArray {
+		if validData != nil && !validData[i] {
+			continue
+		}
+		smilesStr, err := common.ConvertPickleToSMILES(data)
+		if err != nil {
+			log.Error("translate the mol pickle into smiles failed", zap.Error(err))
+			return err
+		}
+		smilesArray[i] = smilesStr
+	}
+	// modify the field data in place
+	*fieldData = &schemapb.FieldData{
+		Type:      (*fieldData).GetType(),
+		FieldName: (*fieldData).GetFieldName(),
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_MolSmilesData{
+					MolSmilesData: &schemapb.MolSmilesArray{
+						Data: smilesArray,
+					},
+				},
+			},
+		},
+		FieldId:   (*fieldData).GetFieldId(),
+		IsDynamic: (*fieldData).GetIsDynamic(),
+		ValidData: (*fieldData).GetValidData(),
+	}
+	return nil
+}
+
 func (v *validateUtil) apply(opts ...validateOption) {
 	for _, opt := range opts {
 		opt(v)
