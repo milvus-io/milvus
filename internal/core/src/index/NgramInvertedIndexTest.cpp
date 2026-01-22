@@ -153,7 +153,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
                                        0);
         if (op_type != proto::plan::OpType::Equal) {
             std::optional<TargetBitmap> bitset_opt =
-                index->ExecuteQuery(literal, op_type, &segment_expr);
+                index->ExecuteQueryForUT(literal, op_type, &segment_expr);
             if (forward_to_br) {
                 ASSERT_TRUE(!bitset_opt.has_value());
             } else {

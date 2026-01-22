@@ -21,6 +21,9 @@ package requestutil
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type CollectionNameGetter interface {
@@ -195,4 +198,42 @@ var TraceLogBaseInfoFuncMap = map[string]func(interface{}) (any, bool){
 	"expr":            GetExprFromRequest,
 	"search_params":   GetSearchParamsFromRequest,
 	"dsl":             GetDSLFromRequest,
+}
+
+var retryableCode typeutil.Set[int32] = typeutil.NewSet(
+	merr.Code(merr.ErrServiceRateLimit),
+	merr.Code(merr.ErrCollectionSchemaMismatch),
+)
+
+// func init() {
+// 	retryableCode = typeutil.NewSet(
+// 		merr.Code(merr.ErrServiceRateLimit),
+// 		merr.Code(merr.ErrCollectionSchemaMismatch),
+// 	)
+// }
+
+func ParseMetricLabel(resp any, err error) string {
+	// err only returned by interceptors
+	if err != nil {
+		return metrics.RejectedLabel
+	}
+
+	// check response status code
+	var status *commonpb.Status
+	switch resp := resp.(type) {
+	case interface{ GetStatus() *commonpb.Status }:
+		status = resp.GetStatus()
+	case *commonpb.Status:
+		status = resp
+	}
+
+	// check if retry
+	if !merr.Ok(status) {
+		// TODO use retriable if all set
+		if retryableCode.Contain(status.GetCode()) {
+			return metrics.RetryLabel
+		}
+		return metrics.FailLabel
+	}
+	return metrics.SuccessLabel
 }
