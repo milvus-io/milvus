@@ -91,15 +91,15 @@ type serdeEntry struct {
 	// arrowType returns the arrow type for the given dimension and element type
 	// elementType is only used for ArrayOfVector
 	arrowType func(dim int, elementType schemapb.DataType) arrow.DataType
-	// deserialize deserializes the i-th element in the array, returns the value and ok.
+	// deserialize deserializes the i-th element in the array, returns the value and error.
 	//	null is deserialized to nil without checking the type nullability.
 	//	if shouldCopy is true, the returned value is copied rather than referenced from arrow array.
 	//	elementType is only used for ArrayOfVector
-	deserialize func(a arrow.Array, i int, elementType schemapb.DataType, dim int, shouldCopy bool) (any, bool)
-	// serialize serializes the value to the builder, returns ok.
+	deserialize func(a arrow.Array, i int, elementType schemapb.DataType, dim int, shouldCopy bool) (any, error)
+	// serialize serializes the value to the builder, returns error.
 	// 	nil is serialized to null without checking the type nullability.
 	//	elementType is only used for ArrayOfVector
-	serialize func(b array.Builder, v any, elementType schemapb.DataType) bool
+	serialize func(b array.Builder, v any, elementType schemapb.DataType) error
 }
 
 var serdeMap = func() map[schemapb.DataType]serdeEntry {
@@ -108,247 +108,256 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
 			return arrow.FixedWidthTypes.Boolean
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, error) {
 			if a.IsNull(i) {
-				return nil, true
+				return nil, nil
 			}
 			if arr, ok := a.(*array.Boolean); ok && i < arr.Len() {
-				return arr.Value(i), true
+				return arr.Value(i), nil
 			}
-			return nil, false
+			return nil, fmt.Errorf("expected *array.Boolean, got %T", a)
 		},
-		serialize: func(b array.Builder, v any, _ schemapb.DataType) bool {
+		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
 				b.AppendNull()
-				return true
+				return nil
 			}
 			if builder, ok := b.(*array.BooleanBuilder); ok {
 				if v, ok := v.(bool); ok {
 					builder.Append(v)
-					return true
+					return nil
 				}
+				return fmt.Errorf("expected bool value, got %T", v)
 			}
-			return false
+			return fmt.Errorf("expected *array.BooleanBuilder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_Int8] = serdeEntry{
 		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
 			return arrow.PrimitiveTypes.Int8
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, error) {
 			if a.IsNull(i) {
-				return nil, true
+				return nil, nil
 			}
 			if arr, ok := a.(*array.Int8); ok && i < arr.Len() {
-				return arr.Value(i), true
+				return arr.Value(i), nil
 			}
-			return nil, false
+			return nil, fmt.Errorf("expected *array.Int8, got %T", a)
 		},
-		serialize: func(b array.Builder, v any, _ schemapb.DataType) bool {
+		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
 				b.AppendNull()
-				return true
+				return nil
 			}
 			if builder, ok := b.(*array.Int8Builder); ok {
 				if v, ok := v.(int8); ok {
 					builder.Append(v)
-					return true
+					return nil
 				}
+				return fmt.Errorf("expected int8 value, got %T", v)
 			}
-			return false
+			return fmt.Errorf("expected *array.Int8Builder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_Int16] = serdeEntry{
 		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
 			return arrow.PrimitiveTypes.Int16
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, error) {
 			if a.IsNull(i) {
-				return nil, true
+				return nil, nil
 			}
 			if arr, ok := a.(*array.Int16); ok && i < arr.Len() {
-				return arr.Value(i), true
+				return arr.Value(i), nil
 			}
-			return nil, false
+			return nil, fmt.Errorf("expected *array.Int16, got %T", a)
 		},
-		serialize: func(b array.Builder, v any, _ schemapb.DataType) bool {
+		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
 				b.AppendNull()
-				return true
+				return nil
 			}
 			if builder, ok := b.(*array.Int16Builder); ok {
 				if v, ok := v.(int16); ok {
 					builder.Append(v)
-					return true
+					return nil
 				}
+				return fmt.Errorf("expected int16 value, got %T", v)
 			}
-			return false
+			return fmt.Errorf("expected *array.Int16Builder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_Int32] = serdeEntry{
 		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
 			return arrow.PrimitiveTypes.Int32
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, error) {
 			if a.IsNull(i) {
-				return nil, true
+				return nil, nil
 			}
 			if arr, ok := a.(*array.Int32); ok && i < arr.Len() {
-				return arr.Value(i), true
+				return arr.Value(i), nil
 			}
-			return nil, false
+			return nil, fmt.Errorf("expected *array.Int32, got %T", a)
 		},
-		serialize: func(b array.Builder, v any, _ schemapb.DataType) bool {
+		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
 				b.AppendNull()
-				return true
+				return nil
 			}
 			if builder, ok := b.(*array.Int32Builder); ok {
 				if v, ok := v.(int32); ok {
 					builder.Append(v)
-					return true
+					return nil
 				}
+				return fmt.Errorf("expected int32 value, got %T", v)
 			}
-			return false
+			return fmt.Errorf("expected *array.Int32Builder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_Int64] = serdeEntry{
 		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
 			return arrow.PrimitiveTypes.Int64
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, error) {
 			if a.IsNull(i) {
-				return nil, true
+				return nil, nil
 			}
 			if arr, ok := a.(*array.Int64); ok && i < arr.Len() {
-				return arr.Value(i), true
+				return arr.Value(i), nil
 			}
-			return nil, false
+			return nil, fmt.Errorf("expected *array.Int64, got %T", a)
 		},
-		serialize: func(b array.Builder, v any, _ schemapb.DataType) bool {
+		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
 				b.AppendNull()
-				return true
+				return nil
 			}
 			if builder, ok := b.(*array.Int64Builder); ok {
 				if v, ok := v.(int64); ok {
 					builder.Append(v)
-					return true
+					return nil
 				}
+				return fmt.Errorf("expected int64 value, got %T", v)
 			}
-			return false
+			return fmt.Errorf("expected *array.Int64Builder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_Float] = serdeEntry{
 		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
 			return arrow.PrimitiveTypes.Float32
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, error) {
 			if a.IsNull(i) {
-				return nil, true
+				return nil, nil
 			}
 			if arr, ok := a.(*array.Float32); ok && i < arr.Len() {
-				return arr.Value(i), true
+				return arr.Value(i), nil
 			}
-			return nil, false
+			return nil, fmt.Errorf("expected *array.Float32, got %T", a)
 		},
-		serialize: func(b array.Builder, v any, _ schemapb.DataType) bool {
+		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
 				b.AppendNull()
-				return true
+				return nil
 			}
 			if builder, ok := b.(*array.Float32Builder); ok {
 				if v, ok := v.(float32); ok {
 					builder.Append(v)
-					return true
+					return nil
 				}
+				return fmt.Errorf("expected float32 value, got %T", v)
 			}
-			return false
+			return fmt.Errorf("expected *array.Float32Builder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_Double] = serdeEntry{
 		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
 			return arrow.PrimitiveTypes.Float64
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, error) {
 			if a.IsNull(i) {
-				return nil, true
+				return nil, nil
 			}
 			if arr, ok := a.(*array.Float64); ok && i < arr.Len() {
-				return arr.Value(i), true
+				return arr.Value(i), nil
 			}
-			return nil, false
+			return nil, fmt.Errorf("expected *array.Float64, got %T", a)
 		},
-		serialize: func(b array.Builder, v any, _ schemapb.DataType) bool {
+		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
 				b.AppendNull()
-				return true
+				return nil
 			}
 			if builder, ok := b.(*array.Float64Builder); ok {
 				if v, ok := v.(float64); ok {
 					builder.Append(v)
-					return true
+					return nil
 				}
+				return fmt.Errorf("expected float64 value, got %T", v)
 			}
-			return false
+			return fmt.Errorf("expected *array.Float64Builder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_Timestamptz] = serdeEntry{
 		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
 			return arrow.PrimitiveTypes.Int64
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, _ int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, _ int, shouldCopy bool) (any, error) {
 			if a.IsNull(i) {
-				return nil, true
+				return nil, nil
 			}
 			if arr, ok := a.(*array.Int64); ok && i < arr.Len() {
-				return arr.Value(i), true
+				return arr.Value(i), nil
 			}
-			return nil, false
+			return nil, fmt.Errorf("expected *array.Int64, got %T", a)
 		},
-		serialize: func(b array.Builder, v any, _ schemapb.DataType) bool {
+		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
 				b.AppendNull()
-				return true
+				return nil
 			}
 			if builder, ok := b.(*array.Int64Builder); ok {
 				if v, ok := v.(int64); ok {
 					builder.Append(v)
-					return true
+					return nil
 				}
+				return fmt.Errorf("expected int64 value, got %T", v)
 			}
-			return false
+			return fmt.Errorf("expected *array.Int64Builder, got %T", b)
 		},
 	}
 	stringEntry := serdeEntry{
 		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
 			return arrow.BinaryTypes.String
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, error) {
 			if a.IsNull(i) {
-				return nil, true
+				return nil, nil
 			}
 			if arr, ok := a.(*array.String); ok && i < arr.Len() {
 				value := arr.Value(i)
 				if shouldCopy {
-					return strings.Clone(value), true
+					return strings.Clone(value), nil
 				}
-				return value, true
+				return value, nil
 			}
-			return nil, false
+			return nil, fmt.Errorf("expected *array.String, got %T", a)
 		},
-		serialize: func(b array.Builder, v any, _ schemapb.DataType) bool {
+		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
 				b.AppendNull()
-				return true
+				return nil
 			}
 			if builder, ok := b.(*array.StringBuilder); ok {
 				if v, ok := v.(string); ok {
 					builder.Append(v)
-					return true
+					return nil
 				}
+				return fmt.Errorf("expected string value, got %T", v)
 			}
-			return false
+			return fmt.Errorf("expected *array.StringBuilder, got %T", b)
 		},
 	}
 
@@ -362,32 +371,37 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
 			return arrow.BinaryTypes.Binary
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, error) {
 			if a.IsNull(i) {
-				return nil, true
+				return nil, nil
 			}
 			if arr, ok := a.(*array.Binary); ok && i < arr.Len() {
 				v := &schemapb.ScalarField{}
 				if err := proto.Unmarshal(arr.Value(i), v); err == nil {
-					return v, true
+					return v, nil
+				} else {
+					return nil, fmt.Errorf("failed to unmarshal ScalarField: %w", err)
 				}
 			}
-			return nil, false
+			return nil, fmt.Errorf("expected *array.Binary, got %T", a)
 		},
-		serialize: func(b array.Builder, v any, _ schemapb.DataType) bool {
+		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
 				b.AppendNull()
-				return true
+				return nil
 			}
 			if builder, ok := b.(*array.BinaryBuilder); ok {
 				if vv, ok := v.(*schemapb.ScalarField); ok {
 					if bytes, err := proto.Marshal(vv); err == nil {
 						builder.Append(bytes)
-						return true
+						return nil
+					} else {
+						return fmt.Errorf("failed to marshal ScalarField: %w", err)
 					}
 				}
+				return fmt.Errorf("expected *schemapb.ScalarField value, got %T", v)
 			}
-			return false
+			return fmt.Errorf("expected *array.BinaryBuilder, got %T", b)
 		},
 	}
 	_ = eagerArrayEntry
@@ -396,45 +410,50 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
 			return arrow.BinaryTypes.Binary
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, error) {
 			if a.IsNull(i) {
-				return nil, true
+				return nil, nil
 			}
 			if arr, ok := a.(*array.Binary); ok && i < arr.Len() {
 				value := arr.Value(i)
 				if shouldCopy {
 					result := make([]byte, len(value))
 					copy(result, value)
-					return result, true
+					return result, nil
 				}
-				return value, true
+				return value, nil
 			}
-			return nil, false
+			return nil, fmt.Errorf("expected *array.Binary, got %T", a)
 		},
-		serialize: func(b array.Builder, v any, _ schemapb.DataType) bool {
+		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
 				b.AppendNull()
-				return true
+				return nil
 			}
 			if builder, ok := b.(*array.BinaryBuilder); ok {
 				if vv, ok := v.([]byte); ok {
 					builder.Append(vv)
-					return true
+					return nil
 				}
 				if vv, ok := v.(*schemapb.ScalarField); ok {
 					if bytes, err := proto.Marshal(vv); err == nil {
 						builder.Append(bytes)
-						return true
+						return nil
+					} else {
+						return fmt.Errorf("failed to marshal ScalarField: %w", err)
 					}
 				}
 				if vv, ok := v.(*schemapb.VectorField); ok {
 					if bytes, err := proto.Marshal(vv); err == nil {
 						builder.Append(bytes)
-						return true
+						return nil
+					} else {
+						return fmt.Errorf("failed to marshal VectorField: %w", err)
 					}
 				}
+				return fmt.Errorf("expected []byte, *schemapb.ScalarField or *schemapb.VectorField value, got %T", v)
 			}
-			return false
+			return fmt.Errorf("expected *array.BinaryBuilder, got %T", b)
 		},
 	}
 
@@ -447,43 +466,43 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(dim int, elementType schemapb.DataType) arrow.DataType {
 			return getArrayOfVectorArrowType(elementType, dim)
 		},
-		deserialize: func(a arrow.Array, i int, elementType schemapb.DataType, dim int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, elementType schemapb.DataType, dim int, shouldCopy bool) (any, error) {
 			return deserializeArrayOfVector(a, i, elementType, int64(dim), shouldCopy)
 		},
-		serialize: func(b array.Builder, v any, elementType schemapb.DataType) bool {
+		serialize: func(b array.Builder, v any, elementType schemapb.DataType) error {
 			vf, ok := v.(*schemapb.VectorField)
 			if !ok {
-				return false
+				return fmt.Errorf("expected *schemapb.VectorField, got %T", v)
 			}
 
 			if vf == nil {
 				b.AppendNull()
-				return true
+				return nil
 			}
 
 			builder, ok := b.(*array.ListBuilder)
 			if !ok {
-				return false
+				return fmt.Errorf("expected *array.ListBuilder, got %T", b)
 			}
 
 			builder.Append(true)
 			valueBuilder := builder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
 			dim := vf.GetDim()
 
-			appendVectorChunks := func(data []byte, bytesPerVector int) bool {
+			appendVectorChunks := func(data []byte, bytesPerVector int) error {
 				numVectors := len(data) / bytesPerVector
 				for i := 0; i < numVectors; i++ {
 					start := i * bytesPerVector
 					end := start + bytesPerVector
 					valueBuilder.Append(data[start:end])
 				}
-				return true
+				return nil
 			}
 
 			switch elementType {
 			case schemapb.DataType_FloatVector:
 				if vf.GetFloatVector() == nil {
-					return false
+					return fmt.Errorf("FloatVector data is nil for elementType FloatVector")
 				}
 				floatData := vf.GetFloatVector().GetData()
 				numVectors := len(floatData) / int(dim)
@@ -499,67 +518,68 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 					}
 					valueBuilder.Append(bytes)
 				}
-				return true
+				return nil
 
 			case schemapb.DataType_BinaryVector:
 				if vf.GetBinaryVector() == nil {
-					return false
+					return fmt.Errorf("BinaryVector data is nil for elementType BinaryVector")
 				}
 				return appendVectorChunks(vf.GetBinaryVector(), int((dim+7)/8))
 
 			case schemapb.DataType_Float16Vector:
 				if vf.GetFloat16Vector() == nil {
-					return false
+					return fmt.Errorf("Float16Vector data is nil for elementType Float16Vector")
 				}
 				return appendVectorChunks(vf.GetFloat16Vector(), int(dim)*2)
 
 			case schemapb.DataType_BFloat16Vector:
 				if vf.GetBfloat16Vector() == nil {
-					return false
+					return fmt.Errorf("BFloat16Vector data is nil for elementType BFloat16Vector")
 				}
 				return appendVectorChunks(vf.GetBfloat16Vector(), int(dim)*2)
 
 			case schemapb.DataType_Int8Vector:
 				if vf.GetInt8Vector() == nil {
-					return false
+					return fmt.Errorf("Int8Vector data is nil for elementType Int8Vector")
 				}
 				return appendVectorChunks(vf.GetInt8Vector(), int(dim))
 
 			case schemapb.DataType_SparseFloatVector:
-				panic("SparseFloatVector in VectorArray not implemented yet")
+				return fmt.Errorf("SparseFloatVector in VectorArray not implemented yet")
 			default:
-				return false
+				return fmt.Errorf("unsupported elementType for ArrayOfVector: %s", elementType.String())
 			}
 		},
 	}
 
-	fixedSizeDeserializer := func(a arrow.Array, i int, _ schemapb.DataType, _ int, shouldCopy bool) (any, bool) {
+	fixedSizeDeserializer := func(a arrow.Array, i int, _ schemapb.DataType, _ int, shouldCopy bool) (any, error) {
 		if a.IsNull(i) {
-			return nil, true
+			return nil, nil
 		}
 		if arr, ok := a.(*array.FixedSizeBinary); ok && i < arr.Len() {
 			value := arr.Value(i)
 			if shouldCopy {
 				result := make([]byte, len(value))
 				copy(result, value)
-				return result, true
+				return result, nil
 			}
-			return value, true
+			return value, nil
 		}
-		return nil, false
+		return nil, fmt.Errorf("expected *array.FixedSizeBinary, got %T", a)
 	}
-	fixedSizeSerializer := func(b array.Builder, v any, _ schemapb.DataType) bool {
+	fixedSizeSerializer := func(b array.Builder, v any, _ schemapb.DataType) error {
 		if v == nil {
 			b.AppendNull()
-			return true
+			return nil
 		}
 		if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
 			if v, ok := v.([]byte); ok {
 				builder.Append(v)
-				return true
+				return nil
 			}
+			return fmt.Errorf("expected []byte value, got %T", v)
 		}
-		return false
+		return fmt.Errorf("expected *array.FixedSizeBinaryBuilder, got %T", b)
 	}
 
 	m[schemapb.DataType_BinaryVector] = serdeEntry{
@@ -587,9 +607,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		arrowType: func(dim int, _ schemapb.DataType) arrow.DataType {
 			return &arrow.FixedSizeBinaryType{ByteWidth: dim}
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, _ int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, _ int, shouldCopy bool) (any, error) {
 			if a.IsNull(i) {
-				return nil, true
+				return nil, nil
 			}
 			if arr, ok := a.(*array.FixedSizeBinary); ok && i < arr.Len() {
 				// convert to []int8
@@ -598,50 +618,51 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				for i, b := range bytes {
 					int8s[i] = int8(b)
 				}
-				return int8s, true
+				return int8s, nil
 			}
-			return nil, false
+			return nil, fmt.Errorf("expected *array.FixedSizeBinary, got %T", a)
 		},
-		serialize: func(b array.Builder, v any, _ schemapb.DataType) bool {
+		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
 				b.AppendNull()
-				return true
+				return nil
 			}
 			if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
 				if vv, ok := v.([]byte); ok {
 					builder.Append(vv)
-					return true
+					return nil
 				} else if vv, ok := v.([]int8); ok {
 					builder.Append(arrow.Int8Traits.CastToBytes(vv))
-					return true
+					return nil
 				}
+				return fmt.Errorf("expected []byte or []int8 value, got %T", v)
 			}
-			return false
+			return fmt.Errorf("expected *array.FixedSizeBinaryBuilder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_FloatVector] = serdeEntry{
 		arrowType: func(dim int, _ schemapb.DataType) arrow.DataType {
 			return &arrow.FixedSizeBinaryType{ByteWidth: dim * 4}
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, _ int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, _ int, shouldCopy bool) (any, error) {
 			if a.IsNull(i) {
-				return nil, true
+				return nil, nil
 			}
 			if arr, ok := a.(*array.FixedSizeBinary); ok && i < arr.Len() {
 				vector := arrow.Float32Traits.CastFromBytes(arr.Value(i))
 				if shouldCopy {
 					vectorCopy := make([]float32, len(vector))
 					copy(vectorCopy, vector)
-					return vectorCopy, true
+					return vectorCopy, nil
 				}
-				return vector, true
+				return vector, nil
 			}
-			return nil, false
+			return nil, fmt.Errorf("expected *array.FixedSizeBinary, got %T", a)
 		},
-		serialize: func(b array.Builder, v any, _ schemapb.DataType) bool {
+		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
 			if v == nil {
 				b.AppendNull()
-				return true
+				return nil
 			}
 			if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
 				if vv, ok := v.([]float32); ok {
@@ -653,10 +674,11 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 						common.Endian.PutUint32(bytesData[i*4:], bytes)
 					}
 					builder.Append(bytesData)
-					return true
+					return nil
 				}
+				return fmt.Errorf("expected []float32 value, got %T", v)
 			}
-			return false
+			return fmt.Errorf("expected *array.FixedSizeBinaryBuilder, got %T", b)
 		},
 	}
 	m[schemapb.DataType_SparseFloatVector] = byteEntry
@@ -861,28 +883,76 @@ func getArrayOfVectorArrowType(elementType schemapb.DataType, dim int) arrow.Dat
 	}
 }
 
+// createEmptyVectorField creates an empty VectorField with the correct Data type based on elementType
+func createEmptyVectorField(elementType schemapb.DataType, dim int64) (*schemapb.VectorField, error) {
+	switch elementType {
+	case schemapb.DataType_FloatVector:
+		return &schemapb.VectorField{
+			Dim: dim,
+			Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{Data: []float32{}},
+			},
+		}, nil
+	case schemapb.DataType_BinaryVector:
+		return &schemapb.VectorField{
+			Dim: dim,
+			Data: &schemapb.VectorField_BinaryVector{
+				BinaryVector: []byte{},
+			},
+		}, nil
+	case schemapb.DataType_Float16Vector:
+		return &schemapb.VectorField{
+			Dim: dim,
+			Data: &schemapb.VectorField_Float16Vector{
+				Float16Vector: []byte{},
+			},
+		}, nil
+	case schemapb.DataType_BFloat16Vector:
+		return &schemapb.VectorField{
+			Dim: dim,
+			Data: &schemapb.VectorField_Bfloat16Vector{
+				Bfloat16Vector: []byte{},
+			},
+		}, nil
+	case schemapb.DataType_Int8Vector:
+		return &schemapb.VectorField{
+			Dim: dim,
+			Data: &schemapb.VectorField_Int8Vector{
+				Int8Vector: []byte{},
+			},
+		}, nil
+	case schemapb.DataType_SparseFloatVector:
+		return nil, fmt.Errorf("SparseFloatVector in empty VectorArray not implemented yet")
+	default:
+		return nil, fmt.Errorf("unsupported element type for empty ArrayOfVector: %s", elementType.String())
+	}
+}
+
 // deserializeArrayOfVector deserializes ArrayOfVector data with known element type
-func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataType, dim int64, shouldCopy bool) (any, bool) {
+func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataType, dim int64, shouldCopy bool) (any, error) {
 	if a.IsNull(i) {
-		return nil, true
+		return nil, nil
 	}
 
 	arr, ok := a.(*array.List)
-	if !ok || i >= arr.Len() {
-		return nil, false
+	if !ok {
+		return nil, fmt.Errorf("expected *array.List for ArrayOfVector, got %T", a)
+	}
+	if i >= arr.Len() {
+		return nil, fmt.Errorf("index %d out of bounds for array of length %d", i, arr.Len())
 	}
 
 	start, end := arr.ValueOffsets(i)
 	totalElements := end - start
 	if totalElements == 0 {
-		return nil, false
+		// empty array, return empty VectorField with correct Data type
+		return createEmptyVectorField(elementType, dim)
 	}
 
 	valuesArray := arr.ListValues()
 	binaryArray, ok := valuesArray.(*array.FixedSizeBinary)
 	if !ok {
-		// empty array
-		return nil, true
+		return nil, fmt.Errorf("expected *array.FixedSizeBinary for ArrayOfVector values, got %T", valuesArray)
 	}
 
 	numVectors := int(totalElements)
@@ -917,7 +987,7 @@ func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataTyp
 					Data: floatData,
 				},
 			},
-		}, true
+		}, nil
 
 	case schemapb.DataType_BinaryVector:
 		return &schemapb.VectorField{
@@ -925,7 +995,7 @@ func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataTyp
 			Data: &schemapb.VectorField_BinaryVector{
 				BinaryVector: extractByteVectors((dim + 7) / 8),
 			},
-		}, true
+		}, nil
 
 	case schemapb.DataType_Float16Vector:
 		return &schemapb.VectorField{
@@ -933,7 +1003,7 @@ func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataTyp
 			Data: &schemapb.VectorField_Float16Vector{
 				Float16Vector: extractByteVectors(dim * 2),
 			},
-		}, true
+		}, nil
 
 	case schemapb.DataType_BFloat16Vector:
 		return &schemapb.VectorField{
@@ -941,7 +1011,7 @@ func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataTyp
 			Data: &schemapb.VectorField_Bfloat16Vector{
 				Bfloat16Vector: extractByteVectors(dim * 2),
 			},
-		}, true
+		}, nil
 
 	case schemapb.DataType_Int8Vector:
 		return &schemapb.VectorField{
@@ -949,11 +1019,11 @@ func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataTyp
 			Data: &schemapb.VectorField_Int8Vector{
 				Int8Vector: extractByteVectors(dim),
 			},
-		}, true
+		}, nil
 	case schemapb.DataType_SparseFloatVector:
-		panic("SparseFloatVector in VectorArray deserialization not implemented yet")
+		return nil, fmt.Errorf("SparseFloatVector in VectorArray deserialization not implemented yet")
 	default:
-		panic(fmt.Sprintf("unsupported element type for ArrayOfVector deserialization: %s", elementType.String()))
+		return nil, fmt.Errorf("unsupported element type for ArrayOfVector deserialization: %s", elementType.String())
 	}
 }
 
@@ -1200,9 +1270,8 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 		}
 
 		for j := 0; j < fieldData.RowNum(); j++ {
-			ok = typeEntry.serialize(fBuilder, fieldData.GetRow(j), elementType)
-			if !ok {
-				return merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s", field.DataType.String()))
+			if err := typeEntry.serialize(fBuilder, fieldData.GetRow(j), elementType); err != nil {
+				return merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s: %v", field.DataType.String(), err))
 			}
 		}
 		return nil
