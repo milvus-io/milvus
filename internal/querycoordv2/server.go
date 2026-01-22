@@ -434,6 +434,7 @@ func (s *Server) initObserver() {
 	s.replicaObserver = observers.NewReplicaObserver(
 		s.meta,
 		s.dist,
+		s.targetMgr,
 	)
 
 	s.resourceObserver = observers.NewResourceObserver(s.meta)
