@@ -16,15 +16,13 @@
 
 #pragma once
 
-#include <future>
-#include <shared_mutex>
-
 #include "milvus-storage/filesystem/fs.h"
-#include <tbb/concurrent_unordered_map.h>
 
 namespace milvus::storage {
 
-// cache for storage v2 filesystem using storage config as key.
+// Facade for storage v2 filesystem using storage config as key.
+// This class delegates to milvus_storage::FilesystemCache internally,
+// providing a unified filesystem cache with metrics support.
 class StorageV2FSCache {
  public:
     struct Key {
@@ -47,81 +45,18 @@ class StorageV2FSCache {
         std::string gcp_credential_json = "";
         bool use_custom_part_upload = true;
         uint32_t max_connections = 100;
-
-        bool
-        operator==(const Key& other) const {
-            return address == other.address &&
-                   bucket_name == other.bucket_name &&
-                   access_key_id == other.access_key_id &&
-                   access_key_value == other.access_key_value &&
-                   root_path == other.root_path &&
-                   storage_type == other.storage_type &&
-                   cloud_provider == other.cloud_provider &&
-                   iam_endpoint == other.iam_endpoint &&
-                   log_level == other.log_level && region == other.region &&
-                   useSSL == other.useSSL && sslCACert == other.sslCACert &&
-                   useIAM == other.useIAM &&
-                   useVirtualHost == other.useVirtualHost &&
-                   requestTimeoutMs == other.requestTimeoutMs &&
-                   gcp_native_without_auth == other.gcp_native_without_auth &&
-                   gcp_credential_json == other.gcp_credential_json &&
-                   use_custom_part_upload == other.use_custom_part_upload &&
-                   max_connections == other.max_connections;
-        }
     };
-
-    struct KeyHasher {
-        size_t
-        operator()(const Key& k) const noexcept {
-            size_t hash = 0;
-            hash_combine(hash, k.address);
-            hash_combine(hash, k.bucket_name);
-            hash_combine(hash, k.access_key_id);
-            hash_combine(hash, k.access_key_value);
-            hash_combine(hash, k.root_path);
-            hash_combine(hash, k.storage_type);
-            hash_combine(hash, k.cloud_provider);
-            hash_combine(hash, k.iam_endpoint);
-            hash_combine(hash, k.log_level);
-            hash_combine(hash, k.region);
-            hash_combine(hash, k.useSSL);
-            hash_combine(hash, k.sslCACert);
-            hash_combine(hash, k.useIAM);
-            hash_combine(hash, k.useVirtualHost);
-            hash_combine(hash, k.requestTimeoutMs);
-            hash_combine(hash, k.gcp_native_without_auth);
-            hash_combine(hash, k.gcp_credential_json);
-            hash_combine(hash, k.use_custom_part_upload);
-            hash_combine(hash, k.max_connections);
-            return hash;
-        }
-
-     private:
-        template <typename T>
-        void
-        hash_combine(size_t& seed, const T& v) const {
-            std::hash<T> hasher;
-            seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-        }
-    };
-
-    // singleflight item using promise and future
-    using Value =
-        std::pair<std::promise<milvus_storage::ArrowFileSystemPtr>,
-                  std::shared_future<milvus_storage::ArrowFileSystemPtr>>;
 
  public:
     // returns singleton of StorageV2FSCache
     static StorageV2FSCache&
     Instance();
 
+    // Get filesystem from the unified FilesystemCache.
+    // Converts Key to api::Properties and delegates to FilesystemCache::get().
     milvus_storage::ArrowFileSystemPtr
     Get(const Key& key);
 
     virtual ~StorageV2FSCache() = default;
-
- private:
-    std::shared_mutex mutex_;
-    tbb::concurrent_unordered_map<Key, Value, KeyHasher> concurrent_map_;
 };
 }  // namespace milvus::storage

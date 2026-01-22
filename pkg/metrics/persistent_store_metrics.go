@@ -16,7 +16,9 @@
 
 package metrics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 const (
 	DataGetLabel    = "get"
@@ -54,6 +56,87 @@ var (
 			Name:      "op_count",
 			Help:      "count of persistent data operation",
 		}, []string{persistentDataOpType, statusLabelName})
+
+	// Filesystem metrics (default filesystem only) - common across all nodes
+	FilesystemReadCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: "storage",
+			Name:      "filesystem_read_count",
+			Help:      "number of filesystem read operations",
+		}, []string{
+			filesystemKeyLabelName,
+		})
+
+	FilesystemWriteCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: "storage",
+			Name:      "filesystem_write_count",
+			Help:      "number of filesystem write operations",
+		}, []string{
+			filesystemKeyLabelName,
+		})
+
+	FilesystemReadBytes = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: "storage",
+			Name:      "filesystem_read_bytes",
+			Help:      "total bytes read from filesystem",
+		}, []string{
+			filesystemKeyLabelName,
+		})
+
+	FilesystemWriteBytes = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: "storage",
+			Name:      "filesystem_write_bytes",
+			Help:      "total bytes written to filesystem",
+		}, []string{
+			filesystemKeyLabelName,
+		})
+
+	FilesystemGetFileInfoCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: "storage",
+			Name:      "filesystem_get_file_info_count",
+			Help:      "number of get file info operations",
+		}, []string{
+			filesystemKeyLabelName,
+		})
+
+	FilesystemFailedCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: "storage",
+			Name:      "filesystem_failed_count",
+			Help:      "number of failed filesystem operations",
+		}, []string{
+			filesystemKeyLabelName,
+		})
+
+	FilesystemMultiPartUploadCreated = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: "storage",
+			Name:      "filesystem_multi_part_upload_created",
+			Help:      "number of multi-part uploads created",
+		}, []string{
+			filesystemKeyLabelName,
+		})
+
+	FilesystemMultiPartUploadFinished = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: "storage",
+			Name:      "filesystem_multi_part_upload_finished",
+			Help:      "number of multi-part uploads finished",
+		}, []string{
+			filesystemKeyLabelName,
+		})
 )
 
 // RegisterStorageMetrics registers storage metrics
@@ -61,4 +144,30 @@ func RegisterStorageMetrics(registry *prometheus.Registry) {
 	registry.MustRegister(PersistentDataKvSize)
 	registry.MustRegister(PersistentDataRequestLatency)
 	registry.MustRegister(PersistentDataOpCounter)
+
+	// filesystem metrics
+	registry.MustRegister(FilesystemReadCount)
+	registry.MustRegister(FilesystemWriteCount)
+	registry.MustRegister(FilesystemReadBytes)
+	registry.MustRegister(FilesystemWriteBytes)
+	registry.MustRegister(FilesystemGetFileInfoCount)
+	registry.MustRegister(FilesystemFailedCount)
+	registry.MustRegister(FilesystemMultiPartUploadCreated)
+	registry.MustRegister(FilesystemMultiPartUploadFinished)
+}
+
+// PublishFilesystemMetrics publishes filesystem metrics (common across all nodes)
+func PublishFilesystemMetrics(fs string, readCount, writeCount, readBytes, writeBytes, getFileInfoCount, failedCount, multiPartUploadCreated, multiPartUploadFinished int64) {
+	labels := prometheus.Labels{
+		filesystemKeyLabelName: fs,
+	}
+
+	FilesystemReadCount.With(labels).Set(float64(readCount))
+	FilesystemWriteCount.With(labels).Set(float64(writeCount))
+	FilesystemReadBytes.With(labels).Set(float64(readBytes))
+	FilesystemWriteBytes.With(labels).Set(float64(writeBytes))
+	FilesystemGetFileInfoCount.With(labels).Set(float64(getFileInfoCount))
+	FilesystemFailedCount.With(labels).Set(float64(failedCount))
+	FilesystemMultiPartUploadCreated.With(labels).Set(float64(multiPartUploadCreated))
+	FilesystemMultiPartUploadFinished.With(labels).Set(float64(multiPartUploadFinished))
 }
