@@ -344,24 +344,6 @@ class QueryContext : public Context {
         return active_element_count_;
     }
 
-    void
-    set_element_level_bitset(TargetBitmap&& bitset) {
-        element_level_bitset_ = std::move(bitset);
-    }
-
-    std::optional<TargetBitmap>
-    get_element_level_bitset() {
-        if (element_level_bitset_.has_value()) {
-            return std::move(element_level_bitset_.value());
-        }
-        return std::nullopt;
-    }
-
-    bool
-    has_element_level_bitset() const {
-        return element_level_bitset_.has_value();
-    }
-
  private:
     folly::Executor* executor_;
     //folly::Executor::KeepAlive<> executor_keepalive_;
@@ -395,7 +377,6 @@ class QueryContext : public Context {
     std::string struct_name_;
     std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
     int64_t active_element_count_{0};  // Total elements in active documents
-    std::optional<TargetBitmap> element_level_bitset_;
 };
 
 // Represent the state of one thread of query execution.

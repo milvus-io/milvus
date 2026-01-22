@@ -329,14 +329,11 @@ template <typename T>
 void
 GroupIteratorsByType(
     const std::vector<std::shared_ptr<VectorIterator>>& iterators,
-    int64_t topK,
-    int64_t group_size,
-    bool strict_group_size,
+    const SearchInfo& search_info,
     const std::shared_ptr<DataGetter<T>>& data_getter,
     std::vector<GroupByValueType>& group_by_values,
     std::vector<int64_t>& seg_offsets,
     std::vector<float>& distances,
-    const knowhere::MetricType& metrics_type,
     std::vector<size_t>& topk_per_nq_prefix_sum);
 
 template <typename T>
@@ -399,13 +396,11 @@ struct GroupByMap {
 template <typename T>
 void
 GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
-                    int64_t topK,
-                    int64_t group_size,
-                    bool strict_group_size,
+                    const SearchInfo& search_info,
                     const std::shared_ptr<DataGetter<T>>& data_getter,
+                    std::vector<GroupByValueType>& group_by_values,
                     std::vector<int64_t>& offsets,
-                    std::vector<float>& distances,
-                    const knowhere::MetricType& metrics_type);
+                    std::vector<float>& distances);
 
 }  // namespace exec
 }  // namespace milvus
