@@ -2597,8 +2597,8 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
                     std::make_unique<milvus::segcore::storagev1translator::
                                          InterimSealedIndexTranslator>(
                         vec_data,
-                        std::to_string(id_),
-                        std::to_string(field_id.get()),
+                        id_,
+                        field_id.get(),
                         interim_index_type,
                         index_metric,
                         build_config,

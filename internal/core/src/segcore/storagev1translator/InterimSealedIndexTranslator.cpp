@@ -8,8 +8,8 @@ namespace milvus::segcore::storagev1translator {
 
 InterimSealedIndexTranslator::InterimSealedIndexTranslator(
     std::shared_ptr<ChunkedColumnInterface> vec_data,
-    std::string segment_id,
-    std::string field_id,
+    int64_t segment_id,
+    int64_t field_id,
     knowhere::IndexType index_type,
     knowhere::MetricType metric_type,
     knowhere::Json build_config,
@@ -17,6 +17,8 @@ InterimSealedIndexTranslator::InterimSealedIndexTranslator(
     bool is_sparse,
     DataType vec_data_type)
     : vec_data_(vec_data),
+      segment_id_(segment_id),
+      field_id_(field_id),
       index_type_(index_type),
       metric_type_(metric_type),
       build_config_(build_config),
@@ -94,9 +96,8 @@ InterimSealedIndexTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
     // Check for cancellation before building interim index
-    CheckCancellation(ctx,
-                      std::stoll(segment_id_),
-                      "InterimSealedIndexTranslator::get_cells()");
+    CheckCancellation(
+        ctx, segment_id_, "InterimSealedIndexTranslator::get_cells()");
 
     std::unique_ptr<index::VectorIndex> vec_index = nullptr;
     if (!is_sparse_) {
