@@ -61,17 +61,21 @@ TEST(LoadCancellationSegment, CreateTextIndexCancellationSealed) {
     auto text_fid = schema->AddDebugField("text", DataType::VARCHAR);
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk_fid);
-    auto segment = CreateSealedSegment(schema, nullptr, -1, SegcoreConfig::default_config(), true);
+    auto segment = CreateSealedSegment(
+        schema, nullptr, -1, SegcoreConfig::default_config(), true);
     folly::CancellationSource source;
     source.requestCancellation();
     OpContext op_ctx(source.getToken());
-    EXPECT_THROW({
-        try { segment->CreateTextIndex(text_fid, &op_ctx); }
-        catch (const SegcoreError& e) {
-            EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
-            throw;
-        }
-    }, SegcoreError);
+    EXPECT_THROW(
+        {
+            try {
+                segment->CreateTextIndex(text_fid, &op_ctx);
+            } catch (const SegcoreError& e) {
+                EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
+                throw;
+            }
+        },
+        SegcoreError);
 }
 
 // Test for Segment CreateTextIndex cancellation (growing segment)
@@ -80,17 +84,21 @@ TEST(LoadCancellationSegment, CreateTextIndexCancellationGrowing) {
     auto text_fid = schema->AddDebugField("text", DataType::VARCHAR);
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk_fid);
-    auto segment = CreateGrowingSegment(schema, nullptr, 1, SegcoreConfig::default_config());
+    auto segment = CreateGrowingSegment(
+        schema, nullptr, 1, SegcoreConfig::default_config());
     folly::CancellationSource source;
     source.requestCancellation();
     OpContext op_ctx(source.getToken());
-    EXPECT_THROW({
-        try { segment->CreateTextIndex(text_fid, &op_ctx); }
-        catch (const SegcoreError& e) {
-            EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
-            throw;
-        }
-    }, SegcoreError);
+    EXPECT_THROW(
+        {
+            try {
+                segment->CreateTextIndex(text_fid, &op_ctx);
+            } catch (const SegcoreError& e) {
+                EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
+                throw;
+            }
+        },
+        SegcoreError);
 }
 
 // Note: CreateTextIndex with null context is implicitly tested by the cancellation tests
@@ -108,7 +116,8 @@ TEST(LoadCancellationUtility, CancellationDuringLoop) {
             CheckCancellation(&op_ctx, 123, i, "LoopOp");
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             iterations++;
-            if (i == 4) source.requestCancellation();
+            if (i == 4)
+                source.requestCancellation();
         }
     } catch (const SegcoreError& e) {
         caught = true;
@@ -211,11 +220,16 @@ TEST(LoadCancellationIntegration, MultipleCheckPoints) {
 
     // No cancellation - all checkpoints pass
     EXPECT_NO_THROW({
-        CheckCancellation(&op_ctx, seg_id, "BeforeLoad"); passed.push_back("BeforeLoad");
-        CheckCancellation(&op_ctx, seg_id, field_id, "LoadFieldData"); passed.push_back("LoadFieldData");
-        CheckCancellation(&op_ctx, seg_id, field_id, "LoadIndex"); passed.push_back("LoadIndex");
-        CheckCancellation(&op_ctx, seg_id, field_id, "CreateTextIndex"); passed.push_back("CreateTextIndex");
-        CheckCancellation(&op_ctx, seg_id, "AfterLoad"); passed.push_back("AfterLoad");
+        CheckCancellation(&op_ctx, seg_id, "BeforeLoad");
+        passed.push_back("BeforeLoad");
+        CheckCancellation(&op_ctx, seg_id, field_id, "LoadFieldData");
+        passed.push_back("LoadFieldData");
+        CheckCancellation(&op_ctx, seg_id, field_id, "LoadIndex");
+        passed.push_back("LoadIndex");
+        CheckCancellation(&op_ctx, seg_id, field_id, "CreateTextIndex");
+        passed.push_back("CreateTextIndex");
+        CheckCancellation(&op_ctx, seg_id, "AfterLoad");
+        passed.push_back("AfterLoad");
     });
     EXPECT_EQ(passed.size(), 5);
 
@@ -236,49 +250,88 @@ TEST(LoadCancellationIntegration, MultipleCheckPoints) {
 // Test Translator with Cancellation Support
 class SlowChunkTranslator : public cachinglayer::Translator<milvus::Chunk> {
  public:
-    SlowChunkTranslator(size_t num_chunks, std::chrono::milliseconds delay, std::string key)
-        : num_chunks_(num_chunks), delay_(delay), key_(std::move(key)),
+    SlowChunkTranslator(size_t num_chunks,
+                        std::chrono::milliseconds delay,
+                        std::string key)
+        : num_chunks_(num_chunks),
+          delay_(delay),
+          key_(std::move(key)),
           meta_(storagev1translator::CTMeta(
               cachinglayer::StorageType::MEMORY,
               cachinglayer::CellIdMappingMode::IDENTICAL,
               cachinglayer::CellDataType::SCALAR_FIELD,
-              CacheWarmupPolicy::CacheWarmupPolicy_Disable, true)),
-          chunks_loaded_(0), was_cancelled_(false) {
+              CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+              true)),
+          chunks_loaded_(0),
+          was_cancelled_(false) {
         meta_.num_rows_until_chunk_.push_back(0);
         for (size_t i = 0; i < num_chunks_; ++i) {
-            meta_.num_rows_until_chunk_.push_back(meta_.num_rows_until_chunk_[i] + 100);
+            meta_.num_rows_until_chunk_.push_back(
+                meta_.num_rows_until_chunk_[i] + 100);
         }
-        storagev1translator::virtual_chunk_config(100 * num_chunks_, num_chunks_,
-            meta_.num_rows_until_chunk_, meta_.virt_chunk_order_, meta_.vcid_to_cid_arr_);
+        storagev1translator::virtual_chunk_config(100 * num_chunks_,
+                                                  num_chunks_,
+                                                  meta_.num_rows_until_chunk_,
+                                                  meta_.virt_chunk_order_,
+                                                  meta_.vcid_to_cid_arr_);
     }
     ~SlowChunkTranslator() override = default;
-    size_t num_cells() const override { return num_chunks_; }
-    cachinglayer::cid_t cell_id_of(cachinglayer::uid_t uid) const override { return uid; }
+    size_t
+    num_cells() const override {
+        return num_chunks_;
+    }
+    cachinglayer::cid_t
+    cell_id_of(cachinglayer::uid_t uid) const override {
+        return uid;
+    }
     std::pair<cachinglayer::ResourceUsage, cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(cachinglayer::cid_t) const override { return {{0, 0}, {0, 0}}; }
-    int64_t cells_storage_bytes(const std::vector<cachinglayer::cid_t>&) const override { return 0; }
-    const std::string& key() const override { return key_; }
-    cachinglayer::Meta* meta() override { return &meta_; }
+    estimated_byte_size_of_cell(cachinglayer::cid_t) const override {
+        return {{0, 0}, {0, 0}};
+    }
+    int64_t
+    cells_storage_bytes(
+        const std::vector<cachinglayer::cid_t>&) const override {
+        return 0;
+    }
+    const std::string&
+    key() const override {
+        return key_;
+    }
+    cachinglayer::Meta*
+    meta() override {
+        return &meta_;
+    }
 
     std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
-    get_cells(milvus::OpContext* ctx, const std::vector<cachinglayer::cid_t>& cids) override {
-        std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>> res;
+    get_cells(milvus::OpContext* ctx,
+              const std::vector<cachinglayer::cid_t>& cids) override {
+        std::vector<
+            std::pair<cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
+            res;
         res.reserve(cids.size());
         for (auto cid : cids) {
             if (ctx && ctx->cancellation_token.isCancellationRequested()) {
                 was_cancelled_ = true;
-                throw SegcoreError(ErrorCode::FollyCancel, fmt::format("cancelled at chunk {}", cid));
+                throw SegcoreError(ErrorCode::FollyCancel,
+                                   fmt::format("cancelled at chunk {}", cid));
             }
             std::this_thread::sleep_for(delay_);
             auto guard = std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
-            auto chunk = std::make_unique<FixedWidthChunk>(100, 1, nullptr, 0, sizeof(int64_t), false, guard);
+            auto chunk = std::make_unique<FixedWidthChunk>(
+                100, 1, nullptr, 0, sizeof(int64_t), false, guard);
             res.emplace_back(cid, std::move(chunk));
             chunks_loaded_++;
         }
         return res;
     }
-    size_t chunks_loaded() const { return chunks_loaded_; }
-    bool was_cancelled() const { return was_cancelled_; }
+    size_t
+    chunks_loaded() const {
+        return chunks_loaded_;
+    }
+    bool
+    was_cancelled() const {
+        return was_cancelled_;
+    }
 
  private:
     size_t num_chunks_;
@@ -298,7 +351,8 @@ TEST(LoadCancellationTranslator, RespectsCancellation) {
     OpContext op_ctx(source.getToken());
     std::thread load_thread([&]() {
         try {
-            std::vector<cachinglayer::cid_t> cids = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+            std::vector<cachinglayer::cid_t> cids = {
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
             raw->get_cells(&op_ctx, cids);
         } catch (const SegcoreError& e) {
             EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
@@ -360,7 +414,8 @@ TEST(LoadCancellationTranslator, CancellationAtMiddleChunk) {
     std::thread load_thread([&]() {
         started = true;
         try {
-            std::vector<cachinglayer::cid_t> cids = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+            std::vector<cachinglayer::cid_t> cids = {
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
             raw->get_cells(&op_ctx, cids);
         } catch (const SegcoreError& e) {
             EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
