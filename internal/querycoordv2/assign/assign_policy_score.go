@@ -469,5 +469,5 @@ func (p *ScoreBasedAssignPolicy) CalculateChannelScore(ch *meta.DmChannel, curre
 		channelWeight := paramtable.Get().QueryCoordCfg.CollectionChannelCountFactor.GetAsFloat()
 		return math.Max(1.0, channelWeight)
 	}
-	return 1
+	return 1.0
 }
