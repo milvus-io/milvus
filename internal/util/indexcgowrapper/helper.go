@@ -94,3 +94,15 @@ func GetLocalUsedSize(path string) (int64, error) {
 
 	return availableSize, nil
 }
+
+// IndexBuildResource represents estimated resource for index building.
+type IndexBuildResource struct {
+	MemoryCost int64
+	DiskCost   int64
+}
+
+// EstimateIndexBuildResource estimates resource required for building an index.
+// TODO: Implement CGO call to knowhere for accurate estimation.
+func EstimateIndexBuildResource(indexType string, dim int64, numRows int64, fieldDataSize uint64) (*IndexBuildResource, error) {
+	return nil, errors.New("EstimateIndexBuildResource not yet implemented")
+}

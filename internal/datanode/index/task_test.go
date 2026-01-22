@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -129,6 +130,45 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 	suite.NoError(err)
 	err = t.PostExecute(context.Background())
 	suite.NoError(err)
+}
+
+func (suite *IndexBuildTaskSuite) TestEstimateIndexDiskCost() {
+	testCases := []struct {
+		fieldDataSize uint64
+		expected      int64
+	}{
+		{0, 0},
+		{1024 * 1024, 2 * 1024 * 1024}, // 1MB -> 2MB
+		{1024 * 1024 * 1024, 2 * 1024 * 1024 * 1024}, // 1GB -> 2GB
+	}
+
+	for _, tc := range testCases {
+		actual := estimateIndexDiskCost(tc.fieldDataSize)
+		suite.Equal(tc.expected, actual, "disk cost should be 2x field data size for input %d", tc.fieldDataSize)
+	}
+}
+
+func (suite *IndexBuildTaskSuite) TestCheckDiskCapacityForBuild() {
+	ctx := context.Background()
+
+	// Test with small data size - should pass
+	err := checkDiskCapacityForBuild(ctx, "DISKANN", 1024*1024) // 1MB
+	suite.Nil(err, "disk capacity check should succeed for small data size")
+
+	// Test with zero data size - should pass
+	err = checkDiskCapacityForBuild(ctx, "DISKANN", 0)
+	suite.Nil(err, "disk capacity check should succeed for zero data size")
+}
+
+func (suite *IndexBuildTaskSuite) TestDiskUsage() {
+	localStoragePath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+
+	// Test disk.Usage returns valid data
+	diskUsage, err := disk.Usage(localStoragePath)
+	suite.NoError(err, "disk.Usage should succeed")
+	suite.NotNil(diskUsage)
+	suite.Greater(diskUsage.Total, uint64(0), "disk total should be positive")
+	suite.LessOrEqual(diskUsage.Used, diskUsage.Total, "disk used should not exceed total")
 }
 
 func TestIndexBuildTask(t *testing.T) {
