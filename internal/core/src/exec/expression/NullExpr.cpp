@@ -98,6 +98,17 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
             }
             break;
         }
+        case DataType::MOL: {
+            if (segment_->type() == SegmentType::Growing &&
+                !storage::MmapManager::GetInstance()
+                     .GetMmapConfig()
+                     .growing_enable_mmap) {
+                result = ExecVisitorImpl<std::string>(input);
+            } else {
+                result = ExecVisitorImpl<std::string_view>(input);
+            }
+            break;
+        }
         default:
             ThrowInfo(DataTypeInvalid,
                       "unsupported data type: {}",

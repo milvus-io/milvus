@@ -49,6 +49,7 @@
 #include "Json.h"
 #include "type_c.h"
 #include "Geometry.h"
+#include "Mol.h"
 
 #include "CustomBitset.h"
 
@@ -86,6 +87,7 @@ enum class DataType {
     GEOMETRY = 24,
     TEXT = 25,
     TIMESTAMPTZ = 26,  // Timestamp with timezone, stored as int64
+    MOL = 27,
 
     // Some special Data type, start from after 50
     // just for internal use now, may sync proto in future
@@ -209,6 +211,8 @@ ToProtoDataType(DataType data_type) {
             return proto::schema::DataType::ArrayOfVector;
         case DataType::GEOMETRY:
             return proto::schema::DataType::Geometry;
+        case DataType::MOL:
+            return proto::schema::DataType::Mol;
 
         // Internal-only or unsupported mappings
         case DataType::ROW:
@@ -248,6 +252,8 @@ GetArrowDataType(DataType data_type, int dim = 1) {
         case DataType::JSON:
             return arrow::binary();
         case DataType::GEOMETRY:
+            return arrow::binary();
+        case DataType::MOL:
             return arrow::binary();
         case DataType::VECTOR_FLOAT:
             return arrow::fixed_size_binary(dim * 4);
@@ -340,6 +346,8 @@ GetDataTypeName(DataType data_type) {
             return "text";
         case DataType::GEOMETRY:
             return "geometry";
+        case DataType::MOL:
+            return "mol";
         case DataType::VECTOR_FLOAT:
             return "vector_float";
         case DataType::VECTOR_BINARY:
@@ -440,6 +448,11 @@ IsGeometryDataType(DataType data_type) {
 }
 
 inline bool
+IsMolDataType(DataType data_type) {
+    return data_type == DataType::MOL;
+}
+
+inline bool
 IsArrayDataType(DataType data_type) {
     return data_type == DataType::ARRAY || data_type == DataType::VECTOR_ARRAY;
 }
@@ -447,7 +460,7 @@ IsArrayDataType(DataType data_type) {
 inline bool
 IsBinaryDataType(DataType data_type) {
     return IsJsonDataType(data_type) || IsArrayDataType(data_type) ||
-           IsGeometryDataType(data_type);
+           IsGeometryDataType(data_type) || IsMolDataType(data_type);
 }
 
 inline bool
@@ -948,6 +961,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
                 break;
             case milvus::DataType::GEOMETRY:
                 name = "GEOMETRY";
+                break;
+            case milvus::DataType::MOL:
+                name = "MOL";
                 break;
             case milvus::DataType::ROW:
                 name = "ROW";

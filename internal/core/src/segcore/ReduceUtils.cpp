@@ -164,6 +164,18 @@ AssembleGroupByValues(
                 }
                 break;
             }
+            case DataType::MOL: {
+                mutable_group_by_field_value->set_type(
+                    milvus::proto::schema::DataType::Mol);
+                auto field_data = group_by_res_values->mutable_mol_data();
+                for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
+                    if (group_by_vals[idx].has_value()) {
+                        std::string val = std::get<std::string>(group_by_vals[idx].value());
+                        *(field_data->mutable_data()->Add()) = val;
+                    }
+                }
+                break;
+            }
             case DataType::JSON: {
                 auto json_path = plan->plan_node_->search_info_.json_path_;
                 auto json_type = plan->plan_node_->search_info_.json_type_;

@@ -232,6 +232,64 @@ GeometryChunkWriter::write_to_target(
 }
 
 std::pair<size_t, size_t>
+MolChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
+    row_nums_ = 0;
+    size_t size = 0;
+    for (const auto& data : array_vec) {
+        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
+    }
+    if (nullable_) {
+        size += (row_nums_ + 7) / 8;
+    }
+    size += sizeof(uint32_t) * (row_nums_ + 1) + MMAP_MOL_PADDING;
+    return {size, row_nums_};
+}
+
+void
+MolChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
+                                 const std::shared_ptr<ChunkTarget>& target) {
+    std::vector<std::string_view> mol_strs;
+    std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
+    mol_strs.reserve(row_nums_);
+
+    for (const auto& data : array_vec) {
+        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
+        for (int64_t i = 0; i < array->length(); ++i) {
+            auto str = array->GetView(i);
+            mol_strs.emplace_back(str);
+        }
+    }
+
+    // chunk layout: null bitmap, offsets, mol strings, padding
+    write_null_bit_maps(null_bitmaps, target);
+
+    const int offset_num = row_nums_ + 1;
+    const uint32_t null_bitmap_bytes =
+        nullable_ ? static_cast<uint32_t>((row_nums_ + 7) / 8) : 0;
+    uint32_t offset_start_pos =
+        null_bitmap_bytes +
+        static_cast<uint32_t>(sizeof(uint32_t) * offset_num);
+    std::vector<uint32_t> offsets;
+    offsets.reserve(offset_num);
+    for (const auto& str : mol_strs) {
+        offsets.push_back(offset_start_pos);
+        offset_start_pos += str.size();
+    }
+    offsets.push_back(offset_start_pos);
+
+    target->write(offsets.data(), offsets.size() * sizeof(uint32_t));
+
+    for (const auto& str : mol_strs) {
+        target->write(str.data(), str.size());
+    }
+
+    char padding[MMAP_MOL_PADDING];
+    target->write(padding, MMAP_MOL_PADDING);
+    
+}
+
+
+std::pair<size_t, size_t>
 ArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
     row_nums_ = 0;
     size_t size = 0;
@@ -591,6 +649,9 @@ create_chunk_writer(const FieldMeta& field_meta) {
         case milvus::DataType::GEOMETRY: {
             return std::make_shared<GeometryChunkWriter>(nullable);
         }
+        case milvus::DataType::MOL: {
+            return std::make_shared<MolChunkWriter>(nullable);
+        }
         case milvus::DataType::ARRAY:
             return std::make_shared<ArrayChunkWriter>(
                 field_meta.get_element_type(), nullable);
@@ -730,6 +791,10 @@ make_chunk(const FieldMeta& field_meta,
                 row_nums, data, size, nullable, chunk_mmap_guard);
         case milvus::DataType::GEOMETRY: {
             return std::make_unique<GeometryChunk>(
+                row_nums, data, size, nullable, chunk_mmap_guard);
+        }
+        case milvus::DataType::MOL: {
+            return std::make_unique<MolChunk>(
                 row_nums, data, size, nullable, chunk_mmap_guard);
         }
         case milvus::DataType::ARRAY:
