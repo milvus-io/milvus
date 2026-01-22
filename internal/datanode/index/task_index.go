@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shirou/gopsutil/v3/disk"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -240,6 +241,15 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	// Ignore the error here, this param will only be used for diskann and aisaq
 	fieldDataSize, _ = estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType())
 	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
+		// Check disk capacity before building disk-intensive index
+		if err := checkDiskCapacityForBuild(ctx, indexType, fieldDataSize); err != nil {
+			log.Warn("disk capacity check failed for disk index build",
+				zap.String("indexType", indexType),
+				zap.Uint64("fieldDataSize", fieldDataSize),
+				zap.Error(err))
+			return err
+		}
+
 		err = indexparams.SetDiskIndexBuildParams(it.newIndexParams, int64(fieldDataSize))
 		if err != nil {
 			log.Warn("failed to fill disk index params", zap.Error(err))
@@ -423,4 +433,57 @@ func (it *indexBuildTask) parseFieldMetaFromBinlog(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// checkDiskCapacityForBuild checks disk space for disk-intensive index build.
+// Returns error if projected usage (diskUsed + fieldDataSize * 3) exceeds threshold.
+func checkDiskCapacityForBuild(ctx context.Context, indexType string, fieldDataSize uint64) error {
+	log := log.Ctx(ctx)
+	localStoragePath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+
+	// 1. Get disk usage of the mounted filesystem
+	diskUsage, err := disk.Usage(localStoragePath)
+	if err != nil {
+		log.Warn("failed to get disk usage, skipping disk capacity check", zap.Error(err))
+		return nil
+	}
+
+	// 2. Estimate index build disk cost (raw data + index files)
+	indexDiskCost := estimateIndexDiskCost(fieldDataSize)
+	requiredSize := fieldDataSize + uint64(indexDiskCost)
+
+	// 3. Calculate threshold
+	maxUsageRatio := paramtable.Get().DataNodeCfg.IndexMaxDiskUsagePercentage.GetAsFloat()
+	maxAllowedUsage := uint64(float64(diskUsage.Total) * maxUsageRatio)
+
+	// 4. Check if space is sufficient
+	projectedUsage := diskUsage.Used + requiredSize
+	if projectedUsage > maxAllowedUsage {
+		log.Warn("insufficient disk space for index build",
+			zap.String("indexType", indexType),
+			zap.Uint64("diskUsed", diskUsage.Used),
+			zap.Uint64("diskTotal", diskUsage.Total),
+			zap.Uint64("required", requiredSize),
+			zap.Uint64("projectedUsage", projectedUsage),
+			zap.Uint64("maxAllowed", maxAllowedUsage),
+			zap.Float64("maxUsageRatio", maxUsageRatio))
+		return fmt.Errorf("insufficient disk space for index build: projected usage %d bytes exceeds limit %d bytes (%.1f%% of %d total)",
+			projectedUsage, maxAllowedUsage, maxUsageRatio*100, diskUsage.Total)
+	}
+
+	log.Info("disk capacity check passed",
+		zap.String("indexType", indexType),
+		zap.Uint64("diskUsed", diskUsage.Used),
+		zap.Uint64("required", requiredSize),
+		zap.Uint64("maxAllowed", maxAllowedUsage))
+
+	return nil
+}
+
+// estimateIndexDiskCost estimates disk cost for index build.
+// Uses 2x multiplier. TODO: use CGO for accurate estimation.
+const diskUsageRatioForBuild = 2.0
+
+func estimateIndexDiskCost(fieldDataSize uint64) int64 {
+	return int64(float64(fieldDataSize) * diskUsageRatioForBuild)
 }
