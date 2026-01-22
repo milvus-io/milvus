@@ -14,7 +14,7 @@
 # Update milvus-storage_VERSION for the first occurrence
 milvus_add_pkg_config("milvus-storage")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( milvus-storage_VERSION 88c2551)
+set( milvus-storage_VERSION f372333)
 set( GIT_REPOSITORY  "https://github.com/milvus-io/milvus-storage.git")
 message(STATUS "milvus-storage repo: ${GIT_REPOSITORY}")
 message(STATUS "milvus-storage version: ${milvus-storage_VERSION}")
@@ -49,3 +49,8 @@ if ( NOT milvus-storage_POPULATED )
 endif()
 
 set( MILVUS_STORAGE_INCLUDE_DIR ${milvus-storage_SOURCE_DIR}/cpp/include CACHE INTERNAL "Path to milvus-storage include directory" )
+
+# Add the milvus-storage include directory to the target's interface include directories
+# This ensures that consumers of milvus-storage can find <arrow/c/abi.h> which is bundled
+# inside the milvus-storage include directory
+target_include_directories(milvus-storage PUBLIC ${MILVUS_STORAGE_INCLUDE_DIR})
