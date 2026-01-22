@@ -188,9 +188,17 @@ func adaptiveGroupSegments(segments []*SegmentView, targetSize float64) [][]*Seg
 	// Use maxFull for small segment counts to maximize full segments
 	// Use larger for large segment counts for O(n) performance
 	if n <= threshold {
+		log.Info("adaptiveGroupSegments: using maxFullSegmentsGrouping algorithm",
+			zap.Int("segmentCount", n),
+			zap.Int("threshold", threshold),
+			zap.Float64("targetSize", targetSize))
 		return maxFullSegmentsGrouping(segments, targetSize)
 	}
 
+	log.Info("adaptiveGroupSegments: using largerGroupingSegments algorithm",
+		zap.Int("segmentCount", n),
+		zap.Int("threshold", threshold),
+		zap.Float64("targetSize", targetSize))
 	return largerGroupingSegments(segments, targetSize)
 }
 
