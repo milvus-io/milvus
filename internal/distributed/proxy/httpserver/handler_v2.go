@@ -1499,6 +1499,28 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 
+	// Check if search by primary keys or by vectors
+	hasIDs := len(httpReq.Ids) > 0
+	hasData := len(httpReq.Data) > 0
+
+	// Primary keys and query vectors are mutually exclusive
+	if hasIDs && hasData {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+			HTTPReturnMessage: "primary keys (ids) and query vectors (data) are mutually exclusive. Please provide either 'ids' or 'data', not both",
+		})
+		return nil, merr.ErrParameterInvalid
+	}
+
+	// At least one of ids or data must be provided
+	if !hasIDs && !hasData {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
+			HTTPReturnMessage: "either 'ids' (for primary key search) or 'data' (for vector search) must be provided",
+		})
+		return nil, merr.ErrMissingRequiredParameters
+	}
+
 	searchParams, err := generateSearchParams(httpReq.SearchParams)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, generate SearchParams failed", zap.Error(err))
@@ -1524,21 +1546,55 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		}
 	}
 
-	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: httpReq.AnnsField})
-	body, _ := c.Get(gin.BodyBytesKey)
-	placeholderGroup, err := generatePlaceholderGroup(ctx, string(body.([]byte)), collSchema, httpReq.AnnsField)
-	if err != nil {
-		log.Ctx(ctx).Warn("high level restful api, search with vector invalid", zap.Error(err))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
-			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
-			HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
-		})
-		return nil, err
+	if hasIDs {
+		// Search by primary keys
+		primaryField, ok := getPrimaryField(collSchema)
+		if !ok {
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+				HTTPReturnMessage: "collection has no primary key field",
+			})
+			return nil, merr.ErrParameterInvalid
+		}
+
+		// Convert ids to schemapb.IDs
+		ids, err := convertIDsToSchemapbIDs(httpReq.Ids, primaryField)
+		if err != nil {
+			log.Ctx(ctx).Warn("high level restful api, convert ids to schemapb.IDs failed", zap.Error(err))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+				HTTPReturnMessage: merr.ErrParameterInvalid.Error() + ", error: " + err.Error(),
+			})
+			return nil, err
+		}
+
+		// Set Ids field using the oneof SearchInput field
+		req.SearchInput = &milvuspb.SearchRequest_Ids{
+			Ids: ids,
+		}
+		// Set anns_field in search params if provided
+		if httpReq.AnnsField != "" {
+			searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: httpReq.AnnsField})
+		}
+	} else {
+		// Search by vectors (existing logic)
+		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: httpReq.AnnsField})
+		body, _ := c.Get(gin.BodyBytesKey)
+		placeholderGroup, err := generatePlaceholderGroup(ctx, string(body.([]byte)), collSchema, httpReq.AnnsField)
+		if err != nil {
+			log.Ctx(ctx).Warn("high level restful api, search with vector invalid", zap.Error(err))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
+				HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
+			})
+			return nil, err
+		}
+		req.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: placeholderGroup,
+		}
 	}
+
 	req.SearchParams = searchParams
-	req.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
-		PlaceholderGroup: placeholderGroup,
-	}
 	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Search", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
