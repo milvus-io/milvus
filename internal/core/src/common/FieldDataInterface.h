@@ -696,6 +696,80 @@ class FieldDataGeometryImpl : public FieldDataImpl<std::string, true> {
     }
 };
 
+class FieldDataMolImpl : public FieldDataImpl<std::string, true> {
+    public:
+       explicit FieldDataMolImpl(DataType data_type,
+                                bool nullable,
+                                int64_t total_num_rows = 0)
+           : FieldDataImpl<std::string, true>(
+                 1, data_type, nullable, total_num_rows) {
+       }
+   
+       int64_t
+       DataSize() const override {
+           int64_t data_size = 0;
+           for (size_t offset = 0; offset < length(); ++offset) {
+               data_size += data_[offset].size();
+           }
+           return data_size;
+       }
+   
+       int64_t
+       DataSize(ssize_t offset) const override {
+           AssertInfo(offset < get_num_rows(),
+                      "field data subscript out of range");
+           AssertInfo(offset < length(),
+                      "subscript position don't has valid value");
+           return data_[offset].size();
+       }
+   
+       void
+       FillFieldData(const std::shared_ptr<arrow::Array> array) override {
+           AssertInfo(array->type()->id() == arrow::Type::type::BINARY,
+                      "inconsistent data type, expected: {}, got: {}",
+                      "BINARY",
+                      array->type()->ToString());
+           auto mol_array =
+               std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+           FillFieldData(mol_array);
+       }
+   
+       void
+       FillFieldData(const std::shared_ptr<arrow::BinaryArray>& array) override {
+           auto n = array->length();
+           if (n == 0) {
+               return;
+           }
+           null_count_ = array->null_count();
+   
+           std::lock_guard lck(tell_mutex_);
+           if (length_ + n > get_num_rows()) {
+               resize_field_data(length_ + n);
+           }
+           auto i = 0;
+           for (const auto& mol_data : *array) {
+               if (!mol_data.has_value()) {
+                   i++;
+                   continue;
+               }
+               data_[length_ + i] = mol_data.value();
+               i++;
+           }
+           if (IsNullable()) {
+               auto valid_data = array->null_bitmap_data();
+               if (valid_data != nullptr) {
+                   bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
+                       valid_data,
+                       array->offset(),
+                       valid_data_.data(),
+                       length_,
+                       n);
+               }
+           }
+           length_ += n;
+       }
+   };
+
 class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
  public:
     explicit FieldDataJsonImpl(DataType data_type,

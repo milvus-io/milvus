@@ -281,6 +281,23 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             }
             return FillFieldData(values.data(), element_count);
         }
+        case DataType::MOL: {
+            AssertInfo(array->type()->id() == arrow::Type::type::BINARY,
+                       "inconsistent data type");
+            auto mol_array =
+                std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+            std::vector<std::string> values(element_count);
+            for (size_t index = 0; index < element_count; ++index) {
+                values[index] = mol_array->GetString(index);
+            }
+            if (nullable_) {
+                return FillFieldData(values.data(),
+                                     array->null_bitmap_data(),
+                                     element_count,
+                                     array->offset());
+            }
+            return FillFieldData(values.data(), element_count);
+        }
         case DataType::ARRAY: {
             auto array_array =
                 std::dynamic_pointer_cast<arrow::BinaryArray>(array);
@@ -561,6 +578,16 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(
                 values.data(), valid_data_ptr.get(), element_count, 0);
         }
+        case DataType::MOL: {
+            FixedVector<std::string> values(element_count);
+            if (default_value.has_value()) {
+                std::fill(
+                    values.begin(), values.end(), default_value->string_data());
+                return FillFieldData(values.data(), nullptr, element_count, 0);
+            }
+            return FillFieldData(
+                values.data(), valid_data_ptr.get(), element_count, 0);
+        }
         case DataType::ARRAY: {
             // todo: add array default_value
             FixedVector<Array> values(element_count);
@@ -722,6 +749,9 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
         case DataType::JSON:
             return std::make_shared<FieldData<Json>>(type, nullable, cap_rows);
         case DataType::GEOMETRY:
+            return std::make_shared<FieldData<std::string>>(
+                type, nullable, cap_rows);
+        case DataType::MOL:
             return std::make_shared<FieldData<std::string>>(
                 type, nullable, cap_rows);
         default:
