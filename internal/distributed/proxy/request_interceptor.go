@@ -24,27 +24,19 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var (
-	retryableCode      typeutil.Set[int32]
 	fullMethodName2Tag *typeutil.ConcurrentMap[string, string]
 	sf                 conc.Singleflight[string]
 )
 
 func init() {
-	retryableCode = typeutil.NewSet(
-		merr.Code(merr.ErrServiceRateLimit),
-		merr.Code(merr.ErrCollectionSchemaMismatch),
-	)
-
 	fullMethodName2Tag = typeutil.NewConcurrentMap[string, string]()
 }
 
@@ -71,7 +63,7 @@ func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.Un
 
 	start := time.Now()
 	resp, err := handler(ctx, req)
-	label := ParseMetricLabel(resp, err)
+	label := requestutil.ParseMetricLabel(resp, err)
 
 	// set metrics for state code
 	metrics.ProxyFunctionCall.WithLabelValues(
@@ -116,30 +108,4 @@ func FullMethodName2Tag(fullMethodName string) string {
 func ParseShortMethodName(fullMethodName string) string {
 	parts := strings.Split(fullMethodName, "/")
 	return parts[len(parts)-1]
-}
-
-func ParseMetricLabel(resp any, err error) string {
-	// err only returned by interceptors
-	if err != nil {
-		return metrics.RejectedLabel
-	}
-
-	// check response status code
-	var status *commonpb.Status
-	switch resp := resp.(type) {
-	case interface{ GetStatus() *commonpb.Status }:
-		status = resp.GetStatus()
-	case *commonpb.Status:
-		status = resp
-	}
-
-	// check if retry
-	if !merr.Ok(status) {
-		// TODO use retriable if all set
-		if retryableCode.Contain(status.GetCode()) {
-			return metrics.RetryLabel
-		}
-		return metrics.FailLabel
-	}
-	return metrics.SuccessLabel
 }
