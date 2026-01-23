@@ -413,8 +413,17 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 
 		im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+		assert.NoError(t, err)
+
+		var job ImportJob = &importJob{
+			ImportJob: &datapb.ImportJob{
+				JobID: 1,
+			},
+		}
+		err = im.AddJob(context.TODO(), job)
 		assert.NoError(t, err)
 
 		taskProto := &datapb.ImportTaskV2{
