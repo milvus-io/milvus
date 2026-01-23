@@ -194,19 +194,13 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
         auto result = ExecuteTask(plan_fragment, query_context);
 
-        if (result == nullptr || result->childrens().empty()) {
+        if (result.empty()) {
             filter_only_result.valid_count_ = active_count;
             search_result_opt_ = std::move(filter_only_result);
             return;
         }
 
-        auto col_vec =
-            std::dynamic_pointer_cast<ColumnVector>(result->childrens()[0]);
-        AssertInfo(col_vec != nullptr,
-                   "filter result must be a column vector with bitset");
-
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
-        auto valid_count = active_count - view.count();
+        auto valid_count = active_count - result.count();
         LOG_INFO("filter only result validCount: {}, activeCount: {}",
                  valid_count,
                  active_count);
