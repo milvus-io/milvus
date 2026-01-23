@@ -169,6 +169,17 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                 : std::min(int64_t(bitset.size()),
                                            segment.get_active_count(timestamp));
 
+        // Check for nullable vector field with all null values
+        if (active_count == 0) {
+            // All vectors are null, return empty result
+            auto total_num = num_queries * info.topk_;
+            search_result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
+            search_result.distances_.resize(total_num, 0.0f);
+            search_result.total_nq_ = num_queries;
+            search_result.unity_topK_ = info.topk_;
+            return;
+        }
+
         if (info.iterator_v2_info_.has_value()) {
             AssertInfo(data_type != DataType::VECTOR_ARRAY,
                        "vector array(embedding list) is not supported for "

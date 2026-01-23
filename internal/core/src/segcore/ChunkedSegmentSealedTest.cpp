@@ -185,6 +185,215 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     }
 }
 
+// Test search on nullable vector field with all null vectors
+// This test verifies that SearchOnSealedColumn returns empty results
+// instead of crashing when all vectors are null
+TEST(test_chunk_segment, TestSearchOnSealedWithAllNullVectors) {
+    int dim = 16;
+    int chunk_num = 2;
+    int chunk_size = 100;
+
+    DeferRelease defer;
+
+    int total_row_count = chunk_num * chunk_size;
+    int bitset_size = (total_row_count + 7) / 8;
+
+    auto schema = std::make_shared<Schema>();
+    // Create nullable vector field
+    auto fakevec_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::COSINE, true);
+
+    auto field_meta = schema->operator[](fakevec_id);
+    ASSERT_TRUE(field_meta.is_nullable());
+
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    std::vector<int64_t> num_rows_per_chunk;
+
+    for (int i = 0; i < chunk_num; i++) {
+        num_rows_per_chunk.push_back(chunk_size);
+
+        // Calculate buffer size: null_bitmap + vector_data
+        int null_bitmap_bytes = (chunk_size + 7) / 8;
+        int vector_data_size = chunk_size * dim * sizeof(float);
+        int buf_size = null_bitmap_bytes + vector_data_size;
+
+        char* buf = new char[buf_size];
+        defer.AddDefer([buf]() { delete[] buf; });
+
+        // Set null bitmap to all zeros (all vectors are null)
+        std::fill(buf, buf + null_bitmap_bytes, 0);
+
+        // Fill vector data with zeros (doesn't matter since all are null)
+        std::fill(buf + null_bitmap_bytes, buf + buf_size, 0);
+
+        auto chunk_mmap_guard =
+            std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+        chunks.emplace_back(
+            std::make_unique<FixedWidthChunk>(chunk_size,
+                                              dim,
+                                              buf,
+                                              buf_size,
+                                              sizeof(float),
+                                              true,
+                                              chunk_mmap_guard));
+    }
+
+    auto translator = std::make_unique<TestChunkTranslator>(
+        num_rows_per_chunk, "", std::move(chunks));
+    auto column =
+        std::make_shared<ChunkedColumn>(std::move(translator), field_meta);
+
+    // Build valid row ids to initialize offset_mapping for nullable vectors
+    column->BuildValidRowIds(nullptr);
+
+    // Verify offset_mapping is enabled and valid count is 0
+    const auto& offset_mapping = column->GetOffsetMapping();
+    ASSERT_TRUE(offset_mapping.IsEnabled());
+    ASSERT_EQ(offset_mapping.GetValidCount(), 0);
+
+    SearchInfo search_info;
+    auto search_conf = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::COSINE},
+    };
+    search_info.search_params_ = search_conf;
+    search_info.field_id_ = fakevec_id;
+    search_info.metric_type_ = knowhere::metric::COSINE;
+    search_info.topk_ = 10;
+
+    uint8_t* bitset_data = new uint8_t[bitset_size];
+    defer.AddDefer([bitset_data]() { delete[] bitset_data; });
+    std::fill(bitset_data, bitset_data + bitset_size, 0);
+    BitsetView bv(bitset_data, total_row_count);
+
+    // Generate query vector
+    std::vector<float> query_data(dim);
+    for (int i = 0; i < dim; i++) {
+        query_data[i] = static_cast<float>(i) / dim;
+    }
+    auto index_info = std::map<std::string, std::string>{};
+    SearchResult search_result;
+    milvus::OpContext op_context;
+
+    // This should NOT crash and should return empty results
+    query::SearchOnSealedColumn(*schema,
+                                column.get(),
+                                search_info,
+                                index_info,
+                                query_data.data(),
+                                nullptr,
+                                1,
+                                total_row_count,
+                                bv,
+                                &op_context,
+                                search_result);
+
+    // Verify that all offsets are -1 (invalid) since no valid vectors exist
+    ASSERT_EQ(search_result.seg_offsets_.size(), search_info.topk_);
+    for (auto& offset : search_result.seg_offsets_) {
+        ASSERT_EQ(offset, INVALID_SEG_OFFSET);
+    }
+    ASSERT_EQ(search_result.total_nq_, 1);
+    ASSERT_EQ(search_result.unity_topK_, search_info.topk_);
+}
+
+// Test search iterator on nullable vector field with all null vectors
+TEST(test_chunk_segment, TestSearchIteratorOnSealedWithAllNullVectors) {
+    int dim = 16;
+    int chunk_num = 2;
+    int chunk_size = 100;
+
+    DeferRelease defer;
+
+    int total_row_count = chunk_num * chunk_size;
+    int bitset_size = (total_row_count + 7) / 8;
+
+    auto schema = std::make_shared<Schema>();
+    auto fakevec_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2, true);
+
+    auto field_meta = schema->operator[](fakevec_id);
+
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    std::vector<int64_t> num_rows_per_chunk;
+
+    for (int i = 0; i < chunk_num; i++) {
+        num_rows_per_chunk.push_back(chunk_size);
+
+        int null_bitmap_bytes = (chunk_size + 7) / 8;
+        int vector_data_size = chunk_size * dim * sizeof(float);
+        int buf_size = null_bitmap_bytes + vector_data_size;
+
+        char* buf = new char[buf_size];
+        defer.AddDefer([buf]() { delete[] buf; });
+
+        // All vectors are null
+        std::fill(buf, buf + null_bitmap_bytes, 0);
+        std::fill(buf + null_bitmap_bytes, buf + buf_size, 0);
+
+        auto chunk_mmap_guard =
+            std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+        chunks.emplace_back(
+            std::make_unique<FixedWidthChunk>(chunk_size,
+                                              dim,
+                                              buf,
+                                              buf_size,
+                                              sizeof(float),
+                                              true,
+                                              chunk_mmap_guard));
+    }
+
+    auto translator = std::make_unique<TestChunkTranslator>(
+        num_rows_per_chunk, "", std::move(chunks));
+    auto column =
+        std::make_shared<ChunkedColumn>(std::move(translator), field_meta);
+
+    // Build valid row ids to initialize offset_mapping for nullable vectors
+    column->BuildValidRowIds(nullptr);
+
+    SearchInfo search_info;
+    auto search_conf = knowhere::Json{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+    };
+    search_info.search_params_ = search_conf;
+    search_info.field_id_ = fakevec_id;
+    search_info.metric_type_ = knowhere::metric::L2;
+    search_info.topk_ = 10;
+    // Enable iterator_v2
+    search_info.iterator_v2_info_ = SearchIteratorV2Info{.batch_size = 10};
+
+    uint8_t* bitset_data = new uint8_t[bitset_size];
+    defer.AddDefer([bitset_data]() { delete[] bitset_data; });
+    std::fill(bitset_data, bitset_data + bitset_size, 0);
+    BitsetView bv(bitset_data, total_row_count);
+
+    std::vector<float> query_data(dim);
+    for (int i = 0; i < dim; i++) {
+        query_data[i] = static_cast<float>(i) / dim;
+    }
+    auto index_info = std::map<std::string, std::string>{};
+    SearchResult search_result;
+    milvus::OpContext op_context;
+
+    // This should NOT crash - search iterator with all null vectors
+    query::SearchOnSealedColumn(*schema,
+                                column.get(),
+                                search_info,
+                                index_info,
+                                query_data.data(),
+                                nullptr,
+                                1,
+                                total_row_count,
+                                bv,
+                                &op_context,
+                                search_result);
+
+    // Verify empty results
+    ASSERT_EQ(search_result.seg_offsets_.size(), search_info.topk_);
+    for (auto& offset : search_result.seg_offsets_) {
+        ASSERT_EQ(offset, INVALID_SEG_OFFSET);
+    }
+}
+
 class TestChunkSegment : public testing::TestWithParam<bool> {
  protected:
     void

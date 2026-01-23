@@ -177,13 +177,35 @@ SearchOnSealedColumn(const Schema& schema,
 
     CheckBruteForceSearchParam(field, search_info);
 
+    // Check for nullable vector field with all null values - must be done before creating iterators
+    const auto& offset_mapping = column->GetOffsetMapping();
+    TargetBitmap transformed_bitset;
+    BitsetView search_bitview = bitview;
+    if (offset_mapping.IsEnabled()) {
+        transformed_bitset = TransformBitset(bitview, offset_mapping);
+        search_bitview = BitsetView(transformed_bitset);
+        if (offset_mapping.GetValidCount() == 0) {
+            // All vectors are null, return empty result
+            auto total_num = num_queries * search_info.topk_;
+            result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
+            result.distances_.resize(total_num, 0.0f);
+            result.total_nq_ = num_queries;
+            result.unity_topK_ = search_info.topk_;
+            return;
+        }
+    }
+
     if (search_info.iterator_v2_info_.has_value()) {
         AssertInfo(data_type != DataType::VECTOR_ARRAY,
                    "vector array(embedding list) is not supported for "
                    "vector iterator");
 
-        CachedSearchIterator cached_iter(
-            column, query_dataset, search_info, index_info, bitview, data_type);
+        CachedSearchIterator cached_iter(column,
+                                         query_dataset,
+                                         search_info,
+                                         index_info,
+                                         search_bitview,
+                                         data_type);
         cached_iter.NextBatch(search_info, result);
         return;
     }
@@ -207,21 +229,6 @@ SearchOnSealedColumn(const Schema& schema,
     }
 
     auto offset = 0;
-    const auto& offset_mapping = column->GetOffsetMapping();
-    TargetBitmap transformed_bitset;
-    BitsetView search_bitview = bitview;
-    if (offset_mapping.IsEnabled()) {
-        transformed_bitset = TransformBitset(bitview, offset_mapping);
-        search_bitview = BitsetView(transformed_bitset);
-        if (offset_mapping.GetValidCount() == 0) {
-            auto total_num = num_queries * search_info.topk_;
-            result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
-            result.distances_.resize(total_num, 0.0f);
-            result.total_nq_ = num_queries;
-            result.unity_topK_ = search_info.topk_;
-            return;
-        }
-    }
     auto vector_chunks = column->GetAllChunks(op_context);
     const auto& valid_count_per_chunk = column->GetValidCountPerChunk();
     for (int i = 0; i < num_chunk; ++i) {
