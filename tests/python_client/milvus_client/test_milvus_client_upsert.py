@@ -1273,3 +1273,499 @@ class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
             self.drop_partition(client, collection_name, partition_name)
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_upsert_same_pk_concurrently(self):
+        """
+        target: test upsert the same pk concurrently
+        method: 1. create a collection and insert data
+                2. load collection
+                3. upsert the same pk
+        expected: not raise exception
+        """
+        import threading
+
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        upsert_nb = 1000
+
+        # 1. Initialize a collection and insert data
+        schema = self.gen_default_schema_for_upsert(enable_dynamic_field=False)
+        self.create_collection(client, collection_name, schema=schema)
+        data = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+
+        # Create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+
+        # 2. Prepare upsert data
+        upsert_rows1 = cf.gen_row_data_by_schema(nb=upsert_nb, schema=schema)
+        upsert_rows2 = cf.gen_row_data_by_schema(nb=upsert_nb, schema=schema)
+        float_values1 = [row[default_float_field_name] for row in upsert_rows1]
+        float_values2 = [row[default_float_field_name] for row in upsert_rows2]
+
+        # 3. Upsert at the same time using threads
+        def do_upsert1():
+            self.upsert(client, collection_name, upsert_rows1)
+
+        def do_upsert2():
+            self.upsert(client, collection_name, upsert_rows2)
+
+        t1 = threading.Thread(target=do_upsert1, args=())
+        t2 = threading.Thread(target=do_upsert2, args=())
+
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        # 4. Check the result
+        self.flush(client, collection_name)
+        exp = f"{ct.default_int64_field_name} >= 0 && {ct.default_int64_field_name} <= {upsert_nb}"
+        res = self.query(client, collection_name, filter=exp, output_fields=[default_float_field_name])[0]
+        res_values = [res[i][default_float_field_name] for i in range(upsert_nb)]
+        assert res_values == float_values1 or res_values == float_values2
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_upsert_multiple_times(self):
+        """
+        target: test upsert multiple times
+        method: 1. create a collection and insert data
+                2. upsert repeatedly
+        expected: not raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        upsert_nb = 1000
+        step = 500
+
+        # 1. Initialize a collection and insert data
+        schema = self.gen_default_schema_for_upsert(enable_dynamic_field=False)
+        self.create_collection(client, collection_name, schema=schema)
+        data = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+
+        # Create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+
+        # 2. Upsert repeatedly
+        for i in range(10):
+            upsert_rows = cf.gen_row_data_by_schema(nb=upsert_nb, schema=schema, start=i * step)
+            self.upsert(client, collection_name, upsert_rows)
+
+        # 3. Check the result
+        self.flush(client, collection_name)
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == upsert_nb * 10 - step * 9
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_upsert_pk_string_multiple_times(self):
+        """
+        target: test upsert multiple times
+        method: 1. create a collection and insert data
+                2. upsert repeatedly
+        expected: not raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        upsert_nb = 1000
+        step = 500
+
+        # 1. Initialize a collection with string primary key and insert data
+        schema = self.gen_default_schema_for_upsert(enable_dynamic_field=False, primary_field=ct.default_string_field_name)
+        self.create_collection(client, collection_name, schema=schema)
+        data = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+
+        # Create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+
+        # 2. Upsert repeatedly
+        for i in range(10):
+            upsert_rows = cf.gen_row_data_by_schema(nb=upsert_nb, schema=schema, start=i * step)
+            self.upsert(client, collection_name, upsert_rows)
+
+        # 3. Check the result
+        self.flush(client, collection_name)
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == upsert_nb * 10 - step * 9
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("auto_id", [True, False])
+    def test_milvus_client_upsert_in_row_with_enable_dynamic_field(self, auto_id):
+        """
+        target: test upsert in rows when enable dynamic field is True
+        method: 1. create a collection and insert data
+                2. upsert in rows
+        expected: upsert successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        upsert_nb = ct.default_nb
+        start = ct.default_nb // 2
+
+        # 1. Initialize a collection with dynamic field enabled and insert data
+        schema = self.gen_default_schema_for_upsert(enable_dynamic_field=True, auto_id=auto_id)
+        self.create_collection(client, collection_name, schema=schema)
+        data = cf.gen_default_rows_data(with_json=False, auto_id=auto_id)
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+
+        # Create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+
+        # 2. Prepare upsert data with dynamic field
+        upsert_data = cf.gen_default_rows_data(with_json=False, start=start)
+        for i in range(start, start + upsert_nb):
+            upsert_data[i - start]["new"] = [i, i + 1]
+
+        self.upsert(client, collection_name, upsert_data)
+        self.flush(client, collection_name)
+
+        # 3. Check the result
+        expr = f"{ct.default_float_field_name} >= {start} && {ct.default_float_field_name} <= {upsert_nb + start}"
+        extra_num = start if auto_id is True else 0  # upsert equals insert in this case if auto_id is True
+        res = self.query(client, collection_name, filter=expr, output_fields=['count(*)'])[0]
+        assert res[0].get('count(*)') == upsert_nb + extra_num
+
+        res = self.query(client, collection_name, filter=expr, output_fields=["new"])[0]
+        assert len(res[upsert_nb + extra_num - 1]["new"]) == 2
+
+        res = self.query(client, collection_name, filter="", output_fields=['count(*)'])[0]
+        assert res[0].get('count(*)') == start + upsert_nb + extra_num
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("nullable", [True, False])
+    @pytest.mark.parametrize("default_value", [[], [None for i in range(ct.default_nb)]])
+    def test_milvus_client_upsert_one_field_using_default_value(self, default_value, nullable):
+        """
+        target: test insert/upsert with one field using default value
+        method: 1. create a collection with one field using default value
+                2. insert using default value to replace the field value []/[None]
+        expected: insert/upsert successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create schema with default value field
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length,
+                         default_value="abc", nullable=nullable)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=ct.default_dim)
+
+        self.create_collection(client, collection_name, schema=schema)
+
+        # Insert initial data
+        data = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema, skip_field_names=[ct.default_string_field_name])
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+
+        # Create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+
+        # 2. Prepare upsert data with default value field ([] or [None])
+        vectors = cf.gen_vectors(ct.default_nb, ct.default_dim)
+        upsert_data = []
+        for i in range(ct.default_nb):
+            row = {ct.default_int64_field_name: i, ct.default_float_field_name: np.float32(i),
+                   ct.default_float_vec_field_name: vectors[i]}
+            # Add string field value based on default_value parameter
+            if len(default_value) > 0:
+                # If default_value is [None, None, ...], set the field to None
+                row[ct.default_string_field_name] = default_value[i]
+            # If default_value is [], omit the field to use default value
+            upsert_data.append(row)
+
+        self.upsert(client, collection_name, upsert_data)
+        self.flush(client, collection_name)
+
+        # 3. Check the result - all records should have string field == 'abc'
+        exp = f"{ct.default_string_field_name} == 'abc'"
+        res = self.query(client, collection_name, filter=exp, output_fields=[default_float_field_name])[0]
+        assert len(res) == ct.default_nb
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_partition_key", [True, False])
+    @pytest.mark.parametrize("default_value", [[], [None for _ in range(ct.default_nb)]])
+    def test_milvus_client_upsert_multi_fields_using_none_data(self, enable_partition_key, default_value):
+        """
+        target: test insert/upsert with multi fields include array using none value
+        method: 1. create a collection with multi fields include array using default value
+                2. insert using none value to replace the field value
+        expected: insert/upsert successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        json_embedded_object = "json_embedded_object"
+
+        # 1. Create schema with multi fields including arrays and JSON
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_int32_field_name, DataType.INT32, default_value=np.int32(1), nullable=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT, default_value=np.float32(1.0), nullable=True)
+        # Partition key field cannot be nullable
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length,
+                         default_value="abc", nullable=not enable_partition_key, is_partition_key=enable_partition_key)
+        schema.add_field(ct.default_int32_array_field_name, DataType.ARRAY, element_type=DataType.INT32,
+                         max_capacity=ct.default_max_capacity, nullable=True)
+        schema.add_field(ct.default_float_array_field_name, DataType.ARRAY, element_type=DataType.FLOAT,
+                         max_capacity=ct.default_max_capacity, nullable=True)
+        schema.add_field(ct.default_string_array_field_name, DataType.ARRAY, element_type=DataType.VARCHAR,
+                         max_capacity=ct.default_max_capacity, max_length=100, nullable=True)
+        schema.add_field(json_embedded_object, DataType.JSON, nullable=True)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=ct.default_dim)
+
+        self.create_collection(client, collection_name, schema=schema)
+
+        # 2. Insert initial data
+        vectors = cf.gen_vectors(ct.default_nb, ct.default_dim)
+        json_data = cf.gen_json_data_for_diff_json_types(nb=ct.default_nb, start=0, json_type=json_embedded_object)
+        insert_data = []
+        for i in range(ct.default_nb):
+            row = {
+                ct.default_int64_field_name: i,
+                ct.default_float_field_name: np.float32(2.0),
+                ct.default_string_field_name: str(i),
+                ct.default_int32_array_field_name: [np.int32(j) for j in range(10)],
+                ct.default_float_array_field_name: [np.float32(j) for j in range(10)],
+                ct.default_string_array_field_name: [str(j) for j in range(10)],
+                json_embedded_object: json_data[i][json_embedded_object],
+                ct.default_float_vec_field_name: vectors[i]
+            }
+            # Add int32 field based on default_value
+            if len(default_value) > 0:
+                row[ct.default_int32_field_name] = default_value[i]
+            # If default_value is [], omit the field to use default value
+            insert_data.append(row)
+
+        self.insert(client, collection_name, insert_data)
+        self.flush(client, collection_name)
+
+        # Create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+
+        # 3. Prepare upsert data with default value fields ([] or [None])
+        vectors_upsert = cf.gen_vectors(ct.default_nb, ct.default_dim)
+        upsert_data = []
+        for i in range(ct.default_nb):
+            row = {
+                ct.default_int64_field_name: i,
+                ct.default_int32_array_field_name: [np.int32(j) for j in range(10)],
+                ct.default_float_array_field_name: [np.float32(j) for j in range(10)],
+                ct.default_float_vec_field_name: vectors_upsert[i]
+            }
+            if len(default_value) > 0:
+                # If default_value is [None, None, ...], set fields to None
+                row[ct.default_int32_field_name] = default_value[i]
+                row[ct.default_float_field_name] = default_value[i]
+                row[ct.default_string_field_name] = default_value[i]
+                row[ct.default_string_array_field_name] = default_value[i]
+                row[json_embedded_object] = default_value[i]
+            # If default_value is [], omit these fields to use default values
+            upsert_data.append(row)
+
+        self.upsert(client, collection_name, upsert_data)
+        self.flush(client, collection_name)
+
+        # 4. Check the result
+        exp = f"{ct.default_float_field_name} == {np.float32(1.0)}"
+        res = self.query(client, collection_name, filter=exp,
+                         output_fields=[default_float_field_name, json_embedded_object,
+                                        ct.default_string_array_field_name])[0]
+        assert len(res) == ct.default_nb
+        assert res[0][json_embedded_object] is None
+        assert res[0][ct.default_string_array_field_name] is None
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_partition_key", [True, False])
+    @pytest.mark.parametrize("nullable", [True, False])
+    def test_milvus_client_upsert_multi_fields_by_rows_using_default(self, enable_partition_key, nullable):
+        """
+        target: test upsert multi fields by rows with default value
+        method: 1. create a collection with one field using default value
+                2. upsert using default value to replace the field value
+        expected: upsert successfully
+        """
+        # Skip if partition key and nullable both are True
+        if enable_partition_key is True and nullable is True:
+            pytest.skip("partition key field not support nullable")
+
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create schema with default value fields
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT, default_value=np.float32(3.14), nullable=nullable)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length,
+                         default_value="abc", nullable=nullable, is_partition_key=enable_partition_key)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=ct.default_dim)
+
+        self.create_collection(client, collection_name, schema=schema)
+
+        # Create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+
+        # 2. Prepare upsert data and set None for even-indexed records
+        upsert_data = cf.gen_default_rows_data()
+        for i in range(0, ct.default_nb, 2):
+            upsert_data[i][ct.default_float_field_name] = None
+            upsert_data[i][ct.default_string_field_name] = None
+
+        self.upsert(client, collection_name, upsert_data)
+        self.flush(client, collection_name)
+
+        # 3. Check the result
+        exp = f"{ct.default_float_field_name} == {np.float32(3.14)} and {ct.default_string_field_name} == 'abc'"
+        res = self.query(client, collection_name, filter=exp,
+                         output_fields=[ct.default_float_field_name, ct.default_string_field_name])[0]
+        assert len(res) == ct.default_nb // 2
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_partition_key", [True, False])
+    def test_milvus_client_upsert_multi_fields_by_rows_using_none(self, enable_partition_key):
+        """
+        target: test insert/upsert multi fields by rows with none value
+        method: 1. create a collection with one field using none value
+                2. insert/upsert using none to replace the field value
+        expected: insert/upsert successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create schema
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT, nullable=True)
+        # Partition key field cannot be nullable
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length,
+                         default_value="abc", nullable=not enable_partition_key, is_partition_key=enable_partition_key)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=ct.default_dim)
+
+        self.create_collection(client, collection_name, schema=schema)
+
+        # Create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name, metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+
+        # 2. Insert data with None for odd-indexed records
+        insert_data = cf.gen_default_rows_data()
+        for i in range(1, ct.default_nb, 2):
+            insert_data[i][ct.default_float_field_name] = None
+            insert_data[i][ct.default_string_field_name] = None
+
+        self.insert(client, collection_name, insert_data)
+        self.flush(client, collection_name)
+
+        # 3. Upsert data with None for even-indexed records
+        upsert_data = cf.gen_default_rows_data()
+        for i in range(0, ct.default_nb, 2):
+            upsert_data[i][ct.default_float_field_name] = None
+            upsert_data[i][ct.default_string_field_name] = None
+
+        self.upsert(client, collection_name, upsert_data)
+        self.flush(client, collection_name)
+
+        # 4. Check the result
+        exp = f"{ct.default_int64_field_name} >= 0"
+        res = self.query(client, collection_name, filter=exp,
+                         output_fields=[ct.default_float_field_name, ct.default_string_field_name])[0]
+        assert len(res) == ct.default_nb
+        assert res[0][ct.default_float_field_name] is None
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index", ct.all_index_types[10:12])
+    def test_milvus_client_upsert_sparse_data(self, index):
+        """
+        target: multiple upserts and counts(*)
+        method: multiple upserts and counts(*)
+        expected: number of data entries normal
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # 1. Create schema with sparse vector
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
+        schema.add_field(ct.default_sparse_vec_field_name, DataType.SPARSE_FLOAT_VECTOR)
+
+        self.create_collection(client, collection_name, schema=schema)
+
+        # 2. Prepare upsert data
+        sparse_vectors = cf.gen_sparse_vectors(nb=ct.default_nb, dim=128)
+        rows = [{ct.default_int64_field_name: i, ct.default_float_field_name: np.float32(i),
+                 ct.default_string_field_name: str(i),
+                 ct.default_sparse_vec_field_name: sparse_vectors[i]} for i in range(ct.default_nb)]
+
+        self.upsert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Verify num entities
+        num_entities = self.get_collection_stats(client, collection_name)[0]
+        assert num_entities.get("row_count", None) == ct.default_nb
+
+        # 3. Create index and load
+        params = cf.get_index_params_params(index)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_sparse_vec_field_name, index_type=index, metric_type="IP",
+                               params=params)
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+
+        # 4. Multiple upserts and verify count
+        for i in range(5):
+            self.upsert(client, collection_name, rows)
+            self.flush(client, collection_name)
+            res = self.query(client, collection_name, filter=f'{ct.default_int64_field_name} >= 0',
+                             output_fields=[ct.default_count_output])[0]
+            assert res[0][ct.default_count_output] == ct.default_nb
+
+        self.drop_collection(client, collection_name)
