@@ -1,6 +1,9 @@
 package milvusclient
 
-import "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+import (
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+)
 
 // MilvusClusterBuilder defines the interface for building Milvus cluster configuration
 type MilvusClusterBuilder interface {
@@ -17,7 +20,7 @@ type MilvusClusterBuilder interface {
 	Build() *commonpb.MilvusCluster
 }
 
-// ReplicateConfigurationBuilder defines the interface for building replicate configuration
+// ReplicateConfigurationBuilder defines the interface for building replicate configuration request
 type ReplicateConfigurationBuilder interface {
 	// WithCluster adds a cluster configuration, you can use MilvusClusterBuilder to create a cluster
 	WithCluster(cluster *commonpb.MilvusCluster) ReplicateConfigurationBuilder
@@ -25,8 +28,11 @@ type ReplicateConfigurationBuilder interface {
 	// WithTopology adds a cross-cluster topology configuration
 	WithTopology(sourceClusterID, targetClusterID string) ReplicateConfigurationBuilder
 
-	// Build constructs and returns the configuration object
-	Build() *commonpb.ReplicateConfiguration
+	// WithForcePromote enables force promote for failover scenarios
+	WithForcePromote() ReplicateConfigurationBuilder
+
+	// Build constructs and returns the request object
+	Build() *milvuspb.UpdateReplicateConfigurationRequest
 }
 
 // NewMilvusClusterBuilder creates a new Milvus cluster builder
@@ -82,7 +88,8 @@ func (b *milvusClusterBuilder) Build() *commonpb.MilvusCluster {
 }
 
 type replicateConfigurationBuilder struct {
-	config *commonpb.ReplicateConfiguration
+	config       *commonpb.ReplicateConfiguration
+	forcePromote bool
 }
 
 func newReplicateConfigurationBuilder() ReplicateConfigurationBuilder {
@@ -91,6 +98,7 @@ func newReplicateConfigurationBuilder() ReplicateConfigurationBuilder {
 			Clusters:             []*commonpb.MilvusCluster{},
 			CrossClusterTopology: []*commonpb.CrossClusterTopology{},
 		},
+		forcePromote: false,
 	}
 }
 
@@ -108,6 +116,14 @@ func (b *replicateConfigurationBuilder) WithTopology(sourceClusterID, targetClus
 	return b
 }
 
-func (b *replicateConfigurationBuilder) Build() *commonpb.ReplicateConfiguration {
-	return b.config
+func (b *replicateConfigurationBuilder) WithForcePromote() ReplicateConfigurationBuilder {
+	b.forcePromote = true
+	return b
+}
+
+func (b *replicateConfigurationBuilder) Build() *milvuspb.UpdateReplicateConfigurationRequest {
+	return &milvuspb.UpdateReplicateConfigurationRequest{
+		ReplicateConfiguration: b.config,
+		ForcePromote:           b.forcePromote,
+	}
 }
