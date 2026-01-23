@@ -333,7 +333,8 @@ func (req *CollectionDataReq) GetDbName() string { return req.DbName }
 type SearchReqV2 struct {
 	DbName           string                 `json:"dbName"`
 	CollectionName   string                 `json:"collectionName" binding:"required"`
-	Data             []interface{}          `json:"data" binding:"required"`
+	Data             []interface{}          `json:"data"`
+	Ids              []interface{}          `json:"ids"`
 	AnnsField        string                 `json:"annsField"`
 	PartitionNames   []string               `json:"partitionNames"`
 	Filter           string                 `json:"filter"`

@@ -2793,3 +2793,142 @@ func TestParseUsernamePassword(t *testing.T) {
 		assert.Equal(t, "", password)
 	})
 }
+
+func TestConvertIDsToSchemapbIDs(t *testing.T) {
+	int64PkField := &schemapb.FieldSchema{
+		FieldID:      common.StartOfUserFieldID,
+		Name:         "id",
+		IsPrimaryKey: true,
+		DataType:     schemapb.DataType_Int64,
+	}
+
+	varcharPkField := &schemapb.FieldSchema{
+		FieldID:      common.StartOfUserFieldID,
+		Name:         "id",
+		IsPrimaryKey: true,
+		DataType:     schemapb.DataType_VarChar,
+	}
+
+	t.Run("empty ids array", func(t *testing.T) {
+		_, err := convertIDsToSchemapbIDs([]interface{}{}, int64PkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ids array cannot be empty")
+	})
+
+	t.Run("int64 pk with float64 values (whole numbers)", func(t *testing.T) {
+		// JSON numbers are decoded as float64
+		ids := []interface{}{float64(1), float64(2), float64(3)}
+		result, err := convertIDsToSchemapbIDs(ids, int64PkField)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		intIds := result.GetIntId()
+		assert.NotNil(t, intIds)
+		assert.Equal(t, []int64{1, 2, 3}, intIds.Data)
+	})
+
+	t.Run("int64 pk with float64 values having fractional part", func(t *testing.T) {
+		ids := []interface{}{float64(1.5)}
+		_, err := convertIDsToSchemapbIDs(ids, int64PkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "has fractional part")
+	})
+
+	t.Run("int64 pk with float64 values - second element has fractional part", func(t *testing.T) {
+		ids := []interface{}{float64(1), float64(2.9)}
+		_, err := convertIDsToSchemapbIDs(ids, int64PkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "index 1")
+		assert.Contains(t, err.Error(), "has fractional part")
+	})
+
+	t.Run("int64 pk with int64 values", func(t *testing.T) {
+		ids := []interface{}{int64(100), int64(200)}
+		result, err := convertIDsToSchemapbIDs(ids, int64PkField)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		intIds := result.GetIntId()
+		assert.NotNil(t, intIds)
+		assert.Equal(t, []int64{100, 200}, intIds.Data)
+	})
+
+	t.Run("int64 pk with int values", func(t *testing.T) {
+		ids := []interface{}{int(10), int(20)}
+		result, err := convertIDsToSchemapbIDs(ids, int64PkField)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		intIds := result.GetIntId()
+		assert.NotNil(t, intIds)
+		assert.Equal(t, []int64{10, 20}, intIds.Data)
+	})
+
+	t.Run("int64 pk with valid string values", func(t *testing.T) {
+		ids := []interface{}{"123", "456"}
+		result, err := convertIDsToSchemapbIDs(ids, int64PkField)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		intIds := result.GetIntId()
+		assert.NotNil(t, intIds)
+		assert.Equal(t, []int64{123, 456}, intIds.Data)
+	})
+
+	t.Run("int64 pk with invalid string values", func(t *testing.T) {
+		ids := []interface{}{"not_a_number"}
+		_, err := convertIDsToSchemapbIDs(ids, int64PkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid int64 id")
+	})
+
+	t.Run("int64 pk with invalid type", func(t *testing.T) {
+		ids := []interface{}{true}
+		_, err := convertIDsToSchemapbIDs(ids, int64PkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid id type")
+	})
+
+	t.Run("varchar pk with string values", func(t *testing.T) {
+		ids := []interface{}{"abc", "def", "ghi"}
+		result, err := convertIDsToSchemapbIDs(ids, varcharPkField)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		strIds := result.GetStrId()
+		assert.NotNil(t, strIds)
+		assert.Equal(t, []string{"abc", "def", "ghi"}, strIds.Data)
+	})
+
+	t.Run("varchar pk with empty string", func(t *testing.T) {
+		ids := []interface{}{""}
+		_, err := convertIDsToSchemapbIDs(ids, varcharPkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "empty string id")
+	})
+
+	t.Run("varchar pk with number values", func(t *testing.T) {
+		ids := []interface{}{float64(123), int64(456), int(789)}
+		result, err := convertIDsToSchemapbIDs(ids, varcharPkField)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		strIds := result.GetStrId()
+		assert.NotNil(t, strIds)
+		assert.Equal(t, []string{"123", "456", "789"}, strIds.Data)
+	})
+
+	t.Run("varchar pk with invalid type", func(t *testing.T) {
+		ids := []interface{}{[]int{1, 2, 3}}
+		_, err := convertIDsToSchemapbIDs(ids, varcharPkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid id type")
+	})
+
+	t.Run("unsupported pk type", func(t *testing.T) {
+		boolPkField := &schemapb.FieldSchema{
+			FieldID:      common.StartOfUserFieldID,
+			Name:         "id",
+			IsPrimaryKey: true,
+			DataType:     schemapb.DataType_Bool,
+		}
+		ids := []interface{}{float64(1)}
+		_, err := convertIDsToSchemapbIDs(ids, boolPkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported primary key type")
+	})
+}
