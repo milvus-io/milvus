@@ -237,6 +237,7 @@ message AlterReplicateConfigMessageHeader {
     // (instead of the current config) to map all broadcast channels including newly added ones,
     // and CDC uses nil checkpoint for new pchannels.
     bool is_pchannel_increasing = 2;
+    bool force_promote = 3;  // indicates this is a forced promote to primary
 }
 
 // AlterReplicateConfigMessageBody is the body of alter replicate configuration message.
