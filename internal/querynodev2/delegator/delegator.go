@@ -391,7 +391,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	}
 	sealedNumWithLargeRowCount := optimizers.CalculateEffectiveSegmentNum(rowCounts, req.GetReq().GetTopk())
 
-	log.Info("search segments...",
+	log.Debug("search segments...",
 		zap.Int("sealedNum", sealedNum),
 		zap.Int("growingNum", len(growing)),
 		zap.Int("sealedNumWithLargeRowCount", sealedNumWithLargeRowCount),
