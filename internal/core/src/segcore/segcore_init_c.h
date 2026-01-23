@@ -124,7 +124,8 @@ ConfigureTieredStorage(
     const float overloaded_memory_threshold_percentage,
     const float loading_resource_factor,
     const float max_disk_usage_percentage,
-    const char* disk_path);
+    const char* disk_path,
+    const int64_t loading_timeout_ms);
 
 #ifdef __cplusplus
 }

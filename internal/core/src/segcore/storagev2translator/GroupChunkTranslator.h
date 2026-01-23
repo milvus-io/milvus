@@ -64,7 +64,8 @@ class GroupChunkTranslator
 
     std::vector<std::pair<milvus::cachinglayer::cid_t,
                           std::unique_ptr<milvus::GroupChunk>>>
-    get_cells(const std::vector<milvus::cachinglayer::cid_t>& cids) override;
+    get_cells(milvus::OpContext* ctx,
+              const std::vector<milvus::cachinglayer::cid_t>& cids) override;
 
     std::pair<size_t, size_t>
     get_file_and_row_group_offset(size_t global_row_group_idx) const;

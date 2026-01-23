@@ -21,8 +21,8 @@ class InterimSealedIndexTranslator
  public:
     InterimSealedIndexTranslator(
         std::shared_ptr<ChunkedColumnInterface> vec_data,
-        std::string segment_id,
-        std::string field_id,
+        int64_t segment_id,
+        int64_t field_id,
         knowhere::IndexType index_type,
         knowhere::MetricType metric_type,
         knowhere::Json build_config,
@@ -40,7 +40,8 @@ class InterimSealedIndexTranslator
     key() const override;
     std::vector<std::pair<milvus::cachinglayer::cid_t,
                           std::unique_ptr<milvus::index::IndexBase>>>
-    get_cells(const std::vector<milvus::cachinglayer::cid_t>& cids) override;
+    get_cells(milvus::OpContext* ctx,
+              const std::vector<milvus::cachinglayer::cid_t>& cids) override;
     Meta*
     meta() override;
 
@@ -52,8 +53,8 @@ class InterimSealedIndexTranslator
 
  private:
     std::shared_ptr<ChunkedColumnInterface> vec_data_;
-    std::string segment_id_;
-    std::string field_id_;
+    int64_t segment_id_;
+    int64_t field_id_;
     knowhere::IndexType index_type_;
     knowhere::MetricType metric_type_;
     knowhere::Json build_config_;

@@ -21,6 +21,7 @@
 
 #include "common/FieldData.h"
 #include "common/LoadInfo.h"
+#include "common/OpContext.h"
 #include "common/Types.h"
 #include "common/Tracer.h"
 #include "common/type_c.h"
@@ -161,17 +162,46 @@ ReopenSegment(CTraceContext c_trace,
     }
 }
 
+CLoadCancellationSource
+NewLoadCancellationSource() {
+    return new folly::CancellationSource();
+}
+
+void
+CancelLoadCancellationSource(CLoadCancellationSource source) {
+    if (source) {
+        static_cast<folly::CancellationSource*>(source)->requestCancellation();
+    }
+}
+
+void
+ReleaseLoadCancellationSource(CLoadCancellationSource source) {
+    delete static_cast<folly::CancellationSource*>(source);
+}
+
 CStatus
-SegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment) {
+SegmentLoad(CTraceContext c_trace,
+            CSegmentInterface c_segment,
+            CLoadCancellationSource source) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
         auto segment =
             static_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        // TODO unify trace context to op context after supported
         auto trace_ctx = milvus::tracer::TraceContext{
             c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
-        segment->Load(trace_ctx);
+
+        if (source) {
+            // Create OpContext with cancellation token from source
+            auto cancellation_source =
+                static_cast<folly::CancellationSource*>(source);
+            milvus::OpContext op_ctx(cancellation_source->getToken());
+            segment->Load(trace_ctx, &op_ctx);
+        } else {
+            // No cancellation source
+            segment->Load(trace_ctx, nullptr);
+        }
+
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
@@ -544,7 +574,8 @@ UpdateSealedSegmentIndex(CSegmentInterface c_segment,
 CStatus
 LoadTextIndex(CSegmentInterface c_segment,
               const uint8_t* serialized_load_text_index_info,
-              const uint64_t len) {
+              const uint64_t len,
+              CLoadCancellationSource source) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -558,7 +589,14 @@ LoadTextIndex(CSegmentInterface c_segment,
             std::make_unique<milvus::proto::indexcgo::LoadTextIndexInfo>();
         info_proto->ParseFromArray(serialized_load_text_index_info, len);
 
-        segment->LoadTextIndex(std::move(info_proto));
+        if (source) {
+            auto cancellation_source =
+                static_cast<folly::CancellationSource*>(source);
+            milvus::OpContext op_ctx(cancellation_source->getToken());
+            segment->LoadTextIndex(std::move(info_proto), &op_ctx);
+        } else {
+            segment->LoadTextIndex(std::move(info_proto), nullptr);
+        }
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
@@ -569,7 +607,8 @@ CStatus
 LoadJsonKeyIndex(CTraceContext c_trace,
                  CSegmentInterface c_segment,
                  const uint8_t* serialized_load_json_key_index_info,
-                 const uint64_t len) {
+                 const uint64_t len,
+                 CLoadCancellationSource source) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -580,6 +619,18 @@ LoadJsonKeyIndex(CTraceContext c_trace,
         auto segment =
             dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
         AssertInfo(segment != nullptr, "segment conversion failed");
+
+        // Check for cancellation before starting
+        if (source) {
+            auto cancellation_source =
+                static_cast<folly::CancellationSource*>(source);
+            if (cancellation_source->getToken().isCancellationRequested()) {
+                throw milvus::SegcoreError(
+                    milvus::ErrorCode::FollyCancel,
+                    fmt::format("Load cancelled for segment {} json stats",
+                                segment->get_segment_id()));
+            }
+        }
 
         auto info_proto =
             std::make_unique<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>();
@@ -744,13 +795,24 @@ RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id) {
 }
 
 CStatus
-CreateTextIndex(CSegmentInterface c_segment, int64_t field_id) {
+CreateTextIndex(CSegmentInterface c_segment,
+                int64_t field_id,
+                CLoadCancellationSource source) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        segment_interface->CreateTextIndex(milvus::FieldId(field_id));
+        if (source) {
+            auto cancellation_source =
+                static_cast<folly::CancellationSource*>(source);
+            milvus::OpContext op_ctx(cancellation_source->getToken());
+            segment_interface->CreateTextIndex(milvus::FieldId(field_id),
+                                               &op_ctx);
+        } else {
+            segment_interface->CreateTextIndex(milvus::FieldId(field_id),
+                                               nullptr);
+        }
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());

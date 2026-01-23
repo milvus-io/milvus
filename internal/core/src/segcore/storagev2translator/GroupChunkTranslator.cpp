@@ -14,7 +14,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
+
 #include "common/type_c.h"
+#include "segcore/Utils.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "common/GroupChunk.h"
 #include "mmap/Types.h"
@@ -279,7 +281,11 @@ GroupChunkTranslator::get_global_row_group_idx(size_t file_idx,
 }
 
 std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>>
-GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
+GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
+                                const std::vector<cachinglayer::cid_t>& cids) {
+    // Check for cancellation before loading group chunks
+    CheckCancellation(ctx, segment_id_, "GroupChunkTranslator::get_cells()");
+
     std::vector<std::pair<milvus::cachinglayer::cid_t,
                           std::unique_ptr<milvus::GroupChunk>>>
         cells;
@@ -322,7 +328,10 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
     auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                   .GetArrowFileSystem();
 
-    auto load_future = pool.Submit([&]() {
+    auto load_future = pool.Submit([&, ctx]() {
+        // Early exit if cancelled while queued
+        CheckCancellation(
+            ctx, segment_id_, "GroupChunkTranslator::get_cells()");
         return LoadWithStrategy(insert_files_,
                                 channel,
                                 DEFAULT_FIELD_MAX_MEMORY_LIMIT,
@@ -346,6 +355,9 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
     // !!! NOTE: the popped row group tables are sorted by the global row group index
     // !!! Never rely on the order of the popped row group tables.
     while (channel->pop(r)) {
+        // Check cancellation while processing results
+        CheckCancellation(
+            ctx, segment_id_, "GroupChunkTranslator::get_cells()");
         for (const auto& table_info : r->arrow_tables) {
             // Convert file_index and row_group_index (file inner index, not global index) to global row group index
             auto rg_idx = get_global_row_group_idx(table_info.file_index,

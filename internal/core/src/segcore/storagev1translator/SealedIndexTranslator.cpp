@@ -1,8 +1,11 @@
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
+
+#include <utility>
+
 #include "index/IndexFactory.h"
+#include "segcore/Utils.h"
 #include "segcore/load_index_c.h"
 #include "segcore/Utils.h"
-#include <utility>
 
 namespace milvus::segcore::storagev1translator {
 
@@ -96,7 +99,10 @@ SealedIndexTranslator::key() const {
 
 std::vector<std::pair<milvus::cachinglayer::cid_t,
                       std::unique_ptr<milvus::index::IndexBase>>>
-SealedIndexTranslator::get_cells(const std::vector<cid_t>& cids) {
+SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
+                                 const std::vector<cid_t>& cids) {
+    int64_t segment_id = std::stoll(index_load_info_.segment_id);
+
     std::unique_ptr<milvus::index::IndexBase> index =
         milvus::index::IndexFactory::GetInstance().CreateIndex(
             index_info_, file_manager_context_);
@@ -131,6 +137,9 @@ SealedIndexTranslator::get_cells(const std::vector<cid_t>& cids) {
     } else {
         config_[milvus::index::ENABLE_MMAP] = "false";
     }
+
+    // Check for cancellation before loading index data
+    CheckCancellation(ctx, segment_id, "LoadIndex");
 
     LOG_INFO("load index with configs: {}", config_.dump());
     index->Load(ctx_, config_);

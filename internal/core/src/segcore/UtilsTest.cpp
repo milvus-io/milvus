@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "common/OpContext.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "segcore/ConcurrentVector.h"
@@ -186,4 +187,88 @@ TEST(Util_Segcore, MergeDataArrayWithNullableVectors) {
     ASSERT_TRUE(merged_result->valid_data(2));
     ASSERT_TRUE(merged_result->valid_data(3));
     ASSERT_TRUE(merged_result->valid_data(4));
+}
+
+// Tests for CheckCancellation utility function
+TEST(UtilSegcore, CheckCancellationNullContext) {
+    using namespace milvus::segcore;
+
+    // Should not throw when op_ctx is nullptr
+    EXPECT_NO_THROW(CheckCancellation(nullptr, 123, "TestOperation"));
+    EXPECT_NO_THROW(CheckCancellation(nullptr, 123, 456, "TestOperation"));
+}
+
+TEST(UtilSegcore, CheckCancellationNotCancelled) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    // Create a cancellation source that is NOT cancelled
+    folly::CancellationSource source;
+    OpContext op_ctx(source.getToken());
+
+    // Should not throw when cancellation is not requested
+    EXPECT_NO_THROW(CheckCancellation(&op_ctx, 123, "TestOperation"));
+    EXPECT_NO_THROW(CheckCancellation(&op_ctx, 123, 456, "TestOperation"));
+}
+
+TEST(UtilSegcore, CheckCancellationCancelled) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    // Create a cancellation source and request cancellation
+    folly::CancellationSource source;
+    OpContext op_ctx(source.getToken());
+    source.requestCancellation();
+
+    // Should throw SegcoreError with FollyCancel when cancelled
+    try {
+        CheckCancellation(&op_ctx, 123, "TestOperation");
+        FAIL() << "Expected SegcoreError to be thrown";
+    } catch (const SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
+        EXPECT_TRUE(std::string(e.what()).find("TestOperation") !=
+                    std::string::npos);
+        EXPECT_TRUE(std::string(e.what()).find("123") != std::string::npos);
+    }
+}
+
+TEST(UtilSegcore, CheckCancellationCancelledWithFieldId) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    // Create a cancellation source and request cancellation
+    folly::CancellationSource source;
+    OpContext op_ctx(source.getToken());
+    source.requestCancellation();
+
+    // Should throw SegcoreError with field info in message
+    try {
+        CheckCancellation(&op_ctx, 123, 456, "LoadFieldData");
+        FAIL() << "Expected SegcoreError to be thrown";
+    } catch (const SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
+        EXPECT_TRUE(std::string(e.what()).find("LoadFieldData") !=
+                    std::string::npos);
+        EXPECT_TRUE(std::string(e.what()).find("123") != std::string::npos);
+        EXPECT_TRUE(std::string(e.what()).find("456") != std::string::npos);
+    }
+}
+
+TEST(UtilSegcore, CheckCancellationCancelAfterCheck) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    // Create a cancellation source
+    folly::CancellationSource source;
+    OpContext op_ctx(source.getToken());
+
+    // First check should pass
+    EXPECT_NO_THROW(CheckCancellation(&op_ctx, 123, "TestOperation"));
+
+    // Request cancellation
+    source.requestCancellation();
+
+    // Second check should throw
+    EXPECT_THROW(CheckCancellation(&op_ctx, 123, "TestOperation"),
+                 SegcoreError);
 }
