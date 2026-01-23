@@ -365,9 +365,9 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
         BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
         auto valid_count = active_count - view.count();
-        LOG_INFO("filter only result validCount: {}, activeCount: {}",
-                 valid_count,
-                 active_count);
+        LOG_DEBUG("filter only result validCount: {}, activeCount: {}",
+                  valid_count,
+                  active_count);
         filter_only_result.valid_count_ = valid_count;
         search_result_opt_ = std::move(filter_only_result);
         return;
