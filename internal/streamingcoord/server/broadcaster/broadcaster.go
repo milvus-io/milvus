@@ -24,6 +24,10 @@ type Broadcaster interface {
 	// Ack acknowledges the message at the specified vchannel.
 	Ack(ctx context.Context, msg message.ImmutableMessage) error
 
+	// GetPendingBroadcastMessages returns all pending broadcast messages that need to be appended.
+	// Used by forced promotion to supplement incomplete broadcasts.
+	GetPendingBroadcastMessages() []message.MutableMessage
+
 	// Close closes the broadcaster.
 	Close()
 }

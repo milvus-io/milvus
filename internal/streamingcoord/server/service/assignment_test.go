@@ -188,3 +188,60 @@ func TestAssignmentService(t *testing.T) {
 		MustBuildBroadcast()
 	assert.NoError(t, registry.CallMessageAckCallback(context.Background(), msg, map[string]*message.AppendResult{}))
 }
+
+func TestForcePromoteValidation(t *testing.T) {
+	// Test validateForcePromoteConfiguration function directly
+
+	t.Run("valid_single_cluster_no_topology", func(t *testing.T) {
+		cfg := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "by-dev", Pchannels: []string{"by-dev-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://test:19530", Token: "by-dev"}},
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{},
+		}
+		err := validateForcePromoteConfiguration(cfg, "by-dev")
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid_multiple_clusters", func(t *testing.T) {
+		cfg := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "by-dev", Pchannels: []string{"by-dev-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://test:19530", Token: "by-dev"}},
+				{ClusterId: "test2", Pchannels: []string{"test2"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://test2:19530", Token: "test2"}},
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{},
+		}
+		err := validateForcePromoteConfiguration(cfg, "by-dev")
+		assert.Error(t, err)
+		// Config helper validates this as "primary count is not 1"
+		assert.Contains(t, err.Error(), "primary count is not 1")
+	})
+
+	t.Run("invalid_with_topology", func(t *testing.T) {
+		cfg := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "by-dev", Pchannels: []string{"by-dev-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://test:19530", Token: "by-dev"}},
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "by-dev", TargetClusterId: "test2"},
+			},
+		}
+		err := validateForcePromoteConfiguration(cfg, "by-dev")
+		assert.Error(t, err)
+		// Config helper validates this as invalid topology/wrong configuration
+		assert.Contains(t, err.Error(), "wrong replicate configuration")
+	})
+
+	t.Run("invalid_wrong_cluster", func(t *testing.T) {
+		cfg := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "test2", Pchannels: []string{"test2-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://test2:19530", Token: "test2"}},
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{},
+		}
+		err := validateForcePromoteConfiguration(cfg, "by-dev")
+		assert.Error(t, err)
+		// Config helper validates this as "current cluster not found"
+		assert.Contains(t, err.Error(), "current cluster not found")
+	})
+}
