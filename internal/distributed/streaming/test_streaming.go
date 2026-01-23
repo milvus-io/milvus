@@ -25,6 +25,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
@@ -60,7 +61,7 @@ func (n *noopReplicateService) Append(ctx context.Context, msg message.Replicate
 	return nil, nil
 }
 
-func (n *noopReplicateService) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
+func (n *noopReplicateService) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) error {
 	return nil
 }
 
@@ -238,7 +239,7 @@ func (n *noopWALAccesser) GetReplicateCheckpoint(ctx context.Context, channelNam
 	return nil, nil
 }
 
-func (n *noopWALAccesser) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
+func (n *noopWALAccesser) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) error {
 	return nil
 }
 
