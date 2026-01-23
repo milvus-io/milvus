@@ -1065,10 +1065,10 @@ TEST(ExtractFilterOnlyPlanTest, NestedVectorSearchNode) {
     auto vector_search_node = std::make_shared<milvus::plan::VectorSearchNode>(
         "vector_search", std::move(sources));
 
-    // Wrap VectorSearchNode in another node (e.g., SearchGroupByNode)
+    // Wrap VectorSearchNode in another node (e.g., GroupByNode)
     std::vector<milvus::plan::PlanNodePtr> group_sources;
     group_sources.push_back(vector_search_node);
-    auto group_by_node = std::make_shared<milvus::plan::SearchGroupByNode>(
+    auto group_by_node = std::make_shared<milvus::plan::GroupByNode>(
         "group_by", std::move(group_sources));
 
     // ExtractFilterOnlyPlan should find the VectorSearchNode and return its source
