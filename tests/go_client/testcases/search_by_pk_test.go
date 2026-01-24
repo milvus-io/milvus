@@ -292,15 +292,18 @@ func TestSearchByPKWithDuplicateIDs(t *testing.T) {
 		WithConsistencyLevel(entity.ClStrong)
 
 	resSearch, err := mc.Search(ctx, searchOption)
-	// Note: Behavior may vary - some systems deduplicate, others may error
-	// For now, we just verify it doesn't crash and returns some results
-	if err == nil {
-		require.NotEmpty(t, resSearch, "Expected some results for duplicate IDs")
-		// Result count may be 2 (deduplicated) or 4 (all duplicates processed)
-		require.True(t, len(resSearch) >= 2, "Expected at least 2 result sets")
-	} else {
-		// If error is returned, it should mention duplicates
-		t.Logf("Search with duplicate IDs returned error (expected): %v", err)
+	common.CheckErr(t, err, true)
+
+	// Milvus processes each ID in the input list, including duplicates
+	// Expected behavior: 4 result sets (one for each ID, including duplicates)
+	require.Equal(t, len(duplicateIDs), len(resSearch),
+		"Expected one result set per input ID (including duplicates)")
+
+	// Verify that each result set has valid results
+	for i, resultSet := range resSearch {
+		require.NotNil(t, resultSet, "Result set %d should not be nil", i)
+		require.Greater(t, resultSet.ResultCount, 0,
+			"Result set %d should have at least one result", i)
 	}
 }
 
@@ -565,20 +568,19 @@ func TestSearchByPKWithInvalidIDs(t *testing.T) {
 		WithConsistencyLevel(entity.ClStrong)
 
 	resSearch, err := mc.Search(ctx, searchOption)
+	common.CheckErr(t, err, true)
 
-	// System may handle this in different ways:
-	// 1. Return empty results (no matches for non-existent IDs)
-	// 2. Return error
-	if err != nil {
-		// Error is acceptable for invalid IDs
-		t.Logf("Search with invalid IDs returned error (acceptable): %v", err)
-	} else {
-		// If no error, results should be empty or have no matches
-		t.Logf("Search with invalid IDs completed, result count: %d", len(resSearch))
-		// Each result set may be empty or have 0 results
-		for i, resultSet := range resSearch {
-			t.Logf("Result set %d has %d results", i, resultSet.ResultCount)
-		}
+	// For non-existent IDs, Milvus should return empty result sets
+	// Expected: one result set per query ID, but each with 0 results
+	require.Equal(t, len(invalidIDs), len(resSearch),
+		"Expected one result set per input ID")
+
+	// Verify that each result set has 0 results (no matches for invalid IDs)
+	for i, resultSet := range resSearch {
+		require.NotNil(t, resultSet, "Result set %d should not be nil", i)
+		require.Equal(t, 0, resultSet.ResultCount,
+			"Result set %d should have 0 results for non-existent ID %d", i, invalidIDs[i])
+		t.Logf("Result set %d (ID=%d): correctly returned 0 results", i, invalidIDs[i])
 	}
 }
 

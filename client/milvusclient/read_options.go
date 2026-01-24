@@ -95,26 +95,21 @@ func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *AnnReq
 }
 
 func (r *AnnRequest) searchRequest() (*milvuspb.SearchRequest, error) {
-	var nq int64
-
-	// Determine if this is search by IDs or search by vectors
-	if r.ids != nil {
-		// Search by primary key IDs
-		nq = int64(r.ids.Len())
-	} else {
-		// Traditional search by vectors
-		nq = int64(len(r.vectors))
-	}
-
 	request := &milvuspb.SearchRequest{
-		Nq:      nq,
 		Dsl:     r.expr,
 		DslType: commonpb.DslType_BoolExprV1,
 	}
 
-	// Set SearchInput based on whether we have IDs or vectors
+	// Determine search mode and build request accordingly
 	if r.ids != nil {
-		// Search by IDs: convert column to protobuf IDs
+		// Search by primary key IDs mode
+		if r.ids.Len() == 0 {
+			return nil, errors.New("IDs column for search cannot be empty")
+		}
+
+		request.Nq = int64(r.ids.Len())
+
+		// Convert IDs to protobuf format
 		pbIDs, err := column2IDs(r.ids)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to convert IDs column")
@@ -123,7 +118,10 @@ func (r *AnnRequest) searchRequest() (*milvuspb.SearchRequest, error) {
 			Ids: pbIDs,
 		}
 	} else {
-		// Traditional search: convert vectors to placeholder group
+		// Traditional search by vectors mode
+		request.Nq = int64(len(r.vectors))
+
+		// Convert vectors to placeholder group
 		placeHolderGroupBytes, err := vector2PlaceholderGroupBytes(r.vectors)
 		if err != nil {
 			return nil, err
