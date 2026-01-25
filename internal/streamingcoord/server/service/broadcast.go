@@ -22,6 +22,13 @@ func NewBroadcastService() BroadcastService {
 type broadcastServceImpl struct{}
 
 // Broadcast broadcasts the message to all channels.
+//
+// Deprecated: This method is deprecated for Import operations. Import now calls
+// DataCoord.ImportV2() directly, and DataCoord handles broadcasting internally using
+// the local broadcaster. This follows the standard DDL/DCL pattern.
+//
+// This gRPC method is kept for backward compatibility during upgrades. It may still be
+// used by old clients or other operations that haven't been migrated yet.
 func (s *broadcastServceImpl) Broadcast(ctx context.Context, req *streamingpb.BroadcastRequest) (*streamingpb.BroadcastResponse, error) {
 	msg := message.NewBroadcastMutableMessageBeforeAppend(req.Message.Payload, req.Message.Properties)
 	api, err := broadcast.StartBroadcastWithResourceKeys(ctx, msg.BroadcastHeader().ResourceKeys.Collect()...)
