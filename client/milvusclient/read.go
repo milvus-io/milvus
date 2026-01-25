@@ -18,6 +18,7 @@ package milvusclient
 
 import (
 	"context"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -32,11 +33,18 @@ import (
 )
 
 func (c *Client) Search(ctx context.Context, option SearchOption, callOptions ...grpc.CallOption) ([]ResultSet, error) {
+	startTime := time.Now()
 	req, err := option.Request()
 	if err != nil {
+		c.recordOperation("Search", "", startTime, err)
 		return nil, err
 	}
-	collection, err := c.getCollection(ctx, req.GetCollectionName())
+	collectionName := req.GetCollectionName()
+	defer func() {
+		c.recordOperation("Search", collectionName, startTime, err)
+	}()
+
+	collection, err := c.getCollection(ctx, collectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -170,13 +178,19 @@ func (c *Client) parseSearchResult(sch *entity.Schema, outputFields []string, fi
 }
 
 func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...grpc.CallOption) (ResultSet, error) {
+	startTime := time.Now()
 	var resultSet ResultSet
 	req, err := option.Request()
 	if err != nil {
+		c.recordOperation("Query", "", startTime, err)
 		return resultSet, err
 	}
+	collectionName := req.GetCollectionName()
+	defer func() {
+		c.recordOperation("Query", collectionName, startTime, err)
+	}()
 
-	collection, err := c.getCollection(ctx, req.GetCollectionName())
+	collection, err := c.getCollection(ctx, collectionName)
 	if err != nil {
 		return resultSet, err
 	}
@@ -210,12 +224,18 @@ func (c *Client) Get(ctx context.Context, option QueryOption, callOptions ...grp
 }
 
 func (c *Client) HybridSearch(ctx context.Context, option HybridSearchOption, callOptions ...grpc.CallOption) ([]ResultSet, error) {
+	startTime := time.Now()
 	req, err := option.HybridRequest()
 	if err != nil {
+		c.recordOperation("HybridSearch", "", startTime, err)
 		return nil, err
 	}
+	collectionName := req.GetCollectionName()
+	defer func() {
+		c.recordOperation("HybridSearch", collectionName, startTime, err)
+	}()
 
-	collection, err := c.getCollection(ctx, req.GetCollectionName())
+	collection, err := c.getCollection(ctx, collectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -237,10 +257,15 @@ func (c *Client) HybridSearch(ctx context.Context, option HybridSearchOption, ca
 }
 
 func (c *Client) RunAnalyzer(ctx context.Context, option RunAnalyzerOption, callOptions ...grpc.CallOption) ([]*entity.AnalyzerResult, error) {
+	startTime := time.Now()
 	req, err := option.Request()
 	if err != nil {
+		c.recordOperation("RunAnalyzer", "", startTime, err)
 		return nil, err
 	}
+	defer func() {
+		c.recordOperation("RunAnalyzer", "", startTime, err)
+	}()
 
 	var result []*entity.AnalyzerResult
 	err = c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
