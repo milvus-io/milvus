@@ -15,16 +15,13 @@ type broadcast struct {
 	*walAccesserImpl
 }
 
+// Append is deprecated and should not be used.
+// Import operations now call DataCoord directly, which handles broadcasting internally.
+// This method is kept for backward compatibility but will be removed in future versions.
 func (b broadcast) Append(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
-	assertValidBroadcastMessage(msg)
-	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return nil, ErrWALAccesserClosed
-	}
-	defer b.lifetime.Done()
-
-	// The broadcast operation will be sent to the coordinator.
-	// The coordinator will dispatch the message to all the vchannels with an eventual consistency guarantee.
-	return b.streamingCoordClient.Broadcast().Broadcast(ctx, msg)
+	// Cross-RPC broadcast has been removed as part of import refactoring.
+	// All broadcast operations should now go through the local broadcaster in coordinators.
+	panic("broadcast.Append() has been deprecated - use coordinator's internal broadcaster instead")
 }
 
 func (b broadcast) Ack(ctx context.Context, msg message.ImmutableMessage) error {
