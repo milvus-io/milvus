@@ -199,13 +199,6 @@ type Local interface {
 
 // Broadcast is the interface for writing broadcast message into the wal.
 type Broadcast interface {
-	// Append of Broadcast sends a broadcast message to all target vchannels.
-	// Guarantees the atomicity written of the messages and eventual consistency.
-	// The resource-key bound at the message will be held as a mutex until the message is broadcasted to all vchannels,
-	// so the other append operation with the same resource-key will be searialized with a deterministic order on every vchannel.
-	// The Append operation will be blocked until the message is consumed and acknowledged by the flusher at streamingnode.
-	Append(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)
-
 	// Ack acknowledges a broadcast message at the specified vchannel.
 	// It must be called after the message is comsumed by the unique-consumer.
 	// It will only return error when the ctx is canceled.
