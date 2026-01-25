@@ -240,8 +240,10 @@ TEST(test_chunk_segment, TestSearchOnSealedWithAllNullVectors) {
 
     auto translator = std::make_unique<TestChunkTranslator>(
         num_rows_per_chunk, "", std::move(chunks));
-    auto column =
-        std::make_shared<ChunkedColumn>(std::move(translator), field_meta);
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<milvus::Chunk>(
+            std::move(translator), nullptr);
+    auto column = std::make_shared<ChunkedColumn>(std::move(slot), field_meta);
 
     // Build valid row ids to initialize offset_mapping for nullable vectors
     column->BuildValidRowIds(nullptr);
@@ -344,8 +346,10 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithAllNullVectors) {
 
     auto translator = std::make_unique<TestChunkTranslator>(
         num_rows_per_chunk, "", std::move(chunks));
-    auto column =
-        std::make_shared<ChunkedColumn>(std::move(translator), field_meta);
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<milvus::Chunk>(
+            std::move(translator), nullptr);
+    auto column = std::make_shared<ChunkedColumn>(std::move(slot), field_meta);
 
     // Build valid row ids to initialize offset_mapping for nullable vectors
     column->BuildValidRowIds(nullptr);
