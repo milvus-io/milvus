@@ -10,16 +10,8 @@ import (
 func init() {
 	resetMessageAckOnceCallbacks()
 	resetMessageAckCallbacks()
-	resetMessageCheckCallbacks()
-}
-
-var RegisterImportV1CheckCallback = registerMessageCheckCallback[*message.ImportMessageHeader, *msgpb.ImportMsg]
-
-// resetMessageCheckCallbacks resets the message check callbacks.
-func resetMessageCheckCallbacks() {
-	messageCheckCallbacks = map[message.MessageTypeWithVersion]*syncutil.Future[messageInnerCheckCallback]{
-		message.MessageTypeImportV1: syncutil.NewFuture[messageInnerCheckCallback](),
-	}
+	// CheckCallback mechanism has been removed as part of import refactoring
+	// All validation is now done before broadcasting in the respective coordinators
 }
 
 var (
