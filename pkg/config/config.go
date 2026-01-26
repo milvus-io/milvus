@@ -102,10 +102,13 @@ func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[stri
 		case []interface{}:
 			// Check if array contains complex types (maps/structs)
 			isComplexArray := false
-			if len(val) > 0 {
-				switch val[0].(type) {
+			for _, item := range val {
+				switch item.(type) {
 				case map[string]interface{}, map[interface{}]interface{}:
 					isComplexArray = true
+				}
+				if isComplexArray {
+					break
 				}
 			}
 
