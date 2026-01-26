@@ -229,10 +229,75 @@ func (s *ExpressionSuite) searchWithExpression() {
 	}
 }
 
+func (s *ExpressionSuite) TestDivisionByZeroError() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	type errorTestCase struct {
+		expr             string
+		topK             int
+		shouldError      bool
+		expectedInReason string
+	}
+
+	testcases := []errorTestCase{
+		// Valid division/modulo operations should succeed
+		{"A / 5 > 0", 10, false, ""},
+		{"B % 3 == 0", 10, false, ""},
+		{"E['F'] / 2 <= 100", 10, false, ""},
+
+		// Division by zero should fail gracefully
+		{"A / 0 > 0", 10, true, "division"},
+		{"B / 0 == 5", 10, true, "division"},
+		{"E['F'] / 0 <= 100", 10, true, "division"},
+
+		// Modulo by zero should fail gracefully
+		{"A % 0 == 1", 10, true, "modulus"},
+		{"B % 0 != 3", 10, true, "modulus"},
+		{"E['G'] % 0 == 4", 10, true, "modulus"},
+
+		// Array field division by zero
+		{"C[0] / 0 > 10", 10, true, "division"},
+		{"C[0] % 0 == 2", 10, true, "modulus"},
+	}
+
+	for _, c := range testcases {
+		params := integration.GetSearchParams(integration.IndexFaissIDMap, metric.IP)
+		searchReq := integration.ConstructSearchRequest(
+			s.dbName, s.collectionName, c.expr,
+			integration.FloatVecField, schemapb.DataType_FloatVector,
+			nil, metric.IP, params, 1, s.dim, c.topK, -1)
+
+		searchResult, err := s.Cluster.MilvusClient.Search(ctx, searchReq)
+		s.NoError(err) // RPC should succeed
+
+		if c.shouldError {
+			// For error cases, check status indicates failure
+			status := searchResult.GetStatus()
+			s.False(merr.Ok(status),
+				fmt.Sprintf("Expected error for expr: %s", c.expr))
+			if c.expectedInReason != "" {
+				s.Contains(status.GetReason(), c.expectedInReason,
+					fmt.Sprintf("Error message should contain '%s' for expr: %s",
+						c.expectedInReason, c.expr))
+			}
+			log.Info("Got expected error",
+				zap.String("expr", c.expr),
+				zap.String("reason", status.GetReason()))
+		} else {
+			// For valid cases, check successful execution
+			err = merr.Error(searchResult.GetStatus())
+			s.NoError(err, fmt.Sprintf("Valid expr should succeed: %s", c.expr))
+			s.NotEmpty(searchResult.GetResults().GetScores())
+		}
+	}
+}
+
 func (s *ExpressionSuite) TestExpression() {
 	s.setParams()
 	s.setupData()
 	s.searchWithExpression()
+	s.TestDivisionByZeroError()
 }
 
 func TestExpression(t *testing.T) {
