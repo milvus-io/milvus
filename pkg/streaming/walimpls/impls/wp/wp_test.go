@@ -100,7 +100,8 @@ func TestWAL(t *testing.T) {
 				jsonBytes, err := json.Marshal(testPools)
 				assert.NoError(t, err)
 				jsonStr := string(jsonBytes)
-				_ = paramtable.Get().Save(wpPoolKey, jsonStr)
+				saveErr := paramtable.Get().Save(wpPoolKey, jsonStr)
+				assert.NoError(t, saveErr)
 			} else {
 				defer func() {
 					// stop embed LogStore singleton only for non-service mode
