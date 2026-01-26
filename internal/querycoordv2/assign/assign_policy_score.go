@@ -20,6 +20,7 @@ import (
 	"context"
 	"math"
 	"sort"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -38,6 +39,50 @@ type ScoreBasedAssignPolicy struct {
 	scheduler   task.Scheduler
 	dist        *meta.DistributionManager
 	meta        *meta.Meta
+
+	mu      sync.Mutex
+	status  *workloadStatus
+	version int64
+}
+
+type workloadStatus struct {
+	nodeGlobalRowCount        map[int64]int
+	nodeGlobalChannelRowCount map[int64]int
+	nodeGlobalChannels        map[int64][]*meta.DmChannel
+}
+
+// getWorkloadStatus refreshes and returns the workload status if the underlying distribution version has changed.
+func (p *ScoreBasedAssignPolicy) getWorkloadStatus() *workloadStatus {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	currVer := p.dist.SegmentDistManager.GetVersion() + p.dist.ChannelDistManager.GetVersion()
+	if currVer == p.version && p.status != nil {
+		return p.status
+	}
+
+	status := &workloadStatus{
+		nodeGlobalRowCount:        make(map[int64]int),
+		nodeGlobalChannelRowCount: make(map[int64]int),
+		nodeGlobalChannels:        make(map[int64][]*meta.DmChannel),
+	}
+
+	allSegments := p.dist.SegmentDistManager.GetByFilter()
+	for _, s := range allSegments {
+		status.nodeGlobalRowCount[s.Node] += int(s.GetNumOfRows())
+	}
+
+	allChannels := p.dist.ChannelDistManager.GetByFilter()
+	for _, ch := range allChannels {
+		status.nodeGlobalChannels[ch.Node] = append(status.nodeGlobalChannels[ch.Node], ch)
+		if ch.View != nil {
+			status.nodeGlobalChannelRowCount[ch.Node] += int(ch.View.NumOfGrowingRows)
+		}
+	}
+
+	p.status = status
+	p.version = currVer
+	return p.status
 }
 
 // newScoreBasedAssignPolicy creates a new ScoreBasedAssignPolicy
@@ -53,6 +98,7 @@ func newScoreBasedAssignPolicy(
 		scheduler:   scheduler,
 		dist:        dist,
 		meta:        meta,
+		version:     -1,
 	}
 }
 
@@ -156,6 +202,8 @@ func (p *ScoreBasedAssignPolicy) AssignSegment(
 
 // ConvertToNodeItemsBySegment creates node items with comprehensive scores
 func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsBySegment(collectionID int64, nodeIDs []int64) map[int64]*NodeItem {
+	status := p.getWorkloadStatus()
+
 	totalScore := 0
 	nodeScoreMap := make(map[int64]*NodeItem)
 	nodeMemMap := make(map[int64]float64)
@@ -163,7 +211,7 @@ func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsBySegment(collectionID int64,
 	allNodeHasMemInfo := true
 
 	for _, node := range nodeIDs {
-		score := p.calculateScoreBySegment(collectionID, node)
+		score := p.calculateScoreBySegment(collectionID, node, status)
 		NodeItem := NewNodeItem(score, node)
 		nodeScoreMap[node] = &NodeItem
 		totalScore += score
@@ -215,19 +263,8 @@ func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsBySegment(collectionID int64,
 }
 
 // calculateScoreBySegment calculates comprehensive score for a node
-func (p *ScoreBasedAssignPolicy) calculateScoreBySegment(collectionID, nodeID int64) int {
-	// Calculate global sealed segment row count
-	globalSegments := p.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(nodeID))
-	nodeRowCount := 0
-	for _, s := range globalSegments {
-		nodeRowCount += int(s.GetNumOfRows())
-	}
-
-	// Calculate global growing segment row count
-	delegatorList := p.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(nodeID))
-	for _, d := range delegatorList {
-		nodeRowCount += int(float64(d.View.NumOfGrowingRows))
-	}
+func (p *ScoreBasedAssignPolicy) calculateScoreBySegment(collectionID, nodeID int64, status *workloadStatus) int {
+	nodeRowCount := status.nodeGlobalRowCount[nodeID] + status.nodeGlobalChannelRowCount[nodeID]
 
 	// Calculate executing task cost in scheduler
 	nodeRowCount += p.scheduler.GetSegmentTaskDelta(nodeID, -1)
@@ -248,7 +285,7 @@ func (p *ScoreBasedAssignPolicy) calculateScoreBySegment(collectionID, nodeID in
 		meta.WithNodeID2Channel(nodeID),
 	)
 	for _, d := range collDelegatorList {
-		collectionRowCount += int(float64(d.View.NumOfGrowingRows))
+		collectionRowCount += int(d.View.NumOfGrowingRows)
 	}
 
 	// Calculate executing task cost for collection
@@ -365,6 +402,8 @@ func (p *ScoreBasedAssignPolicy) AssignChannel(
 
 // ConvertToNodeItemsByChannel creates node items with channel scores
 func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsByChannel(collectionID int64, nodeIDs []int64) map[int64]*NodeItem {
+	status := p.getWorkloadStatus()
+
 	totalScore := 0
 	nodeScoreMap := make(map[int64]*NodeItem)
 	nodeMemMap := make(map[int64]float64)
@@ -372,7 +411,7 @@ func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsByChannel(collectionID int64,
 	allNodeHasMemInfo := true
 
 	for _, node := range nodeIDs {
-		score := p.calculateScoreByChannel(collectionID, node)
+		score := p.calculateScoreByChannel(collectionID, node, status)
 		NodeItem := NewNodeItem(score, node)
 		nodeScoreMap[node] = &NodeItem
 		totalScore += score
@@ -408,8 +447,8 @@ func (p *ScoreBasedAssignPolicy) ConvertToNodeItemsByChannel(collectionID int64,
 }
 
 // calculateScoreByChannel calculates score based on channel count
-func (p *ScoreBasedAssignPolicy) calculateScoreByChannel(collectionID, nodeID int64) int {
-	channels := p.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(nodeID))
+func (p *ScoreBasedAssignPolicy) calculateScoreByChannel(collectionID, nodeID int64, status *workloadStatus) int {
+	channels := status.nodeGlobalChannels[nodeID]
 
 	totalScore := 0.0
 	for _, ch := range channels {
@@ -430,5 +469,5 @@ func (p *ScoreBasedAssignPolicy) CalculateChannelScore(ch *meta.DmChannel, curre
 		channelWeight := paramtable.Get().QueryCoordCfg.CollectionChannelCountFactor.GetAsFloat()
 		return math.Max(1.0, channelWeight)
 	}
-	return 1
+	return 1.0
 }
