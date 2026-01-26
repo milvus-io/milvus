@@ -13,6 +13,19 @@ from pymilvus import DataType
 
 prefix = "snapshot"
 default_dim = 128
+
+
+def wait_for_restore_complete(client, job_id, timeout=60):
+    """Wait for restore snapshot job to complete"""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        state = client.get_restore_snapshot_state(job_id)
+        if state.state == "RestoreSnapshotCompleted":
+            return
+        if state.state == "RestoreSnapshotFailed":
+            raise Exception(f"Restore snapshot failed: {state.reason}")
+        time.sleep(1)
+    raise TimeoutError(f"Restore snapshot job {job_id} did not complete within {timeout}s")
 default_nb = 3000
 default_nq = 2
 default_limit = 10
@@ -102,7 +115,7 @@ class TestMilvusClientSnapshotDefault(TestMilvusClientV2Base):
         assert job_id > 0, "restore_snapshot should return a valid job_id"
 
         # 4. Wait for restore to complete
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # 5. Verify restored collection data count
         self.load_collection(client, restored_collection_name)
@@ -116,17 +129,6 @@ class TestMilvusClientSnapshotDefault(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name)
         self.drop_collection(client, restored_collection_name)
 
-    def _wait_for_restore_complete(self, client, job_id, timeout=60):
-        """Wait for restore snapshot job to complete"""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            state, _ = self.get_restore_snapshot_state(client, job_id)
-            if state.state == "RestoreSnapshotCompleted":
-                return
-            if state.state == "RestoreSnapshotFailed":
-                raise Exception(f"Restore snapshot failed: {state['reason']}")
-            time.sleep(1)
-        raise TimeoutError(f"Restore snapshot job {job_id} did not complete within {timeout}s")
 
 
 class TestMilvusClientSnapshotCreateInvalid(TestMilvusClientV2Base):
@@ -489,7 +491,7 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify data
         self.load_collection(client, restored_collection_name)
@@ -537,7 +539,7 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify data
         self.load_collection(client, restored_collection_name)
@@ -586,7 +588,7 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify data count
         self.load_collection(client, restored_collection_name)
@@ -634,7 +636,7 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify JSON data
         self.load_collection(client, restored_collection_name)
@@ -682,7 +684,7 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify dynamic field data
         self.load_collection(client, restored_collection_name)
@@ -695,17 +697,6 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name)
         self.drop_collection(client, restored_collection_name)
 
-    def _wait_for_restore_complete(self, client, job_id, timeout=60):
-        """Wait for restore snapshot job to complete"""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            state, _ = self.get_restore_snapshot_state(client, job_id)
-            if state.state == "RestoreSnapshotCompleted":
-                return
-            if state.state == "RestoreSnapshotFailed":
-                raise Exception(f"Restore snapshot failed: {state['reason']}")
-            time.sleep(1)
-        raise TimeoutError(f"Restore snapshot job {job_id} did not complete within {timeout}s")
 
 
 class TestMilvusClientSnapshotPartition(TestMilvusClientV2Base):
@@ -744,7 +735,7 @@ class TestMilvusClientSnapshotPartition(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify partitions are preserved
         partitions, _ = self.list_partitions(client, restored_collection_name)
@@ -797,7 +788,7 @@ class TestMilvusClientSnapshotPartition(TestMilvusClientV2Base):
 
         # Restore snapshot
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify partition is restored
         partitions, _ = self.list_partitions(client, restored_collection_name)
@@ -814,17 +805,6 @@ class TestMilvusClientSnapshotPartition(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name)
         self.drop_collection(client, restored_collection_name)
 
-    def _wait_for_restore_complete(self, client, job_id, timeout=60):
-        """Wait for restore snapshot job to complete"""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            state, _ = self.get_restore_snapshot_state(client, job_id)
-            if state.state == "RestoreSnapshotCompleted":
-                return
-            if state.state == "RestoreSnapshotFailed":
-                raise Exception(f"Restore snapshot failed: {state['reason']}")
-            time.sleep(1)
-        raise TimeoutError(f"Restore snapshot job {job_id} did not complete within {timeout}s")
 
 
 class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
@@ -862,7 +842,7 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
 
         # Restore
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify only 50 rows remain
         self.load_collection(client, restored_collection_name)
@@ -915,7 +895,7 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
 
         # Restore snapshot
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Restored collection should only have 100 rows (point-in-time)
         self.load_collection(client, restored_collection_name)
@@ -990,7 +970,7 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
 
         # Restore snapshot to new collection
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify restored collection data count
         self.load_collection(client, restored_collection_name)
@@ -1020,17 +1000,6 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name)
         self.drop_collection(client, restored_collection_name)
 
-    def _wait_for_restore_complete(self, client, job_id, timeout=60):
-        """Wait for restore snapshot job to complete"""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            state, _ = self.get_restore_snapshot_state(client, job_id)
-            if state.state == "RestoreSnapshotCompleted":
-                return
-            if state.state == "RestoreSnapshotFailed":
-                raise Exception(f"Restore snapshot failed: {state['reason']}")
-            time.sleep(1)
-        raise TimeoutError(f"Restore snapshot job {job_id} did not complete within {timeout}s")
 
 
 class TestMilvusClientSnapshotIndex(TestMilvusClientV2Base):
@@ -1072,7 +1041,7 @@ class TestMilvusClientSnapshotIndex(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify index is preserved
         indexes, _ = self.list_indexes(client, restored_collection_name)
@@ -1089,17 +1058,6 @@ class TestMilvusClientSnapshotIndex(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name)
         self.drop_collection(client, restored_collection_name)
 
-    def _wait_for_restore_complete(self, client, job_id, timeout=60):
-        """Wait for restore snapshot job to complete"""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            state, _ = self.get_restore_snapshot_state(client, job_id)
-            if state.state == "RestoreSnapshotCompleted":
-                return
-            if state.state == "RestoreSnapshotFailed":
-                raise Exception(f"Restore snapshot failed: {state['reason']}")
-            time.sleep(1)
-        raise TimeoutError(f"Restore snapshot job {job_id} did not complete within {timeout}s")
 
 
 class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
@@ -1131,7 +1089,7 @@ class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Query all vectors from restored collection
         self.load_collection(client, restored_collection_name)
@@ -1182,7 +1140,7 @@ class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Search on restored collection with same queries
         self.load_collection(client, restored_collection_name)
@@ -1243,7 +1201,7 @@ class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Query and verify all scalar values
         self.load_collection(client, restored_collection_name)
@@ -1262,17 +1220,6 @@ class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name)
         self.drop_collection(client, restored_collection_name)
 
-    def _wait_for_restore_complete(self, client, job_id, timeout=60):
-        """Wait for restore snapshot job to complete"""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            state, _ = self.get_restore_snapshot_state(client, job_id)
-            if state.state == "RestoreSnapshotCompleted":
-                return
-            if state.state == "RestoreSnapshotFailed":
-                raise Exception(f"Restore snapshot failed: {state['reason']}")
-            time.sleep(1)
-        raise TimeoutError(f"Restore snapshot job {job_id} did not complete within {timeout}s")
 
 
 class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
@@ -1438,7 +1385,7 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
         for i, snapshot_name in enumerate(snapshots):
             restored_name = cf.gen_unique_str(prefix + "_restored")
             job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name)
-            self._wait_for_restore_complete(client, job_id)
+            wait_for_restore_complete(client, job_id)
 
             self.load_collection(client, restored_name)
             res, _ = self.query(client, restored_name, filter="id >= 0", output_fields=["count(*)"])
@@ -1490,7 +1437,7 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
 
         # Wait for all to complete
         for job_id in restore_jobs:
-            self._wait_for_restore_complete(client, job_id, timeout=120)
+            wait_for_restore_complete(client, job_id, timeout=120)
 
         # Verify all restored collections have correct data
         for restored_name in restored_names:
@@ -1502,17 +1449,6 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
         # Cleanup
         self.drop_snapshot(client, snapshot_name)
 
-    def _wait_for_restore_complete(self, client, job_id, timeout=60):
-        """Wait for restore snapshot job to complete"""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            state, _ = self.get_restore_snapshot_state(client, job_id)
-            if state.state == "RestoreSnapshotCompleted":
-                return
-            if state.state == "RestoreSnapshotFailed":
-                raise Exception(f"Restore snapshot failed: {state['reason']}")
-            time.sleep(1)
-        raise TimeoutError(f"Restore snapshot job {job_id} did not complete within {timeout}s")
 
 
 class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
@@ -1582,7 +1518,7 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
         # Should be able to restore to new collection
         restored_collection_name = cf.gen_unique_str(prefix + "_restored")
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         self.load_collection(client, restored_collection_name)
         res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["count(*)"])
@@ -1624,7 +1560,7 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify schema of restored collection
         desc = client.describe_collection(restored_collection_name)
@@ -1640,17 +1576,6 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name)
         self.drop_collection(client, restored_collection_name)
 
-    def _wait_for_restore_complete(self, client, job_id, timeout=60):
-        """Wait for restore snapshot job to complete"""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            state, _ = self.get_restore_snapshot_state(client, job_id)
-            if state.state == "RestoreSnapshotCompleted":
-                return
-            if state.state == "RestoreSnapshotFailed":
-                raise Exception(f"Restore snapshot failed: {state['reason']}")
-            time.sleep(1)
-        raise TimeoutError(f"Restore snapshot job {job_id} did not complete within {timeout}s")
 
 
 class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
@@ -1708,7 +1633,7 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify all scalar data
         self.load_collection(client, restored_collection_name)
@@ -1777,7 +1702,7 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify array data
         self.load_collection(client, restored_collection_name)
@@ -1847,7 +1772,7 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify data count
         self.load_collection(client, restored_collection_name)
@@ -1909,7 +1834,7 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify nullable fields
         self.load_collection(client, restored_collection_name)
@@ -1936,17 +1861,6 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name)
         self.drop_collection(client, restored_collection_name)
 
-    def _wait_for_restore_complete(self, client, job_id, timeout=60):
-        """Wait for restore snapshot job to complete"""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            state, _ = self.get_restore_snapshot_state(client, job_id)
-            if state.state == "RestoreSnapshotCompleted":
-                return
-            if state.state == "RestoreSnapshotFailed":
-                raise Exception(f"Restore snapshot failed: {state['reason']}")
-            time.sleep(1)
-        raise TimeoutError(f"Restore snapshot job {job_id} did not complete within {timeout}s")
 
 
 class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
@@ -1987,7 +1901,7 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify index and search
         self.load_collection(client, restored_collection_name)
@@ -2032,7 +1946,7 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify search works
         self.load_collection(client, restored_collection_name)
@@ -2077,7 +1991,7 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify search works
         self.load_collection(client, restored_collection_name)
@@ -2121,7 +2035,7 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify search works
         self.load_collection(client, restored_collection_name)
@@ -2166,7 +2080,7 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify search works
         self.load_collection(client, restored_collection_name)
@@ -2218,7 +2132,7 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify scalar index works with filter
         self.load_collection(client, restored_collection_name)
@@ -2234,17 +2148,6 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name)
         self.drop_collection(client, restored_collection_name)
 
-    def _wait_for_restore_complete(self, client, job_id, timeout=60):
-        """Wait for restore snapshot job to complete"""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            state, _ = self.get_restore_snapshot_state(client, job_id)
-            if state.state == "RestoreSnapshotCompleted":
-                return
-            if state.state == "RestoreSnapshotFailed":
-                raise Exception(f"Restore snapshot failed: {state['reason']}")
-            time.sleep(1)
-        raise TimeoutError(f"Restore snapshot job {job_id} did not complete within {timeout}s")
 
 
 class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
@@ -2286,7 +2189,7 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify description is preserved
         desc = client.describe_collection(restored_collection_name)
@@ -2334,7 +2237,7 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify shard count is preserved
         desc = client.describe_collection(restored_collection_name)
@@ -2383,7 +2286,7 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify consistency level is preserved
         desc = client.describe_collection(restored_collection_name)
@@ -2431,7 +2334,7 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify partition key is preserved in schema
         desc = client.describe_collection(restored_collection_name)
@@ -2451,17 +2354,6 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name)
         self.drop_collection(client, restored_collection_name)
 
-    def _wait_for_restore_complete(self, client, job_id, timeout=60):
-        """Wait for restore snapshot job to complete"""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            state, _ = self.get_restore_snapshot_state(client, job_id)
-            if state.state == "RestoreSnapshotCompleted":
-                return
-            if state.state == "RestoreSnapshotFailed":
-                raise Exception(f"Restore snapshot failed: {state['reason']}")
-            time.sleep(1)
-        raise TimeoutError(f"Restore snapshot job {job_id} did not complete within {timeout}s")
 
 
 class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
@@ -2510,7 +2402,7 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
 
         # Restore
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify
         self.load_collection(client, restored_collection_name)
@@ -2585,7 +2477,7 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
 
         # Restore
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify data count (should be 700: 1000 - 300 deleted)
         self.load_collection(client, restored_collection_name)
@@ -2656,11 +2548,11 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
 
         # Restore snapshot 1 (HNSW)
         job_id_1, _ = self.restore_snapshot(client, snapshot_name_1, restored_collection_name_1)
-        self._wait_for_restore_complete(client, job_id_1)
+        wait_for_restore_complete(client, job_id_1)
 
         # Restore snapshot 2 (IVF_FLAT)
         job_id_2, _ = self.restore_snapshot(client, snapshot_name_2, restored_collection_name_2)
-        self._wait_for_restore_complete(client, job_id_2)
+        wait_for_restore_complete(client, job_id_2)
 
         # Verify both collections can search
         for restored_name in [restored_collection_name_1, restored_collection_name_2]:
@@ -2708,7 +2600,7 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
 
         # Restore
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify all data
         self.load_collection(client, restored_collection_name)
@@ -2773,7 +2665,7 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
 
         # Restore
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify final state
         self.load_collection(client, restored_collection_name)
@@ -2854,7 +2746,7 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
 
         # Restore
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify data
         self.load_collection(client, restored_collection_name)
@@ -2911,7 +2803,7 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         # Create snapshot and restore
         self.create_snapshot(client, collection_name, snapshot_name)
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         # Verify dynamic field data
         self.load_collection(client, restored_collection_name)
@@ -2933,17 +2825,6 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name)
         self.drop_collection(client, restored_collection_name)
 
-    def _wait_for_restore_complete(self, client, job_id, timeout=60):
-        """Wait for restore snapshot job to complete"""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            state, _ = self.get_restore_snapshot_state(client, job_id)
-            if state.state == "RestoreSnapshotCompleted":
-                return
-            if state.state == "RestoreSnapshotFailed":
-                raise Exception(f"Restore snapshot failed: {state['reason']}")
-            time.sleep(1)
-        raise TimeoutError(f"Restore snapshot job {job_id} did not complete within {timeout}s")
 
 
 class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
@@ -3063,7 +2944,7 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
         # Restore and verify consistency
         restored_name = cf.gen_unique_str(prefix + "_restored")
         job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name)
-        self._wait_for_restore_complete(client, job_id)
+        wait_for_restore_complete(client, job_id)
 
         self.load_collection(client, restored_name)
         res, _ = self.query(client, restored_name, filter="id >= 0", output_fields=["count(*)"])
@@ -3128,7 +3009,7 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
 
         # Wait for all to complete
         for job_id in job_ids:
-            self._wait_for_restore_complete(client, job_id, timeout=120)
+            wait_for_restore_complete(client, job_id, timeout=120)
 
         # Verify all restored collections
         for name in restored_names:
@@ -3140,15 +3021,3 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name)
         for name in restored_names:
             self.drop_collection(client, name)
-
-    def _wait_for_restore_complete(self, client, job_id, timeout=60):
-        """Wait for restore snapshot job to complete"""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            state, _ = self.get_restore_snapshot_state(client, job_id)
-            if state.state == "RestoreSnapshotCompleted":
-                return
-            if state.state == "RestoreSnapshotFailed":
-                raise Exception(f"Restore snapshot failed: {state}")
-            time.sleep(1)
-        raise TimeoutError(f"Restore snapshot job {job_id} did not complete within {timeout}s")
