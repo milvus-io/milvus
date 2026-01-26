@@ -475,12 +475,9 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                 DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
             field_data_info.arrow_reader_channel->set_capacity(parallel_degree *
                                                                2);
-            auto& pool =
-                ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-            pool.Submit(LoadArrowReaderFromRemote,
-                        insert_files,
-                        field_data_info.arrow_reader_channel,
-                        load_info.load_priority);
+            LoadArrowReaderFromRemote(insert_files,
+                                      field_data_info.arrow_reader_channel,
+                                      load_info.load_priority);
 
             LOG_INFO("segment {} submits load field {} task to thread pool",
                      this->get_segment_id(),
@@ -3043,7 +3040,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
     bool eager_load,
     milvus::OpContext* op_ctx) {
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<void>> load_group_futures;
     for (const auto& pair : cg_field_ids) {
         auto cg_index = pair.first;
@@ -3070,25 +3067,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         load_group_futures.emplace_back(std::move(future));
     }
 
-    std::vector<std::exception_ptr> load_exceptions;
-    for (auto& future : load_group_futures) {
-        try {
-            future.get();
-        } catch (...) {
-            load_exceptions.push_back(std::current_exception());
-        }
-    }
-
-    // If any exceptions occurred during index loading, handle them
-    if (!load_exceptions.empty()) {
-        LOG_ERROR("Failed to load {} out of {} indexes for segment {}",
-                  load_exceptions.size(),
-                  load_group_futures.size(),
-                  id_);
-
-        // Rethrow the first exception
-        std::rethrow_exception(load_exceptions[0]);
-    }
+    storage::WaitAllFutures(load_group_futures);
 }
 
 void
@@ -3213,18 +3192,25 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 void
 ChunkedSegmentSealedImpl::ReloadColumns(const std::vector<FieldId>& field_ids,
                                         milvus::OpContext* op_ctx) {
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+    std::vector<std::future<void>> reload_futures;
     for (auto& field_id : field_ids) {
-        auto column = get_column(field_id);
-        AssertInfo(column != nullptr,
-                   "cannot reload non-existing field column {}",
-                   field_id.get());
-        auto num_chunks = column->num_chunks();
-        std::vector<int64_t> chunk_ids(num_chunks);
-        for (int64_t chunk_id = 0; chunk_id < num_chunks; chunk_id++) {
-            chunk_ids[chunk_id] = chunk_id;
-        }
-        column->PrefetchChunks(op_ctx, chunk_ids);
+        auto future = pool.Submit([this, field_id, op_ctx]() {
+            auto column = get_column(field_id);
+            AssertInfo(column != nullptr,
+                       "cannot reload non-existing field column {}",
+                       field_id.get());
+            auto num_chunks = column->num_chunks();
+            std::vector<int64_t> chunk_ids(num_chunks);
+            for (int64_t chunk_id = 0; chunk_id < num_chunks; chunk_id++) {
+                chunk_ids[chunk_id] = chunk_id;
+            }
+            column->PrefetchChunks(op_ctx, chunk_ids);
+        });
+        reload_futures.push_back(std::move(future));
     }
+
+    storage::WaitAllFutures(reload_futures);
 }
 
 void
@@ -3234,7 +3220,7 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
         field_id_to_index_info,
     milvus::OpContext* op_ctx) {
     auto num_rows = segment_load_info_.GetNumOfRows();
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<void>> load_index_futures;
     load_index_futures.reserve(field_id_to_index_info.size());
 
@@ -3268,27 +3254,7 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
         }
     }
 
-    // Wait for all index loading to complete and collect exceptions
-    std::vector<std::exception_ptr> index_exceptions;
-    index_exceptions.reserve(load_index_futures.size());
-    for (auto& future : load_index_futures) {
-        try {
-            future.get();
-        } catch (...) {
-            index_exceptions.push_back(std::current_exception());
-        }
-    }
-
-    // If any exceptions occurred during index loading, handle them
-    if (!index_exceptions.empty()) {
-        LOG_ERROR("Failed to load {} out of {} indexes for segment {}",
-                  index_exceptions.size(),
-                  load_index_futures.size(),
-                  id_);
-
-        // Rethrow the first exception
-        std::rethrow_exception(index_exceptions[0]);
-    }
+    storage::WaitAllFutures(load_index_futures);
 }
 
 void
@@ -3306,8 +3272,6 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         LoadFieldDataInfo load_field_data_info;
         load_field_data_info.storage_version =
             segment_load_info_.GetStorageVersion();
-        // const auto& field_binlog = segment_load_info_.GetBinlogPath(i);
-        // std::vector<FieldId> field_ids;
         // when child fields specified, field id is group id, child field ids are actual id values here
         if (field_binlog.child_fields_size() > 0) {
             field_ids.reserve(field_binlog.child_fields_size());
@@ -3387,7 +3351,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         field_data_to_load[FieldId(group_id)] = load_field_data_info;
     }
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<void>> load_field_futures;
     load_field_futures.reserve(field_data_to_load.size());
 
@@ -3408,27 +3372,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         load_field_futures.push_back(std::move(future));
     }
 
-    // Wait for all field data loading to complete and collect exceptions
-    std::vector<std::exception_ptr> field_exceptions;
-    field_exceptions.reserve(load_field_futures.size());
-    for (auto& future : load_field_futures) {
-        try {
-            future.get();
-        } catch (...) {
-            field_exceptions.push_back(std::current_exception());
-        }
-    }
-
-    // If any exceptions occurred during field data loading, handle them
-    if (!field_exceptions.empty()) {
-        LOG_ERROR("Failed to load {} out of {} field data for segment {}",
-                  field_exceptions.size(),
-                  load_field_futures.size(),
-                  id_);
-
-        // Rethrow the first exception
-        std::rethrow_exception(field_exceptions[0]);
-    }
+    storage::WaitAllFutures(load_field_futures);
 }
 
 void
