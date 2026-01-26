@@ -841,7 +841,7 @@ Example configuration below:
     seeds: [n1,n2,n3] # List of seed node addresses for this pool
   - name: region2 # Name of the region pool
     seeds: [n4,n5,n6] # List of seed node addresses for this pool`,
-		Export: true,
+		Export: false,
 	}
 	p.QuorumBufferPools.Init(base.mgr)
 
@@ -851,7 +851,7 @@ Example configuration below:
 		Version:      "2.6.0",
 		DefaultValue: "soft",
 		Doc:          "Affinity mode for node selection rules. Valid values: [soft, hard]",
-		Export:       true,
+		Export:       false,
 	}
 	p.QuorumAffinityMode.Init(base.mgr)
 
@@ -860,7 +860,7 @@ Example configuration below:
 		Version:      "2.6.0",
 		DefaultValue: "3",
 		Doc:          "Number of replicas in the quorum ensemble. Valid values: [3, 5]",
-		Export:       true,
+		Export:       false,
 	}
 	p.QuorumReplicas.Init(base.mgr)
 
@@ -877,7 +877,7 @@ multi-az-single-rg: Multiple availability zones, single resource group
 multi-az-multi-rg: Multiple availability zones and resource groups
 cross-region: Nodes across different regions for maximum durability
 custom: Use custom expressions defined below`,
-		Export: true,
+		Export: false,
 	}
 	p.QuorumStrategy.Init(base.mgr)
 
@@ -900,7 +900,7 @@ Example configuration below:
     region: "default-region-pool"
     az: "az.*"
     resourceGroup: "rg.*"`,
-		Export: true,
+		Export: false,
 	}
 	p.QuorumCustomPlacement.Init(base.mgr)
 
@@ -1045,7 +1045,7 @@ Valid values: [auto, enable, disable]`,
 		Key:          "woodpecker.storage.type",
 		Version:      "2.6.0",
 		DefaultValue: "minio",
-		Doc:          "The Type of the storage provider. Valid values: [minio, local, service]",
+		Doc:          "The Type of the storage provider. Valid values: [minio, local]",
 		Export:       true,
 	}
 	p.StorageType.Init(base.mgr)
