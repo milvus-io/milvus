@@ -353,8 +353,7 @@ func (_c *MockMsgHandler_HandleTruncateCollection_Call) RunAndReturn(run func(me
 func NewMockMsgHandler(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockMsgHandler {
+}) *MockMsgHandler {
 	mock := &MockMsgHandler{}
 	mock.Mock.Test(t)
 

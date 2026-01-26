@@ -2514,7 +2514,7 @@ func (m *meta) TruncateChannelByTime(ctx context.Context, vChannel string, flush
 	segments := m.segments.GetSegmentsBySelector(SegmentFilterFunc(isSegmentHealthy), WithChannel(vChannel))
 	segmentsToDrop := make([]*SegmentInfo, 0)
 	metricMutation := &segMetricMutation{
-		stateChange: make(map[string]map[string]map[string]int),
+		stateChange: make(map[string]map[string]map[string]map[string]int),
 	}
 
 	for _, segment := range segments {

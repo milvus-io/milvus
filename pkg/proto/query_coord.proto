@@ -102,7 +102,6 @@ service QueryCoord {
   rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
   rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
   rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(ValidateAnalyzerResponse){}
-  rpc ManualUpdateCurrentTarget(ManualUpdateCurrentTargetRequest) returns(common.Status){}
 }
 
 service QueryNode {
