@@ -36,9 +36,9 @@
 #include "nlohmann/json.hpp"
 #include "query/PlanNode.h"
 #include "query/SearchOnSealed.h"
+#include "segcore/Utils.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentGrowing.h"
-#include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/loon_ffi/property_singleton.h"
@@ -242,7 +242,10 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
 }
 
 void
-SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
+SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos,
+                                  milvus::OpContext* op_ctx) {
+    // Note: op_ctx is currently unused in growing segments but kept for interface consistency
+    (void)op_ctx;
     switch (infos.storage_version) {
         case 2:
             load_column_group_data_internal(infos);
@@ -1207,7 +1210,11 @@ SegmentGrowingImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
 }
 
 void
-SegmentGrowingImpl::CreateTextIndex(FieldId field_id) {
+SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
+                                    milvus::OpContext* op_ctx) {
+    // Check for cancellation before starting
+    CheckCancellation(op_ctx, id_, field_id.get(), "CreateTextIndex");
+
     std::unique_lock lock(mutex_);
     const auto& field_meta = schema_->operator[](field_id);
     AssertInfo(IsStringDataType(field_meta.get_data_type()),
@@ -1325,7 +1332,8 @@ SegmentGrowingImpl::Reopen(
 }
 
 void
-SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
+SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx,
+                         milvus::OpContext* op_ctx) {
     // Convert load_info_ (SegmentLoadInfo) to LoadFieldDataInfo
     LoadFieldDataInfo field_data_info;
 

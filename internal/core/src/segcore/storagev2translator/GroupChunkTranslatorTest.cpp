@@ -169,7 +169,7 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     for (size_t i = 0; i < translator->num_cells(); ++i) {
         cids.push_back(i);
     }
-    auto cells = translator->get_cells(cids);
+    auto cells = translator->get_cells(nullptr, cids);
     EXPECT_EQ(cells.size(), cids.size());
 
     // Test DataByteSize from meta
@@ -313,7 +313,7 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     for (size_t i = 0; i < std::min(num_cells, static_cast<size_t>(2)); ++i) {
         first_cids.push_back(i);
     }
-    auto first_cells = translator->get_cells(first_cids);
+    auto first_cells = translator->get_cells(nullptr, first_cids);
     EXPECT_EQ(first_cells.size(), first_cids.size());
     int i = 0;
     for (const auto& [cid, chunk] : first_cells) {
@@ -326,7 +326,7 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     for (size_t j = num_cells; j > 0; --j) {
         reverse_cids.push_back(j - 1);
     }
-    auto cells = translator->get_cells(reverse_cids);
+    auto cells = translator->get_cells(nullptr, reverse_cids);
     // Returned cids should be in the same order as input (reverse order)
     i = 0;
     for (const auto& [cid, chunk] : cells) {

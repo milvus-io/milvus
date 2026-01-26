@@ -146,6 +146,51 @@ getCellDataType(bool is_vector, bool is_index);
 
 void
 LoadIndexData(milvus::tracer::TraceContext& ctx,
-              milvus::segcore::LoadIndexInfo* load_index_info);
+              milvus::segcore::LoadIndexInfo* load_index_info,
+              milvus::OpContext* op_ctx = nullptr);
+
+/**
+ * @brief Check if an operation has been cancelled and throw if so.
+ *
+ * This is a helper function to reduce boilerplate cancellation checking code.
+ *
+ * @param op_ctx The operation context containing the cancellation token (can be nullptr)
+ * @param segment_id The segment ID for error message context
+ * @param operation Description of the operation being performed
+ * @throws SegcoreError with ErrorCode::FollyCancel if cancellation was requested
+ */
+inline void
+CheckCancellation(milvus::OpContext* op_ctx,
+                  int64_t segment_id,
+                  const std::string& operation) {
+    if (op_ctx && op_ctx->cancellation_token.isCancellationRequested()) {
+        throw SegcoreError(
+            ErrorCode::FollyCancel,
+            fmt::format("{} cancelled for segment {}", operation, segment_id));
+    }
+}
+
+/**
+ * @brief Check if an operation has been cancelled and throw if so (with field context).
+ *
+ * @param op_ctx The operation context containing the cancellation token (can be nullptr)
+ * @param segment_id The segment ID for error message context
+ * @param field_id The field ID for error message context
+ * @param operation Description of the operation being performed
+ * @throws SegcoreError with ErrorCode::FollyCancel if cancellation was requested
+ */
+inline void
+CheckCancellation(milvus::OpContext* op_ctx,
+                  int64_t segment_id,
+                  int64_t field_id,
+                  const std::string& operation) {
+    if (op_ctx && op_ctx->cancellation_token.isCancellationRequested()) {
+        throw SegcoreError(ErrorCode::FollyCancel,
+                           fmt::format("{} cancelled for segment {} field {}",
+                                       operation,
+                                       segment_id,
+                                       field_id));
+    }
+}
 
 }  // namespace milvus::segcore

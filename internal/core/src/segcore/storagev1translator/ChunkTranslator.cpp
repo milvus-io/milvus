@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "cachinglayer/Utils.h"
+#include "segcore/Utils.h"
 #include "common/ChunkWriter.h"
 #include "common/EasyAssert.h"
 #include "common/Types.h"
@@ -149,6 +150,7 @@ ChunkTranslator::key() const {
 std::vector<
     std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
 ChunkTranslator::get_cells(
+    milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
     std::vector<
         std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
@@ -173,6 +175,9 @@ ChunkTranslator::get_cells(
     auto data_type = field_meta_.get_data_type();
 
     for (auto cid : cids) {
+        // Check for cancellation before processing each chunk
+        CheckCancellation(ctx, segment_id_, field_id_, "LoadChunk");
+
         std::unique_ptr<milvus::Chunk> chunk = nullptr;
         if (!use_mmap_) {
             std::shared_ptr<milvus::ArrowDataWrapper> r;

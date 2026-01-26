@@ -62,7 +62,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadIndex(const LoadIndexInfo& info) override;
     void
-    LoadFieldData(const LoadFieldDataInfo& info) override;
+    LoadFieldData(const LoadFieldDataInfo& info,
+                  milvus::OpContext* op_ctx = nullptr) override;
     void
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) override;
     void
@@ -128,11 +129,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     RemoveFieldFile(const FieldId field_id) override;
 
     void
-    CreateTextIndex(FieldId field_id) override;
+    CreateTextIndex(FieldId field_id,
+                    milvus::OpContext* op_ctx = nullptr) override;
 
     void
-    LoadTextIndex(std::unique_ptr<milvus::proto::indexcgo::LoadTextIndexInfo>
-                      info_proto) override;
+    LoadTextIndex(
+        std::unique_ptr<milvus::proto::indexcgo::LoadTextIndexInfo> info_proto,
+        milvus::OpContext* op_ctx = nullptr) override;
 
     void
     LoadJsonStats(FieldId field_id,
@@ -196,7 +199,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const milvus::proto::segcore::SegmentLoadInfo& load_info) override;
 
     void
-    Load(milvus::tracer::TraceContext& trace_ctx) override;
+    Load(milvus::tracer::TraceContext& trace_ctx,
+         milvus::OpContext* op_ctx = nullptr) override;
 
  public:
     size_t
@@ -937,22 +941,26 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                          size_t num_rows);
 
     void
-    load_field_data_internal(const LoadFieldDataInfo& load_info);
+    load_field_data_internal(const LoadFieldDataInfo& load_info,
+                             milvus::OpContext* op_ctx = nullptr);
 
     void
-    load_column_group_data_internal(const LoadFieldDataInfo& load_info);
+    load_column_group_data_internal(const LoadFieldDataInfo& load_info,
+                                    milvus::OpContext* op_ctx = nullptr);
 
     void
     LoadBatchIndexes(
         milvus::tracer::TraceContext& trace_ctx,
         std::map<FieldId, std::vector<const proto::segcore::FieldIndexInfo*>>&
-            field_id_to_index_info);
+            field_id_to_index_info,
+        milvus::OpContext* op_ctx = nullptr);
 
     void
     LoadBatchFieldData(milvus::tracer::TraceContext& trace_ctx,
                        std::vector<std::pair<std::vector<FieldId>,
                                              proto::segcore::FieldBinlog>>&
-                           field_binlog_to_load);
+                           field_binlog_to_load,
+                       milvus::OpContext* op_ctx = nullptr);
 
     /**
      * @brief Load all column groups from a manifest file path
@@ -961,15 +969,18 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      * and loads each column group into the segment.
      *
      * @param manifest_path JSON string containing base_path and version fields
+     * @param op_ctx Operation context
      */
     void
-    LoadManifest(const std::string& manifest_path);
+    LoadManifest(const std::string& manifest_path,
+                 milvus::OpContext* op_ctx = nullptr);
 
     void
     LoadColumnGroups(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        std::map<int, std::vector<FieldId>>& cg_field_ids_map);
+        std::map<int, std::vector<FieldId>>& cg_field_ids_map,
+        milvus::OpContext* op_ctx = nullptr);
 
     /**
      * @brief Load a single column group at the specified index
@@ -986,7 +997,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
         int64_t index,
-        const std::vector<FieldId>& milvus_field_ids);
+        const std::vector<FieldId>& milvus_field_ids,
+        milvus::OpContext* op_ctx = nullptr);
 
     void
     load_field_data_common(
@@ -995,7 +1007,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         size_t num_rows,
         DataType data_type,
         bool enable_mmap,
-        bool is_proxy_column);
+        bool is_proxy_column,
+        milvus::OpContext* op_ctx = nullptr);
 
     std::shared_ptr<ChunkedColumnInterface>
     get_column(FieldId field_id) const {

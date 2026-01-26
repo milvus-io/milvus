@@ -15,7 +15,9 @@
 // limitations under the License.
 
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
+
 #include "common/type_c.h"
+#include "segcore/Utils.h"
 #include "milvus-storage/reader.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "common/GroupChunk.h"
@@ -172,7 +174,11 @@ ManifestGroupTranslator::key() const {
 std::vector<
     std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>>
 ManifestGroupTranslator::get_cells(
+    milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    // Check for cancellation before loading group chunks
+    CheckCancellation(ctx, segment_id_, "ManifestGroupTranslator::get_cells()");
+
     std::vector<std::pair<milvus::cachinglayer::cid_t,
                           std::unique_ptr<milvus::GroupChunk>>>
         cells;
