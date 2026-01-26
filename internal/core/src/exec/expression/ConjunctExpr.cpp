@@ -19,6 +19,7 @@
 #include "LikeConjunctExpr.h"
 
 #include <algorithm>
+#include "common/ValueOp.h"
 
 namespace milvus {
 namespace exec {
@@ -40,46 +41,32 @@ PhyConjunctFilterExpr::ResolveType(const std::vector<DataType>& inputs) {
     return DataType::BOOL;
 }
 
-static bool
-AllTrue(ColumnVectorPtr& vec) {
-    TargetBitmapView data(vec->GetRawData(), vec->size());
-    return data.all();
-}
-
-static void
-AllSet(ColumnVectorPtr& vec) {
-    TargetBitmapView data(vec->GetRawData(), vec->size());
-    data.set();
-}
-
-static void
-AllReset(ColumnVectorPtr& vec) {
-    TargetBitmapView data(vec->GetRawData(), vec->size());
-    data.reset();
-}
-
-static bool
-AllFalse(ColumnVectorPtr& vec) {
-    TargetBitmapView data(vec->GetRawData(), vec->size());
-    return data.none();
-}
-
 int64_t
 PhyConjunctFilterExpr::UpdateResult(ColumnVectorPtr& input_result,
                                     EvalCtx& ctx,
                                     ColumnVectorPtr& result) {
     if (is_and_) {
-        ConjunctElementFunc<true> func;
-        return func(input_result, result);
+        common::ThreeValuedLogicOp::And(result, input_result);
     } else {
-        ConjunctElementFunc<false> func;
-        return func(input_result, result);
+        common::ThreeValuedLogicOp::Or(result, input_result);
+    }
+
+    // Return the count of active rows for short-circuit optimization
+    // For AND: return count of true (if 0, all false, can skip)
+    // For OR: return count of false (if 0, all true, can skip)
+    TargetBitmapView res_data(result->GetRawData(), result->size());
+    if (is_and_) {
+        return static_cast<int64_t>(res_data.count());
+    } else {
+        return static_cast<int64_t>(result->size() - res_data.count());
     }
 }
 
 bool
 PhyConjunctFilterExpr::CanSkipFollowingExprs(ColumnVectorPtr& vec) {
-    if ((is_and_ && AllFalse(vec)) || (!is_and_ && AllTrue(vec))) {
+    if ((is_and_ && common::ThreeValuedLogicOp::TrueCount(vec) == 0) ||
+        (!is_and_ &&
+         common::ThreeValuedLogicOp::TrueCount(vec) == vec->size())) {
         return true;
     }
     return false;

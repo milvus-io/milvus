@@ -73,16 +73,6 @@ class EvalCtx {
         bitmap_input_.clear();
     }
 
-    void
-    set_apply_valid_data_after_flip(bool apply_valid_data_after_flip) {
-        apply_valid_data_after_flip_ = apply_valid_data_after_flip;
-    }
-
-    bool
-    get_apply_valid_data_after_flip() const {
-        return apply_valid_data_after_flip_;
-    }
-
  private:
     ExecContext* exec_ctx_ = nullptr;
     // we may accept offsets array as input and do expr filtering on these data
@@ -91,9 +81,6 @@ class EvalCtx {
 
     // used for expr pre filter, that avoid unnecessary execution on filtered data
     TargetBitmap bitmap_input_;
-
-    // for some expr(eg. exists), we do not need to apply valid data after flip
-    bool apply_valid_data_after_flip_ = true;
 };
 
 }  // namespace exec
