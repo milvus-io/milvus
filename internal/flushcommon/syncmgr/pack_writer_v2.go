@@ -44,13 +44,11 @@ import (
 
 type BulkPackWriterV2 struct {
 	*BulkPackWriter
-	schema              *schemapb.CollectionSchema
 	bufferSize          int64
 	multiPartUploadSize int64
 
 	storageConfig *indexpb.StorageConfig
 	columnGroups  []storagecommon.ColumnGroup
-	manifestPath  string
 }
 
 func NewBulkPackWriterV2(metaCache metacache.MetaCache, schema *schemapb.CollectionSchema, chunkManager storage.ChunkManager,
@@ -65,7 +63,6 @@ func NewBulkPackWriterV2(metaCache metacache.MetaCache, schema *schemapb.Collect
 			allocator:      allocator,
 			writeRetryOpts: writeRetryOpts,
 		},
-		schema:              schema,
 		bufferSize:          bufferSize,
 		multiPartUploadSize: multiPartUploadSize,
 		storageConfig:       storageConfig,

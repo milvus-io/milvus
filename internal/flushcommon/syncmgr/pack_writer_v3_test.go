@@ -250,3 +250,93 @@ func (s *PackWriterV3Suite) TestWriteInsertDataError() {
 	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
 }
+
+func (s *PackWriterV3Suite) TestInvalidManifestPath() {
+	s.logIDAlloc = allocator.NewLocalAllocator(1, math.MaxInt64)
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(789)
+	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
+	rows := 10
+
+	mc := metacache.NewMockMetaCache(s.T())
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
+
+	// Use an invalid manifest path (not a valid JSON)
+	invalidManifestPath := "invalid-manifest-path"
+
+	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema))
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, invalidManifestPath)
+
+	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+	s.Error(err)
+}
+
+func (s *PackWriterV3Suite) TestWriteWithDeleteData() {
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(789)
+	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
+	rows := 10
+
+	bfs := pkoracle.NewBloomFilterSet()
+
+	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
+	basePath := path.Join(common.SegmentInsertLogPath, k)
+	manifestPath := packed.MarshalManifestPath(basePath, -1)
+
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ManifestPath: manifestPath,
+	}, bfs, nil)
+	metacache.UpdateNumOfRows(1000)(seg)
+	mc := metacache.NewMockMetaCache(s.T())
+	mc.EXPECT().Collection().Return(collectionID).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
+	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
+	mc.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
+	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(seg)
+	}).Return().Maybe()
+
+	deletes := &storage.DeleteData{}
+	for i := 0; i < rows; i++ {
+		pk := storage.NewInt64PrimaryKey(int64(i + 1))
+		ts := uint64(100 + i)
+		deletes.Append(pk, ts)
+	}
+
+	// Test with only delete data (no inserts)
+	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithDeleteData(deletes)
+
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, manifestPath)
+
+	gotInserts, gotDeletes, _, _, _, _, err := bw.Write(context.Background(), pack)
+	s.NoError(err)
+	s.Equal(0, len(gotInserts)) // No insert binlogs when only deletes
+	s.NotNil(gotDeletes)
+	s.Equal(int64(rows), gotDeletes.Binlogs[0].GetEntriesNum())
+}
+
+func (s *PackWriterV3Suite) TestV3InheritsV2Fields() {
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(789)
+
+	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
+	basePath := path.Join(common.SegmentInsertLogPath, k)
+	manifestPath := packed.MarshalManifestPath(basePath, -1)
+
+	mc := metacache.NewMockMetaCache(s.T())
+
+	// Create V3 writer and verify it has access to V2 fields
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, packed.DefaultMultiPartUploadSize, nil, s.currentSplit, manifestPath)
+
+	// Verify V3 can access fields from embedded V2
+	s.Equal(s.schema, bw.schema)
+	s.Equal(s.cm, bw.chunkManager)
+	s.Equal(s.logIDAlloc, bw.allocator)
+	s.EqualValues(packed.DefaultWriteBufferSize, bw.bufferSize) // 0 was passed for bufferSize (default write buffer)
+	s.EqualValues(packed.DefaultMultiPartUploadSize, bw.multiPartUploadSize)
+	s.Equal(s.currentSplit, bw.columnGroups)
+	s.Equal(manifestPath, bw.manifestPath)
+}

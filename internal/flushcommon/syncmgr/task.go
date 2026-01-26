@@ -140,10 +140,6 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, t.writeRetryOpts...)
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, err = writer.Write(ctx, t.pack)
-		if err != nil {
-			log.Warn("failed to write sync data with storage v2 format", zap.Error(err))
-			return err
-		}
 	case storage.StorageV3:
 		writer := NewBulkPackWriterV3(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, segmentInfo.ManifestPath(), t.writeRetryOpts...)
@@ -151,10 +147,11 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	default:
 		writer := NewBulkPackWriter(t.metacache, t.schema, t.chunkManager, t.allocator, t.writeRetryOpts...)
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
-		if err != nil {
-			log.Warn("failed to write sync data", zap.Error(err))
-			return err
-		}
+	}
+
+	if err != nil {
+		log.Warn("failed to write sync data with storage v2 format", zap.Error(err))
+		return err
 	}
 
 	getDataCount := func(binlogs ...*datapb.FieldBinlog) int64 {

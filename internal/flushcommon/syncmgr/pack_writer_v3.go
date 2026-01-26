@@ -37,13 +37,8 @@ import (
 
 type BulkPackWriterV3 struct {
 	*BulkPackWriterV2
-	schema              *schemapb.CollectionSchema
-	bufferSize          int64
-	multiPartUploadSize int64
 
-	storageConfig *indexpb.StorageConfig
-	columnGroups  []storagecommon.ColumnGroup
-	manifestPath  string
+	manifestPath string
 }
 
 func NewBulkPackWriterV3(metaCache metacache.MetaCache, schema *schemapb.CollectionSchema, chunkManager storage.ChunkManager,
@@ -53,13 +48,8 @@ func NewBulkPackWriterV3(metaCache metacache.MetaCache, schema *schemapb.Collect
 	bwV2 := NewBulkPackWriterV2(metaCache, schema, chunkManager, allocator, bufferSize,
 		multiPartUploadSize, storageConfig, columnGroups, writeRetryOpts...)
 	return &BulkPackWriterV3{
-		BulkPackWriterV2:    bwV2,
-		schema:              schema,
-		bufferSize:          bufferSize,
-		multiPartUploadSize: multiPartUploadSize,
-		storageConfig:       storageConfig,
-		columnGroups:        columnGroups,
-		manifestPath:        curManifestPath,
+		BulkPackWriterV2: bwV2,
+		manifestPath:     curManifestPath,
 	}
 }
 
@@ -97,7 +87,7 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 
 func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, string, error) {
 	if len(pack.insertData) == 0 {
-		return make(map[int64]*datapb.FieldBinlog), "", nil
+		return make(map[int64]*datapb.FieldBinlog), bw.manifestPath, nil
 	}
 
 	rec, err := bw.serializeBinlog(ctx, pack)
