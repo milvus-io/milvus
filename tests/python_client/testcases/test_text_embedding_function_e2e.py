@@ -1392,7 +1392,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
         res, _ = collection_w.query(expr="id == 0", output_fields=["document"])
         assert "Updated document" in res[0]["document"]
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_alter_function_when_other_function_is_invalid(self, host):
         """
         target: test alter function succeeds even when another function in collection is invalid
@@ -1505,7 +1505,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             mock_server_1.stop()
             mock_server_2.stop()
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_alter_invalid_function_to_valid_endpoint(self, host):
         """
         target: test user can fix an invalid function by altering it to a valid endpoint
