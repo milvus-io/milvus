@@ -15,6 +15,7 @@
 // limitations under the License.
 #include <cstddef>
 #include <algorithm>
+#include <atomic>
 #include "common/OpContext.h"
 #include "milvus-storage/common/metadata.h"
 #include "segcore/memory_planner.h"
@@ -30,6 +31,7 @@
 #include "arrow/type.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
+#include "folly/ScopeGuard.h"
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "log/Log.h"
@@ -264,35 +266,51 @@ LoadWithStrategyAsync(milvus::OpContext* op_ctx,
                "row group lists");
     auto& pool = ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
 
-    // Use RAII to ensure channel is closed when all tasks are done
-    struct ChannelCloser {
-        std::shared_ptr<ArrowReaderChannel> channel_;
-        ~ChannelCloser() {
-            if (channel_)
-                channel_->close();
+    // First pass: split row groups and count total number of tasks
+    // Cache the blocks to avoid calling split() twice
+    std::vector<std::vector<RowGroupBlock>> all_blocks;
+    all_blocks.reserve(remote_files.size());
+    size_t total_tasks = 0;
+
+    for (size_t file_idx = 0; file_idx < remote_files.size(); ++file_idx) {
+        const auto& row_groups = row_group_lists[file_idx];
+        if (!row_groups.empty()) {
+            auto blocks = strategy->split(row_groups);
+            total_tasks += blocks.size();
+            all_blocks.push_back(std::move(blocks));
+        } else {
+            all_blocks.emplace_back();  // empty vector for this file
         }
-    };
-    auto close = std::make_shared<ChannelCloser>();
-    close->channel_ = channel;
+    }
+
+    // If no tasks, close channel immediately and return
+    if (total_tasks == 0) {
+        channel->close();
+        return {};
+    }
+
+    // Use atomic counter to track remaining tasks.
+    // The last task to complete will close the channel.
+    // This avoids the deadlock caused by std::packaged_task holding
+    // the callable (and captured shared_ptr) in its shared_state,
+    // which is only released when the future is destroyed.
+    auto remaining_tasks = std::make_shared<std::atomic<size_t>>(total_tasks);
 
     // Create and submit tasks for each block
     std::vector<std::future<void>> futures;
+    futures.reserve(total_tasks);
+
     for (size_t file_idx = 0; file_idx < remote_files.size(); ++file_idx) {
         const auto& file = remote_files[file_idx];
-        const auto& row_groups = row_group_lists[file_idx];
+        const auto& blocks = all_blocks[file_idx];
 
-        if (row_groups.empty()) {
+        if (blocks.empty()) {
             continue;
         }
-
-        // Use provided strategy to split row groups
-        auto blocks = strategy->split(row_groups);
 
         LOG_INFO("[StorageV2] split row groups into blocks: {} for file {}",
                  blocks.size(),
                  file);
-
-        futures.reserve(blocks.size());
 
         auto reader_memory_limit = std::max<int64_t>(
             memory_limit / blocks.size(), FILE_SLICE_SIZE.load());
@@ -304,8 +322,20 @@ LoadWithStrategyAsync(milvus::OpContext* op_ctx,
                                               file_idx,
                                               schema,
                                               reader_memory_limit,
-                                              close,
+                                              channel,
+                                              remaining_tasks,
                                               op_ctx]() {
+                // Use a guard to ensure we always decrement the counter
+                // and close the channel when the last task completes,
+                // even if an exception is thrown.
+                auto task_guard =
+                    folly::makeGuard([&channel, &remaining_tasks]() {
+                        if (remaining_tasks->fetch_sub(1) == 1) {
+                            // This is the last task, close the channel
+                            channel->close();
+                        }
+                    });
+
                 AssertInfo(fs != nullptr, "[StorageV2] file system is nullptr");
                 CheckCancellation(op_ctx, -1, "LoadWithStrategyAsync");
                 auto result = milvus_storage::FileRowGroupReader::Make(
@@ -346,7 +376,7 @@ LoadWithStrategyAsync(milvus::OpContext* op_ctx,
                            "for file " +
                                file + " with error " + close_status.ToString());
 
-                close->channel_->push(ret);
+                channel->push(ret);
             }));
         }
     }
