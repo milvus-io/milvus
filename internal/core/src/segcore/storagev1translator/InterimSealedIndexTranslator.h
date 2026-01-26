@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include "cachinglayer/Translator.h"
+#include "common/Types.h"
 #include "index/Index.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 
@@ -28,7 +29,8 @@ class InterimSealedIndexTranslator
         knowhere::Json build_config,
         int64_t dim,
         bool is_sparse,
-        DataType vec_data_type);
+        DataType vec_data_type,
+        const std::string& warmup_policy = "");
     size_t
     num_cells() const override;
     milvus::cachinglayer::cid_t

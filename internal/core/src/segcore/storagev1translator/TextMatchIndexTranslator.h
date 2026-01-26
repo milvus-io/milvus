@@ -29,6 +29,8 @@ struct TextMatchIndexLoadInfo {
     int64_t field_id;
     std::string analyzer_params;
     int64_t index_size;
+    std::string
+        warmup_policy;  // "disable" or "sync", empty means use global config
 };
 
 // Translator for TextMatchIndex (non-knowhere index). It loads a single-cell

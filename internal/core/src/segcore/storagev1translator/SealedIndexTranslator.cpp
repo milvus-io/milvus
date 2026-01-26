@@ -33,7 +33,8 @@ SealedIndexTranslator::SealedIndexTranslator(
                         std::to_string(load_index_info->segment_id),
                         std::to_string(load_index_info->field_id),
                         load_index_info->num_rows,
-                        load_index_info->dim}),
+                        load_index_info->dim,
+                        load_index_info->warmup_policy}),
       meta_(
           load_index_info->enable_mmap
               ? milvus::cachinglayer::StorageType::DISK
@@ -50,8 +51,9 @@ SealedIndexTranslator::SealedIndexTranslator(
                index_info_.index_type, knowhere::feature::LAZY_LOAD))
               ? CacheWarmupPolicy::CacheWarmupPolicy_Sync
               : milvus::segcore::getCacheWarmupPolicy(
-                    /* is_vector */ IsVectorDataType(
-                        load_index_info->field_type),
+                    load_index_info->warmup_policy,
+                    /* is_vector */
+                    IsVectorDataType(load_index_info->field_type),
                     /* is_index */ true),
           /* support_eviction */
           // if index data supports lazy load internally, we don't need to support eviction for index metadata

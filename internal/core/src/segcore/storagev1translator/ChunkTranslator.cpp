@@ -75,7 +75,8 @@ ChunkTranslator::ChunkTranslator(
     std::vector<FileInfo>&& file_infos,
     bool use_mmap,
     bool mmap_populate,
-    milvus::proto::common::LoadPriority load_priority)
+    milvus::proto::common::LoadPriority load_priority,
+    const std::string& warmup_policy)
     : segment_id_(segment_id),
       field_id_(field_data_info.field_id),
       field_meta_(field_meta),
@@ -90,7 +91,9 @@ ChunkTranslator::ChunkTranslator(
             milvus::segcore::getCellDataType(
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false),
+            // Use getCacheWarmupPolicy to resolve: user setting > global config
             milvus::segcore::getCacheWarmupPolicy(
+                warmup_policy,
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false,
                 /* in_load_list*/ field_data_info.in_load_list),

@@ -29,6 +29,8 @@ struct JsonStatsLoadInfo {
     int64_t segment_id;
     int64_t field_id;
     int64_t stats_size;
+    std::string
+        warmup_policy;  // "disable" or "sync", empty means use global config
 };
 
 // Translator for JSON Key Stats (non-knowhere index). It loads a single-cell

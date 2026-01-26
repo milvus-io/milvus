@@ -23,7 +23,8 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
     int64_t segment_id,
     FieldMeta field_meta,
     FieldDataInfo field_data_info,
-    bool use_mmap)
+    bool use_mmap,
+    const std::string& warmup_policy)
     : segment_id_(segment_id),
       key_(fmt::format("seg_{}_f_{}", segment_id, field_data_info.field_id)),
       use_mmap_(use_mmap),
@@ -35,6 +36,7 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false),
             milvus::segcore::getCacheWarmupPolicy(
+                warmup_policy,
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false,
                 /* in_load_list, set to false to reduce memory usage */ false),
