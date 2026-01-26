@@ -2957,6 +2957,7 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
     """
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/47101")
     def test_snapshot_concurrent_create_same_name(self):
         """
         target: verify only one concurrent create with same name succeeds
