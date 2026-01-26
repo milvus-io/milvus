@@ -99,3 +99,14 @@ func ValidateOffsetCacheIndexParams(indexType IndexType, indexParams map[string]
 	}
 	return nil
 }
+
+func ValidateWarmupIndexParams(indexParams map[string]string) error {
+	warmupPolicy, ok := indexParams[common.WarmupKey]
+	if !ok {
+		return nil
+	}
+	if err := common.ValidateWarmupPolicy(warmupPolicy); err != nil {
+		return err
+	}
+	return nil
+}

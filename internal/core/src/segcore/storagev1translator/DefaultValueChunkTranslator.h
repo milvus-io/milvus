@@ -20,6 +20,7 @@
 #include "common/Chunk.h"
 #include "common/FieldMeta.h"
 #include "common/ChunkWriter.h"
+#include "common/Types.h"
 #include "mmap/Types.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
 
@@ -33,10 +34,9 @@ class DefaultValueChunkTranslator
                                 FieldMeta field_meta,
                                 FieldDataInfo field_data_info,
                                 bool use_mmap,
-                                bool mmap_populate);
-
+                                bool mmap_populate,
+                                const std::string& warmup_policy);
     ~DefaultValueChunkTranslator() override;
-
     size_t
     num_cells() const override;
     milvus::cachinglayer::cid_t

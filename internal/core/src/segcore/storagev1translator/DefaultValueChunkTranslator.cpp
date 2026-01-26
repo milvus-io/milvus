@@ -24,7 +24,8 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
     FieldMeta field_meta,
     FieldDataInfo field_data_info,
     bool use_mmap,
-    bool mmap_populate)
+    bool mmap_populate,
+    const std::string& warmup_policy)
     : total_rows_(field_data_info.row_count),
       segment_id_(segment_id),
       key_(
@@ -39,12 +40,12 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
             // Cell IDs are identical to chunk IDs.
             milvus::cachinglayer::CellIdMappingMode::IDENTICAL,
             milvus::segcore::getCellDataType(
+                /* is_index */ false,
+                /* is_vector */ false),
+            milvus::segcore::getCacheWarmupPolicy(
+                warmup_policy,
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false),
-            milvus::segcore::getCacheWarmupPolicy(
-                IsVectorDataType(field_meta.get_data_type()),
-                /* is_index */ false,
-                /* in_load_list, set to false to reduce memory usage */ false),
             /* support_eviction */ false) {
     // Split rows into ~64KB cells according to value_size().
     // Fallback to single-cell if value_size() is not well-defined.

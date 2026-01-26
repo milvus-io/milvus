@@ -1016,7 +1016,9 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
         enable_mmap,
         mmap_config.GetMmapPopulate(),
         milvus_field_ids.size(),
-        load_priority_);
+        load_priority_,
+        // Use global config for warmup policy (pass empty string)
+        /* warmup_policy */ "");
 
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));

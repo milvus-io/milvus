@@ -41,7 +41,8 @@ BsonInvertedIndexTranslator::BsonInvertedIndexTranslator(
             milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
             milvus::segcore::getCellDataType(/* is_vector */ false,
                                              /* is_index */ true),
-            milvus::segcore::getCacheWarmupPolicy(/* is_vector */ false,
+            milvus::segcore::getCacheWarmupPolicy(load_info_.warmup_policy,
+                                                  /* is_vector */ false,
                                                   /* is_index */ true),
             /* support_eviction */ true) {
 }

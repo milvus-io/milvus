@@ -322,3 +322,49 @@ func isDataMmapEnable(fieldSchema *schemapb.FieldSchema) bool {
 func isGrowingMmapEnable() bool {
 	return params.Params.QueryNodeCfg.GrowingMmapEnabled.GetAsBool()
 }
+
+// getFieldWarmupPolicy returns the warmup policy for field data loading.
+// Priority: field TypeParams (propagated from collection-level by QueryCoord) > global config
+func getFieldWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
+	// Check field TypeParams (collection-level warmup.scalarField/warmup.vectorField
+	// is propagated to field TypeParams by QueryCoord)
+	policy, exist := common.GetWarmupPolicy(fieldSchema.GetTypeParams()...)
+
+	if exist {
+		return policy
+	}
+	// Fall back to global config
+	if typeutil.IsVectorType(fieldSchema.GetDataType()) {
+		return params.Params.QueryNodeCfg.TieredWarmupVectorField.GetValue()
+	}
+	return params.Params.QueryNodeCfg.TieredWarmupScalarField.GetValue()
+}
+
+// getIndexWarmupPolicy returns the warmup policy for index loading.
+// Priority: index params (propagated from collection-level by QueryCoord) > global config
+func getIndexWarmupPolicy(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo) string {
+	// Check index params (collection-level warmup.scalarIndex/warmup.vectorIndex
+	// is propagated to index params by QueryCoord)
+	policy, exist := common.GetWarmupPolicy(indexInfo.IndexParams...)
+	if exist {
+		return policy
+	}
+	// Fall back to global config
+	if typeutil.IsVectorType(fieldSchema.GetDataType()) {
+		return params.Params.QueryNodeCfg.TieredWarmupVectorIndex.GetValue()
+	}
+	return params.Params.QueryNodeCfg.TieredWarmupScalarIndex.GetValue()
+}
+
+// getScalarIndexWarmupPolicy returns the warmup policy for scalar index loading (e.g., json key stats).
+// Priority: field TypeParams (propagated from collection-level by QueryCoord) > global config
+func getScalarIndexWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
+	// Check field TypeParams (collection-level warmup.scalarField is propagated
+	// to field TypeParams by QueryCoord, which also applies to scalar indexes like json key stats)
+	policy, exist := common.GetWarmupPolicy(fieldSchema.GetTypeParams()...)
+	if exist {
+		return policy
+	}
+	// Fall back to global config for scalar index
+	return params.Params.QueryNodeCfg.TieredWarmupScalarIndex.GetValue()
+}

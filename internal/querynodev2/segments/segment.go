@@ -817,54 +817,6 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 }
 
 // -------------------------------------------------------------------------------------- interfaces for sealed segment
-func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
-	loadInfo := s.loadInfo.Load()
-	rowCount := loadInfo.GetNumOfRows()
-	fields := loadInfo.GetBinlogPaths()
-
-	if !s.ptrLock.PinIf(state.IsNotReleased) {
-		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
-	}
-	defer s.ptrLock.Unpin()
-
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID()),
-	)
-
-	req := &segcore.LoadFieldDataRequest{
-		RowCount:       rowCount,
-		StorageVersion: loadInfo.StorageVersion,
-	}
-	for _, field := range fields {
-		req.Fields = append(req.Fields, segcore.LoadFieldDataInfo{
-			Field: field,
-		})
-	}
-
-	var err error
-	GetLoadPool().Submit(func() (any, error) {
-		start := time.Now()
-		defer func() {
-			metrics.QueryNodeCGOCallLatency.WithLabelValues(
-				fmt.Sprint(paramtable.GetNodeID()),
-				"LoadFieldData",
-				"Sync",
-			).Observe(float64(time.Since(start).Milliseconds()))
-		}()
-		_, err = s.csegment.LoadFieldData(ctx, req)
-		return nil, nil
-	}).Await()
-	if err != nil {
-		log.Warn("LoadMultiFieldData failed", zap.Error(err))
-		return err
-	}
-
-	log.Info("load mutil field done", zap.Int64("row count", rowCount), zap.Int64("segmentID", s.ID()))
-	return nil
-}
-
 func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog, warmupPolicy ...string) error {
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
@@ -890,17 +842,23 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		return err
 	}
 	mmapEnabled := isDataMmapEnable(fieldSchema)
+
+	// Determine warmup policy: use passed-in value or get from field schema
+	fieldWarmupPolicy := ""
+	if len(warmupPolicy) > 0 {
+		fieldWarmupPolicy = warmupPolicy[0]
+	} else {
+		fieldWarmupPolicy = getFieldWarmupPolicy(fieldSchema)
+	}
+
 	req := &segcore.LoadFieldDataRequest{
 		Fields: []segcore.LoadFieldDataInfo{{
-			Field:      field,
-			EnableMMap: mmapEnabled,
+			Field:        field,
+			EnableMMap:   mmapEnabled,
+			WarmupPolicy: fieldWarmupPolicy,
 		}},
 		RowCount:       rowCount,
 		StorageVersion: s.LoadInfo().GetStorageVersion(),
-	}
-
-	if len(warmupPolicy) > 0 {
-		req.WarmupPolicy = warmupPolicy[0]
 	}
 
 	GetLoadPool().Submit(func() (any, error) {
@@ -938,6 +896,7 @@ func (s *LocalSegment) AddFieldDataInfo(ctx context.Context, rowCount int64, fie
 		zap.Int64("row count", rowCount),
 	)
 
+	collection := s.collection
 	req := &segcore.AddFieldDataInfoRequest{
 		Fields:         make([]segcore.LoadFieldDataInfo, 0, len(fields)),
 		RowCount:       rowCount,
@@ -945,8 +904,13 @@ func (s *LocalSegment) AddFieldDataInfo(ctx context.Context, rowCount int64, fie
 		StorageVersion: s.loadInfo.Load().GetStorageVersion(),
 	}
 	for _, field := range fields {
+		fieldSchema, _ := getFieldSchema(collection.Schema(), field.GetFieldID())
+		mmapEnabled := isDataMmapEnable(fieldSchema)
+		warmupPolicy := getFieldWarmupPolicy(fieldSchema)
 		req.Fields = append(req.Fields, segcore.LoadFieldDataInfo{
-			Field: field,
+			Field:        field,
+			EnableMMap:   mmapEnabled,
+			WarmupPolicy: warmupPolicy,
 		})
 	}
 
@@ -1042,6 +1006,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	fieldSchema *schemapb.FieldSchema,
 	loadInfo *querypb.SegmentLoadInfo,
 	indexInfo *querypb.FieldIndexInfo,
+	collectionProps []*commonpb.KeyValuePair,
 	f func(c *LoadIndexInfo) error,
 ) error {
 	// 1.
@@ -1072,6 +1037,23 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	}
 
 	enableMmap := isIndexMmapEnable(fieldSchema, indexInfo)
+	// Add warmup policy to index_params if not already present
+	// C++ will pass it to Knowhere for index loading
+	if existingWarmup, exists := indexParams[common.WarmupKey]; exists {
+		log.Ctx(ctx).Info("warmup policy already in index params (from QueryCoord)",
+			zap.Int64("segmentID", loadInfo.GetSegmentID()),
+			zap.Int64("fieldID", indexInfo.GetFieldID()),
+			zap.String("warmup", existingWarmup))
+	} else {
+		warmupPolicy := getIndexWarmupPolicy(fieldSchema, indexInfo)
+		log.Ctx(ctx).Info("warmup policy from getIndexWarmupPolicy",
+			zap.Int64("segmentID", loadInfo.GetSegmentID()),
+			zap.Int64("fieldID", indexInfo.GetFieldID()),
+			zap.String("warmup", warmupPolicy))
+		if warmupPolicy != "" {
+			indexParams[common.WarmupKey] = warmupPolicy
+		}
+	}
 	indexInfoProto := &cgopb.LoadIndexInfo{
 		CollectionID:              loadInfo.GetCollectionID(),
 		PartitionID:               loadInfo.GetPartitionID(),
@@ -1151,7 +1133,7 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 	fieldType schemapb.DataType,
 ) error {
 	err := GetCLoadInfoWithFunc(ctx, fieldSchema,
-		s.LoadInfo(), indexInfo, func(loadIndexInfo *LoadIndexInfo) error {
+		s.LoadInfo(), indexInfo, s.collection.Schema().GetProperties(), func(loadIndexInfo *LoadIndexInfo) error {
 			newLoadIndexInfoSpan := tr.RecordSpan()
 
 			if err := loadIndexInfo.loadIndex(ctx); err != nil {
@@ -1203,6 +1185,8 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 
 	// Text match index mmap config is based on the raw data mmap.
 	enableMmap := isDataMmapEnable(f)
+	// Text match index is a scalar index, use scalar index warmup policy
+	warmupPolicy := getScalarIndexWarmupPolicy(f)
 	cgoProto := &indexcgopb.LoadTextIndexInfo{
 		FieldID:                   textLogs.GetFieldID(),
 		Version:                   textLogs.GetVersion(),
@@ -1215,6 +1199,7 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 		EnableMmap:                enableMmap,
 		IndexSize:                 textLogs.GetMemorySize(),
 		CurrentScalarIndexVersion: textLogs.GetCurrentScalarIndexVersion(),
+		WarmupPolicy:              warmupPolicy,
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)
@@ -1263,6 +1248,9 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		return err
 	}
 
+	// JSON key stats is a scalar index, use scalar index warmup policy
+	warmupPolicy := getScalarIndexWarmupPolicy(f)
+
 	cgoProto := &indexcgopb.LoadJsonKeyIndexInfo{
 		FieldID:      jsonKeyStats.GetFieldID(),
 		Version:      jsonKeyStats.GetVersion(),
@@ -1275,6 +1263,7 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		EnableMmap:   paramtable.Get().QueryNodeCfg.MmapJSONStats.GetAsBool(),
 		MmapDirPath:  paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
 		StatsSize:    jsonKeyStats.GetLogSize(),
+		WarmupPolicy: warmupPolicy,
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)
