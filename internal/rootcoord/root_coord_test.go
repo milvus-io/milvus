@@ -1872,13 +1872,13 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().AddFileResource(mock.Anything, mock.Anything).Return(nil)
-		meta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{}, uint64(1))
 
+		observer := NewMockFileResourceObserver(t)
+		observer.EXPECT().Sync().Return(nil)
 		mixc := &mocks.MixCoord{}
-		mixc.EXPECT().SyncQcFileResource(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		mixc.EXPECT().SyncDcFileResource(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator), withMeta(meta), withMixCoord(mixc))
+		c.SetFileResourceObserver(observer)
 		ctx := context.Background()
 		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
@@ -1915,7 +1915,10 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().RemoveFileResource(mock.Anything, mock.Anything).Return(nil, false)
 
+		observer := NewMockFileResourceObserver(t)
+
 		c := newTestCore(withHealthyCode(), withMeta(meta))
+		c.SetFileResourceObserver(observer)
 		ctx := context.Background()
 		resp, err := c.RemoveFileResource(ctx, &milvuspb.RemoveFileResourceRequest{
 			Name: "test_resource",
@@ -1927,13 +1930,13 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 	t.Run("success with resource exist", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().RemoveFileResource(mock.Anything, mock.Anything).Return(nil, true)
-		meta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{}, uint64(1))
 
+		observer := NewMockFileResourceObserver(t)
+		observer.EXPECT().Sync().Return(nil)
 		mixc := &mocks.MixCoord{}
-		mixc.EXPECT().SyncQcFileResource(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		mixc.EXPECT().SyncDcFileResource(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withMeta(meta), withMixCoord(mixc))
+		c.SetFileResourceObserver(observer)
 		ctx := context.Background()
 		resp, err := c.RemoveFileResource(ctx, &milvuspb.RemoveFileResourceRequest{
 			Name: "test_resource",

@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -1458,6 +1459,121 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		assert.Equal(t, int64(150), fieldIDMap["field_150"], "Non-contiguous ID 150 should be preserved")
 		assert.Equal(t, int64(500), fieldIDMap["field_500"], "Non-contiguous ID 500 should be preserved")
 		assert.Equal(t, int64(1000), fieldIDMap["field_1000"], "Non-contiguous ID 1000 should be preserved")
+	})
+
+	t.Run("normal with analyzer", func(t *testing.T) {
+		mixcoord := mocks.NewMixCoord(t)
+		mixcoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&querypb.ValidateAnalyzerResponse{
+			Status:      merr.Status(nil),
+			ResourceIds: []int64{1, 2, 3},
+		}, nil)
+
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+		field2 := funcutil.GenRandomStr()
+
+		schema := &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         field1,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					Name:     field2,
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "100"},
+						{Key: "enable_analyzer", Value: "true"},
+						{Key: "enable_match", Value: "true"},
+						{Key: "analyzer_params", Value: `{"type": "standard"}`},
+					},
+				},
+			},
+		}
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		task := createCollectionTask{
+			Core: newTestCore(withMixCoord(mixcoord)),
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionName:   collectionName,
+				CollectionSchema: schema,
+			},
+			preserveFieldID: false,
+		}
+
+		err = task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+	})
+
+	t.Run("normal with file resource observer", func(t *testing.T) {
+		mixcoord := mocks.NewMixCoord(t)
+		mixcoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&querypb.ValidateAnalyzerResponse{
+			Status:      merr.Status(nil),
+			ResourceIds: []int64{1, 2, 3},
+		}, nil)
+
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+		field2 := funcutil.GenRandomStr()
+
+		schema := &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         field1,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					Name:     field2,
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "100"},
+						{Key: "enable_analyzer", Value: "true"},
+						{Key: "enable_match", Value: "true"},
+						{Key: "analyzer_params", Value: `{"type": "standard"}`},
+					},
+				},
+			},
+		}
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		task := createCollectionTask{
+			Core: newTestCore(withMixCoord(mixcoord)),
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionName:   collectionName,
+				CollectionSchema: schema,
+			},
+			preserveFieldID: false,
+		}
+
+		// with file resource observer
+		fileResourceObserver := NewMockFileResourceObserver(t)
+		fileResourceObserver.EXPECT().CheckAllQnReady().Return(nil)
+
+		task.Core.fileResourceObserver = fileResourceObserver
+		err = task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+
+		assert.Equal(t, []int64{1, 2, 3}, task.body.CollectionSchema.FileResourceIds)
 	})
 
 	t.Run("normal case without preserve field IDs", func(t *testing.T) {

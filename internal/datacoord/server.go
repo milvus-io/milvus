@@ -174,7 +174,12 @@ type Server struct {
 	metricsRequest *metricsinfo.MetricsRequest
 
 	// file resource
-	fileManager *FileResourceManager
+	fileResourceObserver FileResourceObserver
+}
+
+type FileResourceObserver interface {
+	InitDataCoord(manager session.NodeManager)
+	Notify()
 }
 
 type CollectionNameInfo struct {
@@ -228,6 +233,10 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 
 func defaultDataNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 	return datanodeclient.NewClient(ctx, addr, nodeID, Params.DataCoordCfg.WithCredential.GetAsBool())
+}
+
+func (s *Server) SetFileResourceObserver(observer FileResourceObserver) {
+	s.fileResourceObserver = observer
 }
 
 // QuitSignal returns signal when server quits
@@ -346,7 +355,10 @@ func (s *Server) initDataCoord() error {
 
 	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.compactionTriggerManager)
 
-	s.fileManager = NewFileResourceManager(s.ctx, s.meta, s.nodeManager)
+	// init file resource observer
+	if s.fileResourceObserver != nil {
+		s.fileResourceObserver.InitDataCoord(s.nodeManager)
+	}
 
 	// Initialize copy segment meta and components
 	s.copySegmentMeta, err = NewCopySegmentMeta(s.ctx, s.meta.catalog, s.meta, s.meta.snapshotMeta)
@@ -477,8 +489,6 @@ func (s *Server) Start() error {
 func (s *Server) startDataCoord() {
 	s.startTaskScheduler()
 	s.startServerLoop()
-	s.fileManager.Start()
-	s.fileManager.Notify()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
@@ -926,7 +936,9 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 			}
 
 			// notify file manager sync file resource to new node
-			s.fileManager.Notify()
+			if s.fileResourceObserver != nil {
+				s.fileResourceObserver.Notify()
+			}
 			return nil
 		case sessionutil.SessionDelEvent:
 			log.Info("received datanode unregister",
@@ -1115,7 +1127,6 @@ func (s *Server) Stop() error {
 	s.stopServerLoop()
 	log.Info("datacoord stopServerLoop stopped")
 
-	s.fileManager.Close()
 	s.globalScheduler.Stop()
 	s.importInspector.Close()
 	s.importChecker.Close()

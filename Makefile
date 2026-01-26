@@ -502,6 +502,8 @@ generate-mockery-types: getdeps
 
 generate-mockery-rootcoord: getdeps
 	$(INSTALL_PATH)/mockery --name=IMetaTable --dir=$(PWD)/internal/rootcoord --output=$(PWD)/internal/rootcoord/mocks --filename=meta_table.go --with-expecter --outpkg=mockrootcoord
+	$(INSTALL_PATH)/mockery --name=FileResourceObserver --dir=$(PWD)/internal/rootcoord --output=$(PWD)/internal/rootcoord --filename=mock_file_resource_observer.go --with-expecter --structname=MockFileResourceObserver  --inpackage
+
 
 generate-mockery-proxy: getdeps
 	$(INSTALL_PATH)/mockery --config $(PWD)/internal/proxy/.mockery.yaml

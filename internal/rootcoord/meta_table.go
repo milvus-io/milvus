@@ -2238,7 +2238,10 @@ func (mt *MetaTable) AddFileResource(ctx context.Context, resource *internalpb.F
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	if _, ok := mt.fileResourceName2Meta[resource.Name]; ok {
+	if old, ok := mt.fileResourceName2Meta[resource.Name]; ok {
+		if old.Path == resource.Path {
+			return nil
+		}
 		return errors.Newf("file resource %s already exists", resource.Name)
 	}
 

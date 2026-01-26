@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
@@ -62,6 +63,7 @@ func Sync(version uint64, resourceList []*internalpb.FileResourceInfo) error {
 
 // Manager manage file resource
 type Manager interface {
+	GetVersion() uint64
 	// sync resource to local
 	Sync(version uint64, resourceList []*internalpb.FileResourceInfo) error
 
@@ -95,6 +97,7 @@ func (m *BaseManager) Download(ctx context.Context, downloader storage.ChunkMana
 }
 func (m *BaseManager) Release(resources ...*internalpb.FileResourceInfo) {}
 func (m *BaseManager) Mode() Mode                                        { return CloseMode }
+func (m *BaseManager) GetVersion() uint64                                { return 0 }
 
 // Manager with Sync Mode
 // mixcoord should sync all node after add or remove file resource.
@@ -104,8 +107,12 @@ type SyncManager struct {
 	sync.RWMutex
 	downloader storage.ChunkManager
 
-	version     uint64
+	version     *atomic.Uint64
 	resourceMap map[string]int64 // resource name -> resource id
+}
+
+func (m *SyncManager) GetVersion() uint64 {
+	return m.version.Load()
 }
 
 // sync file to local if file mode was Sync
@@ -114,7 +121,7 @@ func (m *SyncManager) Sync(version uint64, resourceList []*internalpb.FileResour
 	defer m.Unlock()
 
 	// skip if version is not changed
-	if version <= m.version {
+	if version <= m.version.Load() {
 		return nil
 	}
 
@@ -183,7 +190,7 @@ func (m *SyncManager) Sync(version uint64, resourceList []*internalpb.FileResour
 		}
 	}
 	m.resourceMap = newResourceMap
-	m.version = version
+	m.version.Store(version)
 	return analyzer.UpdateGlobalResourceInfo(newResourceMap)
 }
 
@@ -194,7 +201,7 @@ func NewSyncManager(downloader storage.ChunkManager) *SyncManager {
 		BaseManager: BaseManager{localPath: pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID())},
 		downloader:  downloader,
 		resourceMap: make(map[string]int64),
-		version:     0,
+		version:     atomic.NewUint64(0),
 	}
 }
 

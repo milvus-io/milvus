@@ -2027,12 +2027,6 @@ func (s *Server) CreateExternalCollection(ctx context.Context, req *msgpb.Create
 	}, nil
 }
 
-// sync file resource to datacoord file manager
-func (s *Server) SyncFileResource(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
-	s.fileManager.UpdateResources(resources, version)
-	return nil
-}
-
 // DropSegmentsByTime drop segments that were updated before the flush timestamp for TruncateCollection
 func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
