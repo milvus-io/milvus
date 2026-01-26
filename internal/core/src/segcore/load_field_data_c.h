@@ -64,6 +64,11 @@ EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
            bool enabled);
 
 void
+SetFieldWarmupPolicy(CLoadFieldDataInfo c_load_field_data_info,
+                     int64_t field_id,
+                     CacheWarmupPolicy warmup_policy);
+
+void
 SetLoadPriority(CLoadFieldDataInfo c_load_field_data_info, int32_t priority);
 
 #ifdef __cplusplus

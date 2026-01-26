@@ -673,7 +673,8 @@ LoadJsonKeyIndex(CTraceContext c_trace,
             info_proto->mmap_dir_path(),
             segment->get_segment_id(),
             info_proto->fieldid(),
-            info_proto->stats_size()};
+            info_proto->stats_size(),
+            info_proto->warmup_policy()};
         milvus::storage::FileManagerContext file_ctx(
             field_meta, index_meta, remote_chunk_manager, fs);
 

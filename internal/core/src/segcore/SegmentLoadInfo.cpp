@@ -95,6 +95,10 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
                            ::tolower);
             use_mmap = (lower == "true");
         }
+        // Extract warmup policy from index params
+        if (kv_pair.key() == "warmup") {
+            load_index_info.warmup_policy = kv_pair.value();
+        }
         load_index_info.index_params[kv_pair.key()] = kv_pair.value();
     }
 

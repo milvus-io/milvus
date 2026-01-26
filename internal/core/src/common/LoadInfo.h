@@ -31,6 +31,8 @@ struct FieldBinlogInfo {
     // estimated memory size for each binlog file, in bytes, used by caching layer
     std::vector<int64_t> memory_sizes;
     bool enable_mmap{false};
+    // "disable" or "sync", empty means use global config
+    std::string warmup_policy;
     std::vector<std::string> insert_files;
     std::vector<int64_t> child_field_ids;
 };
@@ -40,8 +42,8 @@ struct LoadFieldDataInfo {
     int64_t storage_version = 0;
     milvus::proto::common::LoadPriority load_priority =
         milvus::proto::common::LoadPriority::HIGH;
-    CacheWarmupPolicy warmup_policy =
-        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    // "disable" or "sync", empty means use global config
+    std::string warmup_policy;
     std::vector<int64_t> child_field_ids;
 };
 

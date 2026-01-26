@@ -323,14 +323,36 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         // if multiple fields share same column group
         // hint for not loading certain field shall not be working for now
         // warmup will be disabled only when all columns are not in load list
+        // warmup uses OR logic: if ANY field wants sync warmup, group uses sync
         bool merged_in_load_list = false;
+        bool has_warmup_setting = false;
+        bool warmup_sync = false;
         std::vector<FieldId> milvus_field_ids;
         milvus_field_ids.reserve(field_id_list.size());
         for (int i = 0; i < field_id_list.size(); ++i) {
-            milvus_field_ids.emplace_back(field_id_list.Get(i));
+            auto child_field_id = FieldId(field_id_list.Get(i));
+            milvus_field_ids.emplace_back(child_field_id);
             merged_in_load_list = merged_in_load_list ||
                                   schema_->ShouldLoadField(milvus_field_ids[i]);
+
+            // Aggregate warmup policy from child fields
+            auto field_info_iter =
+                load_info.field_infos.find(child_field_id.get());
+            if (field_info_iter != load_info.field_infos.end()) {
+                const auto& field_warmup =
+                    field_info_iter->second.warmup_policy;
+                if (!field_warmup.empty()) {
+                    has_warmup_setting = true;
+                    warmup_sync = warmup_sync || (field_warmup == "sync");
+                }
+            }
         }
+
+        // Determine group warmup policy: use per-field settings if any,
+        // otherwise fall back to global warmup policy
+        std::string group_warmup_policy =
+            has_warmup_setting ? (warmup_sync ? "sync" : "disable")
+                               : load_info.warmup_policy;
 
         auto mmap_dir_path =
             milvus::storage::LocalChunkManagerSingleton::GetInstance()
@@ -364,7 +386,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 info.enable_mmap,
                 mmap_config.GetMmapPopulate(),
                 milvus_field_ids.size(),
-                load_info.load_priority);
+                load_info.load_priority,
+                group_warmup_policy);
 
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
@@ -492,6 +515,10 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             storage::SortByPath(file_infos);
 
             auto field_meta = schema_->operator[](field_id);
+            // Use per-field warmup policy if set, otherwise fall back to global
+            std::string field_warmup_policy = !info.warmup_policy.empty()
+                                                  ? info.warmup_policy
+                                                  : load_info.warmup_policy;
             std::unique_ptr<Translator<milvus::Chunk>> translator =
                 std::make_unique<storagev1translator::ChunkTranslator>(
                     this->get_segment_id(),
@@ -500,7 +527,8 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                     std::move(file_infos),
                     info.enable_mmap,
                     mmap_config.GetMmapPopulate(),
-                    load_info.load_priority);
+                    load_info.load_priority,
+                    field_warmup_policy);
 
             auto data_type = field_meta.get_data_type();
             auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
@@ -1813,7 +1841,8 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
         this->get_segment_id(),
         info_proto->fieldid(),
         field_meta.get_analyzer_params(),
-        info_proto->index_size()};
+        info_proto->index_size(),
+        info_proto->warmup_policy()};
 
     std::unique_ptr<
         milvus::cachinglayer::Translator<milvus::index::TextMatchIndex>>
@@ -2950,6 +2979,11 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         mmap_enabled = mmap_enabled || field_mmap_enabled;
     }
 
+    // Determine warmup policy based on whether it's vector field
+    // (manifest path uses global config since per-field warmup info is not available)
+    // Pass empty string to use global config
+    std::string warmup_policy = "";
+
     if (index_has_rawdata) {
         LOG_INFO(
             "[StorageV2] segment {} index(es) provide all raw data for column "
@@ -2991,7 +3025,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             mmap_config.GetMmapPopulate(),
             mmap_dir_path,
             column_group->columns.size(),
-            segment_load_info_.GetPriority());
+            segment_load_info_.GetPriority(),
+            warmup_policy);
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -3119,6 +3154,8 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         LoadFieldDataInfo load_field_data_info;
         load_field_data_info.storage_version =
             segment_load_info_.GetStorageVersion();
+        // Propagate global warmup policy from field_data_info_ (set by AddFieldDataInfoForSealed)
+        load_field_data_info.warmup_policy = field_data_info_.warmup_policy;
         // const auto& field_binlog = segment_load_info_.GetBinlogPath(i);
         // std::vector<FieldId> field_ids;
         // when child fields specified, field id is group id, child field ids are actual id values here
@@ -3193,6 +3230,25 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
                                    : mmap_config.GetScalarFieldEnableMmap();
         field_binlog_info.enable_mmap =
             has_mmap_setting ? mmap_enabled : global_use_mmap;
+
+        // Aggregate warmup policy from child fields using OR logic:
+        // if ANY field requires 'sync', the entire group uses 'sync'
+        bool has_warmup_setting = false;
+        bool warmup_sync = false;
+        for (const auto& child_field_id : field_ids) {
+            auto iter = field_data_info_.field_infos.find(child_field_id.get());
+            if (iter != field_data_info_.field_infos.end() &&
+                !iter->second.warmup_policy.empty()) {
+                has_warmup_setting = true;
+                warmup_sync =
+                    warmup_sync || (iter->second.warmup_policy == "sync");
+            }
+        }
+        // Determine group warmup policy: use per-field settings if any,
+        // otherwise fall back to global warmup policy
+        field_binlog_info.warmup_policy =
+            has_warmup_setting ? (warmup_sync ? "sync" : "disable")
+                               : field_data_info_.warmup_policy;
 
         // Store in map
         load_field_data_info.field_infos[group_id] = field_binlog_info;

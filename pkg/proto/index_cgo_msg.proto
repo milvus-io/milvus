@@ -121,6 +121,7 @@ message LoadTextIndexInfo {
   common.LoadPriority load_priority = 8;
   bool enable_mmap = 9;
   int64 index_size = 10;
+  string warmup_policy = 12;  // "disable" or "sync", empty means use global config
 }
 
 message LoadJsonKeyIndexInfo {
@@ -135,4 +136,5 @@ message LoadJsonKeyIndexInfo {
   bool enable_mmap = 9;
   string mmap_dir_path = 10;
   int64 stats_size = 11;
+  string warmup_policy = 12;  // "disable" or "sync", empty means use global config
 }

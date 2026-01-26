@@ -33,6 +33,7 @@
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "segcore/Utils.h"
 
 namespace milvus::index {
 
@@ -1015,7 +1016,9 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
         enable_mmap,
         mmap_config.GetMmapPopulate(),
         milvus_field_ids.size(),
-        load_priority_);
+        load_priority_,
+        // Use global config for warmup policy (pass empty string)
+        /* warmup_policy */ "");
 
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));

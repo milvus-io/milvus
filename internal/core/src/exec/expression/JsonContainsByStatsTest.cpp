@@ -116,7 +116,8 @@ BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
         /* mmap_dir_path */ "",
         /* segment_id */ segment_id,
         /* field_id */ field_id,
-        /* stats_size */ 0};
+        /* stats_size */ 0,
+        /* warmup_policy */ ""};
 
     std::unique_ptr<
         milvus::cachinglayer::Translator<milvus::index::JsonKeyStats>>
