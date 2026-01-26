@@ -149,13 +149,94 @@ func (suite *IndexBuildTaskSuite) TestEstimateIndexDiskCost() {
 func (suite *IndexBuildTaskSuite) TestCheckDiskCapacityForBuild() {
 	ctx := context.Background()
 
-	// Test with small data size - should pass
-	err := checkDiskCapacityForBuild(ctx, "DISKANN", 1024*1024) // 1MB
+	// Reset committed disk space before test
+	committedDiskSpaceLock.Lock()
+	committedDiskSpace = 0
+	committedDiskSpaceLock.Unlock()
+
+	// Test with small data size - should pass and reserve space
+	reserved, err := checkDiskCapacityForBuild(ctx, "DISKANN", 1024*1024) // 1MB
 	suite.Nil(err, "disk capacity check should succeed for small data size")
+	suite.Greater(reserved, uint64(0), "should reserve space when check passes")
+
+	// Verify space was reserved
+	committed := getCommittedDiskSpace()
+	suite.Equal(reserved, committed, "committed space should equal reserved space")
+
+	// Release the reserved space
+	subCommittedDiskSpace(reserved)
 
 	// Test with zero data size - should pass
-	err = checkDiskCapacityForBuild(ctx, "DISKANN", 0)
+	reserved, err = checkDiskCapacityForBuild(ctx, "DISKANN", 0)
 	suite.Nil(err, "disk capacity check should succeed for zero data size")
+	suite.Equal(uint64(0), reserved, "should reserve 0 for zero data size")
+}
+
+func (suite *IndexBuildTaskSuite) TestCommittedDiskSpace() {
+	// Reset committed disk space before test
+	committedDiskSpaceLock.Lock()
+	committedDiskSpace = 0
+	committedDiskSpaceLock.Unlock()
+
+	// Test add
+	addCommittedDiskSpace(1000)
+	suite.Equal(uint64(1000), getCommittedDiskSpace())
+
+	addCommittedDiskSpace(500)
+	suite.Equal(uint64(1500), getCommittedDiskSpace())
+
+	// Test sub
+	subCommittedDiskSpace(500)
+	suite.Equal(uint64(1000), getCommittedDiskSpace())
+
+	// Test sub with underflow protection
+	subCommittedDiskSpace(2000)
+	suite.Equal(uint64(0), getCommittedDiskSpace(), "should not go negative")
+}
+
+func (suite *IndexBuildTaskSuite) TestConcurrentDiskReservation() {
+	ctx := context.Background()
+
+	// Reset committed disk space before test
+	committedDiskSpaceLock.Lock()
+	committedDiskSpace = 0
+	committedDiskSpaceLock.Unlock()
+
+	// Get disk usage to calculate a size that would fail if not considering committed space
+	localStoragePath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	diskUsage, err := disk.Usage(localStoragePath)
+	suite.NoError(err)
+
+	maxUsageRatio := paramtable.Get().DataNodeCfg.IndexMaxDiskUsagePercentage.GetAsFloat()
+	maxAllowedUsage := uint64(float64(diskUsage.Total) * maxUsageRatio)
+	availableSpace := maxAllowedUsage - diskUsage.Used
+
+	// If available space is less than 100MB, skip this test
+	if availableSpace < 100*1024*1024 {
+		suite.T().Skip("not enough disk space for concurrent reservation test")
+	}
+
+	// Request half of available space
+	halfAvailable := availableSpace / 2
+
+	// First reservation should succeed
+	reserved1, err := checkDiskCapacityForBuild(ctx, "DISKANN", halfAvailable/3) // /3 because requiredSize = fieldDataSize * 3
+	suite.Nil(err, "first reservation should succeed")
+	suite.Greater(reserved1, uint64(0))
+
+	// Second reservation with same size should also succeed (still within limits)
+	reserved2, err := checkDiskCapacityForBuild(ctx, "DISKANN", halfAvailable/3)
+	suite.Nil(err, "second reservation should succeed")
+	suite.Greater(reserved2, uint64(0))
+
+	// Verify total committed space
+	totalCommitted := getCommittedDiskSpace()
+	suite.Equal(reserved1+reserved2, totalCommitted)
+
+	// Cleanup
+	subCommittedDiskSpace(reserved1)
+	subCommittedDiskSpace(reserved2)
+	suite.Equal(uint64(0), getCommittedDiskSpace())
 }
 
 func (suite *IndexBuildTaskSuite) TestDiskUsage() {
