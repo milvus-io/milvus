@@ -3058,9 +3058,25 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	defer sp.End()
 
 	// Handle search by primary keys: transform IDs to vectors
-	if err := node.handleIfSearchByPK(ctx, request); err != nil {
+	validData, err := node.handleIfSearchByPK(ctx, request)
+	if err != nil {
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
+		}, false, false, false, nil
+	}
+
+	// If all IDs have null vectors (Nq == 0), return empty results without executing search
+	if len(validData) > 0 && request.GetNq() == 0 {
+		return &milvuspb.SearchResults{
+			Status: merr.Success(),
+			Results: &schemapb.SearchResultData{
+				NumQueries: int64(len(validData)),
+				TopK:       0,
+				FieldsData: nil,
+				Scores:     nil,
+				Ids:        &schemapb.IDs{},
+				Topks:      make([]int64, len(validData)),
+			},
 		}, false, false, false, nil
 	}
 
@@ -3222,6 +3238,11 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
 	}
+
+	if qt.result != nil && qt.result.Results != nil && len(validData) > 0 {
+		adjustSearchResultsForNullVectors(qt.result, validData)
+	}
+
 	succeeded = true
 	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, qt.isRecallEvaluation, nil
 }
@@ -3462,6 +3483,24 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, nil
 }
 
+func adjustSearchResultsForNullVectors(results *milvuspb.SearchResults, validData []bool) {
+	resultData := results.Results
+	count := int64(len(validData))
+	resultData.NumQueries = count
+
+	newTopks := make([]int64, count)
+	resultIdx := 0
+	for i, isValid := range validData {
+		if !isValid {
+			newTopks[i] = 0
+		} else {
+			newTopks[i] = resultData.Topks[resultIdx]
+			resultIdx++
+		}
+	}
+	resultData.Topks = newTopks
+}
+
 // validateIDsType validates that the IDs type matches the primary key field type
 func validateIDsType(pkField *schemapb.FieldSchema, ids *schemapb.IDs) error {
 	if ids == nil {
@@ -3491,29 +3530,29 @@ func validateIDsType(pkField *schemapb.FieldSchema, ids *schemapb.IDs) error {
 // After this function, the request will have PlaceholderGroup set, ready for normal search pipeline.
 // If the request is not search-by-IDs, this function does nothing.
 //
-// Returns error if the transformation fails.
-func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.SearchRequest) error {
+// Returns validData ([]bool) indicating which IDs have valid vectors, and error if the transformation fails.
+func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.SearchRequest) ([]bool, error) {
 	// Check if this is a search by PK request
 	ids := request.GetIds()
 	if ids == nil || typeutil.GetSizeOfIDs(ids) == 0 {
-		return nil // Not search by PK, do nothing
+		return nil, nil // Not search by PK, do nothing
 	}
 
 	// Check for duplicate IDs (fail fast before query)
 	inputIDsCount := typeutil.GetSizeOfIDs(ids)
 	checker, err := typeutil.NewIDsChecker(ids)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if checker.Size() != inputIDsCount {
-		return merr.WrapErrParameterInvalidMsg("duplicate IDs found in search request")
+		return nil, merr.WrapErrParameterInvalidMsg("duplicate IDs found in search request")
 	}
 
 	// Get collection schema for validation and plan building
 	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx,
 		request.GetDbName(), request.GetCollectionName(), 0)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Get anns_field from search params, or infer from schema if only one vector field exists
@@ -3521,11 +3560,11 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	if err != nil || annsFieldName == "" {
 		vecFields := typeutil.GetVectorFieldSchemas(collectionInfo.schema.CollectionSchema)
 		if len(vecFields) == 0 {
-			return merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
+			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
 				"no vector field found in schema")
 		}
 		if enableMultipleVectorFields && len(vecFields) > 1 {
-			return merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
+			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
 				"multiple vector fields exist, please specify anns_field in search_params")
 		}
 		annsFieldName = vecFields[0].Name
@@ -3533,11 +3572,11 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 
 	annField := typeutil.GetFieldByName(collectionInfo.schema.CollectionSchema, annsFieldName)
 	if annField == nil {
-		return merr.WrapErrFieldNotFound(annsFieldName, "vector field not found in schema")
+		return nil, merr.WrapErrFieldNotFound(annsFieldName, "vector field not found in schema")
 	}
 
 	if annField.GetDataType() == schemapb.DataType_ArrayOfVector {
-		return merr.WrapErrParameterInvalidMsg("array of vector is not supported for search by IDs")
+		return nil, merr.WrapErrParameterInvalidMsg("array of vector is not supported for search by IDs")
 	}
 
 	// Check if this is a BM25 function-based search
@@ -3548,13 +3587,13 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	if isBM25Search {
 		// BM25 search: fetch the input text field of the BM25 function
 		if len(bm25Function.InputFieldNames) == 0 {
-			return merr.WrapErrParameterInvalidMsg("BM25 function has no input field")
+			return nil, merr.WrapErrParameterInvalidMsg("BM25 function has no input field")
 		}
 		fieldToFetch = bm25Function.InputFieldNames[0]
 	} else {
 		// Vector search: validate and fetch the vector field
 		if !typeutil.IsVectorType(annField.GetDataType()) {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field (%s) to search is not of vector data type", annsFieldName))
+			return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field (%s) to search is not of vector data type", annsFieldName))
 		}
 		fieldToFetch = annsFieldName
 	}
@@ -3562,12 +3601,12 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	// Get primary key field
 	pkField, err := collectionInfo.schema.GetPkField()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Validate IDs type matches primary key type
 	if err := validateIDsType(pkField, ids); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Create requery plan using IDs (no expr parsing overhead)
@@ -3612,11 +3651,11 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	// Execute query
 	queryResult, _, err := node.query(ctx, qt, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if !merr.Ok(queryResult.GetStatus()) {
-		return merr.Error(queryResult.GetStatus())
+		return nil, merr.Error(queryResult.GetStatus())
 	}
 
 	// Extract primary key field to check result count
@@ -3625,7 +3664,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	})
 
 	if pkFieldData == nil {
-		return merr.WrapErrFieldNotFound(pkField.GetName(), "primary key field not found in query result")
+		return nil, merr.WrapErrFieldNotFound(pkField.GetName(), "primary key field not found in query result")
 	}
 
 	// Check if the returned pk count matches the input IDs count
@@ -3660,7 +3699,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 			}
 		}
 
-		return merr.WrapErrParameterInvalidMsg(
+		return nil, merr.WrapErrParameterInvalidMsg(
 			fmt.Sprintf("some of the provided primary key IDs do not exist: missing IDs = %v", missingIDs))
 	}
 
@@ -3671,18 +3710,14 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	})
 
 	if fieldData == nil {
-		return merr.WrapErrFieldNotFound(fieldToFetch, "field not found in query result")
+		return nil, merr.WrapErrFieldNotFound(fieldToFetch, "field not found in query result")
 	}
 
 	// For BM25: converts VarChar to VarChar placeholder (text input for BM25 function)
 	// For vector search: converts vector to vector placeholder
 	placeholderBytes, vectorCount, err := funcutil.FieldDataToPlaceholderGroupBytesWithCount(fieldData)
 	if err != nil {
-		return err
-	}
-
-	if vectorCount == 0 {
-		return merr.WrapErrParameterInvalidMsg("cannot search: all provided IDs have null vector values in field '%s'", annsFieldName)
+		return nil, err
 	}
 
 	request.Nq = int64(vectorCount)
@@ -3693,7 +3728,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		PlaceholderGroup: placeholderBytes,
 	}
 
-	return nil
+	return fieldData.GetValidData(), nil
 }
 
 // Flush notify data nodes to persist the data of collection.
