@@ -130,6 +130,7 @@ ThreadPool::Worker() {
         lock.unlock();
         if (dequeue) {
             func();
+            func = nullptr;
         }
     }
 }
