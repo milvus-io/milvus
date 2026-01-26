@@ -52,10 +52,7 @@ func (id wpID) WALName() message.WALName {
 }
 
 func (id wpID) LT(other message.MessageID) bool {
-	id2, ok := other.(wpID)
-	if !ok {
-		return false
-	}
+	id2 := other.(wpID)
 	if id.logMsgId.SegmentId != id2.logMsgId.SegmentId {
 		return id.logMsgId.SegmentId < id2.logMsgId.SegmentId
 	}
@@ -63,10 +60,7 @@ func (id wpID) LT(other message.MessageID) bool {
 }
 
 func (id wpID) LTE(other message.MessageID) bool {
-	id2, ok := other.(wpID)
-	if !ok {
-		return false
-	}
+	id2 := other.(wpID)
 	if id.logMsgId.SegmentId < id2.logMsgId.SegmentId {
 		return true
 	} else if id.logMsgId.SegmentId > id2.logMsgId.SegmentId {
@@ -76,10 +70,7 @@ func (id wpID) LTE(other message.MessageID) bool {
 }
 
 func (id wpID) EQ(other message.MessageID) bool {
-	id2, ok := other.(wpID)
-	if !ok {
-		return false
-	}
+	id2 := other.(wpID)
 	return id.logMsgId.SegmentId == id2.logMsgId.SegmentId && id.logMsgId.EntryId == id2.logMsgId.EntryId
 }
 

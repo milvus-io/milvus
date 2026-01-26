@@ -43,6 +43,7 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 	if err != nil {
 		return nil, err
 	}
+	wpMetrics.RegisterClientMetricsWithRegisterer(metrics.GetRegisterer())
 	var storageClient wpStorageClient.ObjectStorage
 	if cfg.Woodpecker.Storage.IsStorageMinio() {
 		storageClient, err = wpStorageClient.NewObjectStorage(context.Background(), cfg)
@@ -60,13 +61,13 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 	if cfg.Woodpecker.Storage.IsStorageService() {
 		wpClient, err = woodpecker.NewClient(context.Background(), cfg, etcdCli, true)
 	} else {
+		wpMetrics.RegisterServerMetricsWithRegisterer(metrics.GetRegisterer())
 		wpClient, err = woodpecker.NewEmbedClient(context.Background(), cfg, etcdCli, storageClient, true)
 	}
 	if err != nil {
 		return nil, err
 	}
 	log.Ctx(context.Background()).Info("build wp opener finish", zap.String("wpClientInstance", fmt.Sprintf("%p", wpClient)))
-	wpMetrics.RegisterWoodpeckerWithRegisterer(metrics.GetRegisterer())
 	return &openerImpl{
 		c: wpClient,
 	}, nil
