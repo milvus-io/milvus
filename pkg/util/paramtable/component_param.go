@@ -47,6 +47,7 @@ const (
 	DefaultHighPriorityThreadCoreCoefficient   = 10
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
 	DefaultLowPriorityThreadCoreCoefficient    = 1
+	DefaultBM25LoadThreadCoreCoefficient       = 1
 
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
@@ -229,6 +230,7 @@ type commonConfig struct {
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
+	BM25LoadThreadCoreCoefficient       ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
 	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
@@ -691,6 +693,16 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: true,
 	}
 	p.LowPriorityThreadCoreCoefficient.Init(base.mgr)
+
+	p.BM25LoadThreadCoreCoefficient = ParamItem{
+		Key:          "common.threadCoreCoefficient.bm25Load",
+		Version:      "2.6.8",
+		DefaultValue: strconv.Itoa(DefaultBM25LoadThreadCoreCoefficient),
+		Doc: "This parameter specify how many times the number of threads " +
+			"is the number of cores in BM25 load pool",
+		Export: true,
+	}
+	p.BM25LoadThreadCoreCoefficient.Init(base.mgr)
 
 	p.DiskWriteMode = ParamItem{
 		Key:          "common.diskWriteMode",
@@ -3387,8 +3399,7 @@ type queryNodeConfig struct {
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
 
 	// Idf Oracle
-	IDFEnableDisk       ParamItem `refreshable:"true"`
-	IDFWriteConcurrenct ParamItem `refreshable:"true"`
+	IDFEnableDisk ParamItem `refreshable:"true"`
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
 }
@@ -3401,14 +3412,6 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		DefaultValue: "true",
 	}
 	p.IDFEnableDisk.Init(base.mgr)
-
-	p.IDFWriteConcurrenct = ParamItem{
-		Key:          "queryNode.idfOracle.writeConcurrency",
-		Version:      "2.6.0",
-		Export:       true,
-		DefaultValue: "4",
-	}
-	p.IDFWriteConcurrenct.Init(base.mgr)
 
 	p.SoPath = ParamItem{
 		Key:          "queryNode.soPath",
