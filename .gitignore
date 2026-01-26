@@ -123,3 +123,5 @@ WARP.md
 **/.gocache/
 claude.md
 docs/plans/
+# Worktree directories
+.worktrees/
