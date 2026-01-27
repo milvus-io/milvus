@@ -879,7 +879,7 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
     schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_max_length, nullable=nullable)
     schema.add_field("document", DataType.VARCHAR, max_length=2000, enable_analyzer=True, enable_match=True, nullable=nullable)
     schema.add_field("text", DataType.VARCHAR, max_length=2000, enable_analyzer=True, enable_match=True,
-                    analyzer_params=analyzer_params)
+                    analyzer_params=analyzer_params, nullable=True)
     schema.add_field(ct.default_json_field_name, DataType.JSON, nullable=nullable)
     schema.add_field(ct.default_geometry_field_name, DataType.GEOMETRY, nullable=nullable)
     schema.add_field(ct.default_timestamptz_field_name, DataType.TIMESTAMPTZ, nullable=nullable)
@@ -887,9 +887,9 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
     schema.add_field("array_float", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=ct.default_max_capacity)
     schema.add_field("array_varchar", DataType.ARRAY, element_type=DataType.VARCHAR, max_length=200, max_capacity=ct.default_max_capacity)
     schema.add_field("array_bool", DataType.ARRAY, element_type=DataType.BOOL, max_capacity=ct.default_max_capacity)
-    schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=dim)
-    schema.add_field("image_emb", DataType.INT8_VECTOR, dim=dim)
-    schema.add_field("text_sparse_emb", DataType.SPARSE_FLOAT_VECTOR)
+    schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+    schema.add_field("image_emb", DataType.INT8_VECTOR, dim=dim, nullable=True)
+    schema.add_field("text_sparse_emb", DataType.SPARSE_FLOAT_VECTOR, nullable=False)  # function output field cannot be nullable
     # schema.add_field("voice_emb", DataType.FLOAT_VECTOR, dim=dim)
 
     # Add struct array field
@@ -2387,7 +2387,7 @@ def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
         else:
             dim = ct.default_dim if data_type == DataType.SPARSE_FLOAT_VECTOR else field.params['dim']
         if nb is None:
-            return gen_vectors(1, dim, vector_data_type=data_type)[0]
+            return gen_vectors(1, dim, vector_data_type=data_type)[0] if random.random() < 0.8 or nullable is False else None
         if nullable is False:
             return gen_vectors(nb, dim, vector_data_type=data_type)
         else:

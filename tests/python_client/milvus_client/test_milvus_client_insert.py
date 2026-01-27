@@ -789,21 +789,18 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, max_length=64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, vector_type, dim=dim)
+        schema.add_field(default_vector_field_name, vector_type, dim=dim, nullable=nullable)
         schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
         schema.add_field(default_float_field_name, DataType.FLOAT, nullable=nullable)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
-        rng = np.random.default_rng(seed=19530)
-        vectors = cf.gen_vectors(default_nb, dim, vector_data_type=vector_type)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = cf.gen_row_data_by_schema(ct.default_nb, schema=schema)
         results = self.insert(client, collection_name, rows)[0]
         assert results['insert_count'] == default_nb
         # 3. search
-        vectors_to_search = [vectors[0]]
+        vectors_to_search = cf.gen_vectors(ct.default_nq, dim=dim, vector_data_type=vector_type)
         insert_ids = [i for i in range(default_nb)]
         self.search(client, collection_name, vectors_to_search,
                     check_task=CheckTasks.check_search_results,
@@ -1352,7 +1349,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         collections = self.list_collections(client)[0]
         assert collection_name not in collections
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_create_index(self):
         """
         target: test insert and create index
@@ -1451,7 +1448,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         assert num_entities.get("row_count", None) == ct.default_nb
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_binary_after_index(self):
         """
         target: test insert binary after index
@@ -1485,7 +1482,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         assert num_entities.get("row_count", None) == ct.default_nb
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_auto_id_create_index(self):
         """
         target: test create index in auto_id=True collection
@@ -1578,7 +1575,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        nb = 10
+        nb = 200
         
         # Create schema with auto_id=True and specific primary field
         schema = self.create_schema(client, auto_id=True, enable_dynamic_field=True)[0]
@@ -1586,7 +1583,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
             schema.add_field(pk_field, DataType.INT64, is_primary=True, auto_id=True)
         else:
             schema.add_field(pk_field, DataType.VARCHAR, max_length=ct.default_length, is_primary=True, auto_id=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim, nullable=True)
         schema.add_field(default_float_field_name, DataType.FLOAT)
         if pk_field != ct.default_string_field_name:
             schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
@@ -1594,12 +1591,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dimension=default_dim, schema=schema, auto_id=True)
         
         # Insert twice
-        rng = np.random.default_rng(seed=19530)
-        rows = [{default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0} for i in range(nb)]
-        if pk_field != ct.default_string_field_name:
-            for i, row in enumerate(rows):
-                row[default_string_field_name] = str(i)
+        rows = cf.gen_row_data_by_schema(nb, schema=schema, start=0)
         
         results_1 = self.insert(client, collection_name, rows)[0]
         assert results_1['insert_count'] == nb

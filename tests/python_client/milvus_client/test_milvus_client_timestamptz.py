@@ -524,8 +524,6 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         
         self.drop_collection(client, collection_name)
 
-    
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_timestamptz_add_collection_field(self):
         """
