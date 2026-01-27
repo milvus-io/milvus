@@ -278,6 +278,7 @@ func InitMmapManager(params *paramtable.ComponentParam, nodeID int64) error {
 		scalar_field_enable_mmap: C.bool(params.QueryNodeCfg.MmapScalarField.GetAsBool()),
 		vector_index_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorIndex.GetAsBool()),
 		vector_field_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorField.GetAsBool()),
+		mmap_populate:            C.bool(params.QueryNodeCfg.MmapPopulate.GetAsBool()),
 	}
 	status := C.InitMmapManager(mmapConfig)
 	return HandleCStatus(&status, "InitMmapManager failed")

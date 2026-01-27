@@ -74,12 +74,14 @@ ChunkTranslator::ChunkTranslator(
     FieldDataInfo field_data_info,
     std::vector<FileInfo>&& file_infos,
     bool use_mmap,
+    bool mmap_populate,
     milvus::proto::common::LoadPriority load_priority)
     : segment_id_(segment_id),
       field_id_(field_data_info.field_id),
       field_meta_(field_meta),
       key_(fmt::format("seg_{}_f_{}", segment_id, field_meta.get_id().get())),
       use_mmap_(use_mmap),
+      mmap_populate_(mmap_populate),
       file_infos_(std::move(file_infos)),
       mmap_dir_path_(field_data_info.mmap_dir_path),
       meta_(use_mmap ? milvus::cachinglayer::StorageType::DISK
@@ -206,8 +208,11 @@ ChunkTranslator::get_cells(
             AssertInfo(popped, "failed to pop arrow reader from channel");
             arrow::ArrayVector array_vec =
                 read_single_column_batches(r->reader);
-            chunk = create_chunk(
-                field_meta_, array_vec, filepath.string(), load_priority_);
+            chunk = create_chunk(field_meta_,
+                                 array_vec,
+                                 filepath.string(),
+                                 mmap_populate_,
+                                 load_priority_);
         }
         cells.emplace_back(cid, std::move(chunk));
     }

@@ -3309,6 +3309,7 @@ type queryNodeConfig struct {
 	MmapVectorIndex                     ParamItem `refreshable:"false"`
 	MmapScalarField                     ParamItem `refreshable:"false"`
 	MmapScalarIndex                     ParamItem `refreshable:"false"`
+	MmapPopulate                        ParamItem `refreshable:"false"`
 	MmapJSONStats                       ParamItem `refreshable:"false"`
 	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
@@ -4055,6 +4056,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export: true,
 	}
 	p.MmapScalarIndex.Init(base.mgr)
+
+	p.MmapPopulate = ParamItem{
+		Key:          "queryNode.mmap.populate",
+		Version:      "2.6.9",
+		DefaultValue: "true",
+		Doc:          "MAP_POPULATE flag for mmap",
+		Export:       false,
+	}
+	p.MmapPopulate.Init(base.mgr)
 
 	p.MmapJSONStats = ParamItem{
 		Key:          "queryNode.mmap.jsonShredding",

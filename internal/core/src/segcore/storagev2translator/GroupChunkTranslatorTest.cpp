@@ -116,6 +116,7 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
         column_group_info,
         paths_,
         use_mmap,
+        true,
         schema_->get_field_ids().size(),
         milvus::proto::common::LoadPriority::LOW);
 
@@ -279,6 +280,7 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         column_group_info,
         multi_file_paths,
         use_mmap,
+        true,
         schema_->get_field_ids().size(),
         milvus::proto::common::LoadPriority::LOW);
 

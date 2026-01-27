@@ -56,6 +56,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     std::unique_ptr<milvus_storage::api::ChunkReader> chunk_reader,
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
     bool use_mmap,
+    bool mmap_populate,
     const std::string& mmap_dir_path,
     int64_t num_fields,
     milvus::proto::common::LoadPriority load_priority)
@@ -94,6 +95,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                 /* is_index */ false),
             /* support_eviction */ true),
       use_mmap_(use_mmap),
+      mmap_populate_(mmap_populate),
       load_priority_(load_priority) {
     auto chunk_size_result = chunk_reader_->get_chunk_size();
     if (!chunk_size_result.ok()) {
@@ -324,8 +326,11 @@ ManifestGroupTranslator::load_group_chunk(
                           static_cast<uint8_t>(group_chunk_type_));
         }
         std::filesystem::create_directories(filepath.parent_path());
-        chunks = create_group_chunk(
-            field_ids, field_metas, array_vecs, filepath.string());
+        chunks = create_group_chunk(field_ids,
+                                    field_metas,
+                                    array_vecs,
+                                    filepath.string(),
+                                    mmap_populate_);
     }
 
     return std::make_unique<milvus::GroupChunk>(chunks);

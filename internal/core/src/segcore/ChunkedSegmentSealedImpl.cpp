@@ -299,6 +299,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
     const LoadFieldDataInfo& load_info, milvus::OpContext* op_ctx) {
     size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
     ArrowSchemaPtr arrow_schema = schema_->ConvertToArrowSchema();
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
 
     for (auto& [id, info] : load_info.field_infos) {
         AssertInfo(info.row_count > 0,
@@ -361,6 +362,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 column_group_info,
                 insert_files,
                 info.enable_mmap,
+                mmap_config.GetMmapPopulate(),
                 milvus_field_ids.size(),
                 load_info.load_priority);
 
@@ -425,6 +427,8 @@ void
 ChunkedSegmentSealedImpl::load_field_data_internal(
     const LoadFieldDataInfo& load_info, milvus::OpContext* op_ctx) {
     SCOPE_CGO_CALL_METRIC();
+
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
 
     size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
     AssertInfo(
@@ -495,6 +499,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                     field_data_info,
                     std::move(file_infos),
                     info.enable_mmap,
+                    mmap_config.GetMmapPopulate(),
                     load_info.load_priority);
 
             auto data_type = field_meta.get_data_type();
@@ -2983,6 +2988,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             std::move(chunk_reader),
             field_metas,
             use_mmap,
+            mmap_config.GetMmapPopulate(),
             mmap_dir_path,
             column_group->columns.size(),
             segment_load_info_.GetPriority());
