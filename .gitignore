@@ -123,3 +123,6 @@ WARP.md
 **/.gocache/
 claude.md
 docs/plans/
+
+# agent context
+.context/
