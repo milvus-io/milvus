@@ -504,6 +504,9 @@ CreateArrowBuilder(DataType data_type,
             return std::make_shared<arrow::FixedSizeBinaryBuilder>(
                 arrow::fixed_size_binary(dim * sizeof(int8)));
         }
+        case DataType::VECTOR_SPARSE_U32_F32: {
+            return std::make_shared<arrow::BinaryBuilder>();
+        }
         case DataType::VECTOR_ARRAY: {
             AssertInfo(dim > 0, "invalid dim value");
             AssertInfo(element_type != DataType::NONE,
