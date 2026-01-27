@@ -126,8 +126,13 @@ GroupingSet::getOutput(milvus::RowVectorPtr& result) {
     if (isGlobal_) {
         return getGlobalAggregationOutput(result);
     }
+    // For non-global aggregation, if hash_table_ is null, it means no input data
+    // Return false directly without creating empty hash table
+    if (!hash_table_) {
+        return false;
+    }
     AssertInfo(hash_table_ != nullptr,
-               "hash_table_ should not be nullptr for non-global aggregation");
+               "hash_table_ should not be nullptr");
     const auto& all_rows = hash_table_->rows()->allRows();
     if (!all_rows.empty()) {
         extractGroups(result);
