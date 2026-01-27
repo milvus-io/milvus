@@ -59,6 +59,8 @@ func (s *CopySegmentTaskSuite) TestCopySegmentTask_GettersAndSetters() {
 		IdMappings:   idMappings,
 		CreatedTs:    12345,
 		CompleteTs:   54321,
+		CpuSlot:      1,
+		MemorySlot:   1,
 	})
 
 	// Test all getters
@@ -76,6 +78,9 @@ func (s *CopySegmentTaskSuite) TestCopySegmentTask_GettersAndSetters() {
 	s.Equal(taskcommon.CopySegment, task.GetTaskType())
 	s.Equal(taskcommon.FromCopySegmentState(datapb.CopySegmentTaskState_CopySegmentTaskPending), task.GetTaskState())
 	s.Equal(int64(1), task.GetTaskSlot())
+	cpuSlot, memorySlot := task.GetTaskSlotV2()
+	s.Equal(1.0, cpuSlot)
+	s.Equal(1.0, memorySlot)
 	s.Equal(int64(1), task.GetTaskVersion())
 }
 

@@ -333,12 +333,14 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 			CollectionId: job.GetCollectionId(),
 			NodeId:       NullNodeID,                                         // Not assigned yet
 			TaskVersion:  0,                                                  // Initial version
-			TaskSlot:     1,                                                  // Each copy task uses 1 slot
+			TaskSlot:     1,                                                  // Each copy task uses 1 slot (deprecated)
 			State:        datapb.CopySegmentTaskState_CopySegmentTaskPending, // Initial state
 			Reason:       "",
 			IdMappings:   group, // Lightweight: only source→target segment IDs
 			CreatedTs:    uint64(time.Now().UnixNano()),
 			CompleteTs:   0,
+			CpuSlot:      1.0, // Default CPU slot for copy segment task
+			MemorySlot:   0.0, // Default memory slot (file copy doesn't require significant memory)
 		})
 
 		// Save task to metadata store

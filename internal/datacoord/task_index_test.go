@@ -96,12 +96,15 @@ func (s *indexTaskSuite) TestBasicTaskOperations() {
 		IndexState:   commonpb.IndexState_Unissued,
 		NumRows:      65535,
 	}
-	it := newIndexBuildTask(t, 1, s.mt, nil, nil, nil)
+	it := newIndexBuildTask(t, 1, 1, false, s.mt, nil, nil, nil)
 
 	s.Run("task type and state", func() {
 		s.Equal(taskcommon.Index, it.GetTaskType())
 		s.Equal(taskcommon.State(it.IndexState), it.GetTaskState())
 		s.Equal(int64(1), it.GetTaskSlot())
+		cpuSlot, memorySlot := it.GetTaskSlotV2()
+		s.Equal(1.0, cpuSlot)
+		s.Equal(1.0, memorySlot)
 	})
 
 	s.Run("time management", func() {
@@ -153,7 +156,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 	}, nil)
 	cm := mocks.NewChunkManager(s.T())
 	cm.EXPECT().RootPath().Return("root")
-	it := newIndexBuildTask(t, 1, s.mt, handler, cm, newIndexEngineVersionManager())
+	it := newIndexBuildTask(t, 1, 1, false, s.mt, handler, cm, newIndexEngineVersionManager())
 
 	s.Run("task not exist in meta", func() {
 		s.mt.indexMeta.segmentBuildInfo.buildID2SegmentIndex.Remove(s.taskID)
@@ -248,7 +251,7 @@ func (s *indexTaskSuite) TestQueryTaskOnWorker() {
 		BuildID:      s.taskID,
 		IndexState:   commonpb.IndexState_InProgress,
 	}
-	it := newIndexBuildTask(t, 1, s.mt, nil, nil, nil)
+	it := newIndexBuildTask(t, 1, 1, false, s.mt, nil, nil, nil)
 	it.NodeID = 1
 	s.Run("worker not found", func() {
 		catalogMock := catalogmocks.NewDataCoordCatalog(s.T())
@@ -352,7 +355,7 @@ func (s *indexTaskSuite) TestDropTaskOnWorker() {
 		BuildID:      s.taskID,
 		IndexState:   commonpb.IndexState_Unissued,
 	}
-	it := newIndexBuildTask(t, 1, s.mt, nil, nil, nil)
+	it := newIndexBuildTask(t, 1, 1, false, s.mt, nil, nil, nil)
 	it.NodeID = 1
 
 	s.Run("worker not found", func() {
@@ -383,7 +386,7 @@ func (s *indexTaskSuite) TestSetJobInfo() {
 		BuildID:      s.taskID,
 		IndexState:   commonpb.IndexState_Unissued,
 	}
-	it := newIndexBuildTask(t, 1, s.mt, nil, nil, nil)
+	it := newIndexBuildTask(t, 1, 1, false, s.mt, nil, nil, nil)
 	result := &workerpb.IndexTaskInfo{
 		BuildID: s.taskID,
 		State:   commonpb.IndexState_Finished,
@@ -406,4 +409,77 @@ func (s *indexTaskSuite) TestSetJobInfo() {
 		s.NoError(err)
 		s.Equal(indexpb.JobState_JobStateFinished, indexpb.JobState(it.IndexState))
 	})
+}
+
+func (s *indexTaskSuite) TestIndexBuildTask_GetTaskSlot_MaxLogic() {
+	// Test GetTaskSlot returns max of CPU and memory slots
+	testCases := []struct {
+		name       string
+		cpuSlot    float64
+		memorySlot float64
+		expectSlot int64
+	}{
+		{"cpu_larger", 10.0, 5.0, 10},
+		{"memory_larger", 5.0, 10.0, 10},
+		{"equal", 8.0, 8.0, 8},
+		{"fractional_cpu_larger", 7.5, 3.2, 7},
+		{"fractional_memory_larger", 3.2, 7.5, 7},
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			t := &model.SegmentIndex{
+				CollectionID: s.collID,
+				PartitionID:  s.partID,
+				SegmentID:    s.segID,
+				IndexID:      s.indexID,
+				BuildID:      s.taskID,
+			}
+			task := newIndexBuildTask(t, tc.cpuSlot, tc.memorySlot, false, s.mt, nil, nil, nil)
+
+			slot := task.GetTaskSlot()
+			s.Equal(tc.expectSlot, slot)
+		})
+	}
+}
+
+func (s *indexTaskSuite) TestIndexBuildTask_SlotStoredCorrectly() {
+	// Test that slots are stored and retrieved correctly
+	testCases := []struct {
+		name       string
+		cpuSlot    float64
+		memorySlot float64
+	}{
+		{"small_slots", 0.5, 0.25},
+		{"medium_slots", 4.0, 2.0},
+		{"large_slots", 32.0, 64.0},
+		{"asymmetric_cpu_heavy", 16.0, 4.0},
+		{"asymmetric_memory_heavy", 2.0, 32.0},
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			t := &model.SegmentIndex{
+				CollectionID: s.collID,
+				PartitionID:  s.partID,
+				SegmentID:    s.segID,
+				IndexID:      s.indexID,
+				BuildID:      s.taskID,
+			}
+			task := newIndexBuildTask(t, tc.cpuSlot, tc.memorySlot, false, s.mt, nil, nil, nil)
+
+			// Verify slots are stored correctly
+			s.Equal(tc.cpuSlot, task.cpuSlot)
+			s.Equal(tc.memorySlot, task.memorySlot)
+
+			// Verify GetTaskSlotV2 returns correct values
+			cpu, mem := task.GetTaskSlotV2()
+			s.Equal(tc.cpuSlot, cpu)
+			s.Equal(tc.memorySlot, mem)
+
+			// Verify GetTaskSlot returns max
+			expectedMax := int64(max(tc.cpuSlot, tc.memorySlot))
+			s.Equal(expectedMax, task.GetTaskSlot())
+		})
+	}
 }

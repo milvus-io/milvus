@@ -5426,6 +5426,8 @@ type CompactionPlan struct {
 	PluginContext             []*commonpb.KeyValuePair       `protobuf:"bytes,29,rep,name=plugin_context,json=pluginContext,proto3" json:"plugin_context,omitempty"`
 	FileResources             []*internalpb.FileResourceInfo `protobuf:"bytes,30,rep,name=file_resources,json=fileResources,proto3" json:"file_resources,omitempty"`
 	Functions                 []*schemapb.FunctionSchema     `protobuf:"bytes,31,rep,name=functions,proto3" json:"functions,omitempty"`
+	CpuSlot                   float64                        `protobuf:"fixed64,32,opt,name=cpu_slot,json=cpuSlot,proto3" json:"cpu_slot,omitempty"`
+	MemorySlot                float64                        `protobuf:"fixed64,33,opt,name=memory_slot,json=memorySlot,proto3" json:"memory_slot,omitempty"`
 }
 
 func (x *CompactionPlan) Reset() {
@@ -5641,6 +5643,20 @@ func (x *CompactionPlan) GetFunctions() []*schemapb.FunctionSchema {
 		return x.Functions
 	}
 	return nil
+}
+
+func (x *CompactionPlan) GetCpuSlot() float64 {
+	if x != nil {
+		return x.CpuSlot
+	}
+	return 0
+}
+
+func (x *CompactionPlan) GetMemorySlot() float64 {
+	if x != nil {
+		return x.MemorySlot
+	}
+	return 0
 }
 
 type CompactionSegment struct {
@@ -7364,6 +7380,8 @@ type PreImportRequest struct {
 	StorageConfig *indexpb.StorageConfig     `protobuf:"bytes,10,opt,name=storage_config,json=storageConfig,proto3" json:"storage_config,omitempty"`
 	TaskSlot      int64                      `protobuf:"varint,11,opt,name=task_slot,json=taskSlot,proto3" json:"task_slot,omitempty"`
 	PluginContext []*commonpb.KeyValuePair   `protobuf:"bytes,12,rep,name=plugin_context,json=pluginContext,proto3" json:"plugin_context,omitempty"`
+	CpuSlot       float64                    `protobuf:"fixed64,13,opt,name=cpu_slot,json=cpuSlot,proto3" json:"cpu_slot,omitempty"`
+	MemorySlot    float64                    `protobuf:"fixed64,14,opt,name=memory_slot,json=memorySlot,proto3" json:"memory_slot,omitempty"`
 }
 
 func (x *PreImportRequest) Reset() {

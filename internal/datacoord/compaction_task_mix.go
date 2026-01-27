@@ -50,6 +50,8 @@ func (t *mixCompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
 }
 
+// GetTaskSlot returns the old-style single slot usage (deprecated, kept for backward compatibility).
+// Use GetTaskSlotV2() for separate CPU and memory slot accounting.
 func (t *mixCompactionTask) GetTaskSlot() int64 {
 	slotUsage := t.slotUsage.Load()
 	if slotUsage == 0 {
@@ -66,6 +68,29 @@ func (t *mixCompactionTask) GetTaskSlot() int64 {
 		t.slotUsage.Store(slotUsage)
 	}
 	return slotUsage
+}
+
+// GetTaskSlotV2 returns separate CPU and memory slots for this mix compaction task.
+func (t *mixCompactionTask) GetTaskSlotV2() (float64, float64) {
+	cpuSlot := paramtable.Get().DataCoordCfg.MixCompactionCPUFactor.GetAsFloat()
+	memorySlot := float64(t.GetTaskProto().GetMaxSize()) / 1024 / 1024 / 1024 * paramtable.Get().DataCoordCfg.MixCompactionMemoryFactor.GetAsFloat()
+
+	if t.GetTaskProto().GetType() == datapb.CompactionType_SortCompaction {
+		segment := t.meta.GetHealthySegment(context.Background(), t.GetTaskProto().GetInputSegments()[0])
+		if segment != nil {
+			segSize := segment.getSegmentSize()
+			cpuSlot, memorySlot = calculateStatsTaskSlotV2(segSize)
+			log.Info("mixCompactionTask get task slot V2",
+				zap.Int64("segment size", segSize),
+				zap.Float64("cpu slot", cpuSlot), zap.Float64("memory slot", memorySlot))
+		}
+	}
+	return cpuSlot, memorySlot
+}
+
+func (t *mixCompactionTask) AllowCpuOversubscription() bool {
+	// Compaction tasks are typically memory/IO-intensive, allow CPU over-subscription
+	return true
 }
 
 func (t *mixCompactionTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
@@ -378,7 +403,6 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		TotalRows:                 taskProto.GetTotalRows(),
 		Schema:                    taskProto.GetSchema(),
 		PreAllocatedSegmentIDs:    taskProto.GetPreAllocatedSegmentIDs(),
-		SlotUsage:                 t.GetSlotUsage(),
 		MaxSize:                   taskProto.GetMaxSize(),
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.GetCurrentScalarIndexEngineVersion(),
@@ -394,6 +418,8 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		plan.FileResources = resources
 	}
 
+	plan.CpuSlot, plan.MemorySlot = t.GetTaskSlotV2()
+	plan.SlotUsage = t.GetSlotUsage() // deprecated, kept for backward compatibility
 	segIDMap := make(map[int64][]*datapb.FieldBinlog, len(plan.SegmentBinlogs))
 	segments := make([]*SegmentInfo, 0, len(taskProto.GetInputSegments()))
 	for _, segID := range taskProto.GetInputSegments() {
@@ -433,6 +459,8 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 	return plan, nil
 }
 
+// GetSlotUsage returns the slot usage (deprecated, kept for backward compatibility).
+// Use GetTaskSlot() or GetTaskSlotV2() instead.
 func (t *mixCompactionTask) GetSlotUsage() int64 {
 	return t.GetTaskSlot()
 }

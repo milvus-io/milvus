@@ -29,7 +29,15 @@ type Task interface {
 	GetTaskID() int64
 	GetTaskType() taskcommon.Type
 	GetTaskState() taskcommon.State
+	// GetTaskSlot returns the task slot usage (deprecated, for backward compatibility).
+	// Use GetTaskSlotV2() for separate CPU and memory slot accounting.
 	GetTaskSlot() int64
+	// GetTaskSlotV2 returns (cpuSlot, memorySlot) representing the resource requirements for this task.
+	GetTaskSlotV2() (float64, float64)
+	// AllowCpuOversubscription returns true if this task allows CPU over-subscription.
+	// CPU-intensive tasks (e.g., vector index building) should return false to ensure dedicated CPU resources.
+	// Memory/IO-intensive tasks (e.g., stats, scalar index, compaction) can return true for better resource utilization.
+	AllowCpuOversubscription() bool
 	SetTaskTime(timeType taskcommon.TimeType, time time.Time)
 	GetTaskTime(timeType taskcommon.TimeType) time.Time
 	GetTaskVersion() int64

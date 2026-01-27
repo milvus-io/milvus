@@ -127,7 +127,17 @@ func (t *importTask) GetTaskNodeID() int64 {
 }
 
 func (t *importTask) GetTaskSlot() int64 {
-	return int64(CalculateTaskSlot(t, t.importMeta))
+	cpuSlot, memorySlot := t.GetTaskSlotV2()
+	return int64(max(cpuSlot, memorySlot))
+}
+
+func (t *importTask) GetTaskSlotV2() (float64, float64) {
+	return CalculateTaskSlot(t, t.importMeta)
+}
+
+func (t *importTask) AllowCpuOversubscription() bool {
+	// Import tasks are memory/IO-intensive, allow CPU over-subscription
+	return true
 }
 
 func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
@@ -138,7 +148,7 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		log.Warn("assemble import request failed", WrapTaskLog(t, zap.Error(err))...)
 		return
 	}
-	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
+	err = cluster.CreateImport(nodeID, req)
 	if err != nil {
 		log.Warn("import failed", WrapTaskLog(t, zap.Error(err))...)
 		t.retryTimes++

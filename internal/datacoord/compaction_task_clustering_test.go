@@ -971,3 +971,33 @@ func (s *ClusteringCompactionTaskSuite) TestProcessStatsState() {
 		s.Equal(int32(0), task.GetTaskProto().RetryTimes)
 	})
 }
+
+func (s *ClusteringCompactionTaskSuite) TestGetTaskSlot() {
+	task := s.generateBasicTask(false)
+
+	// Test backward compatibility - GetTaskSlot returns int64
+	slot := task.GetTaskSlot()
+	s.Greater(slot, int64(0))
+	s.IsType(int64(0), slot)
+}
+
+func (s *ClusteringCompactionTaskSuite) TestGetTaskSlotV2() {
+	task := s.generateBasicTask(false)
+
+	// Test new GetTaskSlotV2 returns (float64, float64)
+	cpuSlot, memorySlot := task.GetTaskSlotV2()
+	s.Greater(cpuSlot, 0.0)
+	s.Greater(memorySlot, 0.0)
+
+	// Currently both should be equal (same slot value)
+	s.Equal(cpuSlot, memorySlot)
+}
+
+func (s *ClusteringCompactionTaskSuite) TestGetSlotUsage() {
+	task := s.generateBasicTask(false)
+
+	// Test GetSlotUsage delegates to GetTaskSlot
+	slotUsage := task.GetSlotUsage()
+	taskSlot := task.GetTaskSlot()
+	s.Equal(taskSlot, slotUsage)
+}

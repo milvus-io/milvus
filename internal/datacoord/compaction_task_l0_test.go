@@ -551,3 +551,35 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		}
 	})
 }
+
+func (s *L0CompactionTaskSuite) TestGetTaskSlot() {
+	t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
+
+	// Test backward compatibility - GetTaskSlot returns int64
+	slot := t.GetTaskSlot()
+	s.Greater(slot, int64(0))
+	s.IsType(int64(0), slot)
+}
+
+func (s *L0CompactionTaskSuite) TestGetTaskSlotV2() {
+	t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
+
+	// Test new GetTaskSlotV2 returns (float64, float64)
+	cpuSlot, memorySlot := t.GetTaskSlotV2()
+	s.Greater(cpuSlot, 0.0)
+	s.Greater(memorySlot, 0.0)
+
+	// Both should be equal to GetTaskSlot() converted to float64
+	taskSlot := float64(t.GetTaskSlot())
+	s.Equal(taskSlot, cpuSlot)
+	s.Equal(taskSlot, memorySlot)
+}
+
+func (s *L0CompactionTaskSuite) TestGetSlotUsage() {
+	t := s.generateTestL0Task(datapb.CompactionTaskState_pipelining)
+
+	// Test GetSlotUsage delegates to GetTaskSlot
+	slotUsage := t.GetSlotUsage()
+	taskSlot := t.GetTaskSlot()
+	s.Equal(taskSlot, slotUsage)
+}

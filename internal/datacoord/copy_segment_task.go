@@ -260,6 +260,18 @@ func (t *copySegmentTask) GetTaskSlot() int64 {
 	return t.task.Load().GetTaskSlot()
 }
 
+// GetTaskSlotV2 returns the CPU and memory slots this task consumes.
+func (t *copySegmentTask) GetTaskSlotV2() (float64, float64) {
+	taskProto := t.task.Load()
+	return taskProto.GetCpuSlot(), taskProto.GetMemorySlot()
+}
+
+// AllowCpuOversubscription returns whether this task allows CPU over-subscription.
+func (t *copySegmentTask) AllowCpuOversubscription() bool {
+	// Copy segment tasks are memory/IO-intensive, allow CPU over-subscription
+	return true
+}
+
 // SetTaskTime records a task lifecycle timestamp.
 func (t *copySegmentTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
 	t.times.SetTaskTime(timeType, time)
@@ -574,6 +586,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		targets = append(targets, target)
 	}
 
+	cpuSlot, memorySlot := task.GetTaskSlotV2()
 	return &datapb.CopySegmentRequest{
 		ClusterID:     Params.CommonCfg.ClusterPrefix.GetValue(),
 		JobID:         task.GetJobId(),
@@ -581,7 +594,9 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		Sources:       sources,
 		Targets:       targets,
 		StorageConfig: createStorageConfig(),
-		TaskSlot:      task.GetTaskSlot(),
+		TaskSlot:      task.GetTaskSlot(), // deprecated, kept for backward compatibility
+		CpuSlot:       cpuSlot,
+		MemorySlot:    memorySlot,
 	}, nil
 }
 

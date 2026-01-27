@@ -181,7 +181,6 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 	isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 	fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, indexID)
 	fieldSize := segment.getFieldBinlogSize(fieldID)
-	taskSlot := calculateIndexTaskSlot(fieldSize, isVectorIndex)
 
 	// rewrite the index type if needed, and this final index type will be persisted in the meta
 	if isVectorIndex && Params.KnowhereConfig.Enable.GetAsBool() {
@@ -197,6 +196,7 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		indexType = newIndexType
 	}
 
+	cpuSlot, memorySlot := calculateIndexTaskSlotV2(fieldSize, isVectorIndex)
 	segIndex := &model.SegmentIndex{
 		SegmentID:      segment.ID,
 		CollectionID:   segment.CollectionID,
@@ -212,7 +212,9 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		return err
 	}
 	i.scheduler.Enqueue(newIndexBuildTask(model.CloneSegmentIndex(segIndex),
-		taskSlot,
+		cpuSlot,
+		memorySlot,
+		isVectorIndex,
 		i.meta,
 		i.handler,
 		i.storageCli,
@@ -223,7 +225,8 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		zap.Int64("fieldID", fieldID),
 		zap.Int64("segment size", segment.getSegmentSize()),
 		zap.Int64("field size", fieldSize),
-		zap.Int64("task slot", taskSlot))
+		zap.Float64("cpu slot", cpuSlot),
+		zap.Float64("memory slot", memorySlot))
 	return nil
 }
 
@@ -242,11 +245,13 @@ func (i *indexInspector) reloadFromMeta() {
 			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 			fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, segIndex.IndexID)
 			fieldSize := segment.getFieldBinlogSize(fieldID)
-			taskSlot := calculateIndexTaskSlot(fieldSize, isVectorIndex)
 
+			cpuSlot, memorySlot := calculateIndexTaskSlotV2(fieldSize, isVectorIndex)
 			i.scheduler.Enqueue(newIndexBuildTask(
 				model.CloneSegmentIndex(segIndex),
-				taskSlot,
+				cpuSlot,
+				memorySlot,
+				isVectorIndex,
 				i.meta,
 				i.handler,
 				i.storageCli,

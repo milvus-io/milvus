@@ -72,6 +72,16 @@ func (t *updateExternalCollectionTask) GetTaskSlot() int64 {
 	return 1
 }
 
+func (t *updateExternalCollectionTask) GetTaskSlotV2() (float64, float64) {
+	// External collection tasks are lightweight, use 1 slot
+	return 1, 1
+}
+
+func (t *updateExternalCollectionTask) AllowCpuOversubscription() bool {
+	// External collection tasks are lightweight, allow CPU over-subscription
+	return true
+}
+
 func (t *updateExternalCollectionTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
 	t.times.SetTaskTime(timeType, time)
 }

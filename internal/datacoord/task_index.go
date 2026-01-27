@@ -47,7 +47,9 @@ import (
 type indexBuildTask struct {
 	*model.SegmentIndex
 
-	taskSlot int64
+	cpuSlot       float64
+	memorySlot    float64
+	isVectorIndex bool
 
 	times *taskcommon.Times
 
@@ -60,7 +62,9 @@ type indexBuildTask struct {
 var _ globalTask.Task = (*indexBuildTask)(nil)
 
 func newIndexBuildTask(segIndex *model.SegmentIndex,
-	taskSlot int64,
+	cpuSlot float64,
+	memorySlot float64,
+	isVectorIndex bool,
 	meta *meta,
 	handler Handler,
 	chunkManager storage.ChunkManager,
@@ -68,7 +72,9 @@ func newIndexBuildTask(segIndex *model.SegmentIndex,
 ) *indexBuildTask {
 	return &indexBuildTask{
 		SegmentIndex:              segIndex,
-		taskSlot:                  taskSlot,
+		cpuSlot:                   cpuSlot,
+		memorySlot:                memorySlot,
+		isVectorIndex:             isVectorIndex,
 		times:                     taskcommon.NewTimes(),
 		meta:                      meta,
 		handler:                   handler,
@@ -82,7 +88,18 @@ func (it *indexBuildTask) GetTaskID() int64 {
 }
 
 func (it *indexBuildTask) GetTaskSlot() int64 {
-	return it.taskSlot
+	return int64(max(it.cpuSlot, it.memorySlot))
+}
+
+func (it *indexBuildTask) GetTaskSlotV2() (float64, float64) {
+	return it.cpuSlot, it.memorySlot
+}
+
+func (it *indexBuildTask) AllowCpuOversubscription() bool {
+	// Vector index tasks are CPU-intensive and should not allow CPU over-subscription
+	// to ensure dedicated resources for index building.
+	// Scalar index tasks can allow over-subscription as they are less CPU-intensive.
+	return !it.isVectorIndex
 }
 
 func (it *indexBuildTask) GetTaskState() taskcommon.State {
@@ -336,10 +353,12 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		Field:                     field,
 		PartitionKeyIsolation:     partitionKeyIsolation,
 		StorageVersion:            segment.GetStorageVersion(),
-		TaskSlot:                  it.taskSlot,
+		TaskSlot:                  int64(max(it.cpuSlot, it.memorySlot)), // deprecated, kept for backward compatibility
 		LackBinlogRows:            segIndex.NumRows - totalRows,
 		InsertLogs:                segment.GetBinlogs(),
 		Manifest:                  segment.GetManifestPath(),
+		CpuSlot:                   it.cpuSlot,
+		MemorySlot:                it.memorySlot,
 	}
 
 	WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req)

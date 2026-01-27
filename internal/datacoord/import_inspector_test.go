@@ -112,7 +112,7 @@ func (s *ImportInspectorSuite) TestProcessPreImport() {
 
 	// pending -> inProgress
 	cluster := session.NewMockCluster(s.T())
-	cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything).Return(nil)
 	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Run(func(task task2.Task) {
 		task.CreateTaskOnWorker(1, cluster)
 	})
@@ -182,7 +182,7 @@ func (s *ImportInspectorSuite) TestProcessImport() {
 	s.alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 	s.alloc.EXPECT().AllocTimestamp(mock.Anything).Return(300, nil)
 	cluster := session.NewMockCluster(s.T())
-	cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	cluster.EXPECT().CreateImport(mock.Anything, mock.Anything).Return(nil)
 	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Run(func(task task2.Task) {
 		task.CreateTaskOnWorker(nodeID, cluster)
 	})

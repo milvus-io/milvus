@@ -88,6 +88,8 @@ type CopySegmentTask struct {
 	req            *datapb.CopySegmentRequest          // Original request with source/target pairs
 	manager        TaskManager                         // Task manager for state updates and coordination
 	cm             storage.ChunkManager                // ChunkManager for file copy operations
+	cpuSlot        float64
+	memorySlot     float64
 
 	// Cleanup tracking: records all successfully copied files for cleanup on failure
 	copiedFilesMu sync.Mutex // Protects copiedFiles for concurrent segment copies
@@ -166,6 +168,8 @@ func NewCopySegmentTask(
 		state:          datapb.ImportTaskStateV2_Pending,
 		reason:         "",
 		slots:          req.GetTaskSlot(),
+		cpuSlot:        req.GetCpuSlot(),
+		memorySlot:     req.GetMemorySlot(),
 		segmentResults: segmentResults,
 		req:            req,
 		manager:        manager,
@@ -218,6 +222,10 @@ func (t *CopySegmentTask) GetSchema() *schemapb.CollectionSchema {
 
 func (t *CopySegmentTask) GetSlots() int64 {
 	return t.slots
+}
+
+func (t *CopySegmentTask) GetSlotsV2() (float64, float64) {
+	return t.cpuSlot, t.memorySlot
 }
 
 func (t *CopySegmentTask) GetBufferSize() int64 {

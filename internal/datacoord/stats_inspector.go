@@ -117,13 +117,14 @@ func (si *statsInspector) reloadFromMeta() {
 			continue
 		}
 		segment := si.mt.GetHealthySegment(si.ctx, st.GetSegmentID())
-		taskSlot := int64(0)
+		cpuSlot, memorySlot := float64(0), float64(0)
 		if segment != nil {
-			taskSlot = calculateStatsTaskSlot(segment.getSegmentSize())
+			cpuSlot, memorySlot = calculateStatsTaskSlotV2(segment.getSegmentSize())
 		}
 		si.scheduler.Enqueue(newStatsTask(
 			proto.Clone(st).(*indexpb.StatsTask),
-			taskSlot,
+			cpuSlot,
+			memorySlot,
 			si.mt,
 			si.handler,
 			si.allocator,
@@ -356,7 +357,7 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 		originSegmentSize = originSegment.getSegmentSize() * 2
 	}
 
-	taskSlot := calculateStatsTaskSlot(originSegmentSize)
+	cpuSlot, memorySlot := calculateStatsTaskSlotV2(originSegmentSize)
 	t := &indexpb.StatsTask{
 		CollectionID:    originSegment.GetCollectionID(),
 		PartitionID:     originSegment.GetPartitionID(),
@@ -381,12 +382,13 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 		}
 		return err
 	}
-	si.scheduler.Enqueue(newStatsTask(proto.Clone(t).(*indexpb.StatsTask), taskSlot, si.mt, si.handler, si.allocator, si.ievm))
+	si.scheduler.Enqueue(newStatsTask(proto.Clone(t).(*indexpb.StatsTask), cpuSlot, memorySlot, si.mt, si.handler, si.allocator, si.ievm))
 	log.Ctx(si.ctx).Info("submit stats task success", zap.Int64("taskID", taskID),
 		zap.String("subJobType", subJobType.String()),
 		zap.Int64("collectionID", originSegment.GetCollectionID()),
 		zap.Int64("originSegmentID", originSegmentID),
-		zap.Int64("targetSegmentID", targetSegmentID), zap.Int64("taskSlot", taskSlot))
+		zap.Int64("targetSegmentID", targetSegmentID),
+		zap.Float64("cpuSlot", cpuSlot), zap.Float64("memorySlot", memorySlot))
 	return nil
 }
 
