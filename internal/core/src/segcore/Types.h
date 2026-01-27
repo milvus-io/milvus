@@ -47,7 +47,6 @@ struct LoadIndexInfo {
     index::IndexBasePtr index;
     index::CacheIndexBasePtr cache_index;
     std::string uri;
-    int64_t index_store_version;
     IndexVersion index_engine_version;
     proto::schema::FieldSchema schema;
     int64_t index_size;  // It's the size of index file before compressing
@@ -84,7 +83,6 @@ struct LoadIndexInfo {
           index(nullptr),
           cache_index(nullptr),
           uri(other.uri),
-          index_store_version(other.index_store_version),
           index_engine_version(other.index_engine_version),
           schema(other.schema),
           index_size(other.index_size),
@@ -112,7 +110,6 @@ struct LoadIndexInfo {
             index = nullptr;
             cache_index = nullptr;
             uri = other.uri;
-            index_store_version = other.index_store_version;
             index_engine_version = other.index_engine_version;
             schema = other.schema;
             index_size = other.index_size;

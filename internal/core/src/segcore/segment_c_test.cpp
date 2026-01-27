@@ -1191,25 +1191,6 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
                                    IndexEnum::INDEX_FAISS_IVFSQ8,
                                    DIM,
                                    N);
-    auto binary_set = indexing->Serialize(milvus::Config{});
-    void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-    std::string index_type_key = "index_type";
-    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
-    std::string metric_type_key = "metric_type";
-    std::string metric_type_value = knowhere::metric::L2;
-
-    AppendIndexParam(
-        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfoForTest(
-        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
-    AppendIndexEngineVersionToLoadInfo(
-        c_load_index_info,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
-    AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
@@ -1237,9 +1218,11 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
 
     // load index for vec field, load raw data for scalar field
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
-    sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
+    sealed_segment->LoadIndex(load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = CSearch(sealed_segment.get(),
@@ -1255,7 +1238,6 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
     }
 
-    DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(c_search_result_on_bigIndex);
@@ -1423,33 +1405,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
                                    DIM,
                                    N);
 
-    auto binary_set = indexing->Serialize(milvus::Config{});
-    void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-    std::string index_type_key = "index_type";
-    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
-    std::string metric_type_key = "metric_type";
-    std::string metric_type_value = knowhere::metric::L2;
-
-    AppendIndexParam(
-        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfoForTest(
-        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
-    AppendIndexEngineVersionToLoadInfo(
-        c_load_index_info,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
-    AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
-
-    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
-
-    // load vec index
-    status = UpdateSealedSegmentIndex(segment.get(), c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-
-    // gen query dataset
+    // gen query dataset and query on index before moving it
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
@@ -1465,6 +1421,14 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_FLOAT, 100);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // load vec index
+    status = UpdateSealedSegmentIndex(segment.get(), &load_index_info);
+    ASSERT_EQ(status.error_code, Success);
+
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = CSearch(segment.get(),
                                         plan,
@@ -1479,7 +1443,6 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
     }
 
-    DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(c_search_result_on_bigIndex);

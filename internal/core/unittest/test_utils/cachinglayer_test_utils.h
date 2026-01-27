@@ -25,6 +25,7 @@
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "cachinglayer/lrucache/DList.h"
 #include "index/Index.h"
+#include "index/VectorIndex.h"
 namespace milvus {
 
 using namespace cachinglayer;
@@ -265,6 +266,10 @@ inline std::map<std::string, std::string>
 GenIndexParams(const milvus::index::IndexBase* index) {
     std::map<std::string, std::string> index_params;
     index_params["index_type"] = index->Type();
+    if (auto vec_index =
+            dynamic_cast<const milvus::index::VectorIndex*>(index)) {
+        index_params["metric_type"] = vec_index->GetMetricType();
+    }
     return index_params;
 }
 
