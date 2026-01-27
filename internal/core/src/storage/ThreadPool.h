@@ -143,6 +143,10 @@ class ThreadPool {
     Resize(int new_size) {
         //no need to hold mutex here as we don't require
         //max_threads_size to take effect instantly, just guaranteed atomic
+        new_size = std::max(1, new_size);
+        if (new_size > 16) {
+            new_size = 16;
+        }
         max_threads_size_.store(new_size);
     }
 
