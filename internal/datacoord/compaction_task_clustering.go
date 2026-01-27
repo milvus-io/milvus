@@ -80,6 +80,21 @@ func (t *clusteringCompactionTask) GetTaskSlot() int64 {
 	return paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
 }
 
+func (t *clusteringCompactionTask) GetTaskSlotV2() (float64, float64) {
+	// Currently use the same slot value for both CPU and memory
+	// In future, separate ClusteringCompactionCPUFactor and ClusteringCompactionMemoryFactor
+	// can be added to paramtable for more fine-grained control
+	slot := paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsFloat()
+	cpuSlot := slot
+	memorySlot := slot
+	return cpuSlot, memorySlot
+}
+
+func (t *clusteringCompactionTask) AllowCpuOversubscription() bool {
+	// Clustering compaction tasks are memory/IO-intensive, allow CPU over-subscription
+	return true
+}
+
 func (t *clusteringCompactionTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
 	t.times.SetTaskTime(timeType, time)
 }
@@ -355,10 +370,11 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		BeginLogID:             logIDRange.Begin, // BeginLogID is deprecated, but still assign it for compatibility.
 		PreAllocatedSegmentIDs: taskProto.GetPreAllocatedSegmentIDs(),
 		PreAllocatedLogIDs:     logIDRange,
-		SlotUsage:              t.GetSlotUsage(),
 		MaxSize:                taskProto.GetMaxSize(),
 		JsonParams:             compactionParams,
 	}
+	plan.CpuSlot, plan.MemorySlot = t.GetTaskSlotV2()
+	plan.SlotUsage = t.GetTaskSlot() // deprecated, kept for backward compatibility
 	log := log.With(zap.Int64("taskID", taskProto.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 
 	for _, segID := range taskProto.GetInputSegments() {
@@ -381,7 +397,12 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		})
 	}
 	WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
-	log.Info("Compaction handler build clustering compaction plan", zap.Any("PreAllocatedLogIDs", logIDRange))
+	log.Info("Compaction handler build clustering compaction plan",
+		zap.Any("PreAllocatedLogIDs", logIDRange),
+		zap.Float64("cpu slot", plan.CpuSlot),
+		zap.Float64("memory slot", plan.MemorySlot),
+		zap.Int64("slot usage", plan.SlotUsage),
+	)
 	return plan, nil
 }
 
@@ -847,6 +868,8 @@ func (t *clusteringCompactionTask) NeedReAssignNodeID() bool {
 	return t.GetTaskProto().GetState() == datapb.CompactionTaskState_pipelining && (t.GetTaskProto().GetNodeID() == 0 || t.GetTaskProto().GetNodeID() == NullNodeID)
 }
 
+// GetSlotUsage returns the slot usage (deprecated, kept for backward compatibility).
+// Use GetTaskSlot() or GetTaskSlotV2() instead.
 func (t *clusteringCompactionTask) GetSlotUsage() int64 {
 	return t.GetTaskSlot()
 }
