@@ -905,11 +905,20 @@ func (v *validateUtil) checkTextFieldData(field *schemapb.FieldData, fieldSchema
 
 func (v *validateUtil) checkGeometryFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	geometryArray := field.GetScalars().GetGeometryWktData().GetData()
-	wkbArray := make([][]byte, len(geometryArray))
-	if geometryArray == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
-		msg := fmt.Sprintf("geometry field '%v' is illegal, array type mismatch", field.GetFieldName())
-		return merr.WrapErrParameterInvalid("need geometry array", "got nil", msg)
+	// If WKT data is nil, check if WKB data exists (already converted, e.g., from query result in partial update)
+	if geometryArray == nil {
+		wkbArray := field.GetScalars().GetGeometryData().GetData()
+		if wkbArray != nil {
+			// Data is already in WKB format, no conversion needed
+			return nil
+		}
+		if fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
+			msg := fmt.Sprintf("geometry field '%v' is illegal, array type mismatch", field.GetFieldName())
+			return merr.WrapErrParameterInvalid("need geometry array", "got nil", msg)
+		}
+		return nil
 	}
+	wkbArray := make([][]byte, len(geometryArray))
 	var err error
 	for index, wktdata := range geometryArray {
 		// ignore parsed geom, the check is during insert task pre execute,so geo data became wkb
