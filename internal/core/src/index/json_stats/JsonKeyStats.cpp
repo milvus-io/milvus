@@ -1003,6 +1003,8 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
                                              std::move(field_meta)));
     }
 
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+
     auto translator = std::make_unique<
         milvus::segcore::storagev2translator::GroupChunkTranslator>(
         segment_id_,
@@ -1011,6 +1013,7 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
         column_group_info,
         files,
         enable_mmap,
+        mmap_config.GetMmapPopulate(),
         milvus_field_ids.size(),
         load_priority_);
 
