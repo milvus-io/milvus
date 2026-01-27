@@ -177,8 +177,6 @@ const (
 	FieldTypeFloat FieldType = 10
 	// FieldTypeDouble field type double
 	FieldTypeDouble FieldType = 11
-	// FieldTypeTimestamptz field type timestamptz
-	FieldTypeTimestamptz FieldType = 15
 	// FieldTypeString field type string
 	FieldTypeString FieldType = 20
 	// FieldTypeVarChar field type varchar
@@ -189,6 +187,8 @@ const (
 	FieldTypeJSON FieldType = 23
 	// FieldTypeGeometry field type Geometry
 	FieldTypeGeometry FieldType = 24
+	// FieldTypeTimestamptz field type timestamptz
+	FieldTypeTimestamptz FieldType = 26
 	// FieldTypeBinaryVector field type binary vector
 	FieldTypeBinaryVector FieldType = 100
 	// FieldTypeFloatVector field type float vector

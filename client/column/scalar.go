@@ -17,6 +17,10 @@
 package column
 
 import (
+	"time"
+
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
@@ -186,7 +190,7 @@ func (c *ColumnFloat) GetAsDouble(idx int) (float64, error) {
 
 /* Double */
 
-var _ Column = (*ColumnFloat)(nil)
+var _ Column = (*ColumnDouble)(nil)
 
 type ColumnDouble struct {
 	*genericColumnBase[float64]
@@ -212,16 +216,46 @@ func (c *ColumnDouble) Slice(start, end int) Column {
 var _ Column = (*ColumnTimestamptz)(nil)
 
 type ColumnTimestamptz struct {
-	*genericColumnBase[int64]
+	*genericColumnBase[string]
 }
 
-func NewColumnTimestamptz(name string, values []int64) *ColumnTimestamptz {
+func NewColumnTimestamptz(name string, values []time.Time) *ColumnTimestamptz {
 	return &ColumnTimestamptz{
-		genericColumnBase: &genericColumnBase[int64]{
+		genericColumnBase: &genericColumnBase[string]{
+			name:      name,
+			fieldType: entity.FieldTypeTimestamptz,
+			values: lo.Map(values, func(t time.Time, _ int) string {
+				return t.Format(time.RFC3339Nano)
+			}),
+		},
+	}
+}
+
+func (c *ColumnTimestamptz) Slice(start, end int) Column {
+	return &ColumnTimestamptz{
+		genericColumnBase: c.genericColumnBase.slice(start, end),
+	}
+}
+
+var _ Column = (*ColumnTimestampTzIsoString)(nil)
+
+type ColumnTimestampTzIsoString struct {
+	*genericColumnBase[string]
+}
+
+func NewColumnTimestamptzIsoString(name string, values []string) *ColumnTimestampTzIsoString {
+	return &ColumnTimestampTzIsoString{
+		genericColumnBase: &genericColumnBase[string]{
 			name:      name,
 			fieldType: entity.FieldTypeTimestamptz,
 			values:    values,
 		},
+	}
+}
+
+func (c *ColumnTimestampTzIsoString) Slice(start, end int) Column {
+	return &ColumnTimestampTzIsoString{
+		genericColumnBase: c.genericColumnBase.slice(start, end),
 	}
 }
 
