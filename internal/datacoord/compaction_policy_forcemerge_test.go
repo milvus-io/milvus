@@ -73,7 +73,7 @@ func (s *ForceMergeCompactionPolicySuite) TestSetTopologyQuerier() {
 func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_Success() {
 	ctx := context.Background()
 	collectionID := int64(1)
-	targetSize := int64(1024 * 1024 * 1024 * 2)
+	targetSize := int64(1024 * 2) // 2GB in MB
 	triggerID := int64(100)
 
 	coll := &collectionInfo{
@@ -107,7 +107,7 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_Success() {
 func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_GetCollectionError() {
 	ctx := context.Background()
 	collectionID := int64(999)
-	targetSize := int64(1024 * 1024 * 512)
+	targetSize := int64(1024 * 2) // 2GB in MB
 
 	s.mockHandler.EXPECT().GetCollection(mock.Anything, collectionID).Return(nil, merr.ErrCollectionNotFound)
 
@@ -121,7 +121,7 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_GetCollection
 func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_AllocIDError() {
 	ctx := context.Background()
 	collectionID := int64(1)
-	targetSize := int64(1024 * 1024 * 1024 * 2)
+	targetSize := int64(1024 * 2) // 2GB in MB
 
 	coll := &collectionInfo{
 		ID:         collectionID,
@@ -142,7 +142,7 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_AllocIDError(
 func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_NoEligibleSegments() {
 	ctx := context.Background()
 	collectionID := int64(999)
-	targetSize := int64(1024 * 1024 * 1024 * 2)
+	targetSize := int64(1024 * 2) // 2GB in MB
 	triggerID := int64(100)
 
 	coll := &collectionInfo{
@@ -164,7 +164,7 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_NoEligibleSeg
 func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_TopologyError() {
 	ctx := context.Background()
 	collectionID := int64(1)
-	targetSize := int64(1024 * 1024 * 1024 * 2)
+	targetSize := int64(1024 * 2) // 2GB in MB
 	triggerID := int64(100)
 
 	coll := &collectionInfo{
@@ -187,7 +187,7 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_TopologyError
 func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_WithCollectionProperties() {
 	ctx := context.Background()
 	collectionID := int64(1)
-	targetSize := int64(1024 * 1024 * 1024 * 2)
+	targetSize := int64(1024 * 2) // 2GB in MB
 	triggerID := int64(100)
 
 	coll := &collectionInfo{
@@ -212,6 +212,28 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_WithCollectio
 	s.NoError(err)
 	s.Equal(triggerID, gotTriggerID)
 	s.NotNil(views)
+}
+
+func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_TargetSizeTooSmall() {
+	ctx := context.Background()
+	collectionID := int64(1)
+	// Default configMaxSize is 1024 MB (SegmentMaxSize default), so 512 MB should fail
+	targetSize := int64(512) // 512 MB, smaller than default configMaxSize (1024 MB)
+
+	coll := &collectionInfo{
+		ID:     collectionID,
+		Schema: newTestSchema(),
+	}
+
+	s.mockHandler.EXPECT().GetCollection(mock.Anything, collectionID).Return(coll, nil)
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(100), nil)
+
+	views, triggerID, err := s.policy.triggerOneCollection(ctx, collectionID, targetSize)
+
+	s.Error(err)
+	s.Contains(err.Error(), "should be greater than or equal to")
+	s.Nil(views)
+	s.Equal(int64(0), triggerID)
 }
 
 func (s *ForceMergeCompactionPolicySuite) TestGroupByPartitionChannel_EmptySegments() {
@@ -287,7 +309,7 @@ func (s *ForceMergeCompactionPolicySuite) TestGroupByPartitionChannel_SameGroupM
 func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_FilterSegments() {
 	ctx := context.Background()
 	collectionID := int64(1)
-	targetSize := int64(1024 * 1024 * 1024 * 2)
+	targetSize := int64(1024 * 2) // 2GB in MB
 	triggerID := int64(100)
 
 	coll := &collectionInfo{

@@ -86,9 +86,12 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 		collectionTTL = 0
 	}
 
+	// Convert targetSize from MB to bytes (per design doc: targetSize is in MB)
+	targetSizeBytes := targetSize * 1024 * 1024
+
 	configMaxSize := getExpectedSegmentSize(policy.meta, collectionID, collection.Schema)
-	if targetSize < configMaxSize {
-		return nil, 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("targetSize %d should be greater than or equal to configMaxSize %d", targetSize, configMaxSize))
+	if targetSizeBytes < configMaxSize {
+		return nil, 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("targetSize %d MB should be greater than or equal to configMaxSize %d MB", targetSize, configMaxSize/(1024*1024)))
 	}
 
 	segments := policy.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
@@ -119,7 +122,7 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 			collectionTTL: collectionTTL,
 
 			configMaxSize:      float64(configMaxSize),
-			expectedTargetSize: float64(targetSize),
+			expectedTargetSize: float64(targetSizeBytes),
 			topology:           topology,
 		}
 		views = append(views, view)
