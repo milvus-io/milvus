@@ -52,8 +52,19 @@ const (
 	paramFingerprintType   = "fingerprint_type"
 	paramFingerprintSize   = "fingerprint_size"
 	paramRadius            = "radius"
+	paramMinPath           = "min_path"
+	paramMaxPath           = "max_path"
 	defaultFingerprintSize = 2048
 	defaultRadius          = 2
+	defaultMinPath         = 1
+	defaultMaxPath         = 7
+	maccsFingerprintSize   = 167 // MACCS fingerprint is fixed at 167 bits
+)
+
+const (
+	fingerprintTypeMorgan = "morgan"
+	fingerprintTypeMACCS  = "maccs"
+	fingerprintTypeRDKit  = "rdkit"
 )
 
 // MolFingerprintFunctionRunner implements FunctionRunner for MOL fingerprint generation
@@ -70,6 +81,8 @@ type MolFingerprintFunctionRunner struct {
 	fingerprintType string
 	fingerprintSize int
 	radius          int
+	minPath         int
+	maxPath         int
 }
 
 // NewMolFingerprintFunctionRunner creates a new MolFingerprintFunctionRunner
@@ -110,16 +123,21 @@ func NewMolFingerprintFunctionRunner(coll *schemapb.CollectionSchema, schema *sc
 	}
 
 	// Parse parameters
-	fingerprintType := "morgan" // default
+	fingerprintType := fingerprintTypeMorgan // default
 	fingerprintSize := defaultFingerprintSize
 	radius := defaultRadius
+	minPath := defaultMinPath
+	maxPath := defaultMaxPath
 
 	for _, param := range schema.GetParams() {
 		switch param.GetKey() {
 		case paramFingerprintType:
 			fingerprintType = param.GetValue()
-			if fingerprintType != "morgan" {
-				return nil, fmt.Errorf("unsupported fingerprint type: %s, only 'morgan' is supported currently", fingerprintType)
+			switch fingerprintType {
+			case fingerprintTypeMorgan, fingerprintTypeMACCS, fingerprintTypeRDKit:
+				// Valid types
+			default:
+				return nil, fmt.Errorf("unsupported fingerprint type: %s, supported types: morgan, maccs, rdkit", fingerprintType)
 			}
 		case paramFingerprintSize:
 			size, err := strconv.Atoi(param.GetValue())
@@ -139,7 +157,30 @@ func NewMolFingerprintFunctionRunner(coll *schemapb.CollectionSchema, schema *sc
 				return nil, fmt.Errorf("radius must be non-negative, got %d", r)
 			}
 			radius = r
+		case paramMinPath:
+			mp, err := strconv.Atoi(param.GetValue())
+			if err != nil {
+				return nil, fmt.Errorf("invalid min_path parameter: %s", param.GetValue())
+			}
+			if mp < 1 {
+				return nil, fmt.Errorf("min_path must be at least 1, got %d", mp)
+			}
+			minPath = mp
+		case paramMaxPath:
+			mp, err := strconv.Atoi(param.GetValue())
+			if err != nil {
+				return nil, fmt.Errorf("invalid max_path parameter: %s", param.GetValue())
+			}
+			if mp < minPath {
+				return nil, fmt.Errorf("max_path (%d) must be >= min_path (%d)", mp, minPath)
+			}
+			maxPath = mp
 		}
+	}
+
+	// MACCS fingerprint has fixed size
+	if fingerprintType == fingerprintTypeMACCS {
+		fingerprintSize = maccsFingerprintSize
 	}
 
 	// Validate output field dimension matches fingerprint size
@@ -158,6 +199,8 @@ func NewMolFingerprintFunctionRunner(coll *schemapb.CollectionSchema, schema *sc
 		fingerprintType: fingerprintType,
 		fingerprintSize: fingerprintSize,
 		radius:          radius,
+		minPath:         minPath,
+		maxPath:         maxPath,
 	}, nil
 }
 
@@ -198,29 +241,51 @@ func (v *MolFingerprintFunctionRunner) BatchRun(inputs ...any) ([]any, error) {
 		}}, nil
 	}
 
-	// Generate fingerprints
+	// Generate fingerprints based on fingerprint type
 	fingerprints := make([][]byte, rowNum)
 	for i, smiles := range smilesData {
 		if len(smiles) == 0 {
 			// Empty SMILES -> zero fingerprint
-			fingerprints[i] = make([]byte, v.fingerprintSize/8)
+			byteSize := v.fingerprintSize / 8
+			if v.fingerprintSize%8 != 0 {
+				byteSize++
+			}
+			fingerprints[i] = make([]byte, byteSize)
 			continue
 		}
 
-		fp, err := mol.GenerateMorganFingerprint(smiles, v.radius, v.fingerprintSize)
+		var fp []byte
+		var err error
+
+		switch v.fingerprintType {
+		case fingerprintTypeMorgan:
+			fp, err = mol.GenerateMorganFingerprint(smiles, v.radius, v.fingerprintSize)
+		case fingerprintTypeMACCS:
+			fp, err = mol.GenerateMACCSFingerprint(smiles)
+		case fingerprintTypeRDKit:
+			fp, err = mol.GenerateRDKitFingerprint(smiles, v.minPath, v.maxPath, v.fingerprintSize)
+		default:
+			return nil, fmt.Errorf("unsupported fingerprint type: %s", v.fingerprintType)
+		}
+
 		if err != nil {
 			log.Warn("failed to generate fingerprint for SMILES",
 				zap.String("smiles", smiles),
+				zap.String("fingerprint_type", v.fingerprintType),
 				zap.Int("index", i),
 				zap.Error(err))
-			return nil, merr.WrapErrParameterInvalidMsg("failed to generate fingerprint for SMILES %s: %v", smiles, err)
+			return nil, merr.WrapErrParameterInvalidMsg("failed to generate %s fingerprint for SMILES %s: %v", v.fingerprintType, smiles, err)
 		}
 		fingerprints[i] = fp
 	}
 
 	// Convert fingerprints to BINARY_VECTOR format
 	// BINARY_VECTOR stores bits packed into bytes
-	binaryVector := make([]byte, 0, rowNum*v.fingerprintSize/8)
+	byteSize := v.fingerprintSize / 8
+	if v.fingerprintSize%8 != 0 {
+		byteSize++
+	}
+	binaryVector := make([]byte, 0, rowNum*byteSize)
 	for _, fp := range fingerprints {
 		binaryVector = append(binaryVector, fp...)
 	}
