@@ -654,6 +654,7 @@ LoadJsonKeyIndex(CTraceContext c_trace,
 
         milvus::Config config;
         std::vector<std::string> files;
+        files.reserve(info_proto->files_size());
         for (const auto& f : info_proto->files()) {
             files.push_back(f);
         }

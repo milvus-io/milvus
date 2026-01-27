@@ -656,7 +656,8 @@ ProtoParser::ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb) {
         Assert(data_type == static_cast<DataType>(column_info.data_type()));
     }
     std::vector<::milvus::proto::plan::GenericValue> extra_values;
-    for (auto val : expr_pb.extra_values()) {
+    extra_values.reserve(expr_pb.extra_values_size());
+    for (const auto& val : expr_pb.extra_values()) {
         extra_values.emplace_back(val);
     }
     return std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
@@ -751,9 +752,12 @@ ProtoParser::ParseMatchExprs(const proto::plan::MatchExpr& expr_pb) {
 
 expr::TypedExprPtr
 ProtoParser::ParseCallExprs(const proto::plan::CallExpr& expr_pb) {
+    const auto param_count = expr_pb.function_parameters_size();
     std::vector<expr::TypedExprPtr> parameters;
+    parameters.reserve(param_count);
     std::vector<DataType> func_param_type_list;
-    for (auto& param_expr : expr_pb.function_parameters()) {
+    func_param_type_list.reserve(param_count);
+    for (const auto& param_expr : expr_pb.function_parameters()) {
         // function parameter can be any type
         auto e = this->ParseExprs(param_expr, TypeIsAny);
         parameters.push_back(e);
@@ -823,6 +827,7 @@ ProtoParser::ParseTermExprs(const proto::plan::TermExpr& expr_pb) {
         Assert(data_type == (DataType)columnInfo.data_type());
     }
     std::vector<::milvus::proto::plan::GenericValue> values;
+    values.reserve(expr_pb.values_size());
     for (size_t i = 0; i < expr_pb.values_size(); i++) {
         values.emplace_back(expr_pb.values(i));
     }
@@ -901,6 +906,7 @@ ProtoParser::ParseJsonContainsExprs(
         Assert(data_type == (DataType)columnInfo.data_type());
     }
     std::vector<::milvus::proto::plan::GenericValue> values;
+    values.reserve(expr_pb.elements_size());
     for (size_t i = 0; i < expr_pb.elements_size(); i++) {
         values.emplace_back(expr_pb.elements(i));
     }

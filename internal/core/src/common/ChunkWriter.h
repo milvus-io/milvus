@@ -20,6 +20,7 @@
 #include "common/ChunkTarget.h"
 #include "arrow/record_batch.h"
 #include "common/Chunk.h"
+#include "common/Json.h"
 #include "pb/common.pb.h"
 
 namespace milvus {
@@ -230,6 +231,9 @@ class JSONChunkWriter : public ChunkWriterBase {
     void
     write_to_target(const arrow::ArrayVector& array_vec,
                     const std::shared_ptr<ChunkTarget>& target) override;
+
+ private:
+    std::vector<Json> cached_jsons_;
 };
 
 class GeometryChunkWriter : public ChunkWriterBase {
