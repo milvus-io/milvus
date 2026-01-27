@@ -927,13 +927,18 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		zap.Int64s("unindexed text fields", lo.Keys(unindexedTextFields)),
 		zap.Int64s("indexed json key fields", lo.Keys(jsonKeyStats)),
 	)
+	_, err = GetLoadPool().Submit(func() (any, error) {
+		if err = segment.Load(ctx); err != nil {
+			return struct{}{}, errors.Wrap(err, "At Load")
+		}
 
-	if err = segment.Load(ctx); err != nil {
-		return errors.Wrap(err, "At Load")
-	}
-
-	if err = segment.FinishLoad(); err != nil {
-		return errors.Wrap(err, "At FinishLoad")
+		if err = segment.FinishLoad(); err != nil {
+			return struct{}{}, errors.Wrap(err, "At FinishLoad")
+		}
+		return struct{}{}, nil
+	}).Await()
+	if err != nil {
+		return err
 	}
 
 	for _, indexInfo := range loadInfo.IndexInfos {
