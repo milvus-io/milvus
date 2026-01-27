@@ -226,7 +226,11 @@ MinioChunkManager::PreCheck(const StorageConfig& config) {
              config.ToString());
     try {
         // Just test connection not check real list, avoid cost resource.
-        ListWithPrefix("justforconnectioncheck");
+        std::string check_prefix = "justforconnectioncheck";
+        if (!remote_root_path_.empty()) {
+            check_prefix = remote_root_path_ + "/" + check_prefix;
+        }
+        ListWithPrefix(check_prefix);
     } catch (SegcoreError& e) {
         auto err_message = fmt::format(
             "precheck chunk manager client failed, "
