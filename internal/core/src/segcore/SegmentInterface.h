@@ -685,8 +685,9 @@ class SegmentInternalInterface : public SegmentInterface {
     };
 
  protected:
-    // mutex protecting rw options on schema_
-    std::shared_mutex sch_mutex_;
+    // mutex protecting rw options on schema_ and insert_record_ during schema changes.
+    // Search/Retrieve must acquire shared lock to prevent races with Reopen/fill_empty_field.
+    mutable std::shared_mutex sch_mutex_;
 
     milvus::proto::segcore::SegmentLoadInfo load_info_;
 
