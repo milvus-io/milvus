@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -95,32 +96,6 @@ func (t *l0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clus
 		return
 	}
 
-	// Check if this is a fast finish case (no target segments to compact with)
-	// Fast finish plan only contains L0 input segments, no target L1/L2 segments
-	if len(plan.SegmentBinlogs) == len(t.GetTaskProto().GetInputSegments()) {
-		log.Info("l0CompactionTask fast finish: no target segments, directly marking L0 segments as dropped",
-			zap.Int64("planID", t.GetTaskProto().GetPlanID()))
-
-		// Save segment meta with empty output segments (marks L0 input segments as dropped)
-		if err = t.saveSegmentMeta([]*datapb.CompactionSegment{}); err != nil {
-			log.Warn("l0CompactionTask fast finish failed to save segment meta", zap.Error(err))
-			err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
-			if err != nil {
-				log.Warn("l0CompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
-			}
-			return
-		}
-
-		// Transition to meta_saved state
-		if err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved)); err != nil {
-			log.Warn("l0CompactionTask fast finish failed to save task meta_saved state", zap.Error(err))
-			return
-		}
-
-		log.Info("l0CompactionTask fast finish completed", zap.Int64("planID", t.GetTaskProto().GetPlanID()))
-		return
-	}
-
 	err = cluster.CreateCompaction(nodeID, plan)
 	if err != nil {
 		originNodeID := t.GetTaskProto().GetNodeID()
@@ -165,7 +140,7 @@ func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 			return
 		}
 
-		if err = t.saveSegmentMeta(result.GetSegments()); err != nil {
+		if err = t.saveSegmentMeta(result); err != nil {
 			log.Warn("l0CompactionTask failed to save segment meta", zap.Error(err))
 			return
 		}
@@ -378,10 +353,9 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		return nil, err
 	}
 	if len(flushedSegments) == 0 {
-		// Fast finish: no target segments to compact with, return plan with only L0 segments
-		log.Info("l0Compaction available non-L0 Segments is empty, will fast finish",
-			zap.Any("target position", taskProto.GetPos()))
-		return plan, nil
+		// TODO fast finish l0 segment, just drop l0 segment
+		log.Info("l0Compaction available non-L0 Segments is empty ")
+		return nil, errors.Errorf("Selected zero L1/L2 segments for the position=%v", taskProto.GetPos())
 	}
 
 	segments = append(segments, flushedSegments...)
@@ -442,9 +416,9 @@ func (t *l0CompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
 	return t.meta.SaveCompactionTask(context.TODO(), task)
 }
 
-func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegment) error {
+func (t *l0CompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult) error {
 	var operators []UpdateOperator
-	for _, seg := range outputSegs {
+	for _, seg := range result.GetSegments() {
 		operators = append(operators, AddBinlogsOperator(seg.GetSegmentID(), nil, nil, seg.GetDeltalogs(), nil))
 	}
 

@@ -156,67 +156,42 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 		State:         datapb.CompactionTaskState_executing,
 		InputSegments: []int64{100, 101},
 	}, nil, s.mockMeta)
-	plan, err := task.BuildCompactionRequest()
-	// Fast finish: should return a plan with only L0 segments (no error)
-	s.NoError(err)
-	s.Require().NotNil(plan)
-	// Verify plan only contains L0 input segments (2 segments)
-	s.Equal(2, len(plan.GetSegmentBinlogs()))
-	segIDs := lo.Map(plan.GetSegmentBinlogs(), func(b *datapb.CompactionSegmentBinlogs, _ int) int64 {
-		return b.GetSegmentID()
-	})
-	s.ElementsMatch([]int64{100, 101}, segIDs)
-	// Verify no binlog IDs were allocated for fast finish
-	s.Nil(plan.GetPreAllocatedLogIDs())
+	_, err := task.BuildCompactionRequest()
+	s.Error(err)
 }
 
 func (s *L0CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
-	channel := "Ch-1"
-	deltaLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
+	var task CompactionTask
 
-	s.mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return(
-		[]*SegmentInfo{
-			{SegmentInfo: &datapb.SegmentInfo{
-				ID:            200,
-				Level:         datapb.SegmentLevel_L1,
-				InsertChannel: channel,
-			}},
-			{SegmentInfo: &datapb.SegmentInfo{
-				ID:            201,
-				Level:         datapb.SegmentLevel_L1,
-				InsertChannel: channel,
-			}},
-			{SegmentInfo: &datapb.SegmentInfo{
-				ID:            202,
-				Level:         datapb.SegmentLevel_L1,
-				InsertChannel: channel,
-			}},
-		},
-	)
+	s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(100, 200, errors.New("mock alloc err"))
 
-	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *SegmentInfo {
-		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-			ID:            segID,
-			Level:         datapb.SegmentLevel_L0,
-			InsertChannel: channel,
-			State:         commonpb.SegmentState_Flushed,
-			Deltalogs:     deltaLogs,
-		}}
-	}).Times(2)
-	task := newL0CompactionTask(&datapb.CompactionTask{
-		PlanID:        1,
-		TriggerID:     19530,
-		CollectionID:  1,
-		PartitionID:   10,
-		Type:          datapb.CompactionType_Level0DeleteCompaction,
-		NodeID:        1,
-		State:         datapb.CompactionTaskState_executing,
-		InputSegments: []int64{100, 101},
-	}, s.mockAlloc, s.mockMeta)
+	meta, err := newMemoryMeta(s.T())
+	s.NoError(err)
+	task = &l0CompactionTask{
+		allocator: s.mockAlloc,
+		meta:      meta,
+	}
+	task.SetTask(&datapb.CompactionTask{})
+	_, err = task.BuildCompactionRequest()
+	s.T().Logf("err=%v", err)
+	s.Error(err)
 
-	s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(0, 0, errors.New("mock alloc err"))
+	task = &mixCompactionTask{
+		allocator: s.mockAlloc,
+		meta:      meta,
+		ievm:      newMockVersionManager(),
+	}
+	task.SetTask(&datapb.CompactionTask{})
+	_, err = task.BuildCompactionRequest()
+	s.T().Logf("err=%v", err)
+	s.Error(err)
 
-	_, err := task.BuildCompactionRequest()
+	task = &clusteringCompactionTask{
+		allocator: s.mockAlloc,
+		meta:      meta,
+	}
+	task.SetTask(&datapb.CompactionTask{})
+	_, err = task.BuildCompactionRequest()
 	s.T().Logf("err=%v", err)
 	s.Error(err)
 }
