@@ -66,33 +66,6 @@ func deleteLoadIndexInfo(info *LoadIndexInfo) {
 	}).Await()
 }
 
-// appendIndexParam append indexParam to index
-func (li *LoadIndexInfo) appendIndexParam(ctx context.Context, indexKey string, indexValue string) error {
-	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
-		cIndexKey := C.CString(indexKey)
-		defer C.free(unsafe.Pointer(cIndexKey))
-		cIndexValue := C.CString(indexValue)
-		defer C.free(unsafe.Pointer(cIndexValue))
-		status = C.AppendIndexParam(li.cLoadIndexInfo, cIndexKey, cIndexValue)
-		return nil, nil
-	}).Await()
-	return HandleCStatus(ctx, &status, "AppendIndexParam failed")
-}
-
-func (li *LoadIndexInfo) appendIndexInfo(ctx context.Context, indexID int64, buildID int64, indexVersion int64) error {
-	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
-		cIndexID := C.int64_t(indexID)
-		cBuildID := C.int64_t(buildID)
-		cIndexVersion := C.int64_t(indexVersion)
-
-		status = C.AppendIndexInfo(li.cLoadIndexInfo, cIndexID, cBuildID, cIndexVersion)
-		return nil, nil
-	}).Await()
-	return HandleCStatus(ctx, &status, "AppendIndexInfo failed")
-}
-
 func (li *LoadIndexInfo) cleanLocalData(ctx context.Context) error {
 	var status C.CStatus
 	GetDynamicPool().Submit(func() (any, error) {
@@ -100,41 +73,6 @@ func (li *LoadIndexInfo) cleanLocalData(ctx context.Context) error {
 		return nil, nil
 	}).Await()
 	return HandleCStatus(ctx, &status, "failed to clean cached data on disk")
-}
-
-func (li *LoadIndexInfo) appendIndexFile(ctx context.Context, filePath string) error {
-	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
-		cIndexFilePath := C.CString(filePath)
-		defer C.free(unsafe.Pointer(cIndexFilePath))
-
-		status = C.AppendIndexFilePath(li.cLoadIndexInfo, cIndexFilePath)
-		return nil, nil
-	}).Await()
-	return HandleCStatus(ctx, &status, "AppendIndexIFile failed")
-}
-
-func (li *LoadIndexInfo) appendStorageInfo(uri string, version int64) {
-	GetDynamicPool().Submit(func() (any, error) {
-		cURI := C.CString(uri)
-		defer C.free(unsafe.Pointer(cURI))
-		cVersion := C.int64_t(version)
-		C.AppendStorageInfo(li.cLoadIndexInfo, cURI, cVersion)
-		return nil, nil
-	}).Await()
-}
-
-func (li *LoadIndexInfo) appendIndexEngineVersion(ctx context.Context, indexEngineVersion int32) error {
-	cIndexEngineVersion := C.int32_t(indexEngineVersion)
-
-	var status C.CStatus
-
-	GetDynamicPool().Submit(func() (any, error) {
-		status = C.AppendIndexEngineVersionToLoadInfo(li.cLoadIndexInfo, cIndexEngineVersion)
-		return nil, nil
-	}).Await()
-
-	return HandleCStatus(ctx, &status, "AppendIndexEngineVersion failed")
 }
 
 func (li *LoadIndexInfo) appendLoadIndexInfo(ctx context.Context, info *cgopb.LoadIndexInfo) error {
@@ -169,5 +107,5 @@ func (li *LoadIndexInfo) loadIndex(ctx context.Context) error {
 		return nil, nil
 	}).Await()
 
-	return HandleCStatus(ctx, &status, "AppendIndex failed")
+	return HandleCStatus(ctx, &status, "AppendIndexV2 failed")
 }

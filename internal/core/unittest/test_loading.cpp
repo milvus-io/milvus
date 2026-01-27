@@ -303,7 +303,6 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     loadIndexInfo.index = nullptr;
     loadIndexInfo.cache_index = nullptr;
     loadIndexInfo.uri = "";
-    loadIndexInfo.index_store_version = 1;
     loadIndexInfo.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
     loadIndexInfo.index_size = 1024 * 1024 * 1024;  // 1G index size

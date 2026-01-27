@@ -29,7 +29,6 @@ type SegmentIndex struct {
 	// deprecated
 	WriteHandoff              bool
 	CurrentIndexVersion       int32
-	IndexStoreVersion         int64
 	FinishedUTCTime           uint64
 	CurrentScalarIndexVersion int32
 	IndexType                 string

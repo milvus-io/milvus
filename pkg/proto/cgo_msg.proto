@@ -18,10 +18,11 @@ message LoadIndexInfo {
   map<string, string> index_params = 11;
   repeated string index_files = 12;
   string uri = 13;
-  int64 index_store_version = 14;
+  int64 index_store_version = 14 [deprecated = true];
   int32 index_engine_version = 15;
   int64 index_file_size = 16;
   int64 num_rows = 17;
+  int32 current_scalar_index_version = 18;
 }
 
 message IndexStats {
