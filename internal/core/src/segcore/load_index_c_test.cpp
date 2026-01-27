@@ -349,8 +349,8 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info =
-        CreateTestLoadIndexInfo(std::move(indexing), DataType::VECTOR_FLOAT, 100);
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(load_index_info);
@@ -509,8 +509,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info =
-        CreateTestLoadIndexInfo(std::move(indexing), DataType::VECTOR_FLOAT, 100);
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(load_index_info);
@@ -671,8 +671,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info =
-        CreateTestLoadIndexInfo(std::move(indexing), DataType::VECTOR_FLOAT, 100);
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(load_index_info);
@@ -825,8 +825,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info =
-        CreateTestLoadIndexInfo(std::move(indexing), DataType::VECTOR_FLOAT, 100);
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(load_index_info);
@@ -980,8 +980,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info =
-        CreateTestLoadIndexInfo(std::move(indexing), DataType::VECTOR_FLOAT, 100);
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(load_index_info);
@@ -1144,8 +1144,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info =
-        CreateTestLoadIndexInfo(std::move(indexing), DataType::VECTOR_BINARY, 100);
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_BINARY, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(load_index_info);
@@ -1308,8 +1308,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info =
-        CreateTestLoadIndexInfo(std::move(indexing), DataType::VECTOR_BINARY, 100);
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_BINARY, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(load_index_info);
@@ -1466,8 +1466,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info =
-        CreateTestLoadIndexInfo(std::move(indexing), DataType::VECTOR_BINARY, 100);
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_BINARY, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(load_index_info);
@@ -1644,8 +1644,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info =
-        CreateTestLoadIndexInfo(std::move(indexing), DataType::VECTOR_BINARY, 100);
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_BINARY, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(load_index_info);

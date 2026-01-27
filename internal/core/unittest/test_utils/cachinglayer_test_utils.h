@@ -266,7 +266,8 @@ inline std::map<std::string, std::string>
 GenIndexParams(const milvus::index::IndexBase* index) {
     std::map<std::string, std::string> index_params;
     index_params["index_type"] = index->Type();
-    if (auto vec_index = dynamic_cast<const milvus::index::VectorIndex*>(index)) {
+    if (auto vec_index =
+            dynamic_cast<const milvus::index::VectorIndex*>(index)) {
         index_params["metric_type"] = vec_index->GetMetricType();
     }
     return index_params;

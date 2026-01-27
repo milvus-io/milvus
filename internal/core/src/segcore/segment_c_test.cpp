@@ -1218,8 +1218,8 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info =
-        CreateTestLoadIndexInfo(std::move(indexing), DataType::VECTOR_FLOAT, 100);
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(load_index_info);
@@ -1421,8 +1421,8 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto load_index_info =
-        CreateTestLoadIndexInfo(std::move(indexing), DataType::VECTOR_FLOAT, 100);
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
 
     // load vec index
