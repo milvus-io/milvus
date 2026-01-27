@@ -2439,11 +2439,7 @@ func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.In
 	if err != nil {
 		return err
 	}
-	namespaceEnabeld, _, err := common.ParseNamespaceProp(schema.Properties...)
-	if err != nil {
-		return err
-	}
-	if !namespaceEnabeld {
+	if !schema.GetEnableNamespace() {
 		return nil
 	}
 
@@ -2453,10 +2449,28 @@ func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.In
 		return fmt.Errorf("namespace field not found")
 	}
 
-	// check namespace field data is already set
+	// If namespace field data is already present, validate it instead of rejecting outright.
 	for _, fieldData := range insertMsg.FieldsData {
 		if fieldData.FieldId == namespaceField.FieldID {
-			return fmt.Errorf("namespace field data is already set by users")
+			ns := ""
+			if insertMsg.InsertRequest.Namespace != nil {
+				ns = *insertMsg.InsertRequest.Namespace
+			}
+			scalars := fieldData.GetScalars()
+			if scalars == nil {
+				return fmt.Errorf("invalid namespace field data layout")
+			}
+			strData := scalars.GetStringData()
+			if strData == nil {
+				return fmt.Errorf("invalid namespace field data layout")
+			}
+			for _, v := range strData.GetData() {
+				if v != ns {
+					return fmt.Errorf("namespace field value %q mismatches namespace %q", v, ns)
+				}
+			}
+			// Values are consistent with the namespace; nothing more to do.
+			return nil
 		}
 	}
 

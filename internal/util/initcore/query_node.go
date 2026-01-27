@@ -138,8 +138,8 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cExprResCacheCapacityBytes := C.int64_t(paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.GetAsInt64())
 	C.SetExprResCacheCapacityBytes(cExprResCacheCapacityBytes)
 
-	cEnableParquetStatsSkipIndex := C.bool(paramtable.Get().CommonCfg.EnableNamespace.GetAsBool())
-	C.SetDefaultEnableParquetStatsSkipIndex(cEnableParquetStatsSkipIndex)
+	enableParquetStatsSkipIndex := paramtable.Get().CommonCfg.ParquetStatsSkipIndex.GetAsBool()
+	C.SetDefaultEnableParquetStatsSkipIndex(C.bool(enableParquetStatsSkipIndex))
 
 	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, nodeID)
 

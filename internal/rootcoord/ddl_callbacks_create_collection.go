@@ -209,6 +209,7 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 		Partitions:           partitions,
 		Properties:           properties,
 		EnableDynamicField:   body.CollectionSchema.EnableDynamicField,
+		EnableNamespace:      body.CollectionSchema.EnableNamespace,
 		UpdateTimestamp:      ts,
 		SchemaVersion:        0,
 		ShardInfos:           shardInfos,

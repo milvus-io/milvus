@@ -114,11 +114,12 @@ func (s *NamespaceCompactorTestSuite) setupSortedSegments() {
 		inserts, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 		s.Require().NoError(err)
 		s.sortedSegments = append(s.sortedSegments, &datapb.CompactionSegmentBinlogs{
-			SegmentID:      int64(i),
-			FieldBinlogs:   storage.SortFieldBinlogs(inserts),
-			Deltalogs:      []*datapb.FieldBinlog{},
-			StorageVersion: storage.StorageV2,
-			IsSorted:       true,
+			SegmentID:           int64(i),
+			FieldBinlogs:        storage.SortFieldBinlogs(inserts),
+			Deltalogs:           []*datapb.FieldBinlog{},
+			StorageVersion:      storage.StorageV2,
+			IsSorted:            false,
+			IsSortedByNamespace: true,
 		})
 	}
 }

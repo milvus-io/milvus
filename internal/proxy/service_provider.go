@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -203,7 +204,7 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		Description: c.schema.CollectionSchema.Description,
 		AutoID:      c.schema.CollectionSchema.AutoID,
 		Fields: lo.Filter(c.schema.CollectionSchema.Fields, func(field *schemapb.FieldSchema, _ int) bool {
-			return !field.IsDynamic
+			return !field.IsDynamic && field.Name != common.NamespaceFieldName
 		}),
 		StructArrayFields:  cloneStructArrayFields(c.schema.CollectionSchema.StructArrayFields),
 		EnableDynamicField: c.schema.CollectionSchema.EnableDynamicField,

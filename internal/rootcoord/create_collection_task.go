@@ -321,18 +321,10 @@ func (t *createCollectionTask) appendConsistecyLevel() {
 }
 
 func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema *schemapb.CollectionSchema) error {
-	if !Params.CommonCfg.EnableNamespace.GetAsBool() {
-		return nil
-	}
-
 	hasIsolation := hasIsolationProperty(t.Req.Properties...)
 	_, err := typeutil.GetPartitionKeyFieldSchema(schema)
 	hasPartitionKey := err == nil
-	enabled, has, err := common.ParseNamespaceProp(t.Req.Properties...)
-	if err != nil {
-		return err
-	}
-	if !has || !enabled {
+	if !schema.GetEnableNamespace() {
 		return nil
 	}
 

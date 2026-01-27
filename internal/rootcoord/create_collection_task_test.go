@@ -1859,8 +1859,6 @@ func Test_createCollectionTask_PartitionKey(t *testing.T) {
 
 func TestNamespaceProperty(t *testing.T) {
 	paramtable.Init()
-	paramtable.Get().CommonCfg.EnableNamespace.SwapTempValue("true")
-	defer paramtable.Get().CommonCfg.EnableNamespace.SwapTempValue("false")
 	ctx := context.Background()
 	prefix := "TestNamespaceProperty"
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1887,6 +1885,7 @@ func TestNamespaceProperty(t *testing.T) {
 					},
 				},
 			},
+			EnableNamespace: true,
 		}
 	}
 	hasNamespaceField := func(schema *schemapb.CollectionSchema) bool {
@@ -1903,12 +1902,6 @@ func TestNamespaceProperty(t *testing.T) {
 		task := &createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
 				CollectionName: collectionName,
-				Properties: []*commonpb.KeyValuePair{
-					{
-						Key:   common.NamespaceEnabledKey,
-						Value: "true",
-					},
-				},
 			},
 			header: &message.CreateCollectionMessageHeader{},
 			body: &message.CreateCollectionRequest{
@@ -1923,6 +1916,7 @@ func TestNamespaceProperty(t *testing.T) {
 
 	t.Run("test namespace disabled with isolation and partition key", func(t *testing.T) {
 		schema := initSchema()
+		schema.EnableNamespace = false
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 			FieldID:        102,
 			Name:           "field2",
@@ -1959,10 +1953,6 @@ func TestNamespaceProperty(t *testing.T) {
 				CollectionName: collectionName,
 				Properties: []*commonpb.KeyValuePair{
 					{
-						Key:   common.NamespaceEnabledKey,
-						Value: "true",
-					},
-					{
 						Key:   common.PartitionKeyIsolationKey,
 						Value: "true",
 					},
@@ -1991,12 +1981,6 @@ func TestNamespaceProperty(t *testing.T) {
 		task := &createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
 				CollectionName: collectionName,
-				Properties: []*commonpb.KeyValuePair{
-					{
-						Key:   common.NamespaceEnabledKey,
-						Value: "true",
-					},
-				},
 			},
 			header: &message.CreateCollectionMessageHeader{},
 			body: &message.CreateCollectionRequest{
@@ -2011,8 +1995,9 @@ func TestNamespaceProperty(t *testing.T) {
 	t.Run("test namespace enabled with external collection", func(t *testing.T) {
 		// External collection is identified by having ExternalField set on fields
 		schema := &schemapb.CollectionSchema{
-			Name:           collectionName,
-			ExternalSource: "s3://bucket/path",
+			Name:            collectionName,
+			ExternalSource:  "s3://bucket/path",
+			EnableNamespace: true,
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:       100,
@@ -2038,12 +2023,6 @@ func TestNamespaceProperty(t *testing.T) {
 		task := &createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
 				CollectionName: collectionName,
-				Properties: []*commonpb.KeyValuePair{
-					{
-						Key:   common.NamespaceEnabledKey,
-						Value: "true",
-					},
-				},
 			},
 			header: &message.CreateCollectionMessageHeader{},
 			body: &message.CreateCollectionRequest{

@@ -376,6 +376,7 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 			Field2StatslogPaths: segInfo.GetStatslogs(),
 			Deltalogs:           segInfo.GetDeltalogs(),
 			IsSorted:            segInfo.GetIsSorted(),
+			IsSortedByNamespace: segInfo.GetIsSortedByNamespace(),
 			StorageVersion:      segInfo.GetStorageVersion(),
 			Manifest:            segInfo.GetManifestPath(),
 		})

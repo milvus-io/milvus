@@ -386,7 +386,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	sortMergeAppicable := t.compactionParams.UseMergeSort
 	if sortMergeAppicable {
 		for _, segment := range t.plan.GetSegmentBinlogs() {
-			if !segment.GetIsSorted() {
+			if !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
 				sortMergeAppicable = false
 				break
 			}
