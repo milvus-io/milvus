@@ -1414,6 +1414,45 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NotEqual(t, 0, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
 	})
 
+	t.Run("v3 storage segment with manifest path and no binlogs", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
+		}
+
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     0,
+			Schema: newTestSchema(),
+		})
+
+		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
+			ChannelName: "vchan1",
+			Timestamp:   10,
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
+		})
+		assert.NoError(t, err)
+
+		// V3 segment: flushed, has ManifestPath but no binlogs
+		seg1 := createSegment(100, 0, 0, 50, 10, "vchan1", commonpb.SegmentState_Flushed)
+		seg1.Binlogs = []*datapb.FieldBinlog{} // empty binlogs for V3 storage
+		seg1.ManifestPath = "files/binlogs/0/0/100/manifest_0"
+		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
+		assert.NoError(t, err)
+
+		req := &datapb.GetRecoveryInfoRequestV2{
+			CollectionID: 0,
+		}
+		resp, err := svr.GetRecoveryInfoV2(context.TODO(), req)
+		assert.NoError(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		// V3 segment should NOT be filtered out
+		assert.EqualValues(t, 1, len(resp.GetSegments()))
+		assert.EqualValues(t, int64(100), resp.GetSegments()[0].GetID())
+		assert.EqualValues(t, "files/binlogs/0/0/100/manifest_0", resp.GetSegments()[0].GetManifestPath())
+		assert.EqualValues(t, int64(50), resp.GetSegments()[0].GetNumOfRows())
+	})
+
 	t.Run("with continuous compaction", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)

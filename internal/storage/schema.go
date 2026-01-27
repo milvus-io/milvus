@@ -5,9 +5,11 @@ import (
 	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -86,6 +88,39 @@ func ConvertToArrowSchema(schema *schemapb.CollectionSchema, useFieldID bool) (*
 	}
 
 	return arrow.NewSchema(arrowFields, nil), nil
+}
+
+// FilterRowIDFromSchema returns a deep copy of the schema with RowID system field removed.
+func FilterRowIDFromSchema(schema *schemapb.CollectionSchema) *schemapb.CollectionSchema {
+	filtered := proto.Clone(schema).(*schemapb.CollectionSchema)
+	n := 0
+	for _, f := range filtered.Fields {
+		if f.FieldID != common.RowIDField {
+			filtered.Fields[n] = f
+			n++
+		}
+	}
+	filtered.Fields = filtered.Fields[:n]
+	return filtered
+}
+
+// overrideTextFieldsToBinary replaces utf8 arrow type with binary for TEXT fields.
+// In manifest storage, TEXT fields use LOB spillover and store binary-encoded LOB references.
+func overrideTextFieldsToBinary(schema *schemapb.CollectionSchema, arrowSchema *arrow.Schema) *arrow.Schema {
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	fields := make([]arrow.Field, arrowSchema.NumFields())
+	changed := false
+	for i := 0; i < arrowSchema.NumFields(); i++ {
+		fields[i] = arrowSchema.Field(i)
+		if i < len(allFields) && allFields[i].DataType == schemapb.DataType_Text {
+			fields[i].Type = arrow.BinaryTypes.Binary
+			changed = true
+		}
+	}
+	if !changed {
+		return arrowSchema
+	}
+	return arrow.NewSchema(fields, nil)
 }
 
 func ConvertToArrowField(field *schemapb.FieldSchema, dataType arrow.DataType, useFieldID bool) arrow.Field {

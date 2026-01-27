@@ -63,11 +63,16 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 	wb.mut.Lock()
 	defer wb.mut.Unlock()
 
-	// buffer insert data and add segment if not exists
-	for _, inData := range insertData {
-		err := wb.bufferInsert(inData, startPos, endPos, schemaVersion)
-		if err != nil {
-			return err
+	// For TEXT collections, skip Insert buffer here.
+	// Insert data will be flushed by QueryNode's Growing Segment (via GrowingFlushManager).
+	// This avoids duplicate flush paths for TEXT data.
+	if !wb.hasTextFields {
+		// buffer insert data and add segment if not exists
+		for _, inData := range insertData {
+			err := wb.bufferInsert(inData, startPos, endPos, schemaVersion)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

@@ -55,7 +55,7 @@ func getVarFieldLength(fieldSchema *schemapb.FieldSchema, policy getVariableFiel
 	}
 
 	switch fieldSchema.DataType {
-	case schemapb.DataType_VarChar, schemapb.DataType_Text:
+	case schemapb.DataType_VarChar:
 		maxLengthPerRowValue, ok := paramsMap[common.MaxLengthKey]
 		if !ok {
 			return 0, fmt.Errorf("the max_length was not specified, field type is %s", fieldSchema.DataType.String())
@@ -81,6 +81,9 @@ func getVarFieldLength(fieldSchema *schemapb.FieldSchema, policy getVariableFiel
 		default:
 			return 0, fmt.Errorf("unrecognized getVariableFieldLengthPolicy %v", policy)
 		}
+		// Text type does not require max_length, use the same estimate as JSON/Array fields
+	case schemapb.DataType_Text:
+		return GetDynamicFieldEstimateLength(), nil
 		// geometry field max length now consider the same as json field, which is 512 bytes
 	case schemapb.DataType_Array, schemapb.DataType_JSON, schemapb.DataType_Geometry:
 		return GetDynamicFieldEstimateLength(), nil
@@ -709,6 +712,13 @@ func IsStringType(dataType schemapb.DataType) bool {
 	default:
 		return false
 	}
+}
+
+// IsTextType returns true if input is a TEXT type, otherwise false
+// TEXT type is stored as LOB (Large Object) references in sealed segments,
+// requiring special handling during search (requery pattern)
+func IsTextType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_Text
 }
 
 func IsArrayContainStringElementType(dataType schemapb.DataType, elementType schemapb.DataType) bool {

@@ -297,7 +297,7 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 		resetBinlogFields(cloned)
 
 		rowCount := segmentutil.CalcRowCountFromBinLog(segment)
-		if cloned.GetNumOfRows() != rowCount {
+		if rowCount > 0 && cloned.GetNumOfRows() != rowCount {
 			cloned.NumOfRows = rowCount
 		}
 

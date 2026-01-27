@@ -235,7 +235,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		jsonParams, err := compaction.GenerateJSONParams()
+		jsonParams, err := compaction.GenerateJSONParams(&schemapb.CollectionSchema{})
 		s.Require().NoError(err)
 
 		req := &datapb.CompactionPlan{
@@ -261,7 +261,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		jsonParams, err := compaction.GenerateJSONParams()
+		jsonParams, err := compaction.GenerateJSONParams(&schemapb.CollectionSchema{})
 		s.Require().NoError(err)
 
 		req := &datapb.CompactionPlan{
@@ -312,7 +312,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		jsonParams, err := compaction.GenerateJSONParams()
+		jsonParams, err := compaction.GenerateJSONParams(&schemapb.CollectionSchema{})
 		s.Require().NoError(err)
 
 		req := &datapb.CompactionPlan{

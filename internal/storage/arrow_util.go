@@ -393,6 +393,10 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 		}
 		if field.GetNullable() && typeutil.IsVectorType(field.DataType) && !typeutil.IsSparseFloatVectorType(field.DataType) {
 			builders[i] = array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+		} else if field.DataType == schemapb.DataType_Text {
+			// TEXT fields are stored as binary (LOB references) in manifest storage,
+			// so the builder must use binary type to match what the reader returns.
+			builders[i] = array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
 		} else {
 			arrowType := serdeMap[field.DataType].arrowType(int(dim), elementType)
 			builders[i] = array.NewBuilder(memory.DefaultAllocator, arrowType)

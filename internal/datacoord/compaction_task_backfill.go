@@ -94,11 +94,11 @@ func (t *backfillCompactionTask) GetTaskVersion() int64 {
 }
 
 func (t *backfillCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
-	compactionParams, err := compaction.GenerateJSONParams()
+	taskProto := t.GetTaskProto()
+	compactionParams, err := compaction.GenerateJSONParams(taskProto.GetSchema())
 	if err != nil {
 		return nil, err
 	}
-	taskProto := t.GetTaskProto()
 	log := log.With(zap.Int64("triggerID", taskProto.GetTriggerID()), zap.Int64("PlanID", taskProto.GetPlanID()), zap.Int64("collectionID", taskProto.GetCollectionID()))
 	plan := &datapb.CompactionPlan{
 		PlanID:                    taskProto.GetPlanID(),
@@ -138,7 +138,7 @@ func (t *backfillCompactionTask) BuildCompactionRequest() (*datapb.CompactionPla
 		segments = append(segments, segInfo)
 	}
 
-	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments)
+	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments, taskProto.GetSchema())
 	if err != nil {
 		return nil, err
 	}

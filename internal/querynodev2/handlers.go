@@ -84,7 +84,7 @@ func loadGrowingSegments(ctx context.Context, delegator delegator.ShardDelegator
 				log.Warn("an unflushed segment is not found in segment infos", zap.Int64("segmentID", segmentID))
 				continue
 			}
-			if len(segmentInfo.GetBinlogs()) > 0 {
+			if len(segmentInfo.GetBinlogs()) > 0 || segmentInfo.GetManifestPath() != "" {
 				growingSegments = append(growingSegments, &querypb.SegmentLoadInfo{
 					SegmentID:      segmentInfo.ID,
 					Level:          segmentInfo.GetLevel(),
@@ -101,7 +101,9 @@ func loadGrowingSegments(ctx context.Context, delegator delegator.ShardDelegator
 					ManifestPath:   segmentInfo.GetManifestPath(),
 				})
 			} else {
-				log.Info("skip segment which binlog is empty", zap.Int64("segmentID", segmentInfo.ID))
+				log.Info("skip segment which has no binlog and no manifest path",
+					zap.Int64("segmentID", segmentInfo.ID),
+					zap.String("manifestPath", segmentInfo.GetManifestPath()))
 			}
 		}
 	}

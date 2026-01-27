@@ -855,3 +855,39 @@ func (suite *RowParserSuite) TestFunctionOutputField() {
 func TestCsvRowParser(t *testing.T) {
 	suite.Run(t, new(RowParserSuite))
 }
+
+func TestParseTextFieldValue(t *testing.T) {
+	// TEXT fields should be parsed as strings without maxLength validation.
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+				AutoID:       true,
+			},
+			{
+				FieldID:  101,
+				Name:     "text_field",
+				DataType: schemapb.DataType_Text,
+				// no TypeParams — TEXT has no max_length
+			},
+		},
+	}
+
+	header := []string{"text_field"}
+	parser, err := NewRowParser(schema, header, "")
+	assert.NoError(t, err)
+
+	// Parse a row with a very long TEXT value (no maxLength constraint)
+	longText := strings.Repeat("hello world ", 1000)
+	result, err := parser.Parse([]string{longText})
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+
+	// Verify TEXT field value
+	val, ok := result[int64(101)]
+	assert.True(t, ok)
+	assert.Equal(t, longText, val)
+}

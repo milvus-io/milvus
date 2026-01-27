@@ -40,10 +40,16 @@ func mergeSortMultipleSegments(ctx context.Context,
 
 	log := log.With(zap.Int64("planID", plan.GetPlanID()))
 
+	// For V3 manifest storage, filter out RowID since manifest doesn't store it
+	writerSchema := plan.GetSchema()
+	if compactionParams.StorageVersion == storage.StorageV3 {
+		writerSchema = storage.FilterRowIDFromSchema(writerSchema)
+	}
+
 	segIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedSegmentIDs().GetBegin(), plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedLogIDs().GetBegin(), plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	writer, err := NewMultiSegmentWriter(ctx, binlogIO, compAlloc, plan.GetMaxSize(), plan.GetSchema(), compactionParams, maxRows, partitionID, collectionID, plan.GetChannel(), 4096,
+	writer, err := NewMultiSegmentWriter(ctx, binlogIO, compAlloc, plan.GetMaxSize(), writerSchema, compactionParams, maxRows, partitionID, collectionID, plan.GetChannel(), 4096,
 		storage.WithStorageConfig(compactionParams.StorageConfig),
 		storage.WithUseLoonFFI(compactionParams.UseLoonFFI),
 	)
@@ -134,7 +140,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 		log.Warn("compaction only support int64 and varchar pk field")
 	}
 
-	if _, err = storage.MergeSort(compactionParams.BinLogMaxSize, plan.GetSchema(), segmentReaders, writer, predicate, sortByFields); err != nil {
+	if _, err = storage.MergeSort(compactionParams.BinLogMaxSize, writerSchema, segmentReaders, writer, predicate, sortByFields); err != nil {
 		writer.Close()
 		return nil, err
 	}

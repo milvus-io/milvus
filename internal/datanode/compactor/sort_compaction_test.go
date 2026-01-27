@@ -64,7 +64,7 @@ func (s *SortCompactionTaskSuite) setupTest() {
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.meta = genTestCollectionMeta()
 
-	params, err := compaction.GenerateJSONParams()
+	params, err := compaction.GenerateJSONParams(s.meta.GetSchema())
 	s.NoError(err)
 
 	plan := &datapb.CompactionPlan{
@@ -238,7 +238,7 @@ func (s *SortCompactionTaskSuite) setupBM25Test() {
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.mockChunkManager = mocks.NewChunkManager(s.T())
 	s.meta = genTestCollectionMetaWithBM25()
-	params, err := compaction.GenerateJSONParams()
+	params, err := compaction.GenerateJSONParams(s.meta.GetSchema())
 	if err != nil {
 		panic(err)
 	}

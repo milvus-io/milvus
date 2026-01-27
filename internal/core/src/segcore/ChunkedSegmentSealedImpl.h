@@ -82,6 +82,7 @@
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/Types.h"
 #include "storage/MmapChunkManager.h"
+#include "segcore/TextColumnCache.h"
 
 namespace milvus::segcore {
 
@@ -264,6 +265,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     Load(milvus::tracer::TraceContext& trace_ctx,
          milvus::OpContext* op_ctx = nullptr) override;
+
+    void
+    LoadManifest(const std::string& manifest_path);
 
  public:
     size_t
@@ -1027,6 +1031,16 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         int64_t count,
         google::protobuf::RepeatedPtrField<T>* dst);
 
+    // TEXT column handling for StorageV2 (LOB reference resolution)
+    void
+    bulk_subscript_text_impl(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        const ChunkedColumnInterface* column,
+        const int64_t* seg_offsets,
+        int64_t count,
+        google::protobuf::RepeatedPtrField<std::string>* dst) const;
+
     std::unique_ptr<DataArray>
     fill_with_empty(FieldId field_id,
                     int64_t count,
@@ -1140,6 +1154,17 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                            field_binlog_to_load,
                        milvus::OpContext* op_ctx = nullptr,
                        bool is_replace = false);
+
+    /**
+     * @brief Initialize LOB base paths for TEXT fields
+     *
+     * This method parses the manifest path to extract the segment base path,
+     * and computes lob_base_path for each TEXT type field.
+     *
+     * @param manifest_path JSON string containing base_path and version fields
+     */
+    void
+    InitTextLobPaths(const std::string& manifest_path);
 
     void
     LoadColumnGroups(
@@ -1393,6 +1418,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // struct_name -> ArrayOffsetsSealed mapping (temporary during load)
     std::unordered_map<std::string, std::shared_ptr<ArrayOffsetsSealed>>
         struct_to_array_offsets_;
+
+    // LOB base paths for TEXT fields
+    // field_id -> lob_base_path mapping (e.g., {partition_path}/lobs/{field_id})
+    std::unordered_map<FieldId, std::string> text_lob_paths_;
 };
 
 inline SegmentSealedUPtr

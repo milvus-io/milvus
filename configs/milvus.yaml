@@ -728,6 +728,10 @@ dataCoord:
     dropTolerance: 10800 # The retention duration of the binlog files of the deleted segments before they are cleared, unit: second.
     scanInterval: 168 # orphan file (file on oss but has not been registered on meta) on object storage garbage collection scanning interval in hours
     slowDownCPUUsageThreshold: 0.6 # The CPU usage threshold at which the garbage collection will be slowed down
+    lob:
+      enabled: true # Enable garbage collection for LOB (TEXT column) files
+      safetyWindow: 3600 # Safety window for LOB file GC in seconds. Files older than this are eligible for deletion. Default 1 hour.
+      checkInterval: 1800 # Interval for LOB GC check in seconds. Default 30 minutes.
   snapshot:
     pendingTimeout: 60 # Timeout in minutes for pending snapshots before GC cleanup
     maxCompactionProtectionSeconds: 604800 # Maximum allowed compaction protection duration in seconds (default 604800 = 7 days)
@@ -818,6 +822,11 @@ dataNode:
     levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.
     useMergeSort: true # Whether to enable mergeSort mode when performing mixCompaction.
     maxSegmentMergeSort: 30 # The maximum number of segments to be merged in mergeSort mode.
+    lobHoleRatioThreshold: 0.3 # The hole ratio threshold for TEXT column compaction. If hole_ratio >= threshold, rewrite LOB files; otherwise reuse existing LOB files.
+  text:
+    inlineThreshold: 65536 # TEXT values smaller than this threshold (in bytes) are stored inline instead of in LOB files.
+    maxLobFileBytes: 67108864 # Maximum size of a single LOB file for TEXT column storage (in bytes).
+    flushThresholdBytes: 16777216 # Flush threshold for TEXT column writer buffer (in bytes).
   gracefulStopTimeout: 1800 # seconds. force stop node without graceful stop
   slot:
     slotCap: 16 # The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode

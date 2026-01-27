@@ -20,6 +20,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -30,7 +31,9 @@ import (
 
 // PreAllocateBinlogIDs pre-allocates binlog IDs based on the total number of binlogs from
 // the segments for compaction, multiplied by an expansion factor.
-func PreAllocateBinlogIDs(allocator allocator.Allocator, segmentInfos []*SegmentInfo) (*datapb.IDRange, error) {
+// The schema is used to calculate a minimum ID count for V3 manifest segments where
+// binlog metadata may be empty but stats output still requires IDs.
+func PreAllocateBinlogIDs(allocator allocator.Allocator, segmentInfos []*SegmentInfo, schema *schemapb.CollectionSchema) (*datapb.IDRange, error) {
 	binlogNum := 0
 	for _, s := range segmentInfos {
 		for _, l := range s.GetBinlogs() {
@@ -45,6 +48,20 @@ func PreAllocateBinlogIDs(allocator allocator.Allocator, segmentInfos []*Segment
 		for _, l := range s.GetBm25Statslogs() {
 			binlogNum += len(l.GetBinlogs())
 		}
+	}
+	// Compaction output always needs IDs for PK stats (1) and BM25 stats (per BM25 function).
+	// For V3 manifest segments, binlog metadata may be empty since data is managed by manifest,
+	// but stats output still requires IDs. Calculate the minimum from schema directly.
+	minIDsFromSchema := 1 // 1 for PK stats
+	if schema != nil {
+		for _, fn := range schema.GetFunctions() {
+			if fn.GetType() == schemapb.FunctionType_BM25 {
+				minIDsFromSchema++
+			}
+		}
+	}
+	if binlogNum < minIDsFromSchema {
+		binlogNum = minIDsFromSchema
 	}
 	n := binlogNum * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt()
 	begin, end, err := allocator.AllocN(int64(n))

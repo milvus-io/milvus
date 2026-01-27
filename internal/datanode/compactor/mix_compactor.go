@@ -21,6 +21,7 @@ import (
 	"fmt"
 	sio "io"
 	"math"
+	"path"
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -41,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -69,6 +71,13 @@ type mixCompactionTask struct {
 	sortByFieldIDs   []int64
 
 	ttlFieldID int64
+
+	// lobContext holds LOB compaction strategy decisions for TEXT columns
+	lobContext *compaction.LOBCompactionContext
+
+	// estimatedOutputSegmentCount is the estimated number of output segments
+	// computed during preCompact, used for LOB compaction strategy decision
+	estimatedOutputSegmentCount int64
 }
 
 var _ Compactor = (*mixCompactionTask)(nil)
@@ -128,13 +137,13 @@ func (t *mixCompactionTask) preCompact() error {
 		}
 	}
 
-	outputSegmentCount := int64(math.Ceil(float64(currSize) / float64(t.targetSize)))
+	t.estimatedOutputSegmentCount = int64(math.Ceil(float64(currSize) / float64(t.targetSize)))
 	log.Info("preCompaction analyze",
 		zap.Int64("planID", t.GetPlanID()),
 		zap.Int64("inputSize", currSize),
 		zap.Int64("targetSize", t.targetSize),
 		zap.Int("inputSegmentCount", len(t.plan.GetSegmentBinlogs())),
-		zap.Int64("estimatedOutputSegmentCount", outputSegmentCount),
+		zap.Int64("estimatedOutputSegmentCount", t.estimatedOutputSegmentCount),
 	)
 
 	return nil
@@ -150,14 +159,49 @@ func (t *mixCompactionTask) mergeSplit(
 
 	log := log.With(zap.Int64("planID", t.GetPlanID()))
 
+	if err := t.initLOBCompactionContext(ctx); err != nil {
+		return nil, err
+	}
+
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter, err := NewMultiSegmentWriter(ctx,
-		t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(),
-		t.compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096,
+
+	// For V3 manifest storage, filter out RowID since manifest doesn't store it
+	writerSchema := t.plan.GetSchema()
+	if t.compactionParams.StorageVersion == storage.StorageV3 {
+		writerSchema = storage.FilterRowIDFromSchema(writerSchema)
+	}
+
+	// build writer options
+	writerOpts := []storage.RwOption{
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+	}
+
+	// add TEXT column configs for REWRITE_ALL mode
+	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
+		// LOB base path at partition level: {root}/insert_log/{coll}/{part}
+		lobBasePath := path.Join(t.compactionParams.StorageConfig.GetRootPath(),
+			common.SegmentInsertLogPath, metautil.JoinIDPath(t.collectionID, t.partitionID))
+		textColumnConfigs := t.lobContext.GetTextColumnConfigs(
+			lobBasePath,
+			t.compactionParams.TextInlineThreshold,
+			t.compactionParams.TextMaxLobFileBytes,
+			t.compactionParams.TextFlushThresholdBytes,
+		)
+		if len(textColumnConfigs) > 0 {
+			writerOpts = append(writerOpts, storage.WithTextColumnConfigs(textColumnConfigs))
+			log.Info("TEXT column REWRITE_ALL mode enabled",
+				zap.Int("rewriteFieldCount", len(textColumnConfigs)),
+			)
+		}
+	}
+
+	mWriter, err := NewMultiSegmentWriter(ctx,
+		t.binlogIO, compAlloc, t.plan.GetMaxSize(), writerSchema,
+		t.compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096,
+		writerOpts...,
 	)
 	if err != nil {
 		return nil, err
@@ -173,7 +217,7 @@ func (t *mixCompactionTask) mergeSplit(
 	}
 
 	for _, seg := range t.plan.GetSegmentBinlogs() {
-		del, exp, err := t.writeSegment(ctx, seg, mWriter, pkField)
+		del, exp, err := t.writeSegment(ctx, seg, mWriter, pkField, writerSchema)
 		if err != nil {
 			mWriter.Close()
 			return nil, err
@@ -211,6 +255,7 @@ func (t *mixCompactionTask) mergeSplit(
 func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	seg *datapb.CompactionSegmentBinlogs,
 	mWriter *MultiSegmentWriter, pkField *schemapb.FieldSchema,
+	writerSchema *schemapb.CollectionSchema,
 ) (deletedRowCount, expiredRowCount int64, err error) {
 	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, seg,
 		storage.WithDownloader(t.binlogIO.Download),
@@ -248,6 +293,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	defer reader.Close()
 
 	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
+	var totalRowsRead int64
 
 	for {
 		var r storage.Record
@@ -261,6 +307,8 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				return
 			}
 		}
+
+		totalRowsRead += int64(r.Len())
 
 		var (
 			pkArray = r.Column(pkField.FieldID)
@@ -295,7 +343,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			}
 			if entityFilter.Filtered(pk, ts, expireTs) {
 				if rb == nil {
-					rb = storage.NewRecordBuilder(t.plan.GetSchema())
+					rb = storage.NewRecordBuilder(writerSchema)
 				}
 				if sliceStart != -1 {
 					rb.Append(r, sliceStart, i)
@@ -334,6 +382,13 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	deltalogDeleteEntriesCount := len(delta)
 	deletedRowCount = int64(entityFilter.GetDeletedCount())
 	expiredRowCount = int64(entityFilter.GetExpiredCount())
+
+	// track segment row statistics for LOB compaction in REUSE_ALL mode
+	// this is used to update LOB file valid_rows based on per-segment deletion ratio
+	if t.lobContext != nil && t.lobContext.HasReuseAllFields() {
+		totalDeleted := deletedRowCount + expiredRowCount
+		t.lobContext.SetSegmentRowStats(seg.GetSegmentID(), totalRowsRead, totalDeleted)
+	}
 
 	metrics.DataNodeCompactionDeleteCount.WithLabelValues(fmt.Sprint(t.collectionID)).Add(float64(deltalogDeleteEntriesCount))
 	metrics.DataNodeCompactionMissingDeleteCount.WithLabelValues(fmt.Sprint(t.collectionID)).Add(float64(entityFilter.GetMissingDeleteCount()))
@@ -418,6 +473,11 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	metrics.DataNodeCompactionLatency.WithLabelValues(paramtable.GetStringNodeID(), t.plan.GetType().String()).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(durInQueue.Milliseconds()))
 
+	// apply LOB compaction for TEXT columns (REUSE_ALL mode)
+	if err := t.applyLOBCompaction(ctx, res); err != nil {
+		return nil, err
+	}
+
 	planResult := &datapb.CompactionPlanResult{
 		State:    datapb.CompactionTaskState_completed,
 		PlanID:   t.GetPlanID(),
@@ -468,4 +528,153 @@ func GetBM25FieldIDs(coll *schemapb.CollectionSchema) []int64 {
 		}
 		return 0, false
 	})
+}
+
+// applyLOBCompaction handles TEXT column LOB file merging for REUSE_ALL strategy.
+// this is called after compaction completes to update output manifests with merged LOB file references.
+// it uses t.lobContext which was initialized by initLOBCompactionContext before compaction.
+//
+// This function handles two scenarios:
+//   - REUSE_ALL: all TEXT fields reuse existing LOB files, merge LOB file references
+//   - REWRITE_ALL: all TEXT fields are rewritten, LOB files handled by segment writer
+//
+// NOTE: SetSegmentRowStats() must be called during compaction iteration to track deleted rows per segment.
+func (t *mixCompactionTask) applyLOBCompaction(ctx context.Context, outputSegments []*datapb.CompactionSegment) error {
+	if t.lobContext == nil {
+		return nil
+	}
+
+	log := log.Ctx(ctx).With(zap.Int64("planID", t.GetPlanID()))
+
+	if !t.lobContext.HasReuseAllFields() {
+		log.Info("all TEXT fields use REWRITE_ALL, no LOB file merging needed")
+		return nil
+	}
+
+	// merge LOB file references for REUSE_ALL fields to output manifests
+	outputManifests := make(map[int64]string)
+	for _, seg := range outputSegments {
+		if seg.GetManifest() != "" {
+			outputManifests[seg.GetSegmentID()] = seg.GetManifest()
+		}
+	}
+
+	if len(outputManifests) == 0 {
+		return nil
+	}
+
+	updatedManifests, err := compaction.ApplyLobCompactionToManifests(t.lobContext, outputManifests, t.compactionParams.StorageConfig)
+	if err != nil {
+		return err
+	}
+
+	// update output segments with new manifest paths (version changed after LOB commit)
+	for _, seg := range outputSegments {
+		if newManifest, ok := updatedManifests[seg.GetSegmentID()]; ok {
+			seg.Manifest = newManifest
+		}
+	}
+
+	reuseAllFieldIDs := t.lobContext.GetReuseAllFieldIDs()
+	rewriteAllFieldIDs := t.lobContext.GetRewriteAllFieldIDs()
+	log.Info("LOB file references merged to output manifests",
+		zap.Int("outputSegmentCount", len(outputManifests)),
+		zap.Int64s("reuseAllFieldIDs", reuseAllFieldIDs),
+		zap.Int64s("rewriteAllFieldIDs", rewriteAllFieldIDs),
+		zap.Any("updatedManifests", updatedManifests),
+	)
+
+	return nil
+}
+
+// initLOBCompactionContext initializes the LOB compaction context for TEXT columns.
+// this is called before compaction starts to determine REUSE_ALL vs REWRITE_ALL strategy.
+func (t *mixCompactionTask) initLOBCompactionContext(ctx context.Context) error {
+	// check if there are TEXT fields in schema
+	textFieldIDs := compaction.GetTEXTFieldIDsFromSchema(t.plan.GetSchema())
+	if len(textFieldIDs) == 0 {
+		return nil // no TEXT fields, nothing to do
+	}
+
+	// only apply for manifest-based storage (storage v2/v3)
+	hasManifest := false
+	for _, seg := range t.plan.GetSegmentBinlogs() {
+		if seg.GetManifest() != "" {
+			hasManifest = true
+			break
+		}
+	}
+	if !hasManifest {
+		return nil // no manifest-based segments, nothing to do
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.Int64("planID", t.GetPlanID()),
+		zap.Int64s("textFieldIDs", textFieldIDs),
+	)
+	log.Info("initializing LOB compaction context for TEXT columns")
+
+	// collect source segment manifests
+	sourceManifests := make(map[int64]string)
+	for _, seg := range t.plan.GetSegmentBinlogs() {
+		if seg.GetManifest() != "" {
+			sourceManifests[seg.GetSegmentID()] = seg.GetManifest()
+		}
+	}
+
+	// collect LOB files from source manifests
+	lobFilesBySegment, err := compaction.CollectLobFilesFromManifests(sourceManifests, t.compactionParams.StorageConfig)
+	if err != nil {
+		return err
+	}
+
+	// check if there are any LOB files
+	hasLobFiles := false
+	for _, files := range lobFilesBySegment {
+		if len(files) > 0 {
+			hasLobFiles = true
+			break
+		}
+	}
+	if !hasLobFiles {
+		log.Info("no LOB files found in source segments")
+		return nil
+	}
+
+	// create LOB compaction context and compute strategies
+	t.lobContext = compaction.NewLOBCompactionContext()
+	for segID, files := range lobFilesBySegment {
+		t.lobContext.AddSegmentLobFiles(segID, files)
+	}
+
+	// set compaction type to check for forced strategy
+	// for mix compaction:
+	//   - if 1 segment splits into N segments: force REWRITE_ALL
+	//   - otherwise: compute strategy based on hole ratio
+	sourceSegmentCount := len(t.plan.GetSegmentBinlogs())
+	targetSegmentCount := int(t.estimatedOutputSegmentCount)
+	t.lobContext.SetCompactionType(datapb.CompactionType_MixCompaction, sourceSegmentCount, targetSegmentCount)
+
+	t.lobContext.ComputeStrategies(textFieldIDs, t.compactionParams.LOBHoleRatioThreshold)
+
+	// log strategy decisions
+	for fieldID, decision := range t.lobContext.Decisions {
+		log.Info("LOB compaction strategy decided",
+			zap.Int64("fieldID", fieldID),
+			zap.String("strategy", func() string {
+				if decision.Strategy == compaction.LOBStrategyReuseAll {
+					return "REUSE_ALL"
+				}
+				return "REWRITE_ALL"
+			}()),
+			zap.Bool("isForced", t.lobContext.IsForced),
+			zap.Int("sourceSegmentCount", sourceSegmentCount),
+			zap.Int("targetSegmentCount", targetSegmentCount),
+			zap.Float64("holeRatio", decision.OverallHoleRatio),
+			zap.Int64("validRows", decision.TotalValidRows),
+			zap.Int64("totalRows", decision.TotalRows),
+		)
+	}
+
+	return nil
 }

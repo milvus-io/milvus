@@ -65,6 +65,8 @@ type WriteBuffer interface {
 	MemorySize() int64
 	// EvictBuffer evicts buffer to sync manager which match provided sync policies.
 	EvictBuffer(policies ...SyncPolicy)
+	// HasTextFields returns true if the collection on this channel has TEXT fields.
+	HasTextFields() bool
 	// Close is the method to close and sink current buffer data.
 	Close(ctx context.Context, drop bool)
 }
@@ -140,6 +142,9 @@ type writeBufferBase struct {
 	errHandler           func(err error)
 	taskObserverCallback func(t syncmgr.Task, err error) // execute when a sync task finished, should be concurrent safe.
 
+	// TEXT collection flag - when true, Insert data is flushed by QueryNode Growing Segment
+	hasTextFields bool
+
 	// pre build logger
 	logger        *log.MLogger
 	cpRatedLogger *log.MLogger
@@ -156,6 +161,15 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		return nil, err
 	}
 
+	// Check if collection has TEXT fields
+	hasTextFields := false
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_Text {
+			hasTextFields = true
+			break
+		}
+	}
+
 	wb := &writeBufferBase{
 		channelName:          channel,
 		collectionID:         metacache.Collection(),
@@ -170,6 +184,7 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		flushTimestamp:       flushTs,
 		errHandler:           option.errorHandler,
 		taskObserverCallback: option.taskObserverCallback,
+		hasTextFields:        hasTextFields,
 	}
 
 	wb.logger = log.With(zap.Int64("collectionID", wb.collectionID),
@@ -216,6 +231,10 @@ func (wb *writeBufferBase) SetFlushTimestamp(flushTs uint64) {
 
 func (wb *writeBufferBase) GetFlushTimestamp() uint64 {
 	return wb.flushTimestamp.Load()
+}
+
+func (wb *writeBufferBase) HasTextFields() bool {
+	return wb.hasTextFields
 }
 
 func (wb *writeBufferBase) MemorySize() int64 {
@@ -290,17 +309,23 @@ func (wb *writeBufferBase) triggerSync() (segmentIDs []int64) {
 }
 
 func (wb *writeBufferBase) sealSegments(_ context.Context, segmentIDs []int64) error {
+	existingIDs := make([]int64, 0, len(segmentIDs))
 	for _, segmentID := range segmentIDs {
 		_, ok := wb.metaCache.GetSegmentByID(segmentID)
 		if !ok {
-			log.Warn("cannot find segment when sealSegments", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName))
-			return merr.WrapErrSegmentNotFound(segmentID)
+			log.Info("segment not found in WriteBuffer metaCache, skipping seal",
+				zap.Int64("segmentID", segmentID),
+				zap.String("channel", wb.channelName))
+			continue
 		}
+		existingIDs = append(existingIDs, segmentID)
 	}
 	// mark segment flushing if segment was growing
-	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
-		metacache.WithSegmentIDs(segmentIDs...),
-		metacache.WithSegmentState(commonpb.SegmentState_Growing))
+	if len(existingIDs) > 0 {
+		wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
+			metacache.WithSegmentIDs(existingIDs...),
+			metacache.WithSegmentState(commonpb.SegmentState_Growing))
+	}
 	return nil
 }
 

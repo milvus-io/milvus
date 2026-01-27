@@ -47,6 +47,9 @@ type BufferManager interface {
 	// NotifyCheckpointUpdated notify write buffer checkpoint updated to reset flushTs.
 	NotifyCheckpointUpdated(channel string, ts uint64)
 
+	// HasTextFields returns true if the collection on this channel has TEXT fields.
+	HasTextFields(channel string) bool
+
 	// Start makes the background check start to work.
 	Start()
 	// Stop the background checker and wait for worker goroutine quit.
@@ -236,6 +239,14 @@ func (m *bufferManager) BufferData(channel string, insertData []*InsertData, del
 	}
 
 	return buf.BufferData(insertData, deleteMsgs, startPos, endPos, schemaVersion)
+}
+
+func (m *bufferManager) HasTextFields(channel string) bool {
+	buf, loaded := m.buffers.Get(channel)
+	if !loaded {
+		return false
+	}
+	return buf.HasTextFields()
 }
 
 // GetCheckpoint returns checkpoint for provided channel.

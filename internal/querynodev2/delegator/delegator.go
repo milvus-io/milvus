@@ -85,6 +85,7 @@ type ShardDelegator interface {
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
 	ProcessDelete(deleteData []*DeleteData, ts uint64)
+	ProcessManualFlush(ctx context.Context, flushTs uint64) error
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadL0(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
@@ -176,6 +177,12 @@ type shardDelegator struct {
 	// latest required mvcc timestamp for the delegator
 	// for slow down the delegator consumption and reduce the timetick dispatch frequency.
 	latestRequiredMVCCTimeTick *atomic.Uint64
+
+	// growing segment flush support for TEXT collections
+	// checkpointTracker tracks offset -> MsgPosition mapping for Growing Segments
+	checkpointTracker *segments.CheckpointTracker
+	// growingFlushManager manages periodic flush of Growing Segments (for TEXT collections)
+	growingFlushManager *segments.GrowingFlushManager
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -213,6 +220,9 @@ func (sd *shardDelegator) Stopped() bool {
 // Start sets delegator to working state.
 func (sd *shardDelegator) Start() {
 	sd.lifetime.SetState(lifetime.Working)
+	if sd.growingFlushManager != nil {
+		sd.growingFlushManager.Start(context.Background())
+	}
 }
 
 // Collection returns delegator collection id.
@@ -1244,6 +1254,11 @@ func (sd *shardDelegator) Close() {
 	// Refund all sealed segment candidates in distribution
 	sd.distribution.RefundAllCandidates()
 
+	// stop growing flush manager
+	if sd.growingFlushManager != nil {
+		sd.growingFlushManager.Stop()
+	}
+
 	// clean idf oracle
 	if sd.idfOracle != nil {
 		sd.idfOracle.Close()
@@ -1315,6 +1330,7 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID UniqueID, channel string, version int64,
 	workerManager cluster.Manager, manager *segments.Manager, loader segments.Loader, startTs uint64, queryHook optimizers.QueryHook, chunkManager storage.ChunkManager,
 	queryView *channelQueryView,
+	binlogSaver segments.BinlogSaver,
 ) (ShardDelegator, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID),
 		zap.Int64("replicaID", replicaID),
@@ -1403,9 +1419,43 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		sd.idfOracle.Start()
 	}
 
+	// initialize GrowingFlushManager for TEXT collections
+	// this enables incremental flush of Growing Segments to preserve TEXT data
+	if sd.hasTextFields() {
+		sd.checkpointTracker = segments.NewCheckpointTracker()
+		if binlogSaver != nil {
+			sd.growingFlushManager = segments.NewGrowingFlushManager(
+				collectionID,
+				channel,
+				collection.Schema(),
+				manager.Collection,
+				manager.Segment,
+				binlogSaver,
+				chunkManager,
+				sd.checkpointTracker,
+			)
+			log.Info("initialized GrowingFlushManager for TEXT collection")
+		} else {
+			log.Warn("binlogSaver is nil, GrowingFlushManager not initialized for TEXT collection")
+		}
+	}
+
 	sd.tsCond = syncutil.NewContextCond(&sync.Mutex{})
 	log.Info("finish build new shardDelegator")
 	return sd, nil
+}
+
+// hasTextFields returns true if the collection has any TEXT type fields.
+func (sd *shardDelegator) hasTextFields() bool {
+	if sd.collection == nil {
+		return false
+	}
+	for _, field := range sd.collection.Schema().GetFields() {
+		if field.GetDataType() == schemapb.DataType_Text {
+			return true
+		}
+	}
+	return false
 }
 
 func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {

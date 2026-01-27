@@ -207,16 +207,23 @@ func NewManifestReader(manifest string,
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 ) (*ManifestReader, error) {
-	arrowSchema, err := ConvertToArrowSchema(schema, true)
+	// Filter out RowID system field — manifest storage does not include RowID
+	filteredSchema := FilterRowIDFromSchema(schema)
+
+	arrowSchema, err := ConvertToArrowSchema(filteredSchema, true)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
 	}
+
+	// Override TEXT fields to binary type — LOB references are binary encoded in manifest storage
+	arrowSchema = overrideTextFieldsToBinary(filteredSchema, arrowSchema)
+
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	if err != nil {
 		return nil, err
 	}
 	field2Col := make(map[FieldID]int)
-	allFields := typeutil.GetAllFieldSchemas(schema)
+	allFields := typeutil.GetAllFieldSchemas(filteredSchema)
 	neededColumns := make([]string, 0, len(allFields))
 	for i, field := range allFields {
 		field2Col[field.FieldID] = i
