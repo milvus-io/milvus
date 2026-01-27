@@ -547,6 +547,15 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		paramtable.Get().QueryNodeCfg.EnableLatestDeleteSnapshotOptimization.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			enable, err := strconv.ParseBool(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateEnableLatestDeleteSnapshotOptimization(enable)
+			return nil
+		})
+
 		paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {

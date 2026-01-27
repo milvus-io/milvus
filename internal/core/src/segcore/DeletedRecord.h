@@ -21,6 +21,7 @@
 #include <folly/ConcurrentSkipList.h>
 
 #include "AckResponder.h"
+#include "common/Common.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "segcore/Record.h"
@@ -48,6 +49,21 @@ using SortedDeleteList =
     folly::ConcurrentSkipList<std::pair<Timestamp, Offset>, Comparator>;
 
 static int32_t DELETE_PAIR_SIZE = sizeof(std::pair<Timestamp, Offset>);
+
+// atomic snapshot for fast path query optimization
+// contains a consistent view of (max_timestamp, deleted_bitset)
+struct DeleteSnapshot {
+    Timestamp max_ts{0};
+    BitsetType bitset;
+
+    DeleteSnapshot() = default;
+    DeleteSnapshot(Timestamp ts, BitsetType&& b)
+        : max_ts(ts), bitset(std::move(b)) {
+    }
+    DeleteSnapshot(Timestamp ts, const BitsetType& b)
+        : max_ts(ts), bitset(b.clone()) {
+    }
+};
 
 template <bool is_sealed = false>
 class DeletedRecord {
@@ -103,7 +119,11 @@ class DeletedRecord {
             return;
         }
 
-        InternalPush(pks, timestamps);
+        auto max_ts = InternalPush(pks, timestamps);
+
+        if (ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.load()) {
+            UpdateLatestSnapshot(max_ts);
+        }
 
         bool can_dump = timestamps[0] >= max_load_timestamp_;
         if (can_dump) {
@@ -175,6 +195,18 @@ class DeletedRecord {
         return max_timestamp;
     }
 
+    // update the atomic snapshot with current deleted_mask_ and max timestamp
+    // this ensures a consistent view for fast path query
+    void
+    UpdateLatestSnapshot(Timestamp new_max_ts) {
+        std::lock_guard<std::mutex> lock(snapshot_update_mutex_);
+
+        auto new_snapshot =
+            std::make_shared<const DeleteSnapshot>(new_max_ts, deleted_mask_);
+
+        std::atomic_store(&latest_snapshot_, new_snapshot);
+    }
+
     void
     Query(BitsetTypeView& bitset,
           int64_t insert_barrier,
@@ -186,7 +218,17 @@ class DeletedRecord {
             return;
         }
 
-        // try use snapshot to skip iterations
+        // fast path: use atomic snapshot when query_timestamp >= max_delete_timestamp
+        // this avoids traversing the SkipList entirely
+        auto snapshot = std::atomic_load(&latest_snapshot_);
+        if (snapshot && snapshot->max_ts > 0 &&
+            query_timestamp >= snapshot->max_ts) {
+            auto or_size = std::min({snapshot->bitset.size(), bitset.size()});
+            bitset.inplace_or_with_count(snapshot->bitset, or_size);
+            return;
+        }
+
+        // slow path: try use snapshot to skip iterations
         bool hit_snapshot = false;
         SortedDeleteList::iterator next_iter;
         {
@@ -354,6 +396,12 @@ class DeletedRecord {
     std::atomic<int64_t> dumped_entry_count_{0};
     // estimated memory size of DeletedRecord, only used for sealed segment
     int64_t estimated_memory_size_{0};
+
+    // atomic snapshot for fast path query optimization
+    // when query_timestamp >= snapshot.max_ts, we can directly use the bitset
+    // without traversing the SkipList
+    std::shared_ptr<const DeleteSnapshot> latest_snapshot_;
+    mutable std::mutex snapshot_update_mutex_;
 };
 
 }  // namespace milvus::segcore
