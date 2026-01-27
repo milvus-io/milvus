@@ -278,8 +278,8 @@ def analyze_documents_with_analyzer_params(texts, analyzer_params):
         uri = "http://" + param_info.param_host + ":" + str(param_info.param_port)
 
     client = MilvusClient(
-        uri = uri,
-        token = param_info.param_token
+        uri=uri,
+        token=param_info.param_token
     )
     freq = Counter()
     res = client.run_analyzer(texts, analyzer_params, with_detail=True, with_hash=True)
@@ -3516,20 +3516,17 @@ def modify_file(file_path_list, is_modify=False, input_content=""):
     for file_path in file_path_list:
         folder_path, file_name = os.path.split(file_path)
         if not os.path.isdir(folder_path):
-            log.debug("[modify_file] folder(%s) is not exist." % folder_path)
             os.makedirs(folder_path)
 
         if not os.path.isfile(file_path):
             log.error("[modify_file] file(%s) is not exist." % file_path)
         else:
             if is_modify is True:
-                log.debug("[modify_file] start modifying file(%s)..." % file_path)
                 with open(file_path, "r+") as f:
                     f.seek(0)
                     f.truncate()
                     f.write(input_content)
                     f.close()
-                log.info("[modify_file] file(%s) modification is complete." % file_path_list)
 
 
 def index_to_dict(index):

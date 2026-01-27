@@ -300,9 +300,8 @@ def list_contain_check(sublist, superlist):
         else:
             superlist.remove(i)
     if not check_result:
-        log.error("list_contain_check: List(%s) does not contain list(%s)"
-                  % (str(superlist), str(sublist)))
-
+        #  truncate the lists to 100 items in log message
+        log.error(f"list_contain_check: List({str(superlist[:20])}...) does not contain list({str(sublist[:20])}...)")
     return check_result
 
 

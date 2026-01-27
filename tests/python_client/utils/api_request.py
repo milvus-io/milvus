@@ -9,7 +9,7 @@ from utils.util_log import test_log as log
 # log.info(f"enable_traceback:{enable_traceback}")
 
 
-log_row_length = 300
+log_row_length = 100  # Reduced from 300 to minimize log size
 
 
 def api_request_catch():
