@@ -135,6 +135,16 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 		}
 		growing.UpdateBloomFilter(insertData.PrimaryKeys)
 
+		// record batch info for checkpoint tracking (TEXT collections only)
+		if sd.checkpointTracker != nil {
+			endOffset := growing.RowNum()
+			sd.checkpointTracker.RecordBatch(
+				growing.ID(),
+				endOffset,
+				insertData.StartPosition,
+			)
+		}
+
 		if newGrowingSegment {
 			sd.growingSegmentLock.Lock()
 			// Forbid create growing segment in excluded segment
@@ -375,6 +385,18 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 
 	segmentIDs = lo.Map(loaded, func(segment segments.Segment, _ int) int64 { return segment.ID() })
 	log.Info("load growing segments done", zap.Int64s("segmentIDs", segmentIDs))
+
+	// initialize checkpoint tracking for recovered growing segments (TEXT collections only)
+	if sd.checkpointTracker != nil {
+		for _, segment := range loaded {
+			// the segment was recovered from binlog, so the current row count is the flushed offset
+			flushedOffset := segment.RowNum()
+			sd.checkpointTracker.InitSegment(segment.ID(), flushedOffset)
+			log.Info("initialized checkpoint tracker for recovered growing segment",
+				zap.Int64("segmentID", segment.ID()),
+				zap.Int64("flushedOffset", flushedOffset))
+		}
+	}
 
 	for _, segment := range loaded {
 		sd.pkOracle.Register(segment, paramtable.GetNodeID())
@@ -872,11 +894,115 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 		sd.pkOracle.RefundRemoved(removed)
 	}
 	if len(growing) > 0 {
+		// for TEXT collections: flush unflushed data before releasing growing segments
+		if sd.growingFlushManager != nil && sd.checkpointTracker != nil {
+			segmentsToFlush := make([]SegmentEntry, 0)
+			for _, entry := range growing {
+				segID := entry.SegmentID
+				segment := sd.segmentManager.GetGrowing(segID)
+				if segment == nil {
+					continue
+				}
+
+				// check if segment has unflushed data
+				flushedOffset := sd.checkpointTracker.GetFlushedOffset(segID)
+				currentOffset := segment.RowNum()
+				if flushedOffset < currentOffset {
+					// has unflushed data, need to flush
+					segmentsToFlush = append(segmentsToFlush, entry)
+				}
+			}
+
+			// only flush segments with unflushed data
+			if len(segmentsToFlush) > 0 {
+				flushErrors := make([]error, 0)
+				for _, entry := range segmentsToFlush {
+					segID := entry.SegmentID
+					log := sd.getLogger(ctx).With(zap.Int64("segmentID", segID))
+					log.Info("flushing growing segment with unflushed data before release (manual flush/seal)")
+
+					// retry flush with exponential backoff
+					var flushErr error
+					maxRetries := 3
+					shouldRetry := true
+					for attempt := 0; attempt < maxRetries && shouldRetry; attempt++ {
+						flushErr = sd.growingFlushManager.ForceSync(ctx, segID)
+						if flushErr == nil {
+							log.Info("successfully flushed growing segment before release",
+								zap.Int("attempt", attempt+1))
+							shouldRetry = false
+							continue
+						}
+
+						// check if error is unrecoverable (context canceled, etc.)
+						if errors.IsAny(flushErr, context.Canceled, context.DeadlineExceeded) {
+							log.Warn("flush canceled or timeout, stopping retry",
+								zap.Error(flushErr),
+								zap.Int("attempt", attempt+1))
+							shouldRetry = false
+							continue
+						}
+
+						// last attempt, no need to retry
+						if attempt == maxRetries-1 {
+							log.Error("failed to flush growing segment after all retries",
+								zap.Error(flushErr),
+								zap.Int("attempts", maxRetries))
+							shouldRetry = false
+							continue
+						}
+
+						// exponential backoff: 100ms, 200ms, 400ms
+						backoff := time.Duration(100*(1<<attempt)) * time.Millisecond
+						log.Warn("failed to flush growing segment, retrying",
+							zap.Error(flushErr),
+							zap.Int("attempt", attempt+1),
+							zap.Int("maxRetries", maxRetries),
+							zap.Duration("backoff", backoff))
+
+						select {
+						case <-ctx.Done():
+							flushErr = ctx.Err()
+							shouldRetry = false
+						case <-time.After(backoff):
+							// continue retry
+						}
+					}
+
+					if flushErr != nil {
+						flushErrors = append(flushErrors, errors.Wrapf(flushErr,
+							"failed to flush growing segment %d before release", segID))
+					}
+				}
+
+				// if flush failed, return error to prevent data loss
+				// this is critical for manual flush/seal - we should not release segments with unflushed data
+				if len(flushErrors) > 0 {
+					combinedErr := errors.New("failed to flush one or more growing segments before release")
+					for _, err := range flushErrors {
+						combinedErr = errors.Wrap(combinedErr, err.Error())
+					}
+					log.Error("critical: failed to flush growing segments before release, aborting release to prevent data loss",
+						zap.Int("failedCount", len(flushErrors)),
+						zap.Int64s("segmentIDs", lo.Map(segmentsToFlush, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })),
+						zap.Error(combinedErr))
+					return combinedErr
+				}
+			}
+		}
+
 		sd.pkOracle.Remove(
 			pkoracle.WithSegmentIDs(lo.Map(growing, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })...),
 			pkoracle.WithSegmentType(commonpb.SegmentState_Growing),
 		)
 		// leave the bloom filter sets in growing segment be closed by Release()
+
+		// clean up checkpoint tracking for released growing segments (TEXT collections only)
+		if sd.checkpointTracker != nil {
+			for _, entry := range growing {
+				sd.checkpointTracker.RemoveSegment(entry.SegmentID)
+			}
+		}
 	}
 
 	var releaseErr error

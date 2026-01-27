@@ -194,7 +194,7 @@ func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 			errStr = C.GoString(errMsg)
 		}
 
-		return fmt.Errorf("failed to create properties: %s", errStr)
+		return fmt.Errorf("loon FFI error: %s", errStr)
 	}
 	return nil
 }
@@ -212,11 +212,130 @@ func MarshalManifestPath(basePath string, version int64) string {
 	return string(bs)
 }
 
-func UnmarshalManfestPath(manifestPath string) (string, int64, error) {
+func UnmarshalManifestPath(manifestPath string) (string, int64, error) {
 	var manifestJSON ManifestJSON
 	err := json.Unmarshal([]byte(manifestPath), &manifestJSON)
 	if err != nil {
 		return "", 0, err
 	}
 	return manifestJSON.BasePath, manifestJSON.ManifestVersion, nil
+}
+
+// LobFileInfo represents metadata for a LOB (Large Object) file.
+// used for TEXT column compaction strategy decision (hole ratio calculation)
+type LobFileInfo struct {
+	Path          string // relative path to the LOB file
+	FieldID       int64  // field ID this LOB file belongs to
+	TotalRows     int64  // total number of rows in the LOB file
+	ValidRows     int64  // number of valid (non-deleted) rows
+	FileSizeBytes int64  // size of the LOB file in bytes
+}
+
+// AddLobFilesToTransaction adds multiple LOB files to a transaction in a single commit.
+// this is used during compaction REUSE_ALL mode to merge LOB file references.
+// returns the new committed version after the transaction.
+func AddLobFilesToTransaction(basePath string, version int64, storageConfig *indexpb.StorageConfig, lobFiles []LobFileInfo) (int64, error) {
+	if len(lobFiles) == 0 {
+		return version, nil
+	}
+
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to make properties: %w", err)
+	}
+	defer C.loon_properties_free(cProperties)
+
+	cBasePath := C.CString(basePath)
+	defer C.free(unsafe.Pointer(cBasePath))
+
+	// open transaction
+	var cTransactionHandle C.LoonTransactionHandle
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), 1, &cTransactionHandle)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return 0, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer C.loon_transaction_destroy(cTransactionHandle)
+
+	// add all LOB files
+	for _, lobFile := range lobFiles {
+		cPath := C.CString(lobFile.Path)
+
+		cLobFile := C.LoonLobFileInfo{
+			path:            cPath,
+			field_id:        C.int64_t(lobFile.FieldID),
+			total_rows:      C.int64_t(lobFile.TotalRows),
+			valid_rows:      C.int64_t(lobFile.ValidRows),
+			file_size_bytes: C.int64_t(lobFile.FileSizeBytes),
+		}
+
+		result = C.loon_transaction_add_lob_file(cTransactionHandle, &cLobFile)
+		C.free(unsafe.Pointer(cPath))
+
+		if err := HandleLoonFFIResult(result); err != nil {
+			return 0, fmt.Errorf("failed to add LOB file %s: %w", lobFile.Path, err)
+		}
+	}
+
+	// commit transaction
+	var committedVersion C.int64_t
+	result = C.loon_transaction_commit(cTransactionHandle, &committedVersion)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return 0, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return int64(committedVersion), nil
+}
+
+// GetManifestLobFiles retrieves LOB file information from a manifest.
+// this is used by compaction to calculate hole ratios for TEXT columns.
+func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConfig) ([]LobFileInfo, error) {
+	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal manifest path: %w", err)
+	}
+
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to make properties: %w", err)
+	}
+	defer C.loon_properties_free(cProperties)
+
+	cBasePath := C.CString(basePath)
+	defer C.free(unsafe.Pointer(cBasePath))
+
+	// open transaction to get manifest
+	var cTransactionHandle C.LoonTransactionHandle
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), 1, &cTransactionHandle)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer C.loon_transaction_destroy(cTransactionHandle)
+
+	// get manifest
+	var cManifest *C.LoonManifest
+	result = C.loon_transaction_get_manifest(cTransactionHandle, &cManifest)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return nil, fmt.Errorf("failed to get manifest: %w", err)
+	}
+	defer C.loon_manifest_destroy(cManifest)
+
+	// extract LOB files from manifest
+	numFiles := int(cManifest.lob_files.num_files)
+	lobFiles := make([]LobFileInfo, 0, numFiles)
+
+	if numFiles > 0 && cManifest.lob_files.files != nil {
+		// convert C array to Go slice
+		cFiles := (*[1 << 20]C.LoonLobFileInfo)(unsafe.Pointer(cManifest.lob_files.files))[:numFiles:numFiles]
+		for _, cFile := range cFiles {
+			lobFiles = append(lobFiles, LobFileInfo{
+				Path:          C.GoString(cFile.path),
+				FieldID:       int64(cFile.field_id),
+				TotalRows:     int64(cFile.total_rows),
+				ValidRows:     int64(cFile.valid_rows),
+				FileSizeBytes: int64(cFile.file_size_bytes),
+			})
+		}
+	}
+
+	return lobFiles, nil
 }

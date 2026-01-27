@@ -217,7 +217,7 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 	}
 
 	if bw.manifestPath != "" {
-		basePath, version, err := packed.UnmarshalManfestPath(bw.manifestPath)
+		basePath, version, err := packed.UnmarshalManifestPath(bw.manifestPath)
 		if err != nil {
 			return nil, "", err
 		}

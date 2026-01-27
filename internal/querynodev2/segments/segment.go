@@ -23,6 +23,7 @@ package segments
 #include "segcore/collection_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/reduce_c.h"
+#include "segcore/segment_c.h"
 #include "common/init_c.h"
 */
 import "C"
@@ -1542,4 +1543,68 @@ func (s *LocalSegment) indexNeedLoadRawData(schema *schemapb.CollectionSchema, i
 
 func (s *LocalSegment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo {
 	return s.fieldJSONStats
+}
+
+// FlushData flushes data from the growing segment directly to storage via C++ milvus-storage.
+// This is a unified interface that combines data extraction from segcore and writing to storage.
+// The C++ side handles: extracting raw field data from ConcurrentVector, converting to Arrow,
+// and writing to storage via milvus-storage with TEXT column LOB handling.
+func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int64, config *FlushConfig) (*FlushResult, error) {
+	// currently only growing segments support FlushData
+	if s.Type() != SegmentTypeGrowing {
+		return nil, errors.Errorf("FlushData is only supported for growing segments, got %s", s.Type().String())
+	}
+
+	// validate offsets
+	if startOffset < 0 || endOffset < startOffset {
+		return nil, errors.Errorf("invalid offsets: start=%d, end=%d", startOffset, endOffset)
+	}
+
+	// no data to flush
+	if startOffset == endOffset {
+		return nil, nil
+	}
+
+	// build C flush config
+	var cConfig C.CFlushConfig
+	cSegmentPath := C.CString(config.SegmentBasePath)
+	defer C.free(unsafe.Pointer(cSegmentPath))
+	cConfig.segment_path = cSegmentPath
+
+	cLobBasePath := C.CString(config.PartitionBasePath)
+	defer C.free(unsafe.Pointer(cLobBasePath))
+	cConfig.lob_base_path = cLobBasePath
+
+	cConfig.read_version = C.int64_t(-1) // latest version
+	cConfig.retry_limit = C.uint32_t(3)
+
+	// TODO: add TEXT column configs from schema
+	cConfig.text_field_ids = nil
+	cConfig.text_lob_paths = nil
+	cConfig.num_text_columns = 0
+
+	// call C FFI
+	var cResult C.CFlushResult
+	status := C.FlushGrowingSegmentData(
+		s.ptr,
+		C.int64_t(startOffset),
+		C.int64_t(endOffset),
+		&cConfig,
+		&cResult,
+	)
+	defer C.FreeFlushResult(&cResult)
+
+	if err := HandleCStatus(ctx, &status, "FlushGrowingSegmentData"); err != nil {
+		return nil, err
+	}
+
+	// no data flushed
+	if cResult.manifest_path == nil {
+		return nil, nil
+	}
+
+	return &FlushResult{
+		ManifestPath: C.GoString(cResult.manifest_path),
+		NumRows:      int64(cResult.num_rows),
+	}, nil
 }

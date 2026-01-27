@@ -2367,7 +2367,7 @@ please adjust in embedded Milvus: false`,
 
 	p.MaxTextLength = ParamItem{
 		Key:          "proxy.maxTextLength",
-		Version:      "2.6.0",
+		Version:      "3.0.0",
 		DefaultValue: strconv.Itoa(2 * 1024 * 1024), // 2M
 		Doc:          "maximum number of characters for a row of the text field",
 	}
@@ -4675,6 +4675,11 @@ type dataCoordConfig struct {
 	SnapshotRefIndexLoadInterval ParamItem `refreshable:"true"`
 	EnableActiveStandby          ParamItem `refreshable:"false"`
 
+	// LOB Garbage Collection
+	GCLOBEnabled       ParamItem `refreshable:"false"`
+	GCLOBSafetyWindow  ParamItem `refreshable:"true"`
+	GCLOBCheckInterval ParamItem `refreshable:"true"`
+
 	BindIndexNodeMode    ParamItem `refreshable:"false"`
 	IndexNodeAddress     ParamItem `refreshable:"false"`
 	WithCredential       ParamItem `refreshable:"false"`
@@ -5505,6 +5510,33 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.EnableActiveStandby.Init(base.mgr)
 
+	p.GCLOBEnabled = ParamItem{
+		Key:          "dataCoord.gc.lob.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          "Enable garbage collection for LOB (TEXT column) files",
+		Export:       true,
+	}
+	p.GCLOBEnabled.Init(base.mgr)
+
+	p.GCLOBSafetyWindow = ParamItem{
+		Key:          "dataCoord.gc.lob.safetyWindow",
+		Version:      "3.0.0",
+		DefaultValue: "3600",
+		Doc:          "Safety window for LOB file GC in seconds. Files older than this are eligible for deletion. Default 1 hour.",
+		Export:       true,
+	}
+	p.GCLOBSafetyWindow.Init(base.mgr)
+
+	p.GCLOBCheckInterval = ParamItem{
+		Key:          "dataCoord.gc.lob.checkInterval",
+		Version:      "3.0.0",
+		DefaultValue: "1800",
+		Doc:          "Interval for LOB GC check in seconds. Default 30 minutes.",
+		Export:       true,
+	}
+	p.GCLOBCheckInterval.Init(base.mgr)
+
 	p.MinSegmentNumRowsToEnableIndex = ParamItem{
 		Key:          "indexCoord.segment.minSegmentNumRowsToEnableIndex",
 		Version:      "2.0.0",
@@ -6056,6 +6088,12 @@ type dataNodeConfig struct {
 	UseMergeSort             ParamItem `refreshable:"true"`
 	MaxSegmentMergeSort      ParamItem `refreshable:"true"`
 	MaxCompactionConcurrency ParamItem `refreshable:"true"`
+	LOBHoleRatioThreshold    ParamItem `refreshable:"true"`
+
+	// TEXT column compaction configurations
+	TextInlineThreshold     ParamItem `refreshable:"true"`
+	TextMaxLobFileBytes     ParamItem `refreshable:"true"`
+	TextFlushThresholdBytes ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -6446,6 +6484,42 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.MaxSegmentMergeSort.Init(base.mgr)
+
+	p.LOBHoleRatioThreshold = ParamItem{
+		Key:          "dataNode.compaction.lobHoleRatioThreshold",
+		Version:      "3.0.0",
+		Doc:          "The hole ratio threshold for TEXT column compaction. If hole_ratio >= threshold, rewrite LOB files; otherwise reuse existing LOB files.",
+		DefaultValue: "0.3",
+		Export:       true,
+	}
+	p.LOBHoleRatioThreshold.Init(base.mgr)
+
+	p.TextInlineThreshold = ParamItem{
+		Key:          "dataNode.compaction.textInlineThreshold",
+		Version:      "3.0.0",
+		Doc:          "TEXT values smaller than this threshold (in bytes) are stored inline instead of in LOB files.",
+		DefaultValue: "256",
+		Export:       true,
+	}
+	p.TextInlineThreshold.Init(base.mgr)
+
+	p.TextMaxLobFileBytes = ParamItem{
+		Key:          "dataNode.compaction.textMaxLobFileBytes",
+		Version:      "3.0.0",
+		Doc:          "Maximum size of a single LOB file for TEXT column storage (in bytes).",
+		DefaultValue: "67108864", // 64MB
+		Export:       true,
+	}
+	p.TextMaxLobFileBytes.Init(base.mgr)
+
+	p.TextFlushThresholdBytes = ParamItem{
+		Key:          "dataNode.compaction.textFlushThresholdBytes",
+		Version:      "3.0.0",
+		Doc:          "Flush threshold for TEXT column writer buffer (in bytes).",
+		DefaultValue: "16777216", // 16MB
+		Export:       true,
+	}
+	p.TextFlushThresholdBytes.Init(base.mgr)
 
 	p.MaxCompactionConcurrency = ParamItem{
 		Key:          "dataNode.compaction.maxConcurrency",

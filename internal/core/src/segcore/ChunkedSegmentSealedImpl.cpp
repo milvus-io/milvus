@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <ctime>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -27,6 +28,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <nlohmann/json.hpp>
 
 #include "Utils.h"
 #include "Types.h"
@@ -78,6 +80,7 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "cachinglayer/CacheSlot.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "segcore/TextColumnCache.h"
 
 namespace milvus::segcore {
 using namespace milvus::cachinglayer;
@@ -1752,6 +1755,44 @@ ChunkedSegmentSealedImpl::bulk_subscript_vector_array_impl(
 }
 
 void
+ChunkedSegmentSealedImpl::bulk_subscript_text_impl(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const ChunkedColumnInterface* column,
+    const int64_t* seg_offsets,
+    int64_t count,
+    google::protobuf::RepeatedPtrField<std::string>* dst) const {
+    auto it = text_lob_paths_.find(field_id);
+    if (it == text_lob_paths_.end()) {
+        throw SegcoreError(
+            ErrorCode::UnexpectedError,
+            fmt::format("LOB base path not found for TEXT field {}",
+                        field_id.get()));
+    }
+    const auto& lob_base_path = it->second;
+
+    std::vector<milvus_storage::text_column::EncodedRef> encoded_refs;
+    encoded_refs.reserve(count);
+
+    column->BulkRawStringAt(
+        op_ctx,
+        [&encoded_refs](std::string_view value, size_t offset, bool is_valid) {
+            encoded_refs.push_back(
+                {reinterpret_cast<const uint8_t*>(value.data()), value.size()});
+        },
+        seg_offsets,
+        count);
+
+    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                          .GetProperties();
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
+
+    auto& cache = GetGlobalTextColumnCache();
+    cache.ReadBatchInto(lob_base_path, fs, *properties, encoded_refs, dst);
+}
+
+void
 ChunkedSegmentSealedImpl::ClearData() {
     {
         std::unique_lock lck(mutex_);
@@ -1956,14 +1997,30 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
 
     switch (field_meta.get_data_type()) {
         case DataType::VARCHAR:
-        case DataType::STRING:
-        case DataType::TEXT: {
+        case DataType::STRING: {
             bulk_subscript_ptr_impl<std::string>(
                 op_ctx,
                 column.get(),
                 seg_offsets,
                 count,
                 ret->mutable_scalars()->mutable_string_data()->mutable_data());
+            break;
+        }
+
+        case DataType::TEXT: {
+            // check if we have a LOB path for this TEXT field
+            auto it = text_lob_paths_.find(field_id);
+            if (it != text_lob_paths_.end()) {
+                // TEXT data is stored as LOB references, resolve via TextColumnCache
+                bulk_subscript_text_impl(op_ctx,
+                                         field_id,
+                                         column.get(),
+                                         seg_offsets,
+                                         count,
+                                         ret->mutable_scalars()
+                                             ->mutable_string_data()
+                                             ->mutable_data());
+            }
             break;
         }
 
@@ -3007,6 +3064,48 @@ ChunkedSegmentSealedImpl::LoadManifest(const std::string& manifest_path) {
     }
 
     LoadColumnGroups(column_groups, properties, cg_field_ids);
+
+    // initialize LOB paths for TEXT fields
+    InitTextLobPaths(manifest_path);
+}
+
+void
+ChunkedSegmentSealedImpl::InitTextLobPaths(const std::string& manifest_path) {
+    std::vector<FieldId> text_field_ids;
+    for (auto& [field_id, field_meta] : schema_->get_fields()) {
+        if (field_meta.get_data_type() == DataType::TEXT) {
+            text_field_ids.push_back(field_id);
+        }
+    }
+
+    if (text_field_ids.empty()) {
+        return;
+    }
+
+    std::string segment_base_path;
+    try {
+        nlohmann::json j = nlohmann::json::parse(manifest_path);
+        segment_base_path = j.at("base_path").get<std::string>();
+    } catch (const std::exception& e) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "Failed to parse manifest path for TEXT columns: {}",
+                  e.what());
+    }
+
+    // segment_base_path format: {root}/{collectionID}/{partitionID}/{segmentID}
+    // lob_base_path format: {root}/{collectionID}/{partitionID}/lobs/{field_id}
+    std::filesystem::path segment_fs_path(segment_base_path);
+    std::filesystem::path partition_path = segment_fs_path.parent_path();
+
+    for (auto field_id : text_field_ids) {
+        std::filesystem::path lob_base_path =
+            partition_path / "lobs" / std::to_string(field_id.get());
+        text_lob_paths_[field_id] = lob_base_path.string();
+        LOG_INFO("Initialized TEXT LOB path for segment {} field {}: {}",
+                 id_,
+                 field_id.get(),
+                 lob_base_path.string());
+    }
 }
 
 void

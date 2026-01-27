@@ -176,6 +176,12 @@ type shardDelegator struct {
 	// latest required mvcc timestamp for the delegator
 	// for slow down the delegator consumption and reduce the timetick dispatch frequency.
 	latestRequiredMVCCTimeTick *atomic.Uint64
+
+	// growing segment flush support for TEXT collections
+	// checkpointTracker tracks offset -> MsgPosition mapping for Growing Segments
+	checkpointTracker *segments.CheckpointTracker
+	// growingFlushManager manages periodic flush of Growing Segments (for TEXT collections)
+	growingFlushManager *segments.GrowingFlushManager
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -1317,10 +1323,32 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		sd.idfOracle.Start()
 	}
 
+	// initialize CheckpointTracker for TEXT collections
+	// this enables incremental flush of Growing Segments to preserve TEXT data
+	if sd.hasTextFields() {
+		sd.checkpointTracker = segments.NewCheckpointTracker()
+		log.Info("initialized CheckpointTracker for TEXT collection")
+		// note: GrowingFlushManager will be initialized separately when needed
+		// as it requires additional dependencies (broker, allocator, etc.)
+	}
+
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
 	log.Info("finish build new shardDelegator")
 	return sd, nil
+}
+
+// hasTextFields returns true if the collection has any TEXT type fields.
+func (sd *shardDelegator) hasTextFields() bool {
+	if sd.collection == nil {
+		return false
+	}
+	for _, field := range sd.collection.Schema().GetFields() {
+		if field.GetDataType() == schemapb.DataType_Text {
+			return true
+		}
+	}
+	return false
 }
 
 func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {

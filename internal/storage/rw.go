@@ -73,6 +73,7 @@ type rwOptions struct {
 	neededFields        typeutil.Set[int64]
 	useLoonFFI          bool
 	pluginContext       *indexcgopb.StoragePluginContext
+	textColumnConfigs   []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
 }
 
 func (o *rwOptions) validate() error {
@@ -178,6 +179,15 @@ func WithUseLoonFFI(useLoonFFI bool) RwOption {
 func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption {
 	return func(options *rwOptions) {
 		options.pluginContext = pluginContext
+	}
+}
+
+// WithTextColumnConfigs sets TEXT column configurations for REWRITE_ALL mode during compaction.
+// when TEXT columns need to be rewritten (hole ratio >= threshold), this option enables
+// the writer to expand TEXT LOB references and write to new LOB files.
+func WithTextColumnConfigs(configs []packed.TextColumnConfig) RwOption {
+	return func(options *rwOptions) {
+		options.textColumnConfigs = configs
 	}
 }
 
@@ -409,6 +419,15 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			pluginContext,
 		)
 	case StorageV3:
+		// if TEXT column configs are provided, use the text writer with TEXT column support
+		if len(rwOptions.textColumnConfigs) > 0 {
+			return NewPackedTextManifestRecordWriter(collectionID, partitionID, segmentID, schema,
+				blobsWriter, allocator, maxRowNum,
+				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
+				rwOptions.storageConfig,
+				rwOptions.textColumnConfigs,
+			)
+		}
 		return newPackedManifestRecordWriter(collectionID, partitionID, segmentID, schema,
 			blobsWriter, allocator, maxRowNum,
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,

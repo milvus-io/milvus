@@ -31,6 +31,7 @@
 #include "InsertRecord.h"
 #include "SealedIndexingRecord.h"
 #include "SegmentGrowing.h"
+#include "TextLobSpillover.h"
 #include "common/EasyAssert.h"
 #include "common/IndexMeta.h"
 #include "common/Types.h"
@@ -356,6 +357,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
               },
               segment_id) {
         this->CreateTextIndexes();
+        this->InitializeTextLobSpillovers();
         this->InitializeArrayOffsets();
         this->UpdateResourceTracking();
     }
@@ -507,6 +509,28 @@ class SegmentGrowingImpl : public SegmentGrowing {
                schema_->get_fields().end();
     }
 
+    /**
+     * @brief Check if a TEXT field has spillover enabled
+     */
+    bool
+    HasTextLobSpillover(FieldId field_id) const {
+        return text_lob_spillovers_.find(field_id) !=
+               text_lob_spillovers_.end();
+    }
+
+    /**
+     * @brief Get TextLobSpillover for a TEXT field (for query/flush paths)
+     * @return Pointer to TextLobSpillover, or nullptr if not found
+     */
+    TextLobSpillover*
+    GetTextLobSpillover(FieldId field_id) const {
+        auto it = text_lob_spillovers_.find(field_id);
+        if (it != text_lob_spillovers_.end()) {
+            return it->second.get();
+        }
+        return nullptr;
+    }
+
     std::shared_ptr<const IArrayOffsets>
     GetArrayOffsets(FieldId field_id) const override {
         auto it = array_offsets_map_.find(field_id);
@@ -626,6 +650,15 @@ class SegmentGrowingImpl : public SegmentGrowing {
     CreateTextIndexes();
 
     /**
+     * @brief Initialize TEXT LOB spillover files for each TEXT field
+     *
+     * Creates TextLobSpillover instances for all TEXT fields in the schema.
+     * TEXT data will be written to temporary LOB files to reduce memory usage.
+     */
+    void
+    InitializeTextLobSpillovers();
+
+    /**
      * @brief Load all column groups from a manifest file path
      *
      * This method parses the manifest path to retrieve column groups metadata
@@ -694,6 +727,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
     ResourceUsage tracked_resource_{};
     // Mutex to protect tracked_resource_ updates (refund-then-charge must be atomic)
     mutable std::mutex resource_tracking_mutex_;
+
+    // TEXT field spillover: field_id -> TextLobSpillover
+    // TEXT data is written to temporary LOB files to reduce memory usage.
+    // Memory stores only 16-byte references (offset, size, flags).
+    std::unordered_map<FieldId, std::unique_ptr<TextLobSpillover>>
+        text_lob_spillovers_;
 };
 
 inline SegmentGrowingPtr

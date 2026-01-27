@@ -232,6 +232,61 @@ FinishLoad(CSegmentInterface c_segment);
 CStatus
 ExprResCacheEraseSegment(int64_t segment_id);
 
+//////////////////////////////    interfaces for growing segment flush    //////////////////////////////
+
+/**
+ * @brief Configuration for flushing growing segment data to storage.
+ */
+typedef struct CFlushConfig {
+    const char* segment_path;   // base path for segment manifest and data
+    const char* lob_base_path;  // base path for LOB files (TEXT columns)
+    int64_t read_version;       // version to read (-1 = latest)
+    uint32_t retry_limit;       // retry limit for commit
+    // TEXT column configurations
+    int64_t* text_field_ids;      // array of TEXT field IDs
+    const char** text_lob_paths;  // array of LOB paths for each TEXT field
+    size_t num_text_columns;      // number of TEXT columns
+} CFlushConfig;
+
+/**
+ * @brief Result of flushing growing segment data.
+ */
+typedef struct CFlushResult {
+    char* manifest_path;  // path to the committed manifest (caller must free)
+    int64_t committed_version;  // committed version number
+    int64_t num_rows;           // number of rows flushed
+} CFlushResult;
+
+/**
+ * @brief Flush data from a growing segment directly to storage.
+ *
+ * This function extracts data from the growing segment's ConcurrentVector
+ * and writes it to storage via milvus-storage. It handles:
+ * - Extracting raw field data from InsertRecord
+ * - Converting to Arrow RecordBatch
+ * - Writing to storage with TEXT column LOB handling
+ * - Creating manifest with committed version
+ *
+ * @param c_segment The growing segment to flush
+ * @param start_offset Start row offset (inclusive)
+ * @param end_offset End row offset (exclusive)
+ * @param config Flush configuration
+ * @param result Output flush result (caller must free manifest_path)
+ * @return CStatus indicating success or failure
+ */
+CStatus
+FlushGrowingSegmentData(CSegmentInterface c_segment,
+                        int64_t start_offset,
+                        int64_t end_offset,
+                        const CFlushConfig* config,
+                        CFlushResult* result);
+
+/**
+ * @brief Free the manifest_path in CFlushResult.
+ */
+void
+FreeFlushResult(CFlushResult* result);
+
 #ifdef __cplusplus
 }
 #endif

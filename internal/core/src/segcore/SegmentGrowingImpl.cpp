@@ -48,6 +48,7 @@
 #include "storage/KeyRetriever.h"
 #include "common/TypeTraits.h"
 #include "knowhere/comp/index_param.h"
+#include "storage/MmapManager.h"
 
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -524,11 +525,34 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 field_meta);
         }
         if (!indexing_record_.HasRawData(field_id)) {
-            insert_record_.get_data_base(field_id)->set_data_raw(
-                reserved_offset,
-                num_rows,
-                &insert_record_proto->fields_data(data_offset),
-                field_meta);
+            // special handling for TEXT fields with spillover
+            if (field_meta.get_data_type() == DataType::TEXT &&
+                HasTextLobSpillover(field_id)) {
+                const auto& field_data =
+                    insert_record_proto->fields_data(data_offset);
+                const auto& string_data = field_data.scalars().string_data();
+
+                auto spillover = GetTextLobSpillover(field_id);
+                std::vector<std::string> ref_strings(num_rows);
+                for (int64_t i = 0; i < num_rows; i++) {
+                    const auto& text = string_data.data(i);
+                    ref_strings[i] = spillover->WriteAndEncode(text);
+                }
+
+                auto* vec_base = insert_record_.get_data_base(field_id);
+                auto* string_vec =
+                    dynamic_cast<ConcurrentVector<std::string>*>(vec_base);
+                AssertInfo(string_vec != nullptr,
+                           "TEXT field must use ConcurrentVector<std::string>");
+                string_vec->set_data_raw(
+                    reserved_offset, ref_strings.data(), num_rows);
+            } else {
+                insert_record_.get_data_base(field_id)->set_data_raw(
+                    reserved_offset,
+                    num_rows,
+                    &insert_record_proto->fields_data(data_offset),
+                    field_meta);
+            }
         }
 
         //insert vector data into index
@@ -1340,8 +1364,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                              ->mutable_data());
             break;
         }
-        case DataType::VARCHAR:
-        case DataType::TEXT: {
+        case DataType::VARCHAR: {
             bulk_subscript_ptr_impl<std::string>(op_ctx,
                                                  vec_ptr,
                                                  seg_offsets,
@@ -1349,6 +1372,25 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                                  result->mutable_scalars()
                                                      ->mutable_string_data()
                                                      ->mutable_data());
+            break;
+        }
+        case DataType::TEXT: {
+            // TEXT with spillover: decode references and read from LOB file
+            if (HasTextLobSpillover(field_id)) {
+                auto spillover = GetTextLobSpillover(field_id);
+                auto vec =
+                    dynamic_cast<const ConcurrentVector<std::string>*>(vec_ptr);
+                auto& src = *vec;
+                auto dst = result->mutable_scalars()
+                               ->mutable_string_data()
+                               ->mutable_data();
+                for (int64_t i = 0; i < count; ++i) {
+                    auto offset = seg_offsets[i];
+                    auto ref_str = src.view_element(offset);
+                    std::string text = spillover->DecodeAndRead(ref_str);
+                    dst->at(i).assign(text.data(), text.size());
+                }
+            }
             break;
         }
         case DataType::JSON: {
@@ -1680,10 +1722,29 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                         static_cast<double*>(data));
             break;
         }
-        case DataType::VARCHAR:
-        case DataType::TEXT: {
+        case DataType::VARCHAR: {
             bulk_subscript_ptr_impl<std::string>(
                 vec_ptr, seg_offsets, count, static_cast<std::string*>(data));
+            break;
+        }
+        case DataType::TEXT: {
+            // TEXT with spillover: decode references and read from LOB file
+            if (HasTextLobSpillover(field_id)) {
+                auto spillover = GetTextLobSpillover(field_id);
+                auto vec =
+                    dynamic_cast<const ConcurrentVector<std::string>*>(vec_ptr);
+                auto& src = *vec;
+                auto dst = static_cast<std::string*>(data);
+                for (int64_t i = 0; i < count; ++i) {
+                    auto offset = seg_offsets[i];
+                    if (offset != INVALID_SEG_OFFSET) {
+                        auto ref_str = src.view_element(offset);
+                        dst[i] = spillover->DecodeAndRead(ref_str);
+                    } else {
+                        dst[i] = std::string();
+                    }
+                }
+            }
             break;
         }
         case DataType::JSON: {
@@ -1796,6 +1857,30 @@ SegmentGrowingImpl::CreateTextIndexes() {
         if (IsStringDataType(field_meta.get_data_type()) &&
             field_meta.enable_match()) {
             CreateTextIndex(FieldId(field_id));
+        }
+    }
+}
+
+void
+SegmentGrowingImpl::InitializeTextLobSpillovers() {
+    // get base path from MmapManager config
+    std::string base_path;
+    try {
+        auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+        base_path = mmap_config.GetMmapPath();
+    } catch (...) {
+        base_path = "/tmp/milvus";
+    }
+
+    // create spillover for each TEXT field
+    for (auto& [field_id, field_meta] : schema_->get_fields()) {
+        if (field_meta.get_data_type() == DataType::TEXT) {
+            text_lob_spillovers_[field_id] =
+                std::make_unique<TextLobSpillover>(id_, field_id, base_path);
+            LOG_INFO("Created TEXT LOB spillover for segment {} field {} at {}",
+                     id_,
+                     field_id.get(),
+                     text_lob_spillovers_[field_id]->GetPath());
         }
     }
 }

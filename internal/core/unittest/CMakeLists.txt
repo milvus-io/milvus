@@ -53,6 +53,7 @@ set(MILVUS_TEST_FILES
         test_element_filter.cpp
         test_query_group_by.cpp
         test_minhash.cpp
+        test_text_lob_spillover.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )

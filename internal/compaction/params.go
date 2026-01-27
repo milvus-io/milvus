@@ -32,6 +32,10 @@ type Params struct {
 	BloomFilterApplyBatchSize int                    `json:"bloom_filter_apply_batch_size,omitempty"`
 	StorageConfig             *indexpb.StorageConfig `json:"storage_config,omitempty"`
 	UseLoonFFI                bool                   `json:"use_loon_ffi,omitempty"`
+	LOBHoleRatioThreshold     float64                `json:"lob_hole_ratio_threshold,omitempty"`
+	TextInlineThreshold       int64                  `json:"text_inline_threshold,omitempty"`
+	TextMaxLobFileBytes       int64                  `json:"text_max_lob_file_bytes,omitempty"`
+	TextFlushThresholdBytes   int64                  `json:"text_flush_threshold_bytes,omitempty"`
 }
 
 func GenParams() Params {
@@ -48,6 +52,10 @@ func GenParams() Params {
 		BloomFilterApplyBatchSize: paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
 		StorageConfig:             CreateStorageConfig(),
 		UseLoonFFI:                paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
+		LOBHoleRatioThreshold:     GetLOBHoleRatioThreshold(),
+		TextInlineThreshold:       getTextInlineThreshold(),
+		TextMaxLobFileBytes:       getTextMaxLobFileBytes(),
+		TextFlushThresholdBytes:   getTextFlushThresholdBytes(),
 	}
 }
 

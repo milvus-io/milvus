@@ -217,10 +217,12 @@ func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageColl
 	ctx, cancel := context.WithCancel(context.Background())
 	metaSignal := make(chan gcCmd)
 	orphanSignal := make(chan gcCmd)
+	lobSignal := make(chan gcCmd)
 	// control signal channels
 	controlChannels := map[string]chan gcCmd{
 		"meta":   metaSignal,
 		"orphan": orphanSignal,
+		"lob":    lobSignal,
 	}
 	return &garbageCollector{
 		ctx:                   ctx,
@@ -319,7 +321,7 @@ func (gc *garbageCollector) Resume(ctx context.Context, collectionID int64, tick
 func (gc *garbageCollector) work(ctx context.Context) {
 	// TODO: fast cancel for gc when closing.
 	// Run gc tasks in parallel.
-	gc.wg.Add(3)
+	gc.wg.Add(4)
 	go func() {
 		defer gc.wg.Done()
 		gc.runRecycleTaskWithPauser(ctx, "meta", gc.option.checkInterval, func(ctx context.Context, signal <-chan gcCmd) {
@@ -340,6 +342,14 @@ func (gc *garbageCollector) work(ctx context.Context) {
 			// orphan file not controlled by collection level pause for now
 			gc.recycleUnusedBinlogFiles(ctx)
 			gc.recycleUnusedIndexFiles(ctx)
+		})
+	}()
+	go func() {
+		defer gc.wg.Done()
+		// LOB (TEXT column) file GC runs on its own interval
+		lobCheckInterval := Params.DataCoordCfg.GCLOBCheckInterval.GetAsDuration(time.Second)
+		gc.runRecycleTaskWithPauser(ctx, "lob", lobCheckInterval, func(ctx context.Context, signal <-chan gcCmd) {
+			gc.recycleUnusedLOBFiles(ctx)
 		})
 	}()
 	go func() {

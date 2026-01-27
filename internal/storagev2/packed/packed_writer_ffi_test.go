@@ -105,7 +105,7 @@ func TestPackedFFIWriter(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, manifest)
 
-		p, pv, err := UnmarshalManfestPath(manifest)
+		p, pv, err := UnmarshalManifestPath(manifest)
 		require.NoError(t, err)
 		assert.Equal(t, p, basePath)
 		assert.Equal(t, pv, version+1)

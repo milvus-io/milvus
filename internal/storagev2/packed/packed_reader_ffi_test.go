@@ -373,7 +373,7 @@ func TestPackedFFIReaderMultipleBatches(t *testing.T) {
 		manifest, err = pw.Close()
 		require.NoError(t, err)
 
-		_, version, err = UnmarshalManfestPath(manifest)
+		_, version, err = UnmarshalManifestPath(manifest)
 		require.NoError(t, err)
 
 		totalWrittenRows += numRows

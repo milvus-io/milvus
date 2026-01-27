@@ -697,6 +697,13 @@ func IsStringType(dataType schemapb.DataType) bool {
 	}
 }
 
+// IsTextType returns true if input is a TEXT type, otherwise false
+// TEXT type is stored as LOB (Large Object) references in sealed segments,
+// requiring special handling during search (requery pattern)
+func IsTextType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_Text
+}
+
 func IsArrayContainStringElementType(dataType schemapb.DataType, elementType schemapb.DataType) bool {
 	if IsArrayType(dataType) {
 		if elementType == schemapb.DataType_String || elementType == schemapb.DataType_VarChar {
