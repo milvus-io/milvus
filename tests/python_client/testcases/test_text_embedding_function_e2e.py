@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 import pandas as pd
 from faker import Faker
+from common.mock_tei_server import MockTEIServer, get_local_ip, get_docker_host
 
 fake_zh = Faker("zh_CN")
 fake_jp = Faker("ja_JP")
@@ -1408,8 +1409,6 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
         - localhost/127.0.0.1: uses host.docker.internal for Docker containers
         - Remote host: skipped (network may not be reachable)
         """
-        from common.mock_tei_server import MockTEIServer, get_local_ip, get_docker_host
-
         # Skip if Milvus is on remote host (network may not be reachable)
         local_ip = get_local_ip()
         docker_host = get_docker_host()
@@ -1497,7 +1496,7 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
             # Verify function params are updated
             res, _ = collection_w.describe()
             content_func = next(f for f in res["functions"] if f["name"] == "content_embedding")
-            assert content_func["params"]["truncate"] == "True"
+            assert content_func["params"]["truncate"] == str(True)
 
             log.info("Successfully altered content_embedding function while title_embedding is invalid")
 
@@ -1521,8 +1520,6 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
         - localhost/127.0.0.1: uses host.docker.internal for Docker containers
         - Remote host: skipped (network may not be reachable)
         """
-        from common.mock_tei_server import MockTEIServer, get_local_ip, get_docker_host
-
         # Skip if Milvus is on remote host (network may not be reachable)
         local_ip = get_local_ip()
         docker_host = get_docker_host()

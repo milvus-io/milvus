@@ -87,27 +87,18 @@ class MockTEIHandler:
         """Get the server endpoint URL."""
         return self.httpserver.url_for("")
 
-    def setup_embed(self, permanent: bool = True):
-        """
-        Setup /embed endpoint to return mock embeddings.
-
-        Args:
-            permanent: If True, handler persists across requests
-        """
+    def setup_embed(self):
+        """Setup /embed endpoint to return mock embeddings."""
         def handle_embed(request):
             data = request.json
             inputs = data.get("inputs", [])
             embeddings = [generate_mock_embedding(text, self.dim) for text in inputs]
             return json.dumps(embeddings)
 
-        handler = self.httpserver.expect_request(
+        self.httpserver.expect_request(
             "/embed",
             method="POST"
-        )
-        if permanent:
-            handler = handler.respond_with_handler(handle_embed)
-        else:
-            handler = handler.respond_with_handler(handle_embed)
+        ).respond_with_handler(handle_embed)
 
         return self
 
@@ -215,7 +206,8 @@ def get_local_ip() -> str:
         s.close()
         if not ip.startswith('127.'):
             return ip
-    except Exception:
+    except (OSError, socket.error):
+        # Socket connection failed, try next method
         pass
 
     # Method 2: get from hostname
@@ -224,7 +216,8 @@ def get_local_ip() -> str:
         ip = socket.gethostbyname(hostname)
         if not ip.startswith('127.'):
             return ip
-    except Exception:
+    except (OSError, socket.error, socket.gaierror):
+        # Hostname resolution failed, fall back to localhost
         pass
 
     return '127.0.0.1'
@@ -333,7 +326,8 @@ class MockTEIServer:
                     sock.close()
                     return
                 sock.close()
-            except Exception:
+            except (OSError, socket.error):
+                # Connection not ready yet, retry
                 pass
             time.sleep(0.1)
         raise RuntimeError(f"Server failed to start within {timeout}s")
@@ -344,7 +338,7 @@ class MockTEIServer:
             self._server.server_close()
             self._server = None
         if self._thread:
-            self._thread.join(timeout=5)
+            self._thread.join(timeout=10)
             self._thread = None
         self._running = False
 
@@ -382,7 +376,7 @@ def pytest_httpserver_fixture(dim: int = 768):
     def fixture(httpserver):
         handler = MockTEIHandler(httpserver, dim=dim)
         handler.setup_embed()
-        return handler
+        yield handler
     return fixture
 
 
