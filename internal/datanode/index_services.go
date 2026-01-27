@@ -153,6 +153,7 @@ func (node *DataNode) QueryJobs(ctx context.Context, req *workerpb.QueryJobsRequ
 			ret.IndexInfos[i].MemSize = info.MemSize
 			ret.IndexInfos[i].FailReason = info.FailReason
 			ret.IndexInfos[i].CurrentIndexVersion = info.CurrentIndexVersion
+			ret.IndexInfos[i].CurrentScalarIndexVersion = info.CurrentScalarIndexVersion
 			log.RatedDebug(5, "querying index build task",
 				zap.Int64("indexBuildID", buildID),
 				zap.String("state", info.State.String()),

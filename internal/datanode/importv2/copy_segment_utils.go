@@ -497,13 +497,14 @@ func buildIndexInfoFromSource(
 		}
 
 		indexInfos[srcIndex.GetFieldID()] = &datapb.VectorScalarIndexInfo{
-			FieldId:             srcIndex.GetFieldID(),
-			IndexId:             srcIndex.GetIndexID(),
-			BuildId:             srcIndex.GetBuildID(),
-			Version:             srcIndex.GetIndexVersion(),
-			IndexFilePaths:      targetPaths,
-			IndexSize:           int64(srcIndex.GetSerializedSize()),
-			CurrentIndexVersion: srcIndex.GetCurrentIndexVersion(),
+			FieldId:                   srcIndex.GetFieldID(),
+			IndexId:                   srcIndex.GetIndexID(),
+			BuildId:                   srcIndex.GetBuildID(),
+			Version:                   srcIndex.GetIndexVersion(),
+			IndexFilePaths:            targetPaths,
+			IndexSize:                 int64(srcIndex.GetSerializedSize()),
+			CurrentIndexVersion:       srcIndex.GetCurrentIndexVersion(),
+			CurrentScalarIndexVersion: srcIndex.GetCurrentScalarIndexVersion(),
 		}
 	}
 
