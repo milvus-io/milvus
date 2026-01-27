@@ -156,27 +156,22 @@ class PhyConjunctFilterExpr : public Expr {
         TargetBitmapView data(vec->GetRawData(), size);
         TargetBitmapView valid(vec->GetValidRawData(), size);
 
-        TargetBitmap next_input_bitmap(size);
-
         if (is_and_) {
             // bitmap = data | ~valid
-            // Rows that are TRUE (data=1) or NULL (valid=0) need evaluation
-            next_input_bitmap.inplace_or(data, size);
-            TargetBitmap not_valid(valid);
-            not_valid.flip();
-            next_input_bitmap.inplace_or(not_valid, size);
+            // Using De Morgan's law: data | ~valid = ~(~data & valid) = ~(valid & ~data)
+            // Use inplace_sub which computes: this = this & ~other
+            TargetBitmap next_input_bitmap(valid);      // copy valid
+            next_input_bitmap.inplace_sub(data, size);  // valid & ~data
+            next_input_bitmap.flip();  // ~(valid & ~data) = data | ~valid
+            context.set_bitmap_input(std::move(next_input_bitmap));
         } else {
             // bitmap = ~data | ~valid
-            // Rows that are FALSE (data=0) or NULL (valid=0) need evaluation
-            TargetBitmap not_data(data);
-            not_data.flip();
-            next_input_bitmap.inplace_or(not_data, size);
-            TargetBitmap not_valid(valid);
-            not_valid.flip();
-            next_input_bitmap.inplace_or(not_valid, size);
+            // Using De Morgan's law: ~data | ~valid = ~(data & valid)
+            TargetBitmap next_input_bitmap(data);        // copy data
+            next_input_bitmap.inplace_and(valid, size);  // data & valid
+            next_input_bitmap.flip();  // ~(data & valid) = ~data | ~valid
+            context.set_bitmap_input(std::move(next_input_bitmap));
         }
-
-        context.set_bitmap_input(std::move(next_input_bitmap));
     }
 
     void
