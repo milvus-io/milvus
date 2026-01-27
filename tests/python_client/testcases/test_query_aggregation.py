@@ -117,8 +117,8 @@ class TestQueryAggregationL0V2(TestMilvusClientV2Base):
         # Load collection
         self.load_collection(client, self.collection_name)
 
-        # Store data for ground truth verification
-        self.datas = pd.DataFrame(rows)
+        # Store data for ground truth verification (on class, not instance)
+        self.__class__.datas = pd.DataFrame(rows)
 
         log.info(f"Prepared collection {self.collection_name} with {default_nb} entities")
 
@@ -141,6 +141,7 @@ class TestQueryAggregationL0V2(TestMilvusClientV2Base):
             client,
             self.collection_name,
             filter="",
+            limit=100,
             group_by_fields=[self.c1_field_name],
             output_fields=[self.c1_field_name, "count(c2)", "sum(c3)"]
         )
@@ -180,6 +181,7 @@ class TestQueryAggregationL0V2(TestMilvusClientV2Base):
             client,
             self.collection_name,
             filter="",
+            limit=100,
             group_by_fields=[self.c1_field_name, self.c6_field_name],
             output_fields=[self.c1_field_name, self.c6_field_name, "min(c2)", "max(c2)"]
         )
@@ -293,7 +295,8 @@ class TestQueryAggregationL1V2(TestMilvusClientV2Base):
         self.create_index(client, self.collection_name, index_params=index_params)
         self.load_collection(client, self.collection_name)
 
-        self.datas = pd.DataFrame(rows)
+        # Store data for ground truth verification (on class, not instance)
+        self.__class__.datas = pd.DataFrame(rows)
         log.info(f"Prepared collection {self.collection_name} with {default_nb} entities")
 
         def teardown():
@@ -314,6 +317,7 @@ class TestQueryAggregationL1V2(TestMilvusClientV2Base):
             client,
             self.collection_name,
             filter="",
+            limit=100,
             group_by_fields=[self.c1_field_name],
             output_fields=[self.c1_field_name, "avg(c2)", "avg(c3)", "avg(c4)"]
         )
@@ -395,6 +399,7 @@ class TestQueryAggregationL1V2(TestMilvusClientV2Base):
         """
         target: test GROUP BY without filter but with limit
         method: query with filter="", group_by_fields=["c1"], output_fields=["c1", "avg(c2)"], limit=3
+        limit=100,
         expected: returns at most 3 groups
         """
         client = self._client()
@@ -425,6 +430,7 @@ class TestQueryAggregationL1V2(TestMilvusClientV2Base):
             client,
             self.collection_name,
             filter="",
+            limit=100,
             group_by_fields=[self.c1_field_name],
             output_fields=[self.c1_field_name, "min(c6)", "max(c6)"]
         )
@@ -466,6 +472,7 @@ class TestQueryAggregationL1V2(TestMilvusClientV2Base):
             client,
             self.collection_name,
             filter="",
+            limit=100,
             group_by_fields=[self.c1_field_name],
             output_fields=[self.c1_field_name, "count(ts)", "max(ts)"]
         )
@@ -502,6 +509,7 @@ class TestQueryAggregationL1V2(TestMilvusClientV2Base):
             client,
             self.collection_name,
             filter="",
+            limit=100,
             group_by_fields=[self.c1_field_name],
             output_fields=[self.c1_field_name, "sum(c2)"]
         )
@@ -511,6 +519,7 @@ class TestQueryAggregationL1V2(TestMilvusClientV2Base):
             client,
             self.collection_name,
             filter="",
+            limit=100,
             group_by_fields=[self.c1_field_name],
             output_fields=[self.c1_field_name, "sum(c3)"]
         )
@@ -520,6 +529,7 @@ class TestQueryAggregationL1V2(TestMilvusClientV2Base):
             client,
             self.collection_name,
             filter="",
+            limit=100,
             group_by_fields=[self.c1_field_name],
             output_fields=[self.c1_field_name, "sum(c4)"]
         )
@@ -555,6 +565,7 @@ class TestQueryAggregationL1V2(TestMilvusClientV2Base):
             client,
             self.collection_name,
             filter="",
+            limit=100,
             group_by_fields=[self.c1_field_name],
             output_fields=[self.c1_field_name, "avg(c2)", "avg(c3)", "avg(c4)"]
         )
@@ -604,6 +615,7 @@ class TestQueryAggregationL1V2(TestMilvusClientV2Base):
             client,
             self.collection_name,
             filter="",
+            limit=100,
             group_by_fields=[],
             output_fields=["count(*)", "sum(c2)", "avg(c3)"]
         )
@@ -676,6 +688,7 @@ class TestQueryAggregationNegativeV2(TestMilvusClientV2Base):
             client,
             collection_name,
             filter="",
+            limit=100,
             group_by_fields=["c1"],
             output_fields=["count(c2)"],  # Missing c1
             check_task=CheckTasks.err_res,
@@ -717,6 +730,7 @@ class TestQueryAggregationNegativeV2(TestMilvusClientV2Base):
             client,
             collection_name,
             filter="",
+            limit=100,
             group_by_fields=["vec"],
             output_fields=["vec", "count(c1)"],
             check_task=CheckTasks.err_res,
@@ -759,6 +773,7 @@ class TestQueryAggregationNegativeV2(TestMilvusClientV2Base):
             client,
             collection_name,
             filter="",
+            limit=100,
             group_by_fields=["c1"],
             output_fields=["c1", "sum(c6)"],
             check_task=CheckTasks.err_res,
