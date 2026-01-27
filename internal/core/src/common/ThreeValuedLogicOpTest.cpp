@@ -672,3 +672,124 @@ TEST(ThreeValuedLogicOpTest, LargeScaleOr) {
             << "Valid mismatch at index " << i;
     }
 }
+
+// ============================================================================
+// TrueCount and FalseCount Tests
+// ============================================================================
+
+TEST(ThreeValuedLogicOpTest, TrueCountBasic) {
+    // Test with: [TRUE, FALSE, NULL]
+    // TrueCount should be 1 (only the first element is definitely TRUE)
+    auto vec = CreateColumnVector({true, false, false}, {true, true, false});
+    EXPECT_EQ(ThreeValuedLogicOp::TrueCount(vec), 1);
+}
+
+TEST(ThreeValuedLogicOpTest, FalseCountBasic) {
+    // Test with: [TRUE, FALSE, NULL]
+    // FalseCount should be 1 (only the second element is definitely FALSE)
+    auto vec = CreateColumnVector({true, false, false}, {true, true, false});
+    EXPECT_EQ(ThreeValuedLogicOp::FalseCount(vec), 1);
+}
+
+TEST(ThreeValuedLogicOpTest, TrueCountAllTrue) {
+    auto vec = CreateColumnVector({true, true, true}, {true, true, true});
+    EXPECT_EQ(ThreeValuedLogicOp::TrueCount(vec), 3);
+    EXPECT_EQ(ThreeValuedLogicOp::FalseCount(vec), 0);
+}
+
+TEST(ThreeValuedLogicOpTest, FalseCountAllFalse) {
+    auto vec = CreateColumnVector({false, false, false}, {true, true, true});
+    EXPECT_EQ(ThreeValuedLogicOp::TrueCount(vec), 0);
+    EXPECT_EQ(ThreeValuedLogicOp::FalseCount(vec), 3);
+}
+
+TEST(ThreeValuedLogicOpTest, CountAllNull) {
+    // All NULL values
+    auto vec = CreateColumnVector({false, true, false}, {false, false, false});
+    EXPECT_EQ(ThreeValuedLogicOp::TrueCount(vec), 0);
+    EXPECT_EQ(ThreeValuedLogicOp::FalseCount(vec), 0);
+}
+
+TEST(ThreeValuedLogicOpTest, CountEmpty) {
+    auto vec = CreateColumnVector({}, {});
+    EXPECT_EQ(ThreeValuedLogicOp::TrueCount(vec), 0);
+    EXPECT_EQ(ThreeValuedLogicOp::FalseCount(vec), 0);
+}
+
+TEST(ThreeValuedLogicOpTest, CountSumEqualsValidCount) {
+    // TrueCount + FalseCount should equal the number of valid (non-NULL) rows
+    // Test with: [TRUE, FALSE, NULL, TRUE, FALSE, NULL, NULL, TRUE]
+    auto vec =
+        CreateColumnVector({true, false, false, true, false, true, false, true},
+                           {true, true, false, true, true, false, false, true});
+
+    size_t true_count = ThreeValuedLogicOp::TrueCount(vec);
+    size_t false_count = ThreeValuedLogicOp::FalseCount(vec);
+
+    // Count valid rows manually
+    size_t valid_count = 0;
+    for (size_t i = 0; i < 8; ++i) {
+        if (i == 2 || i == 5 || i == 6) {
+            // NULL rows (valid=false)
+            continue;
+        }
+        valid_count++;
+    }
+
+    EXPECT_EQ(true_count + false_count, valid_count);
+    EXPECT_EQ(true_count, 3);   // rows 0, 3, 7
+    EXPECT_EQ(false_count, 2);  // rows 1, 4
+}
+
+TEST(ThreeValuedLogicOpTest, CountLargeScale) {
+    // Test with a larger dataset to verify SIMD correctness
+    const size_t size = 1000;
+    std::vector<bool> data(size), valid(size);
+
+    size_t expected_true = 0;
+    size_t expected_false = 0;
+
+    for (size_t i = 0; i < size; ++i) {
+        data[i] = (i % 3) == 0;   // TRUE for i=0,3,6,...
+        valid[i] = (i % 5) != 0;  // NULL for i=0,5,10,...
+
+        if (valid[i] && data[i]) {
+            expected_true++;
+        }
+        if (valid[i] && !data[i]) {
+            expected_false++;
+        }
+    }
+
+    auto vec = CreateColumnVector(data, valid);
+    EXPECT_EQ(ThreeValuedLogicOp::TrueCount(vec), expected_true);
+    EXPECT_EQ(ThreeValuedLogicOp::FalseCount(vec), expected_false);
+}
+
+TEST(ThreeValuedLogicOpTest, CountBoundaryConditions) {
+    // Test with sizes that are not multiples of 64 (word size)
+    for (size_t size : {1, 7, 31, 63, 64, 65, 127, 128, 129, 255, 256, 257}) {
+        std::vector<bool> data(size), valid(size);
+
+        size_t expected_true = 0;
+        size_t expected_false = 0;
+
+        for (size_t i = 0; i < size; ++i) {
+            data[i] = (i % 2) == 0;
+            valid[i] = (i % 3) != 0;
+
+            if (valid[i] && data[i]) {
+                expected_true++;
+            }
+            if (valid[i] && !data[i]) {
+                expected_false++;
+            }
+        }
+
+        auto vec = CreateColumnVector(data, valid);
+        EXPECT_EQ(ThreeValuedLogicOp::TrueCount(vec), expected_true)
+            << "TrueCount failed for size " << size;
+        EXPECT_EQ(ThreeValuedLogicOp::FalseCount(vec), expected_false)
+            << "FalseCount failed for size " << size;
+    }
+}

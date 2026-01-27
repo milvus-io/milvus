@@ -64,12 +64,20 @@ PhyConjunctFilterExpr::UpdateResult(ColumnVectorPtr& input_result,
 
 bool
 PhyConjunctFilterExpr::CanSkipFollowingExprs(ColumnVectorPtr& vec) {
-    if ((is_and_ && common::ThreeValuedLogicOp::TrueCount(vec) == 0) ||
-        (!is_and_ &&
-         common::ThreeValuedLogicOp::TrueCount(vec) == vec->size())) {
-        return true;
+    // For AND: can only skip if ALL rows are definitely FALSE (valid=1, data=0)
+    //   - If any row is TRUE, we need to continue to determine final result
+    //   - If any row is NULL, we need to continue because NULL AND FALSE = FALSE
+    //     but NULL AND TRUE = NULL, so the result depends on following exprs
+    //
+    // For OR: can only skip if ALL rows are definitely TRUE (valid=1, data=1)
+    //   - If any row is FALSE, we need to continue to determine final result
+    //   - If any row is NULL, we need to continue because NULL OR TRUE = TRUE
+    //     but NULL OR FALSE = NULL, so the result depends on following exprs
+    if (is_and_) {
+        return common::ThreeValuedLogicOp::FalseCount(vec) == vec->size();
+    } else {
+        return common::ThreeValuedLogicOp::TrueCount(vec) == vec->size();
     }
-    return false;
 }
 
 void

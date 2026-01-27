@@ -29,42 +29,6 @@
 namespace milvus {
 namespace exec {
 
-template <bool is_and>
-struct ConjunctElementFunc {
-    int64_t
-    operator()(ColumnVectorPtr& input_result, ColumnVectorPtr& result) {
-        TargetBitmapView input_data(input_result->GetRawData(),
-                                    input_result->size());
-        TargetBitmapView res_data(result->GetRawData(), result->size());
-
-        /*
-        // This is the original code, kept here for the documentation purposes        
-        int64_t activate_rows = 0;
-        for (int i = 0; i < result->size(); ++i) {
-            if constexpr (is_and) {
-                res_data[i] &= input_data[i];
-                if (res_data[i]) {
-                    activate_rows++;
-                }
-            } else {
-                res_data[i] |= input_data[i];
-                if (!res_data[i]) {
-                    activate_rows++;
-                }
-            }
-        }
-        */
-
-        if constexpr (is_and) {
-            return (int64_t)res_data.inplace_and_with_count(input_data,
-                                                            res_data.size());
-        } else {
-            return (int64_t)res_data.inplace_or_with_count(input_data,
-                                                           res_data.size());
-        }
-    }
-};
-
 class PhyConjunctFilterExpr : public Expr {
  public:
     PhyConjunctFilterExpr(std::vector<ExprPtr>&& inputs,
@@ -172,16 +136,47 @@ class PhyConjunctFilterExpr : public Expr {
         return inputs_.size() - 1;
     }
 
+    // Set the bitmap input for the next expression in the conjunction.
+    // The bitmap indicates which rows still need to be evaluated.
+    //
+    // For AND: A row needs evaluation if it's currently TRUE or NULL
+    //   - TRUE rows: need to check if they remain TRUE after AND
+    //   - NULL rows: need to check if result becomes FALSE (NULL AND FALSE = FALSE)
+    //   - FALSE rows: already determined, no need to evaluate
+    //   => bitmap = data | ~valid (TRUE or NULL)
+    //
+    // For OR: A row needs evaluation if it's currently FALSE or NULL
+    //   - FALSE rows: need to check if they become TRUE after OR
+    //   - NULL rows: need to check if result becomes TRUE (NULL OR TRUE = TRUE)
+    //   - TRUE rows: already determined, no need to evaluate
+    //   => bitmap = ~data | ~valid (FALSE or NULL)
     void
     SetNextExprBitmapInput(const ColumnVectorPtr& vec, EvalCtx& context) {
-        TargetBitmapView last_res_bitmap(vec->GetRawData(), vec->size());
-        TargetBitmap next_input_bitmap(last_res_bitmap);
+        const size_t size = vec->size();
+        TargetBitmapView data(vec->GetRawData(), size);
+        TargetBitmapView valid(vec->GetValidRawData(), size);
+
+        TargetBitmap next_input_bitmap(size);
+
         if (is_and_) {
-            context.set_bitmap_input(std::move(next_input_bitmap));
+            // bitmap = data | ~valid
+            // Rows that are TRUE (data=1) or NULL (valid=0) need evaluation
+            next_input_bitmap.inplace_or(data, size);
+            TargetBitmap not_valid(valid);
+            not_valid.flip();
+            next_input_bitmap.inplace_or(not_valid, size);
         } else {
-            next_input_bitmap.flip();
-            context.set_bitmap_input(std::move(next_input_bitmap));
+            // bitmap = ~data | ~valid
+            // Rows that are FALSE (data=0) or NULL (valid=0) need evaluation
+            TargetBitmap not_data(data);
+            not_data.flip();
+            next_input_bitmap.inplace_or(not_data, size);
+            TargetBitmap not_valid(valid);
+            not_valid.flip();
+            next_input_bitmap.inplace_or(not_valid, size);
         }
+
+        context.set_bitmap_input(std::move(next_input_bitmap));
     }
 
     void
