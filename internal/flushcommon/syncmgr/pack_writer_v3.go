@@ -18,59 +18,42 @@ package syncmgr
 
 import (
 	"context"
-	"encoding/base64"
-	"math"
 
-	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/apache/arrow/go/v17/arrow/memory"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
-	"github.com/milvus-io/milvus/internal/storage"
+	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-type BulkPackWriterV2 struct {
-	*BulkPackWriter
-	bufferSize          int64
-	multiPartUploadSize int64
+type BulkPackWriterV3 struct {
+	*BulkPackWriterV2
 
-	storageConfig *indexpb.StorageConfig
-	columnGroups  []storagecommon.ColumnGroup
+	manifestPath string
 }
 
-func NewBulkPackWriterV2(metaCache metacache.MetaCache, schema *schemapb.CollectionSchema, chunkManager storage.ChunkManager,
+func NewBulkPackWriterV3(metaCache metacache.MetaCache, schema *schemapb.CollectionSchema, chunkManager storage.ChunkManager,
 	allocator allocator.Interface, bufferSize, multiPartUploadSize int64,
-	storageConfig *indexpb.StorageConfig, columnGroups []storagecommon.ColumnGroup, writeRetryOpts ...retry.Option,
-) *BulkPackWriterV2 {
-	return &BulkPackWriterV2{
-		BulkPackWriter: &BulkPackWriter{
-			metaCache:      metaCache,
-			schema:         schema,
-			chunkManager:   chunkManager,
-			allocator:      allocator,
-			writeRetryOpts: writeRetryOpts,
-		},
-		bufferSize:          bufferSize,
-		multiPartUploadSize: multiPartUploadSize,
-		storageConfig:       storageConfig,
-		columnGroups:        columnGroups,
+	storageConfig *indexpb.StorageConfig, columnGroups []storagecommon.ColumnGroup, curManifestPath string, writeRetryOpts ...retry.Option,
+) *BulkPackWriterV3 {
+	bwV2 := NewBulkPackWriterV2(metaCache, schema, chunkManager, allocator, bufferSize,
+		multiPartUploadSize, storageConfig, columnGroups, writeRetryOpts...)
+	return &BulkPackWriterV3{
+		BulkPackWriterV2: bwV2,
+		manifestPath:     curManifestPath,
 	}
 }
 
-func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
+func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	inserts map[int64]*datapb.FieldBinlog,
 	deltas *datapb.FieldBinlog,
 	stats map[int64]*datapb.FieldBinlog,
@@ -79,6 +62,8 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 	size int64,
 	err error,
 ) {
+	log := log.Ctx(ctx)
+
 	if inserts, manifest, err = bw.writeInserts(ctx, pack); err != nil {
 		log.Error("failed to write insert data", zap.Error(err))
 		return
@@ -97,67 +82,12 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 	}
 
 	size = bw.sizeWritten
-
 	return
 }
 
-// getRootPath returns the rootPath current task shall use.
-// when storageConfig is set, use the rootPath in it.
-// otherwise, use chunkManager.RootPath() instead.
-func (bw *BulkPackWriterV2) getRootPath() string {
-	if bw.storageConfig != nil {
-		return bw.storageConfig.RootPath
-	}
-	return bw.chunkManager.RootPath()
-}
-
-func (bw *BulkPackWriterV2) getBucketName() string {
-	if bw.storageConfig != nil {
-		return bw.storageConfig.BucketName
-	}
-	return paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
-}
-
-func (bw *BulkPackWriterV2) getPluginContext(collectionID int64) *indexcgopb.StoragePluginContext {
-	if !hookutil.IsClusterEncryptionEnabled() {
-		return nil
-	}
-	ez := hookutil.GetEzByCollProperties(bw.schema.GetProperties(), collectionID)
-	if ez == nil {
-		return nil
-	}
-	unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-	if len(unsafe) == 0 {
-		return nil
-	}
-
-	return &indexcgopb.StoragePluginContext{
-		EncryptionZoneId: ez.EzID,
-		CollectionId:     ez.CollectionID,
-		EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
-	}
-}
-
-func (bw *BulkPackWriterV2) getTsRange(rec storage.Record) (tsFrom, tsTo uint64) {
-	tsArray := rec.Column(common.TimeStampField).(*array.Int64)
-	rows := rec.Len()
-	tsFrom = math.MaxUint64
-	tsTo = 0
-	for i := 0; i < rows; i++ {
-		ts := typeutil.Timestamp(tsArray.Value(i))
-		if ts < tsFrom {
-			tsFrom = ts
-		}
-		if ts > tsTo {
-			tsTo = ts
-		}
-	}
-	return tsFrom, tsTo
-}
-
-func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, string, error) {
+func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, string, error) {
 	if len(pack.insertData) == 0 {
-		return make(map[int64]*datapb.FieldBinlog), "", nil
+		return make(map[int64]*datapb.FieldBinlog), bw.manifestPath, nil
 	}
 
 	rec, err := bw.serializeBinlog(ctx, pack)
@@ -174,7 +104,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 
 	if err := retry.Do(ctx, func() error {
 		var err error
-		logs, manifestPath, err = bw.writeInsertsIntoStorage(ctx, pluginContextPtr, pack, rec, tsFrom, tsTo)
+		logs, manifestPath, err = bw.writeInsertsIntoStorage(ctx, pluginContextPtr, rec, tsFrom, tsTo)
 		if err != nil {
 			log.Warn("failed to write inserts into storage",
 				zap.Int64("collectionID", pack.collectionID),
@@ -189,16 +119,15 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	return logs, manifestPath, nil
 }
 
-func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
+func (bw *BulkPackWriterV3) writeInsertsIntoStorage(ctx context.Context,
 	pluginContextPtr *indexcgopb.StoragePluginContext,
-	pack *SyncPack,
 	rec storage.Record,
 	tsFrom typeutil.Timestamp,
 	tsTo typeutil.Timestamp,
 ) (map[int64]*datapb.FieldBinlog, string, error) {
+	log := log.Ctx(ctx)
 	logs := make(map[int64]*datapb.FieldBinlog)
 	columnGroups := bw.columnGroups
-	bucketName := bw.getBucketName()
 
 	var err error
 	doWrite := func(w storage.RecordWriter) error {
@@ -223,23 +152,17 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 		return result
 	}
 
-	paths := make([]string, 0)
-	for _, columnGroup := range columnGroups {
-		id, err := bw.allocator.AllocOne()
-		if err != nil {
-			return nil, "", err
-		}
-		path := metautil.BuildInsertLogPath(bw.getRootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroup.GroupID, id)
-		paths = append(paths, path)
+	basePath, version, err := packed.UnmarshalManfestPath(bw.manifestPath)
+	if err != nil {
+		return nil, "", err
 	}
-	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
+	w, err := storage.NewPackedRecordManifestWriter(basePath, version, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
 	if err != nil {
 		return nil, "", err
 	}
 	if err = doWrite(w); err != nil {
 		return nil, "", err
 	}
-	// workaround to store row num
 	for _, columnGroup := range columnGroups {
 		columnGroupID := columnGroup.GroupID
 		logs[columnGroupID] = &datapb.FieldBinlog{
@@ -258,32 +181,6 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 			},
 		}
 	}
-
+	manifestPath = w.GetWrittenManifest()
 	return logs, manifestPath, nil
-}
-
-func (bw *BulkPackWriterV2) serializeBinlog(_ context.Context, pack *SyncPack) (storage.Record, error) {
-	if len(pack.insertData) == 0 {
-		return nil, nil
-	}
-	arrowSchema, err := storage.ConvertToArrowSchema(bw.schema, true)
-	if err != nil {
-		return nil, err
-	}
-	builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
-	defer builder.Release()
-
-	for _, chunk := range pack.insertData {
-		if err := storage.BuildRecord(builder, chunk, bw.schema); err != nil {
-			return nil, err
-		}
-	}
-
-	rec := builder.NewRecord()
-	allFields := typeutil.GetAllFieldSchemas(bw.schema)
-	field2Col := make(map[storage.FieldID]int, len(allFields))
-	for c, field := range allFields {
-		field2Col[field.FieldID] = c
-	}
-	return storage.NewSimpleArrowRecord(rec, field2Col), nil
 }

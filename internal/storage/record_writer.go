@@ -70,7 +70,6 @@ func (pw *packedRecordWriter) Write(r Record) error {
 	}
 	pw.rowNum += int64(r.Len())
 	for col, arr := range rec.Columns() {
-		// size := arr.Data().SizeInBytes()
 		size := calculateActualDataSize(arr)
 		pw.writtenUncompressed += size
 		for _, columnGroup := range pw.columnGroups {
@@ -218,7 +217,6 @@ func (pw *packedRecordManifestWriter) Write(r Record) error {
 	}
 	pw.rowNum += int64(r.Len())
 	for col, arr := range rec.Columns() {
-		// size := arr.Data().SizeInBytes()
 		size := calculateActualDataSize(arr)
 		pw.writtenUncompressed += size
 		for _, columnGroup := range pw.columnGroups {
@@ -279,7 +277,6 @@ func (pw *packedRecordManifestWriter) Close() error {
 }
 
 func NewPackedRecordManifestWriter(
-	bucketName string,
 	basePath string,
 	baseVersion int64,
 	schema *schemapb.CollectionSchema,
@@ -324,7 +321,6 @@ func NewPackedRecordManifestWriter(
 		schema:                  schema,
 		arrowSchema:             arrowSchema,
 		bufferSize:              bufferSize,
-		bucketName:              bucketName,
 		pathsMap:                pathsMap,
 		columnGroups:            columnGroups,
 		columnGroupUncompressed: columnGroupUncompressed,
