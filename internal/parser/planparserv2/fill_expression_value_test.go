@@ -579,3 +579,52 @@ func (s *FillExpressionValueSuite) TestBinaryRangeWithMixedNumericTypesForJSON()
 		s.Equal(float64(100.5), bre.GetUpperValue().GetFloatVal())
 	})
 }
+
+func (s *FillExpressionValueSuite) TestBinaryArithOpEvalRangeDivisionByZero() {
+	schemaH := newTestSchemaHelper(s.T())
+
+	s.Run("division by integer zero should fail", func() {
+		exprStr := `Int64Field / {divisor} == {value}`
+		templateValues := map[string]*schemapb.TemplateValue{
+			"divisor": generateTemplateValue(schemapb.DataType_Int64, int64(0)),
+			"value":   generateTemplateValue(schemapb.DataType_Int64, int64(5)),
+		}
+		s.assertInvalidExpr(schemaH, exprStr, templateValues)
+	})
+
+	s.Run("division by float zero should fail", func() {
+		exprStr := `FloatField / {divisor} == {value}`
+		templateValues := map[string]*schemapb.TemplateValue{
+			"divisor": generateTemplateValue(schemapb.DataType_Double, float64(0.0)),
+			"value":   generateTemplateValue(schemapb.DataType_Double, float64(5.0)),
+		}
+		s.assertInvalidExpr(schemaH, exprStr, templateValues)
+	})
+
+	s.Run("modulo by integer zero should fail", func() {
+		exprStr := `Int64Field % {divisor} == {value}`
+		templateValues := map[string]*schemapb.TemplateValue{
+			"divisor": generateTemplateValue(schemapb.DataType_Int64, int64(0)),
+			"value":   generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+		}
+		s.assertInvalidExpr(schemaH, exprStr, templateValues)
+	})
+
+	s.Run("division by non-zero should succeed", func() {
+		exprStr := `Int64Field / {divisor} == {value}`
+		templateValues := map[string]*schemapb.TemplateValue{
+			"divisor": generateTemplateValue(schemapb.DataType_Int64, int64(2)),
+			"value":   generateTemplateValue(schemapb.DataType_Int64, int64(5)),
+		}
+		s.assertValidExpr(schemaH, exprStr, templateValues)
+	})
+
+	s.Run("modulo by non-zero should succeed", func() {
+		exprStr := `Int64Field % {divisor} == {value}`
+		templateValues := map[string]*schemapb.TemplateValue{
+			"divisor": generateTemplateValue(schemapb.DataType_Int64, int64(3)),
+			"value":   generateTemplateValue(schemapb.DataType_Int64, int64(1)),
+		}
+		s.assertValidExpr(schemaH, exprStr, templateValues)
+	})
+}
