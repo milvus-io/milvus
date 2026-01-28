@@ -2486,9 +2486,7 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	wg.Add(1)
 	t.Run("truncate collection", func(t *testing.T) {
-		defer wg.Done()
 		_, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
@@ -2511,7 +2509,6 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, "0", rowNumStr)
 	})
 
-	wg.Add(1)
 	t.Run("drop collection", func(t *testing.T) {
 		_, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
@@ -2733,15 +2730,12 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
-	wg.Add(1)
 	t.Run("TruncateCollection fail, unhealthy", func(t *testing.T) {
-		defer wg.Done()
 		resp, err := proxy.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	wg.Add(1)
 	t.Run("HasCollection fail, unhealthy", func(t *testing.T) {
 		resp, err := proxy.HasCollection(ctx, &milvuspb.HasCollectionRequest{})
 		assert.NoError(t, err)
@@ -3039,15 +3033,12 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
-	wg.Add(1)
 	t.Run("TruncateCollection fail, dd queue full", func(t *testing.T) {
-		defer wg.Done()
 		resp, err := proxy.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	wg.Add(1)
 	t.Run("HasCollection fail, dd queue full", func(t *testing.T) {
 		resp, err := proxy.HasCollection(ctx, &milvuspb.HasCollectionRequest{})
 		assert.NoError(t, err)
@@ -3270,15 +3261,12 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
-	wg.Add(1)
 	t.Run("TruncateCollection fail, timeout", func(t *testing.T) {
-		defer wg.Done()
 		resp, err := proxy.TruncateCollection(shortCtx, &milvuspb.TruncateCollectionRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	wg.Add(1)
 	t.Run("HasCollection fail, timeout", func(t *testing.T) {
 		resp, err := proxy.HasCollection(shortCtx, &milvuspb.HasCollectionRequest{})
 		assert.NoError(t, err)
