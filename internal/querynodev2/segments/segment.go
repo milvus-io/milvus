@@ -882,7 +882,6 @@ func (s *LocalSegment) AddFieldDataInfo(ctx context.Context, rowCount int64, fie
 		zap.Int64("row count", rowCount),
 	)
 
-	collection := s.collection
 	req := &segcore.AddFieldDataInfoRequest{
 		Fields:         make([]segcore.LoadFieldDataInfo, 0, len(fields)),
 		RowCount:       rowCount,
@@ -890,13 +889,8 @@ func (s *LocalSegment) AddFieldDataInfo(ctx context.Context, rowCount int64, fie
 		StorageVersion: s.loadInfo.Load().GetStorageVersion(),
 	}
 	for _, field := range fields {
-		fieldSchema, _ := getFieldSchema(collection.Schema(), field.GetFieldID())
-		mmapEnabled := isDataMmapEnable(fieldSchema)
-		warmupPolicy := getFieldWarmupPolicy(fieldSchema)
 		req.Fields = append(req.Fields, segcore.LoadFieldDataInfo{
-			Field:        field,
-			EnableMMap:   mmapEnabled,
-			WarmupPolicy: warmupPolicy,
+			Field: field,
 		})
 	}
 
@@ -992,7 +986,6 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	fieldSchema *schemapb.FieldSchema,
 	loadInfo *querypb.SegmentLoadInfo,
 	indexInfo *querypb.FieldIndexInfo,
-	collectionProps []*commonpb.KeyValuePair,
 	f func(c *LoadIndexInfo) error,
 ) error {
 	// 1.
@@ -1119,7 +1112,7 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 	fieldType schemapb.DataType,
 ) error {
 	err := GetCLoadInfoWithFunc(ctx, fieldSchema,
-		s.LoadInfo(), indexInfo, s.collection.Schema().GetProperties(), func(loadIndexInfo *LoadIndexInfo) error {
+		s.LoadInfo(), indexInfo, func(loadIndexInfo *LoadIndexInfo) error {
 			newLoadIndexInfoSpan := tr.RecordSpan()
 
 			if err := loadIndexInfo.loadIndex(ctx); err != nil {
