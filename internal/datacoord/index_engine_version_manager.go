@@ -3,6 +3,7 @@ package datacoord
 import (
 	"math"
 
+	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -42,6 +43,8 @@ type IndexEngineVersionManager interface {
 	GetMinimalScalarIndexEngineVersion() int32
 
 	GetIndexNonEncoding() bool
+
+	GetMinimalSessionVer() semver.Version
 }
 
 type versionManagerImpl struct {
@@ -49,6 +52,7 @@ type versionManagerImpl struct {
 	versions            map[int64]sessionutil.IndexEngineVersion
 	scalarIndexVersions map[int64]sessionutil.IndexEngineVersion
 	indexNonEncoding    map[int64]bool
+	sessionVersion      map[int64]semver.Version
 }
 
 func newIndexEngineVersionManager() IndexEngineVersionManager {
@@ -56,6 +60,7 @@ func newIndexEngineVersionManager() IndexEngineVersionManager {
 		versions:            map[int64]sessionutil.IndexEngineVersion{},
 		scalarIndexVersions: map[int64]sessionutil.IndexEngineVersion{},
 		indexNonEncoding:    map[int64]bool{},
+		sessionVersion:      map[int64]semver.Version{},
 	}
 }
 
@@ -108,10 +113,15 @@ func (m *versionManagerImpl) Update(session *sessionutil.Session) {
 }
 
 func (m *versionManagerImpl) addOrUpdate(session *sessionutil.Session) {
-	log.Info("addOrUpdate version", zap.Int64("nodeId", session.ServerID), zap.Int32("minimal", session.IndexEngineVersion.MinimalIndexVersion), zap.Int32("current", session.IndexEngineVersion.CurrentIndexVersion), zap.Int32("currentScalar", session.ScalarIndexEngineVersion.CurrentIndexVersion))
+	log.Info("addOrUpdate version", zap.Int64("nodeId", session.ServerID),
+		zap.String("sessionVersion", session.Version.String()),
+		zap.Int32("minimal", session.IndexEngineVersion.MinimalIndexVersion),
+		zap.Int32("current", session.IndexEngineVersion.CurrentIndexVersion),
+		zap.Int32("currentScalar", session.ScalarIndexEngineVersion.CurrentIndexVersion))
 	m.versions[session.ServerID] = session.IndexEngineVersion
 	m.scalarIndexVersions[session.ServerID] = session.ScalarIndexEngineVersion
 	m.indexNonEncoding[session.ServerID] = session.IndexNonEncoding
+	m.sessionVersion[session.ServerID] = session.Version
 }
 
 func (m *versionManagerImpl) GetCurrentIndexEngineVersion() int32 {
@@ -203,4 +213,21 @@ func (m *versionManagerImpl) GetIndexNonEncoding() bool {
 		noneEncoding = noneEncoding && encoding
 	}
 	return noneEncoding
+}
+
+func (m *versionManagerImpl) GetMinimalSessionVer() semver.Version {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	minVer := semver.Version{}
+	first := true
+	for _, version := range m.sessionVersion {
+		if first {
+			minVer = version
+			first = false
+		} else if version.LT(minVer) {
+			minVer = version
+		}
+	}
+	return minVer
 }
