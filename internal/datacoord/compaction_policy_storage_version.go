@@ -20,9 +20,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"go.uber.org/zap"
 
-	"github.com/blang/semver/v4"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
