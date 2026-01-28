@@ -34,6 +34,10 @@ namespace {
 template <typename T, typename U>
 decltype(auto)
 safe_mod(T a, U b) {
+    if (b == 0) {
+        ThrowInfo(ErrorCode::ExprInvalid,
+                  "modulus by zero in arithmetic expression");
+    }
     if constexpr (std::is_floating_point_v<T> || std::is_floating_point_v<U>) {
         return std::fmod(a, b);
     } else {
@@ -114,6 +118,16 @@ struct ArithOpElementFunc {
                HighPrecisonType right_operand,
                TargetBitmapView res,
                const int32_t* offsets = nullptr) {
+        // Validate divisor for division/modulo operations
+        if constexpr (arith_op == proto::plan::ArithOpType::Div ||
+                      arith_op == proto::plan::ArithOpType::Mod) {
+            if (right_operand == 0) {
+                ThrowInfo(
+                    ErrorCode::ExprInvalid,
+                    "division or modulus by zero in arithmetic expression");
+            }
+        }
+
         // This is the original code, kept here for the documentation purposes
         // and also this code will be used for iterative filter since iterative filter does not execute as a batch manner
         if constexpr (filter_type == FilterType::random) {
@@ -301,6 +315,16 @@ struct ArithOpIndexFunc {
                HighPrecisonType val,
                HighPrecisonType right_operand,
                const int32_t* offsets = nullptr) {
+        // Validate divisor for division/modulo operations
+        if constexpr (arith_op == proto::plan::ArithOpType::Div ||
+                      arith_op == proto::plan::ArithOpType::Mod) {
+            if (right_operand == 0) {
+                ThrowInfo(
+                    ErrorCode::ExprInvalid,
+                    "division or modulus by zero in arithmetic expression");
+            }
+        }
+
         TargetBitmap res(size);
         for (size_t i = 0; i < size; ++i) {
             auto offset = i;
