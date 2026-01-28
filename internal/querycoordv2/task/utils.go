@@ -406,6 +406,12 @@ func applyIndexWarmupSetting(loadInfo *querypb.SegmentLoadInfo, schema *schemapb
 	for _, field := range schema.GetFields() {
 		fieldMap[field.GetFieldID()] = field
 	}
+	// Include nested fields from struct arrays
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, field := range structField.GetFields() {
+			fieldMap[field.GetFieldID()] = field
+		}
+	}
 
 	for _, indexInfo := range loadInfo.GetIndexInfos() {
 		// Check if index params already has warmup setting

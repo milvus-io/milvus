@@ -1164,8 +1164,8 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 
 	// Text match index mmap config is based on the raw data mmap.
 	enableMmap := isDataMmapEnable(f)
-	// Text match index is a scalar index, use scalar index warmup policy
-	warmupPolicy := getScalarIndexWarmupPolicy(f)
+	// Text match index should based on scala field's warmup policy like mmap
+	warmupPolicy := getScalarDataWarmupPolicy(f)
 	cgoProto := &indexcgopb.LoadTextIndexInfo{
 		FieldID:      textLogs.GetFieldID(),
 		Version:      textLogs.GetVersion(),
@@ -1226,8 +1226,8 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		return err
 	}
 
-	// JSON key stats is a scalar index, use scalar index warmup policy
-	warmupPolicy := getScalarIndexWarmupPolicy(f)
+	// JSON key stats should based on scala field's warmup policy
+	warmupPolicy := getScalarDataWarmupPolicy(f)
 
 	cgoProto := &indexcgopb.LoadJsonKeyIndexInfo{
 		FieldID:      jsonKeyStats.GetFieldID(),

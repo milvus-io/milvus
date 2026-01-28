@@ -356,15 +356,13 @@ func getIndexWarmupPolicy(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.
 	return params.Params.QueryNodeCfg.TieredWarmupScalarIndex.GetValue()
 }
 
-// getScalarIndexWarmupPolicy returns the warmup policy for scalar index loading (e.g., json key stats).
+// getScalarDataWarmupPolicy returns the warmup policy for scalar data, but also include json key stats and text match.
 // Priority: field TypeParams (propagated from collection-level by QueryCoord) > global config
-func getScalarIndexWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
+func getScalarDataWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
 	// Check field TypeParams (collection-level warmup.scalarField is propagated
-	// to field TypeParams by QueryCoord, which also applies to scalar indexes like json key stats)
 	policy, exist := common.GetWarmupPolicy(fieldSchema.GetTypeParams()...)
 	if exist {
 		return policy
 	}
-	// Fall back to global config for scalar index
-	return params.Params.QueryNodeCfg.TieredWarmupScalarIndex.GetValue()
+	return params.Params.QueryNodeCfg.TieredWarmupScalarField.GetValue()
 }
