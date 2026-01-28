@@ -15,6 +15,8 @@
 // limitations under the License.
 #include <cstddef>
 #include <algorithm>
+#include <atomic>
+#include "common/OpContext.h"
 #include "milvus-storage/common/metadata.h"
 #include "segcore/memory_planner.h"
 #include <memory>
@@ -29,9 +31,11 @@
 #include "arrow/type.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
+#include "folly/ScopeGuard.h"
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "log/Log.h"
+#include "segcore/Utils.h"
 #include "storage/ThreadPools.h"
 #include "common/Common.h"
 #include "storage/KeyRetriever.h"
@@ -245,6 +249,139 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
         channel->close();
         throw e;
     }
+}
+
+std::vector<std::future<void>>
+LoadWithStrategyAsync(milvus::OpContext* op_ctx,
+                      const std::vector<std::string>& remote_files,
+                      std::shared_ptr<ArrowReaderChannel>& channel,
+                      int64_t memory_limit,
+                      std::unique_ptr<RowGroupSplitStrategy> strategy,
+                      const std::vector<std::vector<int64_t>>& row_group_lists,
+                      const milvus_storage::ArrowFileSystemPtr& fs,
+                      const std::shared_ptr<arrow::Schema>& schema,
+                      milvus::proto::common::LoadPriority priority) {
+    AssertInfo(remote_files.size() == row_group_lists.size(),
+               "[StorageV2] Number of remote files must match number of "
+               "row group lists");
+    auto& pool = ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
+
+    // First pass: split row groups and count total number of tasks
+    // Cache the blocks to avoid calling split() twice
+    std::vector<std::vector<RowGroupBlock>> all_blocks;
+    all_blocks.reserve(remote_files.size());
+    size_t total_tasks = 0;
+
+    for (size_t file_idx = 0; file_idx < remote_files.size(); ++file_idx) {
+        const auto& row_groups = row_group_lists[file_idx];
+        if (!row_groups.empty()) {
+            auto blocks = strategy->split(row_groups);
+            total_tasks += blocks.size();
+            all_blocks.push_back(std::move(blocks));
+        } else {
+            all_blocks.emplace_back();  // empty vector for this file
+        }
+    }
+
+    // If no tasks, close channel immediately and return
+    if (total_tasks == 0) {
+        channel->close();
+        return {};
+    }
+
+    // Use atomic counter to track remaining tasks.
+    // The last task to complete will close the channel.
+    // This avoids the deadlock caused by std::packaged_task holding
+    // the callable (and captured shared_ptr) in its shared_state,
+    // which is only released when the future is destroyed.
+    auto remaining_tasks = std::make_shared<std::atomic<size_t>>(total_tasks);
+
+    // Create and submit tasks for each block
+    std::vector<std::future<void>> futures;
+    futures.reserve(total_tasks);
+
+    for (size_t file_idx = 0; file_idx < remote_files.size(); ++file_idx) {
+        const auto& file = remote_files[file_idx];
+        const auto& blocks = all_blocks[file_idx];
+
+        if (blocks.empty()) {
+            continue;
+        }
+
+        LOG_INFO("[StorageV2] split row groups into blocks: {} for file {}",
+                 blocks.size(),
+                 file);
+
+        auto reader_memory_limit = std::max<int64_t>(
+            memory_limit / blocks.size(), FILE_SLICE_SIZE.load());
+
+        for (const auto& block : blocks) {
+            futures.emplace_back(pool.Submit([block,
+                                              fs,
+                                              file,
+                                              file_idx,
+                                              schema,
+                                              reader_memory_limit,
+                                              channel,
+                                              remaining_tasks,
+                                              op_ctx]() {
+                // Use a guard to ensure we always decrement the counter
+                // and close the channel when the last task completes,
+                // even if an exception is thrown.
+                auto task_guard =
+                    folly::makeGuard([&channel, &remaining_tasks]() {
+                        if (remaining_tasks->fetch_sub(1) == 1) {
+                            // This is the last task, close the channel
+                            channel->close();
+                        }
+                    });
+
+                AssertInfo(fs != nullptr, "[StorageV2] file system is nullptr");
+                CheckCancellation(op_ctx, -1, "LoadWithStrategyAsync");
+                auto result = milvus_storage::FileRowGroupReader::Make(
+                    fs,
+                    file,
+                    schema,
+                    reader_memory_limit,
+                    milvus::storage::GetReaderProperties());
+                AssertInfo(result.ok(),
+                           "[StorageV2] Failed to create row group reader: " +
+                               result.status().ToString());
+                auto row_group_reader = result.ValueOrDie();
+                auto status = row_group_reader->SetRowGroupOffsetAndCount(
+                    block.offset, block.count);
+                AssertInfo(status.ok(),
+                           "[StorageV2] Failed to set row group offset "
+                           "and count " +
+                               std::to_string(block.offset) + " and " +
+                               std::to_string(block.count) + " with error " +
+                               status.ToString());
+                auto ret = std::make_shared<ArrowDataWrapper>();
+                for (int64_t i = 0; i < block.count; ++i) {
+                    std::shared_ptr<arrow::Table> table;
+                    auto status = row_group_reader->ReadNextRowGroup(&table);
+                    AssertInfo(status.ok(),
+                               "[StorageV2] Failed to read row group " +
+                                   std::to_string(block.offset + i) +
+                                   " from file " + file + " with error " +
+                                   status.ToString());
+                    ret->arrow_tables.push_back(
+                        {file_idx,
+                         static_cast<size_t>(block.offset + i),
+                         table});
+                }
+                auto close_status = row_group_reader->Close();
+                AssertInfo(close_status.ok(),
+                           "[StorageV2] Failed to close row group reader "
+                           "for file " +
+                               file + " with error " + close_status.ToString());
+
+                channel->push(ret);
+            }));
+        }
+    }
+
+    return futures;
 }
 
 }  // namespace milvus::segcore
