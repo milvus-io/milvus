@@ -2958,6 +2958,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     bool index_has_rawdata = true;
     bool has_mmap_setting = false;
     bool mmap_enabled = false;
+    bool has_warmup_setting = false;
+    bool warmup_sync = false;
     for (auto& [field_id, field_meta] : field_metas) {
         if (IsVectorDataType(field_meta.get_data_type())) {
             is_vector = true;
@@ -2977,12 +2979,24 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             schema_->MmapEnabled(field_id);
         has_mmap_setting = has_mmap_setting || field_has_setting;
         mmap_enabled = mmap_enabled || field_mmap_enabled;
+
+        // if field has warmup setting, use it
+        // - warmup setting at collection level, uses appropriate key based on field type
+        // - warmup setting at field level, use the most aggressive policy (sync > disable)
+        // Note: this is for field data loading, not index (is_index = false)
+        bool field_is_vector = IsVectorDataType(field_meta.get_data_type());
+        auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
+            field_id, field_is_vector, /*is_index=*/false);
+        if (field_has_warmup) {
+            has_warmup_setting = true;
+            warmup_sync = warmup_sync || (field_warmup_policy == "sync");
+        }
     }
 
-    // Determine warmup policy based on whether it's vector field
-    // (manifest path uses global config since per-field warmup info is not available)
-    // Pass empty string to use global config
-    std::string warmup_policy = "";
+    // Determine warmup policy: use per-field settings if any,
+    // otherwise pass empty string to fall back to global config
+    std::string warmup_policy =
+        has_warmup_setting ? (warmup_sync ? "sync" : "disable") : "";
 
     if (index_has_rawdata) {
         LOG_INFO(

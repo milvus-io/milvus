@@ -1252,11 +1252,11 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 				return err
 			}
 			if loaded {
-				if hasMmap {
+				// keeping the original error msg here for compatibility
+				if hasMmap || hasLazyLoad {
 					return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
-				} else if hasLazyLoad {
-					return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter lazyload properties if collection loaded")
-				} else if hasWarmup {
+				}
+				if hasWarmup {
 					return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter warmup properties if collection loaded")
 				}
 			}
