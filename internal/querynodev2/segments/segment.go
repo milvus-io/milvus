@@ -817,7 +817,7 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 }
 
 // -------------------------------------------------------------------------------------- interfaces for sealed segment
-func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog, warmupPolicy ...string) error {
+func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
@@ -842,14 +842,7 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		return err
 	}
 	mmapEnabled := isDataMmapEnable(fieldSchema)
-
-	// Determine warmup policy: use passed-in value or get from field schema
-	fieldWarmupPolicy := ""
-	if len(warmupPolicy) > 0 {
-		fieldWarmupPolicy = warmupPolicy[0]
-	} else {
-		fieldWarmupPolicy = getFieldWarmupPolicy(fieldSchema)
-	}
+	fieldWarmupPolicy := getFieldWarmupPolicy(fieldSchema)
 
 	req := &segcore.LoadFieldDataRequest{
 		Fields: []segcore.LoadFieldDataInfo{{
@@ -1178,8 +1171,8 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 
 	// Text match index mmap config is based on the raw data mmap.
 	enableMmap := isDataMmapEnable(f)
-	// Text match index is a scalar index, use scalar index warmup policy
-	warmupPolicy := getScalarIndexWarmupPolicy(f)
+	// Text match index should based on scala field's warmup policy like mmap
+	warmupPolicy := getScalarDataWarmupPolicy(f)
 	cgoProto := &indexcgopb.LoadTextIndexInfo{
 		FieldID:                   textLogs.GetFieldID(),
 		Version:                   textLogs.GetVersion(),
@@ -1241,8 +1234,8 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		return err
 	}
 
-	// JSON key stats is a scalar index, use scalar index warmup policy
-	warmupPolicy := getScalarIndexWarmupPolicy(f)
+	// JSON key stats should based on scala field's warmup policy
+	warmupPolicy := getScalarDataWarmupPolicy(f)
 
 	cgoProto := &indexcgopb.LoadJsonKeyIndexInfo{
 		FieldID:      jsonKeyStats.GetFieldID(),

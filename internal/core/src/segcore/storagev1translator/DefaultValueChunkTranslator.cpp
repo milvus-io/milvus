@@ -40,12 +40,13 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
             // Cell IDs are identical to chunk IDs.
             milvus::cachinglayer::CellIdMappingMode::IDENTICAL,
             milvus::segcore::getCellDataType(
-                /* is_index */ false,
-                /* is_vector */ false),
+                IsVectorDataType(field_meta.get_data_type()),
+                /* is_index */ false),
             milvus::segcore::getCacheWarmupPolicy(
                 warmup_policy,
                 IsVectorDataType(field_meta.get_data_type()),
-                /* is_index */ false),
+                /* is_index */ false,
+                /* in_load_list, set to false to reduce memory usage */ false),
             /* support_eviction */ false) {
     // Split rows into ~64KB cells according to value_size().
     // Fallback to single-cell if value_size() is not well-defined.

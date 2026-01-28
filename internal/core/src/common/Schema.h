@@ -468,7 +468,7 @@ class Schema {
         auto& meta = fields_.at(field_id);
         return meta.get_name().get();
     }
-    
+
     /**
      * @brief Get the warmup policy for a specific field.
      *
@@ -521,7 +521,7 @@ class Schema {
 
     // Cache for struct_name -> first array field mapping (built during AddField)
     std::unordered_map<std::string, FieldId> struct_array_field_cache_;
-    
+
     // warmup policy settings
     // Valid values: "disable", "sync" (empty string means no setting)
     // Collection-level warmup policies for different data types

@@ -505,10 +505,6 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             storage::SortByPath(file_infos);
 
             auto field_meta = schema_->operator[](field_id);
-            // Use per-field warmup policy if set, otherwise fall back to global
-            std::string field_warmup_policy = !info.warmup_policy.empty()
-                                                  ? info.warmup_policy
-                                                  : load_info.warmup_policy;
             std::unique_ptr<Translator<milvus::Chunk>> translator =
                 std::make_unique<storagev1translator::ChunkTranslator>(
                     this->get_segment_id(),
@@ -518,7 +514,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                     info.enable_mmap,
                     mmap_config.GetMmapPopulate(),
                     load_info.load_priority,
-                    field_warmup_policy);
+                    info.warmup_policy);
 
             auto data_type = field_meta.get_data_type();
             auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
@@ -1930,6 +1926,9 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
     config[milvus::index::INDEX_FILES] = files;
     config[milvus::LOAD_PRIORITY] = info_proto->load_priority();
     config[milvus::index::ENABLE_MMAP] = info_proto->enable_mmap();
+    if (info_proto->warmup_policy() != "") {
+        config[milvus::index::WARMUP] = info_proto->warmup_policy();
+    }
     milvus::storage::FileManagerContext file_ctx(
         field_data_meta, index_meta, remote_chunk_manager, fs);
 
@@ -2957,16 +2956,10 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
     int64_t size = num_rows_.value();
     AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
     auto field_data_info = FieldDataInfo(field_id.get(), size, mmap_dir_path);
-    // Determine warmup policy: use per-field setting if available,
-    // otherwise fall back to global warmup policy
-    std::string warmup_policy;
-    auto iter = field_data_info_.field_infos.find(field_id.get());
-    if (iter != field_data_info_.field_infos.end() &&
-        !iter->second.warmup_policy.empty()) {
-        warmup_policy = iter->second.warmup_policy;
-    } else {
-        warmup_policy = field_data_info_.warmup_policy;
-    }
+
+    auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
+        field_id, IsVectorDataType(data_type), /*is_index=*/false);
+    std::string warmup_policy = field_has_warmup ? field_warmup_policy : "";
     std::unique_ptr<Translator<milvus::Chunk>> translator =
         std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
             get_segment_id(),
@@ -3159,20 +3152,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             .GetChunkManager()
             ->GetRootPath();
 
-    // Aggregate warmup policy from child fields using OR logic:
-    // if ANY field requires 'sync', the entire group uses 'sync'
-    // Reset warmup settings to use field_data_info_ based approach
-    has_warmup_setting = false;
-    warmup_sync = false;
-    for (const auto& field_id : milvus_field_ids) {
-        auto iter = field_data_info_.field_infos.find(field_id.get());
-        if (iter != field_data_info_.field_infos.end() &&
-            !iter->second.warmup_policy.empty()) {
-            has_warmup_setting = true;
-            warmup_sync =
-                warmup_sync || (iter->second.warmup_policy == "sync");
-        }
-    }
     // Determine warmup policy: use per-field settings if any,
     // otherwise pass empty string to fall back to global config
     std::string warmup_policy =
@@ -3326,7 +3305,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         LoadFieldDataInfo load_field_data_info;
         load_field_data_info.storage_version =
             segment_load_info_.GetStorageVersion();
-        // when child fields specified, field id is group id, child field ids are actual id values here
+        // xds specified, field id is group id, child field ids are actual id values here
         if (field_binlog.child_fields_size() > 0) {
             field_ids.reserve(field_binlog.child_fields_size());
             for (auto field_id : field_binlog.child_fields()) {
@@ -3415,8 +3394,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         // Determine group warmup policy: use per-field settings if any,
         // otherwise fall back to global warmup policy
         field_binlog_info.warmup_policy =
-            has_warmup_setting ? (warmup_sync ? "sync" : "disable")
-                               : field_data_info_.warmup_policy;
+            has_warmup_setting ? (warmup_sync ? "sync" : "disable") : "";
 
         // Store in map
         load_field_data_info.field_infos[group_id] = field_binlog_info;

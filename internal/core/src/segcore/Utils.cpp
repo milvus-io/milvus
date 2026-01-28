@@ -1303,9 +1303,8 @@ getCacheWarmupPolicy(const std::string& warmup_policy,
         } else if (warmup_policy == "sync") {
             return CacheWarmupPolicy::CacheWarmupPolicy_Sync;
         }
-        // Unknown policy string, fall through to global config
-        LOG_WARN("Unknown warmup policy '{}', falling back to global config",
-                 warmup_policy);
+        // Unknown policy string, should not happen, been checked by milvus proxy side
+        AssertInfo(false, "Unknown warmup policy '{}'", warmup_policy);
     }
 
     // Fall back to global config

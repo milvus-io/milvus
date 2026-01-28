@@ -35,7 +35,7 @@ class DefaultValueChunkTranslator
                                 FieldDataInfo field_data_info,
                                 bool use_mmap,
                                 bool mmap_populate,
-                                const std::string& warmup_policy);
+                                const std::string& warmup_policy = "");
     ~DefaultValueChunkTranslator() override;
     size_t
     num_cells() const override;

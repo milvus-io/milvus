@@ -95,7 +95,8 @@ ChunkTranslator::ChunkTranslator(
             milvus::segcore::getCacheWarmupPolicy(
                 warmup_policy,
                 IsVectorDataType(field_meta.get_data_type()),
-                /* is_index */ false),
+                /* is_index */ false,
+                /* in_load_list*/ field_data_info.in_load_list),
             /* support_eviction */ true),
       load_priority_(load_priority) {
     AssertInfo(!SystemProperty::Instance().IsSystem(FieldId(field_id_)),
