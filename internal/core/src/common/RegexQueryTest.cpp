@@ -187,7 +187,7 @@ struct MockStringIndex : index::StringIndexMarisa {
     }
 
     bool
-    SupportRegexQuery() const override {
+    SupportPatternQuery() const override {
         return false;
     }
 };

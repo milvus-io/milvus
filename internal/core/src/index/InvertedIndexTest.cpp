@@ -825,9 +825,9 @@ test_string() {
         }
 
         {
-            ASSERT_TRUE(real_index->SupportRegexQuery());
+            ASSERT_TRUE(real_index->SupportPatternQuery());
             auto prefix = data[0];
-            auto bitset = real_index->RegexQuery(prefix + "(.|\n)*");
+            auto bitset = real_index->PatternQuery(prefix + "(.|\n)*");
             ASSERT_EQ(cnt, bitset.size());
             size_t start = 0;
             if (has_lack_binlog_row_) {

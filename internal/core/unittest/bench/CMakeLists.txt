@@ -40,3 +40,11 @@ target_link_libraries(indexbuilder_bench
         )
 
 target_link_libraries(indexbuilder_bench benchmark_main)
+
+# Regex query benchmark
+add_executable(regex_bench bench_regex_query.cpp)
+target_link_libraries(regex_bench
+        milvus_core
+        pthread
+        )
+target_link_libraries(regex_bench benchmark_main)
