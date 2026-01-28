@@ -1142,6 +1142,22 @@ func (scheduler *taskScheduler) checkStale(task Task) error {
 		}
 	}
 
+	// For segment grow tasks, check if segment is already loaded in dist.
+	// This prevents duplicate load tasks when checker generates tasks using stale dist snapshot
+	// but dist has been updated before the task is processed.
+	if segmentTask, ok := task.(*SegmentTask); ok && GetTaskType(task) == TaskTypeGrow && replica != nil {
+		existsInDist := scheduler.distMgr.SegmentDistManager.GetByFilter(
+			meta.WithCollectionID(task.CollectionID()),
+			meta.WithReplica(replica),
+			meta.WithSegmentID(segmentTask.SegmentID()),
+		)
+		if len(existsInDist) > 0 {
+			log.Info("task stale due to segment already loaded in dist",
+				zap.Int64("segmentID", segmentTask.SegmentID()))
+			return merr.WrapErrServiceInternal("segment already loaded in dist")
+		}
+	}
+
 	for _, action := range task.Actions() {
 		// Determine the target node for stale checking.
 		// For LeaderAction, we need to check the leader node (delegator) instead of the worker node.
