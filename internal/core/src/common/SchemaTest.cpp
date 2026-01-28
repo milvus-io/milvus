@@ -210,3 +210,205 @@ TEST_F(SchemaTest, MmapEnabledMultipleFields) {
         EXPECT_FALSE(enabled);
     }
 }
+
+// WarmupPolicy tests
+
+TEST_F(SchemaTest, WarmupPolicyNoSetting) {
+    // Add a field without any warmup setting
+    auto field_id = schema_->AddDebugField("test_field", DataType::INT64);
+    schema_->set_primary_field_id(field_id);
+
+    // When no warmup setting exists at any level, first should be false
+    auto [has_setting, policy] = schema_->WarmupPolicy(
+        field_id, /*is_vector=*/false, /*is_index=*/false);
+    EXPECT_FALSE(has_setting);
+    // The policy value is undefined when has_setting is false, so we don't check it
+}
+
+TEST_F(SchemaTest, WarmupPolicyCollectionLevelScalarField) {
+    // Create schema with collection-level warmup.scalarField set to sync
+    milvus::proto::schema::CollectionSchema schema_proto;
+
+    auto* field = schema_proto.add_fields();
+    field->set_fieldid(100);
+    field->set_name("pk_field");
+    field->set_data_type(milvus::proto::schema::DataType::Int64);
+    field->set_is_primary_key(true);
+
+    // Set collection-level warmup.scalarField to sync
+    auto* prop = schema_proto.add_properties();
+    prop->set_key("warmup.scalarField");
+    prop->set_value("sync");
+
+    auto parsed_schema = Schema::ParseFrom(schema_proto);
+    FieldId pk_field_id(100);
+
+    // Scalar field (not index) should use warmup.scalarField
+    auto [has_setting, policy] = parsed_schema->WarmupPolicy(
+        pk_field_id, /*is_vector=*/false, /*is_index=*/false);
+    EXPECT_TRUE(has_setting);
+    EXPECT_EQ(policy, "sync");
+
+    // Scalar index should not have setting (warmup.scalarIndex not set)
+    auto [has_setting_idx, policy_idx] = parsed_schema->WarmupPolicy(
+        pk_field_id, /*is_vector=*/false, /*is_index=*/true);
+    EXPECT_FALSE(has_setting_idx);
+}
+
+TEST_F(SchemaTest, WarmupPolicyCollectionLevelVectorIndex) {
+    // Create schema with collection-level warmup.vectorIndex set to disable
+    milvus::proto::schema::CollectionSchema schema_proto;
+
+    auto* field = schema_proto.add_fields();
+    field->set_fieldid(100);
+    field->set_name("pk_field");
+    field->set_data_type(milvus::proto::schema::DataType::Int64);
+    field->set_is_primary_key(true);
+
+    // Set collection-level warmup.vectorIndex to disable
+    auto* prop = schema_proto.add_properties();
+    prop->set_key("warmup.vectorIndex");
+    prop->set_value("disable");
+
+    auto parsed_schema = Schema::ParseFrom(schema_proto);
+    FieldId pk_field_id(100);
+
+    // Vector index should use warmup.vectorIndex
+    auto [has_setting, policy] = parsed_schema->WarmupPolicy(
+        pk_field_id, /*is_vector=*/true, /*is_index=*/true);
+    EXPECT_TRUE(has_setting);
+    EXPECT_EQ(policy, "disable");
+
+    // Vector field (not index) should not have setting
+    auto [has_setting_field, policy_field] = parsed_schema->WarmupPolicy(
+        pk_field_id, /*is_vector=*/true, /*is_index=*/false);
+    EXPECT_FALSE(has_setting_field);
+}
+
+TEST_F(SchemaTest, WarmupPolicyAllCollectionLevelSettings) {
+    // Test all four collection-level warmup policies
+    milvus::proto::schema::CollectionSchema schema_proto;
+
+    auto* field = schema_proto.add_fields();
+    field->set_fieldid(100);
+    field->set_name("pk_field");
+    field->set_data_type(milvus::proto::schema::DataType::Int64);
+    field->set_is_primary_key(true);
+
+    // Set all four collection-level warmup policies
+    auto* prop1 = schema_proto.add_properties();
+    prop1->set_key("warmup.vectorIndex");
+    prop1->set_value("sync");
+
+    auto* prop2 = schema_proto.add_properties();
+    prop2->set_key("warmup.scalarIndex");
+    prop2->set_value("disable");
+
+    auto* prop3 = schema_proto.add_properties();
+    prop3->set_key("warmup.vectorField");
+    prop3->set_value("sync");
+
+    auto* prop4 = schema_proto.add_properties();
+    prop4->set_key("warmup.scalarField");
+    prop4->set_value("disable");
+
+    auto parsed_schema = Schema::ParseFrom(schema_proto);
+    FieldId pk_field_id(100);
+
+    // Vector index
+    auto [has1, policy1] = parsed_schema->WarmupPolicy(
+        pk_field_id, /*is_vector=*/true, /*is_index=*/true);
+    EXPECT_TRUE(has1);
+    EXPECT_EQ(policy1, "sync");
+
+    // Scalar index
+    auto [has2, policy2] = parsed_schema->WarmupPolicy(
+        pk_field_id, /*is_vector=*/false, /*is_index=*/true);
+    EXPECT_TRUE(has2);
+    EXPECT_EQ(policy2, "disable");
+
+    // Vector field
+    auto [has3, policy3] = parsed_schema->WarmupPolicy(
+        pk_field_id, /*is_vector=*/true, /*is_index=*/false);
+    EXPECT_TRUE(has3);
+    EXPECT_EQ(policy3, "sync");
+
+    // Scalar field
+    auto [has4, policy4] = parsed_schema->WarmupPolicy(
+        pk_field_id, /*is_vector=*/false, /*is_index=*/false);
+    EXPECT_TRUE(has4);
+    EXPECT_EQ(policy4, "disable");
+}
+
+TEST_F(SchemaTest, WarmupPolicyFieldLevelOverridesCollectionLevel) {
+    // Test that field-level warmup policy overrides collection-level setting
+    milvus::proto::schema::CollectionSchema schema_proto;
+
+    auto* field = schema_proto.add_fields();
+    field->set_fieldid(100);
+    field->set_name("pk_field");
+    field->set_data_type(milvus::proto::schema::DataType::Int64);
+    field->set_is_primary_key(true);
+
+    // Set field-level warmup policy to sync (key: "warmup")
+    auto* field_prop = field->add_type_params();
+    field_prop->set_key("warmup");
+    field_prop->set_value("sync");
+
+    // Set collection-level warmup.scalarField to disable
+    auto* prop = schema_proto.add_properties();
+    prop->set_key("warmup.scalarField");
+    prop->set_value("disable");
+
+    auto parsed_schema = Schema::ParseFrom(schema_proto);
+    FieldId pk_field_id(100);
+
+    // Field-level setting should override collection-level
+    auto [has_setting, policy] = parsed_schema->WarmupPolicy(
+        pk_field_id, /*is_vector=*/false, /*is_index=*/false);
+    EXPECT_TRUE(has_setting);
+    EXPECT_EQ(policy, "sync");
+}
+
+TEST_F(SchemaTest, WarmupPolicyFallbackToCollectionLevel) {
+    // Test that field without its own setting falls back to collection-level
+    milvus::proto::schema::CollectionSchema schema_proto;
+
+    auto* field1 = schema_proto.add_fields();
+    field1->set_fieldid(100);
+    field1->set_name("pk_field");
+    field1->set_data_type(milvus::proto::schema::DataType::Int64);
+    field1->set_is_primary_key(true);
+
+    // Field1 has its own warmup policy (key: "warmup")
+    auto* field1_prop = field1->add_type_params();
+    field1_prop->set_key("warmup");
+    field1_prop->set_value("sync");
+
+    auto* field2 = schema_proto.add_fields();
+    field2->set_fieldid(101);
+    field2->set_name("data_field");
+    field2->set_data_type(milvus::proto::schema::DataType::Float);
+    // Field2 has no warmup policy, should use collection-level
+
+    // Set collection-level warmup.scalarField policy
+    auto* prop = schema_proto.add_properties();
+    prop->set_key("warmup.scalarField");
+    prop->set_value("disable");
+
+    auto parsed_schema = Schema::ParseFrom(schema_proto);
+
+    // Field1 should use its own setting
+    FieldId pk_field_id(100);
+    auto [has_setting1, policy1] = parsed_schema->WarmupPolicy(
+        pk_field_id, /*is_vector=*/false, /*is_index=*/false);
+    EXPECT_TRUE(has_setting1);
+    EXPECT_EQ(policy1, "sync");
+
+    // Field2 should fallback to collection-level
+    FieldId data_field_id(101);
+    auto [has_setting2, policy2] = parsed_schema->WarmupPolicy(
+        data_field_id, /*is_vector=*/false, /*is_index=*/false);
+    EXPECT_TRUE(has_setting2);
+    EXPECT_EQ(policy2, "disable");
+}

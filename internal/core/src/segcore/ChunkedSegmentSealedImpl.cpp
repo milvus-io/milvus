@@ -3128,6 +3128,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     bool is_vector = false;
     bool has_mmap_setting = false;
     bool mmap_enabled = false;
+    bool has_warmup_setting = false;
+    bool warmup_sync = false;
     for (auto& [field_id, field_meta] : field_metas) {
         if (IsVectorDataType(field_meta.get_data_type())) {
             is_vector = true;
@@ -3142,6 +3144,18 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             schema_->MmapEnabled(field_id);
         has_mmap_setting = has_mmap_setting || field_has_setting;
         mmap_enabled = mmap_enabled || field_mmap_enabled;
+
+        // if field has warmup setting, use it
+        // - warmup setting at collection level, uses appropriate key based on field type
+        // - warmup setting at field level, use the most aggressive policy (sync > disable)
+        // Note: this is for field data loading, not index (is_index = false)
+        bool field_is_vector = IsVectorDataType(field_meta.get_data_type());
+        auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
+            field_id, field_is_vector, /*is_index=*/false);
+        if (field_has_warmup) {
+            has_warmup_setting = true;
+            warmup_sync = warmup_sync || (field_warmup_policy == "sync");
+        }
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
@@ -3167,8 +3181,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 
     // Aggregate warmup policy from child fields using OR logic:
     // if ANY field requires 'sync', the entire group uses 'sync'
-    bool has_warmup_setting = false;
-    bool warmup_sync = false;
+    // Reset warmup settings to use field_data_info_ based approach
+    has_warmup_setting = false;
+    warmup_sync = false;
     for (const auto& field_id : milvus_field_ids) {
         auto iter = field_data_info_.field_infos.find(field_id.get());
         if (iter != field_data_info_.field_infos.end() &&
@@ -3178,11 +3193,10 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
                 warmup_sync || (iter->second.warmup_policy == "sync");
         }
     }
-    // Determine group warmup policy: use per-field settings if any,
-    // otherwise fall back to global warmup policy
+    // Determine warmup policy: use per-field settings if any,
+    // otherwise pass empty string to fall back to global config
     std::string warmup_policy =
-        has_warmup_setting ? (warmup_sync ? "sync" : "disable")
-                           : field_data_info_.warmup_policy;
+        has_warmup_setting ? (warmup_sync ? "sync" : "disable") : "";
 
     auto translator =
         std::make_unique<storagev2translator::ManifestGroupTranslator>(
