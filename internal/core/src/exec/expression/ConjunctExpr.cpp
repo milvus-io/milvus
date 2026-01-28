@@ -73,11 +73,7 @@ PhyConjunctFilterExpr::CanSkipFollowingExprs(ColumnVectorPtr& vec) {
     //   - If any row is FALSE, we need to continue to determine final result
     //   - If any row is NULL, we need to continue because NULL OR TRUE = TRUE
     //     but NULL OR FALSE = NULL, so the result depends on following exprs
-    if (is_and_) {
-        return common::ThreeValuedLogicOp::FalseCount(vec) == vec->size();
-    } else {
-        return common::ThreeValuedLogicOp::TrueCount(vec) == vec->size();
-    }
+    return is_and_ ? vec->AllFalse() : vec->AllTrue();
 }
 
 void
