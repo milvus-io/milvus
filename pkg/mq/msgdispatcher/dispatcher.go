@@ -350,14 +350,12 @@ func (d *Dispatcher) groupAndParseMsgs(pack *msgstream.ConsumeMsgPack, unmarshal
 				targets = append(targets, k)
 			}
 			if len(targets) > 0 {
-				tsMsg, err := msg.Unmarshal(unmarshalDispatcher)
-				if err != nil {
-					log.Warn("unmarshl message failed", zap.Error(err))
-					continue
-				}
-				// TODO: There's data race when non-dml msg is sent to different flow graph.
-				// Wrong open-trancing information is generated, Fix in future.
 				for _, target := range targets {
+					tsMsg, err := msg.Unmarshal(unmarshalDispatcher)
+					if err != nil {
+						log.Warn("unmarshal message failed", zap.Error(err))
+						continue
+					}
 					targetPacks[target].Msgs = append(targetPacks[target].Msgs, tsMsg)
 				}
 			}
@@ -366,7 +364,7 @@ func (d *Dispatcher) groupAndParseMsgs(pack *msgstream.ConsumeMsgPack, unmarshal
 		if _, ok := targetPacks[vchannel]; ok {
 			tsMsg, err := msg.Unmarshal(unmarshalDispatcher)
 			if err != nil {
-				log.Warn("unmarshl message failed", zap.Error(err))
+				log.Warn("unmarshal message failed", zap.Error(err))
 				continue
 			}
 			targetPacks[vchannel].Msgs = append(targetPacks[vchannel].Msgs, tsMsg)
