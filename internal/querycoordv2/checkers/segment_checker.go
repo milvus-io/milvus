@@ -259,13 +259,23 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	nextTargetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID)
 	nextTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.NextTarget)
 	currentTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.CurrentTarget)
+
+	// Check collection status to distinguish handoff from user-initiated load
+	collection := c.meta.GetCollection(ctx, collectionID)
+	isCollectionLoaded := collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded
+
 	// Segment which exist on next target, but not on dist
 	for _, segment := range nextTargetMap {
 		if isSegmentLack(segment) {
 			_, existOnCurrent := currentTargetMap[segment.GetID()]
 			if existOnCurrent {
+				// Segment exists in current target but missing in dist -> Recovery scenario (HIGH priority)
 				loadPriorities = append(loadPriorities, commonpb.LoadPriority_HIGH)
+			} else if isCollectionLoaded {
+				// Collection already loaded, new segment is from handoff (growing -> sealed flush) -> LOW priority
+				loadPriorities = append(loadPriorities, commonpb.LoadPriority_LOW)
 			} else {
+				// Collection is loading, new segment is from user-initiated load -> Use user's configured priority
 				loadPriorities = append(loadPriorities, replica.LoadPriority())
 			}
 			toLoad = append(toLoad, segment)

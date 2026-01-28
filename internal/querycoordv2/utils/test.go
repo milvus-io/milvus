@@ -89,6 +89,16 @@ func CreateTestCollection(collection int64, replica int32) *meta.Collection {
 	}
 }
 
+func CreateTestCollectionWithStatus(collection int64, replica int32, status querypb.LoadStatus) *meta.Collection {
+	return &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:  collection,
+			ReplicaNumber: replica,
+			Status:        status,
+		},
+	}
+}
+
 func CreateTestPartition(collection int64, partitionID int64) *meta.Partition {
 	return &meta.Partition{
 		PartitionLoadInfo: &querypb.PartitionLoadInfo{
