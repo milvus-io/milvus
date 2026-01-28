@@ -147,6 +147,64 @@ func (_c *MockReplicateService_GetReplicateCheckpoint_Call) RunAndReturn(run fun
 	return _c
 }
 
+// GetReplicateConfiguration provides a mock function with given fields: ctx
+func (_m *MockReplicateService) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReplicateConfiguration")
+	}
+
+	var r0 *commonpb.ReplicateConfiguration
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (*commonpb.ReplicateConfiguration, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) *commonpb.ReplicateConfiguration); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.ReplicateConfiguration)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockReplicateService_GetReplicateConfiguration_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetReplicateConfiguration'
+type MockReplicateService_GetReplicateConfiguration_Call struct {
+	*mock.Call
+}
+
+// GetReplicateConfiguration is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockReplicateService_Expecter) GetReplicateConfiguration(ctx interface{}) *MockReplicateService_GetReplicateConfiguration_Call {
+	return &MockReplicateService_GetReplicateConfiguration_Call{Call: _e.mock.On("GetReplicateConfiguration", ctx)}
+}
+
+func (_c *MockReplicateService_GetReplicateConfiguration_Call) Run(run func(ctx context.Context)) *MockReplicateService_GetReplicateConfiguration_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockReplicateService_GetReplicateConfiguration_Call) Return(_a0 *commonpb.ReplicateConfiguration, _a1 error) *MockReplicateService_GetReplicateConfiguration_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockReplicateService_GetReplicateConfiguration_Call) RunAndReturn(run func(context.Context) (*commonpb.ReplicateConfiguration, error)) *MockReplicateService_GetReplicateConfiguration_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateReplicateConfiguration provides a mock function with given fields: ctx, config
 func (_m *MockReplicateService) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
 	ret := _m.Called(ctx, config)

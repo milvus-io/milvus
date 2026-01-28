@@ -83,6 +83,59 @@ func TestReplicateService(t *testing.T) {
 	}
 }
 
+func TestReplicateService_GetReplicateConfiguration(t *testing.T) {
+	c := mock_client.NewMockClient(t)
+	as := mock_client.NewMockAssignmentService(t)
+	c.EXPECT().Assignment().Return(as).Maybe()
+
+	expectedConfig := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{
+				ClusterId: "primary",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "http://primary:19530",
+					Token: "secret-token",
+				},
+				Pchannels: []string{"channel1"},
+			},
+			{
+				ClusterId: "secondary",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "http://secondary:19530",
+					Token: "another-secret",
+				},
+				Pchannels: []string{"channel1"},
+			},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
+			{SourceClusterId: "primary", TargetClusterId: "secondary"},
+		},
+	}
+
+	as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(
+		replicateutil.MustNewConfigHelper("secondary", expectedConfig), nil,
+	)
+
+	rs := &replicateService{
+		walAccesserImpl: &walAccesserImpl{
+			lifetime:             typeutil.NewLifetime(),
+			clusterID:            "secondary",
+			streamingCoordClient: c,
+		},
+	}
+
+	config, err := rs.GetReplicateConfiguration(context.Background())
+	assert.NoError(t, err)
+	assert.NotNil(t, config)
+
+	// Tokens should be sanitized for all clusters
+	assert.Empty(t, config.Clusters[0].ConnectionParam.Token)
+	assert.Empty(t, config.Clusters[1].ConnectionParam.Token)
+	// URIs should be preserved
+	assert.Equal(t, "http://primary:19530", config.Clusters[0].ConnectionParam.Uri)
+	assert.Equal(t, "http://secondary:19530", config.Clusters[1].ConnectionParam.Uri)
+}
+
 func createReplicateCreateCollectionMessages() []message.ReplicateMutableMessage {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{

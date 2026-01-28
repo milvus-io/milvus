@@ -375,6 +375,7 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeDescribeResourceGroup.String(),
 		commonpb.ObjectPrivilege_PrivilegeListResourceGroups.String(),
 		commonpb.ObjectPrivilege_PrivilegeListPrivilegeGroups.String(),
+		commonpb.ObjectPrivilege_PrivilegeGetReplicateConfiguration.String(),
 	})
 
 	ClusterReadWritePrivileges = append(ClusterReadOnlyPrivileges,
