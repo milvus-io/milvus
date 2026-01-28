@@ -149,6 +149,46 @@ func newV1DeleteMsgFromV0(msg *msgstream.DeleteMsg, rows uint64) message.Mutable
 	return mutableMessage.WithTimeTick(msg.BeginTs())
 }
 
+// newV1UpsertMsgFromV0 creates a new upsert message from the old version upsert message.
+func newV1UpsertMsgFromV0(msg *msgstream.UpsertMsg, binarySize uint64) message.MutableMessage {
+	if msg.InsertMsg == nil || msg.DeleteMsg == nil {
+		panic("upsert message must contain both insert and delete messages")
+	}
+
+	// Calculate delete rows
+	deleteRows := uint64(msg.DeleteMsg.NumRows)
+
+	// Build upsert message body
+	upsertBody := &message.UpsertMessageBody{
+		InsertRequest: msg.InsertMsg.InsertRequest,
+		DeleteRequest: msg.DeleteMsg.DeleteRequest,
+	}
+
+	// Build upsert message header
+	upsertHeader := &message.UpsertMessageHeader{
+		CollectionId: msg.InsertMsg.CollectionID,
+		Partitions: []*message.PartitionSegmentAssignment{{
+			PartitionId: msg.InsertMsg.PartitionID,
+			Rows:        msg.InsertMsg.NumRows,
+			BinarySize:  binarySize,
+			SegmentAssignment: &message.SegmentAssignment{
+				SegmentId: msg.InsertMsg.SegmentID,
+			},
+		}},
+		DeleteRows: deleteRows,
+	}
+
+	mutableMessage, err := message.NewUpsertMessageBuilderV2().
+		WithVChannel(msg.InsertMsg.ShardName).
+		WithHeader(upsertHeader).
+		WithBody(upsertBody).
+		BuildMutable()
+	if err != nil {
+		panic(err)
+	}
+	return mutableMessage.WithTimeTick(msg.InsertMsg.BeginTs())
+}
+
 // newV1TimeTickMsgFromV0 creates a new time tick message from the old version time tick message.
 func newV1TimeTickMsgFromV0(msg *msgstream.TimeTickMsg) message.MutableMessage {
 	mutableMessage, err := message.NewTimeTickMessageBuilderV1().

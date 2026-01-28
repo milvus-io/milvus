@@ -3,7 +3,9 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"sort"
 
+	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
@@ -167,43 +169,67 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 		return nil, err
 	}
 	for channel, rowOffsets := range channel2RowOffsets {
-		partition2RowOffsets := make(map[string][]int)
+		// Group rows by partition
+		partition2RowOffsets := make(map[int64][]int)
 		for _, idx := range rowOffsets {
 			partitionName := partitionNames[hashValues[idx]]
-			if _, ok := partition2RowOffsets[partitionName]; !ok {
-				partition2RowOffsets[partitionName] = []int{}
-			}
-			partition2RowOffsets[partitionName] = append(partition2RowOffsets[partitionName], idx)
+			partitionID := partitionIDs[partitionName]
+			partition2RowOffsets[partitionID] = append(partition2RowOffsets[partitionID], idx)
 		}
 
-		for partitionName, rowOffsets := range partition2RowOffsets {
-			msgs, err := genInsertMsgsByPartition(ctx, 0, partitionIDs[partitionName], partitionName, rowOffsets, channel, insertMsg)
-			if err != nil {
-				return nil, err
-			}
-			for _, msg := range msgs {
-				insertRequest := msg.(*msgstream.InsertMsg).InsertRequest
-				newMsg, err := message.NewInsertMessageBuilderV1().
-					WithVChannel(channel).
-					WithHeader(&message.InsertMessageHeader{
-						CollectionId: insertMsg.CollectionID,
-						Partitions: []*message.PartitionSegmentAssignment{
-							{
-								PartitionId: partitionIDs[partitionName],
-								Rows:        insertRequest.GetNumRows(),
-								BinarySize:  0, // TODO: current not used, message estimate size is used.
-							},
-						},
-					}).
-					WithBody(insertRequest).
-					WithCipher(ez).
-					BuildMutable()
-				if err != nil {
-					return nil, err
-				}
-				messages = append(messages, newMsg)
-			}
+		// Sort partitions by ID for deterministic ordering
+		sortedPartitionIDs := make([]int64, 0, len(partition2RowOffsets))
+		for partitionID := range partition2RowOffsets {
+			sortedPartitionIDs = append(sortedPartitionIDs, partitionID)
 		}
+		sort.Slice(sortedPartitionIDs, func(i, j int) bool {
+			return sortedPartitionIDs[i] < sortedPartitionIDs[j]
+		})
+
+		// Merge all rows from all partitions in partition order (contiguous ranges)
+		allRowOffsets := make([]int, 0)
+		partitionAssignments := make([]*message.PartitionSegmentAssignment, 0, len(sortedPartitionIDs))
+
+		for _, partitionID := range sortedPartitionIDs {
+			rows := partition2RowOffsets[partitionID]
+			allRowOffsets = append(allRowOffsets, rows...)
+
+			partitionAssignments = append(partitionAssignments, &message.PartitionSegmentAssignment{
+				PartitionId: partitionID,
+				Rows:        uint64(len(rows)),
+				BinarySize:  0, // TODO: current not used, message estimate size is used.
+			})
+		}
+
+		// Create single merged InsertRequest with all rows from all partitions
+		// Use partitionID=0 and partitionName="" since this is multi-partition
+		mergedInsertMsgs, err := genInsertMsgsByPartition(ctx, 0, 0, "", allRowOffsets, channel, insertMsg)
+		if err != nil {
+			return nil, err
+		}
+
+		// Should only be 1 message since we're not splitting by partition
+		if len(mergedInsertMsgs) != 1 {
+			return nil, errors.Errorf("expected 1 merged insert message, got %d", len(mergedInsertMsgs))
+		}
+
+		mergedInsertRequest := mergedInsertMsgs[0].(*msgstream.InsertMsg).InsertRequest
+
+		// Create InsertMessage with multi-partition header
+		newMsg, err := message.NewInsertMessageBuilderV1().
+			WithVChannel(channel).
+			WithHeader(&message.InsertMessageHeader{
+				CollectionId: insertMsg.CollectionID,
+				Partitions:   partitionAssignments,
+			}).
+			WithBody(mergedInsertRequest).
+			WithCipher(ez).
+			BuildMutable()
+		if err != nil {
+			return nil, err
+		}
+
+		messages = append(messages, newMsg)
 	}
 	return messages, nil
 }
