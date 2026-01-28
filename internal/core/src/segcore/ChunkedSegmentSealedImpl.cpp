@@ -495,9 +495,6 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             storage::SortByPath(file_infos);
 
             auto field_meta = schema_->operator[](field_id);
-            // Use per-field warmup policy if set, otherwise fall back to global
-            std::string field_warmup_policy =
-                !info.warmup_policy.empty() ? info.warmup_policy : "";
             std::unique_ptr<Translator<milvus::Chunk>> translator =
                 std::make_unique<storagev1translator::ChunkTranslator>(
                     this->get_segment_id(),
@@ -507,7 +504,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                     info.enable_mmap,
                     mmap_config.GetMmapPopulate(),
                     load_info.load_priority,
-                    field_warmup_policy);
+                    info.warmup_policy);
 
             auto data_type = field_meta.get_data_type();
             auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
