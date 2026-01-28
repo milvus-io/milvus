@@ -84,6 +84,7 @@ func (m *versionManagerImpl) removeNodeByID(sessionID int64) {
 	delete(m.versions, sessionID)
 	delete(m.scalarIndexVersions, sessionID)
 	delete(m.indexNonEncoding, sessionID)
+	delete(m.sessionVersion, sessionID)
 }
 
 func (m *versionManagerImpl) Update(session *sessionutil.Session) {
