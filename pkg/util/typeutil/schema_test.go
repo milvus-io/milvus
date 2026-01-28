@@ -5203,3 +5203,30 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestPrepareResultFieldData_NullableField(t *testing.T) {
+	sample := []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_VarChar,
+			FieldId:   101,
+			FieldName: "nullable_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: []string{"a"}},
+					},
+				},
+			},
+			ValidData: []bool{true},
+		},
+	}
+
+	result := PrepareResultFieldData(sample, 10)
+
+	require.Len(t, result, 1)
+	assert.Equal(t, schemapb.DataType_VarChar, result[0].Type)
+	assert.Equal(t, int64(101), result[0].FieldId)
+	assert.NotNil(t, result[0].ValidData)
+	assert.Equal(t, 0, len(result[0].ValidData))
+	assert.Equal(t, 10, cap(result[0].ValidData))
+}
