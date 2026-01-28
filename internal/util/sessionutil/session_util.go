@@ -613,8 +613,36 @@ func (s *Session) processKeepAliveResponse() {
 		}
 
 		// Block until the keep alive failure.
-		for range ch {
+		// Add timeout protection: if no keepalive response is received within half the TTL,
+		// break out to allow reconnection before the lease expires.
+		keepaliveTimeout := time.Duration(s.sessionTTL) * time.Second / 2
+		timer := time.NewTimer(keepaliveTimeout)
+	keepaliveLoop:
+		for {
+			select {
+			case _, ok := <-ch:
+				if !ok {
+					break keepaliveLoop
+				}
+				// Reset timeout on successful keepalive response
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(keepaliveTimeout)
+			case <-timer.C:
+				s.Logger().Warn("keepalive response timeout, breaking out to reconnect",
+					zap.Int64("leaseID", int64(*s.LeaseID)),
+					zap.Int64("timeoutSeconds", s.sessionTTL/2))
+				break keepaliveLoop
+			case <-s.ctx.Done():
+				timer.Stop()
+				return
+			}
 		}
+		timer.Stop()
 
 		// receive a keep alive response, continue the opeartion.
 		// the keep alive channel may be closed because of network error, we should retry the keep alive.
