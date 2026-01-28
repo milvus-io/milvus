@@ -212,7 +212,6 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
         EvalCtx eval_ctx(operator_context_->get_exec_context());
 
         TargetBitmap eval_bitset;
-        TargetBitmap eval_valid_bitset;
         int64_t num_processed_elements = 0;
         std::vector<VectorPtr> results;
 
@@ -238,9 +237,6 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
             auto col_vec_size = col_vec->size();
             TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
             eval_bitset.append(view);
-            TargetBitmapView valid_view(col_vec->GetValidRawData(),
-                                        col_vec_size);
-            eval_valid_bitset.append(valid_view);
             num_processed_elements += col_vec_size;
         }
 
@@ -250,9 +246,8 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
                    total_elements);
 
         // Convert doc_bitset to element bitset
-        auto [elem_bitset, elem_valid_bitset] =
-            array_offsets->RowBitsetToElementBitset(
-                doc_bitset, doc_bitset_valid, 0);
+        auto [elem_bitset, _] = array_offsets->RowBitsetToElementBitset(
+            doc_bitset, doc_bitset_valid, 0);
 
         // AND expression result with element bitset from doc filter
         // eval_bitset: true means element matches expression
@@ -266,8 +261,12 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
                         total_elements,
                         total_elements));
 
-        return std::make_pair(std::move(eval_bitset),
-                              std::move(elem_valid_bitset));
+        // Element filter targets individual elements within arrays.
+        // While the array field itself can be nullable (handled by doc_bitset_valid),
+        // individual elements inside an array do not support null values.
+        // Therefore, the element-level valid_bitset is always all true.
+        TargetBitmap valid_bitset(total_elements, true);
+        return std::make_pair(std::move(eval_bitset), std::move(valid_bitset));
     }
 }
 

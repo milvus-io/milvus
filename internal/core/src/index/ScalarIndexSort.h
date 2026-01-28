@@ -157,10 +157,6 @@ class ScalarIndexSort : public ScalarIndex<T> {
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
-    // For unit test only: build nested index with array data
-    void
-    BuildNestedForUT(size_t n, const boost::container::vector<T>* arrays);
-
  private:
     void
     BuildWithArrayDataNested(const std::vector<FieldDataPtr>& datas);

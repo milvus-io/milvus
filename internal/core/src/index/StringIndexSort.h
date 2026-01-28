@@ -80,11 +80,6 @@ class StringIndexSort : public StringIndex {
     void
     BuildWithArrayDataNested(const std::vector<FieldDataPtr>& datas);
 
-    // For unit test only: build nested index with array data
-    void
-    BuildNestedForUT(size_t n,
-                     const boost::container::vector<std::string>* arrays);
-
     // See detailed format in StringIndexSortMemoryImpl::SerializeToBinary
     BinarySet
     Serialize(const Config& config) override;

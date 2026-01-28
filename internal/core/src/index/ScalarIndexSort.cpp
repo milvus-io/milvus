@@ -206,49 +206,6 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
 }
 
 template <typename T>
-void
-ScalarIndexSort<T>::BuildNestedForUT(
-    size_t n, const boost::container::vector<T>* arrays) {
-    if (is_built_)
-        return;
-    if (n == 0) {
-        ThrowInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
-    }
-
-    is_nested_index_ = true;
-
-    // Convert boost::container::vector<T>* to FieldDataPtr
-    std::vector<Array> array_data;
-    array_data.reserve(n);
-    for (size_t i = 0; i < n; ++i) {
-        proto::schema::ScalarField field_data;
-        for (size_t j = 0; j < arrays[i].size(); ++j) {
-            if constexpr (std::is_same_v<T, bool>) {
-                field_data.mutable_bool_data()->add_data(arrays[i][j]);
-            } else if constexpr (std::is_same_v<T, int8_t> ||
-                                 std::is_same_v<T, int16_t> ||
-                                 std::is_same_v<T, int32_t>) {
-                field_data.mutable_int_data()->add_data(arrays[i][j]);
-            } else if constexpr (std::is_same_v<T, int64_t>) {
-                field_data.mutable_long_data()->add_data(arrays[i][j]);
-            } else if constexpr (std::is_same_v<T, float>) {
-                field_data.mutable_float_data()->add_data(arrays[i][j]);
-            } else if constexpr (std::is_same_v<T, double>) {
-                field_data.mutable_double_data()->add_data(arrays[i][j]);
-            }
-        }
-        array_data.emplace_back(field_data);
-    }
-
-    auto field_data =
-        storage::CreateFieldData(DataType::ARRAY, DataType::NONE, false);
-    field_data->FillFieldData(array_data.data(), array_data.size());
-
-    std::vector<FieldDataPtr> field_datas{field_data};
-    BuildWithFieldData(field_datas);
-}
-
-template <typename T>
 BinarySet
 ScalarIndexSort<T>::Serialize(const Config& config) {
     AssertInfo(is_built_, "index has not been built");
