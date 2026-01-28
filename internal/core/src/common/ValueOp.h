@@ -21,7 +21,7 @@ class ThreeValuedLogicOp {
     // apply not operation to the left column vector
     // and store the result in the left column vector
     static void
-    Not(ColumnVectorPtr left) {
+    Not(const ColumnVectorPtr& left) {
         TargetBitmapView data(left->GetRawData(), left->size());
         TargetBitmapView valid_data(left->GetValidRawData(), left->size());
 
@@ -52,7 +52,7 @@ class ThreeValuedLogicOp {
     // result_valid = left_valid & (right_valid | ~left_data) |
     //                right_valid & ~right_data
     static void
-    And(ColumnVectorPtr left, ColumnVectorPtr right) {
+    And(const ColumnVectorPtr& left, const ColumnVectorPtr& right) {
         const size_t size = left->size();
         TargetBitmapView left_data(left->GetRawData(), size);
         TargetBitmapView left_valid(left->GetValidRawData(), size);
@@ -102,7 +102,7 @@ class ThreeValuedLogicOp {
     // result_valid = left_valid & (right_valid | left_data) |
     //                right_valid & right_data
     static void
-    Or(ColumnVectorPtr left, ColumnVectorPtr right) {
+    Or(const ColumnVectorPtr& left, const ColumnVectorPtr& right) {
         const size_t size = left->size();
         TargetBitmapView left_data(left->GetRawData(), size);
         TargetBitmapView left_valid(left->GetValidRawData(), size);
@@ -129,13 +129,71 @@ class ThreeValuedLogicOp {
         left_data.inplace_or(right_data, size);
     }
 
+    // Count the number of rows that are definitely TRUE (valid=1, data=1)
+    // Uses zero-copy SIMD popcount for efficiency
     static size_t
-    TrueCount(ColumnVectorPtr res) {
-        TargetBitmapView data(res->GetRawData(), res->size());
-        TargetBitmapView valid_data(res->GetValidRawData(), res->size());
-        TargetBitmap tmp(data);
-        tmp.inplace_and(valid_data, res->size());
-        return tmp.count();
+    TrueCount(const ColumnVectorPtr& res) {
+        const size_t size = res->size();
+        if (size == 0) {
+            return 0;
+        }
+
+        const uint64_t* data =
+            reinterpret_cast<const uint64_t*>(res->GetRawData());
+        const uint64_t* valid =
+            reinterpret_cast<const uint64_t*>(res->GetValidRawData());
+
+        const size_t num_full_words = size / 64;
+        const size_t tail_bits = size % 64;
+
+        size_t count = 0;
+        // Process full 64-bit words
+        for (size_t i = 0; i < num_full_words; ++i) {
+            count += __builtin_popcountll(data[i] & valid[i]);
+        }
+
+        // Process remaining bits (if any)
+        if (tail_bits > 0) {
+            const uint64_t mask = (1ULL << tail_bits) - 1;
+            count += __builtin_popcountll(data[num_full_words] &
+                                          valid[num_full_words] & mask);
+        }
+
+        return count;
+    }
+
+    // Count the number of rows that are definitely FALSE (valid=1, data=0)
+    // Uses zero-copy SIMD popcount for efficiency
+    static size_t
+    FalseCount(const ColumnVectorPtr& res) {
+        const size_t size = res->size();
+        if (size == 0) {
+            return 0;
+        }
+
+        const uint64_t* data =
+            reinterpret_cast<const uint64_t*>(res->GetRawData());
+        const uint64_t* valid =
+            reinterpret_cast<const uint64_t*>(res->GetValidRawData());
+
+        const size_t num_full_words = size / 64;
+        const size_t tail_bits = size % 64;
+
+        size_t count = 0;
+        // Process full 64-bit words
+        // FalseCount = popcount(valid & ~data)
+        for (size_t i = 0; i < num_full_words; ++i) {
+            count += __builtin_popcountll(valid[i] & ~data[i]);
+        }
+
+        // Process remaining bits (if any)
+        if (tail_bits > 0) {
+            const uint64_t mask = (1ULL << tail_bits) - 1;
+            count += __builtin_popcountll(valid[num_full_words] &
+                                          ~data[num_full_words] & mask);
+        }
+
+        return count;
     }
 };
 }  // namespace common
