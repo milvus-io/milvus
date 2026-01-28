@@ -53,29 +53,10 @@ const std::unordered_map<DataType, std::string> kDataTypeFieldName = {
     {DataType::JSON, "JSONField"},
 };
 
-// use field name to get schema pb string
-std::string
-GetDataTypeSchemapbStr(const DataType& data_type) {
-    if (kDataTypeFieldName.find(data_type) == kDataTypeFieldName.end()) {
-        throw std::runtime_error("GetDataTypeSchemapbStr: Invalid data type " +
-                                 std::to_string(static_cast<int>(data_type)));
-    }
-
-    std::string str = kDataTypeFieldName.at(data_type);
-    str.erase(str.find("Field"), 5);
-    return str;
-}
-
 constexpr size_t kFieldIdToTouchedCategoriesCntDefault = 0;
 constexpr bool kIsPureAndDefault = true;
 constexpr bool kHasNotDefault = false;
 
-const std::string kFieldIdPlaceholder = "FID";
-const std::string kVecFieldIdPlaceholder = "VEC_FID";
-const std::string kDataTypePlaceholder = "DT";
-const std::string kValPlaceholder = "VAL";
-const std::string kPredicatePlaceholder = "PREDICATE_PLACEHOLDER";
-const std::string kMvInvolvedPlaceholder = "MV_INVOLVED_PLACEHOLDER";
 }  // namespace
 
 class ExprMaterializedViewTest : public testing::Test {
@@ -91,6 +72,16 @@ class ExprMaterializedViewTest : public testing::Test {
             if (data_type == DataType::VECTOR_FLOAT) {
                 schema->AddDebugField(
                     field_name, data_type, kDim, knowhere::metric::L2);
+            } else if (data_type == DataType::VARCHAR) {
+                std::map<std::string, std::string> empty_params;
+                schema->AddDebugVarcharField(FieldName(field_name),
+                                             DataType::VARCHAR,
+                                             256,
+                                             false,
+                                             false,
+                                             false,
+                                             empty_params,
+                                             std::nullopt);
             } else {
                 schema->AddDebugField(field_name, data_type);
             }
@@ -109,26 +100,6 @@ class ExprMaterializedViewTest : public testing::Test {
             std::make_unique<milvus::query::ExecPlanNodeVisitor>(
                 *segment, milvus::MAX_TIMESTAMP);
 
-        // prepare plan template
-        plan_template = R"(vector_anns: <
-                                    field_id: VEC_FID
-                                    predicates: <
-                                        PREDICATE_PLACEHOLDER
-                                    >
-                                    query_info: <
-                                      topk: 1
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 1}"
-                                      materialized_view_involved: MV_INVOLVED_PLACEHOLDER
-                                    >
-                                    placeholder_tag: "$0">)";
-        const int64_t vec_field_id =
-            data_field_info[DataType::VECTOR_FLOAT].field_id;
-        ReplaceAllOccurrence(plan_template,
-                             kVecFieldIdPlaceholder,
-                             std::to_string(vec_field_id));
-
         // collect mv supported data type
         numeric_str_scalar_data_types.clear();
         for (const auto& e : kDataTypeFieldName) {
@@ -137,24 +108,32 @@ class ExprMaterializedViewTest : public testing::Test {
                 numeric_str_scalar_data_types.insert(e.first);
             }
         }
+
+        // create schema handle once for all tests
+        schema_handle =
+            std::make_unique<milvus::segcore::ScopedSchemaHandle>(*schema);
     }
 
     static void
     TearDownTestSuite() {
+        schema_handle = nullptr;
         exec_plan_node_visitor = nullptr;
         segment = nullptr;
         gen_data = nullptr;
     }
 
  protected:
-    // this function takes an predicate string in schemapb format
-    // and return a vector search plan
+    // this function takes a string expression and returns a vector search plan
     std::unique_ptr<milvus::query::Plan>
-    CreatePlan(const std::string& predicate_str, const bool is_mv_enable) {
-        auto plan_str = InterpolateTemplate(predicate_str);
-        plan_str = InterpolateMvInvolved(plan_str, is_mv_enable);
-        auto binary_plan = milvus::segcore::translate_text_plan_to_binary_plan(
-            plan_str.c_str());
+    CreatePlan(const std::string& expr, bool mv_involved) {
+        auto binary_plan = schema_handle->ParseSearch(expr,
+                                                      "VectorFloatField",
+                                                      1,
+                                                      "L2",
+                                                      R"({"nprobe": 1})",
+                                                      3,
+                                                      "",  // hints
+                                                      mv_involved);
         return milvus::query::CreateSearchPlanByExpr(
             schema, binary_plan.data(), binary_plan.size());
     }
@@ -169,65 +148,15 @@ class ExprMaterializedViewTest : public testing::Test {
             .search_params_[knowhere::meta::MATERIALIZED_VIEW_SEARCH_INFO];
     }
 
-    // replace field id, data type and scalar value in a single expr schemapb plan
-    std::string
-    InterpolateSingleExpr(const std::string& expr_in,
-                          const DataType& data_type) {
-        std::string expr = expr_in;
-        const int64_t field_id = data_field_info[data_type].field_id;
-        ReplaceAllOccurrence(
-            expr, kFieldIdPlaceholder, std::to_string(field_id));
-        ReplaceAllOccurrence(
-            expr, kDataTypePlaceholder, GetDataTypeSchemapbStr(data_type));
-
-        // The user can use value placeholder and numeric values after it to distinguish different values
-        // eg. VAL1, VAL2, VAL3 should be replaced with different values of the same data type
-        std::regex pattern("VAL(\\d+)");
-        std::string replacement = "";
-        while (std::regex_search(expr, pattern)) {
-            switch (data_type) {
-                case DataType::BOOL:
-                    ReplaceAllOccurrence(expr, "VAL0", "bool_val:false");
-                    ReplaceAllOccurrence(expr, "VAL1", "bool_val:true");
-                    break;
-                case DataType::INT8:
-                case DataType::INT16:
-                case DataType::INT32:
-                case DataType::INT64:
-                    replacement = "int64_val:$1";
-                    expr = std::regex_replace(expr, pattern, replacement);
-                    break;
-                case DataType::FLOAT:
-                case DataType::DOUBLE:
-                    replacement = "float_val:$1";
-                    expr = std::regex_replace(expr, pattern, replacement);
-                    break;
-                case DataType::VARCHAR:
-                    replacement = "string_val:\"str$1\"";
-                    expr = std::regex_replace(expr, pattern, replacement);
-                    break;
-                case DataType::JSON:
-                    break;
-                default:
-                    throw std::runtime_error(
-                        "InterpolateSingleExpr: Invalid data type " +
-                        fmt::format("{}", data_type));
-            }
-
-            // fmt::print("expr {} data_type {}\n", expr, data_type);
-        }
-        return expr;
-    }
-
     knowhere::MaterializedViewSearchInfo
-    TranslateThenExecuteWhenMvInvolved(const std::string& predicate_str) {
-        auto plan = CreatePlan(predicate_str, true);
+    TranslateThenExecuteWhenMvInvolved(const std::string& expr) {
+        auto plan = CreatePlan(expr, true);
         return ExecutePlan(plan);
     }
 
     knowhere::MaterializedViewSearchInfo
-    TranslateThenExecuteWhenMvNotInvolved(const std::string& predicate_str) {
-        auto plan = CreatePlan(predicate_str, false);
+    TranslateThenExecuteWhenMvNotInvolved(const std::string& expr) {
+        auto plan = CreatePlan(expr, false);
         return ExecutePlan(plan);
     }
 
@@ -246,35 +175,43 @@ class ExprMaterializedViewTest : public testing::Test {
         return data_field_info[data_type].field_id;
     }
 
+    std::string
+    GetFieldName(const DataType& data_type) {
+        auto it = kDataTypeFieldName.find(data_type);
+        if (it == kDataTypeFieldName.end()) {
+            throw std::runtime_error("Invalid data type " +
+                                     fmt::format("{}", data_type));
+        }
+        return it->second;
+    }
+
+    // Get a test value as string for given data type
+    std::string
+    GetTestValue(const DataType& data_type, int value_index) {
+        switch (data_type) {
+            case DataType::BOOL:
+                return value_index == 0 ? "false" : "true";
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32:
+            case DataType::INT64:
+            case DataType::FLOAT:
+            case DataType::DOUBLE:
+                return std::to_string(value_index);
+            case DataType::VARCHAR:
+                return fmt::format("\"str{}\"", value_index);
+            default:
+                throw std::runtime_error("Invalid data type " +
+                                         fmt::format("{}", data_type));
+        }
+    }
+
     void
     TestMvExpectDefault(knowhere::MaterializedViewSearchInfo& mv) {
         EXPECT_EQ(mv.field_id_to_touched_categories_cnt.size(),
                   kFieldIdToTouchedCategoriesCntDefault);
         EXPECT_EQ(mv.is_pure_and, kIsPureAndDefault);
         EXPECT_EQ(mv.has_not, kHasNotDefault);
-    }
-
-    static void
-    ReplaceAllOccurrence(std::string& str,
-                         const std::string& occ,
-                         const std::string& replace) {
-        str = std::regex_replace(str, std::regex(occ), replace);
-    }
-
-    std::string
-    InterpolateMvInvolved(const std::string& plan, const bool is_mv_involved) {
-        std::string p = plan;
-        ReplaceAllOccurrence(
-            p, kMvInvolvedPlaceholder, is_mv_involved ? "true" : "false");
-        return p;
-    }
-
- private:
-    std::string
-    InterpolateTemplate(const std::string& predicate_str) {
-        std::string plan_str = plan_template;
-        ReplaceAllOccurrence(plan_str, kPredicatePlaceholder, predicate_str);
-        return plan_str;
     }
 
  protected:
@@ -292,7 +229,7 @@ class ExprMaterializedViewTest : public testing::Test {
     static std::unique_ptr<milvus::query::ExecPlanNodeVisitor>
         exec_plan_node_visitor;
     static std::unordered_set<DataType> numeric_str_scalar_data_types;
-    static std::string plan_template;
+    static std::unique_ptr<milvus::segcore::ScopedSchemaHandle> schema_handle;
 
     constexpr static size_t N = 1000;
     constexpr static size_t kDim = 16;
@@ -308,7 +245,8 @@ std::unique_ptr<milvus::query::ExecPlanNodeVisitor>
     ExprMaterializedViewTest::exec_plan_node_visitor = nullptr;
 std::unordered_set<DataType>
     ExprMaterializedViewTest::numeric_str_scalar_data_types = {};
-std::string ExprMaterializedViewTest::plan_template = "";
+std::unique_ptr<milvus::segcore::ScopedSchemaHandle>
+    ExprMaterializedViewTest::schema_handle = nullptr;
 
 /*************** Test Cases Start ***************/
 
@@ -317,25 +255,8 @@ std::string ExprMaterializedViewTest::plan_template = "";
 TEST_F(ExprMaterializedViewTest, TestMvNoExpr) {
     for (const auto& data_type : GetNumericAndVarcharScalarDataTypes()) {
         for (const auto& mv_involved : {true, false}) {
-            std::string plan_str = R"(vector_anns: <
-                                    field_id: VEC_FID
-                                    query_info: <
-                                      topk: 1
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 1}"
-                                    >
-                                    placeholder_tag: "$0">)";
-            const int64_t vec_field_id =
-                data_field_info[DataType::VECTOR_FLOAT].field_id;
-            ReplaceAllOccurrence(
-                plan_str, kVecFieldIdPlaceholder, std::to_string(vec_field_id));
-            plan_str = InterpolateMvInvolved(plan_str, mv_involved);
-            auto binary_plan =
-                milvus::segcore::translate_text_plan_to_binary_plan(
-                    plan_str.c_str());
-            auto plan = milvus::query::CreateSearchPlanByExpr(
-                schema, binary_plan.data(), binary_plan.size());
+            // Empty expression means no predicate
+            auto plan = CreatePlan("", mv_involved);
             auto mv = ExecutePlan(plan);
             TestMvExpectDefault(mv);
         }
@@ -344,63 +265,40 @@ TEST_F(ExprMaterializedViewTest, TestMvNoExpr) {
 
 TEST_F(ExprMaterializedViewTest, TestMvNotInvolvedExpr) {
     for (const auto& data_type : GetNumericAndVarcharScalarDataTypes()) {
-        std::string predicate = R"(
-            term_expr: <
-                column_info: <
-                    field_id: FID
-                    data_type: DT
-                >
-                values: < VAL1 >
-            >
-        )";
-        predicate = InterpolateSingleExpr(predicate, data_type);
-        auto plan = CreatePlan(predicate, false);
+        std::string field_name = GetFieldName(data_type);
+        std::string val = GetTestValue(data_type, 1);
+        // F in [A] -> field_name in [val]
+        std::string expr = fmt::format("{} in [{}]", field_name, val);
+        auto plan = CreatePlan(expr, false);
         auto mv = ExecutePlan(plan);
         TestMvExpectDefault(mv);
     }
 }
 
 TEST_F(ExprMaterializedViewTest, TestMvNotInvolvedJsonExpr) {
-    std::string predicate =
-        InterpolateSingleExpr(
-            R"( json_contains_expr:<column_info:<field_id:FID data_type:DT nested_path:"A" > )",
-            DataType::JSON) +
-        InterpolateSingleExpr(
-            R"( elements:<VAL1> op:Contains elements_same_type:true>)",
-            DataType::INT64);
-    auto plan = CreatePlan(predicate, false);
+    // json_contains(JSONField["A"], 1)
+    std::string expr = R"(json_contains(JSONField["A"], 1))";
+    auto plan = CreatePlan(expr, false);
     auto mv = ExecutePlan(plan);
     TestMvExpectDefault(mv);
 }
 
 // Test json_contains
 TEST_F(ExprMaterializedViewTest, TestJsonContainsExpr) {
-    std::string predicate =
-        InterpolateSingleExpr(
-            R"( json_contains_expr:<column_info:<field_id:FID data_type:DT nested_path:"A" > )",
-            DataType::JSON) +
-        InterpolateSingleExpr(
-            R"( elements:<VAL1> op:Contains elements_same_type:true>)",
-            DataType::INT64);
-    auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
+    // json_contains(JSONField["A"], 1)
+    std::string expr = R"(json_contains(JSONField["A"], 1))";
+    auto mv = TranslateThenExecuteWhenMvInvolved(expr);
     TestMvExpectDefault(mv);
 }
 
 // Test numeric and varchar expr: F0 in [A]
 TEST_F(ExprMaterializedViewTest, TestInExpr) {
     for (const auto& data_type : GetNumericAndVarcharScalarDataTypes()) {
-        std::string predicate = R"(
-            term_expr:<
-                column_info:<
-                    field_id: FID
-                    data_type: DT
-                >
-                values:< VAL1 >
-            >
-        )";
-        predicate = InterpolateSingleExpr(predicate, data_type);
-        auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
-        // fmt::print("Predicate: {}\n", predicate);
+        std::string field_name = GetFieldName(data_type);
+        std::string val = GetTestValue(data_type, 1);
+        // F in [A]
+        std::string expr = fmt::format("{} in [{}]", field_name, val);
+        auto mv = TranslateThenExecuteWhenMvInvolved(expr);
 
         ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
         auto field_id = GetFieldID(data_type);
@@ -415,20 +313,12 @@ TEST_F(ExprMaterializedViewTest, TestInExpr) {
 // Test numeric and varchar expr: F0 in [A, A, A]
 TEST_F(ExprMaterializedViewTest, TestInDuplicatesExpr) {
     for (const auto& data_type : GetNumericAndVarcharScalarDataTypes()) {
-        std::string predicate = R"(
-            term_expr:<
-                column_info:<
-                    field_id: FID
-                    data_type: DT
-                >
-                values:< VAL1 >
-                values:< VAL1 >
-                values:< VAL1 >
-            >
-        )";
-        predicate = InterpolateSingleExpr(predicate, data_type);
-        auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
-        // fmt::print("Predicate: {}\n", predicate);
+        std::string field_name = GetFieldName(data_type);
+        std::string val = GetTestValue(data_type, 1);
+        // F in [A, A, A]
+        std::string expr =
+            fmt::format("{} in [{}, {}, {}]", field_name, val, val, val);
+        auto mv = TranslateThenExecuteWhenMvInvolved(expr);
 
         ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
         auto field_id = GetFieldID(data_type);
@@ -443,22 +333,11 @@ TEST_F(ExprMaterializedViewTest, TestInDuplicatesExpr) {
 // Test numeric and varchar expr: F0 not in [A]
 TEST_F(ExprMaterializedViewTest, TestUnaryLogicalNotInExpr) {
     for (const auto& data_type : GetNumericAndVarcharScalarDataTypes()) {
-        std::string predicate = R"(
-            unary_expr:<
-                op:Not
-                child: <
-                    term_expr:<
-                        column_info:<
-                            field_id: FID
-                            data_type: DT
-                        >
-                        values:< VAL1 >
-                    >
-                >
-            >
-        )";
-        predicate = InterpolateSingleExpr(predicate, data_type);
-        auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
+        std::string field_name = GetFieldName(data_type);
+        std::string val = GetTestValue(data_type, 1);
+        // F not in [A]
+        std::string expr = fmt::format("{} not in [{}]", field_name, val);
+        auto mv = TranslateThenExecuteWhenMvInvolved(expr);
 
         ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
         auto field_id = GetFieldID(data_type);
@@ -473,18 +352,11 @@ TEST_F(ExprMaterializedViewTest, TestUnaryLogicalNotInExpr) {
 // Test numeric and varchar expr: F0 == A
 TEST_F(ExprMaterializedViewTest, TestUnaryRangeEqualExpr) {
     for (const auto& data_type : GetNumericAndVarcharScalarDataTypes()) {
-        std::string predicate = R"(
-            unary_range_expr:<
-                column_info:<
-                    field_id:FID
-                    data_type: DT
-                >
-                op:Equal
-                value: < VAL1 >
-            >
-        )";
-        predicate = InterpolateSingleExpr(predicate, data_type);
-        auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
+        std::string field_name = GetFieldName(data_type);
+        std::string val = GetTestValue(data_type, 1);
+        // F == A
+        std::string expr = fmt::format("{} == {}", field_name, val);
+        auto mv = TranslateThenExecuteWhenMvInvolved(expr);
 
         ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
         auto field_id = GetFieldID(data_type);
@@ -499,18 +371,11 @@ TEST_F(ExprMaterializedViewTest, TestUnaryRangeEqualExpr) {
 // Test numeric and varchar expr: F0 != A
 TEST_F(ExprMaterializedViewTest, TestUnaryRangeNotEqualExpr) {
     for (const auto& data_type : GetNumericAndVarcharScalarDataTypes()) {
-        std::string predicate = R"(
-                unary_range_expr:<
-                    column_info:<
-                        field_id:FID
-                        data_type: DT
-                    >
-                    op: NotEqual
-                    value: < VAL1 >
-                >
-            )";
-        predicate = InterpolateSingleExpr(predicate, data_type);
-        auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
+        std::string field_name = GetFieldName(data_type);
+        std::string val = GetTestValue(data_type, 1);
+        // F != A
+        std::string expr = fmt::format("{} != {}", field_name, val);
+        auto mv = TranslateThenExecuteWhenMvInvolved(expr);
 
         ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
         auto field_id = GetFieldID(data_type);
@@ -524,23 +389,14 @@ TEST_F(ExprMaterializedViewTest, TestUnaryRangeNotEqualExpr) {
 
 // Test numeric and varchar expr: F0 < A, F0 <= A, F0 > A, F0 >= A
 TEST_F(ExprMaterializedViewTest, TestUnaryRangeCompareExpr) {
-    const std::vector<std::string> ops = {
-        "LessThan", "LessEqual", "GreaterThan", "GreaterEqual"};
+    const std::vector<std::string> ops = {"<", "<=", ">", ">="};
     for (const auto& data_type : GetNumericAndVarcharScalarDataTypes()) {
-        for (const auto& ops_str : ops) {
-            std::string predicate = R"(
-                unary_range_expr:<
-                    column_info:<
-                        field_id:FID
-                        data_type: DT
-                    >
-                    op: )" + ops_str +
-                                    R"(
-                    value: < VAL1 >
-                >
-            )";
-            predicate = InterpolateSingleExpr(predicate, data_type);
-            auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
+        for (const auto& op : ops) {
+            std::string field_name = GetFieldName(data_type);
+            std::string val = GetTestValue(data_type, 1);
+            // F op A
+            std::string expr = fmt::format("{} {} {}", field_name, op, val);
+            auto mv = TranslateThenExecuteWhenMvInvolved(expr);
 
             ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
             auto field_id = GetFieldID(data_type);
@@ -556,18 +412,13 @@ TEST_F(ExprMaterializedViewTest, TestUnaryRangeCompareExpr) {
 // Test numeric and varchar expr: F in [A, B, C]
 TEST_F(ExprMaterializedViewTest, TestInMultipleExpr) {
     for (const auto& data_type : GetNumericAndVarcharScalarDataTypes()) {
-        std::string predicate = R"(
-            term_expr:<
-                column_info:<
-                    field_id: FID
-                    data_type: DT
-                >
-                values:< VAL0 >
-                values:< VAL1 >
-            >
-        )";
-        predicate = InterpolateSingleExpr(predicate, data_type);
-        auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
+        std::string field_name = GetFieldName(data_type);
+        std::string val0 = GetTestValue(data_type, 0);
+        std::string val1 = GetTestValue(data_type, 1);
+        // F in [A, B]
+        std::string expr =
+            fmt::format("{} in [{}, {}]", field_name, val0, val1);
+        auto mv = TranslateThenExecuteWhenMvInvolved(expr);
 
         ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
         auto field_id = GetFieldID(data_type);
@@ -582,23 +433,13 @@ TEST_F(ExprMaterializedViewTest, TestInMultipleExpr) {
 // Test numeric and varchar expr: F0 not in [A]
 TEST_F(ExprMaterializedViewTest, TestUnaryLogicalNotInMultipleExpr) {
     for (const auto& data_type : GetNumericAndVarcharScalarDataTypes()) {
-        std::string predicate = R"(
-            unary_expr:<
-                op:Not
-                child: <
-                    term_expr:<
-                        column_info:<
-                            field_id: FID
-                            data_type: DT
-                        >
-                        values:< VAL0 >
-                        values:< VAL1 >
-                    >
-                >
-            >
-        )";
-        predicate = InterpolateSingleExpr(predicate, data_type);
-        auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
+        std::string field_name = GetFieldName(data_type);
+        std::string val0 = GetTestValue(data_type, 0);
+        std::string val1 = GetTestValue(data_type, 1);
+        // F not in [A, B]
+        std::string expr =
+            fmt::format("{} not in [{}, {}]", field_name, val0, val1);
+        auto mv = TranslateThenExecuteWhenMvInvolved(expr);
 
         ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
         auto field_id = GetFieldID(data_type);
@@ -614,39 +455,14 @@ TEST_F(ExprMaterializedViewTest, TestUnaryLogicalNotInMultipleExpr) {
 TEST_F(ExprMaterializedViewTest, TestEqualAndEqualExpr) {
     const DataType c0_data_type = DataType::VARCHAR;
     const DataType c1_data_type = DataType::INT32;
-    std::string c0 = R"(
-            unary_range_expr:<
-                column_info:<
-                    field_id:FID
-                    data_type: DT
-                >
-                op:Equal
-                value: < VAL1 >
-            >
-        )";
-    c0 = InterpolateSingleExpr(c0, c0_data_type);
-    std::string c1 = R"(
-            unary_range_expr:<
-                column_info:<
-                    field_id:FID
-                    data_type: DT
-                >
-                op:Equal
-                value: < VAL2 >
-            >
-        )";
-    c1 = InterpolateSingleExpr(c1, c1_data_type);
-    std::string predicate = R"(
-            binary_expr:<
-                op:LogicalAnd
-                left: <)" + c0 +
-                            R"(>
-                right: <)" + c1 +
-                            R"(>
-            >
-        )";
+    std::string f0 = GetFieldName(c0_data_type);
+    std::string f1 = GetFieldName(c1_data_type);
+    std::string val0 = GetTestValue(c0_data_type, 1);
+    std::string val1 = GetTestValue(c1_data_type, 2);
+    // F0 == A && F1 == B
+    std::string expr = fmt::format("{} == {} && {} == {}", f0, val0, f1, val1);
 
-    auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
+    auto mv = TranslateThenExecuteWhenMvInvolved(expr);
 
     ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 2);
     EXPECT_EQ(mv.field_id_to_touched_categories_cnt[GetFieldID(c0_data_type)],
@@ -662,39 +478,16 @@ TEST_F(ExprMaterializedViewTest, TestEqualAndInExpr) {
     const DataType c0_data_type = DataType::VARCHAR;
     const DataType c1_data_type = DataType::INT32;
 
-    std::string c0 = R"(
-            unary_range_expr:<
-                column_info:<
-                    field_id:FID
-                    data_type: DT
-                >
-                op:Equal
-                value: < VAL1 >
-            >
-        )";
-    c0 = InterpolateSingleExpr(c0, c0_data_type);
-    std::string c1 = R"(
-            term_expr:<
-                column_info:<
-                    field_id: FID
-                    data_type: DT
-                >
-                values:< VAL1 >
-                values:< VAL2 >
-            >
-        )";
-    c1 = InterpolateSingleExpr(c1, c1_data_type);
-    std::string predicate = R"(
-            binary_expr:<
-                op:LogicalAnd
-                left: <)" + c0 +
-                            R"(>
-                right: <)" + c1 +
-                            R"(>
-            >
-        )";
+    std::string f0 = GetFieldName(c0_data_type);
+    std::string f1 = GetFieldName(c1_data_type);
+    std::string val0 = GetTestValue(c0_data_type, 1);
+    std::string val1 = GetTestValue(c1_data_type, 1);
+    std::string val2 = GetTestValue(c1_data_type, 2);
+    // F0 == A && F1 in [A, B]
+    std::string expr =
+        fmt::format("{} == {} && {} in [{}, {}]", f0, val0, f1, val1, val2);
 
-    auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
+    auto mv = TranslateThenExecuteWhenMvInvolved(expr);
 
     ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 2);
     EXPECT_EQ(mv.field_id_to_touched_categories_cnt[GetFieldID(c0_data_type)],
@@ -710,44 +503,16 @@ TEST_F(ExprMaterializedViewTest, TestEqualAndNotInExpr) {
     const DataType c0_data_type = DataType::VARCHAR;
     const DataType c1_data_type = DataType::INT32;
 
-    std::string c0 = R"(
-            unary_range_expr:<
-                column_info:<
-                    field_id:FID
-                    data_type: DT
-                >
-                op:Equal
-                value: < VAL1 >
-            >
-        )";
-    c0 = InterpolateSingleExpr(c0, c0_data_type);
-    std::string c1 = R"(
-            unary_expr:<
-                op:Not
-                child: <
-                    term_expr:<
-                        column_info:<
-                            field_id: FID
-                            data_type: DT
-                        >
-                        values:< VAL1 >
-                        values:< VAL2 >
-                    >
-                >
-            >
-        )";
-    c1 = InterpolateSingleExpr(c1, c1_data_type);
-    std::string predicate = R"(
-            binary_expr:<
-                op:LogicalAnd
-                left: <)" + c0 +
-                            R"(>
-                right: <)" + c1 +
-                            R"(>
-            >
-        )";
+    std::string f0 = GetFieldName(c0_data_type);
+    std::string f1 = GetFieldName(c1_data_type);
+    std::string val0 = GetTestValue(c0_data_type, 1);
+    std::string val1 = GetTestValue(c1_data_type, 1);
+    std::string val2 = GetTestValue(c1_data_type, 2);
+    // F0 == A && F1 not in [A, B]
+    std::string expr =
+        fmt::format("{} == {} && {} not in [{}, {}]", f0, val0, f1, val1, val2);
 
-    auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
+    auto mv = TranslateThenExecuteWhenMvInvolved(expr);
 
     ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 2);
     EXPECT_EQ(mv.field_id_to_touched_categories_cnt[GetFieldID(c0_data_type)],
@@ -763,39 +528,14 @@ TEST_F(ExprMaterializedViewTest, TestEqualOrEqualExpr) {
     const DataType c0_data_type = DataType::VARCHAR;
     const DataType c1_data_type = DataType::INT32;
 
-    std::string c0 = R"(
-            unary_range_expr:<
-                column_info:<
-                    field_id:FID
-                    data_type: DT
-                >
-                op:Equal
-                value: < VAL1 >
-            >
-        )";
-    c0 = InterpolateSingleExpr(c0, c0_data_type);
-    std::string c1 = R"(
-            unary_range_expr:<
-                column_info:<
-                    field_id:FID
-                    data_type: DT
-                >
-                op:Equal
-                value: < VAL2 >
-            >
-        )";
-    c1 = InterpolateSingleExpr(c1, c1_data_type);
-    std::string predicate = R"(
-            binary_expr:<
-                op:LogicalOr
-                left: <)" + c0 +
-                            R"(>
-                right: <)" + c1 +
-                            R"(>
-            >
-        )";
+    std::string f0 = GetFieldName(c0_data_type);
+    std::string f1 = GetFieldName(c1_data_type);
+    std::string val0 = GetTestValue(c0_data_type, 1);
+    std::string val1 = GetTestValue(c1_data_type, 2);
+    // F0 == A || F1 == B
+    std::string expr = fmt::format("{} == {} || {} == {}", f0, val0, f1, val1);
 
-    auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
+    auto mv = TranslateThenExecuteWhenMvInvolved(expr);
 
     ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 2);
     EXPECT_EQ(mv.field_id_to_touched_categories_cnt[GetFieldID(c0_data_type)],
@@ -812,60 +552,24 @@ TEST_F(ExprMaterializedViewTest, TestEqualAndInOrEqualExpr) {
     const DataType c1_data_type = DataType::INT32;
     const DataType c2_data_type = DataType::INT16;
 
-    std::string c0 = R"(
-            unary_range_expr:<
-                column_info:<
-                    field_id:FID
-                    data_type: DT
-                >
-                op:Equal
-                value: < VAL1 >
-            >
-        )";
-    c0 = InterpolateSingleExpr(c0, c0_data_type);
-    std::string c1 = R"(
-            term_expr:<
-                column_info:<
-                    field_id: FID
-                    data_type: DT
-                >
-                values:< VAL1 >
-                values:< VAL2 >
-            >
-        )";
-    c1 = InterpolateSingleExpr(c1, c1_data_type);
-    std::string c2 = R"(
-            unary_range_expr:<
-                column_info:<
-                    field_id:FID
-                    data_type: DT
-                >
-                op:Equal
-                value: < VAL3 >
-            >
-        )";
-    c2 = InterpolateSingleExpr(c2, c2_data_type);
+    std::string f0 = GetFieldName(c0_data_type);
+    std::string f1 = GetFieldName(c1_data_type);
+    std::string f2 = GetFieldName(c2_data_type);
+    std::string val0 = GetTestValue(c0_data_type, 1);
+    std::string val1 = GetTestValue(c1_data_type, 1);
+    std::string val2 = GetTestValue(c1_data_type, 2);
+    std::string val3 = GetTestValue(c2_data_type, 3);
+    // F0 == A && (F1 in [A, B] || F2 == C)
+    std::string expr = fmt::format("{} == {} && ({} in [{}, {}] || {} == {})",
+                                   f0,
+                                   val0,
+                                   f1,
+                                   val1,
+                                   val2,
+                                   f2,
+                                   val3);
 
-    std::string predicate = R"(
-            binary_expr:<
-                op:LogicalAnd
-                left: <)" + c0 +
-                            R"(>
-                right: <
-                    binary_expr:<
-                        op:LogicalOr
-                        left: <)" +
-                            c1 +
-                            R"(>
-                        right: <)" +
-                            c2 +
-                            R"(>
-                    >
-                >
-            >
-        )";
-
-    auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
+    auto mv = TranslateThenExecuteWhenMvInvolved(expr);
 
     ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 3);
     EXPECT_EQ(mv.field_id_to_touched_categories_cnt[GetFieldID(c0_data_type)],
@@ -884,65 +588,22 @@ TEST_F(ExprMaterializedViewTest, TestEqualAndNotEqualOrEqualExpr) {
     const DataType c1_data_type = DataType::INT32;
     const DataType c2_data_type = DataType::INT16;
 
-    std::string c0 = R"(
-            unary_range_expr:<
-                column_info:<
-                    field_id:FID
-                    data_type: DT
-                >
-                op:Equal
-                value: < VAL1 >
-            >
-        )";
-    c0 = InterpolateSingleExpr(c0, c0_data_type);
-    std::string c1 = R"(
-            unary_expr:<
-                op:Not
-                child: <
-                    unary_range_expr:<
-                        column_info:<
-                            field_id:FID
-                            data_type: DT
-                        >
-                        op:Equal
-                        value: < VAL2 >
-                    >
-                >
-            >
-        )";
-    c1 = InterpolateSingleExpr(c1, c1_data_type);
-    std::string c2 = R"(
-            unary_range_expr:<
-                column_info:<
-                    field_id:FID
-                    data_type: DT
-                >
-                op:Equal
-                value: < VAL1 >
-            >
-        )";
-    c2 = InterpolateSingleExpr(c2, c2_data_type);
+    std::string f0 = GetFieldName(c0_data_type);
+    std::string f1 = GetFieldName(c1_data_type);
+    std::string f2 = GetFieldName(c2_data_type);
+    std::string val0 = GetTestValue(c0_data_type, 1);
+    std::string val1 = GetTestValue(c1_data_type, 2);
+    std::string val2 = GetTestValue(c2_data_type, 1);
+    // F0 == A && (not(F1 == B) || F2 == C)
+    std::string expr = fmt::format("{} == {} && (not({} == {}) || {} == {})",
+                                   f0,
+                                   val0,
+                                   f1,
+                                   val1,
+                                   f2,
+                                   val2);
 
-    std::string predicate = R"(
-            binary_expr:<
-                op:LogicalAnd
-                left: <)" + c0 +
-                            R"(>
-                right: <
-                    binary_expr:<
-                        op:LogicalOr
-                        left: <)" +
-                            c1 +
-                            R"(>
-                        right: <)" +
-                            c2 +
-                            R"(>
-                    >
-                >
-            >
-        )";
-
-    auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
+    auto mv = TranslateThenExecuteWhenMvInvolved(expr);
 
     ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 3);
     EXPECT_EQ(mv.field_id_to_touched_categories_cnt[GetFieldID(c0_data_type)],
@@ -958,18 +619,16 @@ TEST_F(ExprMaterializedViewTest, TestEqualAndNotEqualOrEqualExpr) {
 // Test expr: A < F0 < B
 TEST_F(ExprMaterializedViewTest, TestBinaryRangeExpr) {
     for (const auto& data_type : GetNumericAndVarcharScalarDataTypes()) {
-        std::string predicate = R"(
-                binary_range_expr: <
-                    column_info:<
-                        field_id:FID
-                        data_type: DT
-                    >
-                    lower_value: < VAL0 >
-                    upper_value: < VAL1 >
-                >
-            )";
-        predicate = InterpolateSingleExpr(predicate, data_type);
-        auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
+        // Skip boolean - range comparison not supported for boolean
+        if (data_type == DataType::BOOL) {
+            continue;
+        }
+        std::string field_name = GetFieldName(data_type);
+        std::string val0 = GetTestValue(data_type, 0);
+        std::string val1 = GetTestValue(data_type, 1);
+        // A < F < B (binary range using chained comparison syntax)
+        std::string expr = fmt::format("{} < {} < {}", val0, field_name, val1);
+        auto mv = TranslateThenExecuteWhenMvInvolved(expr);
 
         ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
         auto field_id = GetFieldID(data_type);

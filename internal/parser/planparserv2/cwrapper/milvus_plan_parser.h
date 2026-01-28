@@ -60,7 +60,7 @@ public:
     static std::string UnregisterSchema(SchemaHandle handle);
 
     /**
-     * @brief Parse an expression string into a serialized PlanNode protobuf.
+     * @brief Parse an expression string into a serialized PlanNode protobuf (RetrievePlan).
      *
      * Thread-safe and lock-free. Multiple threads can call Parse() concurrently
      * with the same or different handles.
@@ -74,6 +74,27 @@ public:
      *   - parsing fails
      */
     static std::vector<uint8_t> Parse(SchemaHandle handle, const std::string& expr);
+
+    /**
+     * @brief Parse an expression string into a serialized SearchPlan PlanNode protobuf.
+     *
+     * Thread-safe and lock-free. Creates a VectorANNS plan node for search operations.
+     *
+     * @param handle The handle returned by RegisterSchema.
+     * @param expr The filter expression string to parse (can be empty).
+     * @param vector_field_name The name of the vector field to search.
+     * @param query_info_proto The serialized QueryInfo protobuf containing topk, metric_type, etc.
+     * @return std::vector<uint8_t> The serialized PlanNode protobuf.
+     * @throws std::runtime_error if:
+     *   - handle is invalid or not found
+     *   - schema was unregistered
+     *   - vector field not found
+     *   - parsing fails
+     */
+    static std::vector<uint8_t> ParseSearch(SchemaHandle handle,
+                                            const std::string& expr,
+                                            const std::string& vector_field_name,
+                                            const std::vector<uint8_t>& query_info_proto);
 };
 
 } // namespace planparserv2

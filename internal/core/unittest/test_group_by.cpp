@@ -69,24 +69,22 @@ TEST(GroupBY, SealedIndex) {
     int topK = 15;
     int group_size = 3;
 
+    // Create ScopedSchemaHandle for parsing expressions
+    ScopedSchemaHandle handle(*schema);
+
     //4. search group by int8
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 100
-                                        query_info: <
-                                          topk: 15
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 101
-                                          group_size: 3
-                                        >
-                                        placeholder_tag: "$0"
-
-         >)";
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto plan_str =
+            handle.ParseGroupBySearch("",         // empty filter expression
+                                      "fakevec",  // vector field name
+                                      topK,       // topk
+                                      "L2",       // metric type
+                                      "{\"ef\": 10}",  // search params
+                                      int8_fid.get(),  // group_by_field_id
+                                      group_size       // group_size
+            );
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -123,23 +121,17 @@ TEST(GroupBY, SealedIndex) {
 
     //5. search group by int16
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 100
-                                        query_info: <
-                                          topk: 100
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 102
-                                          group_size: 3
-                                        >
-                                        placeholder_tag: "$0"
-
-         >)";
-
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto plan_str =
+            handle.ParseGroupBySearch("",         // empty filter expression
+                                      "fakevec",  // vector field name
+                                      100,        // topk
+                                      "L2",       // metric type
+                                      "{\"ef\": 10}",   // search params
+                                      int16_fid.get(),  // group_by_field_id
+                                      group_size        // group_size
+            );
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -173,23 +165,17 @@ TEST(GroupBY, SealedIndex) {
     }
     //6. search group by int32
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 100
-                                        query_info: <
-                                          topk: 100
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 103
-                                          group_size: 3
-                                        >
-                                        placeholder_tag: "$0"
-
-         >)";
-
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto plan_str =
+            handle.ParseGroupBySearch("",         // empty filter expression
+                                      "fakevec",  // vector field name
+                                      100,        // topk
+                                      "L2",       // metric type
+                                      "{\"ef\": 10}",   // search params
+                                      int32_fid.get(),  // group_by_field_id
+                                      group_size        // group_size
+            );
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -224,23 +210,17 @@ TEST(GroupBY, SealedIndex) {
 
     //7. search group by int64
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 100
-                                        query_info: <
-                                          topk: 100
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 104
-                                          group_size: 3
-                                        >
-                                        placeholder_tag: "$0"
-
-         >)";
-
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto plan_str =
+            handle.ParseGroupBySearch("",         // empty filter expression
+                                      "fakevec",  // vector field name
+                                      100,        // topk
+                                      "L2",       // metric type
+                                      "{\"ef\": 10}",   // search params
+                                      int64_fid.get(),  // group_by_field_id
+                                      group_size        // group_size
+            );
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -274,23 +254,17 @@ TEST(GroupBY, SealedIndex) {
 
     //8. search group by string
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 100
-                                        query_info: <
-                                          topk: 100
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 105
-                                          group_size: 3
-                                        >
-                                        placeholder_tag: "$0"
-
-         >)";
-
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto plan_str =
+            handle.ParseGroupBySearch("",         // empty filter expression
+                                      "fakevec",  // vector field name
+                                      100,        // topk
+                                      "L2",       // metric type
+                                      "{\"ef\": 10}",  // search params
+                                      str_fid.get(),   // group_by_field_id
+                                      group_size       // group_size
+            );
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -324,23 +298,17 @@ TEST(GroupBY, SealedIndex) {
 
     //9. search group by bool
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 100
-                                        query_info: <
-                                          topk: 100
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 106
-                                          group_size: 3
-                                        >
-                                        placeholder_tag: "$0"
-
-         >)";
-
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto plan_str =
+            handle.ParseGroupBySearch("",         // empty filter expression
+                                      "fakevec",  // vector field name
+                                      100,        // topk
+                                      "L2",       // metric type
+                                      "{\"ef\": 10}",  // search params
+                                      bool_fid.get(),  // group_by_field_id
+                                      group_size       // group_size
+            );
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -375,23 +343,17 @@ TEST(GroupBY, SealedIndex) {
 
     //10. search group by timestamptz
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 100
-                                        query_info: <
-                                          topk: 100
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 107
-                                          group_size: 3
-                                        >
-                                        placeholder_tag: "$0"
-
-         >)";
-
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto plan_str = handle.ParseGroupBySearch(
+            "",                     // empty filter expression
+            "fakevec",              // vector field name
+            100,                    // topk
+            "L2",                   // metric type
+            "{\"ef\": 10}",         // search params
+            timestamptz_fid.get(),  // group_by_field_id
+            group_size              // group_size
+        );
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -447,22 +409,24 @@ TEST(GroupBY, SealedData) {
 
     int topK = 10;
     int group_size = 5;
+
+    // Create ScopedSchemaHandle for parsing expressions
+    ScopedSchemaHandle handle(*schema);
+
     //3. search group by int8
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 100
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 101,
-                                          group_size: 5,
-                                          strict_group_size: true,
-                                        >
-                                        placeholder_tag: "$0"
-
-         >)";
-        auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+        auto plan_str = handle.ParseGroupBySearch(
+            "",                                     // empty filter expression
+            "fakevec",                              // vector field name
+            topK,                                   // topk
+            "L2",                                   // metric type
+            "{\"ef\": 10}",                         // search params
+            int8_fid.get(),                         // group_by_field_id
+            group_size,                             // group_size
+            "",                                     // json_path (not used)
+            milvus::proto::schema::DataType::None,  // json_type (not used)
+            true                                    // strict_group_size
+        );
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         auto num_queries = 1;
@@ -571,9 +535,20 @@ TEST(GroupBY, Reduce) {
     auto slice_nqs = std::vector<int64_t>{num_queries / 2, num_queries / 2};
     auto slice_topKs = std::vector<int64_t>{topK / 2, topK};
 
-    // Lambda function to execute search and reduce with given raw plan
-    auto executeGroupBySearchAndReduce = [&](const char* raw_plan) {
-        auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    // Create ScopedSchemaHandle for parsing expressions
+    ScopedSchemaHandle handle(*schema);
+
+    // Lambda function to execute search and reduce with given group_by_field_id
+    auto executeGroupBySearchAndReduce = [&](int64_t group_by_field_id) {
+        auto plan_str =
+            handle.ParseGroupBySearch("",         // empty filter expression
+                                      "fakevec",  // vector field name
+                                      topK,       // topk
+                                      "L2",       // metric type
+                                      "{\"ef\": 10}",     // search params
+                                      group_by_field_id,  // group_by_field_id
+                                      group_size          // group_size
+            );
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -611,89 +586,23 @@ TEST(GroupBY, Reduce) {
         DeletePlaceholderGroup(c_ph_group);
     };
 
-    // Execute the test with the original plan (INT64)
-    const char* raw_plan = R"(vector_anns: <
-                                        field_id: 100
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 101
-                                          group_size: 3
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-    executeGroupBySearchAndReduce(raw_plan);
+    // Execute the test with group by INT64 field
+    executeGroupBySearchAndReduce(int64_fid.get());
 
     // Test Case: Group by INT32 field
-    const char* raw_plan_int32 = R"(vector_anns: <
-                                        field_id: 100
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 102
-                                          group_size: 3
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-    executeGroupBySearchAndReduce(raw_plan_int32);
+    executeGroupBySearchAndReduce(int32_fid.get());
 
     // Test Case: Group by INT16 field
-    const char* raw_plan_int16 = R"(vector_anns: <
-                                        field_id: 100
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 103
-                                          group_size: 3
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-    executeGroupBySearchAndReduce(raw_plan_int16);
+    executeGroupBySearchAndReduce(int16_fid.get());
 
     // Test Case: Group by INT8 field
-    const char* raw_plan_int8 = R"(vector_anns: <
-                                        field_id: 100
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 104
-                                          group_size: 3
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-    executeGroupBySearchAndReduce(raw_plan_int8);
+    executeGroupBySearchAndReduce(int8_fid.get());
 
     // Test Case: Group by BOOL field
-    const char* raw_plan_bool = R"(vector_anns: <
-                                        field_id: 100
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 105
-                                          group_size: 3
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-    executeGroupBySearchAndReduce(raw_plan_bool);
+    executeGroupBySearchAndReduce(bool_fid.get());
 
     // Test Case: Group by VARCHAR field
-    const char* raw_plan_string = R"(vector_anns: <
-                                        field_id: 100
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 106
-                                          group_size: 3
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-    executeGroupBySearchAndReduce(raw_plan_string);
+    executeGroupBySearchAndReduce(string_fid.get());
 
     DeleteSegment(c_segment_1);
     DeleteSegment(c_segment_2);
@@ -737,19 +646,19 @@ TEST(GroupBY, GrowingRawData) {
     auto num_queries = 10;
     auto topK = 100;
     int group_size = 1;
-    const char* raw_plan = R"(vector_anns: <
-                                        field_id: 102
-                                        query_info: <
-                                          topk: 100
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 101
-                                          group_size: 1
-                                        >
-                                        placeholder_tag: "$0"
 
-         >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    // Create ScopedSchemaHandle for parsing expressions
+    ScopedSchemaHandle handle(*schema);
+
+    auto plan_str =
+        handle.ParseGroupBySearch("",              // empty filter expression
+                                  "embeddings",    // vector field name
+                                  topK,            // topk
+                                  "L2",            // metric type
+                                  "{\"ef\": 10}",  // search params
+                                  int32_field_id.get(),  // group_by_field_id
+                                  group_size             // group_size
+        );
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -836,20 +745,22 @@ TEST(GroupBY, GrowingIndex) {
     auto num_queries = 10;
     auto topK = 100;
     int group_size = 3;
-    const char* raw_plan = R"(vector_anns: <
-                                        field_id: 102
-                                        query_info: <
-                                          topk: 100
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 101
-                                          group_size: 3
-                                          strict_group_size: true
-                                        >
-                                        placeholder_tag: "$0"
 
-         >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    // Create ScopedSchemaHandle for parsing expressions
+    ScopedSchemaHandle handle(*schema);
+
+    auto plan_str = handle.ParseGroupBySearch(
+        "",                                     // empty filter expression
+        "embeddings",                           // vector field name
+        topK,                                   // topk
+        "L2",                                   // metric type
+        "{\"ef\": 10}",                         // search params
+        int32_field_id.get(),                   // group_by_field_id
+        group_size,                             // group_size
+        "",                                     // json_path (not used)
+        milvus::proto::schema::DataType::None,  // json_type (not used)
+        true                                    // strict_group_size
+    );
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
