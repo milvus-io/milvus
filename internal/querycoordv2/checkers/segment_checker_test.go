@@ -44,11 +44,12 @@ import (
 
 type SegmentCheckerTestSuite struct {
 	suite.Suite
-	kv      kv.MetaKv
-	checker *SegmentChecker
-	meta    *meta.Meta
-	broker  *meta.MockBroker
-	nodeMgr *session.NodeManager
+	kv        kv.MetaKv
+	checker   *SegmentChecker
+	meta      *meta.Meta
+	broker    *meta.MockBroker
+	nodeMgr   *session.NodeManager
+	scheduler *task.MockScheduler
 }
 
 func (suite *SegmentCheckerTestSuite) SetupSuite() {
@@ -81,14 +82,14 @@ func (suite *SegmentCheckerTestSuite) SetupTest() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 
-	scheduler := task.NewMockScheduler(suite.T())
-	scheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
-	scheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.scheduler = task.NewMockScheduler(suite.T())
+	suite.scheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.scheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	// Initialize global assign policy factory before creating checker
-	assign.InitGlobalAssignPolicyFactory(scheduler, suite.nodeMgr, distManager, suite.meta, targetManager)
+	assign.InitGlobalAssignPolicyFactory(suite.scheduler, suite.nodeMgr, distManager, suite.meta, targetManager)
 
-	suite.checker = NewSegmentChecker(suite.meta, distManager, targetManager, suite.nodeMgr, scheduler)
+	suite.checker = NewSegmentChecker(suite.meta, distManager, targetManager, suite.nodeMgr, suite.scheduler)
 
 	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 }
@@ -149,26 +150,38 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 		View:    &meta.LeaderView{ID: 2, CollectionID: 1, Channel: "test-insert-channel", Version: 1, Status: &querypb.LeaderViewStatus{Serviceable: true}},
 	})
 
+	// Capture tasks added via scheduler.Add()
+	var addedTasks []task.Task
+	suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
+		addedTasks = append(addedTasks, t)
+		return nil
+	}).Maybe()
+
 	tasks := checker.Check(context.TODO())
-	suite.Len(tasks, 1)
-	suite.Len(tasks[0].Actions(), 1)
-	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
+	suite.Len(tasks, 0) // No tasks returned, they are added directly via scheduler.Add()
+	suite.Len(addedTasks, 1)
+	suite.Len(addedTasks[0].Actions(), 1)
+	action, ok := addedTasks[0].Actions()[0].(*task.SegmentAction)
 	suite.True(ok)
-	suite.EqualValues(1, tasks[0].ReplicaID())
+	suite.EqualValues(1, addedTasks[0].ReplicaID())
 	suite.Equal(task.ActionTypeGrow, action.Type())
 	suite.EqualValues(1, action.GetSegmentID())
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
+	suite.Equal(addedTasks[0].Priority(), task.TaskPriorityNormal)
 
 	// test activation
 	checker.Deactivate()
 	suite.False(checker.IsActive())
+	addedTasks = nil
 	tasks = checker.Check(context.TODO())
 	suite.Len(tasks, 0)
+	suite.Len(addedTasks, 0)
 
 	checker.Activate()
 	suite.True(checker.IsActive())
+	addedTasks = nil
 	tasks = checker.Check(context.TODO())
-	suite.Len(tasks, 1)
+	suite.Len(tasks, 0)
+	suite.Len(addedTasks, 1)
 }
 
 func (suite *SegmentCheckerTestSuite) TestSkipLoadSegments() {
@@ -211,9 +224,17 @@ func (suite *SegmentCheckerTestSuite) TestSkipLoadSegments() {
 		channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 
+	// Capture tasks added via scheduler.Add()
+	var addedTasks []task.Task
+	suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
+		addedTasks = append(addedTasks, t)
+		return nil
+	}).Maybe()
+
 	// when channel not subscribed, segment_checker won't generate load segment task
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 0)
+	suite.Len(addedTasks, 0)
 }
 
 func (suite *SegmentCheckerTestSuite) TestReleaseSegments() {
@@ -247,15 +268,23 @@ func (suite *SegmentCheckerTestSuite) TestReleaseSegments() {
 		View:    &meta.LeaderView{ID: 2, CollectionID: 1, Channel: "test-insert-channel", Version: 1, Status: &querypb.LeaderViewStatus{Serviceable: true}},
 	})
 
+	// Capture tasks added via scheduler.Add()
+	var addedTasks []task.Task
+	suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
+		addedTasks = append(addedTasks, t)
+		return nil
+	}).Maybe()
+
 	tasks := checker.Check(context.TODO())
-	suite.Len(tasks, 1)
-	suite.Len(tasks[0].Actions(), 1)
-	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
+	suite.Len(tasks, 0) // No tasks returned, they are added directly via scheduler.Add()
+	suite.Len(addedTasks, 1)
+	suite.Len(addedTasks[0].Actions(), 1)
+	action, ok := addedTasks[0].Actions()[0].(*task.SegmentAction)
 	suite.True(ok)
-	suite.EqualValues(1, tasks[0].ReplicaID())
+	suite.EqualValues(1, addedTasks[0].ReplicaID())
 	suite.Equal(task.ActionTypeReduce, action.Type())
 	suite.EqualValues(2, action.GetSegmentID())
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
+	suite.Equal(addedTasks[0].Priority(), task.TaskPriorityNormal)
 }
 
 func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
@@ -297,16 +326,24 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 		View:    utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 2}, map[int64]*meta.Segment{}),
 	})
 
+	// Capture tasks added via scheduler.Add()
+	var addedTasks []task.Task
+	suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
+		addedTasks = append(addedTasks, t)
+		return nil
+	}).Maybe()
+
 	tasks := checker.Check(context.TODO())
-	suite.Len(tasks, 1)
-	suite.Len(tasks[0].Actions(), 1)
-	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
+	suite.Len(tasks, 0) // No tasks returned, they are added directly via scheduler.Add()
+	suite.Len(addedTasks, 1)
+	suite.Len(addedTasks[0].Actions(), 1)
+	action, ok := addedTasks[0].Actions()[0].(*task.SegmentAction)
 	suite.True(ok)
-	suite.EqualValues(1, tasks[0].ReplicaID())
+	suite.EqualValues(1, addedTasks[0].ReplicaID())
 	suite.Equal(task.ActionTypeReduce, action.Type())
 	suite.EqualValues(1, action.GetSegmentID())
 	suite.EqualValues(1, action.Node())
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityLow)
+	suite.Equal(addedTasks[0].Priority(), task.TaskPriorityLow)
 
 	// test less version exist on leader
 	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
@@ -318,8 +355,10 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 		Version: 1,
 		View:    utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 1}, map[int64]*meta.Segment{}),
 	})
+	addedTasks = nil
 	tasks = checker.Check(context.TODO())
 	suite.Len(tasks, 0)
+	suite.Len(addedTasks, 0)
 }
 
 func (suite *SegmentCheckerTestSuite) TestReleaseDirtySegments() {
@@ -370,6 +409,10 @@ func (suite *SegmentCheckerTestSuite) TestReleaseDirtySegments() {
 		View:    utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 2}, map[int64]*meta.Segment{}),
 	})
 
+	// Mock scheduler.Add() for replica-related tasks
+	suite.scheduler.EXPECT().Add(mock.Anything).Return(nil).Maybe()
+
+	// Dirty segment tasks are returned via Check() return value (replicaID = -1)
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
 	suite.Len(tasks[0].Actions(), 1)
@@ -439,28 +482,36 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 		},
 	})
 
+	// Capture tasks added via scheduler.Add()
+	var addedTasks []task.Task
+	suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
+		addedTasks = append(addedTasks, t)
+		return nil
+	}).Maybe()
+
 	tasks := checker.Check(context.TODO())
-	suite.Len(tasks, 2)
-	sort.Slice(tasks, func(i, j int) bool {
-		return tasks[i].Actions()[0].(*task.SegmentAction).GetSegmentID() < tasks[j].Actions()[0].(*task.SegmentAction).GetSegmentID()
+	suite.Len(tasks, 0) // No tasks returned, they are added directly via scheduler.Add()
+	suite.Len(addedTasks, 2)
+	sort.Slice(addedTasks, func(i, j int) bool {
+		return addedTasks[i].Actions()[0].(*task.SegmentAction).GetSegmentID() < addedTasks[j].Actions()[0].(*task.SegmentAction).GetSegmentID()
 	})
-	suite.Len(tasks[0].Actions(), 1)
-	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
+	suite.Len(addedTasks[0].Actions(), 1)
+	action, ok := addedTasks[0].Actions()[0].(*task.SegmentAction)
 	suite.True(ok)
-	suite.EqualValues(1, tasks[0].ReplicaID())
+	suite.EqualValues(1, addedTasks[0].ReplicaID())
 	suite.Equal(task.ActionTypeReduce, action.Type())
 	suite.EqualValues(2, action.GetSegmentID())
 	suite.EqualValues(2, action.Node())
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
+	suite.Equal(addedTasks[0].Priority(), task.TaskPriorityNormal)
 
-	suite.Len(tasks[1].Actions(), 1)
-	action, ok = tasks[1].Actions()[0].(*task.SegmentAction)
+	suite.Len(addedTasks[1].Actions(), 1)
+	action, ok = addedTasks[1].Actions()[0].(*task.SegmentAction)
 	suite.True(ok)
-	suite.EqualValues(1, tasks[1].ReplicaID())
+	suite.EqualValues(1, addedTasks[1].ReplicaID())
 	suite.Equal(task.ActionTypeReduce, action.Type())
 	suite.EqualValues(3, action.GetSegmentID())
 	suite.EqualValues(2, action.Node())
-	suite.Equal(tasks[1].Priority(), task.TaskPriorityNormal)
+	suite.Equal(addedTasks[1].Priority(), task.TaskPriorityNormal)
 }
 
 func (suite *SegmentCheckerTestSuite) TestReleaseCompactedGrowingSegments() {
@@ -517,19 +568,24 @@ func (suite *SegmentCheckerTestSuite) TestReleaseCompactedGrowingSegments() {
 		},
 	})
 
+	// Capture tasks added via scheduler.Add()
+	var addedTasks []task.Task
+	suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
+		addedTasks = append(addedTasks, t)
+		return nil
+	}).Maybe()
+
 	tasks := checker.Check(context.TODO())
-	suite.Len(tasks, 1)
-	sort.Slice(tasks, func(i, j int) bool {
-		return tasks[i].Actions()[0].(*task.SegmentAction).GetSegmentID() < tasks[j].Actions()[0].(*task.SegmentAction).GetSegmentID()
-	})
-	suite.Len(tasks[0].Actions(), 1)
-	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
+	suite.Len(tasks, 0) // No tasks returned, they are added directly via scheduler.Add()
+	suite.Len(addedTasks, 1)
+	suite.Len(addedTasks[0].Actions(), 1)
+	action, ok := addedTasks[0].Actions()[0].(*task.SegmentAction)
 	suite.True(ok)
-	suite.EqualValues(1, tasks[0].ReplicaID())
+	suite.EqualValues(1, addedTasks[0].ReplicaID())
 	suite.Equal(task.ActionTypeReduce, action.Type())
 	suite.EqualValues(4, action.GetSegmentID())
 	suite.EqualValues(2, action.Node())
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
+	suite.Equal(addedTasks[0].Priority(), task.TaskPriorityNormal)
 }
 
 func (suite *SegmentCheckerTestSuite) TestSkipReleaseGrowingSegments() {
@@ -576,8 +632,16 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseGrowingSegments() {
 		},
 	})
 
+	// Capture tasks added via scheduler.Add()
+	var addedTasks []task.Task
+	suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
+		addedTasks = append(addedTasks, t)
+		return nil
+	}).Maybe()
+
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 0)
+	suite.Len(addedTasks, 0)
 
 	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
 		VchannelInfo: &datapb.VchannelInfo{
@@ -596,21 +660,28 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseGrowingSegments() {
 			GrowingSegments: growingSegments,
 		},
 	})
+	addedTasks = nil
 	tasks = checker.Check(context.TODO())
-	suite.Len(tasks, 1)
-	suite.Len(tasks[0].Actions(), 1)
-	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
+	suite.Len(tasks, 0) // No tasks returned, they are added directly via scheduler.Add()
+	suite.Len(addedTasks, 1)
+	suite.Len(addedTasks[0].Actions(), 1)
+	action, ok := addedTasks[0].Actions()[0].(*task.SegmentAction)
 	suite.True(ok)
-	suite.EqualValues(1, tasks[0].ReplicaID())
+	suite.EqualValues(1, addedTasks[0].ReplicaID())
 	suite.Equal(task.ActionTypeReduce, action.Type())
 	suite.EqualValues(2, action.GetSegmentID())
 	suite.EqualValues(2, action.Node())
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
+	suite.Equal(addedTasks[0].Priority(), task.TaskPriorityNormal)
 }
 
 func (suite *SegmentCheckerTestSuite) TestReleaseDroppedSegments() {
 	checker := suite.checker
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
+
+	// Mock scheduler.Add() for any replica-related tasks (not expected in this test)
+	suite.scheduler.EXPECT().Add(mock.Anything).Return(nil).Maybe()
+
+	// Released segment tasks are returned via Check() return value (replicaID = -1)
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
 	suite.Len(tasks[0].Actions(), 1)

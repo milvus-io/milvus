@@ -94,17 +94,26 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 		return nil
 	}
 	collectionIDs := c.meta.CollectionManager.GetAll(ctx)
-	results := make([]task.Task, 0)
 	for _, cid := range collectionIDs {
 		if c.readyToCheck(ctx, cid) {
 			replicas := c.meta.ReplicaManager.GetByCollection(ctx, cid)
 			for _, r := range replicas {
-				results = append(results, c.checkReplica(ctx, r)...)
+				tasks := c.checkReplica(ctx, r)
+				// Add tasks immediately after checking each replica to reduce
+				// the time window between task generation and addition.
+				// This prevents duplicate segment loading when dist updates
+				// and old tasks are removed during the window.
+				for _, t := range tasks {
+					if err := c.scheduler.Add(t); err != nil {
+						t.Cancel(err)
+					}
+				}
 			}
 		}
 	}
 
 	// find already released segments which are not contained in target
+	results := make([]task.Task, 0)
 	segments := c.dist.SegmentDistManager.GetByFilter()
 	released := utils.FilterReleased(segments, collectionIDs)
 	reduceTasks := c.createSegmentReduceTasks(ctx, released, meta.NilReplica, querypb.DataScope_Historical)

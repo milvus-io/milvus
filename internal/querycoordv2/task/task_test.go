@@ -188,6 +188,7 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 		"TestLeaderTaskRemove",
 		"TestNoExecutor",
 		"TestTaskStaleByRONode",
+		"TestTaskStaleBySegmentInDist",
 		"TestLeaderTaskStaleByRONode":
 		suite.meta.PutCollection(suite.ctx, &meta.Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
@@ -2364,5 +2365,99 @@ func (suite *TaskSuite) TestTaskStaleByRONode() {
 		// Clean up
 		suite.scheduler.remove(task)
 		suite.meta.ReplicaManager.Put(suite.ctx, utils.CreateTestReplica(suite.replica.GetID(), suite.collection, []int64{1, 2, 3}))
+	})
+}
+
+func (suite *TaskSuite) TestTaskStaleBySegmentInDist() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	targetNode := int64(3)
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
+	}
+
+	// Test case: Grow task should be stale when segment already exists in dist
+	suite.Run("SegmentAlreadyInDist", func() {
+		// Set up channel distribution
+		suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID: suite.collection,
+				ChannelName:  channel.ChannelName,
+			},
+			Node:    targetNode,
+			Version: 1,
+			View:    &meta.LeaderView{ID: targetNode, CollectionID: suite.collection, Channel: channel.ChannelName, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+		})
+
+		segmentID := suite.loadSegments[0]
+
+		// Create a Grow task for the segment
+		task, err := NewSegmentTask(
+			ctx,
+			timeout,
+			WrapIDSource(0),
+			suite.collection,
+			suite.replica,
+			commonpb.LoadPriority_LOW,
+			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segmentID),
+		)
+		suite.NoError(err)
+
+		// Add task should succeed (segment not in dist yet)
+		err = suite.scheduler.Add(task)
+		suite.NoError(err)
+
+		// Now simulate segment being loaded: add segment to dist
+		suite.dist.SegmentDistManager.Update(targetNode, utils.CreateTestSegment(suite.collection, 1, segmentID, targetNode, 1, channel.ChannelName))
+
+		// Dispatch will trigger promote which calls checkStale
+		suite.dispatchAndWait(targetNode)
+
+		// Task should be canceled because segment is already in dist
+		suite.Equal(TaskStatusCanceled, task.Status())
+		suite.ErrorContains(task.Err(), "segment already loaded in dist")
+
+		// Clean up
+		suite.dist.SegmentDistManager.Update(targetNode)
+	})
+
+	// Test case: Reduce task should not be affected by segment in dist check
+	suite.Run("ReduceTaskNotAffected", func() {
+		// Set up channel distribution
+		suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID: suite.collection,
+				ChannelName:  channel.ChannelName,
+			},
+			Node:    targetNode,
+			Version: 1,
+			View:    &meta.LeaderView{ID: targetNode, CollectionID: suite.collection, Channel: channel.ChannelName, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+		})
+
+		segmentID := suite.releaseSegments[0]
+
+		// Add segment to dist first
+		suite.dist.SegmentDistManager.Update(targetNode, utils.CreateTestSegment(suite.collection, 1, segmentID, targetNode, 1, channel.ChannelName))
+
+		// Create a Reduce task for the segment (should not be affected by dist check)
+		task, err := NewSegmentTask(
+			ctx,
+			timeout,
+			WrapIDSource(0),
+			suite.collection,
+			suite.replica,
+			commonpb.LoadPriority_LOW,
+			NewSegmentAction(targetNode, ActionTypeReduce, channel.GetChannelName(), segmentID),
+		)
+		suite.NoError(err)
+
+		// Add task should succeed - Reduce task is not affected by "segment in dist" check
+		err = suite.scheduler.Add(task)
+		suite.NoError(err)
+
+		// Clean up without dispatching (to avoid mock issues)
+		suite.scheduler.remove(task)
+		suite.dist.SegmentDistManager.Update(targetNode)
 	})
 }
