@@ -322,6 +322,7 @@ func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix stri
 }
 
 func (mcm *RemoteChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
+	start := timerecord.NewTimeRecorder("WalkWithPrefix")
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.TotalLabel).Inc()
 	logger := log.With(zap.String("prefix", prefix), zap.Bool("recursive", recursive))
 
@@ -331,6 +332,8 @@ func (mcm *RemoteChunkManager) WalkWithPrefix(ctx context.Context, prefix string
 		logger.Warn("failed to walk through objects", zap.Error(err))
 		return err
 	}
+	metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataWalkLabel).
+		Observe(float64(start.ElapseSpan().Milliseconds()))
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.SuccessLabel).Inc()
 	logger.Info("finish walk through objects")
 	return nil
@@ -339,9 +342,12 @@ func (mcm *RemoteChunkManager) WalkWithPrefix(ctx context.Context, prefix string
 func (mcm *RemoteChunkManager) getObject(ctx context.Context, bucketName, objectName string,
 	offset int64, size int64,
 ) (FileReader, error) {
+	start := timerecord.NewTimeRecorder("getObject")
 	reader, err := mcm.client.GetObject(ctx, bucketName, objectName, offset, size)
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataGetLabel, metrics.TotalLabel).Inc()
 	if err == nil && reader != nil {
+		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataGetLabel).
+			Observe(float64(start.ElapseSpan().Milliseconds()))
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataGetLabel, metrics.SuccessLabel).Inc()
 	} else {
 		if errors.Is(err, context.Canceled) {

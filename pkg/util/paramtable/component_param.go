@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -322,6 +323,8 @@ type commonConfig struct {
 
 	// Local RPC enabled for milvus internal communication when mix or standalone mode.
 	LocalRPCEnabled ParamItem `refreshable:"false"`
+
+	PreferIPv6LocalIP ParamItem `refreshable:"false"`
 
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
 
@@ -1219,6 +1222,17 @@ The default value is 1, which is enough for most cases.`,
 	}
 	p.LocalRPCEnabled.Init(base.mgr)
 
+	p.PreferIPv6LocalIP = ParamItem{
+		Key:          "common.preferIPv6",
+		Version:      "2.5.10",
+		DefaultValue: "false",
+		Doc: `Prefer IPv6 addresses when automatically selecting the local IP.
+If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
+		Export: true,
+	}
+	p.PreferIPv6LocalIP.Init(base.mgr)
+	funcutil.PreferIPv6LocalIP.Store(p.PreferIPv6LocalIP.GetAsBool())
+
 	p.SyncTaskPoolReleaseTimeoutSeconds = ParamItem{
 		Key:          "common.sync.taskPoolReleaseTimeoutSeconds",
 		DefaultValue: "60",
@@ -1930,7 +1944,6 @@ type proxyConfig struct {
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
-	SlowLogSpanInSeconds   ParamItem `refreshable:"true"`
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
@@ -2432,21 +2445,11 @@ Disabled if the value is less or equal to 0.`,
 	p.SlowQuerySpanInSeconds = ParamItem{
 		Key:          "proxy.slowQuerySpanInSeconds",
 		Version:      "2.3.11",
-		Doc:          "query whose executed time exceeds the `slowQuerySpanInSeconds` can be considered slow, in seconds.",
-		DefaultValue: "5",
+		Doc:          "threshold for slow query detection in seconds. For Search/HybridSearch requests, the time is divided by nq for more accurate per-query measurement. Triggers slow log, WebUI display, and metrics.",
+		DefaultValue: "1",
 		Export:       true,
 	}
 	p.SlowQuerySpanInSeconds.Init(base.mgr)
-
-	p.SlowLogSpanInSeconds = ParamItem{
-		Key:          "proxy.slowLogSpanInSeconds",
-		Version:      "2.5.8",
-		Doc:          "query whose executed time exceeds the `slowLogSpanInSeconds` will have slow log, in seconds. If request type is search, the query time will be divided by nq number.",
-		DefaultValue: "1",
-		FallbackKeys: []string{"proxy.slowQuerySpanInSeconds"},
-		Export:       false,
-	}
-	p.SlowLogSpanInSeconds.Init(base.mgr)
 
 	p.QueryNodePoolingSize = ParamItem{
 		Key:          "proxy.queryNodePooling.size",
@@ -2532,6 +2535,7 @@ type queryCoordConfig struct {
 	CheckNodeSessionInterval       ParamItem `refreshable:"false"`
 	GracefulStopTimeout            ParamItem `refreshable:"true"`
 	EnableStoppingBalance          ParamItem `refreshable:"true"`
+	StoppingBalanceAssignPolicy    ParamItem `refreshable:"true"`
 	ChannelExclusiveNodeFactor     ParamItem `refreshable:"true"`
 
 	CollectionObserverInterval         ParamItem `refreshable:"false"`
@@ -3077,6 +3081,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	}
 	p.EnableStoppingBalance.Init(base.mgr)
 
+	p.StoppingBalanceAssignPolicy = ParamItem{
+		Key:          "queryCoord.stoppingBalanceAssignPolicy",
+		Version:      "2.6.7",
+		DefaultValue: "ScoreBased",
+		Doc:          "assign policy for stopping balance, options: RoundRobin, RowCount, ScoreBased",
+		Export:       true,
+	}
+	p.StoppingBalanceAssignPolicy.Init(base.mgr)
+
 	p.ChannelExclusiveNodeFactor = ParamItem{
 		Key:          "queryCoord.channelExclusiveNodeFactor",
 		Version:      "2.4.2",
@@ -3270,6 +3283,7 @@ type queryNodeConfig struct {
 	TieredEvictionIntervalMs        ParamItem `refreshable:"false"`
 	CacheCellUnaccessedSurvivalTime ParamItem `refreshable:"false"`
 	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
+	TieredLoadingTimeoutMs          ParamItem `refreshable:"false"`
 	StorageUsageTrackingEnabled     ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
@@ -3691,6 +3705,23 @@ If set to 0, time based eviction is disabled.`,
 		Export: false,
 	}
 	p.TieredLoadingResourceFactor.Init(base.mgr)
+
+	p.TieredLoadingTimeoutMs = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.loadingTimeoutMs",
+		Version:      "2.6.10",
+		DefaultValue: "0",
+		Forbidden:    true,
+		Formatter: func(v string) string {
+			timeout := getAsInt64(v)
+			if timeout < 0 {
+				return "0"
+			}
+			return fmt.Sprintf("%d", timeout)
+		},
+		Doc:    "Loading timeout in milliseconds for cache slot loading. 0 means no timeout.",
+		Export: false,
+	}
+	p.TieredLoadingTimeoutMs.Init(base.mgr)
 
 	p.EnableDisk = ParamItem{
 		Key:          "queryNode.enableDisk",

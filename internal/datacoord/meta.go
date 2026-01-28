@@ -18,6 +18,7 @@
 package datacoord
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -104,8 +105,7 @@ type meta struct {
 	externalCollectionTaskMeta *externalCollectionTaskMeta
 
 	// File Resource Meta
-	resourceMeta    map[string]*internalpb.FileResourceInfo // name -> info
-	resourceIDMap   map[int64]*internalpb.FileResourceInfo  // id -> info
+	resourceIDMap   map[int64]*internalpb.FileResourceInfo // id -> info
 	resourceVersion uint64
 	resourceLock    lock.RWMutex
 	// Snapshot Meta
@@ -166,6 +166,17 @@ type collectionInfo struct {
 	VChannelNames  []string
 }
 
+// IsExternal returns true when the collection schema references an external source or spec.
+func (c *collectionInfo) IsExternal() bool {
+	if c == nil {
+		return false
+	}
+	if c.Schema == nil {
+		return false
+	}
+	return typeutil.IsExternalCollection(c.Schema)
+}
+
 type dbInfo struct {
 	ID         int64
 	Name       string
@@ -222,9 +233,10 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		compactionTaskMeta: ctm,
 		statsTaskMeta:      stm,
 		// externalCollectionTaskMeta: ectm,
-		resourceMeta:  make(map[string]*internalpb.FileResourceInfo),
-		resourceIDMap: make(map[int64]*internalpb.FileResourceInfo),
-		snapshotMeta:  spm,
+		resourceIDMap:   make(map[int64]*internalpb.FileResourceInfo),
+		resourceVersion: 0,
+		resourceLock:    lock.RWMutex{},
+		snapshotMeta:    spm,
 	}
 	err = mt.reloadFromKV(ctx, broker)
 	if err != nil {
@@ -330,11 +342,6 @@ func (m *meta) reloadFromKV(ctx context.Context, broker broker.Broker) error {
 			metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
 				Set(float64(ts.Unix()))
 		}
-	}
-
-	// Load FileResource meta
-	if err := m.reloadFileResourceMeta(ctx); err != nil {
-		return err
 	}
 
 	log.Ctx(ctx).Info("DataCoord meta reloadFromKV done", zap.Int("numSegments", numSegments), zap.Duration("duration", record.ElapseSpan()))
@@ -1255,6 +1262,35 @@ func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
 	}
 }
 
+// UpdateImportSegmentPosition updates the segment's StartPosition and DmlPosition
+// for import segments using actual timestamps from the imported data.
+// Unlike UpdateStartPosition/UpdateDmlPosition, this operator allows nil MsgID
+// since import segments don't have message queue positions.
+func UpdateImportSegmentPosition(segmentID int64, minTs, maxTs uint64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: update import segment position failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		channelName := segment.GetInsertChannel()
+		// Use actual min timestamp for StartPosition
+		segment.StartPosition = &msgpb.MsgPosition{
+			ChannelName: channelName,
+			MsgID:       nil,
+			Timestamp:   minTs,
+		}
+		// Use actual max timestamp for DmlPosition
+		segment.DmlPosition = &msgpb.MsgPosition{
+			ChannelName: channelName,
+			MsgID:       nil,
+			Timestamp:   maxTs,
+		}
+		return true
+	}
+}
+
 // UpdateAsDroppedIfEmptyWhenFlushing updates segment state to Dropped if segment is empty and in Flushing state
 // It's used to make a empty flushing segment to be dropped directly.
 func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
@@ -2010,7 +2046,7 @@ func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos
 	defer m.channelCPs.Unlock()
 
 	oldPosition, ok := m.channelCPs.checkpoints[vChannel]
-	if !ok || oldPosition.Timestamp < pos.Timestamp {
+	if !ok || oldPosition.Timestamp < pos.Timestamp || (oldPosition.Timestamp == pos.Timestamp && !bytes.Equal(oldPosition.MsgID, pos.MsgID)) {
 		err := m.catalog.SaveChannelCheckpoint(ctx, vChannel, pos)
 		if err != nil {
 			return err
@@ -2021,6 +2057,7 @@ func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos
 			zap.String("vChannel", vChannel),
 			zap.Uint64("ts", pos.GetTimestamp()),
 			zap.ByteString("msgID", pos.GetMsgID()),
+			zap.Stringer("walName", pos.WALName),
 			zap.Time("time", ts))
 		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
 			Set(float64(ts.Unix()))
@@ -2056,13 +2093,13 @@ func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.
 	m.channelCPs.Lock()
 	defer m.channelCPs.Unlock()
 	toUpdates := lo.Filter(positions, func(pos *msgpb.MsgPosition, _ int) bool {
-		if pos == nil || pos.GetMsgID() == nil || pos.GetChannelName() == "" {
+		if pos == nil || (pos.GetMsgID() == nil && pos.GetWALName() != commonpb.WALName_WoodPecker) || pos.GetChannelName() == "" {
 			log.Warn("illegal channel cp", zap.Any("pos", pos))
 			return false
 		}
 		vChannel := pos.GetChannelName()
 		oldPosition, ok := m.channelCPs.checkpoints[vChannel]
-		return !ok || oldPosition.Timestamp < pos.Timestamp
+		return !ok || oldPosition.Timestamp < pos.Timestamp || (oldPosition.Timestamp == pos.Timestamp && !bytes.Equal(oldPosition.MsgID, pos.MsgID))
 	})
 	err := m.catalog.SaveChannelCheckpoints(ctx, toUpdates)
 	if err != nil {
@@ -2072,6 +2109,7 @@ func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.
 		channel := pos.GetChannelName()
 		m.channelCPs.checkpoints[channel] = pos
 		log.Info("UpdateChannelCheckpoint done", zap.String("channel", channel),
+			zap.Stringer("walName", pos.WALName),
 			zap.Uint64("ts", pos.GetTimestamp()),
 			zap.Time("time", tsoutil.PhysicalTime(pos.GetTimestamp())))
 		ts, _ := tsoutil.ParseTS(pos.Timestamp)
@@ -2475,62 +2513,22 @@ func contains(arr []int64, target int64) bool {
 	return false
 }
 
-// reloadFileResourceMeta load file resource meta from catalog
-func (m *meta) reloadFileResourceMeta(ctx context.Context) error {
+func (m *meta) UpdateFileResources(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
 	m.resourceLock.Lock()
 	defer m.resourceLock.Unlock()
-
-	resources, version, err := m.catalog.ListFileResource(ctx)
-	if err != nil {
-		return err
-	}
-
-	m.resourceMeta = make(map[string]*internalpb.FileResourceInfo)
+	m.resourceIDMap = make(map[int64]*internalpb.FileResourceInfo)
 	for _, resource := range resources {
-		m.resourceMeta[resource.Name] = resource
 		m.resourceIDMap[resource.Id] = resource
 	}
 	m.resourceVersion = version
+
 	return nil
 }
 
-// AddFileResource add file resource to meta
-func (m *meta) AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error {
-	m.resourceLock.Lock()
-	defer m.resourceLock.Unlock()
-
-	if _, ok := m.resourceMeta[resource.Name]; ok {
-		return merr.WrapErrAsInputError(fmt.Errorf("create resource failed: resource name exist"))
-	}
-
-	err := m.catalog.SaveFileResource(ctx, resource, m.resourceVersion+1)
-	if err != nil {
-		return err
-	}
-
-	m.resourceMeta[resource.Name] = resource
-	m.resourceIDMap[resource.Id] = resource
-	m.resourceVersion += 1
-	return nil
-}
-
-// RemoveFileResource remove file resource from meta
-func (m *meta) RemoveFileResource(ctx context.Context, name string) error {
-	m.resourceLock.Lock()
-	defer m.resourceLock.Unlock()
-
-	if resource, ok := m.resourceMeta[name]; ok {
-		err := m.catalog.RemoveFileResource(ctx, resource.Id, m.resourceVersion+1)
-		if err != nil {
-			return err
-		}
-
-		delete(m.resourceMeta, name)
-		delete(m.resourceIDMap, resource.Id)
-		m.resourceVersion += 1
-	}
-
-	return nil
+func (m *meta) ListFileResources(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64) {
+	m.resourceLock.RLock()
+	defer m.resourceLock.RUnlock()
+	return lo.Values(m.resourceIDMap), m.resourceVersion
 }
 
 func (m *meta) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
@@ -2538,22 +2536,14 @@ func (m *meta) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*i
 	defer m.resourceLock.RUnlock()
 
 	resources := make([]*internalpb.FileResourceInfo, 0)
-	for _, resourceID := range resourceIDs {
-		if resource, ok := m.resourceIDMap[resourceID]; ok {
+	for _, id := range resourceIDs {
+		if resource, ok := m.resourceIDMap[id]; ok {
 			resources = append(resources, resource)
 		} else {
-			return nil, errors.Errorf("file resource %d not found", resourceID)
+			return nil, errors.Errorf("file resource %d not found", id)
 		}
 	}
 	return resources, nil
-}
-
-// ListFileResource list file resources from meta
-func (m *meta) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64) {
-	m.resourceLock.RLock()
-	defer m.resourceLock.RUnlock()
-
-	return lo.Values(m.resourceMeta), m.resourceVersion
 }
 
 // TruncateChannelByTime drops segments of a channel that were updated before the flush timestamp

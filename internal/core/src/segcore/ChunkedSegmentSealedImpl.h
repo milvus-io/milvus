@@ -64,7 +64,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadIndex(const LoadIndexInfo& info) override;
     void
-    LoadFieldData(const LoadFieldDataInfo& info) override;
+    LoadFieldData(const LoadFieldDataInfo& info,
+                  milvus::OpContext* op_ctx = nullptr) override;
     void
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) override;
     void
@@ -130,11 +131,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     RemoveFieldFile(const FieldId field_id) override;
 
     void
-    CreateTextIndex(FieldId field_id) override;
+    CreateTextIndex(FieldId field_id,
+                    milvus::OpContext* op_ctx = nullptr) override;
 
     void
-    LoadTextIndex(std::unique_ptr<milvus::proto::indexcgo::LoadTextIndexInfo>
-                      info_proto) override;
+    LoadTextIndex(
+        std::unique_ptr<milvus::proto::indexcgo::LoadTextIndexInfo> info_proto,
+        milvus::OpContext* op_ctx = nullptr) override;
 
     void
     RemoveJsonStats(FieldId field_id) override {
@@ -204,7 +207,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const milvus::proto::segcore::SegmentLoadInfo& load_info) override;
 
     void
-    Load(milvus::tracer::TraceContext& trace_ctx) override;
+    Load(milvus::tracer::TraceContext& trace_ctx,
+         milvus::OpContext* op_ctx = nullptr) override;
 
  public:
     size_t
@@ -971,39 +975,33 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                          size_t num_rows);
 
     void
-    load_field_data_internal(const LoadFieldDataInfo& load_info);
+    load_field_data_internal(const LoadFieldDataInfo& load_info,
+                             milvus::OpContext* op_ctx = nullptr);
 
     void
-    load_column_group_data_internal(const LoadFieldDataInfo& load_info);
+    load_column_group_data_internal(const LoadFieldDataInfo& load_info,
+                                    milvus::OpContext* op_ctx = nullptr);
 
     void
-    LoadBatchIndexes(
-        milvus::tracer::TraceContext& trace_ctx,
-        std::map<FieldId, std::vector<const proto::segcore::FieldIndexInfo*>>&
-            field_id_to_index_info);
+    LoadBatchIndexes(milvus::tracer::TraceContext& trace_ctx,
+                     std::unordered_map<FieldId, std::vector<LoadIndexInfo>>&
+                         field_id_to_index_info,
+                     milvus::OpContext* op_ctx = nullptr);
 
     void
     LoadBatchFieldData(milvus::tracer::TraceContext& trace_ctx,
                        std::vector<std::pair<std::vector<FieldId>,
                                              proto::segcore::FieldBinlog>>&
-                           field_binlog_to_load);
-
-    /**
-     * @brief Load all column groups from a manifest file path
-     *
-     * This method reads the manifest file to retrieve column groups metadata
-     * and loads each column group into the segment.
-     *
-     * @param manifest_path JSON string containing base_path and version fields
-     */
-    void
-    LoadManifest(const std::string& manifest_path);
+                           field_binlog_to_load,
+                       milvus::OpContext* op_ctx = nullptr);
 
     void
     LoadColumnGroups(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids);
+        std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
+        bool eager_load,
+        milvus::OpContext* op_ctx = nullptr);
 
     /**
      * @brief Load a single column group at the specified index
@@ -1014,13 +1012,28 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      * @param column_groups Metadata about all available column groups
      * @param properties Storage properties for accessing the data
      * @param index Index of the column group to load
+     * @param milvus_field_ids A vector of field IDs to load
+     * @param eager_load Whether to eagerly load provided columns
+     * @param op_ctx The operation context
      */
     void
     LoadColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
         int64_t index,
-        const std::vector<FieldId>& milvus_field_ids);
+        const std::vector<FieldId>& milvus_field_ids,
+        bool eager_load,
+        milvus::OpContext* op_ctx = nullptr);
+
+    /**
+     * @brief Reloads columns from the specified field IDs
+     *
+     * @param field_ids_to_reload A vector of field IDs to reload
+     * @param op_ctx The operation context
+     */
+    void
+    ReloadColumns(const std::vector<FieldId>& field_ids_to_reload,
+                  milvus::OpContext* op_ctx = nullptr);
 
     /**
      * @brief Apply load differences to update segment load information
@@ -1031,9 +1044,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      *
      * @param segment_load_info The segment load information to be updated
      * @param load_diff The differences to apply, containing fields and indexes to add/remove
+     * @param op_ctx The operation context
      */
     void
-    ApplyLoadDiff(SegmentLoadInfo& segment_load_info, LoadDiff& load_diff);
+    ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
+                  LoadDiff& load_diff,
+                  milvus::OpContext* op_ctx = nullptr);
 
     void
     load_field_data_common(
@@ -1043,7 +1059,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         DataType data_type,
         bool enable_mmap,
         bool is_proxy_column,
-        std::optional<ParquetStatistics> statistics = {});
+        std::optional<ParquetStatistics> statistics = {},
+        milvus::OpContext* op_ctx = nullptr);
 
     std::shared_ptr<ChunkedColumnInterface>
     get_column(FieldId field_id) const {

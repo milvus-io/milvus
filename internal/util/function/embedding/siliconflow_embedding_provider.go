@@ -53,11 +53,17 @@ func NewSiliconflowEmbeddingProvider(fieldSchema *schemapb.FieldSchema, function
 		return nil, err
 	}
 	var modelName string
+	var dim int64
 
 	for _, param := range functionSchema.Params {
 		switch strings.ToLower(param.Key) {
 		case models.ModelNameParamKey:
 			modelName = param.Value
+		case models.DimParamKey:
+			dim, err = models.ParseAndCheckFieldDim(param.Value, fieldDim, fieldSchema.Name)
+			if err != nil {
+				return nil, err
+			}
 		default:
 		}
 	}
@@ -72,13 +78,14 @@ func NewSiliconflowEmbeddingProvider(fieldSchema *schemapb.FieldSchema, function
 	}
 
 	provider := SiliconflowEmbeddingProvider{
-		client:     c,
-		url:        url,
-		fieldDim:   fieldDim,
-		modelName:  modelName,
-		maxBatch:   32,
-		timeoutSec: 30,
-		extraInfo:  extraInfo,
+		client:        c,
+		url:           url,
+		fieldDim:      fieldDim,
+		modelName:     modelName,
+		embedDimParam: dim,
+		maxBatch:      32,
+		timeoutSec:    30,
+		extraInfo:     extraInfo,
 	}
 	return &provider, nil
 }
@@ -99,7 +106,7 @@ func (provider *SiliconflowEmbeddingProvider) CallEmbedding(ctx context.Context,
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], "float", provider.timeoutSec)
+		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], "float", int(provider.embedDimParam), provider.timeoutSec)
 		if err != nil {
 			return nil, err
 		}

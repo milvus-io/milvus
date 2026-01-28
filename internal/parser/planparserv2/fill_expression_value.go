@@ -211,6 +211,15 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 		if err != nil {
 			return err
 		}
+
+		// Validate divisor for division/modulo operations
+		if expr.ArithOp == planpb.ArithOpType_Div || expr.ArithOp == planpb.ArithOpType_Mod {
+			if (IsInteger(castedOperand) && castedOperand.GetInt64Val() == 0) ||
+				(IsFloating(castedOperand) && castedOperand.GetFloatVal() == 0) {
+				return errors.New("division or modulus by zero")
+			}
+		}
+
 		expr.RightOperand = castedOperand
 	}
 

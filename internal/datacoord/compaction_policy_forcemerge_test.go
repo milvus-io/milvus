@@ -73,7 +73,7 @@ func (s *ForceMergeCompactionPolicySuite) TestSetTopologyQuerier() {
 func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_Success() {
 	ctx := context.Background()
 	collectionID := int64(1)
-	targetSize := int64(1024 * 1024 * 512)
+	targetSize := int64(1024 * 1024 * 1024 * 2)
 	triggerID := int64(100)
 
 	coll := &collectionInfo{
@@ -121,7 +121,7 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_GetCollection
 func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_AllocIDError() {
 	ctx := context.Background()
 	collectionID := int64(1)
-	targetSize := int64(1024 * 1024 * 512)
+	targetSize := int64(1024 * 1024 * 1024 * 2)
 
 	coll := &collectionInfo{
 		ID:         collectionID,
@@ -142,7 +142,7 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_AllocIDError(
 func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_NoEligibleSegments() {
 	ctx := context.Background()
 	collectionID := int64(999)
-	targetSize := int64(1024 * 1024 * 512)
+	targetSize := int64(1024 * 1024 * 1024 * 2)
 	triggerID := int64(100)
 
 	coll := &collectionInfo{
@@ -164,7 +164,7 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_NoEligibleSeg
 func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_TopologyError() {
 	ctx := context.Background()
 	collectionID := int64(1)
-	targetSize := int64(1024 * 1024 * 512)
+	targetSize := int64(1024 * 1024 * 1024 * 2)
 	triggerID := int64(100)
 
 	coll := &collectionInfo{
@@ -187,7 +187,7 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_TopologyError
 func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_WithCollectionProperties() {
 	ctx := context.Background()
 	collectionID := int64(1)
-	targetSize := int64(1024 * 1024 * 512)
+	targetSize := int64(1024 * 1024 * 1024 * 2)
 	triggerID := int64(100)
 
 	coll := &collectionInfo{
@@ -287,7 +287,7 @@ func (s *ForceMergeCompactionPolicySuite) TestGroupByPartitionChannel_SameGroupM
 func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_FilterSegments() {
 	ctx := context.Background()
 	collectionID := int64(1)
-	targetSize := int64(1024 * 1024 * 512)
+	targetSize := int64(1024 * 1024 * 1024 * 2)
 	triggerID := int64(100)
 
 	coll := &collectionInfo{

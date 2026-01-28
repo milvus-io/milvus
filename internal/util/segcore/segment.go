@@ -315,7 +315,14 @@ func (s *cSegmentImpl) FinishLoad() error {
 func (s *cSegmentImpl) Load(ctx context.Context) error {
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
-	status := C.SegmentLoad(traceCtx.ctx, s.ptr)
+
+	// Create cancellation guard for this load operation
+	guard := NewCancellationGuard(ctx)
+	defer guard.Close()
+
+	// Perform the load with cancellation support
+	status := C.SegmentLoad(traceCtx.ctx, s.ptr, (C.CLoadCancellationSource)(guard.Source()))
+
 	return ConsumeCStatusIntoError(&status)
 }
 
@@ -458,7 +465,6 @@ func convertFieldIndexInfos(src []*querypb.FieldIndexInfo) []*segcorepb.FieldInd
 			IndexVersion:        fii.GetIndexVersion(),
 			NumRows:             fii.GetNumRows(),
 			CurrentIndexVersion: fii.GetCurrentIndexVersion(),
-			IndexStoreVersion:   fii.GetIndexStoreVersion(),
 		})
 	}
 	return result

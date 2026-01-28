@@ -12,9 +12,10 @@ import (
 )
 
 var (
-	ErrStopping = errors.New("streaming node is stopping")
-	ErrNotAlive = errors.New("streaming node is not alive")
-	ErrFrozen   = errors.New("streaming node is frozen")
+	ErrStopping     = errors.New("streaming node is stopping")
+	ErrNotAlive     = errors.New("streaming node is not alive")
+	ErrFrozen       = errors.New("streaming node is frozen")
+	ErrFileResource = errors.New("streaming node is not sync the file resource successfully")
 )
 
 // AssignmentDiscoverWatcher is the interface for watching the assignment discovery.

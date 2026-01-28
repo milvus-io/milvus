@@ -133,7 +133,6 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, 0, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
 
 	broker := broker.NewMockBroker(t)
@@ -207,7 +206,6 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, 0, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
 
 	broker := broker2.NewMockBroker(t)
@@ -269,7 +267,6 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, 0, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
 
 	alloc := allocator.NewMockAllocator(t)
@@ -346,7 +343,6 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, 0, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
 
 	alloc := allocator.NewMockAllocator(t)
@@ -432,7 +428,6 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, 0, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
 
 	importMeta, err := NewImportMeta(context.TODO(), catalog, nil, nil)
@@ -621,7 +616,6 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, 0, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
 
 	importMeta, err := NewImportMeta(context.TODO(), catalog, nil, nil)
@@ -752,17 +746,8 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	// failed state
-	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(mockErr))
-	assert.NoError(t, err)
-
-	progress, state, _, _, reason := GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
-	assert.Equal(t, int64(0), progress)
-	assert.Equal(t, internalpb.ImportJobState_Failed, state)
-	assert.Equal(t, mockErr, reason)
-
 	// job does not exist
-	progress, state, _, _, reason = GetJobProgress(ctx, -1, importMeta, meta)
+	progress, state, _, _, reason := GetJobProgress(ctx, -1, importMeta, meta)
 	assert.Equal(t, int64(0), progress)
 	assert.Equal(t, internalpb.ImportJobState_Failed, state)
 	assert.NotEqual(t, "", reason)

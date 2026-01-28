@@ -1407,17 +1407,23 @@ func TestProxy_ImportV2(t *testing.T) {
 		node.chMgr = chMgr
 
 		// no such collection
+		// checkExternalCollectionBlockedForWrite skips error when GetCollectionSchema fails,
+		// so task will be enqueued and PreExecute will call GetCollectionID which returns error.
 		mc := NewMockCache(t)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr).Once()
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, mockErr)
 		globalMetaCache = mc
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
 		assert.NoError(t, err)
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
 
-		// get schema failed
+		// get schema failed in PreExecute
 		mc = NewMockCache(t)
+		// checkExternalCollectionBlockedForWrite skips error, task enqueued.
+		// PreExecute calls GetCollectionID (succeeds), then GetCollectionSchema (fails).
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr).Once()
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr).Once()
 		globalMetaCache = mc
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
 		assert.NoError(t, err)
@@ -1850,7 +1856,7 @@ func TestProxy_AddFileResource(t *testing.T) {
 
 		resp, err := proxy.AddFileResource(context.Background(), req)
 		assert.NoError(t, err)
-		assert.Error(t, merr.Error(resp))
+		assert.NoError(t, merr.Error(resp))
 	})
 
 	t.Run("proxy not healthy", func(t *testing.T) {
@@ -1867,23 +1873,23 @@ func TestProxy_AddFileResource(t *testing.T) {
 		assert.Error(t, merr.Error(resp))
 	})
 
-	// t.Run("mixCoord error", func(t *testing.T) {
-	// 	proxy := &Proxy{}
-	// 	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+	t.Run("mixCoord error", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
-	// 	mockMixCoord := mocks.NewMockMixCoordClient(t)
-	// 	mockMixCoord.EXPECT().AddFileResource(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
-	// 	proxy.mixCoord = mockMixCoord
+		mockMixCoord := mocks.NewMockMixCoordClient(t)
+		mockMixCoord.EXPECT().AddFileResource(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		proxy.mixCoord = mockMixCoord
 
-	// 	req := &milvuspb.AddFileResourceRequest{
-	// 		Name: "test_resource",
-	// 		Path: "/path/to/resource",
-	// 	}
+		req := &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/resource",
+		}
 
-	// 	resp, err := proxy.AddFileResource(context.Background(), req)
-	// 	assert.NoError(t, err)
-	// 	assert.Error(t, merr.Error(resp))
-	// })
+		resp, err := proxy.AddFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
 }
 
 func TestProxy_RemoveFileResource(t *testing.T) {
@@ -1899,7 +1905,7 @@ func TestProxy_RemoveFileResource(t *testing.T) {
 
 		resp, err := proxy.RemoveFileResource(context.Background(), req)
 		assert.NoError(t, err)
-		assert.Error(t, merr.Error(resp))
+		assert.NoError(t, merr.Error(resp))
 	})
 
 	t.Run("proxy not healthy", func(t *testing.T) {
@@ -1914,22 +1920,22 @@ func TestProxy_RemoveFileResource(t *testing.T) {
 		assert.Error(t, merr.Error(resp))
 	})
 
-	// t.Run("mixCoord error", func(t *testing.T) {
-	// 	proxy := &Proxy{}
-	// 	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+	t.Run("mixCoord error", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
-	// 	mockMixCoord := mocks.NewMockMixCoordClient(t)
-	// 	mockMixCoord.EXPECT().RemoveFileResource(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
-	// 	proxy.mixCoord = mockMixCoord
+		mockMixCoord := mocks.NewMockMixCoordClient(t)
+		mockMixCoord.EXPECT().RemoveFileResource(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		proxy.mixCoord = mockMixCoord
 
-	// 	req := &milvuspb.RemoveFileResourceRequest{
-	// 		Name: "test_resource",
-	// 	}
+		req := &milvuspb.RemoveFileResourceRequest{
+			Name: "test_resource",
+		}
 
-	// 	resp, err := proxy.RemoveFileResource(context.Background(), req)
-	// 	assert.NoError(t, err)
-	// 	assert.Error(t, merr.Error(resp))
-	// })
+		resp, err := proxy.RemoveFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
 }
 
 func TestProxy_ListFileResources(t *testing.T) {
@@ -1944,7 +1950,7 @@ func TestProxy_ListFileResources(t *testing.T) {
 
 		resp, err := proxy.ListFileResources(context.Background(), req)
 		assert.NoError(t, err)
-		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.NoError(t, merr.Error(resp.GetStatus()))
 	})
 
 	t.Run("proxy not healthy", func(t *testing.T) {
@@ -1957,19 +1963,19 @@ func TestProxy_ListFileResources(t *testing.T) {
 		assert.Error(t, merr.Error(resp.GetStatus()))
 	})
 
-	// t.Run("mixCoord error", func(t *testing.T) {
-	// 	proxy := &Proxy{}
-	// 	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+	t.Run("mixCoord error", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
-	// 	mockMixCoord := mocks.NewMockMixCoordClient(t)
-	// 	mockMixCoord.EXPECT().ListFileResources(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
-	// 	proxy.mixCoord = mockMixCoord
+		mockMixCoord := mocks.NewMockMixCoordClient(t)
+		mockMixCoord.EXPECT().ListFileResources(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		proxy.mixCoord = mockMixCoord
 
-	// 	req := &milvuspb.ListFileResourcesRequest{}
-	// 	resp, err := proxy.ListFileResources(context.Background(), req)
-	// 	assert.NoError(t, err)
-	// 	assert.Error(t, merr.Error(resp.GetStatus()))
-	// })
+		req := &milvuspb.ListFileResourcesRequest{}
+		resp, err := proxy.ListFileResources(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
 }
 
 func TestProxy_ComputePhraseMatchSlop(t *testing.T) {
@@ -2085,4 +2091,307 @@ func TestHandleIfSearchByPK_BM25Detection(t *testing.T) {
 		_, found = getBM25FunctionOfAnnsField(102, functions)
 		assert.False(t, found)
 	})
+}
+
+func TestProxy_ManualCompaction_ExternalCollection(t *testing.T) {
+	// Save and restore globalMetaCache
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	globalMetaCache = &MetaCache{}
+
+	// Create external collection schema
+	externalSchema := &schemapb.CollectionSchema{
+		Name:           "external_col",
+		ExternalSource: "s3://bucket/path",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+		},
+	}
+
+	m1 := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1), nil).Build()
+	m2 := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+		schema: newSchemaInfo(externalSchema),
+	}, nil).Build()
+	defer m1.UnPatch()
+	defer m2.UnPatch()
+
+	proxy := &Proxy{}
+	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	req := &milvuspb.ManualCompactionRequest{
+		DbName:         "default",
+		CollectionName: "external_col",
+	}
+
+	resp, err := proxy.ManualCompaction(context.Background(), req)
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp.GetStatus()))
+}
+
+func TestProxy_Insert_ExternalCollection(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	globalMetaCache = &MetaCache{}
+
+	externalSchema := &schemapb.CollectionSchema{
+		Name: "external_col",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+		},
+	}
+
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	defer m1.UnPatch()
+
+	proxy := &Proxy{}
+	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	req := &milvuspb.InsertRequest{
+		DbName:         "default",
+		CollectionName: "external_col",
+	}
+
+	resp, err := proxy.Insert(context.Background(), req)
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp.GetStatus()))
+	assert.Contains(t, resp.GetStatus().GetReason(), "insert operation is not supported for external collection")
+}
+
+func TestProxy_Delete_ExternalCollection(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	globalMetaCache = &MetaCache{}
+
+	externalSchema := &schemapb.CollectionSchema{
+		Name: "external_col",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+		},
+	}
+
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	defer m1.UnPatch()
+
+	proxy := &Proxy{}
+	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	req := &milvuspb.DeleteRequest{
+		DbName:         "default",
+		CollectionName: "external_col",
+		Expr:           "id in [1, 2, 3]",
+	}
+
+	resp, err := proxy.Delete(context.Background(), req)
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp.GetStatus()))
+	assert.Contains(t, resp.GetStatus().GetReason(), "delete operation is not supported for external collection")
+}
+
+func TestProxy_Upsert_ExternalCollection(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	globalMetaCache = &MetaCache{}
+
+	externalSchema := &schemapb.CollectionSchema{
+		Name: "external_col",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+		},
+	}
+
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	defer m1.UnPatch()
+
+	proxy := &Proxy{}
+	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	req := &milvuspb.UpsertRequest{
+		DbName:         "default",
+		CollectionName: "external_col",
+	}
+
+	resp, err := proxy.Upsert(context.Background(), req)
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp.GetStatus()))
+	assert.Contains(t, resp.GetStatus().GetReason(), "upsert operation is not supported for external collection")
+}
+
+func TestProxy_Flush_ExternalCollection(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	globalMetaCache = &MetaCache{}
+
+	externalSchema := &schemapb.CollectionSchema{
+		Name: "external_col",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+		},
+	}
+
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	defer m1.UnPatch()
+
+	proxy := &Proxy{}
+	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	req := &milvuspb.FlushRequest{
+		DbName:          "default",
+		CollectionNames: []string{"external_col"},
+	}
+
+	resp, err := proxy.Flush(context.Background(), req)
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp.GetStatus()))
+	assert.Contains(t, resp.GetStatus().GetReason(), "flush operation is not supported for external collection")
+}
+
+func TestProxy_CreatePartition_ExternalCollection(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	globalMetaCache = &MetaCache{}
+
+	externalSchema := &schemapb.CollectionSchema{
+		Name: "external_col",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+		},
+	}
+
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	defer m1.UnPatch()
+
+	proxy := &Proxy{}
+	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	req := &milvuspb.CreatePartitionRequest{
+		DbName:         "default",
+		CollectionName: "external_col",
+		PartitionName:  "partition1",
+	}
+
+	resp, err := proxy.CreatePartition(context.Background(), req)
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp))
+	assert.Contains(t, resp.GetReason(), "create partition operation is not supported for external collection")
+}
+
+func TestProxy_DropPartition_ExternalCollection(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	globalMetaCache = &MetaCache{}
+
+	externalSchema := &schemapb.CollectionSchema{
+		Name: "external_col",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+		},
+	}
+
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	defer m1.UnPatch()
+
+	proxy := &Proxy{}
+	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	req := &milvuspb.DropPartitionRequest{
+		DbName:         "default",
+		CollectionName: "external_col",
+		PartitionName:  "partition1",
+	}
+
+	resp, err := proxy.DropPartition(context.Background(), req)
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp))
+	assert.Contains(t, resp.GetReason(), "drop partition operation is not supported for external collection")
+}
+
+func TestProxy_ImportV2_ExternalCollection(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	globalMetaCache = &MetaCache{}
+
+	externalSchema := &schemapb.CollectionSchema{
+		Name: "external_col",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+		},
+	}
+
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	defer m1.UnPatch()
+
+	proxy := &Proxy{}
+	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	req := &internalpb.ImportRequest{
+		DbName:         "default",
+		CollectionName: "external_col",
+	}
+
+	resp, err := proxy.ImportV2(context.Background(), req)
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp.GetStatus()))
+	assert.Contains(t, resp.GetStatus().GetReason(), "import operation is not supported for external collection")
+}
+
+func TestProxy_AddCollectionField_ExternalCollection(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	globalMetaCache = &MetaCache{}
+
+	externalSchema := &schemapb.CollectionSchema{
+		Name: "external_col",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+		},
+	}
+
+	m1 := mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+		Status: merr.Success(),
+		Schema: externalSchema,
+	}, nil).Build()
+	defer m1.UnPatch()
+
+	proxy := &Proxy{}
+	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	req := &milvuspb.AddCollectionFieldRequest{
+		DbName:         "default",
+		CollectionName: "external_col",
+	}
+
+	resp, err := proxy.AddCollectionField(context.Background(), req)
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp))
+	assert.Contains(t, resp.GetReason(), "add field operation is not supported for external collection")
+}
+
+func TestProxy_AlterCollectionField_ExternalCollection(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	globalMetaCache = &MetaCache{}
+
+	externalSchema := &schemapb.CollectionSchema{
+		Name: "external_col",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "ext_id"},
+		},
+	}
+
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	defer m1.UnPatch()
+
+	proxy := &Proxy{}
+	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	req := &milvuspb.AlterCollectionFieldRequest{
+		DbName:         "default",
+		CollectionName: "external_col",
+		FieldName:      "id",
+	}
+
+	resp, err := proxy.AlterCollectionField(context.Background(), req)
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp))
+	assert.Contains(t, resp.GetReason(), "alter field operation is not supported for external collection")
 }

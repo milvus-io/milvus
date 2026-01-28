@@ -1,0 +1,93 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package assign
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+)
+
+func TestAssignChannelToWALLocatedFirst(t *testing.T) {
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+		versions := []typeutil.VersionInt64Pair{
+			{Global: 1, Local: 2},
+		}
+		pchans := [][]types.PChannelInfoAssigned{
+			{
+				types.PChannelInfoAssigned{
+					Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
+					Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
+				},
+				types.PChannelInfoAssigned{
+					Channel: types.PChannelInfo{Name: "pchannel2", Term: 1},
+					Node:    types.StreamingNodeInfo{ServerID: 2, Address: "localhost:1"},
+				},
+				types.PChannelInfoAssigned{
+					Channel: types.PChannelInfo{Name: "pchannel3", Term: 1},
+					Node:    types.StreamingNodeInfo{ServerID: 3, Address: "localhost:1"},
+				},
+			},
+		}
+		for i := 0; i < len(versions); i++ {
+			cb(balancer.WatchChannelAssignmentsCallbackParam{
+				Version:            versions[i],
+				CChannelAssignment: &streamingpb.CChannelAssignment{Meta: &streamingpb.CChannelMeta{Pchannel: "pchannel"}},
+				Relations:          pchans[i],
+			})
+		}
+		<-ctx.Done()
+		return context.Cause(ctx)
+	})
+	balance.Register(b)
+
+	channels := []*meta.DmChannel{
+		{VchannelInfo: &datapb.VchannelInfo{ChannelName: "pchannel_v1"}},
+		{VchannelInfo: &datapb.VchannelInfo{ChannelName: "pchannel2_v2"}},
+		{VchannelInfo: &datapb.VchannelInfo{ChannelName: "pchannel3_v1"}},
+	}
+
+	var scoreDelta map[int64]int
+	nodes := []int64{1, 2}
+
+	notFounChannels, plans, scoreDelta := assignChannelToWALLocatedFirstForNodeInfo(channels, nodes)
+	assert.Len(t, notFounChannels, 1)
+	assert.Equal(t, notFounChannels[0].GetChannelName(), "pchannel3_v1")
+	assert.Len(t, plans, 2)
+	assert.Len(t, scoreDelta, 2)
+	for _, plan := range plans {
+		if plan.Channel.GetChannelName() == "pchannel_v1" {
+			assert.Equal(t, plan.To, int64(1))
+			assert.Equal(t, scoreDelta[1], 1)
+		} else {
+			assert.Equal(t, plan.To, int64(2))
+			assert.Equal(t, scoreDelta[2], 1)
+		}
+	}
+}

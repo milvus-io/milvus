@@ -121,10 +121,12 @@ func TestBulkPackWriter_Write(t *testing.T) {
 				FieldID: 100,
 				Binlogs: []*datapb.Binlog{
 					{
-						EntriesNum: 10,
-						LogPath:    "files/delta_log/123/456/789/10000",
-						LogSize:    60,
-						MemorySize: 240,
+						EntriesNum:    10,
+						TimestampFrom: 100,
+						TimestampTo:   109,
+						LogPath:       "files/delta_log/123/456/789/10000",
+						LogSize:       60,
+						MemorySize:    240,
 					},
 				},
 			},

@@ -33,12 +33,13 @@ type Server struct {
 }
 
 // Init initializes the streamingcoord server.
-func (s *Server) Start(ctx context.Context) (err error) {
+func (s *Server) Start(ctx context.Context, checker balancer.FileResourceChecker) (err error) {
 	s.logger.Info("init streamingcoord...")
 	if err := s.initBasicComponent(ctx); err != nil {
 		s.logger.Warn("init basic component of streamingcoord failed", zap.Error(err))
 		return err
 	}
+	balance.SetFileResourceChecker(checker)
 	// Init all grpc service of streamingcoord server.
 	s.logger.Info("streamingcoord initialized")
 	return nil

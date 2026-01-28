@@ -20,11 +20,8 @@ expr:
 	| PHRASEMATCH'('Identifier',' StringLiteral (',' expr)? ')'       			                            # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
 	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
-	| MATCH_ALL'(' Identifier ',' expr ')'                                                                  # MatchAll
-	| MATCH_ANY'(' Identifier ',' expr ')'                                                                  # MatchAny
-	| MATCH_LEAST'(' Identifier ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'                           # MatchLeast
-	| MATCH_MOST'(' Identifier ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'                            # MatchMost
-	| MATCH_EXACT'(' Identifier ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'                           # MatchExact
+	| op=(MATCH_ALL | MATCH_ANY) '(' Identifier ',' expr ')'                                                 # MatchSimple
+	| op=(MATCH_LEAST | MATCH_MOST | MATCH_EXACT) '(' Identifier ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'  # MatchThreshold
 	| expr POW expr											                                                # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                                                # Unary
 //	| '(' typeName ')' expr									                                                # Cast
@@ -35,13 +32,7 @@ expr:
 	| (JSONContains | ArrayContains)'('expr',' expr')'                                                      # JSONContains
 	| (JSONContainsAll | ArrayContainsAll)'('expr',' expr')'                                                # JSONContainsAll
 	| (JSONContainsAny | ArrayContainsAny)'('expr',' expr')'                                                # JSONContainsAny
-	| STEuqals'('Identifier','StringLiteral')'				                                                # STEuqals	
-	| STTouches'('Identifier','StringLiteral')'				             		                            # STTouches
-	| STOverlaps'('Identifier','StringLiteral')'						 		                            # STOverlaps
-	| STCrosses'('Identifier','StringLiteral')'									                            # STCrosses
-	| STContains'('Identifier','StringLiteral')'						 		                            # STContains
-	| STIntersects'('Identifier','StringLiteral')'								                            # STIntersects
-	| STWithin'('Identifier','StringLiteral')'									                            # STWithin
+	| op=(STEuqals | STTouches | STOverlaps | STCrosses | STContains | STIntersects | STWithin) '(' Identifier ',' StringLiteral ')'  # SpatialBinary
 	| STDWithin'('Identifier','StringLiteral',' expr')'                                                     # STDWithin
 	| STIsValid'('Identifier')'                                  			 	                            # STIsValid
 	| ArrayLength'('(Identifier | JSONIdentifier)')'                                                        # ArrayLength
@@ -61,15 +52,6 @@ expr:
 textMatchOption:
 	MINIMUM_SHOULD_MATCH ASSIGN IntegerConstant;
 
-// typeName: ty = (BOOL | INT8 | INT16 | INT32 | INT64 | FLOAT | DOUBLE);
-
-// BOOL: 'bool';
-// INT8: 'int8';
-// INT16: 'int16';
-// INT32: 'int32';
-// INT64: 'int64';
-// FLOAT: 'float';
-// DOUBLE: 'double';
 LBRACE: '{';
 RBRACE: '}';
 

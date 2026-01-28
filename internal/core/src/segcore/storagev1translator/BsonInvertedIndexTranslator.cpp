@@ -20,6 +20,7 @@
 
 #include "cachinglayer/CacheSlot.h"
 #include "segcore/Utils.h"
+#include "segcore/Utils.h"
 #include "monitor/Monitor.h"
 #include "common/ScopedTimer.h"
 #include "log/Log.h"
@@ -85,7 +86,12 @@ BsonInvertedIndexTranslator::key() const {
 std::vector<std::pair<milvus::cachinglayer::cid_t,
                       std::unique_ptr<milvus::index::BsonInvertedIndex>>>
 BsonInvertedIndexTranslator::get_cells(
-    const std::vector<milvus::cachinglayer::cid_t>&) {
+    milvus::OpContext* ctx,
+    const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    // Check for cancellation before loading BSON inverted index
+    CheckCancellation(
+        ctx, load_info_.segment_id, "BsonInvertedIndexTranslator::get_cells()");
+
     auto index =
         std::make_unique<milvus::index::BsonInvertedIndex>(disk_file_manager_);
 

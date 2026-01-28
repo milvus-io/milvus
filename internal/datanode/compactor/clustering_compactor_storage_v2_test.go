@@ -213,7 +213,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) initStorageV2Segments(rows int,
 	bw := syncmgr.NewBulkPackWriterV2(mc, sch, cm, s.mockAlloc, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
 		StorageType: "local",
 		RootPath:    rootPath,
-	}, columnGroups, "")
+	}, columnGroups)
 	return bw.Write(context.Background(), pack)
 }
 

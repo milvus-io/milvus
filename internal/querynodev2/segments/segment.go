@@ -1084,7 +1084,6 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 		IndexParams:        indexParams,
 		IndexFiles:         indexInfo.GetIndexFilePaths(),
 		IndexEngineVersion: indexInfo.GetCurrentIndexVersion(),
-		IndexStoreVersion:  indexInfo.GetIndexStoreVersion(),
 		IndexFileSize:      indexInfo.GetIndexSize(),
 		NumRows:            indexInfo.GetNumRows(),
 	}
@@ -1221,9 +1220,12 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 		return err
 	}
 
+	guard := segcore.NewCancellationGuard(ctx)
+	defer guard.Close()
+
 	var status C.CStatus
 	_, _ = GetLoadPool().Submit(func() (any, error) {
-		status = C.LoadTextIndex(s.ptr, (*C.uint8_t)(unsafe.Pointer(&marshaled[0])), (C.uint64_t)(len(marshaled)))
+		status = C.LoadTextIndex(s.ptr, (*C.uint8_t)(unsafe.Pointer(&marshaled[0])), (C.uint64_t)(len(marshaled)), (C.CLoadCancellationSource)(guard.Source()))
 		return nil, nil
 	}).Await()
 
@@ -1278,10 +1280,13 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		return err
 	}
 
+	guard := segcore.NewCancellationGuard(ctx)
+	defer guard.Close()
+
 	var status C.CStatus
 	_, _ = GetLoadPool().Submit(func() (any, error) {
 		traceCtx := ParseCTraceContext(ctx)
-		status = C.LoadJsonKeyIndex(traceCtx.ctx, s.ptr, (*C.uint8_t)(unsafe.Pointer(&marshaled[0])), (C.uint64_t)(len(marshaled)))
+		status = C.LoadJsonKeyIndex(traceCtx.ctx, s.ptr, (*C.uint8_t)(unsafe.Pointer(&marshaled[0])), (C.uint64_t)(len(marshaled)), (C.CLoadCancellationSource)(guard.Source()))
 		return nil, nil
 	}).Await()
 
@@ -1356,8 +1361,11 @@ func (s *LocalSegment) CreateTextIndex(ctx context.Context, fieldID int64) error
 	var status C.CStatus
 	log.Ctx(ctx).Info("create text index for segment", zap.Int64("segmentID", s.ID()), zap.Int64("fieldID", fieldID))
 
+	guard := segcore.NewCancellationGuard(ctx)
+	defer guard.Close()
+
 	GetLoadPool().Submit(func() (any, error) {
-		status = C.CreateTextIndex(s.ptr, C.int64_t(fieldID))
+		status = C.CreateTextIndex(s.ptr, C.int64_t(fieldID), (C.CLoadCancellationSource)(guard.Source()))
 		return nil, nil
 	}).Await()
 

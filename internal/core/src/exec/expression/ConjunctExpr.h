@@ -17,6 +17,7 @@
 #pragma once
 
 #include <fmt/core.h>
+#include <set>
 
 #include "common/EasyAssert.h"
 #include "common/OpContext.h"
@@ -27,42 +28,6 @@
 
 namespace milvus {
 namespace exec {
-
-template <bool is_and>
-struct ConjunctElementFunc {
-    int64_t
-    operator()(ColumnVectorPtr& input_result, ColumnVectorPtr& result) {
-        TargetBitmapView input_data(input_result->GetRawData(),
-                                    input_result->size());
-        TargetBitmapView res_data(result->GetRawData(), result->size());
-
-        /*
-        // This is the original code, kept here for the documentation purposes        
-        int64_t activate_rows = 0;
-        for (int i = 0; i < result->size(); ++i) {
-            if constexpr (is_and) {
-                res_data[i] &= input_data[i];
-                if (res_data[i]) {
-                    activate_rows++;
-                }
-            } else {
-                res_data[i] |= input_data[i];
-                if (!res_data[i]) {
-                    activate_rows++;
-                }
-            }
-        }
-        */
-
-        if constexpr (is_and) {
-            return (int64_t)res_data.inplace_and_with_count(input_data,
-                                                            res_data.size());
-        } else {
-            return (int64_t)res_data.inplace_or_with_count(input_data,
-                                                           res_data.size());
-        }
-    }
-};
 
 class PhyConjunctFilterExpr : public Expr {
  public:
@@ -118,15 +83,25 @@ class PhyConjunctFilterExpr : public Expr {
     ToString() const {
         if (!input_order_.empty()) {
             std::vector<std::string> inputs;
-            for (auto& i : input_order_) {
-                inputs.push_back(inputs_[i]->ToString());
+            inputs.reserve(input_order_.size());
+            for (const auto& i : input_order_) {
+                if (i < inputs_.size()) {
+                    inputs.push_back(inputs_[i]->ToString());
+                } else {
+                    // Reserved position for runtime-created expressions (e.g., PhyLikeConjunctExpr)
+                    // This can happen during optimization phase before the expression is actually created
+                    inputs.push_back(
+                        fmt::format("[RuntimeExpr:index={}:pending]", i));
+                }
             }
             std::string input_str =
                 is_and_ ? Join(inputs, " && ") : Join(inputs, " || ");
             return fmt::format("[ConjuctExpr:{}]", input_str);
         }
+        // Fallback: no reordering applied yet
         std::vector<std::string> inputs;
-        for (auto& in : inputs_) {
+        inputs.reserve(inputs_.size());
+        for (const auto& in : inputs_) {
             inputs.push_back(in->ToString());
         }
         std::string input_str =
@@ -154,14 +129,47 @@ class PhyConjunctFilterExpr : public Expr {
         return input_order_;
     }
 
+    // Add a new expression to inputs and return its index
+    size_t
+    AddInput(std::shared_ptr<Expr> expr) {
+        inputs_.push_back(std::move(expr));
+        return inputs_.size() - 1;
+    }
+
+    // Set the bitmap input for the next expression in the conjunction.
+    // The bitmap indicates which rows still need to be evaluated.
+    //
+    // For AND: A row needs evaluation if it's currently TRUE or NULL
+    //   - TRUE rows: need to check if they remain TRUE after AND
+    //   - NULL rows: need to check if result becomes FALSE (NULL AND FALSE = FALSE)
+    //   - FALSE rows: already determined, no need to evaluate
+    //   => bitmap = data | ~valid (TRUE or NULL)
+    //
+    // For OR: A row needs evaluation if it's currently FALSE or NULL
+    //   - FALSE rows: need to check if they become TRUE after OR
+    //   - NULL rows: need to check if result becomes TRUE (NULL OR TRUE = TRUE)
+    //   - TRUE rows: already determined, no need to evaluate
+    //   => bitmap = ~data | ~valid (FALSE or NULL)
     void
     SetNextExprBitmapInput(const ColumnVectorPtr& vec, EvalCtx& context) {
-        TargetBitmapView last_res_bitmap(vec->GetRawData(), vec->size());
-        TargetBitmap next_input_bitmap(last_res_bitmap);
+        const size_t size = vec->size();
+        TargetBitmapView data(vec->GetRawData(), size);
+        TargetBitmapView valid(vec->GetValidRawData(), size);
+
         if (is_and_) {
+            // bitmap = data | ~valid
+            // Using De Morgan's law: data | ~valid = ~(~data & valid) = ~(valid & ~data)
+            // Use inplace_sub which computes: this = this & ~other
+            TargetBitmap next_input_bitmap(valid);      // copy valid
+            next_input_bitmap.inplace_sub(data, size);  // valid & ~data
+            next_input_bitmap.flip();  // ~(valid & ~data) = data | ~valid
             context.set_bitmap_input(std::move(next_input_bitmap));
         } else {
-            next_input_bitmap.flip();
+            // bitmap = ~data | ~valid
+            // Using De Morgan's law: ~data | ~valid = ~(data & valid)
+            TargetBitmap next_input_bitmap(data);        // copy data
+            next_input_bitmap.inplace_and(valid, size);  // data & valid
+            next_input_bitmap.flip();  // ~(data & valid) = ~data | ~valid
             context.set_bitmap_input(std::move(next_input_bitmap));
         }
     }
@@ -181,6 +189,16 @@ class PhyConjunctFilterExpr : public Expr {
         return !is_and_;
     }
 
+    void
+    SetLikeIndices(std::vector<size_t>&& indices) {
+        like_indices_ = std::move(indices);
+    }
+
+    const std::vector<size_t>&
+    GetLikeIndices() const {
+        return like_indices_;
+    }
+
  private:
     int64_t
     UpdateResult(ColumnVectorPtr& input_result,
@@ -198,6 +216,12 @@ class PhyConjunctFilterExpr : public Expr {
     // true if conjunction (and), false if disjunction (or).
     bool is_and_;
     std::vector<size_t> input_order_;
+    // Indices of LIKE expressions for potential batch ngram optimization (AND only)
+    std::vector<size_t> like_indices_;
+    // Flag to indicate if batch ngram optimization has been initialized
+    bool like_batch_initialized_{false};
+    // Indices of expressions executed via batch ngram (to skip in normal iteration)
+    std::set<size_t> batch_ngram_indices_;
 };
 }  //namespace exec
 }  // namespace milvus

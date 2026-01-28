@@ -956,13 +956,18 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		zap.Int64s("unindexed text fields", lo.Keys(unindexedTextFields)),
 		zap.Int64s("indexed json key fields", lo.Keys(jsonKeyStats)),
 	)
+	_, err = GetLoadPool().Submit(func() (any, error) {
+		if err = segment.Load(ctx); err != nil {
+			return struct{}{}, errors.Wrap(err, "At Load")
+		}
 
-	if err = segment.Load(ctx); err != nil {
-		return errors.Wrap(err, "At Load")
-	}
-
-	if err = segment.FinishLoad(); err != nil {
-		return errors.Wrap(err, "At FinishLoad")
+		if err = segment.FinishLoad(); err != nil {
+			return struct{}{}, errors.Wrap(err, "At FinishLoad")
+		}
+		return struct{}{}, nil
+	}).Await()
+	if err != nil {
+		return err
 	}
 
 	for _, indexInfo := range loadInfo.IndexInfos {
@@ -1948,6 +1953,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		log.Warn("failed to create schema helper", zap.String("name", schema.GetName()), zap.Error(err))
 		return nil, err
 	}
+	indexedFields := make(map[int64]struct{})
 	ctx := context.Background()
 
 	// PART 1: calculate size of indexes
@@ -1958,6 +1964,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			if err != nil {
 				return nil, err
 			}
+			indexedFields[fieldID] = struct{}{}
 
 			isVectorType := typeutil.IsVectorType(fieldSchema.GetDataType())
 
@@ -2036,6 +2043,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		mmapEnabled := true
 		isVectorType := true
 		needWarmup := false
+		hasIndex := true
 
 		for _, fieldID := range fieldIDs {
 			// get field schema from fieldID
@@ -2043,6 +2051,9 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			if err != nil {
 				log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
 				return nil, err
+			}
+			if _, ok := indexedFields[fieldID]; !ok {
+				hasIndex = false
 			}
 
 			// missing mapping, shall be "0" group for storage v2
@@ -2070,10 +2081,12 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			continue
 		}
 
-		if !multiplyFactor.TieredEvictionEnabled || needWarmup {
-			interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && supportInterimIndexDataType
-			if interimIndexEnable {
-				segMemoryLoadingSize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
+		if !hasIndex {
+			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+				interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && supportInterimIndexDataType
+				if interimIndexEnable {
+					segMemoryLoadingSize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
+				}
 			}
 		}
 

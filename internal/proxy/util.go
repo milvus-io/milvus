@@ -654,14 +654,11 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 			return err
 		}
 	} else {
-		// TODO(SpadeA): only support float vector now
-		if field.GetElementType() != schemapb.DataType_FloatVector {
-			return fmt.Errorf("Unsupported element type of array field %s, now only float vector is supported", field.Name)
+		// ArrayOfVector: support FloatVector, Float16Vector, BFloat16Vector, Int8Vector, BinaryVector
+		if !typeutil.IsFixDimVectorType(field.GetElementType()) {
+			return fmt.Errorf("Unsupported element type %s of ArrayOfVector field %s, only fixed dimension vector types are supported", field.GetElementType().String(), field.Name)
 		}
 
-		// if !typeutil.IsVectorType(field.GetElementType()) {
-		// 	return fmt.Errorf("Inconsistent schema: element type of array field %s is not a vector type", field.Name)
-		// }
 		err = validateDimension(field)
 		if err != nil {
 			return err

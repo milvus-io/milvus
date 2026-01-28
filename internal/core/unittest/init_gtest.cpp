@@ -13,6 +13,7 @@
 
 #include "folly/init/Init.h"
 #include "common/type_c.h"
+#include "exec/expression/function/init_c.h"
 #include "test_utils/Constants.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
@@ -22,6 +23,9 @@ int
 main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     folly::Init follyInit(&argc, &argv, false);
+
+    // Initialize expression function factory (registers aggregate functions like count, sum, min, max)
+    InitExecExpressionFunctionFactory();
 
     milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(
         TestLocalPath);
@@ -39,7 +43,8 @@ main(int argc, char** argv) {
         {1024 * mb, 1024 * mb, 1024 * mb, 1024 * mb, 1024 * mb, 1024 * mb},
         true,
         true,
-        {10, true, 30});
+        {10, true, 30},
+        std::chrono::milliseconds(0));
 
     return RUN_ALL_TESTS();
 }

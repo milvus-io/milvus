@@ -153,7 +153,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
                                        0);
         if (op_type != proto::plan::OpType::Equal) {
             std::optional<TargetBitmap> bitset_opt =
-                index->ExecuteQuery(literal, op_type, &segment_expr);
+                index->ExecuteQueryForUT(literal, op_type, &segment_expr);
             if (forward_to_br) {
                 ASSERT_TRUE(!bitset_opt.has_value());
             } else {
@@ -172,32 +172,30 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
             {milvus::index::MAX_GRAM, "4"},
             {milvus::LOAD_PRIORITY, "HIGH"},
         };
-        milvus::segcore::LoadIndexInfo load_index_info{
-            .collection_id = collection_id,
-            .partition_id = partition_id,
-            .segment_id = segment_id,
-            .field_id = field_id.get(),
-            .field_type = DataType::VARCHAR,
-            .enable_mmap = true,
-            .mmap_dir_path = "/tmp/test-ngram-index-mmap-dir",
-            .index_id = index_id,
-            .index_build_id = index_build_id,
-            .index_version = index_version,
-            .index_params = index_params,
-            .index_files = index_files,
-            .schema = field_meta.field_schema,
-            .index_size = index_size,
-        };
+        milvus::segcore::LoadIndexInfo load_index_info{};
+        load_index_info.collection_id = collection_id;
+        load_index_info.partition_id = partition_id;
+        load_index_info.segment_id = segment_id;
+        load_index_info.field_id = field_id.get();
+        load_index_info.field_type = DataType::VARCHAR;
+        load_index_info.enable_mmap = true;
+        load_index_info.mmap_dir_path = "/tmp/test-ngram-index-mmap-dir";
+        load_index_info.index_id = index_id;
+        load_index_info.index_build_id = index_build_id;
+        load_index_info.index_version = index_version;
+        load_index_info.index_params = index_params;
+        load_index_info.index_files = index_files;
+        load_index_info.schema = field_meta.field_schema;
+        load_index_info.index_size = index_size;
 
         uint8_t trace_id[16] = {0};
         uint8_t span_id[8] = {0};
         trace_id[0] = 1;
         span_id[0] = 2;
-        CTraceContext trace{
-            .traceID = trace_id,
-            .spanID = span_id,
-            .traceFlags = 0,
-        };
+        CTraceContext trace{};
+        trace.traceID = trace_id;
+        trace.spanID = span_id;
+        trace.traceFlags = 0;
         auto cload_index_info = static_cast<CLoadIndexInfo>(&load_index_info);
         AppendIndexV2(trace, cload_index_info);
         UpdateSealedSegmentIndex(segment.get(), cload_index_info);
@@ -454,32 +452,30 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
             {milvus::index::MAX_GRAM, "4"},
             {milvus::LOAD_PRIORITY, "HIGH"},
         };
-        milvus::segcore::LoadIndexInfo load_index_info{
-            .collection_id = collection_id,
-            .partition_id = partition_id,
-            .segment_id = segment_id,
-            .field_id = field_id.get(),
-            .field_type = DataType::VARCHAR,
-            .enable_mmap = true,
-            .mmap_dir_path = "/tmp/test-ngram-index-mmap-dir",
-            .index_id = index_id,
-            .index_build_id = index_build_id,
-            .index_version = index_version,
-            .index_params = index_params,
-            .index_files = index_files,
-            .schema = field_meta.field_schema,
-            .index_size = 1024 * 1024 * 1024,
-        };
+        milvus::segcore::LoadIndexInfo load_index_info{};
+        load_index_info.collection_id = collection_id;
+        load_index_info.partition_id = partition_id;
+        load_index_info.segment_id = segment_id;
+        load_index_info.field_id = field_id.get();
+        load_index_info.field_type = DataType::VARCHAR;
+        load_index_info.enable_mmap = true;
+        load_index_info.mmap_dir_path = "/tmp/test-ngram-index-mmap-dir";
+        load_index_info.index_id = index_id;
+        load_index_info.index_build_id = index_build_id;
+        load_index_info.index_version = index_version;
+        load_index_info.index_params = index_params;
+        load_index_info.index_files = index_files;
+        load_index_info.schema = field_meta.field_schema;
+        load_index_info.index_size = 1024 * 1024 * 1024;
 
         uint8_t trace_id[16] = {0};
         uint8_t span_id[8] = {0};
         trace_id[0] = 1;
         span_id[0] = 2;
-        CTraceContext trace{
-            .traceID = trace_id,
-            .spanID = span_id,
-            .traceFlags = 0,
-        };
+        CTraceContext trace{};
+        trace.traceID = trace_id;
+        trace.spanID = span_id;
+        trace.traceFlags = 0;
         auto cload_index_info = static_cast<CLoadIndexInfo>(&load_index_info);
         AppendIndexV2(trace, cload_index_info);
         UpdateSealedSegmentIndex(segment.get(), cload_index_info);

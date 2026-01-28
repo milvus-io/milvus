@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
@@ -57,7 +58,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -115,11 +115,7 @@ type Server struct {
 	replicaObserver      *observers.ReplicaObserver
 	resourceObserver     *observers.ResourceObserver
 	leaderCacheObserver  *observers.LeaderCacheObserver
-	fileResourceObserver *observers.FileResourceObserver
-
-	getBalancerFunc checkers.GetBalancerFunc
-	balancerMap     map[string]balance.Balance
-	balancerLock    sync.RWMutex
+	fileResourceObserver FileResourceObserver
 
 	// Active-standby
 	enableActiveStandBy bool
@@ -140,12 +136,16 @@ type Server struct {
 	loadConfigWatcher *LoadConfigWatcher
 }
 
+type FileResourceObserver interface {
+	InitQueryCoord(manager *session.NodeManager, cluster session.Cluster)
+	Notify()
+}
+
 func NewQueryCoord(ctx context.Context) (*Server, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	server := &Server{
 		ctx:            ctx,
 		cancel:         cancel,
-		balancerMap:    make(map[string]balance.Balance),
 		metricsRequest: metricsinfo.NewMetricsRequest(),
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -232,6 +232,10 @@ func (s *Server) registerMetricsRequest() {
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SegmentKey, QuerySegmentsAction)
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ChannelKey, QueryChannelsAction)
 	log.Ctx(s.ctx).Info("register metrics actions finished")
+}
+
+func (s *Server) SetFileResourceObserver(observer FileResourceObserver) {
+	s.fileResourceObserver = observer
 }
 
 func (s *Server) Init() error {
@@ -328,38 +332,16 @@ func (s *Server) initQueryCoord() error {
 	s.proxyWatcher.DelSessionFunc(s.proxyClientManager.DelProxyClient)
 	log.Info("init proxy manager done")
 
+	// Init global assign policy factory
+	log.Info("init global assign policy factory")
+	assign.InitGlobalAssignPolicyFactory(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
+
+	// Init global balancer factory
+	log.Info("init global balancer factory")
+	balance.InitGlobalBalancerFactory(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
+
 	// Init checker controller
 	log.Info("init checker controller")
-	s.getBalancerFunc = func() balance.Balance {
-		balanceKey := paramtable.Get().QueryCoordCfg.Balancer.GetValue()
-		s.balancerLock.Lock()
-		defer s.balancerLock.Unlock()
-
-		balancer, ok := s.balancerMap[balanceKey]
-		if ok {
-			return balancer
-		}
-
-		log.Info("switch to new balancer", zap.String("name", balanceKey))
-		switch balanceKey {
-		case meta.RoundRobinBalancerName:
-			balancer = balance.NewRoundRobinBalancer(s.taskScheduler, s.nodeMgr)
-		case meta.RowCountBasedBalancerName:
-			balancer = balance.NewRowCountBasedBalancer(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
-		case meta.ScoreBasedBalancerName:
-			balancer = balance.NewScoreBasedBalancer(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
-		case meta.MultiTargetBalancerName:
-			balancer = balance.NewMultiTargetBalancer(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
-		case meta.ChannelLevelScoreBalancerName:
-			balancer = balance.NewChannelLevelScoreBalancer(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
-		default:
-			log.Info(fmt.Sprintf("default to use %s", meta.ScoreBasedBalancerName))
-			balancer = balance.NewScoreBasedBalancer(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
-		}
-
-		s.balancerMap[balanceKey] = balancer
-		return balancer
-	}
 	s.checkerController = checkers.NewCheckerController(
 		s.meta,
 		s.dist,
@@ -367,7 +349,6 @@ func (s *Server) initQueryCoord() error {
 		s.nodeMgr,
 		s.taskScheduler,
 		s.broker,
-		s.getBalancerFunc,
 	)
 
 	// Init observers
@@ -463,6 +444,7 @@ func (s *Server) initObserver() {
 	s.replicaObserver = observers.NewReplicaObserver(
 		s.meta,
 		s.dist,
+		s.targetMgr,
 	)
 
 	s.resourceObserver = observers.NewResourceObserver(s.meta)
@@ -471,7 +453,9 @@ func (s *Server) initObserver() {
 		s.proxyClientManager,
 	)
 
-	s.fileResourceObserver = observers.NewFileResourceObserver(s.ctx, s.nodeMgr, s.cluster)
+	if s.fileResourceObserver != nil {
+		s.fileResourceObserver.InitQueryCoord(s.nodeMgr, s.cluster)
+	}
 }
 
 func (s *Server) afterStart() {}
@@ -535,7 +519,6 @@ func (s *Server) startServerLoop() {
 	s.targetObserver.Start()
 	s.replicaObserver.Start()
 	s.resourceObserver.Start()
-	s.fileResourceObserver.Start()
 
 	log.Info("start task scheduler...")
 	s.taskScheduler.Start()
@@ -595,9 +578,6 @@ func (s *Server) Stop() error {
 	}
 	if s.leaderCacheObserver != nil {
 		s.leaderCacheObserver.Stop()
-	}
-	if s.fileResourceObserver != nil {
-		s.fileResourceObserver.Stop()
 	}
 
 	if s.distController != nil {
@@ -701,7 +681,9 @@ func (s *Server) watchNodes(revision int64) {
 					Labels:   event.Session.GetServerLabel(),
 				}))
 				s.handleNodeUp(nodeID)
-				s.fileResourceObserver.Notify()
+				if s.fileResourceObserver != nil {
+					s.fileResourceObserver.Notify()
+				}
 
 			case sessionutil.SessionUpdateEvent:
 				log.Info("stopping the node")
@@ -893,9 +875,4 @@ func (s *Server) watchLoadConfigChanges() {
 
 	rgHandler := config.NewHandler("watchResourceGroupChanges", func(e *config.Event) { w.Trigger() })
 	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, rgHandler)
-}
-
-func (s *Server) SyncFileResource(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
-	s.fileResourceObserver.UpdateResources(resources, version)
-	return nil
 }

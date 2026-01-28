@@ -39,7 +39,9 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
@@ -1779,6 +1781,188 @@ func (s *RootCoordSuite) TestRestore() {
 		withTsoAllocator(tsoAllocator),
 		withMeta(meta))
 	core.restore(context.Background())
+}
+
+func TestRootCoord_AddFileResource(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		c := newTestCore(withAbnormalCode())
+		ctx := context.Background()
+		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
+	})
+
+	t.Run("storage check error", func(t *testing.T) {
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(false, errors.New("storage error"))
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock))
+		ctx := context.Background()
+		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/file",
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("file not exist", func(t *testing.T) {
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(false, nil)
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock))
+		ctx := context.Background()
+		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/file",
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("tso allocator error", func(t *testing.T) {
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
+
+		tsoAllocator := newMockTsoAllocator()
+		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
+			return 0, errors.New("tso error")
+		}
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator))
+		ctx := context.Background()
+		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/file",
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("meta add file resource error", func(t *testing.T) {
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
+
+		tsoAllocator := newMockTsoAllocator()
+		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
+			return 100, nil
+		}
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().AddFileResource(mock.Anything, mock.Anything).Return(errors.New("meta error"))
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator), withMeta(meta))
+		ctx := context.Background()
+		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/file",
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("success", func(t *testing.T) {
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
+
+		tsoAllocator := newMockTsoAllocator()
+		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
+			return 100, nil
+		}
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().AddFileResource(mock.Anything, mock.Anything).Return(nil)
+
+		observer := NewMockFileResourceObserver(t)
+		observer.EXPECT().Sync().Return(nil)
+		mixc := &mocks.MixCoord{}
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator), withMeta(meta), withMixCoord(mixc))
+		c.SetFileResourceObserver(observer)
+		ctx := context.Background()
+		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/file",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}
+
+func TestRootCoord_RemoveFileResource(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		c := newTestCore(withAbnormalCode())
+		ctx := context.Background()
+		resp, err := c.RemoveFileResource(ctx, &milvuspb.RemoveFileResourceRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
+	})
+
+	t.Run("meta remove file resource error", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().RemoveFileResource(mock.Anything, mock.Anything).Return(errors.New("meta error"), false)
+
+		c := newTestCore(withHealthyCode(), withMeta(meta))
+		ctx := context.Background()
+		resp, err := c.RemoveFileResource(ctx, &milvuspb.RemoveFileResourceRequest{
+			Name: "test_resource",
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("success with resource not exist", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().RemoveFileResource(mock.Anything, mock.Anything).Return(nil, false)
+
+		observer := NewMockFileResourceObserver(t)
+
+		c := newTestCore(withHealthyCode(), withMeta(meta))
+		c.SetFileResourceObserver(observer)
+		ctx := context.Background()
+		resp, err := c.RemoveFileResource(ctx, &milvuspb.RemoveFileResourceRequest{
+			Name: "test_resource",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("success with resource exist", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().RemoveFileResource(mock.Anything, mock.Anything).Return(nil, true)
+
+		observer := NewMockFileResourceObserver(t)
+		observer.EXPECT().Sync().Return(nil)
+		mixc := &mocks.MixCoord{}
+
+		c := newTestCore(withHealthyCode(), withMeta(meta), withMixCoord(mixc))
+		c.SetFileResourceObserver(observer)
+		ctx := context.Background()
+		resp, err := c.RemoveFileResource(ctx, &milvuspb.RemoveFileResourceRequest{
+			Name: "test_resource",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}
+
+func TestRootCoord_ListFileResources(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		c := newTestCore(withAbnormalCode())
+		ctx := context.Background()
+		resp, err := c.ListFileResources(ctx, &milvuspb.ListFileResourcesRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("success", func(t *testing.T) {
+		c := newTestCore(withHealthyCode())
+		ctx := context.Background()
+		resp, err := c.ListFileResources(ctx, &milvuspb.ListFileResourcesRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.NotNil(t, resp.GetResources())
+	})
 }
 
 func TestRootCoordSuite(t *testing.T) {

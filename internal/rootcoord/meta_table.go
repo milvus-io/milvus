@@ -45,7 +45,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -149,6 +148,10 @@ type IMetaTable interface {
 	ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error)
 	OperatePrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error
 	GetPrivilegeGroupRoles(ctx context.Context, groupName string) ([]*milvuspb.RoleEntity, error)
+
+	AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error
+	RemoveFileResource(ctx context.Context, name string) (error, bool)
+	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64)
 }
 
 // MetaTable is a persistent meta set of all databases, collections and partitions.
@@ -160,6 +163,11 @@ type MetaTable struct {
 
 	dbName2Meta map[string]*model.Database              // database name ->  db meta
 	collID2Meta map[typeutil.UniqueID]*model.Collection // collection id -> collection meta
+
+	fileResourceName2Meta map[string]*internalpb.FileResourceInfo // file resource name -> file resource meta
+	fileResourceID2Meta   map[int64]*internalpb.FileResourceInfo  // file resource id -> file resource meta
+	fileResourceRefCnt    map[int64]int                           // file resource id -> reference count
+	fileResourceVersion   uint64
 
 	generalCnt int // sum of product of partition number and shard number
 
@@ -191,6 +199,7 @@ func (mt *MetaTable) reload() error {
 	record := timerecord.NewTimeRecorder("rootcoord")
 	mt.dbName2Meta = make(map[string]*model.Database)
 	mt.collID2Meta = make(map[UniqueID]*model.Collection)
+	mt.fileResourceRefCnt = make(map[int64]int)
 	mt.names = newNameDb()
 	mt.aliases = newNameDb()
 
@@ -245,6 +254,9 @@ func (mt *MetaTable) reload() error {
 			mt.collID2Meta[collection.CollectionID] = collection
 			if collection.Available() {
 				mt.names.insert(dbName, collection.Name, collection.CollectionID)
+				for _, fileResourceID := range collection.FileResourceIds {
+					mt.fileResourceRefCnt[fileResourceID]++
+				}
 				pn := collection.GetPartitionNum(true)
 				mt.generalCnt += pn * int(collection.ShardsNum)
 				collectionNum++
@@ -282,6 +294,19 @@ func (mt *MetaTable) reload() error {
 	}
 	channel.RecoverPChannelStatsManager(vchannels)
 
+	// reload file resources
+	resources, version, err := mt.catalog.ListFileResource(mt.ctx)
+	if err != nil {
+		return err
+	}
+	mt.fileResourceName2Meta = make(map[string]*internalpb.FileResourceInfo)
+	mt.fileResourceID2Meta = make(map[int64]*internalpb.FileResourceInfo)
+	for _, resource := range resources {
+		mt.fileResourceName2Meta[resource.Name] = resource
+		mt.fileResourceID2Meta[resource.Id] = resource
+	}
+	mt.fileResourceVersion = version
+
 	log.Ctx(mt.ctx).Info("RootCoord meta table reload done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
@@ -299,6 +324,9 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 		mt.collID2Meta[collection.CollectionID] = collection
 		if collection.Available() {
 			mt.names.insert(util.DefaultDBName, collection.Name, collection.CollectionID)
+			for _, fileResourceID := range collection.FileResourceIds {
+				mt.fileResourceRefCnt[fileResourceID]++
+			}
 			pn := collection.GetPartitionNum(true)
 			mt.generalCnt += pn * int(collection.ShardsNum)
 			collectionNum++
@@ -324,7 +352,9 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 }
 
 func (mt *MetaTable) createDefaultDb() error {
-	ts, err := mt.tsoAllocator.GenerateTSO(1)
+	// Generate ezID and db ts for default database
+	// Use unique ID as ezID because the default dbID(1) for each cluster is the same
+	ts, err := mt.tsoAllocator.GenerateTSO(2)
 	if err != nil {
 		return err
 	}
@@ -335,21 +365,16 @@ func (mt *MetaTable) createDefaultDb() error {
 		return err
 	}
 
-	defaultRootKey := paramtable.GetCipherParams().DefaultRootKey.GetValue()
-	if hookutil.IsClusterEncryptionEnabled() && len(defaultRootKey) > 0 {
-		// Set unique ID as ezID because the default dbID for each cluster
-		// is the same
-		ezID, err := mt.tsoAllocator.GenerateTSO(1)
-		if err != nil {
-			return err
-		}
+	// Apply same encryption logic as regular database creation
+	// This respects the defaultKey setting
+	defaultProperties, err = hookutil.TidyDBCipherProperties(int64(ts-1), defaultProperties)
+	if err != nil {
+		return err
+	}
 
-		cipherProps := hookutil.GetDBCipherProperties(ezID, defaultRootKey)
-		defaultProperties = append(defaultProperties, cipherProps...)
-
-		if err := hookutil.CreateEZByDBProperties(defaultProperties); err != nil {
-			return err
-		}
+	// Create EZ if encryption is enabled
+	if err := hookutil.CreateEZByDBProperties(defaultProperties); err != nil {
+		return err
 	}
 
 	return mt.createDatabasePrivate(mt.ctx, model.NewDefaultDatabase(defaultProperties), ts)
@@ -525,6 +550,9 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 
 	mt.collID2Meta[coll.CollectionID] = coll.Clone()
 	mt.names.insert(coll.DBName, coll.Name, coll.CollectionID)
+	for _, fileResourceID := range coll.FileResourceIds {
+		mt.fileResourceRefCnt[fileResourceID]++
+	}
 
 	pn := coll.GetPartitionNum(true)
 	mt.generalCnt += pn * int(coll.ShardsNum)
@@ -562,6 +590,10 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 		return err
 	}
 	mt.collID2Meta[collectionID] = clone
+	for _, fileResourceID := range coll.FileResourceIds {
+		mt.fileResourceRefCnt[fileResourceID]--
+	}
+
 	log.Ctx(ctx).Info("update coll state to dropping",
 		zap.Int64("collectionID", collectionID),
 		zap.String("state", clone.State.String()),
@@ -2200,4 +2232,56 @@ func (mt *MetaTable) GetPrivilegeGroupRoles(ctx context.Context, groupName strin
 		}
 	}
 	return lo.Keys(rolesMap), nil
+}
+
+func (mt *MetaTable) AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	if old, ok := mt.fileResourceName2Meta[resource.Name]; ok {
+		if old.Path == resource.Path {
+			return nil
+		}
+		return errors.Newf("file resource %s already exists", resource.Name)
+	}
+
+	err := mt.catalog.SaveFileResource(ctx, resource, mt.fileResourceVersion+1)
+	if err != nil {
+		return err
+	}
+
+	mt.fileResourceName2Meta[resource.Name] = resource
+	mt.fileResourceID2Meta[resource.Id] = resource
+	mt.fileResourceVersion++
+	return nil
+}
+
+func (mt *MetaTable) RemoveFileResource(ctx context.Context, name string) (error, bool) {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	if resource, ok := mt.fileResourceName2Meta[name]; ok {
+		if mt.fileResourceRefCnt[resource.Id] > 0 {
+			return errors.Newf("file resource %s is still in use: %d", resource.Name, mt.fileResourceRefCnt[resource.Id]), false
+		}
+
+		err := mt.catalog.RemoveFileResource(ctx, resource.Id, mt.fileResourceVersion+1)
+		if err != nil {
+			return err, false
+		}
+
+		delete(mt.fileResourceName2Meta, resource.Name)
+		delete(mt.fileResourceID2Meta, resource.Id)
+		delete(mt.fileResourceRefCnt, resource.Id)
+		mt.fileResourceVersion++
+		return nil, true
+	}
+	return nil, false
+}
+
+func (mt *MetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	return lo.Values(mt.fileResourceID2Meta), mt.fileResourceVersion
 }

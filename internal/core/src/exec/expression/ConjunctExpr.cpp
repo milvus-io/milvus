@@ -15,6 +15,11 @@
 // limitations under the License.
 
 #include "ConjunctExpr.h"
+#include "UnaryExpr.h"
+#include "LikeConjunctExpr.h"
+
+#include <algorithm>
+#include "common/ValueOp.h"
 
 namespace milvus {
 namespace exec {
@@ -36,49 +41,39 @@ PhyConjunctFilterExpr::ResolveType(const std::vector<DataType>& inputs) {
     return DataType::BOOL;
 }
 
-static bool
-AllTrue(ColumnVectorPtr& vec) {
-    TargetBitmapView data(vec->GetRawData(), vec->size());
-    return data.all();
-}
-
-static void
-AllSet(ColumnVectorPtr& vec) {
-    TargetBitmapView data(vec->GetRawData(), vec->size());
-    data.set();
-}
-
-static void
-AllReset(ColumnVectorPtr& vec) {
-    TargetBitmapView data(vec->GetRawData(), vec->size());
-    data.reset();
-}
-
-static bool
-AllFalse(ColumnVectorPtr& vec) {
-    TargetBitmapView data(vec->GetRawData(), vec->size());
-    return data.none();
-}
-
 int64_t
 PhyConjunctFilterExpr::UpdateResult(ColumnVectorPtr& input_result,
                                     EvalCtx& ctx,
                                     ColumnVectorPtr& result) {
     if (is_and_) {
-        ConjunctElementFunc<true> func;
-        return func(input_result, result);
+        common::ThreeValuedLogicOp::And(result, input_result);
     } else {
-        ConjunctElementFunc<false> func;
-        return func(input_result, result);
+        common::ThreeValuedLogicOp::Or(result, input_result);
+    }
+
+    // Return the count of active rows for short-circuit optimization
+    // For AND: return count of true (if 0, all false, can skip)
+    // For OR: return count of false (if 0, all true, can skip)
+    TargetBitmapView res_data(result->GetRawData(), result->size());
+    if (is_and_) {
+        return static_cast<int64_t>(res_data.count());
+    } else {
+        return static_cast<int64_t>(result->size() - res_data.count());
     }
 }
 
 bool
 PhyConjunctFilterExpr::CanSkipFollowingExprs(ColumnVectorPtr& vec) {
-    if ((is_and_ && AllFalse(vec)) || (!is_and_ && AllTrue(vec))) {
-        return true;
-    }
-    return false;
+    // For AND: can only skip if ALL rows are definitely FALSE (valid=1, data=0)
+    //   - If any row is TRUE, we need to continue to determine final result
+    //   - If any row is NULL, we need to continue because NULL AND FALSE = FALSE
+    //     but NULL AND TRUE = NULL, so the result depends on following exprs
+    //
+    // For OR: can only skip if ALL rows are definitely TRUE (valid=1, data=1)
+    //   - If any row is FALSE, we need to continue to determine final result
+    //   - If any row is NULL, we need to continue because NULL OR TRUE = TRUE
+    //     but NULL OR FALSE = NULL, so the result depends on following exprs
+    return is_and_ ? vec->AllFalse() : vec->AllTrue();
 }
 
 void
@@ -100,11 +95,62 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             input_order_[i] = i;
         }
     }
-    for (int i = 0; i < input_order_.size(); ++i) {
+
+    auto has_input_offset = context.get_offset_input() != nullptr;
+    if (!has_input_offset && !like_batch_initialized_ && is_and_ &&
+        like_indices_.size() > 1) {
+        like_batch_initialized_ = true;
+        // Collect LIKE expressions that can use ngram index at runtime
+        std::vector<std::shared_ptr<PhyUnaryRangeFilterExpr>> ngram_exprs;
+        for (size_t idx : like_indices_) {
+            auto unary_expr =
+                std::dynamic_pointer_cast<PhyUnaryRangeFilterExpr>(
+                    inputs_[idx]);
+            if (unary_expr && unary_expr->CanUseNgramIndex()) {
+                ngram_exprs.push_back(unary_expr);
+                batch_ngram_indices_.insert(idx);
+            }
+        }
+
+        // Create PhyLikeConjunctExpr and add to inputs_ if we have >= 2 eligible
+        if (ngram_exprs.size() >= 2) {
+            auto active_count = ngram_exprs[0]->GetActiveCount();
+            auto like_conjunct = std::make_shared<PhyLikeConjunctExpr>(
+                std::move(ngram_exprs),
+                op_ctx_,
+                active_count,
+                context.get_query_config()->get_expr_batch_size());
+            inputs_.push_back(like_conjunct);
+        } else {
+            batch_ngram_indices_.clear();
+            // Remove the like_conjunct index from input_order_ since we're not
+            // creating the batch expression. The index was reserved at compile
+            // time but the PhyLikeConjunctExpr is not being created at runtime.
+            auto original_size = inputs_.size();
+            input_order_.erase(std::remove_if(input_order_.begin(),
+                                              input_order_.end(),
+                                              [original_size](size_t idx) {
+                                                  return idx >= original_size;
+                                              }),
+                               input_order_.end());
+        }
+    }
+
+    bool has_result = false;
+    for (size_t i = 0; i < input_order_.size(); ++i) {
+        size_t idx = input_order_[i];
+
+        // Skip expressions already executed via batch ngram
+        if (batch_ngram_indices_.count(idx)) {
+            continue;
+        }
+
         VectorPtr input_result;
-        inputs_[input_order_[i]]->Eval(context, input_result);
-        if (i == 0) {
+        inputs_[idx]->Eval(context, input_result);
+
+        if (!has_result) {
             result = input_result;
+            has_result = true;
             auto all_flat_result = GetColumnVector(result);
             if (CanSkipFollowingExprs(all_flat_result)) {
                 SkipFollowingExprs(i + 1);

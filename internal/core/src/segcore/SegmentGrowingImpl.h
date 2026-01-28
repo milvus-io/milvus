@@ -37,6 +37,7 @@
 #include "query/PlanNode.h"
 #include "common/GeometryCache.h"
 #include "common/ArrayOffsets.h"
+#include "milvus-storage/reader.h"
 
 namespace milvus::segcore {
 
@@ -69,7 +70,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) override;
 
     void
-    LoadFieldData(const LoadFieldDataInfo& info) override;
+    LoadFieldData(const LoadFieldDataInfo& info,
+                  milvus::OpContext* op_ctx = nullptr) override;
 
     int64_t
     get_segment_id() const override {
@@ -85,7 +87,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     };
 
     void
-    CreateTextIndex(FieldId field_id) override;
+    CreateTextIndex(FieldId field_id,
+                    milvus::OpContext* op_ctx = nullptr) override;
 
     void
     load_field_data_internal(const LoadFieldDataInfo& load_info);
@@ -114,7 +117,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     FinishLoad() override;
 
     void
-    Load(milvus::tracer::TraceContext& trace_ctx) override;
+    Load(milvus::tracer::TraceContext& trace_ctx,
+         milvus::OpContext* op_ctx = nullptr) override;
 
  private:
     // Build geometry cache for inserted data

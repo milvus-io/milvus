@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"fmt"
 	"io"
 	"reflect"
 	"testing"
@@ -115,12 +116,13 @@ func TestSerDe(t *testing.T) {
 			serdeMap[dt].serialize(builder, v, schemapb.DataType_None)
 			// assert.True(t, ok)
 			a := builder.NewArray()
-			got, got1 := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, false)
+			got, err := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, false)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("deserialize() got = %v, want %v", got, tt.want)
 			}
-			if got1 != tt.want1 {
-				t.Errorf("deserialize() got1 = %v, want %v", got1, tt.want1)
+			gotOk := err == nil
+			if gotOk != tt.want1 {
+				t.Errorf("deserialize() got error = %v, want success = %v", err, tt.want1)
 			}
 		})
 	}
@@ -150,9 +152,9 @@ func TestSerDeCopy(t *testing.T) {
 			a := builder.NewArray()
 
 			// Test deserialize with shouldCopy parameter
-			copy, got1 := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, true)
-			if !got1 {
-				t.Errorf("deserialize() failed for %s", tt.name)
+			copy, err := serdeMap[dt].deserialize(a, 0, schemapb.DataType_None, 0, true)
+			if err != nil {
+				t.Errorf("deserialize() failed for %s: %v", tt.name, err)
 			}
 			if !reflect.DeepEqual(copy, tt.v) {
 				t.Errorf("deserialize() got = %v, want %v", copy, tt.v)
@@ -353,6 +355,82 @@ func TestArrayOfVectorSerialization(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:        "Float16Vector array",
+			elementType: schemapb.DataType_Float16Vector,
+			dim:         4,
+			vectors: []*schemapb.VectorField{
+				{
+					Dim: 4,
+					Data: &schemapb.VectorField_Float16Vector{
+						Float16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8}, // 4 dims * 2 bytes
+					},
+				},
+				{
+					Dim: 4,
+					Data: &schemapb.VectorField_Float16Vector{
+						Float16Vector: []byte{9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24}, // 8 dims * 2 bytes (2 vectors)
+					},
+				},
+			},
+		},
+		{
+			name:        "BFloat16Vector array",
+			elementType: schemapb.DataType_BFloat16Vector,
+			dim:         4,
+			vectors: []*schemapb.VectorField{
+				{
+					Dim: 4,
+					Data: &schemapb.VectorField_Bfloat16Vector{
+						Bfloat16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8}, // 4 dims * 2 bytes
+					},
+				},
+				{
+					Dim: 4,
+					Data: &schemapb.VectorField_Bfloat16Vector{
+						Bfloat16Vector: []byte{9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24}, // 8 dims * 2 bytes (2 vectors)
+					},
+				},
+			},
+		},
+		{
+			name:        "Int8Vector array",
+			elementType: schemapb.DataType_Int8Vector,
+			dim:         4,
+			vectors: []*schemapb.VectorField{
+				{
+					Dim: 4,
+					Data: &schemapb.VectorField_Int8Vector{
+						Int8Vector: []byte{1, 2, 3, 4}, // 4 dims * 1 byte
+					},
+				},
+				{
+					Dim: 4,
+					Data: &schemapb.VectorField_Int8Vector{
+						Int8Vector: []byte{5, 6, 7, 8, 9, 10, 11, 12}, // 8 dims * 1 byte (2 vectors)
+					},
+				},
+			},
+		},
+		{
+			name:        "BinaryVector array",
+			elementType: schemapb.DataType_BinaryVector,
+			dim:         32, // Must be multiple of 8
+			vectors: []*schemapb.VectorField{
+				{
+					Dim: 32,
+					Data: &schemapb.VectorField_BinaryVector{
+						BinaryVector: []byte{1, 2, 3, 4}, // 32 dims / 8 = 4 bytes per vector
+					},
+				},
+				{
+					Dim: 32,
+					Data: &schemapb.VectorField_BinaryVector{
+						BinaryVector: []byte{5, 6, 7, 8, 9, 10, 11, 12}, // 2 vectors * 4 bytes
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -366,16 +444,16 @@ func TestArrayOfVectorSerialization(t *testing.T) {
 			defer builder.Release()
 
 			for _, vector := range tt.vectors {
-				ok := entry.serialize(builder, vector, tt.elementType)
-				assert.True(t, ok)
+				err := entry.serialize(builder, vector, tt.elementType)
+				assert.NoError(t, err)
 			}
 
 			arr := builder.NewArray()
 			defer arr.Release()
 
 			for i, expectedVector := range tt.vectors {
-				result, ok := entry.deserialize(arr, i, tt.elementType, tt.dim, false)
-				assert.True(t, ok)
+				result, err := entry.deserialize(arr, i, tt.elementType, tt.dim, false)
+				assert.NoError(t, err)
 
 				if expectedVector == nil {
 					assert.Nil(t, result)
@@ -386,9 +464,26 @@ func TestArrayOfVectorSerialization(t *testing.T) {
 
 					assert.Equal(t, expectedVector.GetDim(), resultVector.GetDim())
 
-					if tt.elementType == schemapb.DataType_FloatVector {
+					switch tt.elementType {
+					case schemapb.DataType_FloatVector:
 						expectedData := expectedVector.GetFloatVector().GetData()
 						resultData := resultVector.GetFloatVector().GetData()
+						assert.Equal(t, expectedData, resultData)
+					case schemapb.DataType_Float16Vector:
+						expectedData := expectedVector.GetFloat16Vector()
+						resultData := resultVector.GetFloat16Vector()
+						assert.Equal(t, expectedData, resultData)
+					case schemapb.DataType_BFloat16Vector:
+						expectedData := expectedVector.GetBfloat16Vector()
+						resultData := resultVector.GetBfloat16Vector()
+						assert.Equal(t, expectedData, resultData)
+					case schemapb.DataType_Int8Vector:
+						expectedData := expectedVector.GetInt8Vector()
+						resultData := resultVector.GetInt8Vector()
+						assert.Equal(t, expectedData, resultData)
+					case schemapb.DataType_BinaryVector:
+						expectedData := expectedVector.GetBinaryVector()
+						resultData := resultVector.GetBinaryVector()
 						assert.Equal(t, expectedData, resultData)
 					}
 				}
@@ -397,29 +492,109 @@ func TestArrayOfVectorSerialization(t *testing.T) {
 	}
 }
 
-func TestArrayOfVectorIntegration(t *testing.T) {
-	// Test the full integration with BuildRecord
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID:     100,
-				Name:        "vec_array",
-				DataType:    schemapb.DataType_ArrayOfVector,
-				ElementType: schemapb.DataType_FloatVector,
-				TypeParams: []*commonpb.KeyValuePair{
-					{Key: "dim", Value: "4"},
-				},
-			},
-		},
+func TestArrayOfVectorEmptyArray(t *testing.T) {
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		dim         int
+	}{
+		{"FloatVector empty", schemapb.DataType_FloatVector, 4},
+		{"Float16Vector empty", schemapb.DataType_Float16Vector, 4},
+		{"BFloat16Vector empty", schemapb.DataType_BFloat16Vector, 4},
+		{"Int8Vector empty", schemapb.DataType_Int8Vector, 4},
+		{"BinaryVector empty", schemapb.DataType_BinaryVector, 32},
 	}
 
-	// Create insert data
-	insertData := &InsertData{
-		Data: map[FieldID]FieldData{
-			100: &VectorArrayFieldData{
-				Data: []*schemapb.VectorField{
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := serdeMap[schemapb.DataType_ArrayOfVector]
+
+			arrowType := entry.arrowType(tt.dim, tt.elementType)
+			assert.NotNil(t, arrowType)
+
+			// Create empty VectorField based on element type
+			var emptyVector *schemapb.VectorField
+			switch tt.elementType {
+			case schemapb.DataType_FloatVector:
+				emptyVector = &schemapb.VectorField{
+					Dim:  int64(tt.dim),
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{}}},
+				}
+			case schemapb.DataType_Float16Vector:
+				emptyVector = &schemapb.VectorField{
+					Dim:  int64(tt.dim),
+					Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{}},
+				}
+			case schemapb.DataType_BFloat16Vector:
+				emptyVector = &schemapb.VectorField{
+					Dim:  int64(tt.dim),
+					Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{}},
+				}
+			case schemapb.DataType_Int8Vector:
+				emptyVector = &schemapb.VectorField{
+					Dim:  int64(tt.dim),
+					Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{}},
+				}
+			case schemapb.DataType_BinaryVector:
+				emptyVector = &schemapb.VectorField{
+					Dim:  int64(tt.dim),
+					Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}},
+				}
+			}
+
+			builder := array.NewBuilder(memory.DefaultAllocator, arrowType)
+			defer builder.Release()
+
+			// Serialize empty vector
+			err := entry.serialize(builder, emptyVector, tt.elementType)
+			assert.NoError(t, err)
+
+			arr := builder.NewArray()
+			defer arr.Release()
+
+			// Deserialize and verify
+			result, err := entry.deserialize(arr, 0, tt.elementType, tt.dim, false)
+			assert.NoError(t, err)
+			assert.NotNil(t, result)
+
+			resultVector, ok := result.(*schemapb.VectorField)
+			assert.True(t, ok)
+			assert.Equal(t, int64(tt.dim), resultVector.GetDim())
+
+			// Verify data is empty
+			switch tt.elementType {
+			case schemapb.DataType_FloatVector:
+				assert.Empty(t, resultVector.GetFloatVector().GetData())
+			case schemapb.DataType_Float16Vector:
+				assert.Empty(t, resultVector.GetFloat16Vector())
+			case schemapb.DataType_BFloat16Vector:
+				assert.Empty(t, resultVector.GetBfloat16Vector())
+			case schemapb.DataType_Int8Vector:
+				assert.Empty(t, resultVector.GetInt8Vector())
+			case schemapb.DataType_BinaryVector:
+				assert.Empty(t, resultVector.GetBinaryVector())
+			}
+		})
+	}
+}
+
+func TestArrayOfVectorIntegration(t *testing.T) {
+	tests := []struct {
+		name            string
+		elementType     schemapb.DataType
+		dim             int
+		elementTypeCode string // Expected element type code in metadata
+		createVectors   func(dim int) []*schemapb.VectorField
+	}{
+		{
+			name:            "FloatVector",
+			elementType:     schemapb.DataType_FloatVector,
+			dim:             4,
+			elementTypeCode: "101",
+			createVectors: func(dim int) []*schemapb.VectorField {
+				return []*schemapb.VectorField{
 					{
-						Dim: 4,
+						Dim: int64(dim),
 						Data: &schemapb.VectorField_FloatVector{
 							FloatVector: &schemapb.FloatArray{
 								Data: []float32{1.0, 2.0, 3.0, 4.0},
@@ -427,44 +602,160 @@ func TestArrayOfVectorIntegration(t *testing.T) {
 						},
 					},
 					{
-						Dim: 4,
+						Dim: int64(dim),
 						Data: &schemapb.VectorField_FloatVector{
 							FloatVector: &schemapb.FloatArray{
 								Data: []float32{5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0},
 							},
 						},
 					},
-				},
+				}
+			},
+		},
+		{
+			name:            "Float16Vector",
+			elementType:     schemapb.DataType_Float16Vector,
+			dim:             4,
+			elementTypeCode: "102",
+			createVectors: func(dim int) []*schemapb.VectorField {
+				return []*schemapb.VectorField{
+					{
+						Dim: int64(dim),
+						Data: &schemapb.VectorField_Float16Vector{
+							Float16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8},
+						},
+					},
+					{
+						Dim: int64(dim),
+						Data: &schemapb.VectorField_Float16Vector{
+							Float16Vector: []byte{9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24},
+						},
+					},
+				}
+			},
+		},
+		{
+			name:            "BFloat16Vector",
+			elementType:     schemapb.DataType_BFloat16Vector,
+			dim:             4,
+			elementTypeCode: "103",
+			createVectors: func(dim int) []*schemapb.VectorField {
+				return []*schemapb.VectorField{
+					{
+						Dim: int64(dim),
+						Data: &schemapb.VectorField_Bfloat16Vector{
+							Bfloat16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8},
+						},
+					},
+					{
+						Dim: int64(dim),
+						Data: &schemapb.VectorField_Bfloat16Vector{
+							Bfloat16Vector: []byte{9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24},
+						},
+					},
+				}
+			},
+		},
+		{
+			name:            "Int8Vector",
+			elementType:     schemapb.DataType_Int8Vector,
+			dim:             4,
+			elementTypeCode: "105",
+			createVectors: func(dim int) []*schemapb.VectorField {
+				return []*schemapb.VectorField{
+					{
+						Dim: int64(dim),
+						Data: &schemapb.VectorField_Int8Vector{
+							Int8Vector: []byte{1, 2, 3, 4},
+						},
+					},
+					{
+						Dim: int64(dim),
+						Data: &schemapb.VectorField_Int8Vector{
+							Int8Vector: []byte{5, 6, 7, 8, 9, 10, 11, 12},
+						},
+					},
+				}
+			},
+		},
+		{
+			name:            "BinaryVector",
+			elementType:     schemapb.DataType_BinaryVector,
+			dim:             32,
+			elementTypeCode: "100",
+			createVectors: func(dim int) []*schemapb.VectorField {
+				return []*schemapb.VectorField{
+					{
+						Dim: int64(dim),
+						Data: &schemapb.VectorField_BinaryVector{
+							BinaryVector: []byte{1, 2, 3, 4},
+						},
+					},
+					{
+						Dim: int64(dim),
+						Data: &schemapb.VectorField_BinaryVector{
+							BinaryVector: []byte{5, 6, 7, 8, 9, 10, 11, 12},
+						},
+					},
+				}
 			},
 		},
 	}
 
-	arrowSchema, err := ConvertToArrowSchema(schema, false)
-	assert.NoError(t, err)
-	assert.NotNil(t, arrowSchema)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:     100,
+						Name:        "vec_array",
+						DataType:    schemapb.DataType_ArrayOfVector,
+						ElementType: tt.elementType,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: "dim", Value: fmt.Sprintf("%d", tt.dim)},
+						},
+					},
+				},
+			}
 
-	recordBuilder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
-	defer recordBuilder.Release()
+			insertData := &InsertData{
+				Data: map[FieldID]FieldData{
+					100: &VectorArrayFieldData{
+						Data:        tt.createVectors(tt.dim),
+						ElementType: tt.elementType,
+						Dim:         int64(tt.dim),
+					},
+				},
+			}
 
-	err = BuildRecord(recordBuilder, insertData, schema)
-	assert.NoError(t, err)
+			arrowSchema, err := ConvertToArrowSchema(schema, false)
+			assert.NoError(t, err)
+			assert.NotNil(t, arrowSchema)
 
-	record := recordBuilder.NewRecord()
-	defer record.Release()
+			recordBuilder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+			defer recordBuilder.Release()
 
-	assert.Equal(t, int64(2), record.NumRows())
-	assert.Equal(t, int64(1), record.NumCols())
+			err = BuildRecord(recordBuilder, insertData, schema)
+			assert.NoError(t, err)
 
-	field := arrowSchema.Field(0)
-	assert.True(t, field.HasMetadata())
+			record := recordBuilder.NewRecord()
+			defer record.Release()
 
-	elementTypeStr, ok := field.Metadata.GetValue("elementType")
-	assert.True(t, ok)
-	assert.Equal(t, "101", elementTypeStr) // FloatVector = 101
+			assert.Equal(t, int64(2), record.NumRows())
+			assert.Equal(t, int64(1), record.NumCols())
 
-	dimStr, ok := field.Metadata.GetValue("dim")
-	assert.True(t, ok)
-	assert.Equal(t, "4", dimStr)
+			field := arrowSchema.Field(0)
+			assert.True(t, field.HasMetadata())
+
+			elementTypeStr, ok := field.Metadata.GetValue("elementType")
+			assert.True(t, ok)
+			assert.Equal(t, tt.elementTypeCode, elementTypeStr)
+
+			dimStr, ok := field.Metadata.GetValue("dim")
+			assert.True(t, ok)
+			assert.Equal(t, fmt.Sprintf("%d", tt.dim), dimStr)
+		})
+	}
 }
 
 func TestActualSizeInBytesSlicedFixedSizeBinary(t *testing.T) {

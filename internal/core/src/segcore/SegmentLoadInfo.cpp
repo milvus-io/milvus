@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "index/IndexFactory.h"
 #include "segcore/SegmentLoadInfo.h"
 
 #include <algorithm>
@@ -36,14 +37,15 @@ SegmentLoadInfo::GetColumnGroups() {
     auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                           .GetProperties();
 
-    column_groups_ = ::GetColumnGroups(manifest_path, properties);
+    auto loon_manifest = ::GetLoonManifest(manifest_path, properties);
+    column_groups_ = std::make_shared<milvus_storage::api::ColumnGroups>(
+        loon_manifest->columnGroups());
     return column_groups_;
 }
 
 LoadIndexInfo
 SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     const proto::segcore::FieldIndexInfo* field_index_info,
-    const Schema& schema,
     int64_t segment_id) const {
     LoadIndexInfo load_index_info;
 
@@ -54,7 +56,7 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     load_index_info.partition_id = GetPartitionID();
 
     // Get field type from schema
-    const auto& field_meta = schema[field_id];
+    const auto& field_meta = schema_->operator[](field_id);
     load_index_info.field_type = field_meta.get_data_type();
     load_index_info.element_type = field_meta.get_element_type();
 
@@ -62,8 +64,6 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     load_index_info.index_id = field_index_info->indexid();
     load_index_info.index_build_id = field_index_info->buildid();
     load_index_info.index_version = field_index_info->index_version();
-    load_index_info.index_store_version =
-        field_index_info->index_store_version();
     load_index_info.index_engine_version =
         static_cast<IndexVersion>(field_index_info->current_index_version());
     load_index_info.index_size = field_index_info->index_size();
@@ -115,72 +115,48 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     return load_index_info;
 }
 
-std::vector<LoadIndexInfo>
-SegmentLoadInfo::GetAllLoadIndexInfos(FieldId field_id,
-                                      const Schema& schema,
-                                      int64_t segment_id) const {
-    auto field_index_infos = GetFieldIndexInfos(field_id);
-    std::vector<LoadIndexInfo> result;
-    result.reserve(field_index_infos.size());
+bool
+SegmentLoadInfo::CheckIndexHasRawData(const LoadIndexInfo& load_index_info) {
+    auto request = milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+        load_index_info.field_type,
+        load_index_info.element_type,
+        load_index_info.index_engine_version,
+        load_index_info.index_size,
+        load_index_info.index_params,
+        load_index_info.enable_mmap,
+        load_index_info.num_rows,
+        load_index_info.dim);
 
-    for (const auto* index_info : field_index_infos) {
-        result.push_back(ConvertFieldIndexInfoToLoadIndexInfo(
-            index_info, schema, segment_id));
-    }
-
-    return result;
-}
-
-std::map<FieldId, std::vector<LoadIndexInfo>>
-SegmentLoadInfo::GetAllLoadIndexInfos(const Schema& schema,
-                                      int64_t segment_id) const {
-    std::map<FieldId, std::vector<LoadIndexInfo>> result;
-
-    for (const auto& [field_id, index_infos] : field_index_cache_) {
-        std::vector<LoadIndexInfo> converted;
-        converted.reserve(index_infos.size());
-        for (const auto* index_info : index_infos) {
-            converted.push_back(ConvertFieldIndexInfoToLoadIndexInfo(
-                index_info, schema, segment_id));
-        }
-        result.emplace(field_id, std::move(converted));
-    }
-
-    return result;
+    return request.has_raw_data;
 }
 
 void
 SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
-    // Get current indexed field IDs
+    // Get current index IDs from converted cache
     std::set<int64_t> current_index_ids;
-    for (auto const& index_info : GetIndexInfos()) {
-        if (index_info.index_file_paths_size() == 0) {
-            continue;
-        }
-        current_index_ids.insert(index_info.indexid());
+    for (const auto& load_index_info : converted_index_infos_) {
+        current_index_ids.insert(load_index_info.index_id);
     }
 
     std::set<int64_t> new_index_ids;
     // Find indexes to load: indexes in new_info but not in current
-    for (const auto& new_index_info : new_info.GetIndexInfos()) {
-        if (new_index_info.index_file_paths_size() == 0) {
-            continue;
-        }
-        new_index_ids.insert(new_index_info.indexid());
-        if (current_index_ids.find(new_index_info.indexid()) ==
-            current_index_ids.end()) {
-            diff.indexes_to_load[FieldId(new_index_info.fieldid())]
-                .emplace_back(&new_index_info);
+    // Use converted_field_index_cache_ from new_info
+    for (const auto& [field_id, load_index_infos] :
+         new_info.converted_field_index_cache_) {
+        for (const auto& load_index_info : load_index_infos) {
+            new_index_ids.insert(load_index_info.index_id);
+            if (current_index_ids.find(load_index_info.index_id) ==
+                current_index_ids.end()) {
+                diff.indexes_to_load[field_id].push_back(load_index_info);
+            }
         }
     }
 
     // Find indexes to drop: fields that have indexes in current but not in new_info
-    for (const auto& index_info : GetIndexInfos()) {
-        if (index_info.index_file_paths_size() == 0) {
-            continue;
-        }
-        if (new_index_ids.find(index_info.indexid()) == new_index_ids.end()) {
-            diff.indexes_to_drop.insert(FieldId(index_info.fieldid()));
+    for (const auto& load_index_info : converted_index_infos_) {
+        if (new_index_ids.find(load_index_info.index_id) ==
+            new_index_ids.end()) {
+            diff.indexes_to_drop.insert(FieldId(load_index_info.field_id));
         }
     }
 }
@@ -248,7 +224,7 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
     // Build a set of current FieldIds from current column groups
     std::map<int64_t, int> cur_field_ids;
     for (int i = 0; i < cur_column_group->size(); i++) {
-        auto cg = cur_column_group->get_column_group(i);
+        auto cg = cur_column_group->at(i);
         for (const auto& column : cg->columns) {
             auto field_id = std::stoll(column);
             cur_field_ids.emplace(field_id, i);
@@ -258,8 +234,9 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
     // Build a set of new FieldIds and find column groups to load
     std::map<int64_t, int> new_field_ids;
     for (int i = 0; i < new_column_group->size(); i++) {
-        auto cg = new_column_group->get_column_group(i);
+        auto cg = new_column_group->at(i);
         std::vector<FieldId> fields;
+        std::vector<FieldId> lazy_fields;
         for (const auto& column : cg->columns) {
             auto field_id = std::stoll(column);
             new_field_ids.emplace(field_id, i);
@@ -267,11 +244,21 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             auto iter = cur_field_ids.find(field_id);
             // If this field doesn't exist in current, mark the column group for loading
             if (iter == cur_field_ids.end() || iter->second != i) {
-                fields.emplace_back(field_id);
+                if (schema_->ShouldLoadField(FieldId(field_id)) &&
+                    field_index_has_raw_data_.find(FieldId(field_id)) ==
+                        field_index_has_raw_data_.end()) {
+                    fields.emplace_back(field_id);
+                } else {
+                    // put lazy load & index_has_raw_data field in lazy_fields
+                    lazy_fields.emplace_back(field_id);
+                }
             }
         }
         if (!fields.empty()) {
             diff.column_groups_to_load.emplace_back(i, fields);
+        }
+        if (!lazy_fields.empty()) {
+            diff.column_groups_to_lazyload.emplace_back(i, lazy_fields);
         }
     }
 
@@ -283,12 +270,30 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
     }
 }
 
+void
+SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
+                                         SegmentLoadInfo& new_info) {
+    // Find fields that were previously skipped (index had raw data)
+    // but now need loading (index no longer has raw data or was dropped)
+    for (const auto& field_id : field_index_has_raw_data_) {
+        // If new_info doesn't have this field in index_has_raw_data_,
+        // we need to reload the field data
+        if (new_info.field_index_has_raw_data_.find(field_id) ==
+            new_info.field_index_has_raw_data_.end()) {
+            diff.fields_to_reload.emplace_back(field_id);
+        }
+    }
+}
+
 LoadDiff
 SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
     LoadDiff diff;
 
     // Handle index changes
     ComputeDiffIndexes(diff, new_info);
+
+    // Compute fields that need to be reloaded due to index raw data changes
+    ComputeDiffReloadFields(diff, new_info);
 
     // Handle field data changes
     // Note: Updates can only happen within the same category:
@@ -314,6 +319,7 @@ SegmentLoadInfo::GetLoadDiff() {
     LoadDiff diff;
 
     SegmentLoadInfo empty_info;
+    empty_info.schema_ = schema_;
 
     // Handle index changes
     empty_info.ComputeDiffIndexes(diff, *this);

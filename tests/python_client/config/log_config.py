@@ -3,10 +3,9 @@ from pathlib import Path
 
 class LogConfig:
     def __init__(self):
-        self.log_debug = ""
-        self.log_err = ""
-        self.log_info = ""
-        self.log_worker = ""
+        self.log_path = ""
+        self.log_report_json = ""
+        self.log_report_html = ""
         self.get_default_config()
 
     @staticmethod
@@ -31,12 +30,9 @@ class LogConfig:
     def get_default_config(self):
         """ Make sure the path exists """
         log_dir = self.get_env_variable()
-        self.log_debug = "%s/ci_test_log.debug" % log_dir
-        self.log_info = "%s/ci_test_log.log" % log_dir
-        self.log_err = "%s/ci_test_log.err" % log_dir
-        work_log = os.environ.get('PYTEST_XDIST_WORKER')
-        if work_log is not None:
-            self.log_worker = f'{log_dir}/{work_log}.log'
+        self.log_path = log_dir
+        self.log_report_json = "%s/test_report.json" % log_dir
+        self.log_report_html = "%s/test_report.html" % log_dir
 
         self.create_path(log_dir)
 

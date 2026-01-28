@@ -134,7 +134,7 @@ CreateArrowField(const JsonKey& key,
 
 std::pair<std::vector<std::shared_ptr<arrow::ArrayBuilder>>,
           std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>>
-CreateArrowBuilders(std::map<JsonKey, JsonKeyLayoutType> column_map) {
+CreateArrowBuilders(const std::map<JsonKey, JsonKeyLayoutType>& column_map) {
     std::shared_ptr<arrow::ArrayBuilder> shared_builder =
         CreateSharedArrowBuilder();
     std::vector<std::shared_ptr<arrow::ArrayBuilder>> builders;
@@ -164,7 +164,7 @@ CreateArrowBuilders(std::map<JsonKey, JsonKeyLayoutType> column_map) {
 }
 
 std::shared_ptr<arrow::Schema>
-CreateArrowSchema(std::map<JsonKey, JsonKeyLayoutType> column_map) {
+CreateArrowSchema(const std::map<JsonKey, JsonKeyLayoutType>& column_map) {
     std::vector<std::shared_ptr<arrow::Field>> fields;
     std::shared_ptr<arrow::Field> shared_field = nullptr;
     bool shared_field_name_conflict = false;
@@ -207,7 +207,8 @@ CreateArrowSchema(std::map<JsonKey, JsonKeyLayoutType> column_map) {
 }
 
 std::vector<std::pair<std::string, std::string>>
-CreateParquetKVMetadata(std::map<JsonKey, JsonKeyLayoutType> column_map) {
+CreateParquetKVMetadata(
+    const std::map<JsonKey, JsonKeyLayoutType>& column_map) {
     // layout type map is now stored in a separate meta file to reduce parquet file size.
     // return empty metadata vector.
     return {};
