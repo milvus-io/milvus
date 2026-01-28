@@ -1,6 +1,7 @@
 package message
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -40,7 +41,12 @@ func mustGetCipher() hook.Cipher {
 var ErrKmsKeyInvalid = errors.New("kms key invalid")
 
 func isKmsKeyInvalidError(err error) bool {
-	return errors.Is(err, ErrKmsKeyInvalid)
+	if err == nil {
+		return false
+	}
+	// Check both errors.Is for local errors and string matching for errors
+	// that cross the plugin boundary (which lose type information)
+	return errors.Is(err, ErrKmsKeyInvalid) || strings.Contains(err.Error(), "kms key invalid")
 }
 
 // getDecryptorWithRetry wraps cipher.GetDecryptor with retry logic for streaming node consumption.

@@ -257,6 +257,16 @@ func TestIsKmsKeyInvalidError(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "error from plugin with matching message",
+			err:      errors.New("kms key invalid"),
+			expected: true,
+		},
+		{
+			name:     "error from plugin with message in context",
+			err:      errors.New("failed to decrypt: kms key invalid: permission denied"),
+			expected: true,
+		},
+		{
 			name:     "different error",
 			err:      errors.New("some other error"),
 			expected: false,
