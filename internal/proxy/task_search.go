@@ -515,6 +515,11 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, internalSubReq.FieldId) {
 			metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.HybridSearchLabel, strconv.FormatInt(internalSubReq.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(internalSubReq.PlaceholderGroup, int(internalSubReq.GetNq()))))
 		}
+		// Convert placeholder group vector type if needed (e.g., fp32 -> fp16/bf16)
+		internalSubReq.PlaceholderGroup, err = t.convertPlaceholderIfNeeded(subReq.GetPlaceholderGroup(), internalSubReq.FieldId)
+		if err != nil {
+			return err
+		}
 		t.SearchRequest.SubReqs[index] = internalSubReq
 		t.queryInfos[index] = queryInfo
 		log.Debug("proxy init search request",
@@ -706,7 +711,11 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, t.SearchRequest.FieldId) {
 		metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.SearchLabel, strconv.FormatInt(t.SearchRequest.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.GetPlaceholderGroup(), int(t.request.GetNq()))))
 	}
-	t.SearchRequest.PlaceholderGroup = t.request.GetPlaceholderGroup()
+	// Convert placeholder group vector type if needed (e.g., fp32 -> fp16/bf16)
+	t.SearchRequest.PlaceholderGroup, err = t.convertPlaceholderIfNeeded(t.request.GetPlaceholderGroup(), t.SearchRequest.FieldId)
+	if err != nil {
+		return err
+	}
 	t.SearchRequest.Topk = queryInfo.GetTopk()
 	t.SearchRequest.MetricType = queryInfo.GetMetricType()
 	t.queryInfos = append(t.queryInfos, queryInfo)
@@ -733,6 +742,15 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		zap.Stringer("plan", plan)) // may be very large if large term passed.
 
 	return nil
+}
+
+// convertPlaceholderIfNeeded converts fp32 vectors to fp16/bf16 if the target field uses lower precision.
+func (t *searchTask) convertPlaceholderIfNeeded(phgBytes []byte, fieldID int64) ([]byte, error) {
+	field := typeutil.GetFieldByID(t.schema.CollectionSchema, fieldID)
+	if field == nil {
+		return phgBytes, nil
+	}
+	return ConvertPlaceholderGroup(phgBytes, field)
 }
 
 func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, error) {
