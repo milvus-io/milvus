@@ -311,7 +311,10 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 			return nil, err
 		}
 		if idx < numGroupingKeys {
-			hashers[idx] = accessor
+			// Wrap group-by field accessors with NullableFieldAccessor to
+			// correctly handle nullable fields. For non-nullable fields,
+			// validData will be empty and the wrapper passes through.
+			hashers[idx] = &NullableFieldAccessor{inner: accessor}
 		} else {
 			accumulators[idx-numGroupingKeys] = accessor
 		}
