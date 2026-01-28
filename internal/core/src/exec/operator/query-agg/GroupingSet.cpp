@@ -131,8 +131,6 @@ GroupingSet::getOutput(milvus::RowVectorPtr& result) {
     if (!hash_table_) {
         return false;
     }
-    AssertInfo(hash_table_ != nullptr,
-               "hash_table_ should not be nullptr");
     const auto& all_rows = hash_table_->rows()->allRows();
     if (!all_rows.empty()) {
         extractGroups(result);
