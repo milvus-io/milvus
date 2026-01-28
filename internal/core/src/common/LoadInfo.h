@@ -42,8 +42,6 @@ struct LoadFieldDataInfo {
     int64_t storage_version = 0;
     milvus::proto::common::LoadPriority load_priority =
         milvus::proto::common::LoadPriority::HIGH;
-    // "disable" or "sync", empty means use global config
-    std::string warmup_policy;
     std::vector<int64_t> child_field_ids;
 };
 

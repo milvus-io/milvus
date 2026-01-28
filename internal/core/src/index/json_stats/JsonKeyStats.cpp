@@ -931,7 +931,8 @@ JsonKeyStats::LoadShreddingMeta(
 
 void
 JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
-                              const std::vector<int64_t>& file_ids) {
+                              const std::vector<int64_t>& file_ids,
+                              const std::string& warmup_policy) {
     if (file_ids.empty()) {
         return;
     }
@@ -1017,8 +1018,7 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
         mmap_config.GetMmapPopulate(),
         milvus_field_ids.size(),
         load_priority_,
-        // Use global config for warmup policy (pass empty string)
-        /* warmup_policy */ "");
+        warmup_policy);
 
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
@@ -1043,7 +1043,8 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
 }
 
 void
-JsonKeyStats::LoadShreddingData(const std::vector<std::string>& index_files) {
+JsonKeyStats::LoadShreddingData(const std::vector<std::string>& index_files,
+                                const std::string& warmup_policy) {
     // sort files by column group id and file id
     auto sorted_files = SortByParquetPath(index_files);
 
@@ -1052,7 +1053,7 @@ JsonKeyStats::LoadShreddingData(const std::vector<std::string>& index_files) {
 
     // load shredding data
     for (const auto& [column_group_id, file_ids] : sorted_files) {
-        LoadColumnGroup(column_group_id, file_ids);
+        LoadColumnGroup(column_group_id, file_ids, warmup_policy);
     }
 }
 
@@ -1115,7 +1116,8 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     }
 
     // load shredding data
-    LoadShreddingData(shredding_data_files);
+    LoadShreddingData(shredding_data_files,
+                      config.contains(WARMUP) ? config.at(WARMUP) : "");
 
     // load shared key index
     bson_inverted_index_->LoadIndex(shared_key_index_files,

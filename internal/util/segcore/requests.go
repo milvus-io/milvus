@@ -44,7 +44,6 @@ type LoadFieldDataRequest struct {
 	RowCount       int64
 	StorageVersion int64
 	LoadPriority   commonpb.LoadPriority
-	WarmupPolicy   string
 }
 
 type LoadFieldDataInfo struct {
@@ -104,13 +103,7 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 		}
 	}
 	C.SetLoadPriority(cLoadFieldDataInfo, C.int32_t(req.LoadPriority))
-	if len(req.WarmupPolicy) > 0 {
-		warmupPolicy, err := initcore.ConvertCacheWarmupPolicy(req.WarmupPolicy)
-		if err != nil {
-			return nil, errors.Wrapf(err, "ConvertCacheWarmupPolicy failed at warmupPolicy, %s", req.WarmupPolicy)
-		}
-		C.AppendWarmupPolicy(cLoadFieldDataInfo, C.CacheWarmupPolicy(warmupPolicy))
-	}
+
 	return &cLoadFieldDataRequest{
 		cLoadFieldDataInfo: cLoadFieldDataInfo,
 	}, nil

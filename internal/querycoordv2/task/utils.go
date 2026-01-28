@@ -365,6 +365,9 @@ func applyCollectionWarmupSetting(schema *schemapb.CollectionSchema,
 
 	// Apply warmup to struct array fields and their nested fields
 	for _, structField := range schema.GetStructArrayFields() {
+		// Get struct field's warmup setting
+		structFieldWarmup, structHasWarmup := common.GetWarmupPolicy(structField.GetTypeParams()...)
+
 		// Apply warmup setting to fields inside struct
 		for _, field := range structField.GetFields() {
 			// Skip if field already has warmup setting
@@ -372,17 +375,25 @@ func applyCollectionWarmupSetting(schema *schemapb.CollectionSchema,
 				continue
 			}
 
-			isVector := typeutil.IsVectorType(field.GetDataType())
-			if isVector && vectorFieldExist {
+			// Priority: struct field setting > collection setting
+			if structHasWarmup {
 				field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
 					Key:   common.WarmupKey,
-					Value: vectorFieldWarmup,
+					Value: structFieldWarmup,
 				})
-			} else if !isVector && scalarFieldExist {
-				field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-					Key:   common.WarmupKey,
-					Value: scalarFieldWarmup,
-				})
+			} else {
+				isVector := typeutil.IsVectorType(field.GetDataType())
+				if isVector && vectorFieldExist {
+					field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+						Key:   common.WarmupKey,
+						Value: vectorFieldWarmup,
+					})
+				} else if !isVector && scalarFieldExist {
+					field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+						Key:   common.WarmupKey,
+						Value: scalarFieldWarmup,
+					})
+				}
 			}
 		}
 	}
@@ -406,7 +417,7 @@ func applyIndexWarmupSetting(loadInfo *querypb.SegmentLoadInfo, schema *schemapb
 	for _, field := range schema.GetFields() {
 		fieldMap[field.GetFieldID()] = field
 	}
-	// Include nested fields from struct arrays
+	// Include nested fields from struct arrays (struct array fields themselves don't support indexes)
 	for _, structField := range schema.GetStructArrayFields() {
 		for _, field := range structField.GetFields() {
 			fieldMap[field.GetFieldID()] = field

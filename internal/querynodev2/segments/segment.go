@@ -803,7 +803,7 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 }
 
 // -------------------------------------------------------------------------------------- interfaces for sealed segment
-func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog, warmupPolicy ...string) error {
+func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
@@ -828,14 +828,7 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		return err
 	}
 	mmapEnabled := isDataMmapEnable(fieldSchema)
-
-	// Determine warmup policy: use passed-in value or get from field schema
-	fieldWarmupPolicy := ""
-	if len(warmupPolicy) > 0 {
-		fieldWarmupPolicy = warmupPolicy[0]
-	} else {
-		fieldWarmupPolicy = getFieldWarmupPolicy(fieldSchema)
-	}
+	fieldWarmupPolicy := getFieldWarmupPolicy(fieldSchema)
 
 	req := &segcore.LoadFieldDataRequest{
 		Fields: []segcore.LoadFieldDataInfo{{

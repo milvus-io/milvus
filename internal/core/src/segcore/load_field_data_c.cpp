@@ -136,14 +136,6 @@ WarmupPolicyToString(CacheWarmupPolicy policy) {
 }  // namespace
 
 void
-AppendWarmupPolicy(CLoadFieldDataInfo c_load_field_data_info,
-                   CacheWarmupPolicy warmup_policy) {
-    auto load_field_data_info =
-        static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
-    load_field_data_info->warmup_policy = WarmupPolicyToString(warmup_policy);
-}
-
-void
 SetStorageVersion(CLoadFieldDataInfo c_load_field_data_info,
                   int64_t storage_version) {
     SCOPE_CGO_CALL_METRIC();
