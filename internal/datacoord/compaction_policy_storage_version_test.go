@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -39,9 +40,10 @@ func TestStorageVersionUpgradePolicySuite(t *testing.T) {
 type StorageVersionUpgradePolicySuite struct {
 	suite.Suite
 
-	mockAlloc *allocator.MockAllocator
-	testLabel *CompactionGroupLabel
-	handler   *NMockHandler
+	mockAlloc  *allocator.MockAllocator
+	testLabel  *CompactionGroupLabel
+	handler    *NMockHandler
+	versionMgr *MockVersionManager
 
 	policy *storageVersionUpgradePolicy
 }
@@ -60,7 +62,8 @@ func (s *StorageVersionUpgradePolicySuite) SetupTest() {
 
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.handler = NewNMockHandler(s.T())
-	s.policy = newStorageVersionUpgradePolicy(meta, s.mockAlloc, s.handler)
+	s.versionMgr = NewMockVersionManager(s.T())
+	s.policy = newStorageVersionUpgradePolicy(meta, s.mockAlloc, s.handler, s.versionMgr)
 }
 
 func (s *StorageVersionUpgradePolicySuite) TestEnable() {
@@ -87,6 +90,9 @@ func (s *StorageVersionUpgradePolicySuite) TestTargetVersion() {
 }
 
 func (s *StorageVersionUpgradePolicySuite) TestTriggerNoCollections() {
+	// Mock version manager to return a version that satisfies requirement
+	s.versionMgr.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0"))
+
 	// Test with no collections
 	events, err := s.policy.Trigger(context.Background())
 	s.NoError(err)
@@ -364,6 +370,9 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerIntervalReset() {
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
 	}()
 
+	// Mock version manager to return a version that satisfies requirement
+	s.versionMgr.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0"))
+
 	// Set last period to a time before the interval
 	s.policy.lastPeriod = time.Now().Add(-2 * time.Second)
 	s.policy.currentCount = 100 // Some high count
@@ -462,6 +471,9 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerMultipleCollections() {
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
 		// paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 	}()
+
+	// Mock version manager to return a version that satisfies requirement
+	s.versionMgr.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0"))
 
 	coll1 := &collectionInfo{
 		ID:     100,
@@ -689,4 +701,219 @@ func (s *StorageVersionUpgradePolicySuite) TestGrowingSegmentFiltered() {
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
 	s.NoError(err)
 	s.Equal(0, len(views)) // Growing segment should not be triggered
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerSkippedDueToVersionRequirement() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	// Setup params with a higher version requirement
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.Key, "2.7.0")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "1")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "10")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	}()
+
+	// Mock version manager to return a lower version than requirement
+	s.versionMgr.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.6.0"))
+
+	coll := &collectionInfo{
+		ID:     collID,
+		Schema: newTestSchema(),
+	}
+
+	// Create a segment that would normally be upgraded
+	segments := make(map[UniqueID]*SegmentInfo)
+	segments[101] = &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             101,
+			CollectionID:   collID,
+			PartitionID:    10,
+			InsertChannel:  "ch-1",
+			Level:          datapb.SegmentLevel_L1,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      10000,
+			StorageVersion: storage.StorageV2,
+		},
+	}
+
+	segmentsInfo := &SegmentsInfo{
+		segments: segments,
+		secondaryIndexes: segmentInfoIndexes{
+			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
+				collID: segments,
+			},
+		},
+	}
+
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collID, coll)
+
+	s.policy.meta = &meta{
+		segments:    segmentsInfo,
+		collections: collections,
+	}
+
+	// Should return empty views because version requirement is not met
+	events, err := s.policy.Trigger(ctx)
+	s.NoError(err)
+	s.NotNil(events)
+	_, ok := events[TriggerTypeStorageVersionUpgrade]
+	s.False(ok)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerVersionRequirementSatisfied() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	// Setup params
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.Key, "2.6.0")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "1")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "10")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	}()
+
+	// Mock version manager to return a version that satisfies requirement
+	s.versionMgr.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0"))
+
+	coll := &collectionInfo{
+		ID:     collID,
+		Schema: newTestSchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(1000), nil)
+
+	// Create a segment that should be upgraded
+	segments := make(map[UniqueID]*SegmentInfo)
+	segments[101] = &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             101,
+			CollectionID:   collID,
+			PartitionID:    10,
+			InsertChannel:  "ch-1",
+			Level:          datapb.SegmentLevel_L1,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      10000,
+			StorageVersion: storage.StorageV2,
+		},
+	}
+
+	segmentsInfo := &SegmentsInfo{
+		segments: segments,
+		secondaryIndexes: segmentInfoIndexes{
+			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
+				collID: segments,
+			},
+		},
+	}
+
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collID, coll)
+
+	s.policy.meta = &meta{
+		segments:    segmentsInfo,
+		collections: collections,
+	}
+
+	// Should trigger because version requirement is met
+	events, err := s.policy.Trigger(ctx)
+	s.NoError(err)
+	s.NotNil(events)
+	gotViews, ok := events[TriggerTypeStorageVersionUpgrade]
+	s.True(ok)
+	s.Equal(1, len(gotViews)) // Segment should be triggered
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerInvalidVersionRequirement() {
+	// Setup params with an invalid version string
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.Key, "invalid-version")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.Key)
+
+	// Should return error because version requirement is invalid
+	events, err := s.policy.Trigger(context.Background())
+	s.Error(err)
+	s.Empty(events)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerVersionExactlyEqual() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	// Setup params - minVersion equals requirement exactly
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.Key, "2.6.10")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "1")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "10")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	}()
+
+	// Mock version manager to return exact same version as requirement
+	s.versionMgr.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.6.10"))
+
+	coll := &collectionInfo{
+		ID:     collID,
+		Schema: newTestSchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(1000), nil)
+
+	// Create a segment that should be upgraded
+	segments := make(map[UniqueID]*SegmentInfo)
+	segments[101] = &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             101,
+			CollectionID:   collID,
+			PartitionID:    10,
+			InsertChannel:  "ch-1",
+			Level:          datapb.SegmentLevel_L1,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      10000,
+			StorageVersion: storage.StorageV2,
+		},
+	}
+
+	segmentsInfo := &SegmentsInfo{
+		segments: segments,
+		secondaryIndexes: segmentInfoIndexes{
+			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
+				collID: segments,
+			},
+		},
+	}
+
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collID, coll)
+
+	s.policy.meta = &meta{
+		segments:    segmentsInfo,
+		collections: collections,
+	}
+
+	// Should trigger because minVersion equals requirement (not less than)
+	events, err := s.policy.Trigger(ctx)
+	s.NoError(err)
+	s.NotNil(events)
+	gotViews, ok := events[TriggerTypeStorageVersionUpgrade]
+	s.True(ok)
+	s.Equal(1, len(gotViews)) // Segment should be triggered
 }

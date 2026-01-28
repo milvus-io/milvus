@@ -4675,6 +4675,7 @@ type dataCoordConfig struct {
 	StorageVersionCompactionEnabled           ParamItem `refreshable:"true"`
 	StorageVersionCompactionRateLimitTokens   ParamItem `refreshable:"true"`
 	StorageVersionCompactionRateLimitInterval ParamItem `refreshable:"true"`
+	StorageVersionCompactionMinSessionVersion ParamItem `refreshable:"true"`
 
 	ChannelCheckpointMaxLag ParamItem `refreshable:"true"`
 	SyncSegmentsInterval    ParamItem `refreshable:"false"`
@@ -5190,7 +5191,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.StorageVersionCompactionEnabled = ParamItem{
 		Key:          "dataCoord.compaction.storageVersion.enabled",
-		Version:      "2.6.9",
+		Version:      "2.6.10",
 		DefaultValue: "true",
 		Doc:          "Enable storage version compaction",
 		Export:       false,
@@ -5199,7 +5200,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.StorageVersionCompactionRateLimitTokens = ParamItem{
 		Key:          "dataCoord.compaction.storageVersion.rateLimitTokens",
-		Version:      "2.6.9",
+		Version:      "2.6.10",
 		DefaultValue: "3",
 		Doc:          "The storage version compaction tokens per period, applying rate limit",
 		Export:       false,
@@ -5208,12 +5209,21 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.StorageVersionCompactionRateLimitInterval = ParamItem{
 		Key:          "dataCoord.compaction.storageVersion.rateLimitInterval",
-		Version:      "2.6.9",
+		Version:      "2.6.10",
 		DefaultValue: "120",
 		Doc:          "The storage version compaction rate limit interval, in seconds",
 		Export:       false,
 	}
 	p.StorageVersionCompactionRateLimitInterval.Init(base.mgr)
+
+	p.StorageVersionCompactionMinSessionVersion = ParamItem{
+		Key:          "dataCoord.compaction.storageVersion.sessionVersionRequirement",
+		Version:      "2.6.10",
+		DefaultValue: "2.6.9",
+		Doc:          "The minimal session version requirements for triggering storage version upgrade compaction",
+		Export:       false,
+	}
+	p.StorageVersionCompactionMinSessionVersion.Init(base.mgr)
 
 	p.GlobalCompactionInterval = ParamItem{
 		Key:          "dataCoord.compaction.global.interval",

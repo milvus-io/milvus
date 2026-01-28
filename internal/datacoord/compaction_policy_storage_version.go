@@ -22,6 +22,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/blang/semver/v4"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -31,20 +32,22 @@ import (
 )
 
 type storageVersionUpgradePolicy struct {
-	meta      *meta
-	allocator allocator.Allocator
-	handler   Handler
+	meta           *meta
+	allocator      allocator.Allocator
+	handler        Handler
+	versionManager IndexEngineVersionManager
 
 	// Rate limiting state, no need to be thread-safe since it is only used in one goroutine
 	lastPeriod   time.Time
 	currentCount int
 }
 
-func newStorageVersionUpgradePolicy(meta *meta, allocator allocator.Allocator, handler Handler) *storageVersionUpgradePolicy {
+func newStorageVersionUpgradePolicy(meta *meta, allocator allocator.Allocator, handler Handler, versionMgr IndexEngineVersionManager) *storageVersionUpgradePolicy {
 	return &storageVersionUpgradePolicy{
-		meta:      meta,
-		allocator: allocator,
-		handler:   handler,
+		meta:           meta,
+		allocator:      allocator,
+		handler:        handler,
+		versionManager: versionMgr,
 	}
 }
 
@@ -62,6 +65,19 @@ func (policy *storageVersionUpgradePolicy) targetVersion() int64 {
 }
 
 func (policy *storageVersionUpgradePolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {
+	versionReqStr := paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.GetValue()
+	versionRequirement, err := semver.Parse(versionReqStr)
+	if err != nil {
+		log.Warn("failed to parse storage version upgrade version requirement", zap.String("versionStr", versionReqStr), zap.Error(err))
+		return map[CompactionTriggerType][]CompactionView{}, err
+	}
+
+	minVersion := policy.versionManager.GetMinimalSessionVer()
+	if minVersion.LT(versionRequirement) {
+		log.Info("storage version upgrade policy skipped due to minimal querynode version does not satisfy requirement", zap.String("minVersion", minVersion.String()), zap.String("requirement", versionRequirement.String()))
+		return map[CompactionTriggerType][]CompactionView{}, nil
+	}
+
 	collections := policy.meta.GetCollections()
 
 	if time.Since(policy.lastPeriod) > paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.GetAsDuration(time.Second) {
