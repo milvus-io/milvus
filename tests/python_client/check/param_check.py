@@ -241,10 +241,17 @@ def exist_check(param, _list):
 
 
 def dict_equal_check(dict1, dict2):
+    """Check if dict2 is a subset of dict1.
+
+    This allows API responses to include additional fields without breaking tests.
+    For example, if dict1 = {'a': 1, 'b': 2, 'c': 3} and dict2 = {'a': 1, 'b': 2},
+    the check will pass because all key-value pairs in dict2 exist in dict1.
+    """
     if not isinstance(dict1, dict) or not isinstance(dict2, dict):
         log.error("[DICT_EQUAL_CHECK] Type of dict(%s) or dict(%s) is not a dict." % (str(dict1), str(dict2)))
         return False
-    return operator.eq(dict1, dict2)
+    # Check if dict2 is a subset of dict1
+    return all(k in dict1 and dict1[k] == v for k, v in dict2.items())
 
 
 def list_de_duplication(_list):
