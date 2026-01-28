@@ -3,6 +3,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -87,7 +88,13 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 	}
 
 	// Convert targetSize from MB to bytes (per design doc: targetSize is in MB)
-	targetSizeBytes := targetSize * 1024 * 1024
+	// Handle overflow: when targetSize is very large (e.g., max_int64 for auto-calculate mode)
+	var targetSizeBytes int64
+	if targetSize > math.MaxInt64/(1024*1024) {
+		targetSizeBytes = math.MaxInt64
+	} else {
+		targetSizeBytes = targetSize * 1024 * 1024
+	}
 
 	configMaxSize := getExpectedSegmentSize(policy.meta, collectionID, collection.Schema)
 	if targetSizeBytes < configMaxSize {

@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -234,6 +235,37 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_TargetSizeToo
 	s.Contains(err.Error(), "should be greater than or equal to")
 	s.Nil(views)
 	s.Equal(int64(0), triggerID)
+}
+
+func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_AutoCalculateMode() {
+	// Test that max_int64 (auto-calculate mode) doesn't cause overflow
+	ctx := context.Background()
+	collectionID := int64(1)
+	targetSize := int64(math.MaxInt64) // Auto-calculate mode
+	triggerID := int64(100)
+
+	coll := &collectionInfo{
+		ID:         collectionID,
+		Schema:     newTestSchema(),
+		Properties: nil,
+	}
+
+	topology := &CollectionTopology{
+		CollectionID: collectionID,
+		NumReplicas:  1,
+	}
+
+	s.mockHandler.EXPECT().GetCollection(mock.Anything, collectionID).Return(coll, nil)
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(triggerID, nil)
+	s.mockQuerier.EXPECT().GetCollectionTopology(mock.Anything, collectionID).Return(topology, nil)
+
+	views, gotTriggerID, err := s.policy.triggerOneCollection(ctx, collectionID, targetSize)
+
+	// Should not overflow and should succeed
+	s.NoError(err)
+	s.Equal(triggerID, gotTriggerID)
+	s.NotNil(views)
+	s.Greater(len(views), 0)
 }
 
 func (s *ForceMergeCompactionPolicySuite) TestGroupByPartitionChannel_EmptySegments() {
