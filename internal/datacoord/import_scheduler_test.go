@@ -345,3 +345,122 @@ func (s *ImportSchedulerSuite) TestPickNode() {
 func TestImportScheduler(t *testing.T) {
 	suite.Run(t, new(ImportSchedulerSuite))
 }
+
+func TestExtractTimestampFromBinlogs(t *testing.T) {
+	t.Run("empty binlogs", func(t *testing.T) {
+		minTs, maxTs := extractTimestampFromBinlogs(nil)
+		if minTs != math.MaxUint64 {
+			t.Errorf("expected minTs=%d, got %d", uint64(math.MaxUint64), minTs)
+		}
+		if maxTs != 0 {
+			t.Errorf("expected maxTs=0, got %d", maxTs)
+		}
+	})
+
+	t.Run("empty field binlogs", func(t *testing.T) {
+		binlogs := []*datapb.FieldBinlog{}
+		minTs, maxTs := extractTimestampFromBinlogs(binlogs)
+		if minTs != math.MaxUint64 {
+			t.Errorf("expected minTs=%d, got %d", uint64(math.MaxUint64), minTs)
+		}
+		if maxTs != 0 {
+			t.Errorf("expected maxTs=0, got %d", maxTs)
+		}
+	})
+
+	t.Run("single binlog", func(t *testing.T) {
+		binlogs := []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{
+						TimestampFrom: 1000,
+						TimestampTo:   2000,
+					},
+				},
+			},
+		}
+		minTs, maxTs := extractTimestampFromBinlogs(binlogs)
+		if minTs != 1000 {
+			t.Errorf("expected minTs=1000, got %d", minTs)
+		}
+		if maxTs != 2000 {
+			t.Errorf("expected maxTs=2000, got %d", maxTs)
+		}
+	})
+
+	t.Run("multiple binlogs in single field", func(t *testing.T) {
+		binlogs := []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{
+						TimestampFrom: 1000,
+						TimestampTo:   2000,
+					},
+					{
+						TimestampFrom: 500,
+						TimestampTo:   3000,
+					},
+				},
+			},
+		}
+		minTs, maxTs := extractTimestampFromBinlogs(binlogs)
+		if minTs != 500 {
+			t.Errorf("expected minTs=500, got %d", minTs)
+		}
+		if maxTs != 3000 {
+			t.Errorf("expected maxTs=3000, got %d", maxTs)
+		}
+	})
+
+	t.Run("multiple fields with multiple binlogs", func(t *testing.T) {
+		binlogs := []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{
+						TimestampFrom: 1000,
+						TimestampTo:   2000,
+					},
+				},
+			},
+			{
+				FieldID: 101,
+				Binlogs: []*datapb.Binlog{
+					{
+						TimestampFrom: 500,
+						TimestampTo:   1500,
+					},
+					{
+						TimestampFrom: 800,
+						TimestampTo:   3000,
+					},
+				},
+			},
+		}
+		minTs, maxTs := extractTimestampFromBinlogs(binlogs)
+		if minTs != 500 {
+			t.Errorf("expected minTs=500, got %d", minTs)
+		}
+		if maxTs != 3000 {
+			t.Errorf("expected maxTs=3000, got %d", maxTs)
+		}
+	})
+
+	t.Run("field binlog with no binlogs inside", func(t *testing.T) {
+		binlogs := []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{},
+			},
+		}
+		minTs, maxTs := extractTimestampFromBinlogs(binlogs)
+		if minTs != math.MaxUint64 {
+			t.Errorf("expected minTs=%d, got %d", uint64(math.MaxUint64), minTs)
+		}
+		if maxTs != 0 {
+			t.Errorf("expected maxTs=0, got %d", maxTs)
+		}
+	})
+}

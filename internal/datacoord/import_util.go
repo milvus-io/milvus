@@ -29,7 +29,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -212,15 +211,6 @@ func AllocImportSegment(ctx context.Context,
 		log.Error("failed to alloc id for import segment", zap.Error(err))
 		return nil, err
 	}
-	ts, err := alloc.AllocTimestamp(ctx)
-	if err != nil {
-		return nil, err
-	}
-	position := &msgpb.MsgPosition{
-		ChannelName: channelName,
-		MsgID:       nil,
-		Timestamp:   ts,
-	}
 
 	segmentInfo := &datapb.SegmentInfo{
 		ID:             id,
@@ -232,8 +222,6 @@ func AllocImportSegment(ctx context.Context,
 		MaxRowNum:      0,
 		Level:          level,
 		LastExpireTime: math.MaxUint64,
-		StartPosition:  position,
-		DmlPosition:    position,
 	}
 	segmentInfo.IsImporting = true
 	segment := NewSegmentInfo(segmentInfo)
