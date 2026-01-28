@@ -168,14 +168,12 @@ ChunkTranslator::get_cells(
         remote_files.push_back(file_infos_[cid].file_path);
     }
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     auto channel = std::make_shared<ArrowReaderChannel>();
     LOG_INFO("segment {} submits load field {} chunks {} task to thread pool",
              segment_id_,
              field_id_,
              fmt::format("{}", fmt::join(cids, " ")));
-    pool.Submit(
-        LoadArrowReaderFromRemote, remote_files, channel, load_priority_);
+    LoadArrowReaderFromRemote(remote_files, channel, load_priority_);
 
     auto data_type = field_meta_.get_data_type();
 

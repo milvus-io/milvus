@@ -952,7 +952,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadBatchIndexes(milvus::tracer::TraceContext& trace_ctx,
                      std::unordered_map<FieldId, std::vector<LoadIndexInfo>>&
                          field_id_to_index_info,
-        milvus::OpContext* op_ctx = nullptr);
+                     milvus::OpContext* op_ctx = nullptr);
 
     void
     LoadBatchFieldData(milvus::tracer::TraceContext& trace_ctx,
@@ -994,9 +994,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      * @brief Reloads columns from the specified field IDs
      *
      * @param field_ids_to_reload A vector of field IDs to reload
+     * @param op_ctx The operation context
      */
     void
-    ReloadColumns(const std::vector<FieldId>& field_ids_to_reload);
+    ReloadColumns(const std::vector<FieldId>& field_ids_to_reload,
+                  milvus::OpContext* op_ctx = nullptr);
 
     /**
      * @brief Apply load differences to update segment load information
