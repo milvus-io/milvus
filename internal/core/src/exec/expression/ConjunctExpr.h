@@ -111,13 +111,6 @@ class PhyConjunctFilterExpr : public Expr {
         return input_order_;
     }
 
-    // Add a new expression to inputs and return its index
-    size_t
-    AddInput(std::shared_ptr<Expr> expr) {
-        inputs_.push_back(std::move(expr));
-        return inputs_.size() - 1;
-    }
-
     // Set the bitmap input for the next expression in the conjunction.
     // The bitmap indicates which rows still need to be evaluated.
     //
