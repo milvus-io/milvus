@@ -365,18 +365,6 @@ func applyCollectionWarmupSetting(schema *schemapb.CollectionSchema,
 
 	// Apply warmup to struct array fields and their nested fields
 	for _, structField := range schema.GetStructArrayFields() {
-		structWarmup, structExist := common.GetWarmupPolicy(structField.GetTypeParams()...)
-
-		// If struct field itself doesn't have warmup setting, inherit from collection (scalar)
-		if !structExist && scalarFieldExist {
-			structField.TypeParams = append(structField.TypeParams, &commonpb.KeyValuePair{
-				Key:   common.WarmupKey,
-				Value: scalarFieldWarmup,
-			})
-			structWarmup = scalarFieldWarmup
-			structExist = true
-		}
-
 		// Apply warmup setting to fields inside struct
 		for _, field := range structField.GetFields() {
 			// Skip if field already has warmup setting
@@ -385,13 +373,7 @@ func applyCollectionWarmupSetting(schema *schemapb.CollectionSchema,
 			}
 
 			isVector := typeutil.IsVectorType(field.GetDataType())
-			// Priority: struct field setting > collection setting
-			if structExist {
-				field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-					Key:   common.WarmupKey,
-					Value: structWarmup,
-				})
-			} else if isVector && vectorFieldExist {
+			if isVector && vectorFieldExist {
 				field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
 					Key:   common.WarmupKey,
 					Value: vectorFieldWarmup,

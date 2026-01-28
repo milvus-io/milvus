@@ -1783,7 +1783,7 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			isVectorType := typeutil.IsVectorType(fieldSchema.GetDataType())
 
 			var estimateResult ResourceEstimate
-			err = GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, schema.GetProperties(), func(c *LoadIndexInfo) error {
+			err = GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
 				GetDynamicPool().Submit(func() (any, error) {
 					loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
 					estimateResult = GetResourceEstimate(&loadResourceRequest)
@@ -1969,7 +1969,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			isVectorType := typeutil.IsVectorType(fieldSchema.GetDataType())
 
 			var estimateResult ResourceEstimate
-			err = GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, schema.GetProperties(), func(c *LoadIndexInfo) error {
+			err = GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
 				GetDynamicPool().Submit(func() (any, error) {
 					loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
 					estimateResult = GetResourceEstimate(&loadResourceRequest)
