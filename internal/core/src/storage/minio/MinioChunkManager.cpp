@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "storage/MinioChunkManager.h"
+#include "storage/minio/MinioChunkManager.h"
 
 #include <fstream>
 #include <aws/core/auth/AWSCredentials.h>
@@ -30,10 +30,10 @@
 #include <aws/s3/model/ListObjectsRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
 
-#include "storage/AliyunSTSClient.h"
-#include "storage/AliyunCredentialsProvider.h"
-#include "storage/TencentCloudSTSClient.h"
-#include "storage/TencentCloudCredentialsProvider.h"
+#include "storage/aliyun/AliyunSTSClient.h"
+#include "storage/aliyun/AliyunCredentialsProvider.h"
+#include "storage/tencent/TencentCloudSTSClient.h"
+#include "storage/tencent/TencentCloudCredentialsProvider.h"
 #include "monitor/Monitor.h"
 #include "common/EasyAssert.h"
 #include "log/Log.h"
