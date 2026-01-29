@@ -5210,7 +5210,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.StorageVersionCompactionEnabled = ParamItem{
 		Key:          "dataCoord.compaction.storageVersion.enabled",
 		Version:      "2.6.10",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "Enable storage version compaction",
 		Export:       false,
 	}
