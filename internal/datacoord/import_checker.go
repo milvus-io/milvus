@@ -442,7 +442,7 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageWaitL0Import).Observe(float64(buildIndexDuration.Milliseconds()))
 	log.Info("import job l0 import done", zap.Duration("jobTimeCost/l0Import", waitL0ImportDuration))
 
-	if c.updateSegmentState(originSegmentIDs, statsSegmentIDs) {
+	if c.unsetSegmentImporting(originSegmentIDs, statsSegmentIDs) {
 		return
 	}
 	// all finished, update import job state to `Completed`.
@@ -475,7 +475,8 @@ func (c *importChecker) waitL0ImortTaskDone(job ImportJob) bool {
 	return false
 }
 
-func (c *importChecker) updateSegmentState(originSegmentIDs, statsSegmentIDs []int64) bool {
+// unsetSegmentImporting unsets the isImporting flag for segments.
+func (c *importChecker) unsetSegmentImporting(originSegmentIDs, statsSegmentIDs []int64) bool {
 	// Here, all segment indexes have been successfully built, try unset isImporting flag for all segments.
 	isImportingSegments := lo.Filter(append(originSegmentIDs, statsSegmentIDs...), func(segmentID int64, _ int) bool {
 		segment := c.meta.GetSegment(c.ctx, segmentID)
@@ -485,21 +486,10 @@ func (c *importChecker) updateSegmentState(originSegmentIDs, statsSegmentIDs []i
 		}
 		return segment.GetIsImporting()
 	})
-	channels, err := c.meta.GetSegmentsChannels(isImportingSegments)
-	if err != nil {
-		log.Warn("get segments channels failed", zap.Error(err))
-		return true
-	}
+
 	for _, segmentID := range isImportingSegments {
-		channelCP := c.meta.GetChannelCheckpoint(channels[segmentID])
-		if channelCP == nil {
-			log.Warn("nil channel checkpoint")
-			return true
-		}
-		op1 := UpdateStartPosition([]*datapb.SegmentStartPosition{{StartPosition: channelCP, SegmentID: segmentID}})
-		op2 := UpdateDmlPosition(segmentID, channelCP)
-		op3 := UpdateIsImporting(segmentID, false)
-		err = c.meta.UpdateSegmentsInfo(c.ctx, op1, op2, op3)
+		op := UpdateIsImporting(segmentID, false)
+		err := c.meta.UpdateSegmentsInfo(c.ctx, op)
 		if err != nil {
 			log.Warn("update import segment failed", zap.Error(err))
 			return true

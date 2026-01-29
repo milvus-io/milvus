@@ -19,6 +19,7 @@ package syncmgr
 import (
 	"context"
 	"fmt"
+	"math"
 	"path"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -330,6 +331,9 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 	defer pkBuilder.Release()
 	defer tsBuilder.Release()
 
+	// Extract min/max timestamps from delete data
+	var tsFrom uint64 = math.MaxUint64
+	var tsTo uint64 = 0
 	for i := int64(0); i < pack.deltaData.RowCount; i++ {
 		switch pkField.DataType {
 		case schemapb.DataType_Int64:
@@ -339,7 +343,14 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 		default:
 			return nil, fmt.Errorf("unexpected pk type %v", pkField.DataType)
 		}
-		tsBuilder.(*array.Int64Builder).Append(int64(pack.deltaData.Tss[i]))
+		ts := pack.deltaData.Tss[i]
+		tsBuilder.(*array.Int64Builder).Append(int64(ts))
+		if ts < tsFrom {
+			tsFrom = ts
+		}
+		if ts > tsTo {
+			tsTo = ts
+		}
 	}
 
 	pkArray := pkBuilder.NewArray()
@@ -362,8 +373,8 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 
 	deltalog := &datapb.Binlog{
 		EntriesNum:    pack.deltaData.RowCount,
-		TimestampFrom: pack.tsFrom,
-		TimestampTo:   pack.tsTo,
+		TimestampFrom: tsFrom,
+		TimestampTo:   tsTo,
 		LogPath:       path,
 		LogSize:       pack.deltaData.Size() / 4, // Not used
 		MemorySize:    pack.deltaData.Size(),
