@@ -52,7 +52,8 @@ StringChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
 void
 StringChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
                                    const std::shared_ptr<ChunkTarget>& target) {
-    std::vector<std::string_view> strs;
+    strs_.clear();
+    strs_.reserve(row_nums_);
     // tuple <data, size, offset>
     std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
     for (const auto& data : array_vec) {
@@ -60,7 +61,7 @@ StringChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
         for (int i = 0; i < array->length(); i++) {
             auto str = array->GetView(i);
-            strs.emplace_back(str);
+            strs_.emplace_back(str);
         }
         if (nullable_) {
             null_bitmaps.emplace_back(
@@ -80,14 +81,14 @@ StringChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
         null_bitmap_bytes + sizeof(uint32_t) * offset_num;
     std::vector<uint32_t> offsets;
     offsets.reserve(offset_num);
-    for (const auto& str : strs) {
+    for (const auto& str : strs_) {
         offsets.push_back(offset_start_pos);
         offset_start_pos += str.size();
     }
     offsets.push_back(offset_start_pos);
 
     target->write(offsets.data(), offsets.size() * sizeof(uint32_t));
-    for (auto str : strs) {
+    for (const auto& str : strs_) {
         target->write(str.data(), str.size());
     }
 
@@ -101,14 +102,22 @@ std::pair<size_t, size_t>
 JSONChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
     row_nums_ = 0;
     size_t size = 0;
+    cached_jsons_.clear();
+
+    // First pass: count total rows for reserve
+    for (const auto& data : array_vec) {
+        row_nums_ += data->length();
+    }
+    cached_jsons_.reserve(row_nums_);
+
+    // Second pass: parse and cache Json objects
     for (const auto& data : array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
         for (int i = 0; i < array->length(); i++) {
             auto str = array->GetView(i);
-            auto json = Json(simdjson::padded_string(str));
-            size += json.data().size();
+            cached_jsons_.emplace_back(simdjson::padded_string(str));
+            size += cached_jsons_.back().data().size();
         }
-        row_nums_ += array->length();
     }
     if (nullable_) {
         size += (row_nums_ + 7) / 8;
@@ -121,17 +130,10 @@ JSONChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
 void
 JSONChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
                                  const std::shared_ptr<ChunkTarget>& target) {
-    std::vector<Json> jsons;
-    // tuple <data, size, offset>
+    // Collect null bitmaps
     std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
-    for (const auto& data : array_vec) {
-        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
-        for (int i = 0; i < array->length(); i++) {
-            auto str = array->GetView(i);
-            auto json = Json(simdjson::padded_string(str));
-            jsons.push_back(std::move(json));
-        }
-        if (nullable_) {
+    if (nullable_) {
+        for (const auto& data : array_vec) {
             null_bitmaps.emplace_back(
                 data->null_bitmap_data(), data->length(), data->offset());
         }
@@ -148,7 +150,7 @@ JSONChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
         null_bitmap_bytes + sizeof(uint32_t) * offset_num;
     std::vector<uint32_t> offsets;
     offsets.reserve(offset_num);
-    for (const auto& json : jsons) {
+    for (const auto& json : cached_jsons_) {
         offsets.push_back(offset_start_pos);
         offset_start_pos += json.data().size();
     }
@@ -157,12 +159,16 @@ JSONChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
     target->write(offsets.data(), offset_num * sizeof(uint32_t));
 
     // write data
-    for (const auto& json : jsons) {
+    for (const auto& json : cached_jsons_) {
         target->write(json.data().data(), json.data().size());
     }
 
     char padding[simdjson::SIMDJSON_PADDING];
     target->write(padding, simdjson::SIMDJSON_PADDING);
+
+    // Release cached data
+    cached_jsons_.clear();
+    cached_jsons_.shrink_to_fit();
 }
 
 std::pair<size_t, size_t>

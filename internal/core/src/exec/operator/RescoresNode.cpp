@@ -79,6 +79,8 @@ PhyRescoresNode::GetOutput() {
     // prepare segment offset
     FixedVector<int32_t> offsets;
     std::vector<size_t> offset_idx;
+    offsets.reserve(search_result.seg_offsets_.size());
+    offset_idx.reserve(search_result.seg_offsets_.size());
 
     for (size_t i = 0; i < search_result.seg_offsets_.size(); i++) {
         // remain offset will be placeholder(-1) if result count not enough (less than topk)
