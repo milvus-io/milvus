@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"math"
 	"sort"
 	"strconv"
 	"sync"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -321,6 +323,7 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 		).Add(float64(diff))
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
+		job := s.importMeta.GetJob(s.ctx, task.GetJobID())
 		for _, info := range resp.GetImportSegmentsInfo() {
 			// try to parse path and fill logID
 			err = binlog.CompressBinLogs(info.GetBinlogs(), info.GetDeltalogs(), info.GetStatslogs(), info.GetBm25Logs())
@@ -329,9 +332,20 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 					WrapTaskLog(task, zap.Int64("segmentID", info.GetSegmentID()), zap.Error(err))...)
 				return
 			}
-			op1 := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), info.GetDeltalogs(), info.GetBm25Logs())
-			op2 := UpdateStatusOperator(info.GetSegmentID(), commonpb.SegmentState_Flushed)
-			err = s.meta.UpdateSegmentsInfo(s.ctx, op1, op2)
+
+			// Extract actual timestamps from binlogs for segment positions
+			var minTs, maxTs uint64
+			isL0Import := importutilv2.IsL0Import(job.GetOptions())
+			if isL0Import {
+				minTs, maxTs = extractTimestampFromBinlogs(info.GetDeltalogs())
+			} else {
+				minTs, maxTs = extractTimestampFromBinlogs(info.GetBinlogs())
+			}
+
+			opBinlog := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), info.GetDeltalogs(), info.GetBm25Logs())
+			opState := UpdateStatusOperator(info.GetSegmentID(), commonpb.SegmentState_Flushed)
+			opPosition := UpdateImportSegmentPosition(info.GetSegmentID(), minTs, maxTs)
+			err = s.meta.UpdateSegmentsInfo(s.ctx, opBinlog, opState, opPosition)
 			if err != nil {
 				updateErr := s.importMeta.UpdateJob(s.ctx, task.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
 				if updateErr != nil {
@@ -340,6 +354,10 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 				log.Warn("update import segment binlogs failed", WrapTaskLog(task, zap.String("err", err.Error()))...)
 				return
 			}
+			log.Info("update import segment info done", WrapTaskLog(task,
+				zap.Int64("segmentID", info.GetSegmentID()),
+				zap.Uint64("minTs", minTs),
+				zap.Uint64("maxTs", maxTs))...)
 		}
 		completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
 		err = s.importMeta.UpdateTask(s.ctx, task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed), UpdateCompleteTime(completeTime))
@@ -386,4 +404,23 @@ func (s *importScheduler) processFailed(task ImportTask) {
 	if err != nil {
 		log.Warn("drop import failed", WrapTaskLog(task, zap.Error(err))...)
 	}
+}
+
+// extractTimestampFromBinlogs extracts min and max timestamps from binlogs.
+// The timestamps are stored in Binlog.TimestampFrom and Binlog.TimestampTo
+// by the sync task during import.
+func extractTimestampFromBinlogs(binlogs []*datapb.FieldBinlog) (minTs, maxTs uint64) {
+	minTs = math.MaxUint64
+	maxTs = 0
+	for _, fieldBinlog := range binlogs {
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			if binlog.GetTimestampFrom() < minTs {
+				minTs = binlog.GetTimestampFrom()
+			}
+			if binlog.GetTimestampTo() > maxTs {
+				maxTs = binlog.GetTimestampTo()
+			}
+		}
+	}
+	return minTs, maxTs
 }
