@@ -839,7 +839,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 				cloned = nil
 				continue
 			}
-			if err := gc.meta.DropSegment(ctx, cloned.GetID()); err != nil {
+			if err := gc.meta.DropSegment(ctx, cloned); err != nil {
 				log.Warn("GC segment meta failed to drop segment", zap.Error(err))
 				cloned = nil
 				continue
@@ -873,7 +873,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			continue
 		}
 
-		if err := gc.meta.DropSegment(ctx, cloned.GetID()); err != nil {
+		if err := gc.meta.DropSegment(ctx, cloned); err != nil {
 			log.Warn("GC segment meta failed to drop segment", zap.Error(err))
 			cloned = nil
 			continue

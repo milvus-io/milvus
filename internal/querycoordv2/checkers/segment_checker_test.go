@@ -18,6 +18,7 @@ package checkers
 
 import (
 	"context"
+	"os"
 	"sort"
 	"testing"
 
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -183,6 +185,85 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 	tasks = checker.Check(context.TODO())
 	suite.Len(tasks, 0)
 	suite.Len(addedTasks, 1)
+}
+
+func (suite *SegmentCheckerTestSuite) TestLoadSegmentsToSQNWhenEnabled() {
+	ctx := context.Background()
+	checker := suite.checker
+
+	oldValue, existed := os.LookupEnv(streamingutil.MilvusStreamingServiceEnabled)
+	suite.Require().NoError(os.Setenv(streamingutil.MilvusStreamingServiceEnabled, "1"))
+	suite.Require().NoError(paramtable.Get().Save(paramtable.Get().QueryCoordCfg.EnableSQNServeSegments.Key, "true"))
+	defer func() {
+		suite.NoError(paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.EnableSQNServeSegments.Key))
+		if existed {
+			suite.NoError(os.Setenv(streamingutil.MilvusStreamingServiceEnabled, oldValue))
+		} else {
+			suite.NoError(os.Unsetenv(streamingutil.MilvusStreamingServiceEnabled))
+		}
+	}()
+
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.ReplicaManager.Put(ctx, meta.NewReplica(&querypb.Replica{
+		ID:           1,
+		CollectionID: 1,
+		Nodes:        []int64{1, 2},
+		RwSqNodes:    []int64{11, 12},
+		ChannelNodeInfos: map[string]*querypb.ChannelNodeInfo{
+			"test-insert-channel": {RwNodes: []int64{1}},
+		},
+		ResourceGroup: meta.DefaultResourceGroupName,
+	}))
+
+	for _, nodeID := range []int64{1, 2, 11, 12} {
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   nodeID,
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
+		checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID)
+	}
+
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            1,
+			PartitionID:   1,
+			InsertChannel: "test-insert-channel",
+		},
+	}
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
+
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(channels, segments, nil)
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
+	checker.dist.ChannelDistManager.Update(11, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    11,
+		Version: 1,
+		View:    &meta.LeaderView{ID: 11, CollectionID: 1, Channel: "test-insert-channel", Version: 1, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+	})
+
+	var addedTasks []task.Task
+	suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
+		addedTasks = append(addedTasks, t)
+		return nil
+	}).Maybe()
+
+	tasks := checker.Check(ctx)
+	suite.Len(tasks, 0)
+	suite.Len(addedTasks, 1)
+	action, ok := addedTasks[0].Actions()[0].(*task.SegmentAction)
+	suite.True(ok)
+	suite.EqualValues(11, action.Node())
+	suite.NotEqualValues(1, action.Node())
 }
 
 func (suite *SegmentCheckerTestSuite) TestSkipLoadSegments() {

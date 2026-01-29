@@ -964,6 +964,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
     const LoadFieldDataInfo& load_info,
     milvus::OpContext* op_ctx,
     bool is_replace) {
+    auto func_start = std::chrono::steady_clock::now();
     size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
     ArrowSchemaPtr arrow_schema = schema_->ConvertToArrowSchema();
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
@@ -1020,6 +1021,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
 
         auto field_metas = schema_->get_field_metas(milvus_field_ids);
 
+        auto t_prepare = std::chrono::steady_clock::now();
         std::vector<FieldId> fields_for_stats;
         if (ENABLE_PARQUET_STATS_SKIP_INDEX) {
             fields_for_stats = milvus_field_ids;
@@ -1054,6 +1056,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 info.warmup_policy);
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
+        auto t_translator = std::chrono::steady_clock::now();
 
         // Create ProxyChunkColumn for each field in this column group
         for (const auto& field_id : milvus_field_ids) {
@@ -1085,6 +1088,25 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         if (column_group_id.get() == DEFAULT_SHORT_COLUMN_GROUP_ID) {
             stats_.mem_size += chunked_column_group->memory_size();
         }
+
+        auto t_load_done = std::chrono::steady_clock::now();
+        LOG_INFO(
+            "[xxx] segment {} column_group {} loaded, "
+            "prepare={}ms, translator={}ms, load_fields={}ms, total={}ms",
+            id_,
+            column_group_id.get(),
+            std::chrono::duration_cast<std::chrono::milliseconds>(t_prepare -
+                                                                  func_start)
+                .count(),
+            std::chrono::duration_cast<std::chrono::milliseconds>(t_translator -
+                                                                  t_prepare)
+                .count(),
+            std::chrono::duration_cast<std::chrono::milliseconds>(t_load_done -
+                                                                  t_translator)
+                .count(),
+            std::chrono::duration_cast<std::chrono::milliseconds>(t_load_done -
+                                                                  func_start)
+                .count());
     }
 }
 
@@ -4118,6 +4140,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     std::optional<ParquetStatistics> statistics,
     milvus::OpContext* op_ctx,
     bool is_replace) {
+    auto t0 = std::chrono::steady_clock::now();
     {
         std::unique_lock lck(mutex_);
         if (is_replace) {
@@ -4151,8 +4174,17 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             mmap_field_ids_.insert(field_id);
         }
     }
+    auto t1 = std::chrono::steady_clock::now();
     // system field only needs to emplace column to fields_ map
     if (SystemProperty::Instance().IsSystem(field_id)) {
+        LOG_INFO(
+            "[xxx] segment {} field {} load_field_data_common done (system "
+            "field), "
+            "emplace={}ms",
+            id_,
+            field_id.get(),
+            std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0)
+                .count());
         return;
     }
 
@@ -4197,6 +4229,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     // statistics, skip building the skip index during load to avoid triggering
     // S3 data fetches when warmup=disable. The skip index will be unavailable
     // for these segments, which only affects skip-index-based pruning.
+    auto t2 = std::chrono::steady_clock::now();
     if (!IsVariableDataType(data_type) || IsStringDataType(data_type)) {
         if (statistics) {
             LoadSkipIndexFromStatistics(
@@ -4205,6 +4238,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             LoadSkipIndex(field_id, data_type, column);
         }
     }
+    auto t3 = std::chrono::steady_clock::now();
 
     // set pks to offset
     if (schema_->get_primary_field_id() == field_id) {
@@ -4216,8 +4250,10 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         }
     }
 
+    auto t4 = std::chrono::steady_clock::now();
     // now interim index does not touch column warmup
     generate_interim_index(field_id, num_rows);
+    auto t5 = std::chrono::steady_clock::now();
 
     std::string struct_name;
     const FieldMeta* field_meta_ptr = nullptr;
@@ -4268,6 +4304,21 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             array_offsets_map_[field_id] = it->second;
         }
     }
+
+    auto t6 = std::chrono::steady_clock::now();
+    LOG_INFO(
+        "[xxx] segment {} field {} load_field_data_common done, "
+        "emplace={}ms, stats={}ms, skip_index={}ms, pk={}ms, "
+        "interim_index={}ms, bitset={}ms, total={}ms",
+        id_,
+        field_id.get(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(t5 - t4).count(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(t6 - t5).count(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(t6 - t0).count());
 }
 
 static TimestampIndex
@@ -5042,6 +5093,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         field_binlog_to_load,
     milvus::OpContext* op_ctx,
     bool is_replace) {
+    auto batch_start = std::chrono::steady_clock::now();
     LOG_INFO("Loading field binlog for {} fields in segment {}",
              field_binlog_to_load.size(),
              id_);
@@ -5161,6 +5213,16 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         field_data_to_load[FieldId(group_id)] = load_field_data_info;
     }
 
+    auto prepare_done = std::chrono::steady_clock::now();
+    LOG_INFO(
+        "[xxx] segment {} prepare field metadata done, fields_to_load={}, "
+        "elapsed={}ms",
+        id_,
+        field_data_to_load.size(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(prepare_done -
+                                                              batch_start)
+            .count());
+
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<void>> load_field_futures;
     load_field_futures.reserve(field_data_to_load.size());
@@ -5169,6 +5231,10 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         // Create local copies to capture in lambda (C++17 compatible)
         const auto field_data = load_field_data_info;
         const auto captured_field_id = field_id;
+        LOG_INFO("[xxx] segment {} submit pool size {}, cap {}",
+                 id_,
+                 pool.GetThreadNum(),
+                 pool.GetMaxThreadNum());
         auto future = pool.Submit(
             [this, field_data, captured_field_id, op_ctx, is_replace]()
                 -> void {
@@ -5183,7 +5249,33 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         load_field_futures.push_back(std::move(future));
     }
 
+    auto submit_done = std::chrono::steady_clock::now();
+    LOG_INFO("[xxx] segment {} submitted {} load tasks, elapsed={}ms",
+             id_,
+             load_field_futures.size(),
+             std::chrono::duration_cast<std::chrono::milliseconds>(submit_done -
+                                                                   prepare_done)
+                 .count());
+
     storage::WaitAllFutures(load_field_futures);
+
+    auto wait_done = std::chrono::steady_clock::now();
+    LOG_INFO(
+        "[xxx] segment {} all field data loaded, "
+        "prepare={}ms, submit={}ms, wait={}ms, total={}ms",
+        id_,
+        std::chrono::duration_cast<std::chrono::milliseconds>(prepare_done -
+                                                              batch_start)
+            .count(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(submit_done -
+                                                              prepare_done)
+            .count(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(wait_done -
+                                                              submit_done)
+            .count(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(wait_done -
+                                                              batch_start)
+            .count());
 }
 
 void
@@ -5200,14 +5292,15 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
 
     auto snapshot = std::atomic_load(&segment_load_info_);
     auto num_rows = snapshot->GetNumOfRows();
-    LOG_INFO("Loading segment {} with {} rows", id_, num_rows);
+    LOG_INFO("[xxx] Loading segment {} with {} rows", id_, num_rows);
 
     SegmentLoadInfo mutable_copy(snapshot->GetProto(), schema_);
     auto diff = mutable_copy.GetLoadDiff();
     LOG_WARN("Load segment {} with diff {}", id_, diff.ToString());
     ApplyLoadDiff(op_ctx, mutable_copy, diff);
 
-    LOG_INFO("Successfully loaded segment {} with {} rows", id_, num_rows);
+    LOG_INFO(
+        "[xxx] Successfully loaded segment {} with {} rows", id_, num_rows);
 }
 
 void

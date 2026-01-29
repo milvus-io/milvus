@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -133,6 +134,7 @@ func (c *QueryCluster) updateLoop() {
 func (c *QueryCluster) LoadSegments(ctx context.Context, nodeID int64, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	var status *commonpb.Status
 	var err error
+	log.Info("[xxx] 11 send load segments request to node", zap.Any("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })))
 	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
 		req = proto.Clone(req).(*querypb.LoadSegmentsRequest)
 		req.Base.TargetID = nodeID
@@ -354,7 +356,7 @@ func (c *QueryCluster) send(ctx context.Context, nodeID int64, fn func(cli types
 		return WrapErrNodeNotFound(nodeID)
 	}
 
-	cli, err := c.getOrCreate(ctx, node)
+	cli, err := c.clients.getOrCreate(ctx, node)
 	if err != nil {
 		return err
 	}

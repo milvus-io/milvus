@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -75,24 +76,45 @@ func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
 	size int64,
 	err error,
 ) {
+	start := time.Now()
 	if inserts, err = bw.writeInserts(ctx, pack); err != nil {
 		log.Error("failed to write insert data", zap.Error(err))
 		return
 	}
+	writeInsertsDur := time.Since(start)
+
+	stageStart := time.Now()
 	if stats, err = bw.writeStats(ctx, pack); err != nil {
 		log.Error("failed to process stats blob", zap.Error(err))
 		return
 	}
+	writeStatsDur := time.Since(stageStart)
+
+	stageStart = time.Now()
 	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
 		log.Error("failed to process delta blob", zap.Error(err))
 		return
 	}
+	writeDeltaDur := time.Since(stageStart)
+
+	stageStart = time.Now()
 	if bm25Stats, err = bw.writeBM25Stasts(ctx, pack); err != nil {
 		log.Error("failed to process bm25 stats blob", zap.Error(err))
 		return
 	}
+	writeBM25Dur := time.Since(stageStart)
 
 	size = bw.sizeWritten
+
+	log.Info("[BulkPackWriter] writeData stages",
+		zap.Int64("segmentID", pack.segmentID),
+		zap.Duration("writeInserts", writeInsertsDur),
+		zap.Duration("writeStats", writeStatsDur),
+		zap.Duration("writeDelta", writeDeltaDur),
+		zap.Duration("writeBM25", writeBM25Dur),
+		zap.Duration("total", time.Since(start)),
+		zap.Int64("size", size),
+	)
 
 	return
 }

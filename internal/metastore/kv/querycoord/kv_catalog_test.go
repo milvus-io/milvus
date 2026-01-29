@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/kv/mocks"
+	kvmocks "github.com/milvus-io/milvus/internal/kv/mocks"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -129,6 +129,49 @@ func (suite *CatalogTestSuite) TestPartition() {
 	partitions, err := suite.catalog.GetPartitions(ctx, []int64{0})
 	suite.NoError(err)
 	suite.Len(partitions, 1)
+}
+
+func (suite *CatalogTestSuite) TestSavePartitionUseMultiSave() {
+	ctx := context.Background()
+	kv := kvmocks.NewMetaKv(suite.T())
+	catalog := NewCatalog(kv)
+
+	kv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, kvs map[string]string) error {
+		suite.Len(kvs, 2)
+		suite.Contains(kvs, EncodePartitionLoadInfoKey(1, 100))
+		suite.Contains(kvs, EncodePartitionLoadInfoKey(1, 101))
+		return nil
+	}).Once()
+
+	err := catalog.SavePartition(ctx,
+		&querypb.PartitionLoadInfo{CollectionID: 1, PartitionID: 100},
+		&querypb.PartitionLoadInfo{CollectionID: 1, PartitionID: 101},
+	)
+	suite.NoError(err)
+}
+
+func (suite *CatalogTestSuite) TestSavePartitionBatching() {
+	ctx := context.Background()
+	kv := kvmocks.NewMetaKv(suite.T())
+	catalog := NewCatalog(kv)
+
+	partitions := make([]*querypb.PartitionLoadInfo, 0, MetaOpsBatchSize+1)
+	for i := 0; i < MetaOpsBatchSize+1; i++ {
+		partitions = append(partitions, &querypb.PartitionLoadInfo{
+			CollectionID: 1,
+			PartitionID:  int64(i),
+		})
+	}
+
+	batchSizes := make([]int, 0)
+	kv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, kvs map[string]string) error {
+		batchSizes = append(batchSizes, len(kvs))
+		return nil
+	}).Twice()
+
+	err := catalog.SavePartition(ctx, partitions...)
+	suite.NoError(err)
+	suite.ElementsMatch([]int{MetaOpsBatchSize, 1}, batchSizes)
 }
 
 func (suite *CatalogTestSuite) TestGetPartitions() {
@@ -285,7 +328,7 @@ func (suite *CatalogTestSuite) TestCollectionTarget() {
 	suite.Equal(int64(3), targets[3].Version)
 
 	// test access meta store failed
-	mockStore := mocks.NewMetaKv(suite.T())
+	mockStore := kvmocks.NewMetaKv(suite.T())
 	mockErr := errors.New("failed to access etcd")
 	mockStore.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(mockErr)
 	mockStore.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockErr)

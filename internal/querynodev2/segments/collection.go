@@ -23,6 +23,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -89,11 +90,14 @@ func (m *collectionManager) Get(collectionID int64) *Collection {
 }
 
 func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error {
-	m.mut.Lock()
-	defer m.mut.Unlock()
-	if collection, ok := m.collections[collectionID]; ok {
+	m.mut.RLock()
+	collection, ok := m.collections[collectionID]
+	m.mut.RUnlock()
+
+	if ok {
 		if loadMeta.GetSchemaVersion() > collection.schemaVersion {
 			// the schema may be changed even the collection is loaded
+			collection.mu.Lock()
 			collection.schema.Store(schema)
 			collection.ccollection.UpdateSchema(schema, loadMeta.GetSchemaVersion())
 			collection.schemaVersion = loadMeta.GetSchemaVersion()
@@ -102,18 +106,41 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 				zap.Uint64("schemaVersion", loadMeta.GetSchemaVersion()),
 				zap.Any("schema", schema),
 			)
+			collection.mu.Unlock()
 		}
 		// Always update index meta to ensure newly indexed fields are visible
 		// for search plan creation (CollectionIndexMeta::HasField check).
 		if meta != nil {
-			if err := collection.ccollection.UpdateIndexMeta(meta); err != nil {
+			blob, err := proto.Marshal(meta)
+			if err != nil {
 				return err
+			}
+			indexHash, err := typeutil.Hash32Bytes(blob)
+			if err != nil {
+				return err
+			}
+
+			if indexHash != collection.indexHash.Load() {
+				collection.mu.Lock()
+				if err := collection.ccollection.UpdateIndexMeta(meta); err != nil {
+					collection.mu.Unlock()
+					return err
+				}
+				collection.indexHash.Store(indexHash)
+				collection.mu.Unlock()
 			}
 		}
 		collection.Ref(1)
 		return nil
 	}
 
+	m.mut.Lock()
+	defer m.mut.Unlock()
+	// Re-check after acquiring write lock; another goroutine may have inserted it.
+	if existing, ok := m.collections[collectionID]; ok {
+		existing.Ref(1)
+		return nil
+	}
 	log.Info("put new collection", zap.Int64("collectionID", collectionID), zap.Any("schema", schema))
 	collection, err := NewCollection(collectionID, schema, meta, loadMeta)
 	log.Info("new collection created", zap.Int64("collectionID", collectionID), zap.Any("schema", schema), zap.Error(err))
@@ -148,15 +175,15 @@ func (m *collectionManager) updateMetric() {
 }
 
 func (m *collectionManager) Ref(collectionID int64, count uint32) bool {
-	m.mut.Lock()
-	defer m.mut.Unlock()
-
-	if collection, ok := m.collections[collectionID]; ok {
-		collection.Ref(count)
-		return true
+	m.mut.RLock()
+	collection, ok := m.collections[collectionID]
+	m.mut.RUnlock()
+	if !ok {
+		return false
 	}
 
-	return false
+	collection.Ref(count)
+	return true
 }
 
 func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
@@ -203,6 +230,8 @@ type Collection struct {
 	schemaVersion uint64
 
 	refCount *atomic.Uint32
+
+	indexHash atomic.Uint32
 }
 
 // GetDBName returns the database name of collection.

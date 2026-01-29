@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync/atomic"
+	"time"
 
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -69,6 +70,11 @@ type ddNode struct {
 	dropMode   atomic.Value
 	msgHandler util.MsgHandler
 
+	// HandleCreateSegment stats
+	createSegCount  int64
+	createSegDurSum time.Duration
+	createSegDurMax time.Duration
+
 	// for recovery
 	growingSegInfo    map[typeutil.UniqueID]*datapb.SegmentInfo // segmentID
 	sealedSegInfo     map[typeutil.UniqueID]*datapb.SegmentInfo // segmentID
@@ -100,6 +106,8 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		log.Warn("type assertion failed for MsgStreamMsg", zap.String("channel", ddn.vChannelName), zap.String("name", reflect.TypeOf(in[0]).Name()))
 		return []Msg{}
 	}
+	msgCount := len(msMsg.TsMessages())
+	log.Info("ddNode operate", zap.String("channel", ddn.vChannelName), zap.Int("msgCount", msgCount))
 
 	if msMsg.IsCloseMsg() {
 		fgMsg := FlowGraphMsg{
@@ -235,16 +243,26 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			fgMsg.DeleteMessages = append(fgMsg.DeleteMessages, dmsg)
 		case commonpb.MsgType_CreateSegment:
 			createSegment := msg.(*adaptor.CreateSegmentMessageBody)
-			logger := log.With(
-				zap.String("vchannel", ddn.Name()),
-				zap.Int32("msgType", int32(msg.Type())),
-				zap.Uint64("timetick", createSegment.CreateSegmentMessage.TimeTick()),
-			)
-			logger.Info("receive create segment message")
+			t0 := time.Now()
 			if err := ddn.msgHandler.HandleCreateSegment(ddn.ctx, createSegment.CreateSegmentMessage); err != nil {
-				logger.Warn("handle create segment message failed", zap.Error(err))
-			} else {
-				logger.Info("handle create segment message success")
+				log.Warn("handle create segment message failed",
+					zap.String("vchannel", ddn.Name()),
+					zap.Uint64("timetick", createSegment.CreateSegmentMessage.TimeTick()),
+					zap.Error(err))
+			}
+			dur := time.Since(t0)
+			ddn.createSegCount++
+			ddn.createSegDurSum += dur
+			if dur > ddn.createSegDurMax {
+				ddn.createSegDurMax = dur
+			}
+			if ddn.createSegCount%1000 == 0 {
+				log.Info("HandleCreateSegment stats",
+					zap.String("vchannel", ddn.vChannelName),
+					zap.Int64("count", ddn.createSegCount),
+					zap.Duration("avg", ddn.createSegDurSum/time.Duration(ddn.createSegCount)),
+					zap.Duration("max", ddn.createSegDurMax),
+					zap.Duration("last", dur))
 			}
 		case commonpb.MsgType_FlushSegment:
 			flushMsg := msg.(*adaptor.FlushMessageBody)

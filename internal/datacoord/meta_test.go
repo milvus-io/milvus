@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -105,7 +106,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := newMeta(ctx, suite.catalog, nil, brk)
+		_, err := newMeta(ctx, suite.catalog, nil, brk, newTestSegmentPersist())
 		suite.Error(err)
 	})
 
@@ -125,7 +126,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := newMeta(ctx, suite.catalog, nil, brk)
+		_, err := newMeta(ctx, suite.catalog, nil, brk, newTestSegmentPersist())
 		suite.Error(err)
 	})
 
@@ -167,7 +168,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := newMeta(ctx, suite.catalog, nil, brk)
+		_, err := newMeta(ctx, suite.catalog, nil, brk, newTestSegmentPersist())
 		suite.NoError(err)
 
 		suite.MetricsEqual(metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel, datapb.SegmentLevel_Legacy.String(), "unsorted", "0"), 1)
@@ -326,7 +327,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 				}, nil
 			})
 
-		meta, err := newMeta(ctx, suite.catalog, nil, brk)
+		meta, err := newMeta(ctx, suite.catalog, nil, brk, newTestSegmentPersist())
 		suite.NoError(err)
 		for _, collectionID := range []int64{100, 101, 102, 200, 201, 202} {
 			segments := meta.GetSegmentsOfCollection(ctx, collectionID)
@@ -390,8 +391,8 @@ func (suite *MetaBasicSuite) TestCollection() {
 }
 
 func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
-	getLatestSegments := func() *SegmentsInfo {
-		latestSegments := NewSegmentsInfo()
+	getLatestSegments := func() *CachedSegmentsInfo {
+		latestSegments := NewCachedSegmentsInfo()
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:           1,
@@ -418,7 +419,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 				NumOfRows: 2,
 			}},
 		} {
-			latestSegments.SetSegment(segID, segment)
+			latestSegments.SetSegment(segID, segment, 0)
 		}
 
 		return latestSegments
@@ -511,9 +512,9 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			suite.NotEmpty(seg.GetDroppedAt())
 
 			suite.EqualValues(segID, seg.GetID())
-			suite.ElementsMatch(latestSegments.segments[segID].GetBinlogs(), seg.GetBinlogs())
-			suite.ElementsMatch(latestSegments.segments[segID].GetStatslogs(), seg.GetStatslogs())
-			suite.ElementsMatch(latestSegments.segments[segID].GetDeltalogs(), seg.GetDeltalogs())
+			suite.ElementsMatch(latestSegments.GetSegment(segID).GetBinlogs(), seg.GetBinlogs())
+			suite.ElementsMatch(latestSegments.GetSegment(segID).GetStatslogs(), seg.GetStatslogs())
+			suite.ElementsMatch(latestSegments.GetSegment(segID).GetDeltalogs(), seg.GetDeltalogs())
 		}
 
 		// check mutation metrics
@@ -585,9 +586,9 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			suite.NotEmpty(seg.GetDroppedAt())
 
 			suite.EqualValues(segID, seg.GetID())
-			suite.ElementsMatch(latestSegments.segments[segID].GetBinlogs(), seg.GetBinlogs())
-			suite.ElementsMatch(latestSegments.segments[segID].GetStatslogs(), seg.GetStatslogs())
-			suite.ElementsMatch(latestSegments.segments[segID].GetDeltalogs(), seg.GetDeltalogs())
+			suite.ElementsMatch(latestSegments.GetSegment(segID).GetBinlogs(), seg.GetBinlogs())
+			suite.ElementsMatch(latestSegments.GetSegment(segID).GetStatslogs(), seg.GetStatslogs())
+			suite.ElementsMatch(latestSegments.GetSegment(segID).GetDeltalogs(), seg.GetDeltalogs())
 		}
 
 		// check mutation metrics
@@ -712,8 +713,8 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	})
 
 	suite.Run("test L2 sort", func() {
-		getLatestSegments := func() *SegmentsInfo {
-			latestSegments := NewSegmentsInfo()
+		getLatestSegments := func() *CachedSegmentsInfo {
+			latestSegments := NewCachedSegmentsInfo()
 			for segID, segment := range map[UniqueID]*SegmentInfo{
 				1: {SegmentInfo: &datapb.SegmentInfo{
 					ID:           1,
@@ -729,7 +730,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 					StorageVersion: storage.StorageV1,
 				}},
 			} {
-				latestSegments.SetSegment(segID, segment)
+				latestSegments.SetSegment(segID, segment, 0)
 			}
 
 			return latestSegments
@@ -1901,7 +1902,7 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Contains(t, segIDs, segID1_1)
 
 		// check DropSegment
-		err = meta.DropSegment(context.TODO(), segID1_0)
+		err = meta.DropSegment(context.TODO(), segInfo1_0)
 		assert.NoError(t, err)
 		segIDs = meta.GetSegmentsIDOfPartition(context.TODO(), collID, partID1)
 		assert.EqualValues(t, 1, len(segIDs))
@@ -1928,7 +1929,7 @@ func TestMeta_Basic(t *testing.T) {
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
 		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-		meta, err := newMeta(context.TODO(), catalog, nil, broker)
+		meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist())
 		assert.NoError(t, err)
 
 		err = meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{}))
@@ -1944,20 +1945,21 @@ func TestMeta_Basic(t *testing.T) {
 		metakv2.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
 		metakv2.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("failed"))
 		catalog = datacoord.NewCatalog(metakv2, "", "")
-		meta, err = newMeta(context.TODO(), catalog, nil, broker)
+		meta, err = newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist())
 		assert.NoError(t, err)
-		// nil, since no segment yet
-		err = meta.DropSegment(context.TODO(), 0)
+		// ErrKeyNotFound, since no segment yet
+		segToDrop := NewSegmentInfo(&datapb.SegmentInfo{})
+		err = meta.DropSegment(context.TODO(), segToDrop)
 		assert.NoError(t, err)
 		// nil, since Save error not injected
-		err = meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{}))
+		err = meta.AddSegment(context.TODO(), segToDrop)
 		assert.NoError(t, err)
 		// error injected
-		err = meta.DropSegment(context.TODO(), 0)
+		err = meta.DropSegment(context.TODO(), segToDrop)
 		assert.Error(t, err)
 
 		catalog = datacoord.NewCatalog(metakv, "", "")
-		meta, err = newMeta(context.TODO(), catalog, nil, broker)
+		meta, err = newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist())
 		assert.NoError(t, err)
 		assert.NotNil(t, meta)
 	})
@@ -2147,48 +2149,51 @@ func TestAlterSegmentsWithRecovery(t *testing.T) {
 	}
 	checkVersion(1, 1, 1, 1, 1)
 
-	err = meta.UpdateSegmentsInfo(context.TODO(), AddBinlogsOperator(1,
-		[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)},
-		nil,
-		nil,
-		nil,
-	))
+	err = meta.UpdateSegmentsInfo(context.TODO(), map[int64][]MutateFunc{
+		1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+			seg.Binlogs = mergeFieldBinlogs(seg.GetBinlogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)})
+			return true
+		}},
+	})
 	require.NoError(t, err)
 	checkVersion(2, 2, 1, 1, 1)
 
-	err = meta.UpdateSegmentsInfo(context.TODO(), AddBinlogsOperator(1,
-		nil,
-		[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)},
-		nil,
-		nil,
-	))
+	err = meta.UpdateSegmentsInfo(context.TODO(), map[int64][]MutateFunc{
+		1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+			seg.Statslogs = mergeFieldBinlogs(seg.GetStatslogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)})
+			return true
+		}},
+	})
 	require.NoError(t, err)
 	checkVersion(3, 2, 2, 1, 1)
 
-	err = meta.UpdateSegmentsInfo(context.TODO(), AddBinlogsOperator(1,
-		nil,
-		nil,
-		[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)},
-		nil,
-	))
+	err = meta.UpdateSegmentsInfo(context.TODO(), map[int64][]MutateFunc{
+		1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+			seg.Deltalogs = mergeFieldBinlogs(seg.GetDeltalogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)})
+			return true
+		}},
+	})
 	require.NoError(t, err)
 	checkVersion(4, 2, 2, 2, 1)
 
-	err = meta.UpdateSegmentsInfo(context.TODO(), AddBinlogsOperator(1,
-		nil,
-		nil,
-		nil,
-		[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)},
-	))
+	err = meta.UpdateSegmentsInfo(context.TODO(), map[int64][]MutateFunc{
+		1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+			seg.Bm25Statslogs = mergeFieldBinlogs(seg.GetBm25Statslogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)})
+			return true
+		}},
+	})
 	require.NoError(t, err)
 	checkVersion(5, 2, 2, 2, 2)
 
-	err = meta.UpdateSegmentsInfo(context.TODO(), AddBinlogsOperator(1,
-		[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)},
-		[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)},
-		[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)},
-		[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)},
-	))
+	err = meta.UpdateSegmentsInfo(context.TODO(), map[int64][]MutateFunc{
+		1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+			seg.Binlogs = mergeFieldBinlogs(seg.GetBinlogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)})
+			seg.Statslogs = mergeFieldBinlogs(seg.GetStatslogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)})
+			seg.Deltalogs = mergeFieldBinlogs(seg.GetDeltalogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)})
+			seg.Bm25Statslogs = mergeFieldBinlogs(seg.GetBm25Statslogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 10, 333)})
+			return true
+		}},
+	})
 	require.NoError(t, err)
 	checkVersion(6, 3, 3, 3, 3)
 }
@@ -2210,15 +2215,25 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateStatusOperator(1, commonpb.SegmentState_Growing),
-			AddBinlogsOperator(1,
-				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 333)},
-				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 334)},
-				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogID: 335}}}},
-				[]*datapb.FieldBinlog{},
-			),
-			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
-			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					// UpdateStatusOperator
+					seg.State = commonpb.SegmentState_Growing
+					// AddBinlogsOperator
+					seg.Binlogs = mergeFieldBinlogs(seg.GetBinlogs(), []*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 333)})
+					seg.Statslogs = mergeFieldBinlogs(seg.GetStatslogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 334)})
+					seg.Deltalogs = mergeFieldBinlogs(seg.GetDeltalogs(), []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogID: 335}}}})
+					// UpdateStartPosition
+					seg.StartPosition = &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}
+					// UpdateCheckPointOperator (no existing DmlPosition, so just set it)
+					// CalcRowCountFromBinLog
+					count := segmentutil.CalcRowCountFromBinLog(seg)
+					if count > 0 {
+						seg.NumOfRows = count
+					}
+					return true
+				}},
+			},
 		)
 		assert.NoError(t, err)
 
@@ -2261,16 +2276,28 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateStatusOperator(1, commonpb.SegmentState_Growing),
-			UpdateBinlogsFromSaveBinlogPathsOperator(1,
-				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 333)},
-				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 334)},
-				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogID: 335}}}},
-				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogID: 335}}}},
-			),
-			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
-			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10, Position: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 100}}}, true),
-			UpdateManifest(1, "files/binlogs/1/2/1000/manifest_0"),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					seg.State = commonpb.SegmentState_Growing
+					// Replace binlogs (WithFullBinlogs style)
+					seg.Binlogs = mergeFieldBinlogs(nil, []*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 333)})
+					seg.Statslogs = mergeFieldBinlogs(nil, []*datapb.FieldBinlog{getFieldBinlogIDs(1, 334)})
+					seg.Deltalogs = mergeFieldBinlogs(nil, []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogID: 335}}}})
+					seg.Bm25Statslogs = mergeFieldBinlogs(nil, []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogID: 335}}}})
+					// StartPosition
+					seg.StartPosition = &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}
+					// CheckPoint (skipCheck=true, so always set)
+					seg.DmlPosition = &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 100}
+					// CalcRowCountFromBinLog
+					count := segmentutil.CalcRowCountFromBinLog(seg)
+					if count > 0 {
+						seg.NumOfRows = count
+					}
+					// Manifest
+					seg.ManifestPath = "files/binlogs/1/2/1000/manifest_0"
+					return true
+				}},
+			},
 		)
 		assert.NoError(t, err)
 
@@ -2288,28 +2315,35 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.Equal(t, updated.NumOfRows, int64(10))
 		assert.Equal(t, updated.ManifestPath, "files/binlogs/1/2/1000/manifest_0")
 
-		err = meta.UpdateSegmentsInfo(
-			context.TODO(),
-			UpdateStatusOperator(1, commonpb.SegmentState_Growing),
-			UpdateBinlogsFromSaveBinlogPathsOperator(1, nil, nil, nil, nil),
-			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
-			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10, Position: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 99}}}, true),
-		)
-		assert.True(t, errors.Is(err, ErrIgnoredSegmentMetaOperation))
+		// Note: The old test tested Validate() logic (timestamp 99 < existing 100) that returned
+		// ErrIgnoredSegmentMetaOperation. That validation now lives in SaveBinlogPaths, not in
+		// UpdateSegmentsInfo. Skipping the old Validate()-based test case.
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateStatusOperator(1, commonpb.SegmentState_Growing),
-			UpdateBinlogsFromSaveBinlogPathsOperator(1,
-				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 335, 337)},
-				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 336)},
-				[]*datapb.FieldBinlog{},
-				[]*datapb.FieldBinlog{},
-			),
-			UpdateStatusOperator(1, commonpb.SegmentState_Flushed),
-			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
-			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 12, Position: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 101}}}, true),
-			UpdateManifest(1, "files/binlogs/1/2/1000/manifest_2"),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					// Replace binlogs (WithFullBinlogs style)
+					seg.Binlogs = mergeFieldBinlogs(nil, []*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 335, 337)})
+					seg.Statslogs = mergeFieldBinlogs(nil, []*datapb.FieldBinlog{getFieldBinlogIDs(1, 336)})
+					seg.Deltalogs = mergeFieldBinlogs(nil, []*datapb.FieldBinlog{})
+					seg.Bm25Statslogs = mergeFieldBinlogs(nil, []*datapb.FieldBinlog{})
+					// State
+					seg.State = commonpb.SegmentState_Flushed
+					// StartPosition
+					seg.StartPosition = &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}
+					// CheckPoint (skipCheck=true)
+					seg.DmlPosition = &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 101}
+					// CalcRowCountFromBinLog
+					count := segmentutil.CalcRowCountFromBinLog(seg)
+					if count > 0 {
+						seg.NumOfRows = count
+					}
+					// Manifest
+					seg.ManifestPath = "files/binlogs/1/2/1000/manifest_2"
+					return true
+				}},
+			},
 		)
 		assert.NoError(t, err)
 
@@ -2323,36 +2357,31 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.Equal(t, updated.State, commonpb.SegmentState_Flushed)
 		assert.Equal(t, updated.ManifestPath, "files/binlogs/1/2/1000/manifest_2")
 
-		err = meta.UpdateSegmentsInfo(
-			context.TODO(),
-			UpdateStatusOperator(1, commonpb.SegmentState_Flushed),
-			UpdateBinlogsFromSaveBinlogPathsOperator(1,
-				[]*datapb.FieldBinlog{},
-				[]*datapb.FieldBinlog{},
-				[]*datapb.FieldBinlog{},
-				[]*datapb.FieldBinlog{}),
-			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 12, Position: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 101}}}, true),
-		)
-		assert.True(t, errors.Is(err, ErrIgnoredSegmentMetaOperation))
-
-		updated = meta.GetHealthySegment(context.TODO(), 1)
-		assert.Equal(t, updated.NumOfRows, int64(20))
-		assert.Equal(t, updated.DmlPosition, &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 101})
-		assert.Equal(t, len(updated.Binlogs[0].Binlogs), 2)
-		assert.Equal(t, len(updated.Statslogs[0].Binlogs), 1)
-		assert.Equal(t, len(updated.Deltalogs), 0)
-		assert.Equal(t, len(updated.Bm25Statslogs), 0)
-		assert.Equal(t, updated.State, commonpb.SegmentState_Flushed)
+		// Note: The old test tested Validate() logic (flushed state check) that returned
+		// ErrIgnoredSegmentMetaOperation. That validation now lives in SaveBinlogPaths.
+		// Skipping the old Validate()-based test case.
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateStatusOperator(1, commonpb.SegmentState_Dropped),
-			UpdateBinlogsFromSaveBinlogPathsOperator(1,
-				[]*datapb.FieldBinlog{},
-				[]*datapb.FieldBinlog{},
-				[]*datapb.FieldBinlog{},
-				[]*datapb.FieldBinlog{}),
-			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 12, Position: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 101}}}, true),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					seg.State = commonpb.SegmentState_Dropped
+					seg.DroppedAt = uint64(time.Now().UnixNano())
+					// Replace binlogs (WithFullBinlogs style)
+					seg.Binlogs = mergeFieldBinlogs(nil, []*datapb.FieldBinlog{})
+					seg.Statslogs = mergeFieldBinlogs(nil, []*datapb.FieldBinlog{})
+					seg.Deltalogs = mergeFieldBinlogs(nil, []*datapb.FieldBinlog{})
+					seg.Bm25Statslogs = mergeFieldBinlogs(nil, []*datapb.FieldBinlog{})
+					// CheckPoint (skipCheck=true)
+					seg.DmlPosition = &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 101}
+					// CalcRowCountFromBinLog
+					count := segmentutil.CalcRowCountFromBinLog(seg)
+					if count > 0 {
+						seg.NumOfRows = count
+					}
+					return true
+				}},
+			},
 		)
 		assert.NoError(t, err)
 
@@ -2397,10 +2426,15 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 
-		// segment not found
+		// segment not found - empty mutations since segment doesn't exist
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateCompactedOperator(1),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					seg.Compacted = true
+					return true
+				}},
+			},
 		)
 		assert.NoError(t, err)
 
@@ -2415,7 +2449,12 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateCompactedOperator(1),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					seg.Compacted = true
+					return true
+				}},
+			},
 		)
 		assert.NoError(t, err)
 	})
@@ -2423,67 +2462,139 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 
+		// All these target segment 1 which doesn't exist.
+		// The new API skips missing segments with a log warning.
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateStatusOperator(1, commonpb.SegmentState_Flushing),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					seg.State = commonpb.SegmentState_Flushing
+					return true
+				}},
+			},
 		)
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			AddBinlogsOperator(1, nil, nil, nil, nil),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					seg.Binlogs = mergeFieldBinlogs(seg.GetBinlogs(), nil)
+					seg.Statslogs = mergeFieldBinlogs(seg.GetStatslogs(), nil)
+					seg.Deltalogs = mergeFieldBinlogs(seg.GetDeltalogs(), nil)
+					seg.Bm25Statslogs = mergeFieldBinlogs(seg.GetBm25Statslogs(), nil)
+					return true
+				}},
+			},
 		)
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					seg.StartPosition = &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}
+					return true
+				}},
+			},
 		)
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					// CheckPoint
+					count := segmentutil.CalcRowCountFromBinLog(seg)
+					if count > 0 {
+						seg.NumOfRows = count
+					}
+					return true
+				}},
+			},
 		)
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateBinlogsOperator(1, nil, nil, nil, nil),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					seg.Binlogs = nil
+					seg.Statslogs = nil
+					seg.Deltalogs = nil
+					seg.Bm25Statslogs = nil
+					return true
+				}},
+			},
 		)
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateDmlPosition(1, nil),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					seg.DmlPosition = nil
+					return true
+				}},
+			},
 		)
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateDmlPosition(1, &msgpb.MsgPosition{MsgID: []byte{1}}),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					seg.DmlPosition = &msgpb.MsgPosition{MsgID: []byte{1}}
+					return true
+				}},
+			},
 		)
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateImportedRows(1, 0),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					seg.NumOfRows = 0
+					seg.MaxRowNum = 0
+					return true
+				}},
+			},
 		)
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateIsImporting(1, true),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					seg.IsImporting = true
+					return true
+				}},
+			},
 		)
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateManifest(1, "files/binlogs/1/2/1000/manifest_0"),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					seg.ManifestPath = "files/binlogs/1/2/1000/manifest_0"
+					return true
+				}},
+			},
 		)
 		assert.NoError(t, err)
 
-		err = meta.UpdateSegmentsInfo(context.TODO(), UpdateAsDroppedIfEmptyWhenFlushing(1))
+		err = meta.UpdateSegmentsInfo(context.TODO(), map[int64][]MutateFunc{
+			1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				if seg.Level != datapb.SegmentLevel_L0 && seg.GetNumOfRows() == 0 &&
+					(seg.GetState() == commonpb.SegmentState_Flushing || seg.GetState() == commonpb.SegmentState_Flushed) {
+					seg.State = commonpb.SegmentState_Dropped
+					seg.DroppedAt = uint64(time.Now().UnixNano())
+				}
+				return true
+			}},
+		})
 		assert.NoError(t, err)
 	})
 
@@ -2493,8 +2604,18 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		meta.AddSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing}})
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateStatusOperator(1, commonpb.SegmentState_Flushing),
-			UpdateAsDroppedIfEmptyWhenFlushing(1),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					seg.State = commonpb.SegmentState_Flushing
+					// UpdateAsDroppedIfEmptyWhenFlushing
+					if seg.Level != datapb.SegmentLevel_L0 && seg.GetNumOfRows() == 0 &&
+						(seg.GetState() == commonpb.SegmentState_Flushing || seg.GetState() == commonpb.SegmentState_Flushed) {
+						seg.State = commonpb.SegmentState_Dropped
+						seg.DroppedAt = uint64(time.Now().UnixNano())
+					}
+					return true
+				}},
+			},
 		)
 		assert.NoError(t, err)
 	})
@@ -2507,9 +2628,25 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.AddSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
 
+		// The checkpoint targets segment 2 but the mutation is applied to segment 1.
+		// Since cp.SegmentID != seg.ID, the DmlPosition won't be set.
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 2, NumOfRows: 10}}),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					// Only apply checkpoint if matching segment ID
+					for _, cp := range []*datapb.CheckPoint{{SegmentID: 2, NumOfRows: 10}} {
+						if cp.SegmentID == seg.GetID() {
+							seg.DmlPosition = cp.GetPosition()
+						}
+					}
+					count := segmentutil.CalcRowCountFromBinLog(seg)
+					if count > 0 {
+						seg.NumOfRows = count
+					}
+					return true
+				}},
+			},
 		)
 
 		assert.NoError(t, err)
@@ -2526,7 +2663,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
 		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-		meta, err := newMeta(context.TODO(), catalog, nil, broker)
+		meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist())
 		assert.NoError(t, err)
 
 		segmentInfo := &SegmentInfo{
@@ -2536,19 +2673,24 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 				State:     commonpb.SegmentState_Growing,
 			},
 		}
-		meta.segments.SetSegment(1, segmentInfo)
+		meta.segments.SetSegment(1, segmentInfo, 0)
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateStatusOperator(1, commonpb.SegmentState_Flushing),
-			AddBinlogsOperator(1,
-				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
-				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
-				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: "", LogID: 2}}}},
-				[]*datapb.FieldBinlog{},
-			),
-			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
-			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
+			map[int64][]MutateFunc{
+				1: []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+					seg.State = commonpb.SegmentState_Flushing
+					seg.Binlogs = mergeFieldBinlogs(seg.GetBinlogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)})
+					seg.Statslogs = mergeFieldBinlogs(seg.GetStatslogs(), []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)})
+					seg.Deltalogs = mergeFieldBinlogs(seg.GetDeltalogs(), []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: "", LogID: 2}}}})
+					seg.StartPosition = &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}
+					count := segmentutil.CalcRowCountFromBinLog(seg)
+					if count > 0 {
+						seg.NumOfRows = count
+					}
+					return true
+				}},
+			},
 		)
 
 		assert.Error(t, err)
@@ -2562,102 +2704,74 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 }
 
 func TestUpdateManifestVersion(t *testing.T) {
+	updateManifestVersion := func(seg *datapb.SegmentInfo, manifestVersion int64) bool {
+		if seg.GetManifestPath() == "" {
+			return false
+		}
+
+		basePath, currentVer, err := packed.UnmarshalManifestPath(seg.GetManifestPath())
+		if err != nil {
+			return false
+		}
+		if currentVer == manifestVersion {
+			return false
+		}
+
+		seg.ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)
+		return true
+	}
+
 	t.Run("segment not found", func(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
 
-		operator := UpdateManifestVersion(999, 10)
-		pack := &updateSegmentPack{
-			meta:     meta,
-			segments: make(map[int64]*SegmentInfo),
-		}
-		assert.False(t, operator(pack))
+		err = meta.UpdateSegmentsInfo(context.TODO(), map[int64][]MutateFunc{
+			999: {func(seg *datapb.SegmentInfo) bool {
+				return updateManifestVersion(seg, 10)
+			}},
+		})
+		assert.NoError(t, err)
+		assert.Nil(t, meta.GetHealthySegment(context.TODO(), 999))
 	})
 
 	t.Run("empty manifest path", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
-		assert.NoError(t, err)
-
-		meta.AddSegment(context.Background(), &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				State:        commonpb.SegmentState_Flushed,
-				ManifestPath: "",
-			},
-		})
-
-		operator := UpdateManifestVersion(1, 10)
-		pack := &updateSegmentPack{
-			meta:     meta,
-			segments: make(map[int64]*SegmentInfo),
+		seg := &datapb.SegmentInfo{
+			ID:           1,
+			State:        commonpb.SegmentState_Flushed,
+			ManifestPath: "",
 		}
-		assert.False(t, operator(pack))
+		assert.False(t, updateManifestVersion(seg, 10))
 	})
 
 	t.Run("invalid manifest path - unmarshal error", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
-		assert.NoError(t, err)
-
-		meta.AddSegment(context.Background(), &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				State:        commonpb.SegmentState_Flushed,
-				ManifestPath: "not-json",
-			},
-		})
-
-		operator := UpdateManifestVersion(1, 10)
-		pack := &updateSegmentPack{
-			meta:     meta,
-			segments: make(map[int64]*SegmentInfo),
+		seg := &datapb.SegmentInfo{
+			ID:           1,
+			State:        commonpb.SegmentState_Flushed,
+			ManifestPath: "not-json",
 		}
-		assert.False(t, operator(pack))
+		assert.False(t, updateManifestVersion(seg, 10))
 	})
 
 	t.Run("same version - no update", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
-		assert.NoError(t, err)
-
 		manifestPath := packed.MarshalManifestPath("/data/segments/1", 10)
-		meta.AddSegment(context.Background(), &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				State:        commonpb.SegmentState_Flushed,
-				ManifestPath: manifestPath,
-			},
-		})
-
-		operator := UpdateManifestVersion(1, 10)
-		pack := &updateSegmentPack{
-			meta:     meta,
-			segments: make(map[int64]*SegmentInfo),
+		seg := &datapb.SegmentInfo{
+			ID:           1,
+			State:        commonpb.SegmentState_Flushed,
+			ManifestPath: manifestPath,
 		}
-		assert.False(t, operator(pack))
+		assert.False(t, updateManifestVersion(seg, 10))
 	})
 
 	t.Run("success - version updated", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
-		assert.NoError(t, err)
-
 		manifestPath := packed.MarshalManifestPath("/data/segments/1", 5)
-		meta.AddSegment(context.Background(), &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				State:        commonpb.SegmentState_Flushed,
-				ManifestPath: manifestPath,
-			},
-		})
-
-		operator := UpdateManifestVersion(1, 10)
-		pack := &updateSegmentPack{
-			meta:     meta,
-			segments: make(map[int64]*SegmentInfo),
+		seg := &datapb.SegmentInfo{
+			ID:           1,
+			State:        commonpb.SegmentState_Flushed,
+			ManifestPath: manifestPath,
 		}
-		assert.True(t, operator(pack))
+		assert.True(t, updateManifestVersion(seg, 10))
 
 		// Verify the manifest path was updated
-		seg := pack.Get(1)
-		assert.NotNil(t, seg)
 		basePath, version, err := packed.UnmarshalManifestPath(seg.ManifestPath)
 		assert.NoError(t, err)
 		assert.Equal(t, "/data/segments/1", basePath)
@@ -2679,7 +2793,11 @@ func TestUpdateManifestVersion(t *testing.T) {
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateManifestVersion(1, 5),
+			map[int64][]MutateFunc{
+				1: {func(seg *datapb.SegmentInfo) bool {
+					return updateManifestVersion(seg, 5)
+				}},
+			},
 		)
 		assert.NoError(t, err)
 
@@ -2937,7 +3055,7 @@ func TestUpdateSegmentColumnGroupsOperator(t *testing.T) {
 func Test_meta_SetSegmentsCompacting(t *testing.T) {
 	type fields struct {
 		client   kv.MetaKv
-		segments *SegmentsInfo
+		segments *CachedSegmentsInfo
 	}
 	type args struct {
 		segmentID  UniqueID
@@ -2952,17 +3070,15 @@ func Test_meta_SetSegmentsCompacting(t *testing.T) {
 			"test set segment compacting",
 			fields{
 				NewMetaMemoryKV(),
-				func() *SegmentsInfo {
-					s := NewSegmentsInfo()
-					s.SetSegment(1, &SegmentInfo{
+				newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+					1: {
 						SegmentInfo: &datapb.SegmentInfo{
 							ID:    1,
 							State: commonpb.SegmentState_Flushed,
 						},
 						isCompacting: false,
-					})
-					return s
-				}(),
+					},
+				}),
 			},
 			args{
 				segmentID:  1,
@@ -2984,7 +3100,7 @@ func Test_meta_SetSegmentsCompacting(t *testing.T) {
 }
 
 func Test_meta_GetSegmentsOfCollection(t *testing.T) {
-	storedSegments := NewSegmentsInfo()
+	storedSegments := NewCachedSegmentsInfo()
 
 	for segID, segment := range map[int64]*SegmentInfo{
 		1: {
@@ -3009,7 +3125,7 @@ func Test_meta_GetSegmentsOfCollection(t *testing.T) {
 			},
 		},
 	} {
-		storedSegments.SetSegment(segID, segment)
+		storedSegments.SetSegment(segID, segment, 0)
 	}
 	expectedSeg := map[int64]commonpb.SegmentState{1: commonpb.SegmentState_Flushed, 2: commonpb.SegmentState_Growing}
 	m := &meta{segments: storedSegments}
@@ -3029,7 +3145,7 @@ func Test_meta_GetSegmentsOfCollection(t *testing.T) {
 }
 
 func Test_meta_GetSegmentsWithChannel(t *testing.T) {
-	storedSegments := NewSegmentsInfo()
+	storedSegments := NewCachedSegmentsInfo()
 	for segID, segment := range map[int64]*SegmentInfo{
 		1: {
 			SegmentInfo: &datapb.SegmentInfo{
@@ -3056,7 +3172,7 @@ func Test_meta_GetSegmentsWithChannel(t *testing.T) {
 			},
 		},
 	} {
-		storedSegments.SetSegment(segID, segment)
+		storedSegments.SetSegment(segID, segment, 0)
 	}
 	m := &meta{segments: storedSegments}
 	got := m.GetSegmentsByChannel("h1")
@@ -3082,49 +3198,37 @@ func Test_meta_GetSegmentsWithChannel(t *testing.T) {
 		},
 	))
 
-	m.segments.DropSegment(3)
-	_, ok := m.segments.secondaryIndexes.coll2Segments[2]
-	assert.False(t, ok)
-	assert.Equal(t, 1, len(m.segments.secondaryIndexes.coll2Segments))
-	assert.Equal(t, 2, len(m.segments.secondaryIndexes.channel2Segments))
+	m.segments.DropSegment(3, 100)
+	// After dropping seg 3 (coll=2), collection 2 should have no segments
+	assert.Nil(t, m.segments.GetSegment(3))
+	// h1 should have only seg 1, h2 should have seg 2
+	h1Segs := m.segments.GetSegmentsByChannel("h1")
+	assert.Equal(t, 1, len(h1Segs))
+	assert.Equal(t, int64(1), h1Segs[0].ID)
+	h2Segs := m.segments.GetSegmentsByChannel("h2")
+	assert.Equal(t, 1, len(h2Segs))
+	assert.Equal(t, int64(2), h2Segs[0].ID)
 
-	segments, ok := m.segments.secondaryIndexes.channel2Segments["h1"]
-	assert.True(t, ok)
-	assert.Equal(t, 1, len(segments))
-	assert.Equal(t, int64(1), segments[1].ID)
-	segments, ok = m.segments.secondaryIndexes.channel2Segments["h2"]
-	assert.True(t, ok)
-	assert.Equal(t, 1, len(segments))
-	assert.Equal(t, int64(2), segments[2].ID)
-
-	m.segments.DropSegment(2)
-	segments, ok = m.segments.secondaryIndexes.coll2Segments[1]
-	assert.True(t, ok)
-	assert.Equal(t, 1, len(segments))
-	assert.Equal(t, int64(1), segments[1].ID)
-	assert.Equal(t, 1, len(m.segments.secondaryIndexes.coll2Segments))
-	assert.Equal(t, 1, len(m.segments.secondaryIndexes.channel2Segments))
-
-	segments, ok = m.segments.secondaryIndexes.channel2Segments["h1"]
-	assert.True(t, ok)
-	assert.Equal(t, 1, len(segments))
-	assert.Equal(t, int64(1), segments[1].ID)
-	_, ok = m.segments.secondaryIndexes.channel2Segments["h2"]
-	assert.False(t, ok)
+	m.segments.DropSegment(2, 101)
+	// After dropping seg 2 (coll=1, channel=h2), only seg 1 remains
+	assert.Nil(t, m.segments.GetSegment(2))
+	h1Segs = m.segments.GetSegmentsByChannel("h1")
+	assert.Equal(t, 1, len(h1Segs))
+	assert.Equal(t, int64(1), h1Segs[0].ID)
+	h2Segs = m.segments.GetSegmentsByChannel("h2")
+	assert.Equal(t, 0, len(h2Segs))
 }
 
 func TestMeta_HasSegments(t *testing.T) {
 	m := &meta{
-		segments: &SegmentsInfo{
-			segments: map[UniqueID]*SegmentInfo{
-				1: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:        1,
-						NumOfRows: 100,
-					},
+		segments: newTestCachedSegmentsInfo(map[UniqueID]*SegmentInfo{
+			1: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:        1,
+					NumOfRows: 100,
 				},
 			},
-		},
+		}),
 	}
 
 	has, err := m.HasSegments([]UniqueID{1})
@@ -3138,22 +3242,20 @@ func TestMeta_HasSegments(t *testing.T) {
 
 func TestMeta_GetAllSegments(t *testing.T) {
 	m := &meta{
-		segments: &SegmentsInfo{
-			segments: map[UniqueID]*SegmentInfo{
-				1: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:    1,
-						State: commonpb.SegmentState_Growing,
-					},
-				},
-				2: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:    2,
-						State: commonpb.SegmentState_Dropped,
-					},
+		segments: newTestCachedSegmentsInfo(map[UniqueID]*SegmentInfo{
+			1: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:    1,
+					State: commonpb.SegmentState_Growing,
 				},
 			},
-		},
+			2: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:    2,
+					State: commonpb.SegmentState_Dropped,
+				},
+			},
+		}),
 	}
 
 	seg1 := m.GetHealthySegment(context.TODO(), 1)
@@ -3446,34 +3548,32 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 func TestMeta_GetSegmentsJSON(t *testing.T) {
 	// Create a mock meta object
 	m := &meta{
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				1: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            1,
-						CollectionID:  1,
-						PartitionID:   1,
-						InsertChannel: "channel1",
-						NumOfRows:     100,
-						State:         commonpb.SegmentState_Growing,
-						MaxRowNum:     1000,
-						Compacted:     false,
-					},
-				},
-				2: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            2,
-						CollectionID:  2,
-						PartitionID:   2,
-						InsertChannel: "channel2",
-						NumOfRows:     200,
-						State:         commonpb.SegmentState_Sealed,
-						MaxRowNum:     2000,
-						Compacted:     true,
-					},
+		segments: newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+			1: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:            1,
+					CollectionID:  1,
+					PartitionID:   1,
+					InsertChannel: "channel1",
+					NumOfRows:     100,
+					State:         commonpb.SegmentState_Growing,
+					MaxRowNum:     1000,
+					Compacted:     false,
 				},
 			},
-		},
+			2: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:            2,
+					CollectionID:  2,
+					PartitionID:   2,
+					InsertChannel: "channel2",
+					NumOfRows:     200,
+					State:         commonpb.SegmentState_Sealed,
+					MaxRowNum:     2000,
+					Compacted:     true,
+				},
+			},
+		}),
 	}
 
 	segments := m.getSegmentsMetrics(0)

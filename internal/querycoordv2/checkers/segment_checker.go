@@ -510,8 +510,12 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		}
 
 		rwNodes := replica.GetChannelRWNodes(shard)
+		segmentRWNodes := utils.GetSegmentRWNodes(replica)
+		if len(rwNodes) > 0 {
+			rwNodes = lo.Intersect(rwNodes, segmentRWNodes)
+		}
 		if len(rwNodes) == 0 {
-			rwNodes = replica.GetRWNodes()
+			rwNodes = segmentRWNodes
 		}
 
 		segmentInfos := lo.Map(segments, func(s *datapb.SegmentInfo, _ int) *meta.Segment {

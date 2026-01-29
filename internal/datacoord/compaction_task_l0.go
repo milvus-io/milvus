@@ -528,25 +528,34 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 		return err
 	}
 
-	var operators []UpdateOperator
+	mutations := map[int64][]MutateFunc{}
 	for _, seg := range outputSegs {
-		if seg.GetManifest() != "" {
-			operators = append(operators, UpdateManifest(seg.GetSegmentID(), seg.GetManifest()))
-		}
-		if len(seg.GetDeltalogs()) > 0 {
-			operators = append(operators, AddBinlogsOperator(seg.GetSegmentID(), nil, nil, seg.GetDeltalogs(), nil))
-		}
+		deltalogs := seg.GetDeltalogs() // capture
+		manifest := seg.GetManifest()   // capture
+		mutations[seg.GetSegmentID()] = []MutateFunc{func(s *datapb.SegmentInfo) bool {
+			if manifest != "" {
+				s.ManifestPath = manifest
+			} else {
+				s.Deltalogs = mergeFieldBinlogs(s.GetDeltalogs(), deltalogs)
+			}
+			return true
+		}}
 	}
 
 	for _, segID := range t.GetTaskProto().InputSegments {
-		operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped), UpdateCompactedOperator(segID))
+		mutations[segID] = []MutateFunc{func(s *datapb.SegmentInfo) bool {
+			s.State = commonpb.SegmentState_Dropped
+			s.DroppedAt = uint64(time.Now().UnixNano())
+			s.Compacted = true
+			return true
+		}}
 	}
 
 	log.Info("meta update: update segments info for level zero compaction",
 		zap.Int64("planID", t.GetTaskProto().GetPlanID()),
 	)
 
-	return t.meta.UpdateSegmentsInfo(context.TODO(), operators...)
+	return t.meta.UpdateSegmentsInfo(context.TODO(), mutations)
 }
 
 func (t *l0CompactionTask) GetSlotUsage() int64 {

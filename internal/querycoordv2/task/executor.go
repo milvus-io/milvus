@@ -163,6 +163,7 @@ func (ex *Executor) Execute(task Task, step int) bool {
 		}
 	} else {
 		cur := ex.nonChannelTaskNum.Inc()
+		log.Info("non-channel task accepted", zap.Int32("current", cur), zap.Int32("cap", ex.GetNonChannelTaskCap()))
 		if cur > ex.GetNonChannelTaskCap() {
 			ex.nonChannelTaskNum.Dec()
 			ex.executingTasks.Remove(task.Index())
@@ -293,7 +294,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	}
 
 	startTs := time.Now()
-	log.Info("load segments...")
+	log.Info("[xxx] load segments...")
 	status, err := ex.cluster.LoadSegments(task.Context(), view.Node, req)
 	err = merr.CheckRPCCall(status, err)
 	if err != nil {
@@ -302,7 +303,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	}
 
 	elapsed := time.Since(startTs)
-	log.Info("load segments done", zap.Duration("elapsed", elapsed))
+	log.Info("[xxx] load segments done", zap.Duration("elapsed", elapsed))
 
 	return nil
 }

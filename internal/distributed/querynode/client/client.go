@@ -19,8 +19,10 @@ package grpcquerynodeclient
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -156,11 +158,15 @@ func (c *Client) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannel
 
 // LoadSegments loads the segments to search.
 func (c *Client) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+	t1 := time.Now()
 	req = typeutil.Clone(req)
+	log.Info("[xxx] client laod segments", zap.Duration("time", t1.Sub(time.Now())), zap.Any("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })))
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(c.nodeID))
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*commonpb.Status, error) {
+
+		log.Info("[xxx] 22 client load segments", zap.Duration("time", time.Now().Sub(t1)), zap.Any("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })))
 		return client.LoadSegments(ctx, req)
 	})
 }
