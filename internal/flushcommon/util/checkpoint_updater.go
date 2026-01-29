@@ -103,13 +103,6 @@ func (ccu *ChannelCheckpointUpdater) Start() {
 	}
 }
 
-func (ccu *ChannelCheckpointUpdater) getTask(channel string) (*channelCPUpdateTask, bool) {
-	ccu.mu.RLock()
-	defer ccu.mu.RUnlock()
-	task, ok := ccu.tasks[channel]
-	return task, ok
-}
-
 func (ccu *ChannelCheckpointUpdater) trigger() {
 	select {
 	case ccu.notifyChan <- struct{}{}:
@@ -187,10 +180,15 @@ func (ccu *ChannelCheckpointUpdater) AddTask(channelPos *msgpb.MsgPosition, flus
 		defer ccu.trigger()
 	}
 	channel := channelPos.GetChannelName()
-	task, ok := ccu.getTask(channelPos.GetChannelName())
+
+	// Use full lock to avoid TOCTOU race between getTask check and task addition.
+	// Without this, a task could be deleted by updateCheckpoints between the check
+	// and the add, causing duplicate callbacks.
+	ccu.mu.Lock()
+	defer ccu.mu.Unlock()
+
+	task, ok := ccu.tasks[channel]
 	if !ok {
-		ccu.mu.Lock()
-		defer ccu.mu.Unlock()
 		ccu.tasks[channel] = &channelCPUpdateTask{
 			pos:      channelPos,
 			callback: callback,
@@ -208,8 +206,6 @@ func (ccu *ChannelCheckpointUpdater) AddTask(channelPos *msgpb.MsgPosition, flus
 	// 1. `task.pos.GetTimestamp() < channelPos.GetTimestamp()`: position updated, update task position
 	// 2. `flush && !task.flush`: position not being updated, but flush is triggered, update task flush flag
 	if task.pos.GetTimestamp() < channelPos.GetTimestamp() || (flush && !task.flush) {
-		ccu.mu.Lock()
-		defer ccu.mu.Unlock()
 		ccu.tasks[channel] = &channelCPUpdateTask{
 			pos:      max(channelPos, task.pos),
 			callback: callback,
