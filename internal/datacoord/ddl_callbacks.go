@@ -37,6 +37,7 @@ func RegisterDDLCallbacks(s *Server) {
 	ddlCallback.registerIndexCallbacks()
 	registry.RegisterFlushAllV2AckCallback(ddlCallback.flushAllV2AckCallback)
 	ddlCallback.registerSnapshotCallbacks()
+	ddlCallback.registerExternalCollectionCallbacks()
 }
 
 type DDLCallbacks struct {
@@ -53,6 +54,10 @@ func (c *DDLCallbacks) registerSnapshotCallbacks() {
 	registry.RegisterCreateSnapshotV2AckCallback(c.createSnapshotV2AckCallback)
 	registry.RegisterDropSnapshotV2AckCallback(c.dropSnapshotV2AckCallback)
 	registry.RegisterRestoreSnapshotV2AckCallback(c.restoreSnapshotV2AckCallback)
+}
+
+func (c *DDLCallbacks) registerExternalCollectionCallbacks() {
+	registry.RegisterRefreshExternalCollectionV2AckCallback(c.refreshExternalCollectionV2AckCallback)
 }
 
 // startBroadcastWithCollectionID starts a broadcast with collection name.

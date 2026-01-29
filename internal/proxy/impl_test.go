@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -2394,4 +2395,367 @@ func TestProxy_AlterCollectionField_ExternalCollection(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Error(t, merr.Error(resp))
 	assert.Contains(t, resp.GetReason(), "alter field operation is not supported for external collection")
+}
+
+func TestProxy_RefreshExternalCollection(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	t.Run("not healthy", func(t *testing.T) {
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		resp, err := node.RefreshExternalCollection(ctx, &milvuspb.RefreshExternalCollectionRequest{
+			CollectionName: "test_collection",
+		})
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(resp.GetStatus()))
+	})
+
+	t.Run("invalid collection name", func(t *testing.T) {
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := node.RefreshExternalCollection(ctx, &milvuspb.RefreshExternalCollectionRequest{
+			CollectionName: "$invalid$",
+		})
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(resp.GetStatus()))
+	})
+
+	t.Run("collection not found", func(t *testing.T) {
+		cacheBak := globalMetaCache
+		defer func() { globalMetaCache = cacheBak }()
+
+		mockCache := NewMockCache(t)
+		globalMetaCache = mockCache
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, "test_collection", mock.Anything).
+			Return(nil, errors.New("collection not found"))
+
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := node.RefreshExternalCollection(ctx, &milvuspb.RefreshExternalCollectionRequest{
+			CollectionName: "test_collection",
+		})
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(resp.GetStatus()))
+	})
+
+	t.Run("not external collection", func(t *testing.T) {
+		cacheBak := globalMetaCache
+		defer func() { globalMetaCache = cacheBak }()
+
+		mockCache := NewMockCache(t)
+		globalMetaCache = mockCache
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, "test_collection", mock.Anything).
+			Return(&collectionInfo{
+				collID: 1,
+				schema: &schemaInfo{
+					CollectionSchema: &schemapb.CollectionSchema{
+						Name: "test_collection",
+						// Not an external collection (no external_table property)
+					},
+				},
+			}, nil)
+
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := node.RefreshExternalCollection(ctx, &milvuspb.RefreshExternalCollectionRequest{
+			CollectionName: "test_collection",
+		})
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(resp.GetStatus()))
+		assert.Contains(t, resp.GetStatus().GetReason(), "not an external collection")
+	})
+
+	t.Run("success", func(t *testing.T) {
+		cacheBak := globalMetaCache
+		defer func() { globalMetaCache = cacheBak }()
+
+		mockCache := NewMockCache(t)
+		globalMetaCache = mockCache
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, "test_collection", mock.Anything).
+			Return(&collectionInfo{
+				collID: 1,
+				schema: &schemaInfo{
+					CollectionSchema: &schemapb.CollectionSchema{
+						Name: "test_collection",
+						Fields: []*schemapb.FieldSchema{
+							{
+								FieldID:       1,
+								Name:          "id",
+								ExternalField: "source.id", // External field marker
+							},
+						},
+					},
+				},
+			}, nil)
+
+		node := &Proxy{
+			mixCoord: NewMixCoordMock(),
+		}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := node.RefreshExternalCollection(ctx, &milvuspb.RefreshExternalCollectionRequest{
+			CollectionName: "test_collection",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int64(1), resp.GetJobId())
+	})
+}
+
+func TestProxy_GetRefreshExternalCollectionProgress(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	t.Run("not healthy", func(t *testing.T) {
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		resp, err := node.GetRefreshExternalCollectionProgress(ctx, &milvuspb.GetRefreshExternalCollectionProgressRequest{
+			JobId: 1,
+		})
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(resp.GetStatus()))
+	})
+
+	t.Run("invalid job id", func(t *testing.T) {
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := node.GetRefreshExternalCollectionProgress(ctx, &milvuspb.GetRefreshExternalCollectionProgressRequest{
+			JobId: 0, // Invalid: job_id is required
+		})
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(resp.GetStatus()))
+		assert.Contains(t, resp.GetStatus().GetReason(), "job_id is required")
+	})
+
+	t.Run("success", func(t *testing.T) {
+		node := &Proxy{
+			mixCoord: NewMixCoordMock(),
+		}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := node.GetRefreshExternalCollectionProgress(ctx, &milvuspb.GetRefreshExternalCollectionProgressRequest{
+			JobId: 1,
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.NotNil(t, resp.GetJobInfo())
+		assert.Equal(t, int64(1), resp.GetJobInfo().GetJobId())
+		assert.Equal(t, milvuspb.RefreshExternalCollectionState_RefreshCompleted, resp.GetJobInfo().GetState())
+	})
+}
+
+func TestProxy_ListRefreshExternalCollectionJobs(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	t.Run("not healthy", func(t *testing.T) {
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		resp, err := node.ListRefreshExternalCollectionJobs(ctx, &milvuspb.ListRefreshExternalCollectionJobsRequest{
+			CollectionName: "test_collection",
+		})
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(resp.GetStatus()))
+	})
+
+	t.Run("invalid collection name", func(t *testing.T) {
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := node.ListRefreshExternalCollectionJobs(ctx, &milvuspb.ListRefreshExternalCollectionJobsRequest{
+			CollectionName: "$invalid$",
+		})
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(resp.GetStatus()))
+	})
+
+	t.Run("collection not found", func(t *testing.T) {
+		cacheBak := globalMetaCache
+		defer func() { globalMetaCache = cacheBak }()
+
+		mockCache := NewMockCache(t)
+		globalMetaCache = mockCache
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, "test_collection", mock.Anything).
+			Return(nil, errors.New("collection not found"))
+
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := node.ListRefreshExternalCollectionJobs(ctx, &milvuspb.ListRefreshExternalCollectionJobsRequest{
+			CollectionName: "test_collection",
+		})
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(resp.GetStatus()))
+	})
+
+	t.Run("not external collection", func(t *testing.T) {
+		cacheBak := globalMetaCache
+		defer func() { globalMetaCache = cacheBak }()
+
+		mockCache := NewMockCache(t)
+		globalMetaCache = mockCache
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, "test_collection", mock.Anything).
+			Return(&collectionInfo{
+				collID: 1,
+				schema: &schemaInfo{
+					CollectionSchema: &schemapb.CollectionSchema{
+						Name: "test_collection",
+					},
+				},
+			}, nil)
+
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := node.ListRefreshExternalCollectionJobs(ctx, &milvuspb.ListRefreshExternalCollectionJobsRequest{
+			CollectionName: "test_collection",
+		})
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(resp.GetStatus()))
+		assert.Contains(t, resp.GetStatus().GetReason(), "not an external collection")
+	})
+
+	t.Run("success", func(t *testing.T) {
+		cacheBak := globalMetaCache
+		defer func() { globalMetaCache = cacheBak }()
+
+		mockCache := NewMockCache(t)
+		globalMetaCache = mockCache
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, "test_collection", mock.Anything).
+			Return(&collectionInfo{
+				collID: 1,
+				schema: &schemaInfo{
+					CollectionSchema: &schemapb.CollectionSchema{
+						Name: "test_collection",
+						Fields: []*schemapb.FieldSchema{
+							{
+								FieldID:       1,
+								Name:          "id",
+								ExternalField: "source.id", // External field marker
+							},
+						},
+					},
+				},
+			}, nil)
+
+		node := &Proxy{
+			mixCoord: NewMixCoordMock(),
+		}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := node.ListRefreshExternalCollectionJobs(ctx, &milvuspb.ListRefreshExternalCollectionJobsRequest{
+			CollectionName: "test_collection",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Len(t, resp.GetJobs(), 1)
+		assert.Equal(t, int64(1), resp.GetJobs()[0].GetJobId())
+	})
+}
+
+func TestConvertJobStateToExternalCollectionState(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    indexpb.JobState
+		expected milvuspb.RefreshExternalCollectionState
+	}{
+		{
+			name:     "JobStateInit",
+			input:    indexpb.JobState_JobStateInit,
+			expected: milvuspb.RefreshExternalCollectionState_RefreshPending,
+		},
+		{
+			name:     "JobStateInProgress",
+			input:    indexpb.JobState_JobStateInProgress,
+			expected: milvuspb.RefreshExternalCollectionState_RefreshInProgress,
+		},
+		{
+			name:     "JobStateFinished",
+			input:    indexpb.JobState_JobStateFinished,
+			expected: milvuspb.RefreshExternalCollectionState_RefreshCompleted,
+		},
+		{
+			name:     "JobStateFailed",
+			input:    indexpb.JobState_JobStateFailed,
+			expected: milvuspb.RefreshExternalCollectionState_RefreshFailed,
+		},
+		{
+			name:     "JobStateRetry",
+			input:    indexpb.JobState_JobStateRetry,
+			expected: milvuspb.RefreshExternalCollectionState_RefreshInProgress,
+		},
+		{
+			name:     "JobStateNone_default",
+			input:    indexpb.JobState_JobStateNone,
+			expected: milvuspb.RefreshExternalCollectionState_RefreshPending,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := convertJobStateToExternalCollectionState(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestConvertToExternalCollectionJobInfo(t *testing.T) {
+	t.Run("nil input", func(t *testing.T) {
+		result := convertToExternalCollectionJobInfo(nil)
+		assert.Nil(t, result)
+	})
+
+	t.Run("valid input", func(t *testing.T) {
+		input := &datapb.ExternalCollectionRefreshJob{
+			JobId:          123,
+			CollectionName: "test_collection",
+			State:          indexpb.JobState_JobStateFinished,
+			Progress:       100,
+			FailReason:     "",
+			ExternalSource: "s3://bucket/path",
+			StartTime:      1000,
+			EndTime:        2000,
+		}
+
+		result := convertToExternalCollectionJobInfo(input)
+
+		assert.NotNil(t, result)
+		assert.Equal(t, int64(123), result.GetJobId())
+		assert.Equal(t, "test_collection", result.GetCollectionName())
+		assert.Equal(t, milvuspb.RefreshExternalCollectionState_RefreshCompleted, result.GetState())
+		assert.Equal(t, int64(100), result.GetProgress())
+		assert.Equal(t, "", result.GetReason())
+		assert.Equal(t, "s3://bucket/path", result.GetExternalSource())
+		assert.Equal(t, int64(1000), result.GetStartTime())
+		assert.Equal(t, int64(2000), result.GetEndTime())
+	})
+
+	t.Run("failed job", func(t *testing.T) {
+		input := &datapb.ExternalCollectionRefreshJob{
+			JobId:          456,
+			CollectionName: "test_collection",
+			State:          indexpb.JobState_JobStateFailed,
+			Progress:       50,
+			FailReason:     "connection timeout",
+			ExternalSource: "s3://bucket/path",
+			StartTime:      1000,
+			EndTime:        1500,
+		}
+
+		result := convertToExternalCollectionJobInfo(input)
+
+		assert.NotNil(t, result)
+		assert.Equal(t, int64(456), result.GetJobId())
+		assert.Equal(t, milvuspb.RefreshExternalCollectionState_RefreshFailed, result.GetState())
+		assert.Equal(t, int64(50), result.GetProgress())
+		assert.Equal(t, "connection timeout", result.GetReason())
+	})
 }

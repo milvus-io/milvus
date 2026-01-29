@@ -111,6 +111,7 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetImportProgress.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListImport.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAddCollectionField.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRefreshExternalCollection.String()),
 		},
 		commonpb.ObjectType_Global.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAll.String()),
@@ -240,6 +241,7 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeDropSnapshot.String(),
 		commonpb.ObjectPrivilege_PrivilegeDescribeSnapshot.String(),
 		commonpb.ObjectPrivilege_PrivilegeListSnapshots.String(),
+		commonpb.ObjectPrivilege_PrivilegeRefreshExternalCollection.String(),
 	}
 	AdminPrivilegeGroup = []string{
 		commonpb.ObjectPrivilege_PrivilegeCreateCollection.String(),
@@ -302,6 +304,7 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeDescribeSnapshot.String(),
 		commonpb.ObjectPrivilege_PrivilegeListSnapshots.String(),
 		commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String(),
+		commonpb.ObjectPrivilege_PrivilegeRefreshExternalCollection.String(),
 	}
 )
 
@@ -340,6 +343,7 @@ var (
 			commonpb.ObjectPrivilege_PrivilegeCreatePartition.String(),
 			commonpb.ObjectPrivilege_PrivilegeDropPartition.String(),
 			commonpb.ObjectPrivilege_PrivilegeAddCollectionField.String(),
+			commonpb.ObjectPrivilege_PrivilegeRefreshExternalCollection.String(),
 		})...,
 	)
 

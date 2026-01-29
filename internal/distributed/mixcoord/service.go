@@ -1004,3 +1004,15 @@ func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRes
 func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error) {
 	return s.mixCoord.ListRestoreSnapshotJobs(ctx, req)
 }
+
+func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.RefreshExternalCollectionRequest) (*datapb.RefreshExternalCollectionResponse, error) {
+	return s.mixCoord.RefreshExternalCollection(ctx, req)
+}
+
+func (s *Server) GetRefreshExternalCollectionProgress(ctx context.Context, req *datapb.GetRefreshExternalCollectionProgressRequest) (*datapb.GetRefreshExternalCollectionProgressResponse, error) {
+	return s.mixCoord.GetRefreshExternalCollectionProgress(ctx, req)
+}
+
+func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+	return s.mixCoord.ListRefreshExternalCollectionJobs(ctx, req)
+}

@@ -2073,3 +2073,36 @@ func (c *Client) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRe
 		return client.ListRestoreSnapshotJobs(ctx, req)
 	})
 }
+
+func (c *Client) RefreshExternalCollection(ctx context.Context, req *datapb.RefreshExternalCollectionRequest, opts ...grpc.CallOption) (*datapb.RefreshExternalCollectionResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.RefreshExternalCollectionResponse, error) {
+		return client.RefreshExternalCollection(ctx, req, opts...)
+	})
+}
+
+func (c *Client) GetRefreshExternalCollectionProgress(ctx context.Context, req *datapb.GetRefreshExternalCollectionProgressRequest, opts ...grpc.CallOption) (*datapb.GetRefreshExternalCollectionProgressResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.GetRefreshExternalCollectionProgressResponse, error) {
+		return client.GetRefreshExternalCollectionProgress(ctx, req, opts...)
+	})
+}
+
+func (c *Client) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest, opts ...grpc.CallOption) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+		return client.ListRefreshExternalCollectionJobs(ctx, req, opts...)
+	})
+}
