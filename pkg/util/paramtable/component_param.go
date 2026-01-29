@@ -4707,6 +4707,11 @@ type dataCoordConfig struct {
 	CopySegmentTaskRetention        ParamItem `refreshable:"true"`
 	CopySegmentJobTimeout           ParamItem `refreshable:"true"`
 
+	ExternalCollectionCheckInterval ParamItem `refreshable:"true"`
+	ExternalCollectionJobTimeout    ParamItem `refreshable:"true"`
+	ExternalCollectionJobRetention  ParamItem `refreshable:"true"`
+	ExternalCollectionDropRatioWarn ParamItem `refreshable:"true"` // warn if dropping more than this ratio of segments (0-1)
+
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
 	ClusteringCompactionSlotUsage ParamItem `refreshable:"true"`
@@ -5826,6 +5831,42 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		PanicIfEmpty: false,
 	}
 	p.CopySegmentJobTimeout.Init(base.mgr)
+
+	p.ExternalCollectionCheckInterval = ParamItem{
+		Key:          "dataCoord.externalCollectionCheckInterval",
+		Version:      "2.6.8",
+		Doc:          "The interval in seconds for external collection job checker to monitor and drive job state transitions.",
+		DefaultValue: "10",
+		PanicIfEmpty: false,
+	}
+	p.ExternalCollectionCheckInterval.Init(base.mgr)
+
+	p.ExternalCollectionJobTimeout = ParamItem{
+		Key:          "dataCoord.externalCollectionJobTimeout",
+		Version:      "2.6.8",
+		Doc:          "The timeout in seconds for external collection refresh jobs. Jobs exceeding this duration will be marked as failed.",
+		DefaultValue: "3600",
+		PanicIfEmpty: false,
+	}
+	p.ExternalCollectionJobTimeout.Init(base.mgr)
+
+	p.ExternalCollectionJobRetention = ParamItem{
+		Key:          "dataCoord.externalCollectionJobRetention",
+		Version:      "2.6.8",
+		Doc:          "The retention period in seconds for external collection jobs in Finished or Failed state before garbage collection.",
+		DefaultValue: "86400",
+		PanicIfEmpty: false,
+	}
+	p.ExternalCollectionJobRetention.Init(base.mgr)
+
+	p.ExternalCollectionDropRatioWarn = ParamItem{
+		Key:          "dataCoord.externalCollectionDropRatioWarn",
+		Version:      "2.6.8",
+		Doc:          "Warn if a refresh job would drop more than this ratio (0-1) of segments. Default 0.9 (90%).",
+		DefaultValue: "0.9",
+		PanicIfEmpty: false,
+	}
+	p.ExternalCollectionDropRatioWarn.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",

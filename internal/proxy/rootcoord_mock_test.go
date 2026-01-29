@@ -1726,6 +1726,37 @@ func (coord *MixCoordMock) CreateExternalCollection(ctx context.Context, req *ms
 	}, nil
 }
 
+func (coord *MixCoordMock) RefreshExternalCollection(ctx context.Context, req *datapb.RefreshExternalCollectionRequest, opts ...grpc.CallOption) (*datapb.RefreshExternalCollectionResponse, error) {
+	return &datapb.RefreshExternalCollectionResponse{
+		Status: merr.Success(),
+		JobId:  1,
+	}, nil
+}
+
+func (coord *MixCoordMock) GetRefreshExternalCollectionProgress(ctx context.Context, req *datapb.GetRefreshExternalCollectionProgressRequest, opts ...grpc.CallOption) (*datapb.GetRefreshExternalCollectionProgressResponse, error) {
+	return &datapb.GetRefreshExternalCollectionProgressResponse{
+		Status: merr.Success(),
+		JobInfo: &datapb.ExternalCollectionRefreshJob{
+			JobId:    req.GetJobId(),
+			State:    indexpb.JobState_JobStateFinished,
+			Progress: 100,
+		},
+	}, nil
+}
+
+func (coord *MixCoordMock) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest, opts ...grpc.CallOption) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+	return &datapb.ListRefreshExternalCollectionJobsResponse{
+		Status: merr.Success(),
+		Jobs: []*datapb.ExternalCollectionRefreshJob{
+			{
+				JobId:    1,
+				State:    indexpb.JobState_JobStateFinished,
+				Progress: 100,
+			},
+		},
+	}, nil
+}
+
 func (coord *MixCoordMock) TruncateCollection(ctx context.Context, req *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error) {
 	return &milvuspb.TruncateCollectionResponse{
 		Status: merr.Success(),

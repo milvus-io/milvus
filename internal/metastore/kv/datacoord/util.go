@@ -369,6 +369,14 @@ func buildUpdateExternalCollectionTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", UpdateExternalCollectionTaskPrefix, taskID)
 }
 
+func buildExternalCollectionRefreshJobKey(jobID int64) string {
+	return fmt.Sprintf("%s/%d", ExternalCollectionRefreshJobPrefix, jobID)
+}
+
+func buildExternalCollectionRefreshTaskKey(taskID int64) string {
+	return fmt.Sprintf("%s/%d", ExternalCollectionRefreshTaskPrefix, taskID)
+}
+
 func buildSnapshotKey(collectionID int64, snapshotID int64) string {
 	return fmt.Sprintf("%s/%d/%d", SnapshotPrefix, collectionID, snapshotID)
 }

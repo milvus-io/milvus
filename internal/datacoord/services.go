@@ -2337,3 +2337,146 @@ func (s *Server) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsReq
 		Snapshots: snapshots,
 	}, nil
 }
+
+// RefreshExternalCollection manually triggers a refresh job for an external collection
+// This uses WAL Broadcast mechanism for idempotency and distributed consistency.
+func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.RefreshExternalCollectionRequest) (*datapb.RefreshExternalCollectionResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionId()),
+		zap.String("collectionName", req.GetCollectionName()))
+
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.RefreshExternalCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("receive RefreshExternalCollection request")
+
+	if s.externalCollectionRefreshManager == nil {
+		log.Warn("external collection refresh manager not initialized")
+		return &datapb.RefreshExternalCollectionResponse{
+			Status: merr.Status(merr.WrapErrServiceUnavailable("external collection refresh manager not initialized")),
+		}, nil
+	}
+
+	// Pre-allocate JobID for idempotency (ensures same JobID even if retry after failure)
+	allocatedJobID, err := s.allocator.AllocID(ctx)
+	if err != nil {
+		log.Warn("failed to allocate job ID", zap.Error(err))
+		return &datapb.RefreshExternalCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	log.Info("pre-allocated job ID for refresh", zap.Int64("jobID", allocatedJobID))
+
+	// Start broadcaster with resource lock (shared DB + exclusive collection)
+	b, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionId())
+	if err != nil {
+		log.Warn("failed to start broadcaster", zap.Error(err))
+		return &datapb.RefreshExternalCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	defer b.Close()
+
+	// Build and broadcast the message
+	msg := message.NewRefreshExternalCollectionMessageBuilderV2().
+		WithHeader(&message.RefreshExternalCollectionMessageHeader{
+			CollectionId:   req.GetCollectionId(),
+			CollectionName: req.GetCollectionName(),
+			JobId:          allocatedJobID,
+			ExternalSource: req.GetExternalSource(),
+			ExternalSpec:   req.GetExternalSpec(),
+		}).
+		WithBody(&message.RefreshExternalCollectionMessageBody{}).
+		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		MustBuildBroadcast()
+
+	if _, err := b.Broadcast(ctx, msg); err != nil {
+		log.Warn("failed to broadcast refresh message", zap.Error(err))
+		return &datapb.RefreshExternalCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("refresh external collection job submitted via WAL broadcast", zap.Int64("jobID", allocatedJobID))
+
+	return &datapb.RefreshExternalCollectionResponse{
+		Status: merr.Success(),
+		JobId:  allocatedJobID,
+	}, nil
+}
+
+// GetRefreshExternalCollectionProgress returns the progress of a refresh job
+func (s *Server) GetRefreshExternalCollectionProgress(ctx context.Context, req *datapb.GetRefreshExternalCollectionProgressRequest) (*datapb.GetRefreshExternalCollectionProgressResponse, error) {
+	log := log.Ctx(ctx).With(zap.Int64("jobID", req.GetJobId()))
+
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.GetRefreshExternalCollectionProgressResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("receive GetRefreshExternalCollectionProgress request")
+
+	if s.externalCollectionRefreshManager == nil {
+		log.Warn("external collection refresh manager not initialized")
+		return &datapb.GetRefreshExternalCollectionProgressResponse{
+			Status: merr.Status(merr.WrapErrServiceUnavailable("external collection refresh manager not initialized")),
+		}, nil
+	}
+
+	jobInfo, err := s.externalCollectionRefreshManager.GetJobProgress(ctx, req.GetJobId())
+	if err != nil {
+		log.Warn("failed to get job progress", zap.Error(err))
+		return &datapb.GetRefreshExternalCollectionProgressResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("get refresh external collection progress completed",
+		zap.String("state", jobInfo.GetState().String()),
+		zap.Int64("progress", jobInfo.GetProgress()))
+
+	return &datapb.GetRefreshExternalCollectionProgressResponse{
+		Status:  merr.Success(),
+		JobInfo: jobInfo,
+	}, nil
+}
+
+// ListRefreshExternalCollectionJobs lists refresh jobs for a collection
+func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionId()))
+
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.ListRefreshExternalCollectionJobsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("receive ListRefreshExternalCollectionJobs request")
+
+	if s.externalCollectionRefreshManager == nil {
+		log.Warn("external collection refresh manager not initialized")
+		return &datapb.ListRefreshExternalCollectionJobsResponse{
+			Status: merr.Status(merr.WrapErrServiceUnavailable("external collection refresh manager not initialized")),
+		}, nil
+	}
+
+	jobs, err := s.externalCollectionRefreshManager.ListJobs(ctx, req.GetCollectionId())
+	if err != nil {
+		log.Warn("failed to list jobs", zap.Error(err))
+		return &datapb.ListRefreshExternalCollectionJobsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("list refresh external collection jobs completed", zap.Int("jobCount", len(jobs)))
+
+	return &datapb.ListRefreshExternalCollectionJobsResponse{
+		Status: merr.Success(),
+		Jobs:   jobs,
+	}, nil
+}

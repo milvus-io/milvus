@@ -3040,3 +3040,308 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		assert.Contains(t, resp.GetReason(), "already exists")
 	})
 }
+
+// --- Test RefreshExternalCollection ---
+
+func TestServer_RefreshExternalCollection(t *testing.T) {
+	t.Run("server_not_healthy", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Abnormal)
+
+		resp, err := server.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
+			CollectionId:   100,
+			CollectionName: "test_collection",
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("refresh_manager_not_initialized", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{
+			externalCollectionRefreshManager: nil, // Not initialized
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
+			CollectionId:   100,
+			CollectionName: "test_collection",
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.Contains(t, resp.GetStatus().GetReason(), "external collection refresh manager not initialized")
+	})
+
+	t.Run("alloc_id_failed", func(t *testing.T) {
+		ctx := context.Background()
+
+		mockAllocator := allocator.NewMockAllocator(t)
+		mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(0), errors.New("alloc failed"))
+
+		// Create a mock refresh manager (non-nil)
+		mockRefreshMgr := &externalCollectionRefreshManager{}
+
+		server := &Server{
+			allocator:                        mockAllocator,
+			externalCollectionRefreshManager: mockRefreshMgr,
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
+			CollectionId:   100,
+			CollectionName: "test_collection",
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("start_broadcaster_failed", func(t *testing.T) {
+		ctx := context.Background()
+
+		mockAllocator := allocator.NewMockAllocator(t)
+		mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(123), nil)
+
+		// Create a mock refresh manager (non-nil)
+		mockRefreshMgr := &externalCollectionRefreshManager{}
+
+		server := &Server{
+			allocator:                        mockAllocator,
+			externalCollectionRefreshManager: mockRefreshMgr,
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		// Mock startBroadcastWithCollectionID to return error
+		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(nil, errors.New("broadcaster failed")).Build()
+		defer mockStartBroadcast.UnPatch()
+
+		resp, err := server.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
+			CollectionId:   100,
+			CollectionName: "test_collection",
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+}
+
+// --- Test GetRefreshExternalCollectionProgress ---
+
+func TestServer_GetRefreshExternalCollectionProgress(t *testing.T) {
+	t.Run("server_not_healthy", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Abnormal)
+
+		resp, err := server.GetRefreshExternalCollectionProgress(ctx, &datapb.GetRefreshExternalCollectionProgressRequest{
+			JobId: 123,
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("refresh_manager_not_initialized", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{
+			externalCollectionRefreshManager: nil,
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.GetRefreshExternalCollectionProgress(ctx, &datapb.GetRefreshExternalCollectionProgressRequest{
+			JobId: 123,
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.Contains(t, resp.GetStatus().GetReason(), "external collection refresh manager not initialized")
+	})
+
+	t.Run("get_job_progress_failed", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Mock GetJobProgress to return error
+		mockGetJobProgress := mockey.Mock((*externalCollectionRefreshManager).GetJobProgress).Return(nil, errors.New("job not found")).Build()
+		defer mockGetJobProgress.UnPatch()
+
+		mockRefreshMgr := &externalCollectionRefreshManager{}
+
+		server := &Server{
+			externalCollectionRefreshManager: mockRefreshMgr,
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.GetRefreshExternalCollectionProgress(ctx, &datapb.GetRefreshExternalCollectionProgressRequest{
+			JobId: 123,
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("success", func(t *testing.T) {
+		ctx := context.Background()
+
+		expectedJob := &datapb.ExternalCollectionRefreshJob{
+			JobId:          123,
+			CollectionId:   100,
+			CollectionName: "test_collection",
+			State:          indexpb.JobState_JobStateInProgress,
+			Progress:       50,
+		}
+
+		// Mock GetJobProgress to return success
+		mockGetJobProgress := mockey.Mock((*externalCollectionRefreshManager).GetJobProgress).Return(expectedJob, nil).Build()
+		defer mockGetJobProgress.UnPatch()
+
+		mockRefreshMgr := &externalCollectionRefreshManager{}
+
+		server := &Server{
+			externalCollectionRefreshManager: mockRefreshMgr,
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.GetRefreshExternalCollectionProgress(ctx, &datapb.GetRefreshExternalCollectionProgressRequest{
+			JobId: 123,
+		})
+
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.NotNil(t, resp.GetJobInfo())
+		assert.Equal(t, int64(123), resp.GetJobInfo().GetJobId())
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, resp.GetJobInfo().GetState())
+		assert.Equal(t, int64(50), resp.GetJobInfo().GetProgress())
+	})
+}
+
+// --- Test ListRefreshExternalCollectionJobs ---
+
+func TestServer_ListRefreshExternalCollectionJobs(t *testing.T) {
+	t.Run("server_not_healthy", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Abnormal)
+
+		resp, err := server.ListRefreshExternalCollectionJobs(ctx, &datapb.ListRefreshExternalCollectionJobsRequest{
+			CollectionId: 100,
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("refresh_manager_not_initialized", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{
+			externalCollectionRefreshManager: nil,
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.ListRefreshExternalCollectionJobs(ctx, &datapb.ListRefreshExternalCollectionJobsRequest{
+			CollectionId: 100,
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.Contains(t, resp.GetStatus().GetReason(), "external collection refresh manager not initialized")
+	})
+
+	t.Run("list_jobs_failed", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Mock ListJobs to return error
+		mockListJobs := mockey.Mock((*externalCollectionRefreshManager).ListJobs).Return(nil, errors.New("list failed")).Build()
+		defer mockListJobs.UnPatch()
+
+		mockRefreshMgr := &externalCollectionRefreshManager{}
+
+		server := &Server{
+			externalCollectionRefreshManager: mockRefreshMgr,
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.ListRefreshExternalCollectionJobs(ctx, &datapb.ListRefreshExternalCollectionJobsRequest{
+			CollectionId: 100,
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("success_empty_list", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Mock ListJobs to return empty list
+		mockListJobs := mockey.Mock((*externalCollectionRefreshManager).ListJobs).Return([]*datapb.ExternalCollectionRefreshJob{}, nil).Build()
+		defer mockListJobs.UnPatch()
+
+		mockRefreshMgr := &externalCollectionRefreshManager{}
+
+		server := &Server{
+			externalCollectionRefreshManager: mockRefreshMgr,
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.ListRefreshExternalCollectionJobs(ctx, &datapb.ListRefreshExternalCollectionJobsRequest{
+			CollectionId: 100,
+		})
+
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Len(t, resp.GetJobs(), 0)
+	})
+
+	t.Run("success_with_jobs", func(t *testing.T) {
+		ctx := context.Background()
+
+		expectedJobs := []*datapb.ExternalCollectionRefreshJob{
+			{
+				JobId:          123,
+				CollectionId:   100,
+				CollectionName: "test_collection",
+				State:          indexpb.JobState_JobStateFinished,
+				Progress:       100,
+			},
+			{
+				JobId:          122,
+				CollectionId:   100,
+				CollectionName: "test_collection",
+				State:          indexpb.JobState_JobStateFailed,
+				Progress:       50,
+				FailReason:     "connection timeout",
+			},
+		}
+
+		// Mock ListJobs to return jobs
+		mockListJobs := mockey.Mock((*externalCollectionRefreshManager).ListJobs).Return(expectedJobs, nil).Build()
+		defer mockListJobs.UnPatch()
+
+		mockRefreshMgr := &externalCollectionRefreshManager{}
+
+		server := &Server{
+			externalCollectionRefreshManager: mockRefreshMgr,
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.ListRefreshExternalCollectionJobs(ctx, &datapb.ListRefreshExternalCollectionJobsRequest{
+			CollectionId: 100,
+		})
+
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Len(t, resp.GetJobs(), 2)
+		assert.Equal(t, int64(123), resp.GetJobs()[0].GetJobId())
+		assert.Equal(t, indexpb.JobState_JobStateFinished, resp.GetJobs()[0].GetState())
+		assert.Equal(t, int64(122), resp.GetJobs()[1].GetJobId())
+		assert.Equal(t, indexpb.JobState_JobStateFailed, resp.GetJobs()[1].GetState())
+	})
+}
