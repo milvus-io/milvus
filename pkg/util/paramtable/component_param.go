@@ -6024,6 +6024,9 @@ type dataNodeConfig struct {
 	MaxChannelCheckpointsPerRPC          ParamItem `refreshable:"true"`
 	ChannelCheckpointUpdateTickInSeconds ParamItem `refreshable:"true"`
 
+	// index services config
+	IndexMaxDiskUsagePercentage ParamItem `refreshable:"true"`
+
 	// import
 	ImportConcurrencyPerCPUCore ParamItem `refreshable:"true"`
 	MaxImportFileSizeInGB       ParamItem `refreshable:"true"`
@@ -6317,6 +6320,18 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.ChannelCheckpointUpdateTickInSeconds.Init(base.mgr)
+
+	p.IndexMaxDiskUsagePercentage = ParamItem{
+		Key:          "dataNode.index.maxDiskUsagePercentage",
+		Version:      "2.6.0",
+		DefaultValue: "95",
+		Doc:          "Maximum disk usage percentage allowed for disk-intensive index building (DISKANN, etc.)",
+		Export:       true,
+		Formatter: func(v string) string {
+			return fmt.Sprintf("%f", getAsFloat(v)/100)
+		},
+	}
+	p.IndexMaxDiskUsagePercentage.Init(base.mgr)
 
 	p.ImportConcurrencyPerCPUCore = ParamItem{
 		Key:          "dataNode.import.concurrencyPerCPUCore",
