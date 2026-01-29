@@ -2,8 +2,7 @@ package funcutil
 
 import "fmt"
 
-func MapReduce(results []map[string]string, method map[string]func(string) error) error {
-	// TODO: use generic type to reconstruct map[string]string -> [T any] map[string]T
+func MapReduce[T any](results []map[string]T, method map[string]func(T) error) error {
 	for _, result := range results {
 		for k, v := range result {
 			fn, ok := method[k]
