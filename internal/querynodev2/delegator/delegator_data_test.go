@@ -957,6 +957,8 @@ func (s *DelegatorDataSuite) waitTargetVersion(targetVersion int64) {
 }
 
 func (s *DelegatorDataSuite) TestBuildBM25IDF() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	s.genCollectionWithFunction()
 
 	genBM25Stats := func(start uint32, end uint32) map[int64]*storage.BM25Stats {
@@ -1034,7 +1036,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			SerializedExprPlan: plan,
 			FieldId:            101,
 		}
-		avgdl, err := s.delegator.buildBM25IDF(req)
+		avgdl, err := s.delegator.buildBM25IDF(ctx, req)
 		s.NoError(err)
 		s.Equal(float64(1), avgdl)
 
@@ -1064,7 +1066,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(ctx, req)
 		s.Error(err)
 	})
 
@@ -1077,7 +1079,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			FieldId:          103, // invalid field id
 		}
 
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(ctx, req)
 		s.Error(err)
 	})
 
@@ -1104,7 +1106,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(ctx, req)
 		s.Error(err)
 	})
 
@@ -1131,7 +1133,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(ctx, req)
 		s.Error(err)
 	})
 
@@ -1158,7 +1160,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          103, // invalid field
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(ctx, req)
 		s.Error(err)
 		log.Info("test", zap.Error(err))
 	})
@@ -1181,7 +1183,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(ctx, req)
 		s.Error(err)
 	})
 }
