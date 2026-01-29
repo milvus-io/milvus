@@ -63,6 +63,10 @@ struct LoadDiff {
     // Only populated when both current and new use binlog mode
     std::unordered_set<FieldId> field_data_to_drop;
 
+    // Fields that need to be filled with default values (schema evolution scenario)
+    // These fields exist in schema but have no data source (binlog/index/column_group)
+    std::vector<FieldId> fields_to_fill_default;
+
     // Whether manifest path has changed (only when both use manifest mode)
     bool manifest_updated = false;
 
@@ -74,7 +78,7 @@ struct LoadDiff {
         return !indexes_to_load.empty() || !binlogs_to_load.empty() ||
                !column_groups_to_load.empty() || !fields_to_reload.empty() ||
                !indexes_to_drop.empty() || !field_data_to_drop.empty() ||
-               manifest_updated;
+               !fields_to_fill_default.empty() || manifest_updated;
     }
 
     [[nodiscard]] bool
@@ -154,6 +158,17 @@ struct LoadDiff {
         }
         oss << "], ";
 
+        // fields_to_fill_default
+        oss << "fields_to_fill_default=[";
+        first = true;
+        for (const auto& field_id : fields_to_fill_default) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << field_id.get();
+        }
+        oss << "], ";
+
         // manifest_updated and new_manifest_path
         oss << "manifest_updated=" << (manifest_updated ? "true" : "false");
         if (manifest_updated) {
@@ -177,10 +192,7 @@ class SegmentLoadInfo {
  public:
     using ProtoType = milvus::proto::segcore::SegmentLoadInfo;
 
-    /**
-     * @brief Default constructor creates an empty SegmentLoadInfo
-     */
-    SegmentLoadInfo() = default;
+    SegmentLoadInfo() = delete;
 
     /**
      * @brief Construct from a protobuf SegmentLoadInfo (copy)
@@ -788,6 +800,9 @@ class SegmentLoadInfo {
     void
     ComputeDiffReloadFields(LoadDiff& diff, SegmentLoadInfo& new_info);
 
+    void
+    ComputeDiffDefaultFields(LoadDiff& diff, SegmentLoadInfo& new_info);
+
     ProtoType info_;
 
     SchemaPtr schema_;
@@ -800,6 +815,9 @@ class SegmentLoadInfo {
 
     // set of field ids that corresponding index has raw data
     std::set<FieldId> field_index_has_raw_data_;
+
+    // set of field ids that have been filled with default values
+    std::set<FieldId> fields_filled_with_default_;
 
     // Cache for quick field -> binlog lookup
     std::map<FieldId, const proto::segcore::FieldBinlog*> field_binlog_cache_;

@@ -86,7 +86,6 @@ type Segment interface {
 	LoadDeltaData(ctx context.Context, deltaData *storage.DeltaData) error
 	LastDeltaTimestamp() uint64
 	Load(ctx context.Context) error
-	FinishLoad() error
 	Release(ctx context.Context, opts ...releaseOption)
 	Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error
 

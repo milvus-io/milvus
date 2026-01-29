@@ -16,6 +16,7 @@
 #include <cctype>
 #include <memory>
 
+#include "common/Consts.h"
 #include "common/FieldMeta.h"
 #include "milvus-storage/column_groups.h"
 #include "storage/LocalChunkManagerSingleton.h"
@@ -285,6 +286,77 @@ SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
     }
 }
 
+void
+SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
+                                          SegmentLoadInfo& new_info) {
+    // Helper lambda to collect all field ids with data source
+    auto collect_data_fields = [](SegmentLoadInfo& info) -> std::set<FieldId> {
+        std::set<FieldId> fields;
+
+        // From binlog paths
+        for (int i = 0; i < info.GetBinlogPathCount(); i++) {
+            auto& binlog = info.GetBinlogPath(i);
+            std::vector<int64_t> child_fields(binlog.child_fields().begin(),
+                                              binlog.child_fields().end());
+            if (child_fields.empty()) {
+                child_fields.emplace_back(binlog.fieldid());
+            }
+            for (auto child_id : child_fields) {
+                fields.emplace(child_id);
+            }
+        }
+
+        // From index with raw data
+        for (const auto& field_id : info.field_index_has_raw_data_) {
+            fields.insert(field_id);
+        }
+
+        // From column groups (manifest mode)
+        if (info.HasManifestPath()) {
+            auto column_groups = info.GetColumnGroups();
+            if (column_groups) {
+                for (size_t i = 0; i < column_groups->size(); i++) {
+                    auto cg = column_groups->at(i);
+                    for (const auto& column : cg->columns) {
+                        fields.emplace(std::stoll(column));
+                    }
+                }
+            }
+        }
+        return fields;
+    };
+
+    // Collect field ids with data source
+    std::set<FieldId> new_info_fields = collect_data_fields(new_info);
+    std::set<FieldId> current_fields = collect_data_fields(*this);
+
+    // Build "current handled" set:
+    // - Fields with data source in current
+    // - Fields already filled with default values
+    std::set<FieldId> current_handled = current_fields;
+    current_handled.insert(fields_filled_with_default_.begin(),
+                           fields_filled_with_default_.end());
+
+    // Compute: schema_fields - new_info_fields - current_handled
+    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+        if (field_id.get() < START_USER_FIELDID) {
+            continue;
+        }
+
+        if (new_info_fields.count(field_id)) {
+            continue;
+        }
+
+        if (current_handled.count(field_id)) {
+            new_info.fields_filled_with_default_.insert(field_id);
+            continue;
+        }
+
+        diff.fields_to_fill_default.push_back(field_id);
+        new_info.fields_filled_with_default_.insert(field_id);
+    }
+}
+
 LoadDiff
 SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
     LoadDiff diff;
@@ -311,15 +383,24 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
         ComputeDiffBinlogs(diff, new_info);
     }
 
+    // Compute fields that need default value filling (schema evolution)
+    ComputeDiffDefaultFields(diff, new_info);
+
     return diff;
 }
 
 LoadDiff
 SegmentLoadInfo::GetLoadDiff() {
+    // GetLoadDiff requires non-empty load info (must have data sources)
+    AssertInfo(GetBinlogPathCount() > 0 || GetIndexInfoCount() > 0 ||
+                   HasManifestPath(),
+               "GetLoadDiff called on empty SegmentLoadInfo");
+
     LoadDiff diff;
 
-    SegmentLoadInfo empty_info;
-    empty_info.schema_ = schema_;
+    milvus::proto::segcore::SegmentLoadInfo empty_load_info;
+
+    SegmentLoadInfo empty_info(empty_load_info, schema_);
 
     // Handle index changes
     empty_info.ComputeDiffIndexes(diff, *this);
@@ -338,6 +419,9 @@ SegmentLoadInfo::GetLoadDiff() {
     } else {
         empty_info.ComputeDiffBinlogs(diff, *this);
     }
+
+    // Compute fields that need default value filling (schema evolution)
+    empty_info.ComputeDiffDefaultFields(diff, *this);
 
     return diff;
 }

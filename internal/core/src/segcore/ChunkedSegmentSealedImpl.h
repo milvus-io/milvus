@@ -200,9 +200,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LazyCheckSchema(SchemaPtr sch) override;
 
     void
-    FinishLoad() override;
-
-    void
     SetLoadInfo(
         const milvus::proto::segcore::SegmentLoadInfo& load_info) override;
 
@@ -969,6 +966,18 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     fill_empty_field(const FieldMeta& field_meta);
+
+    /**
+     * @brief Fill default values for fields without data sources
+     *
+     * This method fills default values for fields that exist in the schema
+     * but have no data source (binlog, index with raw data, or column group).
+     * Used during schema evolution when new fields are added.
+     *
+     * @param field_ids Vector of field IDs that need default value filling
+     */
+    void
+    FillDefaultValueFields(const std::vector<FieldId>& field_ids);
 
     void
     init_timestamp_index(const std::vector<Timestamp>& timestamps,
