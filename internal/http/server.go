@@ -195,6 +195,13 @@ func RegisterWebUIHandler() {
 		Path:    RouteWebUI,
 		Handler: handleNotFound(fileServer, serveIndex),
 	})
+
+	// Telemetry UI handler
+	serveTelemetry := serveFile("webui/telemetry.html", httpFS)
+	Register(&Handler{
+		Path:    TelemetryUIPath,
+		Handler: serveTelemetry,
+	})
 }
 
 type responseInterceptor struct {

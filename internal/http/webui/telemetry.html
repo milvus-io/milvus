@@ -1,0 +1,3086 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Milvus Client Telemetry</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-400: #9ca3af;
+            --gray-500: #6b7280;
+            --gray-600: #4b5563;
+            --gray-700: #374151;
+            --gray-800: #1f2937;
+            --gray-900: #111827;
+            --radius: 12px;
+            --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: var(--gray-800);
+        }
+
+        /* Login Page */
+        .login-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .login-card {
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-lg);
+            padding: 40px;
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .login-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .login-header h1 {
+            font-size: 24px;
+            color: var(--gray-900);
+            margin-bottom: 8px;
+        }
+
+        .login-header p {
+            color: var(--gray-500);
+            font-size: 14px;
+        }
+
+        .login-logo {
+            width: 64px;
+            height: 64px;
+            background: linear-gradient(135deg, var(--primary) 0%, #764ba2 100%);
+            border-radius: 16px;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            color: white;
+            font-weight: bold;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--gray-700);
+            margin-bottom: 6px;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid var(--gray-300);
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 24px;
+            font-size: 14px;
+            font-weight: 600;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            width: 100%;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+        }
+
+        .btn-secondary {
+            background: var(--gray-100);
+            color: var(--gray-700);
+        }
+
+        .btn-secondary:hover {
+            background: var(--gray-200);
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-sm {
+            padding: 8px 16px;
+            font-size: 13px;
+        }
+
+        .history-preset.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        .login-error {
+            background: #fef2f2;
+            color: var(--danger);
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        /* Main App */
+        .app-container {
+            display: none;
+            background: var(--gray-50);
+            min-height: 100vh;
+        }
+
+        .app-header {
+            background: white;
+            border-bottom: 1px solid var(--gray-200);
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .app-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .app-title-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--primary) 0%, #764ba2 100%);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .app-title h1 {
+            font-size: 18px;
+            color: var(--gray-900);
+        }
+
+        .app-title span {
+            font-size: 13px;
+            color: var(--gray-500);
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--gray-600);
+            font-size: 14px;
+        }
+
+        .main-content {
+            padding: 24px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: var(--radius);
+            padding: 20px;
+            box-shadow: var(--shadow);
+        }
+
+        .stat-label {
+            font-size: 13px;
+            color: var(--gray-500);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--gray-900);
+        }
+
+        .stat-value.success { color: var(--success); }
+        .stat-value.danger { color: var(--danger); }
+
+        /* Section */
+        .section {
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            margin-bottom: 24px;
+            overflow: hidden;
+        }
+
+        .section-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--gray-900);
+        }
+
+        .section-content {
+            padding: 20px;
+        }
+
+        /* Client Cards */
+        .clients-grid {
+            display: grid;
+            gap: 16px;
+        }
+
+        .client-card {
+            background: var(--gray-50);
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .client-card:hover {
+            border-color: var(--primary);
+            box-shadow: var(--shadow);
+        }
+
+        .client-card.expanded {
+            border-color: var(--primary);
+        }
+
+        .client-header {
+            padding: 16px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .client-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .client-avatar {
+            width: 40px;
+            height: 40px;
+            background: var(--primary);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .client-name {
+            font-weight: 600;
+            color: var(--gray-900);
+            font-size: 14px;
+            font-family: "Monaco", "Menlo", monospace;
+        }
+
+        .client-meta {
+            font-size: 13px;
+            color: var(--gray-500);
+            margin-top: 2px;
+        }
+
+        .client-stats {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .client-stat {
+            text-align: right;
+        }
+
+        .client-stat-value {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--gray-800);
+        }
+
+        .client-stat-label {
+            font-size: 11px;
+            color: var(--gray-500);
+            text-transform: uppercase;
+        }
+
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-active {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .status-inactive {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        /* Client Details */
+        .client-details {
+            display: none;
+            border-top: 1px solid var(--gray-200);
+            background: white;
+            padding: 20px;
+        }
+
+        .client-card.expanded .client-details {
+            display: block;
+        }
+
+        .metrics-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            border-bottom: 1px solid var(--gray-200);
+            padding-bottom: 12px;
+        }
+
+        .metrics-tab {
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--gray-600);
+            background: none;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .metrics-tab:hover {
+            background: var(--gray-100);
+        }
+
+        .metrics-tab.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        .metrics-content {
+            display: none;
+        }
+
+        .metrics-content.active {
+            display: block;
+        }
+
+        .metrics-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .metrics-table th,
+        .metrics-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--gray-100);
+        }
+
+        .metrics-table th {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: var(--gray-500);
+            font-weight: 600;
+            background: var(--gray-50);
+        }
+
+        .metrics-table td {
+            font-size: 14px;
+        }
+
+        .metrics-table tr:hover {
+            background: var(--gray-50);
+        }
+
+        .op-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            background: var(--gray-100);
+            border-radius: 6px;
+            font-weight: 500;
+            font-size: 13px;
+        }
+
+        .op-badge.search { background: #dbeafe; color: #1e40af; }
+        .op-badge.query { background: #fef3c7; color: #92400e; }
+        .op-badge.insert { background: #d1fae5; color: #065f46; }
+        .op-badge.delete { background: #fee2e2; color: #991b1b; }
+        .op-badge.upsert { background: #e0e7ff; color: #3730a3; }
+
+        .latency-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .latency-bar-track {
+            flex: 1;
+            height: 6px;
+            background: var(--gray-200);
+            border-radius: 3px;
+            overflow: hidden;
+            max-width: 100px;
+        }
+
+        .latency-bar-fill {
+            height: 100%;
+            background: var(--primary);
+            border-radius: 3px;
+        }
+
+        /* Command Section */
+        .command-form {
+            display: grid;
+            gap: 16px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid var(--gray-300);
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+
+        .form-group textarea {
+            min-height: 100px;
+            font-family: "Monaco", "Menlo", monospace;
+            font-size: 13px;
+            resize: vertical;
+        }
+
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: var(--gray-700);
+            cursor: pointer;
+        }
+
+        .checkbox-label input {
+            width: 18px;
+            height: 18px;
+        }
+
+        /* Auto refresh */
+        .auto-refresh {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: var(--gray-600);
+        }
+
+        .auto-refresh input {
+            width: 16px;
+            height: 16px;
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            padding: 16px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: var(--shadow-lg);
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+        }
+
+        .toast.success {
+            background: var(--success);
+            color: white;
+        }
+
+        .toast.error {
+            background: var(--danger);
+            color: white;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--gray-500);
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .empty-state h3 {
+            font-size: 16px;
+            color: var(--gray-700);
+            margin-bottom: 8px;
+        }
+
+        /* Expand Icon */
+        .expand-icon {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--gray-400);
+            transition: transform 0.2s;
+        }
+
+        .client-card.expanded .expand-icon {
+            transform: rotate(180deg);
+        }
+
+        /* Commands Grid */
+        .commands-grid {
+            display: grid;
+            gap: 12px;
+        }
+
+        .command-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: var(--gray-50);
+            border: 1px solid var(--gray-200);
+            border-radius: 8px;
+        }
+
+        .command-item-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .command-type-badge {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            background: var(--primary);
+            color: white;
+        }
+
+        .command-type-badge.persistent {
+            background: #8b5cf6;
+        }
+
+        .command-target {
+            font-size: 13px;
+            color: var(--gray-600);
+        }
+
+        .command-time {
+            font-size: 12px;
+            color: var(--gray-400);
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-lg);
+            width: 90%;
+            max-width: 700px;
+            max-height: 80vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--gray-900);
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: var(--gray-500);
+        }
+
+        .modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .error-item {
+            padding: 12px;
+            border: 1px solid var(--gray-200);
+            border-radius: 8px;
+            margin-bottom: 12px;
+            background: #fef2f2;
+        }
+
+        .error-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .error-operation {
+            font-weight: 600;
+            color: var(--danger);
+        }
+
+        .error-time {
+            font-size: 12px;
+            color: var(--gray-500);
+        }
+
+        .error-message {
+            font-family: "Monaco", "Menlo", monospace;
+            font-size: 13px;
+            color: var(--gray-700);
+            word-break: break-all;
+        }
+
+        .error-collection {
+            font-size: 12px;
+            color: var(--gray-500);
+            margin-top: 4px;
+        }
+
+        /* Client Actions */
+        .client-actions {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        /* Command Replies */
+        .reply-item {
+            padding: 12px;
+            border: 1px solid var(--gray-200);
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+
+        .reply-item.success {
+            background: #f0fdf4;
+            border-color: var(--success);
+        }
+
+        .reply-item.error {
+            background: #fef2f2;
+            border-color: var(--danger);
+        }
+
+        .reply-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .reply-status {
+            font-weight: 600;
+        }
+
+        .reply-status.success {
+            color: var(--success);
+        }
+
+        .reply-status.error {
+            color: var(--danger);
+        }
+
+        .reply-command-id {
+            font-family: "Monaco", "Menlo", monospace;
+            font-size: 12px;
+            color: var(--gray-500);
+        }
+
+        .reply-time {
+            font-size: 12px;
+            color: var(--gray-400);
+        }
+
+        .reply-error-msg {
+            font-family: "Monaco", "Menlo", monospace;
+            font-size: 13px;
+            color: var(--danger);
+            background: #fff5f5;
+            padding: 8px;
+            border-radius: 4px;
+            margin-top: 8px;
+            word-break: break-all;
+        }
+
+        .reply-payload {
+            font-family: "Monaco", "Menlo", monospace;
+            font-size: 12px;
+            color: var(--gray-600);
+            background: var(--gray-50);
+            padding: 8px;
+            border-radius: 4px;
+            margin-top: 8px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        /* Command Tabs */
+        .command-tabs {
+            display: flex;
+            gap: 4px;
+            border-bottom: 2px solid var(--gray-200);
+            margin-bottom: 20px;
+        }
+
+        .command-tab {
+            padding: 12px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--gray-600);
+            background: none;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+        }
+
+        .command-tab:hover {
+            color: var(--primary);
+        }
+
+        .command-tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+
+        .command-tab-content {
+            display: none;
+        }
+
+        .command-tab-content.active {
+            display: block;
+        }
+
+        /* Toggle Switch */
+        .toggle-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .toggle-switch {
+            display: flex;
+            background: var(--gray-100);
+            border-radius: 6px;
+            padding: 2px;
+        }
+
+        .toggle-option {
+            padding: 8px 16px;
+            font-size: 13px;
+            font-weight: 500;
+            border: none;
+            background: none;
+            cursor: pointer;
+            border-radius: 4px;
+            color: var(--gray-600);
+            transition: all 0.2s;
+        }
+
+        .toggle-option.active {
+            background: white;
+            color: var(--gray-900);
+            box-shadow: var(--shadow);
+        }
+
+        .toggle-option.active.on {
+            background: var(--success);
+            color: white;
+        }
+
+        .toggle-option.active.off {
+            background: var(--danger);
+            color: white;
+        }
+
+        /* Settings Card */
+        .settings-card {
+            background: var(--gray-50);
+            border: 1px solid var(--gray-200);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .settings-card-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--gray-700);
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .setting-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        .setting-row:last-child {
+            border-bottom: none;
+        }
+
+        .setting-label {
+            font-size: 14px;
+            color: var(--gray-700);
+        }
+
+        .setting-input {
+            width: 150px;
+            padding: 8px 12px;
+            border: 1px solid var(--gray-300);
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .setting-input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        /* Collapsible Section */
+        .collapsible-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            padding: 12px 0;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--gray-600);
+        }
+
+        .collapsible-header:hover {
+            color: var(--primary);
+        }
+
+        .collapsible-icon {
+            transition: transform 0.2s;
+        }
+
+        .collapsible-header.expanded .collapsible-icon {
+            transform: rotate(90deg);
+        }
+
+        .collapsible-content {
+            display: none;
+            padding-top: 12px;
+        }
+
+        .collapsible-content.expanded {
+            display: block;
+        }
+
+        /* Status Box */
+        .status-box {
+            background: var(--gray-50);
+            border: 1px solid var(--gray-200);
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 16px;
+        }
+
+        .status-box-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--gray-700);
+            margin-bottom: 12px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+            font-size: 14px;
+        }
+
+        .status-item-enabled {
+            color: var(--success);
+        }
+
+        .status-item-disabled {
+            color: var(--gray-500);
+        }
+
+        /* Errors Table */
+        .errors-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .errors-table th,
+        .errors-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        .errors-table th {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: var(--gray-500);
+            font-weight: 600;
+            background: var(--gray-50);
+        }
+
+        .errors-table tr:hover {
+            background: var(--gray-50);
+        }
+
+        .errors-table .error-msg-cell {
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+
+        .errors-table .error-msg-cell:hover {
+            white-space: normal;
+            word-break: break-all;
+        }
+
+        .note-box {
+            background: #fffbeb;
+            border: 1px solid #fcd34d;
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 13px;
+            color: #92400e;
+            margin-top: 16px;
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #059669;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .client-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+            }
+
+            .client-stats {
+                width: 100%;
+                justify-content: space-between;
+            }
+
+            .header-actions {
+                flex-direction: column;
+                gap: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Login Page -->
+    <div id="loginPage" class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <div class="login-logo">M</div>
+                <h1>Milvus Telemetry</h1>
+                <p>Sign in to view client metrics</p>
+            </div>
+            <div id="loginError" class="login-error"></div>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" class="form-input" placeholder="Enter username" autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" class="form-input" placeholder="Enter password" autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn btn-primary">Sign In</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main Application -->
+    <div id="appContainer" class="app-container">
+        <header class="app-header">
+            <div class="app-title">
+                <div class="app-title-icon">M</div>
+                <div>
+                    <h1>Client Telemetry</h1>
+                    <span>Real-time client monitoring</span>
+                </div>
+            </div>
+            <div class="header-actions">
+                <div class="auto-refresh">
+                    <input type="checkbox" id="autoRefresh" checked>
+                    <label for="autoRefresh">Auto-refresh</label>
+                </div>
+                <div class="user-info">
+                    <span id="currentUser"></span>
+                </div>
+                <button class="btn btn-secondary btn-sm" onclick="logout()">Logout</button>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <!-- Stats Overview -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Connected Clients</div>
+                    <div class="stat-value" id="totalClients">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Requests</div>
+                    <div class="stat-value" id="totalRequests">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Success Rate</div>
+                    <div class="stat-value success" id="successRate">100%</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Errors</div>
+                    <div class="stat-value danger" id="totalErrors">0</div>
+                </div>
+            </div>
+
+            <!-- Clients Section -->
+            <div class="section">
+                <div class="section-header">
+                    <h2 class="section-title">Connected Clients</h2>
+                    <input type="text" id="clientFilter" class="form-input" placeholder="Filter clients..." style="max-width: 250px;">
+                </div>
+                <div class="section-content">
+                    <div id="clientsGrid" class="clients-grid"></div>
+                    <div id="emptyState" class="empty-state" style="display: none;">
+                        <div class="empty-state-icon">📡</div>
+                        <h3>No clients connected</h3>
+                        <p>Waiting for client connections...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Commands Section -->
+            <div class="section">
+                <div class="section-header">
+                    <h2 class="section-title">Active Commands</h2>
+                    <button class="btn btn-secondary btn-sm" onclick="loadServerCommands()">Refresh</button>
+                </div>
+                <div class="section-content">
+                    <div id="commandsGrid" class="commands-grid"></div>
+                    <div id="commandsEmpty" class="empty-state" style="padding: 20px;">
+                        <p>No active commands</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Command Center Section with Tabs -->
+            <div class="section">
+                <div class="section-header">
+                    <h2 class="section-title">Command Center</h2>
+                </div>
+                <div class="section-content">
+                    <!-- Tab Navigation -->
+                    <div class="command-tabs">
+                        <button class="command-tab active" onclick="switchCommandTab('config')">Config</button>
+                        <button class="command-tab" onclick="switchCommandTab('collection')">Collection Metrics</button>
+                        <button class="command-tab" onclick="switchCommandTab('errors')">Errors</button>
+                    </div>
+
+                    <!-- Tab 1: Telemetry Config -->
+                    <div id="configTab" class="command-tab-content active">
+                        <div class="form-row" style="margin-bottom: 16px;">
+                            <div class="form-group">
+                                <label>Target</label>
+                                <select id="configTargetScope" onchange="updateConfigTargetClient()">
+                                    <option value="global">All Clients</option>
+                                    <option value="client">Specific Client</option>
+                                    <option value="database">Specific Database</option>
+                                </select>
+                            </div>
+                            <div class="form-group" id="configClientIdGroup" style="display: none;">
+                                <label>Client ID</label>
+                                <input type="text" id="configTargetClient" class="form-input" placeholder="Enter client ID">
+                            </div>
+                            <div class="form-group" id="configDatabaseIdGroup" style="display: none;">
+                                <label>Database Name</label>
+                                <input type="text" id="configTargetDatabase" class="form-input" placeholder="Enter database name">
+                            </div>
+                        </div>
+
+                        <div class="settings-card">
+                            <div class="settings-card-title">Telemetry Settings</div>
+
+                            <div class="setting-row">
+                                <span class="setting-label">Telemetry Enabled</span>
+                                <div class="toggle-switch">
+                                    <button type="button" class="toggle-option" onclick="setConfigEnabled(true)" id="configEnabledOn">ON</button>
+                                    <button type="button" class="toggle-option active" onclick="setConfigEnabled(null)" id="configEnabledNone">--</button>
+                                    <button type="button" class="toggle-option" onclick="setConfigEnabled(false)" id="configEnabledOff">OFF</button>
+                                </div>
+                            </div>
+
+                            <div class="setting-row">
+                                <span class="setting-label">Heartbeat Interval (ms)</span>
+                                <input type="number" id="configHeartbeat" class="setting-input" placeholder="e.g. 5000" min="1000">
+                            </div>
+
+                            <div class="setting-row">
+                                <span class="setting-label">Sampling Rate (0.0 - 1.0)</span>
+                                <input type="number" id="configSamplingRate" class="setting-input" placeholder="e.g. 1.0" min="0" max="1" step="0.1">
+                            </div>
+                        </div>
+
+                        <!-- Advanced: Custom JSON -->
+                        <div class="collapsible-header" onclick="toggleAdvancedConfig()">
+                            <span class="collapsible-icon" id="advancedConfigIcon">▶</span>
+                            <span>Advanced: Custom JSON</span>
+                        </div>
+                        <div class="collapsible-content" id="advancedConfigContent">
+                            <div class="form-group">
+                                <textarea id="configCustomJson" placeholder='{"custom_key": "value"}' style="min-height: 80px;"></textarea>
+                                <p style="font-size: 12px; color: var(--gray-500); margin-top: 4px;">
+                                    Custom JSON will be merged with settings above
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="form-row" style="margin-top: 16px;">
+                            <div class="form-group" style="display: flex; align-items: center;">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="configPersistent" checked>
+                                    Persistent (survives client restart)
+                                </label>
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 16px;">
+                            <button type="button" class="btn btn-primary" onclick="pushConfig()">Push Config</button>
+                        </div>
+                    </div>
+
+                    <!-- Tab 2: Collection Metrics -->
+                    <div id="collectionTab" class="command-tab-content">
+                        <div class="form-row" style="margin-bottom: 16px;">
+                            <div class="form-group">
+                                <label>Target</label>
+                                <select id="collectionTargetScope" onchange="updateCollectionTargetClient()">
+                                    <option value="global">All Clients</option>
+                                    <option value="client">Specific Client</option>
+                                    <option value="database">Specific Database</option>
+                                </select>
+                            </div>
+                            <div class="form-group" id="collectionClientIdGroup" style="display: none;">
+                                <label>Client ID</label>
+                                <input type="text" id="collectionTargetClient" class="form-input" placeholder="Enter client ID">
+                            </div>
+                            <div class="form-group" id="collectionDatabaseIdGroup" style="display: none;">
+                                <label>Database Name</label>
+                                <input type="text" id="collectionTargetDatabase" class="form-input" placeholder="Enter database name">
+                            </div>
+                        </div>
+
+                        <div class="settings-card">
+                            <div class="settings-card-title">Collection-Level Metrics</div>
+
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="allCollections" onchange="toggleCollectionInput()">
+                                    All Collections (use * wildcard)
+                                </label>
+                            </div>
+
+                            <div class="form-group" id="collectionNamesGroup">
+                                <label>Collections (comma separated)</label>
+                                <input type="text" id="collectionNames" class="form-input" placeholder="e.g. products, users, logs" style="width: 100%;">
+                            </div>
+                        </div>
+
+                        <div style="display: flex; gap: 12px; margin-top: 16px;">
+                            <button type="button" class="btn btn-success" onclick="pushCollectionMetrics(true)">Enable</button>
+                            <button type="button" class="btn btn-danger" onclick="pushCollectionMetrics(false)">Disable</button>
+                            <button type="button" class="btn btn-secondary" onclick="queryCollectionStatus()">Query Status</button>
+                        </div>
+
+                        <div class="status-box" id="collectionStatusBox" style="display: none;">
+                            <div class="status-box-title">Current Enabled Collections</div>
+                            <div id="collectionStatusContent">
+                                <p style="color: var(--gray-500); font-size: 14px;">Click "Query Status" to fetch</p>
+                            </div>
+                        </div>
+
+                        <div class="note-box">
+                            <strong>Note:</strong> Collection-level metrics are disabled by default for performance.
+                            Enable them only for collections you need to monitor closely.
+                        </div>
+                    </div>
+
+                    <!-- Tab 3: Client Errors -->
+                    <div id="errorsTab" class="command-tab-content">
+                        <div class="form-row" style="margin-bottom: 16px;">
+                            <div class="form-group">
+                                <label>Client</label>
+                                <select id="errorsClientSelect">
+                                    <option value="">Select a client...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Max Errors</label>
+                                <input type="number" id="errorsMaxCount" class="setting-input" value="100" min="1" max="1000">
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 16px;">
+                            <button type="button" class="btn btn-primary" onclick="fetchClientErrors()">Fetch Errors</button>
+                        </div>
+
+                        <div class="status-box" id="errorsStatusBox" style="display: none;">
+                            <div class="status-box-title">
+                                <span id="errorsStatusTitle">Errors</span>
+                                <span id="errorsStatusCount" style="font-weight: normal; color: var(--gray-500);"></span>
+                            </div>
+                            <div id="errorsContent">
+                                <!-- Errors will be rendered here -->
+                            </div>
+                        </div>
+
+                        <div class="note-box" id="errorsNote">
+                            <strong>Note:</strong> Errors are stored on the client side. After clicking "Fetch Errors",
+                            the results will appear after the client's next heartbeat (usually within 5-30 seconds).
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Error Modal -->
+    <div id="errorModal" class="modal-overlay" style="display: none;" onclick="closeErrorModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>Client Errors - <span id="errorModalClientId"></span></h3>
+                <button class="modal-close" onclick="closeErrorModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="errorModalContent">
+                    <div class="empty-state" style="padding: 20px;">
+                        <p>Loading errors...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Command Responses Modal -->
+    <div id="repliesModal" class="modal-overlay" style="display: none;" onclick="closeRepliesModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>Command Responses - <span id="repliesModalClientId"></span></h3>
+                <button class="modal-close" onclick="closeRepliesModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="repliesModalContent">
+                    <div class="empty-state" style="padding: 20px;">
+                        <p>Loading responses...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Historical View Modal -->
+    <div id="historyModal" class="modal-overlay" style="display: none;" onclick="closeHistoryModal(event)">
+        <div class="modal-content" style="max-width: 900px;" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>Historical Metrics - <span id="historyModalClientId"></span></h3>
+                <button class="modal-close" onclick="closeHistoryModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom: 20px;">
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;">
+                        <button class="btn btn-secondary btn-sm history-preset" data-minutes="5" onclick="setHistoryPreset(5)">Last 5 min</button>
+                        <button class="btn btn-secondary btn-sm history-preset" data-minutes="15" onclick="setHistoryPreset(15)">Last 15 min</button>
+                        <button class="btn btn-secondary btn-sm history-preset" data-minutes="30" onclick="setHistoryPreset(30)">Last 30 min</button>
+                        <button class="btn btn-secondary btn-sm history-preset" data-minutes="60" onclick="setHistoryPreset(60)">Last 1 hour (aggregated)</button>
+                    </div>
+                    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                        <label style="font-size: 14px; color: var(--gray-600);">Custom Range:</label>
+                        <input type="datetime-local" id="historyStartTime" class="form-input" style="width: auto;">
+                        <span style="color: var(--gray-500);">to</span>
+                        <input type="datetime-local" id="historyEndTime" class="form-input" style="width: auto;">
+                        <button class="btn btn-primary btn-sm" onclick="queryHistory()">Query</button>
+                    </div>
+                </div>
+                <div id="historyModalContent">
+                    <div class="empty-state" style="padding: 20px;">
+                        <p>Select a time range to view historical metrics</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Client Config Modal -->
+    <div id="configModal" class="modal-overlay" style="display: none;" onclick="closeConfigModal(event)">
+        <div class="modal-content" style="max-width: 700px;" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>Client Configuration - <span id="configModalClientId"></span></h3>
+                <button class="modal-close" onclick="closeConfigModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="configModalContent">
+                    <div class="empty-state" style="padding: 20px;">
+                        <p>Loading configuration...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/v1';
+        let authToken = '';
+        let autoRefreshInterval = null;
+        let clientsData = [];
+        let serverCommands = []; // Commands fetched from server
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            // Check if already logged in
+            const savedAuth = sessionStorage.getItem('milvusAuth');
+            if (savedAuth) {
+                authToken = savedAuth;
+                const savedUser = sessionStorage.getItem('milvusUser');
+                showApp(savedUser || 'User');
+            }
+
+            // Event listeners
+            document.getElementById('loginForm').addEventListener('submit', handleLogin);
+            document.getElementById('autoRefresh').addEventListener('change', toggleAutoRefresh);
+            document.getElementById('clientFilter').addEventListener('input', filterClients);
+        });
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const errorDiv = document.getElementById('loginError');
+
+            if (!username || !password) {
+                errorDiv.textContent = 'Please enter username and password';
+                errorDiv.style.display = 'block';
+                return;
+            }
+
+            // Create Basic Auth token
+            authToken = 'Basic ' + btoa(username + ':' + password);
+
+            // Test auth by making a request
+            try {
+                const resp = await fetch(`${API_BASE}/_telemetry/clients`, {
+                    headers: { 'Authorization': authToken }
+                });
+
+                if (resp.status === 401) {
+                    errorDiv.textContent = 'Invalid username or password';
+                    errorDiv.style.display = 'block';
+                    authToken = '';
+                    return;
+                }
+
+                if (!resp.ok) {
+                    throw new Error('Server error');
+                }
+
+                // Save auth
+                sessionStorage.setItem('milvusAuth', authToken);
+                sessionStorage.setItem('milvusUser', username);
+                showApp(username);
+            } catch (error) {
+                errorDiv.textContent = 'Connection error: ' + error.message;
+                errorDiv.style.display = 'block';
+                authToken = '';
+            }
+        }
+
+        function showApp(username) {
+            document.getElementById('loginPage').style.display = 'none';
+            document.getElementById('appContainer').style.display = 'block';
+            document.getElementById('currentUser').textContent = username;
+            loadData();
+            loadServerCommands();
+            if (document.getElementById('autoRefresh').checked) {
+                startAutoRefresh();
+            }
+        }
+
+        function logout() {
+            sessionStorage.removeItem('milvusAuth');
+            sessionStorage.removeItem('milvusUser');
+            authToken = '';
+            stopAutoRefresh();
+            document.getElementById('appContainer').style.display = 'none';
+            document.getElementById('loginPage').style.display = 'flex';
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+            document.getElementById('loginError').style.display = 'none';
+        }
+
+        function startAutoRefresh() {
+            stopAutoRefresh();
+            autoRefreshInterval = setInterval(() => {
+                loadData();
+                loadServerCommands();
+            }, 60000); // 1 minute
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+        }
+
+        function toggleAutoRefresh(e) {
+            if (e.target.checked) {
+                startAutoRefresh();
+            } else {
+                stopAutoRefresh();
+            }
+        }
+
+        async function loadData() {
+            try {
+                const resp = await fetch(`${API_BASE}/_telemetry/clients?include_metrics=true`, {
+                    headers: authToken ? { 'Authorization': authToken } : {}
+                });
+
+                if (resp.status === 401) {
+                    logout();
+                    return;
+                }
+
+                if (!resp.ok) throw new Error('Failed to fetch');
+
+                const data = await resp.json();
+                clientsData = data.clients || [];
+                renderStats(data);
+                renderClients(clientsData);
+            } catch (error) {
+                console.error('Error loading data:', error);
+            }
+        }
+
+        function renderStats(data) {
+            const clients = data.clients || [];
+            const aggregated = data.aggregated || {};
+
+            document.getElementById('totalClients').textContent = clients.length;
+            document.getElementById('totalRequests').textContent = formatNumber(aggregated.request_count || 0);
+            document.getElementById('totalErrors').textContent = formatNumber(aggregated.error_count || 0);
+
+            const requests = aggregated.request_count || 0;
+            const success = aggregated.success_count || 0;
+            const rate = requests > 0 ? ((success / requests) * 100).toFixed(1) + '%' : 'N/A';
+            document.getElementById('successRate').textContent = rate;
+        }
+
+        function renderClients(clients) {
+            const grid = document.getElementById('clientsGrid');
+            const empty = document.getElementById('emptyState');
+
+            if (clients.length === 0) {
+                grid.innerHTML = '';
+                empty.style.display = 'block';
+                return;
+            }
+
+            empty.style.display = 'none';
+            grid.innerHTML = clients.map((client, index) => {
+                const totalRequests = getTotalRequests(client);
+                const totalErrors = getTotalErrors(client);
+                const initials = getInitials(client.client_info?.sdk_type || 'UK');
+
+                return `
+                    <div class="client-card" data-index="${index}" onclick="toggleClient(this)">
+                        <div class="client-header">
+                            <div class="client-info">
+                                <div class="client-avatar">${initials}</div>
+                                <div>
+                                    <div class="client-name">${escapeHtml(client.client_id || 'unknown')}</div>
+                                    <div class="client-meta">${escapeHtml(client.client_info?.sdk_type || '-')} • ${escapeHtml(client.client_info?.host || '-')}</div>
+                                </div>
+                            </div>
+                            <div class="client-stats">
+                                <div class="client-stat">
+                                    <div class="client-stat-value">${formatNumber(totalRequests)}</div>
+                                    <div class="client-stat-label">Requests</div>
+                                </div>
+                                <div class="client-stat">
+                                    <div class="client-stat-value" style="color: ${totalErrors > 0 ? 'var(--danger)' : 'var(--success)'}">${formatNumber(totalErrors)}</div>
+                                    <div class="client-stat-label">Errors</div>
+                                </div>
+                                <span class="status-badge status-${client.status}">${client.status}</span>
+                                <div class="expand-icon">▼</div>
+                            </div>
+                        </div>
+                        <div class="client-details">
+                            ${renderClientDetails(client)}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderClientDetails(client) {
+            const clientId = client.client_info?.reserved?.client_id || client.client_id || 'unknown';
+            const repliesCount = client.command_replies?.length || 0;
+
+            // Action buttons
+            const actionsHtml = `
+                <div class="client-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="showClientErrors('${escapeHtml(clientId)}')">Show Errors</button>
+                    <button class="btn btn-secondary btn-sm" onclick="showCommandReplies('${escapeHtml(clientId)}')">
+                        Command Responses ${repliesCount > 0 ? `(${repliesCount})` : ''}
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="showHistoricalView('${escapeHtml(clientId)}')">Historical View</button>
+                    <button class="btn btn-secondary btn-sm" onclick="showClientConfig('${escapeHtml(clientId)}')">Show Config</button>
+                </div>
+            `;
+
+            const metrics = client.metrics || [];
+            if (metrics.length === 0) {
+                return actionsHtml + '<div class="empty-state" style="padding: 20px;"><p>No metrics available</p></div>';
+            }
+
+            const safeClientId = sanitizeId(client.client_id);
+            const tabs = metrics.map((m, i) => `
+                <button class="metrics-tab ${i === 0 ? 'active' : ''}" onclick="switchTab(event, '${safeClientId}-${i}')">${escapeHtml(m.operation)}</button>
+            `).join('');
+
+            const contents = metrics.map((m, i) => {
+                const global = m.global || {};
+                const collections = m.collection_metrics || {};
+                const maxLatency = Math.max(global.p99_latency_ms || 0, 100);
+
+                let collectionRows = '';
+                if (Object.keys(collections).length > 0) {
+                    collectionRows = Object.entries(collections).map(([name, cm]) => `
+                        <tr>
+                            <td><span class="op-badge">${escapeHtml(name)}</span></td>
+                            <td>${formatNumber(cm.request_count || 0)}</td>
+                            <td>${formatNumber(cm.success_count || 0)}</td>
+                            <td>${formatNumber(cm.error_count || 0)}</td>
+                            <td>
+                                <div class="latency-bar">
+                                    <div class="latency-bar-track">
+                                        <div class="latency-bar-fill" style="width: ${Math.min((cm.avg_latency_ms || 0) / maxLatency * 100, 100)}%"></div>
+                                    </div>
+                                    <span>${(cm.avg_latency_ms || 0).toFixed(2)}ms</span>
+                                </div>
+                            </td>
+                            <td>${(cm.p99_latency_ms || 0).toFixed(2)}ms</td>
+                        </tr>
+                    `).join('');
+                }
+
+                return `
+                    <div class="metrics-content ${i === 0 ? 'active' : ''}" id="${safeClientId}-${i}">
+                        <h4 style="margin-bottom: 12px; color: var(--gray-700);">Global Metrics</h4>
+                        <table class="metrics-table">
+                            <thead>
+                                <tr>
+                                    <th>Metric</th>
+                                    <th>Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>Total Requests</td><td>${formatNumber(global.request_count || 0)}</td></tr>
+                                <tr><td>Successful</td><td>${formatNumber(global.success_count || 0)}</td></tr>
+                                <tr><td>Errors</td><td>${formatNumber(global.error_count || 0)}</td></tr>
+                                <tr><td>Avg Latency</td><td>${(global.avg_latency_ms || 0).toFixed(2)} ms</td></tr>
+                                <tr><td>P99 Latency</td><td>${(global.p99_latency_ms || 0).toFixed(2)} ms</td></tr>
+                            </tbody>
+                        </table>
+                        ${Object.keys(collections).length > 0 ? `
+                            <h4 style="margin: 20px 0 12px; color: var(--gray-700);">Collection Metrics</h4>
+                            <table class="metrics-table">
+                                <thead>
+                                    <tr>
+                                        <th>Collection</th>
+                                        <th>Requests</th>
+                                        <th>Success</th>
+                                        <th>Errors</th>
+                                        <th>Avg Latency</th>
+                                        <th>P99 Latency</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${collectionRows}</tbody>
+                            </table>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                ${actionsHtml}
+                <div class="metrics-tabs">${tabs}</div>
+                ${contents}
+            `;
+        }
+
+        function toggleClient(card) {
+            // Don't toggle if clicking on tabs or buttons inside
+            if (event.target.closest('.metrics-tab') || event.target.closest('button')) {
+                return;
+            }
+            card.classList.toggle('expanded');
+        }
+
+        function switchTab(event, tabId) {
+            event.stopPropagation();
+            const card = event.target.closest('.client-card');
+
+            // Update tab buttons
+            card.querySelectorAll('.metrics-tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+
+            // Update content
+            card.querySelectorAll('.metrics-content').forEach(c => c.classList.remove('active'));
+            card.querySelector(`#${CSS.escape(tabId)}`).classList.add('active');
+        }
+
+        function getTotalRequests(client) {
+            return (client.metrics || []).reduce((sum, m) => sum + (m.global?.request_count || 0), 0);
+        }
+
+        function getTotalErrors(client) {
+            return (client.metrics || []).reduce((sum, m) => sum + (m.global?.error_count || 0), 0);
+        }
+
+        function getInitials(text) {
+            return text.replace(/[^A-Z]/g, '').slice(0, 2) || 'CL';
+        }
+
+        function updateTargetClient() {
+            const scope = document.getElementById('targetScope').value;
+            document.getElementById('clientIdGroup').style.display = scope === 'client' ? 'block' : 'none';
+        }
+
+        function filterClients() {
+            const filter = document.getElementById('clientFilter').value.toLowerCase();
+            const filtered = clientsData.filter(c => {
+                const text = `${c.client_id} ${c.client_info?.sdk_type} ${c.client_info?.host}`.toLowerCase();
+                return text.includes(filter);
+            });
+            renderClients(filtered);
+        }
+
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        function formatNumber(num) {
+            return num.toLocaleString();
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function decodePayload(payload) {
+            if (!payload || (Array.isArray(payload) && payload.length === 0)) return '';
+            try {
+                let payloadStr = '';
+                if (typeof payload === 'string') {
+                    payloadStr = atob(payload);
+                } else if (Array.isArray(payload)) {
+                    payloadStr = String.fromCharCode.apply(null, payload);
+                }
+                if (!payloadStr) return '';
+                try {
+                    const parsed = JSON.parse(payloadStr);
+                    return JSON.stringify(parsed, null, 2);
+                } catch (e) {
+                    return payloadStr;
+                }
+            } catch (e) {
+                return '';
+            }
+        }
+
+        // Sanitize a string for use as an HTML id attribute (alphanumeric, dash, underscore only)
+        function sanitizeId(text) {
+            if (!text) return 'unknown';
+            return text.replace(/[^a-zA-Z0-9_-]/g, '_');
+        }
+
+        // Server Commands Management
+        async function loadServerCommands() {
+            try {
+                const resp = await fetch(`${API_BASE}/_telemetry/commands`, {
+                    headers: authToken ? { 'Authorization': authToken } : {}
+                });
+
+                if (resp.status === 401) {
+                    logout();
+                    return;
+                }
+
+                if (!resp.ok) {
+                    throw new Error('Failed to load commands');
+                }
+
+                const data = await resp.json();
+                serverCommands = data.commands || [];
+                renderServerCommands();
+            } catch (error) {
+                console.error('Failed to load commands:', error);
+                // Keep existing commands on error
+                renderServerCommands();
+            }
+        }
+
+        function formatRemainingTime(createTime, ttlSeconds) {
+            if (!ttlSeconds || ttlSeconds <= 0) return '';
+            const expiresAt = createTime + ttlSeconds * 1000;
+            const remaining = expiresAt - Date.now();
+            if (remaining <= 0) return 'expired';
+
+            const seconds = Math.floor(remaining / 1000);
+            if (seconds < 60) return `${seconds}s`;
+            const minutes = Math.floor(seconds / 60);
+            if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+            const hours = Math.floor(minutes / 60);
+            return `${hours}h ${minutes % 60}m`;
+        }
+
+        function renderServerCommands() {
+            const grid = document.getElementById('commandsGrid');
+            const empty = document.getElementById('commandsEmpty');
+
+            if (serverCommands.length === 0) {
+                grid.innerHTML = '';
+                empty.style.display = 'block';
+                return;
+            }
+
+            empty.style.display = 'none';
+            grid.innerHTML = serverCommands.map(cmd => {
+                const time = new Date(cmd.create_time).toLocaleTimeString();
+                const remaining = cmd.persistent ? '' : formatRemainingTime(cmd.create_time, cmd.ttl_seconds);
+                const remainingHtml = remaining ? `<span style="font-size: 11px; color: ${remaining === 'expired' ? 'var(--danger)' : 'var(--warning)'}; margin-left: 8px;">(${remaining})</span>` : '';
+                return `
+                    <div class="command-item">
+                        <div class="command-item-info">
+                            <span class="command-type-badge ${cmd.persistent ? 'persistent' : ''}">${escapeHtml(cmd.command_type)}</span>
+                            <span class="command-target">${escapeHtml(cmd.target_scope)}</span>
+                            ${cmd.persistent ? '<span style="font-size: 11px; color: #8b5cf6;">(persistent)</span>' : remainingHtml}
+                        </div>
+                        <div>
+                            <span class="command-time">${time}</span>
+                            <button class="btn btn-secondary btn-sm" style="margin-left: 8px;" onclick="deleteCommand('${cmd.command_id}')">Delete</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function deleteCommand(commandId) {
+            try {
+                const resp = await fetch(`${API_BASE}/_telemetry/commands/${commandId}`, {
+                    method: 'DELETE',
+                    headers: authToken ? { 'Authorization': authToken } : {}
+                });
+
+                if (resp.status === 401) {
+                    logout();
+                    return;
+                }
+
+                if (!resp.ok) {
+                    throw new Error('Failed to delete command');
+                }
+
+                // Refresh from server
+                await loadServerCommands();
+                showToast('Command deleted', 'success');
+            } catch (error) {
+                showToast('Error: ' + error.message, 'error');
+            }
+        }
+
+        // Client Errors Modal
+        async function showClientErrors(clientId) {
+            event.stopPropagation();
+            document.getElementById('errorModalClientId').textContent = clientId;
+            document.getElementById('errorModalContent').innerHTML = '<div class="empty-state" style="padding: 20px;"><p>Loading errors...</p></div>';
+            document.getElementById('errorModal').style.display = 'flex';
+
+            try {
+                // Push show_errors command to specific client
+                const resp = await fetch(`${API_BASE}/_telemetry/commands`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(authToken ? { 'Authorization': authToken } : {})
+                    },
+                    body: JSON.stringify({
+                        command_type: 'show_errors',
+                        target_client_id: clientId,
+                        payload: '{"limit": 100}',
+                        ttl_seconds: 300 // 5 minutes TTL
+                    })
+                });
+
+                if (resp.status === 401) {
+                    logout();
+                    return;
+                }
+
+                if (!resp.ok) {
+                    throw new Error('Failed to request errors');
+                }
+
+                document.getElementById('errorModalContent').innerHTML = `
+                    <div class="empty-state" style="padding: 20px;">
+                        <p>Error request sent to client.</p>
+                        <p style="font-size: 13px; color: var(--gray-500); margin-top: 8px;">
+                            The show_errors command has been pushed to the client.
+                            Errors will be included in the client's next heartbeat response
+                            and can be viewed in the server logs.
+                        </p>
+                        <p style="font-size: 12px; color: var(--gray-400); margin-top: 12px;">
+                            Note: Client errors are collected locally on each client and sent to the server
+                            when the show_errors command is received. Check the Milvus server logs for the error details.
+                        </p>
+                    </div>
+                `;
+            } catch (error) {
+                document.getElementById('errorModalContent').innerHTML = `
+                    <div class="empty-state" style="padding: 20px;">
+                        <p style="color: var(--danger);">Error: ${escapeHtml(error.message)}</p>
+                    </div>
+                `;
+            }
+        }
+
+        function closeErrorModal(event) {
+            if (!event || event.target === document.getElementById('errorModal')) {
+                document.getElementById('errorModal').style.display = 'none';
+            }
+        }
+
+        // Command Responses Modal
+        function showCommandReplies(clientId) {
+            event.stopPropagation();
+            document.getElementById('repliesModalClientId').textContent = clientId;
+            document.getElementById('repliesModal').style.display = 'flex';
+
+            // Find the client and get their command replies
+            const client = clientsData.find(c => {
+                const cid = c.client_info?.reserved?.client_id || c.client_id;
+                return cid === clientId;
+            });
+
+            if (!client || !client.command_replies || client.command_replies.length === 0) {
+                document.getElementById('repliesModalContent').innerHTML = `
+                    <div class="empty-state" style="padding: 20px;">
+                        <p>No command responses recorded for this client.</p>
+                        <p style="font-size: 13px; color: var(--gray-500); margin-top: 8px;">
+                            Command responses are recorded when the client acknowledges commands sent from the server.
+                        </p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Render the replies
+            const repliesHtml = client.command_replies.map(reply => {
+                const statusClass = reply.success ? 'success' : 'error';
+                const statusText = reply.success ? 'Success' : 'Failed';
+                const time = new Date(reply.received_at).toLocaleString();
+
+                let payloadHtml = '';
+                const payloadStr = decodePayload(reply.payload);
+                if (payloadStr) {
+                    payloadHtml = `<div class="reply-payload"><div style="font-weight:600; margin-bottom:4px;">Reply Payload</div>${escapeHtml(payloadStr)}</div>`;
+                }
+
+                let cmdPayloadHtml = '';
+                const cmdPayloadStr = decodePayload(reply.command_payload);
+                if (cmdPayloadStr) {
+                    cmdPayloadHtml = `<div class="reply-payload"><div style="font-weight:600; margin-bottom:4px;">Command Payload</div>${escapeHtml(cmdPayloadStr)}</div>`;
+                }
+
+                return `
+                    <div class="reply-item ${statusClass}">
+                        <div class="reply-item-header">
+                            <div>
+                                <span class="reply-status ${statusClass}">${statusText}</span>
+                                ${reply.command_type ? `<span style="margin-left: 8px; font-size: 13px; color: var(--gray-600);">${escapeHtml(reply.command_type)}</span>` : ''}
+                            </div>
+                            <span class="reply-time">${time}</span>
+                        </div>
+                        <div class="reply-command-id">Command ID: ${escapeHtml(reply.command_id)}</div>
+                        ${reply.error_msg ? `<div class="reply-error-msg">${escapeHtml(reply.error_msg)}</div>` : ''}
+                        ${cmdPayloadHtml}
+                        ${payloadHtml}
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('repliesModalContent').innerHTML = repliesHtml;
+        }
+
+        function closeRepliesModal(event) {
+            if (!event || event.target === document.getElementById('repliesModal')) {
+                document.getElementById('repliesModal').style.display = 'none';
+            }
+        }
+
+        // =====================================================
+        // Client Config Modal Functions
+        // =====================================================
+        let currentConfigClientId = '';
+
+        async function showClientConfig(clientId) {
+            currentConfigClientId = clientId;
+            document.getElementById('configModalClientId').textContent = clientId;
+            document.getElementById('configModalContent').innerHTML = `
+                <div class="empty-state" style="padding: 20px;">
+                    <p>Fetching configuration from client...</p>
+                </div>
+            `;
+            document.getElementById('configModal').style.display = 'flex';
+
+            try {
+                const response = await fetch(`${API_BASE}/_telemetry/clients/${encodeURIComponent(clientId)}/config`, {
+                    headers: { 'Authorization': authToken }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (data.status === 'pending') {
+                    // Start polling for the command reply
+                    document.getElementById('configModalContent').innerHTML = `
+                        <div class="empty-state" style="padding: 20px;">
+                            <p>Command sent. Waiting for client response...</p>
+                            <p style="font-size: 12px; color: var(--gray-400); margin-top: 8px;">Command ID: ${escapeHtml(data.command_id)}</p>
+                        </div>
+                    `;
+                    pollForConfigReply(data.command_id, clientId);
+                } else {
+                    renderConfigResponse(data);
+                }
+            } catch (error) {
+                document.getElementById('configModalContent').innerHTML = `
+                    <div class="empty-state" style="padding: 20px;">
+                        <p style="color: var(--danger);">Failed to fetch config: ${escapeHtml(error.message)}</p>
+                    </div>
+                `;
+            }
+        }
+
+        async function pollForConfigReply(commandId, clientId) {
+            const maxAttempts = 60; // 60 seconds total (1s * 60) - increased to handle slow heartbeats
+            let attempts = 0;
+
+            const poll = async () => {
+                attempts++;
+                try {
+                    // Fetch client data to check for command reply
+                    const response = await fetch(`${API_BASE}/_telemetry/clients?client_id=${encodeURIComponent(clientId)}&include_metrics=false`, {
+                        headers: { 'Authorization': authToken }
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    const clients = data.clients || [];
+
+                    if (clients.length > 0) {
+                        const client = clients[0];
+                        const replies = client.command_replies || [];
+                        const configReply = replies.find(r => r.command_id === commandId);
+
+                        if (configReply) {
+                            if (configReply.success && configReply.payload) {
+                                try {
+                                    // Payload is a JSON string (not base64) - parse directly
+                                    // Server stores Payload as string type, so no base64 decoding needed
+                                    const payloadStr = configReply.payload;
+                                    if (!payloadStr || payloadStr.trim() === '') {
+                                        throw new Error('Empty payload received');
+                                    }
+                                    const configData = JSON.parse(payloadStr);
+                                    renderConfigData(configData);
+                                } catch (e) {
+                                    console.error('Failed to parse config response:', e, 'payload:', configReply.payload);
+                                    document.getElementById('configModalContent').innerHTML = `
+                                        <div class="empty-state" style="padding: 20px;">
+                                            <p style="color: var(--danger);">Failed to parse config response: ${escapeHtml(e.message)}</p>
+                                            <p style="font-size: 12px; color: var(--gray-400); margin-top: 8px;">Raw payload: ${escapeHtml(String(configReply.payload).substring(0, 200))}</p>
+                                        </div>
+                                    `;
+                                }
+                            } else {
+                                document.getElementById('configModalContent').innerHTML = `
+                                    <div class="empty-state" style="padding: 20px;">
+                                        <p style="color: var(--danger);">Config request failed: ${escapeHtml(configReply.error_msg || 'Unknown error')}</p>
+                                    </div>
+                                `;
+                            }
+                            return;
+                        }
+                    }
+
+                    if (attempts < maxAttempts) {
+                        setTimeout(poll, 1000); // Poll every 1 second
+                    } else {
+                        document.getElementById('configModalContent').innerHTML = `
+                            <div class="empty-state" style="padding: 20px;">
+                                <p style="color: var(--warning);">Timeout waiting for client response (60s)</p>
+                                <p style="font-size: 12px; color: var(--gray-400); margin-top: 8px;">The client may respond in its next heartbeat. Try again later.</p>
+                            </div>
+                        `;
+                    }
+                } catch (error) {
+                    document.getElementById('configModalContent').innerHTML = `
+                        <div class="empty-state" style="padding: 20px;">
+                            <p style="color: var(--danger);">Failed to poll for response: ${escapeHtml(error.message)}</p>
+                        </div>
+                    `;
+                }
+            };
+
+            setTimeout(poll, 1000);
+        }
+
+        function renderConfigData(configData) {
+            const userConfig = configData.user_config || {};
+            const pushedConfig = configData.pushed_config || {};
+
+            let userConfigHtml = '';
+            const userConfigKeys = Object.keys(userConfig).sort();
+            if (userConfigKeys.length > 0) {
+                userConfigHtml = `
+                    <div style="margin-bottom: 24px;">
+                        <h4 style="font-size: 14px; font-weight: 600; color: var(--gray-700); margin-bottom: 12px;">User Configuration</h4>
+                        <table class="metrics-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40%;">Parameter</th>
+                                    <th>Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${userConfigKeys.map(key => `
+                                    <tr>
+                                        <td style="font-weight: 500;">${escapeHtml(key)}</td>
+                                        <td><code style="background: var(--gray-100); padding: 2px 6px; border-radius: 4px; font-size: 13px;">${escapeHtml(formatConfigValue(userConfig[key]))}</code></td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            }
+
+            let pushedConfigHtml = '';
+            const pushedConfigKeys = Object.keys(pushedConfig).sort();
+            if (pushedConfigKeys.length > 0) {
+                pushedConfigHtml = `
+                    <div>
+                        <h4 style="font-size: 14px; font-weight: 600; color: var(--gray-700); margin-bottom: 12px;">Server-Pushed Configuration</h4>
+                        <table class="metrics-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40%;">Parameter</th>
+                                    <th>Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${pushedConfigKeys.map(key => `
+                                    <tr>
+                                        <td style="font-weight: 500;">${escapeHtml(key)}</td>
+                                        <td><code style="background: var(--gray-100); padding: 2px 6px; border-radius: 4px; font-size: 13px;">${escapeHtml(formatConfigValue(pushedConfig[key]))}</code></td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            } else {
+                pushedConfigHtml = `
+                    <div>
+                        <h4 style="font-size: 14px; font-weight: 600; color: var(--gray-700); margin-bottom: 12px;">Server-Pushed Configuration</h4>
+                        <p style="color: var(--gray-500); font-size: 14px;">No server-pushed configuration</p>
+                    </div>
+                `;
+            }
+
+            document.getElementById('configModalContent').innerHTML = userConfigHtml + pushedConfigHtml;
+        }
+
+        function formatConfigValue(value) {
+            if (value === null || value === undefined) {
+                return 'null';
+            }
+            if (typeof value === 'object') {
+                return JSON.stringify(value);
+            }
+            return String(value);
+        }
+
+        function closeConfigModal(event) {
+            if (!event || event.target === document.getElementById('configModal')) {
+                document.getElementById('configModal').style.display = 'none';
+            }
+        }
+
+        // =====================================================
+        // Historical View Modal Functions
+        // =====================================================
+        let currentHistoryClientId = '';
+
+        function showHistoricalView(clientId) {
+            currentHistoryClientId = clientId;
+            document.getElementById('historyModalClientId').textContent = clientId;
+            document.getElementById('historyModalContent').innerHTML = `
+                <div class="empty-state" style="padding: 20px;">
+                    <p>Select a time range to view historical metrics</p>
+                </div>
+            `;
+
+            // Set default time range to last 15 minutes
+            const now = new Date();
+            const fifteenMinsAgo = new Date(now.getTime() - 15 * 60 * 1000);
+            document.getElementById('historyEndTime').value = formatDateTimeLocal(now);
+            document.getElementById('historyStartTime').value = formatDateTimeLocal(fifteenMinsAgo);
+
+            // Clear preset selection
+            document.querySelectorAll('.history-preset').forEach(btn => btn.classList.remove('active'));
+
+            document.getElementById('historyModal').style.display = 'flex';
+        }
+
+        function formatDateTimeLocal(date) {
+            const pad = n => n.toString().padStart(2, '0');
+            return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        }
+
+        function setHistoryPreset(minutes) {
+            const now = new Date();
+            const startTime = new Date(now.getTime() - minutes * 60 * 1000);
+
+            document.getElementById('historyEndTime').value = formatDateTimeLocal(now);
+            document.getElementById('historyStartTime').value = formatDateTimeLocal(startTime);
+
+            // Update preset button active state
+            document.querySelectorAll('.history-preset').forEach(btn => {
+                btn.classList.toggle('active', parseInt(btn.dataset.minutes) === minutes);
+            });
+
+            // Auto-query when selecting a preset
+            queryHistory(minutes >= 60);
+        }
+
+        async function queryHistory(aggregate = false) {
+            const startTimeInput = document.getElementById('historyStartTime').value;
+            const endTimeInput = document.getElementById('historyEndTime').value;
+
+            if (!startTimeInput || !endTimeInput) {
+                alert('Please select both start and end time');
+                return;
+            }
+
+            const startTime = new Date(startTimeInput).toISOString();
+            const endTime = new Date(endTimeInput).toISOString();
+
+            // Check if time range is >= 1 hour, auto-enable aggregation
+            const diffMs = new Date(endTimeInput) - new Date(startTimeInput);
+            if (diffMs >= 60 * 60 * 1000) {
+                aggregate = true;
+            }
+
+            document.getElementById('historyModalContent').innerHTML = `
+                <div class="empty-state" style="padding: 20px;">
+                    <p>Loading historical metrics...</p>
+                </div>
+            `;
+
+            try {
+                const url = `${API_BASE}/_telemetry/clients/${encodeURIComponent(currentHistoryClientId)}/history?start_time=${encodeURIComponent(startTime)}&end_time=${encodeURIComponent(endTime)}&aggregate=${aggregate}`;
+                const resp = await fetch(url, {
+                    headers: { 'Authorization': `Basic ${authToken}` }
+                });
+
+                if (!resp.ok) {
+                    const errData = await resp.json();
+                    throw new Error(errData.error || `HTTP error: ${resp.status}`);
+                }
+
+                const data = await resp.json();
+
+                // The endpoint returns a command_id since it's async
+                // We need to wait for the command reply
+                if (data.status === 'pending') {
+                    document.getElementById('historyModalContent').innerHTML = `
+                        <div class="empty-state" style="padding: 20px;">
+                            <p>Command sent to client (ID: ${escapeHtml(data.command_id)})</p>
+                            <p style="margin-top: 10px; color: var(--gray-500);">Results will be available in the client's next heartbeat.</p>
+                            <p style="margin-top: 10px; color: var(--gray-500);">Waiting for client response...</p>
+                        </div>
+                    `;
+                    pollForCommandReply(data.command_id, currentHistoryClientId, 'history', aggregate);
+                    return;
+                }
+
+                // If we get data directly (future enhancement), render it
+                renderHistoryResults(data, aggregate);
+
+            } catch (error) {
+                document.getElementById('historyModalContent').innerHTML = `
+                    <div class="empty-state" style="padding: 20px;">
+                        <p style="color: var(--danger);">Error: ${escapeHtml(error.message)}</p>
+                    </div>
+                `;
+            }
+        }
+
+        function renderHistoryResults(data, aggregated) {
+            if (aggregated && data.aggregated) {
+                // Render aggregated view
+                const agg = data.aggregated;
+                const metrics = agg.metrics || {};
+
+                let tableRows = Object.entries(metrics).map(([op, m]) => `
+                    <tr>
+                        <td><span class="op-badge">${escapeHtml(op)}</span></td>
+                        <td>${formatNumber(m.request_count || 0)}</td>
+                        <td>${formatNumber(m.success_count || 0)}</td>
+                        <td>${formatNumber(m.error_count || 0)}</td>
+                        <td>${(m.avg_latency_ms || 0).toFixed(2)} ms</td>
+                        <td>${(m.p99_latency_ms || 0).toFixed(2)} ms</td>
+                        <td>${(m.max_latency_ms || 0).toFixed(2)} ms</td>
+                    </tr>
+                `).join('');
+
+                if (tableRows === '') {
+                    tableRows = '<tr><td colspan="7" style="text-align: center; color: var(--gray-500);">No data available</td></tr>';
+                }
+
+                document.getElementById('historyModalContent').innerHTML = `
+                    <div style="margin-bottom: 12px; color: var(--gray-600); font-size: 14px;">
+                        Aggregated from ${data.snapshot_count || 0} snapshots
+                    </div>
+                    <table class="metrics-table">
+                        <thead>
+                            <tr>
+                                <th>Operation</th>
+                                <th>Requests</th>
+                                <th>Success</th>
+                                <th>Errors</th>
+                                <th>Avg Latency</th>
+                                <th>P99 Latency</th>
+                                <th>Max Latency</th>
+                            </tr>
+                        </thead>
+                        <tbody>${tableRows}</tbody>
+                    </table>
+                `;
+            } else if (data.snapshots) {
+                // Render snapshot list view
+                const snapshots = data.snapshots || [];
+                if (snapshots.length === 0) {
+                    document.getElementById('historyModalContent').innerHTML = `
+                        <div class="empty-state" style="padding: 20px;">
+                            <p>No snapshots found in the selected time range</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                let snapshotHtml = snapshots.map(snap => {
+                    const timestamp = new Date(snap.timestamp).toLocaleTimeString();
+                    const endTime = new Date(snap.end_time).toLocaleTimeString();
+                    const metrics = snap.metrics || {};
+
+                    let metricsRows = Object.entries(metrics).map(([op, m]) => `
+                        <tr>
+                            <td><span class="op-badge">${escapeHtml(op)}</span></td>
+                            <td>${formatNumber(m.request_count || 0)}</td>
+                            <td>${(m.avg_latency_ms || 0).toFixed(2)} ms</td>
+                            <td>${(m.p99_latency_ms || 0).toFixed(2)} ms</td>
+                        </tr>
+                    `).join('');
+
+                    if (metricsRows === '') {
+                        metricsRows = '<tr><td colspan="4" style="text-align: center; color: var(--gray-500);">No metrics</td></tr>';
+                    }
+
+                    return `
+                        <div style="margin-bottom: 16px; border: 1px solid var(--gray-200); border-radius: 8px; padding: 12px;">
+                            <div style="font-weight: 600; color: var(--gray-700); margin-bottom: 8px;">
+                                ${timestamp} - ${endTime}
+                            </div>
+                            <table class="metrics-table" style="margin: 0;">
+                                <thead>
+                                    <tr>
+                                        <th>Operation</th>
+                                        <th>Requests</th>
+                                        <th>Avg Latency</th>
+                                        <th>P99 Latency</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${metricsRows}</tbody>
+                            </table>
+                        </div>
+                    `;
+                }).join('');
+
+                document.getElementById('historyModalContent').innerHTML = `
+                    <div style="margin-bottom: 12px; color: var(--gray-600); font-size: 14px;">
+                        ${data.total_snapshots || snapshots.length} snapshots found
+                    </div>
+                    <div style="max-height: 400px; overflow-y: auto;">
+                        ${snapshotHtml}
+                    </div>
+                `;
+            }
+        }
+
+        function closeHistoryModal(event) {
+            if (!event || event.target === document.getElementById('historyModal')) {
+                document.getElementById('historyModal').style.display = 'none';
+            }
+        }
+
+        // =====================================================
+        // Command Center Tab Functions
+        // =====================================================
+
+        // Current config enabled state (null = no change, true = on, false = off)
+        let configEnabledState = null;
+
+        // Switch between command tabs
+        function switchCommandTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.command-tab').forEach(tab => tab.classList.remove('active'));
+            event.target.classList.add('active');
+
+            // Update tab content
+            document.querySelectorAll('.command-tab-content').forEach(content => content.classList.remove('active'));
+            document.getElementById(tabName + 'Tab').classList.add('active');
+
+            // Populate client dropdown when switching to errors tab
+            if (tabName === 'errors') {
+                populateErrorsClientDropdown();
+            }
+        }
+
+        // =====================================================
+        // Tab 1: Telemetry Config Functions
+        // =====================================================
+
+        function updateConfigTargetClient() {
+            const scope = document.getElementById('configTargetScope').value;
+            document.getElementById('configClientIdGroup').style.display = scope === 'client' ? 'block' : 'none';
+            document.getElementById('configDatabaseIdGroup').style.display = scope === 'database' ? 'block' : 'none';
+        }
+
+        function setConfigEnabled(value) {
+            configEnabledState = value;
+
+            // Update toggle UI
+            document.getElementById('configEnabledOn').className = 'toggle-option' + (value === true ? ' active on' : '');
+            document.getElementById('configEnabledNone').className = 'toggle-option' + (value === null ? ' active' : '');
+            document.getElementById('configEnabledOff').className = 'toggle-option' + (value === false ? ' active off' : '');
+        }
+
+        function toggleAdvancedConfig() {
+            const header = document.querySelector('.collapsible-header');
+            const content = document.getElementById('advancedConfigContent');
+            const icon = document.getElementById('advancedConfigIcon');
+
+            header.classList.toggle('expanded');
+            content.classList.toggle('expanded');
+        }
+
+        async function pushConfig() {
+            const targetScope = document.getElementById('configTargetScope').value;
+            const targetClient = document.getElementById('configTargetClient').value;
+            const targetDatabase = document.getElementById('configTargetDatabase').value;
+
+            if (targetScope === 'client' && !targetClient) {
+                showToast('Please enter a client ID', 'error');
+                return;
+            }
+            if (targetScope === 'database' && !targetDatabase) {
+                showToast('Please enter a database name', 'error');
+                return;
+            }
+
+            // Build config payload
+            let payload = {};
+
+            // Add enabled state if changed
+            if (configEnabledState !== null) {
+                payload.enabled = configEnabledState;
+            }
+
+            // Add heartbeat interval if provided
+            const heartbeat = document.getElementById('configHeartbeat').value;
+            if (heartbeat) {
+                payload.heartbeat_interval_ms = parseInt(heartbeat);
+            }
+
+            // Add sampling rate if provided
+            const samplingRate = document.getElementById('configSamplingRate').value;
+            if (samplingRate !== '') {
+                payload.sampling_rate = parseFloat(samplingRate);
+            }
+
+            // Merge custom JSON if provided
+            const customJson = document.getElementById('configCustomJson').value.trim();
+            if (customJson) {
+                try {
+                    const custom = JSON.parse(customJson);
+                    payload = { ...payload, ...custom };
+                } catch (e) {
+                    showToast('Invalid custom JSON: ' + e.message, 'error');
+                    return;
+                }
+            }
+
+            const persistent = document.getElementById('configPersistent').checked;
+
+            try {
+                const resp = await fetch(`${API_BASE}/_telemetry/commands`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(authToken ? { 'Authorization': authToken } : {})
+                    },
+                    body: JSON.stringify({
+                        command_type: 'push_config',
+                        target_client_id: targetScope === 'client' ? targetClient : '',
+                        target_database: targetScope === 'database' ? targetDatabase : '',
+                        payload: Object.keys(payload).length > 0 ? JSON.stringify(payload) : '',
+                        ttl_seconds: 3600,
+                        persistent: persistent
+                    })
+                });
+
+                if (resp.status === 401) {
+                    logout();
+                    return;
+                }
+
+                if (!resp.ok) {
+                    const error = await resp.json();
+                    throw new Error(error.error || 'Failed to push config');
+                }
+
+                const result = await resp.json();
+
+                // Refresh commands from server
+                await loadServerCommands();
+
+                showToast(`Config pushed successfully (ID: ${result.command_id})`, 'success');
+            } catch (error) {
+                showToast('Error: ' + error.message, 'error');
+            }
+        }
+
+        // =====================================================
+        // Tab 2: Collection Metrics Functions
+        // =====================================================
+
+        function updateCollectionTargetClient() {
+            const scope = document.getElementById('collectionTargetScope').value;
+            document.getElementById('collectionClientIdGroup').style.display = scope === 'client' ? 'block' : 'none';
+            document.getElementById('collectionDatabaseIdGroup').style.display = scope === 'database' ? 'block' : 'none';
+        }
+
+        function toggleCollectionInput() {
+            const allCollections = document.getElementById('allCollections').checked;
+            const collectionNamesGroup = document.getElementById('collectionNamesGroup');
+            collectionNamesGroup.style.display = allCollections ? 'none' : 'block';
+            if (allCollections) {
+                document.getElementById('collectionNames').value = '';
+            }
+        }
+
+        async function pushCollectionMetrics(enabled) {
+            const targetScope = document.getElementById('collectionTargetScope').value;
+            const targetClient = document.getElementById('collectionTargetClient').value;
+            const targetDatabase = document.getElementById('collectionTargetDatabase').value;
+            const allCollections = document.getElementById('allCollections').checked;
+            const collectionsInput = document.getElementById('collectionNames').value.trim();
+
+            if (targetScope === 'client' && !targetClient) {
+                showToast('Please enter a client ID', 'error');
+                return;
+            }
+            if (targetScope === 'database' && !targetDatabase) {
+                showToast('Please enter a database name', 'error');
+                return;
+            }
+
+            // Parse collections - use "*" wildcard for all collections
+            let collections = [];
+            if (allCollections) {
+                collections = ['*'];
+            } else if (collectionsInput) {
+                collections = collectionsInput.split(',').map(c => c.trim()).filter(c => c);
+            }
+
+            // For enable, collections are required
+            if (enabled && collections.length === 0) {
+                showToast('Please enter at least one collection name or select "All Collections"', 'error');
+                return;
+            }
+
+            const payload = {
+                enabled: enabled,
+                collections: collections
+            };
+
+            try {
+                const resp = await fetch(`${API_BASE}/_telemetry/commands`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(authToken ? { 'Authorization': authToken } : {})
+                    },
+                    body: JSON.stringify({
+                        command_type: 'collection_metrics',
+                        target_client_id: targetScope === 'client' ? targetClient : '',
+                        target_database: targetScope === 'database' ? targetDatabase : '',
+                        payload: JSON.stringify(payload),
+                        ttl_seconds: 3600,
+                        persistent: false
+                    })
+                });
+
+                if (resp.status === 401) {
+                    logout();
+                    return;
+                }
+
+                if (!resp.ok) {
+                    const error = await resp.json();
+                    throw new Error(error.error || 'Failed to push collection metrics command');
+                }
+
+                const result = await resp.json();
+
+                // Refresh commands from server
+                await loadServerCommands();
+
+                const action = enabled ? 'enabled' : 'disabled';
+                const collMsg = collections.length > 0 ? ` for: ${collections.join(', ')}` : ' for all';
+                showToast(`Collection metrics ${action}${collMsg}`, 'success');
+            } catch (error) {
+                showToast('Error: ' + error.message, 'error');
+            }
+        }
+
+        async function queryCollectionStatus() {
+            const targetScope = document.getElementById('collectionTargetScope').value;
+            const targetClient = document.getElementById('collectionTargetClient').value;
+            const targetDatabase = document.getElementById('collectionTargetDatabase').value;
+
+            if (targetScope === 'client' && !targetClient) {
+                showToast('Please enter a client ID', 'error');
+                return;
+            }
+            if (targetScope === 'database' && !targetDatabase) {
+                showToast('Please enter a database name', 'error');
+                return;
+            }
+
+            // Show status box
+            document.getElementById('collectionStatusBox').style.display = 'block';
+            document.getElementById('collectionStatusContent').innerHTML = '<p style="color: var(--gray-500);">Querying status... (waiting for next heartbeat)</p>';
+
+            try {
+                const resp = await fetch(`${API_BASE}/_telemetry/commands`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(authToken ? { 'Authorization': authToken } : {})
+                    },
+                    body: JSON.stringify({
+                        command_type: 'collection_metrics',
+                        target_client_id: targetScope === 'client' ? targetClient : '',
+                        target_database: targetScope === 'database' ? targetDatabase : '',
+                        payload: '', // Empty payload to query status
+                        ttl_seconds: 300,
+                        persistent: false
+                    })
+                });
+
+                if (resp.status === 401) {
+                    logout();
+                    return;
+                }
+
+                if (!resp.ok) {
+                    const error = await resp.json();
+                    throw new Error(error.error || 'Failed to query status');
+                }
+
+                const result = await resp.json();
+
+                // Refresh commands from server
+                await loadServerCommands();
+
+                // Start polling for the response
+                // For database scope, pass null since we're targeting multiple clients in that database
+                pollForCommandReply(result.command_id, targetScope === 'client' ? targetClient : null, 'collection');
+
+            } catch (error) {
+                showToast('Error: ' + error.message, 'error');
+                document.getElementById('collectionStatusContent').innerHTML = `<p style="color: var(--danger);">Error: ${escapeHtml(error.message)}</p>`;
+            }
+        }
+
+        // =====================================================
+        // Tab 3: Client Errors Functions
+        // =====================================================
+
+        function populateErrorsClientDropdown() {
+            const select = document.getElementById('errorsClientSelect');
+            const currentValue = select.value;
+
+            select.innerHTML = '<option value="">Select a client...</option>';
+
+            clientsData.forEach(client => {
+                const clientId = client.client_info?.reserved?.client_id || client.client_id;
+                const displayName = `${clientId} (${client.client_info?.sdk_type || 'Unknown'})`;
+                const option = document.createElement('option');
+                option.value = clientId;
+                option.textContent = displayName;
+                select.appendChild(option);
+            });
+
+            // Restore previous selection if still valid
+            if (currentValue) {
+                select.value = currentValue;
+            }
+        }
+
+        async function fetchClientErrors() {
+            const clientId = document.getElementById('errorsClientSelect').value;
+            const maxCount = parseInt(document.getElementById('errorsMaxCount').value) || 100;
+
+            if (!clientId) {
+                showToast('Please select a client', 'error');
+                return;
+            }
+
+            // Build payload
+            const payload = { max_count: maxCount };
+
+            // Show status box
+            document.getElementById('errorsStatusBox').style.display = 'block';
+            document.getElementById('errorsStatusTitle').textContent = 'Fetching Errors...';
+            document.getElementById('errorsStatusCount').textContent = '';
+            document.getElementById('errorsContent').innerHTML = '<p style="color: var(--gray-500);">Waiting for client response...</p>';
+
+            try {
+                const resp = await fetch(`${API_BASE}/_telemetry/commands`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(authToken ? { 'Authorization': authToken } : {})
+                    },
+                    body: JSON.stringify({
+                        command_type: 'show_errors',
+                        target_client_id: clientId,
+                        payload: JSON.stringify(payload),
+                        ttl_seconds: 300,
+                        persistent: false
+                    })
+                });
+
+                if (resp.status === 401) {
+                    logout();
+                    return;
+                }
+
+                if (!resp.ok) {
+                    const error = await resp.json();
+                    throw new Error(error.error || 'Failed to fetch errors');
+                }
+
+                const result = await resp.json();
+
+                // Refresh commands from server
+                await loadServerCommands();
+
+                // Start polling for the response
+                pollForCommandReply(result.command_id, clientId, 'errors');
+
+            } catch (error) {
+                showToast('Error: ' + error.message, 'error');
+                document.getElementById('errorsContent').innerHTML = `<p style="color: var(--danger);">Error: ${escapeHtml(error.message)}</p>`;
+            }
+        }
+
+        // Poll for command reply
+        async function pollForCommandReply(commandId, clientId, type, aggregate) {
+            const maxAttempts = 12; // 12 * 5s = 60 seconds max wait
+            let attempts = 0;
+
+            const poll = async () => {
+                attempts++;
+
+                // Reload data to get latest command replies
+                await loadData();
+
+                // Find the client and check for the reply
+                let found = false;
+                for (const client of clientsData) {
+                    const cid = client.client_info?.reserved?.client_id || client.client_id;
+
+                    // For global commands, check all clients; for specific client, check only that one
+                    if (clientId && cid !== clientId) continue;
+
+                    const replies = client.command_replies || [];
+                    const reply = replies.find(r => r.command_id === commandId);
+
+                    if (reply) {
+                        found = true;
+                        if (type === 'errors') {
+                            renderErrorsResponse(reply);
+                        } else if (type === 'collection') {
+                            renderCollectionStatusResponse(reply);
+                        } else if (type === 'history') {
+                            const payloadStr = decodePayload(reply.payload);
+                            if (!payloadStr) {
+                                document.getElementById('historyModalContent').innerHTML = `
+                                    <div class="empty-state" style="padding: 20px;">
+                                        <p style="color: var(--warning);">No payload returned from client.</p>
+                                    </div>
+                                `;
+                                return;
+                            }
+                            try {
+                                const parsed = JSON.parse(payloadStr);
+                                renderHistoryResults(parsed, aggregate || !!parsed.aggregated);
+                            } catch (e) {
+                                document.getElementById('historyModalContent').innerHTML = `
+                                    <div class="empty-state" style="padding: 20px;">
+                                        <p style="color: var(--danger);">Failed to parse history payload.</p>
+                                    </div>
+                                `;
+                            }
+                        }
+                        return;
+                    }
+                }
+
+                if (!found && attempts < maxAttempts) {
+                    setTimeout(poll, 5000); // Poll every 5 seconds
+                } else if (!found) {
+                    // Timeout
+                    if (type === 'errors') {
+                        document.getElementById('errorsStatusTitle').textContent = 'Timeout';
+                        document.getElementById('errorsContent').innerHTML = '<p style="color: var(--warning);">No response received from client. The client may not be active or the heartbeat interval may be longer than expected.</p>';
+                    } else if (type === 'collection') {
+                        document.getElementById('collectionStatusContent').innerHTML = '<p style="color: var(--warning);">No response received. Try again or check if the client is active.</p>';
+                    } else if (type === 'history') {
+                        document.getElementById('historyModalContent').innerHTML = '<p style="color: var(--warning); padding: 20px;">No response received. The client may be inactive or the heartbeat interval may be longer than expected.</p>';
+                    }
+                }
+            };
+
+            // Start polling after a short delay
+            setTimeout(poll, 3000);
+        }
+
+        function renderErrorsResponse(reply) {
+            document.getElementById('errorsStatusTitle').textContent = reply.success ? 'Errors' : 'Error';
+
+            if (!reply.success) {
+                document.getElementById('errorsContent').innerHTML = `<p style="color: var(--danger);">${escapeHtml(reply.error_msg || 'Unknown error')}</p>`;
+                return;
+            }
+
+            // Parse payload (errors array)
+            let errors = [];
+            if (reply.payload && reply.payload.length > 0) {
+                try {
+                    let payloadStr = '';
+                    if (typeof reply.payload === 'string') {
+                        payloadStr = atob(reply.payload);
+                    } else if (Array.isArray(reply.payload)) {
+                        payloadStr = String.fromCharCode.apply(null, reply.payload);
+                    }
+                    errors = JSON.parse(payloadStr);
+                } catch (e) {
+                    console.error('Failed to parse errors payload:', e);
+                }
+            }
+
+            document.getElementById('errorsStatusCount').textContent = `(${errors.length} errors)`;
+
+            if (errors.length === 0) {
+                document.getElementById('errorsContent').innerHTML = '<p style="color: var(--success);">No errors recorded on this client.</p>';
+                return;
+            }
+
+            // Render errors table
+            const tableHtml = `
+                <table class="errors-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Operation</th>
+                            <th>Collection</th>
+                            <th>Error Message</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${errors.map(err => {
+                            const time = new Date(err.timestamp).toLocaleString();
+                            return `
+                                <tr>
+                                    <td>${escapeHtml(time)}</td>
+                                    <td><span class="op-badge ${(err.operation || '').toLowerCase()}">${escapeHtml(err.operation || '-')}</span></td>
+                                    <td>${escapeHtml(err.collection || '-')}</td>
+                                    <td class="error-msg-cell" title="${escapeHtml(err.error_msg || '')}">${escapeHtml(err.error_msg || '-')}</td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            `;
+
+            document.getElementById('errorsContent').innerHTML = tableHtml;
+        }
+
+        function renderCollectionStatusResponse(reply) {
+            if (!reply.success) {
+                document.getElementById('collectionStatusContent').innerHTML = `<p style="color: var(--danger);">${escapeHtml(reply.error_msg || 'Unknown error')}</p>`;
+                return;
+            }
+
+            // Parse payload
+            let data = {};
+            if (reply.payload && reply.payload.length > 0) {
+                try {
+                    let payloadStr = '';
+                    if (typeof reply.payload === 'string') {
+                        payloadStr = atob(reply.payload);
+                    } else if (Array.isArray(reply.payload)) {
+                        payloadStr = String.fromCharCode.apply(null, reply.payload);
+                    }
+                    data = JSON.parse(payloadStr);
+                } catch (e) {
+                    console.error('Failed to parse collection status payload:', e);
+                }
+            }
+
+            const collections = data.enabled_collections || [];
+            const allEnabled = data.all_collections_enabled || false;
+
+            if (allEnabled) {
+                document.getElementById('collectionStatusContent').innerHTML = `
+                    <div class="status-item status-item-enabled">
+                        <span>✓</span>
+                        <span style="font-weight: 600;">All Collections Enabled (*)</span>
+                    </div>
+                `;
+                return;
+            }
+
+            if (collections.length === 0) {
+                document.getElementById('collectionStatusContent').innerHTML = '<p style="color: var(--gray-500);">No collections have metrics enabled.</p>';
+                return;
+            }
+
+            const listHtml = collections.map(coll => `
+                <div class="status-item status-item-enabled">
+                    <span>✓</span>
+                    <span>${escapeHtml(coll)}</span>
+                </div>
+            `).join('');
+
+            document.getElementById('collectionStatusContent').innerHTML = listHtml;
+        }
+
+    </script>
+</body>
+</html>
