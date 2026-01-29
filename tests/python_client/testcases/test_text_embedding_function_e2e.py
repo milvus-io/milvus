@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 import pandas as pd
 from faker import Faker
+from common.mock_tei_server import MockTEIServer, get_local_ip, get_docker_host
 
 fake_zh = Faker("zh_CN")
 fake_jp = Faker("ja_JP")
@@ -1391,6 +1392,230 @@ class TestTextEmbeddingFunctionCURD(TestcaseBase):
 
         res, _ = collection_w.query(expr="id == 0", output_fields=["document"])
         assert "Updated document" in res[0]["document"]
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_alter_function_when_other_function_is_invalid(self, host):
+        """
+        target: test alter function succeeds even when another function in collection is invalid
+        method:
+            1. create collection with 2 text embedding functions using mock TEI servers
+            2. make one mock server return errors (simulate service becoming unavailable)
+            3. alter the other valid function
+        expected: alter should succeed (only validates the target function, not all functions)
+        issue: https://github.com/milvus-io/milvus/issues/46949
+        pr: https://github.com/milvus-io/milvus/pull/46984
+
+        NOTE: This test requires the Milvus server to be able to access the local mock TEI server.
+        - localhost/127.0.0.1: uses host.docker.internal for Docker containers
+        - Remote host: skipped (network may not be reachable)
+        """
+        # Skip if Milvus is on remote host (network may not be reachable)
+        local_ip = get_local_ip()
+        docker_host = get_docker_host()
+        if host not in ['localhost', '127.0.0.1', local_ip, docker_host]:
+            pytest.skip(f"Skipping: Milvus host ({host}) may not be able to access local mock server. "
+                       "Run this test with Milvus on localhost or in the same network.")
+
+        self._connect()
+        dim = 768
+
+        # Start two mock TEI servers with external access enabled
+        # host='0.0.0.0' binds to all interfaces, external_host='docker' uses host.docker.internal
+        mock_server_1 = MockTEIServer(dim=dim, host='0.0.0.0', external_host='docker')
+        mock_server_2 = MockTEIServer(dim=dim, host='0.0.0.0', external_host='docker')
+
+        try:
+            endpoint_1 = mock_server_1.start()
+            endpoint_2 = mock_server_2.start()
+            log.info(f"Mock TEI servers started at: {endpoint_1}, {endpoint_2}")
+
+            fields = [
+                FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+                FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=65535),
+                FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=65535),
+                FieldSchema(name="title_vector", dtype=DataType.FLOAT_VECTOR, dim=dim),
+                FieldSchema(name="content_vector", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            ]
+            schema = CollectionSchema(fields=fields, description="test collection")
+
+            # Add two text embedding functions using different mock servers
+            title_embedding = Function(
+                name="title_embedding",
+                function_type=FunctionType.TEXTEMBEDDING,
+                input_field_names=["title"],
+                output_field_names="title_vector",
+                params={"provider": "TEI", "endpoint": endpoint_1}
+            )
+            schema.add_function(title_embedding)
+
+            content_embedding = Function(
+                name="content_embedding",
+                function_type=FunctionType.TEXTEMBEDDING,
+                input_field_names=["content"],
+                output_field_names="content_vector",
+                params={"provider": "TEI", "endpoint": endpoint_2}
+            )
+            schema.add_function(content_embedding)
+
+            c_name = cf.gen_unique_str(prefix)
+            collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+
+            # Verify both functions exist
+            res, _ = collection_w.describe()
+            assert len(res["functions"]) == 2
+
+            # Make server_1 return errors (simulate "Model integration is not active")
+            mock_server_1.set_error_mode(
+                enabled=True,
+                status_code=400,
+                message="Model integration is not active"
+            )
+
+            # Now title_embedding function is invalid, but we should still be able to
+            # alter content_embedding function (PR #46984 fix)
+            new_content_embedding = Function(
+                name="content_embedding",
+                function_type=FunctionType.TEXTEMBEDDING,
+                input_field_names=["content"],
+                output_field_names="content_vector",
+                params={
+                    "provider": "TEI",
+                    "endpoint": endpoint_2,
+                    "truncate": True
+                }
+            )
+
+            # This should succeed after PR #46984 fix
+            # Before the fix, this would fail because it validated ALL functions
+            self.client.alter_collection_function(
+                collection_name=c_name,
+                function_name="content_embedding",
+                function=new_content_embedding
+            )
+
+            # Verify function params are updated
+            res, _ = collection_w.describe()
+            content_func = next(f for f in res["functions"] if f["name"] == "content_embedding")
+            assert content_func["params"]["truncate"] == str(True)
+
+            log.info("Successfully altered content_embedding function while title_embedding is invalid")
+
+        finally:
+            mock_server_1.stop()
+            mock_server_2.stop()
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_alter_invalid_function_to_valid_endpoint(self, host):
+        """
+        target: test user can fix an invalid function by altering it to a valid endpoint
+        method:
+            1. create collection with function using mock TEI server
+            2. make mock server return errors (function becomes invalid)
+            3. start a new valid server and alter function to use it
+        expected: alter should succeed, allowing user to fix the broken function
+        issue: https://github.com/milvus-io/milvus/issues/46949
+        pr: https://github.com/milvus-io/milvus/pull/46984
+
+        NOTE: This test requires the Milvus server to be able to access the local mock TEI server.
+        - localhost/127.0.0.1: uses host.docker.internal for Docker containers
+        - Remote host: skipped (network may not be reachable)
+        """
+        # Skip if Milvus is on remote host (network may not be reachable)
+        local_ip = get_local_ip()
+        docker_host = get_docker_host()
+        if host not in ['localhost', '127.0.0.1', local_ip, docker_host]:
+            pytest.skip(f"Skipping: Milvus host ({host}) may not be able to access local mock server. "
+                       "Run this test with Milvus on localhost or in the same network.")
+
+        self._connect()
+        dim = 768
+
+        # Start mock servers with external access enabled
+        mock_server = MockTEIServer(dim=dim, host='0.0.0.0', external_host='docker')
+        backup_server = MockTEIServer(dim=dim, host='0.0.0.0', external_host='docker')
+
+        try:
+            endpoint = mock_server.start()
+            backup_endpoint = backup_server.start()
+            log.info(f"Mock TEI servers started at: {endpoint}, {backup_endpoint}")
+
+            fields = [
+                FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+                FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=65535),
+                FieldSchema(name="dense", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            ]
+            schema = CollectionSchema(fields=fields, description="test collection")
+
+            text_embedding = Function(
+                name="tei",
+                function_type=FunctionType.TEXTEMBEDDING,
+                input_field_names=["document"],
+                output_field_names="dense",
+                params={"provider": "TEI", "endpoint": endpoint}
+            )
+            schema.add_function(text_embedding)
+
+            c_name = cf.gen_unique_str(prefix)
+            collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+
+            # Insert some data while function is working
+            data = [{"id": i, "document": f"Document {i}"} for i in range(3)]
+            collection_w.insert(data)
+
+            # Create index and load
+            index_params = {"index_type": "AUTOINDEX", "metric_type": "COSINE", "params": {}}
+            collection_w.create_index("dense", index_params)
+            collection_w.load()
+
+            # Simulate the original endpoint becoming unavailable
+            mock_server.set_error_mode(
+                enabled=True,
+                status_code=400,
+                message="Model integration is not active"
+            )
+
+            # User wants to fix the function by switching to backup endpoint
+            # This is the exact scenario from issue #46949
+            new_function = Function(
+                name="tei",
+                function_type=FunctionType.TEXTEMBEDDING,
+                input_field_names=["document"],
+                output_field_names="dense",
+                params={"provider": "TEI", "endpoint": backup_endpoint}
+            )
+
+            # After PR #46984, this should succeed
+            self.client.alter_collection_function(
+                collection_name=c_name,
+                function_name="tei",
+                function=new_function
+            )
+
+            # Verify function is updated
+            res, _ = collection_w.describe()
+            func = res["functions"][0]
+            assert func["params"]["endpoint"] == backup_endpoint
+
+            # Verify the function works with new endpoint
+            new_data = [{"id": 10, "document": "New document after fix"}]
+            collection_w.insert(new_data)
+            assert collection_w.num_entities == 4
+
+            # Search should work
+            search_params = {"metric_type": "COSINE", "params": {}}
+            res, _ = collection_w.search(
+                data=["New document"],
+                anns_field="dense",
+                param=search_params,
+                limit=4,
+            )
+            assert len(res[0]) == 4
+
+            log.info("Successfully fixed invalid function by altering to valid endpoint")
+
+        finally:
+            mock_server.stop()
+            backup_server.stop()
 
     # ==================== drop_collection_function positive tests ====================
 
