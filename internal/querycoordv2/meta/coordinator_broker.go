@@ -50,7 +50,7 @@ type Broker interface {
 	GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentIDs ...UniqueID) (map[int64][]*querypb.FieldIndexInfo, error)
 	GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)
 	DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error)
-	GetCollectionLoadInfo(ctx context.Context, collectionID UniqueID) ([]string, int64, error)
+	GetCollectionLoadInfo(ctx context.Context, collectionID UniqueID) (resourceGroups []string, streamingResourceGroups []string, replicaNum int64, err error)
 }
 
 type CoordinatorBroker struct {
@@ -102,11 +102,12 @@ func (broker *CoordinatorBroker) DescribeDatabase(ctx context.Context, dbName st
 	return resp, nil
 }
 
-// try to get database level replica_num and resource groups, return (resource_groups, replica_num, error)
-func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, collectionID UniqueID) ([]string, int64, error) {
+// try to get database level replica_num, resource groups and streaming resource groups
+// return (resource_groups, streaming_resource_groups, replica_num, error)
+func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, collectionID UniqueID) ([]string, []string, int64, error) {
 	collectionInfo, err := broker.DescribeCollection(ctx, collectionID)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
 
 	log := log.Ctx(ctx)
@@ -127,7 +128,7 @@ func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, coll
 	if replicaNum <= 0 || len(rgs) == 0 {
 		dbInfo, err := broker.DescribeDatabase(ctx, collectionInfo.GetDbName())
 		if err != nil {
-			return nil, 0, err
+			return nil, nil, 0, err
 		}
 
 		if replicaNum <= 0 {
@@ -165,7 +166,13 @@ func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, coll
 		}
 	}
 
-	return rgs, replicaNum, nil
+	// Always get streaming resource groups from cluster config
+	streamingRGs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadStreamingResourceGroups.GetAsStrings()
+	if len(streamingRGs) > 0 {
+		log.Info("get cluster level streaming resource groups", zap.Int64("collectionID", collectionID), zap.Strings("streaming_resource_groups", streamingRGs))
+	}
+
+	return rgs, streamingRGs, replicaNum, nil
 }
 
 func (broker *CoordinatorBroker) GetPartitions(ctx context.Context, collectionID UniqueID) ([]UniqueID, error) {

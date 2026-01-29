@@ -19,6 +19,7 @@ type ReplicaInterface interface {
 	GetID() typeutil.UniqueID
 	GetCollectionID() typeutil.UniqueID
 	GetResourceGroup() string
+	GetStreamingResourceGroup() string
 
 	// Node access
 	GetNodes() []int64
@@ -130,6 +131,11 @@ func (replica *Replica) GetCollectionID() typeutil.UniqueID {
 // GetResourceGroup returns the resource group name of the replica.
 func (replica *Replica) GetResourceGroup() string {
 	return replica.replicaPB.GetResourceGroup()
+}
+
+// GetStreamingResourceGroup returns the streaming resource group name of the replica.
+func (replica *Replica) GetStreamingResourceGroup() string {
+	return replica.replicaPB.GetStreamingResourceGroup()
 }
 
 // GetNodes returns the rw nodes of the replica.
@@ -295,6 +301,11 @@ type mutableReplica struct {
 // SetResourceGroup sets the resource group name of the replica.
 func (replica *mutableReplica) SetResourceGroup(resourceGroup string) {
 	replica.replicaPB.ResourceGroup = resourceGroup
+}
+
+// SetStreamingResourceGroup sets the streaming resource group name of the replica.
+func (replica *mutableReplica) SetStreamingResourceGroup(streamingResourceGroup string) {
+	replica.replicaPB.StreamingResourceGroup = streamingResourceGroup
 }
 
 // AddRWNode adds the node to rw nodes of the replica.

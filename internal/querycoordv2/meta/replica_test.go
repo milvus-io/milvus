@@ -728,6 +728,37 @@ func (suite *ReplicaSuite) TestCalculateOptimalAssignments() {
 	suite.Equal(1, countsOfThree) // 1 channel gets 3 nodes
 }
 
+func (suite *ReplicaSuite) TestStreamingResourceGroup() {
+	// Test Get/Set StreamingResourceGroup
+	replicaPB := &querypb.Replica{
+		ID:                     1,
+		CollectionID:           2,
+		Nodes:                  []int64{1, 2, 3},
+		ResourceGroup:          DefaultResourceGroupName,
+		StreamingResourceGroup: "streaming_rg_1",
+	}
+
+	r := newReplica(replicaPB)
+	suite.Equal("streaming_rg_1", r.GetStreamingResourceGroup())
+
+	// Test SetStreamingResourceGroup
+	mr := r.CopyForWrite()
+	mr.SetStreamingResourceGroup("streaming_rg_2")
+	suite.Equal("streaming_rg_2", mr.GetStreamingResourceGroup())
+
+	// Original replica should not be modified
+	suite.Equal("streaming_rg_1", r.GetStreamingResourceGroup())
+
+	// Test empty streaming resource group
+	replicaPB2 := &querypb.Replica{
+		ID:            3,
+		CollectionID:  4,
+		ResourceGroup: DefaultResourceGroupName,
+	}
+	r2 := newReplica(replicaPB2)
+	suite.Equal("", r2.GetStreamingResourceGroup())
+}
+
 func TestReplica(t *testing.T) {
 	suite.Run(t, new(ReplicaSuite))
 }

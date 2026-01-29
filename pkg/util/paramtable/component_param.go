@@ -2538,13 +2538,14 @@ type queryCoordConfig struct {
 	StoppingBalanceAssignPolicy    ParamItem `refreshable:"true"`
 	ChannelExclusiveNodeFactor     ParamItem `refreshable:"true"`
 
-	CollectionObserverInterval         ParamItem `refreshable:"false"`
-	CheckExecutedFlagInterval          ParamItem `refreshable:"false"`
-	CollectionBalanceSegmentBatchSize  ParamItem `refreshable:"true"`
-	CollectionBalanceChannelBatchSize  ParamItem `refreshable:"true"`
-	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
-	ClusterLevelLoadReplicaNumber      ParamItem `refreshable:"true"`
-	ClusterLevelLoadResourceGroups     ParamItem `refreshable:"true"`
+	CollectionObserverInterval              ParamItem `refreshable:"false"`
+	CheckExecutedFlagInterval               ParamItem `refreshable:"false"`
+	CollectionBalanceSegmentBatchSize       ParamItem `refreshable:"true"`
+	CollectionBalanceChannelBatchSize       ParamItem `refreshable:"true"`
+	UpdateCollectionLoadStatusInterval      ParamItem `refreshable:"false"`
+	ClusterLevelLoadReplicaNumber           ParamItem `refreshable:"true"`
+	ClusterLevelLoadResourceGroups          ParamItem `refreshable:"true"`
+	ClusterLevelLoadStreamingResourceGroups ParamItem `refreshable:"true"`
 
 	// balance batch size in one trigger
 	BalanceSegmentBatchSize            ParamItem `refreshable:"true"`
@@ -3152,6 +3153,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.ClusterLevelLoadResourceGroups.Init(base.mgr)
+
+	p.ClusterLevelLoadStreamingResourceGroups = ParamItem{
+		Key:          "queryCoord.clusterLevelLoadStreamingResourceGroups",
+		Version:      "2.6.0",
+		DefaultValue: "",
+		Doc:          "streaming resource group names for load collection, replicas will use streaming nodes from these resource groups, separate with commas",
+		Export:       false,
+	}
+	p.ClusterLevelLoadStreamingResourceGroups.Init(base.mgr)
 
 	p.AutoBalanceInterval = ParamItem{
 		Key:          "queryCoord.autoBalanceInterval",
@@ -6589,6 +6599,9 @@ if this parameter <= 0, will set it as 10`,
 }
 
 type streamingConfig struct {
+	// primary resource group
+	PrimaryResourceGroup ParamItem `refreshable:"true"`
+
 	// scanner
 	WALScannerPauseConsumption ParamItem `refreshable:"true"`
 
@@ -6652,6 +6665,19 @@ type streamingConfig struct {
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
+	// primary resource group
+	p.PrimaryResourceGroup = ParamItem{
+		Key:     "streaming.primaryResourceGroup",
+		Version: "2.6.10",
+		Doc: `The resource group name that WAL should be loaded on.
+When this is set, only streaming nodes with the matching resource group label will be used for WAL operations.
+The resource group label is set via environment variable MILVUS_SERVER_LABEL_RESOURCE_GROUP.
+If empty, streaming nodes from all resource groups can be used.`,
+		DefaultValue: "",
+		Export:       false,
+	}
+	p.PrimaryResourceGroup.Init(base.mgr)
+
 	// scanner
 	p.WALScannerPauseConsumption = ParamItem{
 		Key:     "streaming.walScanner.pauseConsumption",

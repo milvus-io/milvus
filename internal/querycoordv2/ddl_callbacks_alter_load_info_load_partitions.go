@@ -39,7 +39,8 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 	}
 
 	userSpecifiedReplicaMode := req.GetReplicaNumber() > 0
-	replicaNumber, resourceGroups, err := s.getDefaultResourceGroupsAndReplicaNumber(ctx, req.GetReplicaNumber(), req.GetResourceGroups(), req.GetCollectionID())
+	// StreamingResourceGroups are not in LoadPartitionsRequest, only get from cluster config
+	replicaNumber, resourceGroups, streamingResourceGroups, err := s.getDefaultResourceGroupsAndReplicaNumber(ctx, req.GetReplicaNumber(), req.GetResourceGroups(), nil, req.GetCollectionID())
 	if err != nil {
 		return err
 	}
@@ -62,6 +63,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 		Expected: job.ExpectedLoadConfig{
 			ExpectedPartitionIDs:             partitionIDsSet.Collect(),
 			ExpectedReplicaNumber:            expectedReplicasNumber,
+			ExpectedStreamingResourceGroups:  streamingResourceGroups,
 			ExpectedFieldIndexID:             req.GetFieldIndexID(),
 			ExpectedLoadFields:               req.GetLoadFields(),
 			ExpectedPriority:                 req.GetPriority(),

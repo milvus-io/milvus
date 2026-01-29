@@ -299,7 +299,7 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.server.registerMetricsRequest()
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 
-	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, mock.Anything).Return([]string{meta.DefaultResourceGroupName}, 1, nil).Maybe()
+	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, mock.Anything).Return([]string{meta.DefaultResourceGroupName}, []string{}, int64(1), nil).Maybe()
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
 		for _, collection := range suite.collections {
 			if collection == collectionID {

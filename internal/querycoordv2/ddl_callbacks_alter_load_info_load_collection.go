@@ -49,7 +49,8 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	}
 	// if user specified the replica number in load request, load config changes won't be apply to the collection automatically
 	userSpecifiedReplicaMode := req.GetReplicaNumber() > 0
-	replicaNumber, resourceGroups, err := s.getDefaultResourceGroupsAndReplicaNumber(ctx, req.GetReplicaNumber(), req.GetResourceGroups(), req.GetCollectionID())
+	// StreamingResourceGroups are not in LoadCollectionRequest, only get from cluster config
+	replicaNumber, resourceGroups, streamingResourceGroups, err := s.getDefaultResourceGroupsAndReplicaNumber(ctx, req.GetReplicaNumber(), req.GetResourceGroups(), nil, req.GetCollectionID())
 	if err != nil {
 		return err
 	}
@@ -67,6 +68,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 		Expected: job.ExpectedLoadConfig{
 			ExpectedPartitionIDs:             partitionIDs,
 			ExpectedReplicaNumber:            expectedReplicasNumber,
+			ExpectedStreamingResourceGroups:  streamingResourceGroups,
 			ExpectedFieldIndexID:             req.GetFieldIndexID(),
 			ExpectedLoadFields:               req.GetLoadFields(),
 			ExpectedPriority:                 req.GetPriority(),
@@ -81,19 +83,28 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	return err
 }
 
-// getDefaultResourceGroupsAndReplicaNumber gets the default resource groups and replica number for the collection.
-func (s *Server) getDefaultResourceGroupsAndReplicaNumber(ctx context.Context, replicaNumber int32, resourceGroups []string, collectionID int64) (int32, []string, error) {
+// getDefaultResourceGroupsAndReplicaNumber gets the default resource groups, streaming resource groups and replica number for the collection.
+func (s *Server) getDefaultResourceGroupsAndReplicaNumber(ctx context.Context, replicaNumber int32, resourceGroups []string, streamingResourceGroups []string, collectionID int64) (int32, []string, []string, error) {
+	// Always get collection load info from broker (which includes all configuration levels: collection, database, cluster)
+	// This centralizes all config reading logic in GetCollectionLoadInfo
+	rgs, streamingRGs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, collectionID)
+	if err != nil {
+		log.Warn("failed to get pre-defined load info", zap.Error(err))
+		// Continue with default values on error
+	}
+
+	// Use config values only if not specified in request
 	// so only both replica and resource groups didn't set in request, it will turn to use the configured load info
 	if replicaNumber <= 0 && len(resourceGroups) == 0 {
-		// when replica number or resource groups is not set, use pre-defined load config
-		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, collectionID)
-		if err != nil {
-			log.Warn("failed to get pre-defined load info", zap.Error(err))
-		} else {
-			replicaNumber = int32(replicas)
-			resourceGroups = rgs
-		}
+		replicaNumber = int32(replicas)
+		resourceGroups = rgs
 	}
+
+	// Use streaming resource groups from config if not specified in request
+	if len(streamingResourceGroups) == 0 {
+		streamingResourceGroups = streamingRGs
+	}
+
 	// to be compatible with old sdk, which set replica=1 if replica is not specified
 	if replicaNumber <= 0 {
 		log.Info("request doesn't indicate the number of replicas, set it to 1")
@@ -103,7 +114,11 @@ func (s *Server) getDefaultResourceGroupsAndReplicaNumber(ctx context.Context, r
 		log.Info(fmt.Sprintf("request doesn't indicate the resource groups, set it to %s", meta.DefaultResourceGroupName))
 		resourceGroups = []string{meta.DefaultResourceGroupName}
 	}
-	return replicaNumber, resourceGroups, nil
+	if len(streamingResourceGroups) == 0 {
+		log.Info(fmt.Sprintf("request doesn't indicate the streaming resource groups, set it to %s", meta.DefaultResourceGroupName))
+		streamingResourceGroups = []string{meta.DefaultResourceGroupName}
+	}
+	return replicaNumber, resourceGroups, streamingResourceGroups, nil
 }
 
 func (s *Server) getCurrentLoadConfig(ctx context.Context, collectionID int64) job.CurrentLoadConfig {

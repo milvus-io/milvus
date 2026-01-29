@@ -355,7 +355,9 @@ func TestBalanceChecker_GetReplicaForStoppingBalance_WithRONodes(t *testing.T) {
 	mockGetID := mockey.Mock((*meta.Replica).GetID).Return(mockey.Sequence(101).Times(1).Then(102)).Build()
 	defer mockGetID.UnPatch()
 
-	// Skip streaming service mock for simplicity
+	// Mock streaming service to be disabled for this test
+	mockStreamingServiceEnabled := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(false).Build()
+	defer mockStreamingServiceEnabled.UnPatch()
 
 	result := checker.getReplicaForStoppingBalance(ctx, collectionID)
 	// Should return replica1 ID since it has RO nodes

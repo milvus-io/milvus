@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // this file contains proxy management restful API handler
@@ -58,6 +59,8 @@ func RegisterMgrRoute(s *mixCoordImpl) {
 			{management.WALAlterPath, s.HandleAlterWAL},
 			// config
 			{management.ConfigAlterPath, s.HandleAlterConfig},
+			// ops
+			{management.ReplicaReadinessPath, s.HandleReplicaReadiness},
 		}
 
 		// Loop through the slice and register each route.
@@ -1284,6 +1287,10 @@ func (s *mixCoordImpl) broadcastAlterWALMessage(ctx context.Context, targetWALNa
 // Only immutable configurations can be modified through this endpoint.
 // Non-immutable configurations should be modified directly in the configuration file.
 // For mqtype modifications, use the alterWAL endpoint instead.
+//
+// Request format:
+//
+//	{"configs": [{"key": "config.key1", "value": "value1"}, {"key": "config.key2", "value": "value2"}]}
 func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
 		http.Error(writer, `{"msg": "Method not allowed, use POST"}`, http.StatusMethodNotAllowed)
@@ -1293,9 +1300,13 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 	logger := log.With(zap.String("Scope", "Config"))
 	paramMgr := paramtable.GetBaseTable().Manager()
 
-	var requestBody struct {
+	type ConfigPair struct {
 		Key   string `json:"key"`
 		Value string `json:"value"`
+	}
+
+	var requestBody struct {
+		Configs []ConfigPair `json:"configs"`
 	}
 
 	if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
@@ -1304,33 +1315,52 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	if requestBody.Key == "" {
-		logger.Info("HandleAlterConfig missing key")
-		http.Error(writer, `{"msg": "key is required"}`, http.StatusBadRequest)
+	if len(requestBody.Configs) == 0 {
+		logger.Info("HandleAlterConfig no configs provided")
+		http.Error(writer, `{"msg": "configs array is required and cannot be empty"}`, http.StatusBadRequest)
 		return
 	}
 
-	if requestBody.Value == "" {
-		logger.Info("HandleAlterConfig missing value")
-		http.Error(writer, `{"msg": "value is required"}`, http.StatusBadRequest)
-		return
-	}
+	// Convert array to map and validate
+	configsToUpdate := make(map[string]string, len(requestBody.Configs))
+	for _, config := range requestBody.Configs {
+		if config.Key == "" {
+			logger.Info("HandleAlterConfig config missing key")
+			http.Error(writer, `{"msg": "all configs must have a non-empty key"}`, http.StatusBadRequest)
+			return
+		}
 
-	// Check if it's mqtype configuration
-	normalizedKey := strings.ToLower(strings.ReplaceAll(requestBody.Key, "/", "."))
-	if strings.Contains(normalizedKey, "mqtype") || strings.Contains(normalizedKey, "mq.type") {
-		logger.Info("HandleAlterConfig attempted to modify mqtype",
-			zap.String("key", requestBody.Key))
-		http.Error(writer, `{"msg": "mqtype configuration cannot be modified through this endpoint. Please use the alterWAL endpoint instead"}`, http.StatusBadRequest)
-		return
-	}
+		if config.Value == "" {
+			logger.Info("HandleAlterConfig config missing value", zap.String("key", config.Key))
+			http.Error(writer, fmt.Sprintf(`{"msg": "config with key '%s' has empty value"}`, config.Key), http.StatusBadRequest)
+			return
+		}
 
-	// Check if the configuration is immutable
-	if !paramMgr.IsImmutable(requestBody.Key) {
-		logger.Info("HandleAlterConfig attempted to modify non-immutable config",
-			zap.String("key", requestBody.Key))
-		http.Error(writer, `{"msg": "only immutable configurations can be modified through this endpoint. Non-immutable configurations should be modified directly in the configuration file"}`, http.StatusBadRequest)
-		return
+		// Check for duplicate keys
+		if _, exists := configsToUpdate[config.Key]; exists {
+			logger.Info("HandleAlterConfig duplicate key found", zap.String("key", config.Key))
+			http.Error(writer, fmt.Sprintf(`{"msg": "duplicate key found: %s"}`, config.Key), http.StatusBadRequest)
+			return
+		}
+
+		// Check if it's mqtype configuration
+		normalizedKey := strings.ToLower(strings.ReplaceAll(config.Key, "/", "."))
+		if strings.Contains(normalizedKey, "mqtype") || strings.Contains(normalizedKey, "mq.type") {
+			logger.Info("HandleAlterConfig attempted to modify mqtype",
+				zap.String("key", config.Key))
+			http.Error(writer, fmt.Sprintf(`{"msg": "mqtype configuration cannot be modified through this endpoint. Please use the alterWAL endpoint instead. Invalid key: %s"}`, config.Key), http.StatusBadRequest)
+			return
+		}
+
+		// Check if the configuration is immutable
+		if !paramMgr.IsImmutable(config.Key) {
+			logger.Info("HandleAlterConfig attempted to modify non-immutable config",
+				zap.String("key", config.Key))
+			http.Error(writer, fmt.Sprintf(`{"msg": "only immutable configurations can be modified through this endpoint. Non-immutable configurations should be modified directly in the configuration file. Invalid key: %s"}`, config.Key), http.StatusBadRequest)
+			return
+		}
+
+		configsToUpdate[config.Key] = config.Value
 	}
 
 	// Get EtcdSource to save the configuration
@@ -1341,22 +1371,186 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	// Save configuration to etcd
-	// Use the original key format, SaveConfigToEtcd will handle normalization internally
-	if err := paramMgr.SaveConfigToEtcd(etcdSource, requestBody.Key, requestBody.Value); err != nil {
-		logger.Info("HandleAlterConfig failed to save config to etcd",
-			zap.String("key", requestBody.Key),
-			zap.String("value", requestBody.Value),
+	// Update configuration(s) in etcd
+	// Batch update - use atomic transaction
+	if err := paramMgr.UpdateConfigsInEtcd(etcdSource, configsToUpdate); err != nil {
+		logger.Info("HandleAlterConfig failed to atomically update configs to etcd",
+			zap.Any("configs", configsToUpdate),
 			zap.Error(err))
-		http.Error(writer, fmt.Sprintf(`{"msg": "failed to save configuration to etcd: %s"}`, err.Error()), http.StatusInternalServerError)
+		http.Error(writer, fmt.Sprintf(`{"msg": "failed to atomically update configurations to etcd: %s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
 
 	logger.Info("HandleAlterConfig success",
-		zap.String("key", requestBody.Key),
-		zap.String("value", requestBody.Value))
+		zap.Int("count", len(configsToUpdate)),
+		zap.Any("configs", configsToUpdate))
 
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(http.StatusOK)
 	writer.Write([]byte(`{"msg": "OK"}`))
+}
+
+// HandleReplicaReadiness checks if all loaded collections meet the cluster-level replica configuration requirements
+// writeJSONResponse writes a JSON response with the given status code and data
+func writeJSONResponse(w http.ResponseWriter, statusCode int, data map[string]string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(data)
+}
+
+// validateResourceGroupDistribution validates that replicas are distributed according to cluster config
+// Returns error message if validation fails, empty string if validation passes
+func validateResourceGroupDistribution(
+	actualRGs typeutil.Set[string],
+	expectedRGs []string,
+	replicaNum int32,
+	rgType string, // "resource group" or "streaming resource group"
+	collectionID int64,
+	logger *log.MLogger,
+) string {
+	if len(expectedRGs) == 0 {
+		return ""
+	}
+
+	if len(expectedRGs) == 1 {
+		// All replicas should use the same resource group
+		expectedRG := expectedRGs[0]
+		if !actualRGs.Contain(expectedRG) || actualRGs.Len() != 1 {
+			logger.Info(fmt.Sprintf("collection replicas not in the required %s", rgType),
+				zap.Int64("collectionID", collectionID),
+				zap.String(fmt.Sprintf("required%s", rgType), expectedRG),
+				zap.Any(fmt.Sprintf("actual%ss", rgType), actualRGs.Collect()))
+			return "NotReady"
+		}
+	} else if len(expectedRGs) == int(replicaNum) {
+		// Each replica should use one of the specified resource groups
+		expectedRGSet := typeutil.NewSet(expectedRGs...)
+
+		// Check 1: All actual RGs must be in expected set
+		if !expectedRGSet.Contain(actualRGs.Collect()...) {
+			logger.Info(fmt.Sprintf("collection replicas not distributed across required %ss", rgType),
+				zap.Int64("collectionID", collectionID),
+				zap.Strings(fmt.Sprintf("required%ss", rgType), expectedRGs),
+				zap.Any(fmt.Sprintf("actual%ss", rgType), actualRGs.Collect()))
+			return "NotReady"
+		}
+
+		// Check 2: All expected RGs should be used (one-to-one mapping)
+		if actualRGs.Len() != len(expectedRGs) {
+			logger.Info(fmt.Sprintf("collection replicas not using all required %ss", rgType),
+				zap.Int64("collectionID", collectionID),
+				zap.Strings(fmt.Sprintf("required%ss", rgType), expectedRGs),
+				zap.Any(fmt.Sprintf("actual%ss", rgType), actualRGs.Collect()))
+			return "NotReady"
+		}
+	}
+
+	return ""
+}
+
+func (s *mixCoordImpl) HandleReplicaReadiness(w http.ResponseWriter, req *http.Request) {
+	logger := log.With(zap.String("handler", "ReplicaReadiness"))
+
+	ctx := req.Context()
+
+	// Get cluster-level configuration
+	clusterReplicaNum := Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt32()
+	clusterResourceGroups := Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+	clusterStreamingResourceGroups := Params.QueryCoordCfg.ClusterLevelLoadStreamingResourceGroups.GetAsStrings()
+
+	logger.Info("checking replica readiness",
+		zap.Int32("clusterReplicaNum", clusterReplicaNum),
+		zap.Strings("clusterResourceGroups", clusterResourceGroups),
+		zap.Strings("clusterStreamingResourceGroups", clusterStreamingResourceGroups))
+
+	// Use ShowLoadCollections to get all loaded collections
+	showResp, err := s.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
+		Base: commonpbutil.NewMsgBase(),
+	})
+	if err := merr.CheckRPCCall(showResp, err); err != nil {
+		logger.Warn("failed to show collections", zap.Error(err))
+		writeJSONResponse(w, http.StatusInternalServerError,
+			map[string]string{"status": "Error", "msg": fmt.Sprintf("failed to get collections: %s", err.Error())})
+		return
+	}
+
+	// Check each collection
+	for idx, collectionID := range showResp.GetCollectionIDs() {
+		// Check if collection is fully loaded (LoadPercentage == 100)
+		loadPercentage := showResp.GetInMemoryPercentages()[idx]
+		if loadPercentage < 100 {
+			logger.Info("collection not 100% loaded",
+				zap.Int64("collectionID", collectionID),
+				zap.Int64("loadPercentage", loadPercentage))
+			writeJSONResponse(w, http.StatusOK, map[string]string{"status": "NotReady"})
+			return
+		}
+
+		// Skip if cluster-level config is not set (default values)
+		if clusterReplicaNum <= 0 || len(clusterResourceGroups) == 0 {
+			continue
+		}
+
+		// Get internal replicas from QueryCoord meta which contains StreamingResourceGroup field
+		internalReplicas := s.queryCoordServer.GetInternalReplicasByCollection(ctx, collectionID)
+
+		// Check replica count matches exactly
+		if int32(len(internalReplicas)) != clusterReplicaNum {
+			logger.Info("collection replica count does not match cluster requirement",
+				zap.Int64("collectionID", collectionID),
+				zap.Int("actualReplicaNum", len(internalReplicas)),
+				zap.Int32("requiredReplicaNum", clusterReplicaNum))
+			writeJSONResponse(w, http.StatusOK, map[string]string{"status": "NotReady"})
+			return
+		}
+
+		// Check resource groups - collect actual RGs from replicas
+		actualRGs := typeutil.NewSet[string]()
+		for _, replica := range internalReplicas {
+			actualRGs.Insert(replica.GetResourceGroup())
+		}
+
+		// Validate resource groups
+		if status := validateResourceGroupDistribution(actualRGs, clusterResourceGroups, clusterReplicaNum,
+			"resource group", collectionID, logger); status != "" {
+			writeJSONResponse(w, http.StatusOK, map[string]string{"status": status})
+			return
+		}
+
+		// Check streaming resource groups if configured
+		if len(clusterStreamingResourceGroups) > 0 {
+			// Collect actual streaming resource groups from internal replicas
+			actualStreamingRGs := typeutil.NewSet[string]()
+			missingStreamingRGCount := 0
+
+			for _, replica := range internalReplicas {
+				if streamingRG := replica.GetStreamingResourceGroup(); streamingRG != "" {
+					actualStreamingRGs.Insert(streamingRG)
+				} else {
+					missingStreamingRGCount++
+				}
+			}
+
+			// Check if any replicas are missing streaming resource groups
+			if missingStreamingRGCount > 0 {
+				logger.Info("some replicas missing streaming resource group configuration",
+					zap.Int64("collectionID", collectionID),
+					zap.Int("missingCount", missingStreamingRGCount))
+				writeJSONResponse(w, http.StatusOK, map[string]string{"status": "NotReady"})
+				return
+			}
+
+			// Validate streaming resource groups
+			if status := validateResourceGroupDistribution(actualStreamingRGs, clusterStreamingResourceGroups, clusterReplicaNum,
+				"streaming resource group", collectionID, logger); status != "" {
+				writeJSONResponse(w, http.StatusOK, map[string]string{"status": status})
+				return
+			}
+		}
+	}
+
+	// All collections meet the requirements
+	logger.Info("all collections meet replica readiness requirements",
+		zap.Int("totalCollections", len(showResp.GetCollectionIDs())))
+	writeJSONResponse(w, http.StatusOK, map[string]string{"status": "Ready"})
 }
