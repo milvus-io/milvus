@@ -849,6 +849,75 @@ func TestAnyToColumns(t *testing.T) {
 		// Field 'b' should not be present since it wasn't provided in any row
 		assert.False(t, fieldNames["b"])
 	})
+
+	t.Run("insert with struct array field", func(t *testing.T) {
+		// Create a schema with struct array field
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       false,
+				},
+				{
+					FieldID:  101,
+					Name:     "vector",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2"},
+					},
+				},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					Name:    "chunks",
+					FieldID: 102,
+					Fields: []*schemapb.FieldSchema{
+						{
+							Name:        "chunks[text]",
+							FieldID:     1021,
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_VarChar,
+						},
+					},
+				},
+			},
+			EnableDynamicField: false,
+		}
+
+		// Create row data with struct array field already parsed
+		rows := []map[string]interface{}{
+			{
+				"id":     int64(1),
+				"vector": []float32{0.1, 0.2},
+				"chunks": map[string]any{
+					"text": &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{Data: []string{"hello", "world"}},
+						},
+					},
+				},
+			},
+		}
+
+		fieldsData, err := anyToColumns(rows, nil, schema, true, false)
+		assert.NoError(t, err)
+		assert.NotNil(t, fieldsData)
+
+		// Find the struct array field
+		var structArrayField *schemapb.FieldData
+		for _, fd := range fieldsData {
+			if fd.FieldName == "chunks" {
+				structArrayField = fd
+				break
+			}
+		}
+		assert.NotNil(t, structArrayField)
+		assert.Equal(t, schemapb.DataType_ArrayOfStruct, structArrayField.Type)
+	})
 }
 
 func TestCheckAndSetData(t *testing.T) {
@@ -1280,7 +1349,7 @@ func TestConvertQueries2Placeholder(t *testing.T) {
 	}...)
 
 	for _, testcase := range testCases {
-		phv, err := convertQueries2Placeholder(testcase.requestBody, testcase.dataType, testcase.dim)
+		phv, err := convertQueries2Placeholder(testcase.requestBody, testcase.dataType, testcase.dim, false)
 		assert.Nil(t, err)
 		assert.Equal(t, testcase.placehoderValue(), phv.GetValues(),
 			fmt.Sprintf("check equal fail, data: %s, type: %s, dim: %d", testcase.requestBody, testcase.dataType, testcase.dim))
@@ -1308,7 +1377,7 @@ func TestConvertQueries2Placeholder(t *testing.T) {
 			},
 		},
 	} {
-		phv, err := convertQueries2Placeholder(testcase.requestBody, testcase.dataType, testcase.dim)
+		phv, err := convertQueries2Placeholder(testcase.requestBody, testcase.dataType, testcase.dim, false)
 		assert.Nil(t, err)
 		assert.NotEqual(t, testcase.placehoderValue(), phv.GetValues(),
 			fmt.Sprintf("check not equal fail, data: %s, type: %s, dim: %d", testcase.requestBody, testcase.dataType, testcase.dim))
@@ -1345,9 +1414,101 @@ func TestConvertQueries2Placeholder(t *testing.T) {
 			},
 		},
 	} {
-		_, err := convertQueries2Placeholder(testcase.requestBody, testcase.dataType, testcase.dim)
+		_, err := convertQueries2Placeholder(testcase.requestBody, testcase.dataType, testcase.dim, false)
 		assert.NotNil(t, err)
 	}
+}
+
+func TestConvertQueries2PlaceholderEmbeddingList(t *testing.T) {
+	t.Run("valid embedding list for FloatVector", func(t *testing.T) {
+		// 3D array: [[[0.1, 0.2], [0.3, 0.4]], [[0.5, 0.6]]]
+		// Gets flattened to: [[0.1, 0.2, 0.3, 0.4], [0.5, 0.6]]
+		requestBody := `{"data": [[[0.1, 0.2], [0.3, 0.4]], [[0.5, 0.6]]]}`
+		phv, err := convertQueries2Placeholder(requestBody, schemapb.DataType_FloatVector, 2, true)
+		assert.NoError(t, err)
+		assert.NotNil(t, phv)
+		assert.Equal(t, commonpb.PlaceholderType_EmbListFloatVector, phv.Type)
+		assert.Equal(t, 2, len(phv.Values))
+		// First embedding list flattened: [0.1, 0.2, 0.3, 0.4] -> 16 bytes (4 float32)
+		assert.Equal(t, 16, len(phv.Values[0]))
+		// Second embedding list flattened: [0.5, 0.6] -> 8 bytes (2 float32)
+		assert.Equal(t, 8, len(phv.Values[1]))
+	})
+
+	t.Run("embedding list not supported for BinaryVector", func(t *testing.T) {
+		requestBody := `{"data": [[[255, 128]]]}`
+		_, err := convertQueries2Placeholder(requestBody, schemapb.DataType_BinaryVector, 16, true)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "embedding list format is not supported for BinaryVector")
+	})
+
+	t.Run("embedding list not supported for Float16Vector", func(t *testing.T) {
+		requestBody := `{"data": [[[0.1, 0.2]]]}`
+		_, err := convertQueries2Placeholder(requestBody, schemapb.DataType_Float16Vector, 2, true)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "embedding list format is not supported for Float16Vector")
+	})
+
+	t.Run("embedding list not supported for BFloat16Vector", func(t *testing.T) {
+		requestBody := `{"data": [[[0.1, 0.2]]]}`
+		_, err := convertQueries2Placeholder(requestBody, schemapb.DataType_BFloat16Vector, 2, true)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "embedding list format is not supported for BFloat16Vector")
+	})
+
+	t.Run("embedding list not supported for SparseFloatVector", func(t *testing.T) {
+		requestBody := `{"data": [[{"1": 0.5}]]}`
+		_, err := convertQueries2Placeholder(requestBody, schemapb.DataType_SparseFloatVector, 0, true)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "embedding list format is not supported for SparseFloatVector")
+	})
+
+	t.Run("embedding list not supported for Int8Vector", func(t *testing.T) {
+		requestBody := `{"data": [[[1, 2, 3, 4]]]}`
+		_, err := convertQueries2Placeholder(requestBody, schemapb.DataType_Int8Vector, 4, true)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "embedding list format is not supported for Int8Vector")
+	})
+
+	t.Run("invalid embedding list data", func(t *testing.T) {
+		requestBody := `{"data": "not_an_array"}`
+		_, err := convertQueries2Placeholder(requestBody, schemapb.DataType_FloatVector, 2, true)
+		assert.Error(t, err)
+	})
+}
+
+func TestSerializeEmbeddingListFloatVectors(t *testing.T) {
+	t.Run("valid embedding list", func(t *testing.T) {
+		vectorStr := `[[[0.1, 0.2], [0.3, 0.4]], [[0.5, 0.6, 0.7, 0.8]]]`
+		values, err := serializeEmbeddingListFloatVectors(vectorStr, schemapb.DataType_FloatVector, 2, 8, typeutil.Float32ArrayToBytes)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(values))
+		// First: [0.1, 0.2, 0.3, 0.4] -> 16 bytes
+		assert.Equal(t, 16, len(values[0]))
+		// Second: [0.5, 0.6, 0.7, 0.8] -> 16 bytes
+		assert.Equal(t, 16, len(values[1]))
+	})
+
+	t.Run("dimension mismatch", func(t *testing.T) {
+		vectorStr := `[[[0.1, 0.2, 0.3]]]` // 3 elements, not divisible by dim=2
+		_, err := serializeEmbeddingListFloatVectors(vectorStr, schemapb.DataType_FloatVector, 2, 8, typeutil.Float32ArrayToBytes)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not divisible by dimension")
+	})
+
+	t.Run("invalid json", func(t *testing.T) {
+		vectorStr := `not_valid_json`
+		_, err := serializeEmbeddingListFloatVectors(vectorStr, schemapb.DataType_FloatVector, 2, 8, typeutil.Float32ArrayToBytes)
+		assert.Error(t, err)
+	})
+
+	t.Run("empty embedding list", func(t *testing.T) {
+		vectorStr := `[[]]`
+		values, err := serializeEmbeddingListFloatVectors(vectorStr, schemapb.DataType_FloatVector, 2, 8, typeutil.Float32ArrayToBytes)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(values))
+		assert.Equal(t, 0, len(values[0]))
+	})
 }
 
 func compareRow64(m1 map[string]interface{}, m2 map[string]interface{}) bool {
@@ -1442,6 +1603,75 @@ func TestBuildQueryResp(t *testing.T) {
 	assert.Equal(t, nil, err)
 	exceptRows := generateSearchResult(schemapb.DataType_Int64)
 	assert.Equal(t, true, compareRows(rows, exceptRows, compareRow))
+}
+
+func TestBuildQueryRespWithStructArrayField(t *testing.T) {
+	fieldDataList := []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "id",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{1, 2},
+						},
+					},
+				},
+			},
+		},
+		{
+			Type:      schemapb.DataType_ArrayOfStruct,
+			FieldName: "chunks",
+			Field: &schemapb.FieldData_StructArrays{
+				StructArrays: &schemapb.StructArrayField{
+					Fields: []*schemapb.FieldData{
+						{
+							FieldName: "text",
+							Type:      schemapb.DataType_Array,
+							Field: &schemapb.FieldData_Scalars{
+								Scalars: &schemapb.ScalarField{
+									Data: &schemapb.ScalarField_ArrayData{
+										ArrayData: &schemapb.ArrayArray{
+											Data: []*schemapb.ScalarField{
+												{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"chunk1"}}}},
+												{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"chunk2"}}}},
+											},
+										},
+									},
+								},
+							},
+						},
+						{
+							FieldName: "embedding",
+							Type:      schemapb.DataType_ArrayOfVector,
+							Field: &schemapb.FieldData_Vectors{
+								Vectors: &schemapb.VectorField{
+									Data: &schemapb.VectorField_VectorArray{
+										VectorArray: &schemapb.VectorArray{
+											Data: []*schemapb.VectorField{
+												{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2}}}},
+												{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{0.3, 0.4}}}},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	outputFields := []string{"id", "chunks"}
+	rows, err := buildQueryResp(int64(0), outputFields, fieldDataList, nil, nil, true, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(rows))
+
+	// Verify the struct array field is correctly assembled in each row
+	assert.NotNil(t, rows[0]["chunks"])
+	assert.NotNil(t, rows[1]["chunks"])
 }
 
 func newCollectionSchema(coll *schemapb.CollectionSchema) *schemapb.CollectionSchema {
@@ -2930,5 +3160,627 @@ func TestConvertIDsToSchemapbIDs(t *testing.T) {
 		_, err := convertIDsToSchemapbIDs(ids, boolPkField)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unsupported primary key type")
+	})
+}
+
+func TestExtractScalarFieldValue(t *testing.T) {
+	t.Run("nil input", func(t *testing.T) {
+		result := extractScalarFieldValue(nil)
+		assert.Nil(t, result)
+	})
+
+	t.Run("bool data", func(t *testing.T) {
+		scalarField := &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_BoolData{
+				BoolData: &schemapb.BoolArray{Data: []bool{true, false}},
+			},
+		}
+		result := extractScalarFieldValue(scalarField)
+		assert.Equal(t, []bool{true, false}, result)
+	})
+
+	t.Run("int data", func(t *testing.T) {
+		scalarField := &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
+			},
+		}
+		result := extractScalarFieldValue(scalarField)
+		assert.Equal(t, []int32{1, 2, 3}, result)
+	})
+
+	t.Run("long data", func(t *testing.T) {
+		scalarField := &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_LongData{
+				LongData: &schemapb.LongArray{Data: []int64{100, 200}},
+			},
+		}
+		result := extractScalarFieldValue(scalarField)
+		assert.Equal(t, []int64{100, 200}, result)
+	})
+
+	t.Run("float data", func(t *testing.T) {
+		scalarField := &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_FloatData{
+				FloatData: &schemapb.FloatArray{Data: []float32{1.1, 2.2}},
+			},
+		}
+		result := extractScalarFieldValue(scalarField)
+		assert.Equal(t, []float32{1.1, 2.2}, result)
+	})
+
+	t.Run("double data", func(t *testing.T) {
+		scalarField := &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_DoubleData{
+				DoubleData: &schemapb.DoubleArray{Data: []float64{1.1, 2.2}},
+			},
+		}
+		result := extractScalarFieldValue(scalarField)
+		assert.Equal(t, []float64{1.1, 2.2}, result)
+	})
+
+	t.Run("string data", func(t *testing.T) {
+		scalarField := &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_StringData{
+				StringData: &schemapb.StringArray{Data: []string{"a", "b"}},
+			},
+		}
+		result := extractScalarFieldValue(scalarField)
+		assert.Equal(t, []string{"a", "b"}, result)
+	})
+}
+
+func TestExtractVectorFieldValue(t *testing.T) {
+	t.Run("nil input", func(t *testing.T) {
+		result := extractVectorFieldValue(nil)
+		assert.Nil(t, result)
+	})
+
+	t.Run("float vector", func(t *testing.T) {
+		vectorField := &schemapb.VectorField{
+			Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2, 0.3}},
+			},
+		}
+		result := extractVectorFieldValue(vectorField)
+		assert.Equal(t, []float32{0.1, 0.2, 0.3}, result)
+	})
+
+	t.Run("binary vector", func(t *testing.T) {
+		vectorField := &schemapb.VectorField{
+			Data: &schemapb.VectorField_BinaryVector{
+				BinaryVector: []byte{255, 128},
+			},
+		}
+		result := extractVectorFieldValue(vectorField)
+		assert.Equal(t, []byte{255, 128}, result)
+	})
+
+	t.Run("float16 vector", func(t *testing.T) {
+		vectorField := &schemapb.VectorField{
+			Data: &schemapb.VectorField_Float16Vector{
+				Float16Vector: []byte{1, 2, 3, 4},
+			},
+		}
+		result := extractVectorFieldValue(vectorField)
+		assert.Equal(t, []byte{1, 2, 3, 4}, result)
+	})
+
+	t.Run("bfloat16 vector", func(t *testing.T) {
+		vectorField := &schemapb.VectorField{
+			Data: &schemapb.VectorField_Bfloat16Vector{
+				Bfloat16Vector: []byte{1, 2, 3, 4},
+			},
+		}
+		result := extractVectorFieldValue(vectorField)
+		assert.Equal(t, []byte{1, 2, 3, 4}, result)
+	})
+
+	t.Run("int8 vector", func(t *testing.T) {
+		vectorField := &schemapb.VectorField{
+			Data: &schemapb.VectorField_Int8Vector{
+				Int8Vector: []byte{1, 2, 3, 4},
+			},
+		}
+		result := extractVectorFieldValue(vectorField)
+		assert.Equal(t, []byte{1, 2, 3, 4}, result)
+	})
+
+	t.Run("sparse float vector", func(t *testing.T) {
+		vectorField := &schemapb.VectorField{
+			Data: &schemapb.VectorField_SparseFloatVector{
+				SparseFloatVector: &schemapb.SparseFloatArray{
+					Contents: [][]byte{{1, 2}, {3, 4}},
+				},
+			},
+		}
+		result := extractVectorFieldValue(vectorField)
+		assert.Equal(t, [][]byte{{1, 2}, {3, 4}}, result)
+	})
+}
+
+func TestExtractFieldDataValue(t *testing.T) {
+	t.Run("array type", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			Type: schemapb.DataType_Array,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							Data: []*schemapb.ScalarField{
+								{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1, 2}}}},
+								{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{3, 4}}}},
+							},
+						},
+					},
+				},
+			},
+		}
+		result := extractFieldDataValue(fieldData, 0)
+		assert.Equal(t, []int32{1, 2}, result)
+
+		result = extractFieldDataValue(fieldData, 1)
+		assert.Equal(t, []int32{3, 4}, result)
+
+		// Out of bounds
+		result = extractFieldDataValue(fieldData, 5)
+		assert.Nil(t, result)
+	})
+
+	t.Run("array of vector type", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			Type: schemapb.DataType_ArrayOfVector,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_VectorArray{
+						VectorArray: &schemapb.VectorArray{
+							Data: []*schemapb.VectorField{
+								{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2}}}},
+								{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{0.3, 0.4}}}},
+							},
+						},
+					},
+				},
+			},
+		}
+		result := extractFieldDataValue(fieldData, 0)
+		assert.Equal(t, []float32{0.1, 0.2}, result)
+
+		result = extractFieldDataValue(fieldData, 1)
+		assert.Equal(t, []float32{0.3, 0.4}, result)
+
+		// Out of bounds
+		result = extractFieldDataValue(fieldData, 5)
+		assert.Nil(t, result)
+	})
+
+	t.Run("bool type", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			Type: schemapb.DataType_Bool,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_BoolData{
+						BoolData: &schemapb.BoolArray{Data: []bool{true, false, true}},
+					},
+				},
+			},
+		}
+		result := extractFieldDataValue(fieldData, 0)
+		assert.Equal(t, true, result)
+
+		result = extractFieldDataValue(fieldData, 1)
+		assert.Equal(t, false, result)
+
+		// Out of bounds
+		result = extractFieldDataValue(fieldData, 5)
+		assert.Nil(t, result)
+	})
+
+	t.Run("int type", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			Type: schemapb.DataType_Int32,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{100, 200, 300}},
+					},
+				},
+			},
+		}
+		result := extractFieldDataValue(fieldData, 0)
+		assert.Equal(t, int32(100), result)
+
+		result = extractFieldDataValue(fieldData, 2)
+		assert.Equal(t, int32(300), result)
+
+		// Out of bounds
+		result = extractFieldDataValue(fieldData, 5)
+		assert.Nil(t, result)
+	})
+
+	t.Run("int64 type", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{1000, 2000}},
+					},
+				},
+			},
+		}
+		result := extractFieldDataValue(fieldData, 0)
+		assert.Equal(t, int64(1000), result)
+
+		// Out of bounds
+		result = extractFieldDataValue(fieldData, 5)
+		assert.Nil(t, result)
+	})
+
+	t.Run("float type", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			Type: schemapb.DataType_Float,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_FloatData{
+						FloatData: &schemapb.FloatArray{Data: []float32{1.1, 2.2}},
+					},
+				},
+			},
+		}
+		result := extractFieldDataValue(fieldData, 0)
+		assert.Equal(t, float32(1.1), result)
+
+		// Out of bounds
+		result = extractFieldDataValue(fieldData, 5)
+		assert.Nil(t, result)
+	})
+
+	t.Run("double type", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			Type: schemapb.DataType_Double,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_DoubleData{
+						DoubleData: &schemapb.DoubleArray{Data: []float64{1.11, 2.22}},
+					},
+				},
+			},
+		}
+		result := extractFieldDataValue(fieldData, 0)
+		assert.Equal(t, float64(1.11), result)
+
+		// Out of bounds
+		result = extractFieldDataValue(fieldData, 5)
+		assert.Nil(t, result)
+	})
+
+	t.Run("string type", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			Type: schemapb.DataType_VarChar,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: []string{"hello", "world"}},
+					},
+				},
+			},
+		}
+		result := extractFieldDataValue(fieldData, 0)
+		assert.Equal(t, "hello", result)
+
+		// Out of bounds
+		result = extractFieldDataValue(fieldData, 5)
+		assert.Nil(t, result)
+	})
+
+	t.Run("float vector type", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			Type: schemapb.DataType_FloatVector,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 2,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2, 0.3, 0.4}},
+					},
+				},
+			},
+		}
+		result := extractFieldDataValue(fieldData, 0)
+		assert.Equal(t, []float32{0.1, 0.2}, result)
+
+		result = extractFieldDataValue(fieldData, 1)
+		assert.Equal(t, []float32{0.3, 0.4}, result)
+
+		// Out of bounds
+		result = extractFieldDataValue(fieldData, 5)
+		assert.Nil(t, result)
+	})
+}
+
+func TestGetRowsNumForStructArrayField(t *testing.T) {
+	t.Run("nil input", func(t *testing.T) {
+		result := getRowsNumForStructArrayField(nil)
+		assert.Equal(t, int64(0), result)
+	})
+
+	t.Run("empty fields", func(t *testing.T) {
+		fieldData := &schemapb.StructArrayField{
+			Fields: []*schemapb.FieldData{},
+		}
+		result := getRowsNumForStructArrayField(fieldData)
+		assert.Equal(t, int64(0), result)
+	})
+
+	t.Run("array type field", func(t *testing.T) {
+		fieldData := &schemapb.StructArrayField{
+			Fields: []*schemapb.FieldData{
+				{
+					Type: schemapb.DataType_Array,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_ArrayData{
+								ArrayData: &schemapb.ArrayArray{
+									Data: []*schemapb.ScalarField{
+										{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1, 2}}}},
+										{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{3, 4}}}},
+										{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{5, 6}}}},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		result := getRowsNumForStructArrayField(fieldData)
+		assert.Equal(t, int64(3), result)
+	})
+
+	t.Run("array of vector type field", func(t *testing.T) {
+		fieldData := &schemapb.StructArrayField{
+			Fields: []*schemapb.FieldData{
+				{
+					Type: schemapb.DataType_ArrayOfVector,
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: 2,
+							Data: &schemapb.VectorField_FloatVector{
+								FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2, 0.3, 0.4, 0.5, 0.6}},
+							},
+						},
+					},
+				},
+			},
+		}
+		result := getRowsNumForStructArrayField(fieldData)
+		assert.Equal(t, int64(3), result)
+	})
+}
+
+func TestAssembleStructArrayFieldToJSON(t *testing.T) {
+	t.Run("single scalar field", func(t *testing.T) {
+		fieldData := &schemapb.StructArrayField{
+			Fields: []*schemapb.FieldData{
+				{
+					FieldName: "name",
+					Type:      schemapb.DataType_Array,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_ArrayData{
+								ArrayData: &schemapb.ArrayArray{
+									Data: []*schemapb.ScalarField{
+										{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"hello"}}}},
+										{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"world"}}}},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		result := assembleStructArrayFieldToJSON(fieldData, 0)
+		assert.NotNil(t, result)
+		assert.Equal(t, []string{"hello"}, result["name"])
+
+		result = assembleStructArrayFieldToJSON(fieldData, 1)
+		assert.Equal(t, []string{"world"}, result["name"])
+	})
+
+	t.Run("multiple fields", func(t *testing.T) {
+		fieldData := &schemapb.StructArrayField{
+			Fields: []*schemapb.FieldData{
+				{
+					FieldName: "text",
+					Type:      schemapb.DataType_Array,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_ArrayData{
+								ArrayData: &schemapb.ArrayArray{
+									Data: []*schemapb.ScalarField{
+										{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"chunk1"}}}},
+										{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"chunk2"}}}},
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					FieldName: "embedding",
+					Type:      schemapb.DataType_ArrayOfVector,
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Data: &schemapb.VectorField_VectorArray{
+								VectorArray: &schemapb.VectorArray{
+									Data: []*schemapb.VectorField{
+										{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2}}}},
+										{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{0.3, 0.4}}}},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		result := assembleStructArrayFieldToJSON(fieldData, 0)
+		assert.NotNil(t, result)
+		assert.Equal(t, []string{"chunk1"}, result["text"])
+		assert.Equal(t, []float32{0.1, 0.2}, result["embedding"])
+
+		result = assembleStructArrayFieldToJSON(fieldData, 1)
+		assert.Equal(t, []string{"chunk2"}, result["text"])
+		assert.Equal(t, []float32{0.3, 0.4}, result["embedding"])
+	})
+}
+
+func TestConvertIdsToSchemaIDs(t *testing.T) {
+	t.Run("empty ids", func(t *testing.T) {
+		pkField := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Int64,
+		}
+		_, err := convertIdsToSchemaIDs([]interface{}{}, pkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ids cannot be empty")
+	})
+
+	t.Run("int64 ids with various types", func(t *testing.T) {
+		pkField := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Int64,
+		}
+
+		// Test with int64
+		ids := []interface{}{int64(1), int64(2), int64(3)}
+		result, err := convertIdsToSchemaIDs(ids, pkField)
+		assert.NoError(t, err)
+		assert.Equal(t, []int64{1, 2, 3}, result.GetIntId().GetData())
+
+		// Test with float64 (JSON numbers)
+		ids = []interface{}{float64(1), float64(2), float64(3)}
+		result, err = convertIdsToSchemaIDs(ids, pkField)
+		assert.NoError(t, err)
+		assert.Equal(t, []int64{1, 2, 3}, result.GetIntId().GetData())
+
+		// Test with string
+		ids = []interface{}{"10", "20", "30"}
+		result, err = convertIdsToSchemaIDs(ids, pkField)
+		assert.NoError(t, err)
+		assert.Equal(t, []int64{10, 20, 30}, result.GetIntId().GetData())
+	})
+
+	t.Run("int64 ids with invalid string", func(t *testing.T) {
+		pkField := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Int64,
+		}
+		ids := []interface{}{"not_a_number"}
+		_, err := convertIdsToSchemaIDs(ids, pkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid int64 id")
+	})
+
+	t.Run("int64 ids with invalid type", func(t *testing.T) {
+		pkField := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Int64,
+		}
+		ids := []interface{}{[]int{1, 2, 3}}
+		_, err := convertIdsToSchemaIDs(ids, pkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid int64 id")
+	})
+
+	t.Run("varchar ids with various types", func(t *testing.T) {
+		pkField := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_VarChar,
+		}
+
+		// Test with string
+		ids := []interface{}{"id1", "id2", "id3"}
+		result, err := convertIdsToSchemaIDs(ids, pkField)
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"id1", "id2", "id3"}, result.GetStrId().GetData())
+
+		// Test with int64 converted to string
+		ids = []interface{}{int64(1), int64(2), int64(3)}
+		result, err = convertIdsToSchemaIDs(ids, pkField)
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"1", "2", "3"}, result.GetStrId().GetData())
+	})
+
+	t.Run("varchar ids with empty string", func(t *testing.T) {
+		pkField := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_VarChar,
+		}
+		ids := []interface{}{""}
+		_, err := convertIdsToSchemaIDs(ids, pkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "empty string id")
+	})
+
+	t.Run("varchar ids with invalid type", func(t *testing.T) {
+		pkField := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_VarChar,
+		}
+		ids := []interface{}{[]string{"a", "b"}}
+		_, err := convertIdsToSchemaIDs(ids, pkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid string id")
+	})
+
+	t.Run("unsupported pk type", func(t *testing.T) {
+		pkField := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Bool,
+		}
+		ids := []interface{}{true, false}
+		_, err := convertIdsToSchemaIDs(ids, pkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported primary key type")
+	})
+}
+
+func TestConvertQueries2PlaceholderWithEmbeddingList(t *testing.T) {
+	t.Run("float vector with embedding list", func(t *testing.T) {
+		body := `{"data": [[[0.1, 0.2], [0.3, 0.4]], [[0.5, 0.6]]]}`
+		result, err := convertQueries2Placeholder(body, schemapb.DataType_FloatVector, 2, true)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, commonpb.PlaceholderType_EmbListFloatVector, result.Type)
+		assert.Equal(t, 2, len(result.Values))
+	})
+
+	t.Run("binary vector rejects embedding list", func(t *testing.T) {
+		body := `{"data": [[[255]]]}`
+		_, err := convertQueries2Placeholder(body, schemapb.DataType_BinaryVector, 8, true)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "embedding list format is not supported for BinaryVector")
+	})
+
+	t.Run("float16 vector rejects embedding list", func(t *testing.T) {
+		body := `{"data": [[[0.1, 0.2]]]}`
+		_, err := convertQueries2Placeholder(body, schemapb.DataType_Float16Vector, 2, true)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "embedding list format is not supported for Float16Vector")
+	})
+
+	t.Run("bfloat16 vector rejects embedding list", func(t *testing.T) {
+		body := `{"data": [[[0.1, 0.2]]]}`
+		_, err := convertQueries2Placeholder(body, schemapb.DataType_BFloat16Vector, 2, true)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "embedding list format is not supported for BFloat16Vector")
+	})
+
+	t.Run("sparse float vector rejects embedding list", func(t *testing.T) {
+		body := `{"data": [[{"1": 0.5}]]}`
+		_, err := convertQueries2Placeholder(body, schemapb.DataType_SparseFloatVector, 0, true)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "embedding list format is not supported for SparseFloatVector")
+	})
+
+	t.Run("int8 vector rejects embedding list", func(t *testing.T) {
+		body := `{"data": [[[1, 2]]]}`
+		_, err := convertQueries2Placeholder(body, schemapb.DataType_Int8Vector, 2, true)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "embedding list format is not supported for Int8Vector")
 	})
 }
