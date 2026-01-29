@@ -112,6 +112,7 @@ internal/proto/**/*.pb.go
 pkg/streaming/**/*.pb.go
 internal/core/src/pb/*.pb.h
 internal/core/src/pb/*.pb.cc
+**/legacypb/*.pb.go
 pkg/streaming/proto/**/*.pb.go
 
 #AI rules
@@ -122,7 +123,6 @@ WARP.md
 
 # Gocache
 **/.gocache/
-docs/plans/
 
 # Claude
 claude.md
