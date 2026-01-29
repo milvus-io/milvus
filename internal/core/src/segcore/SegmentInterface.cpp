@@ -18,8 +18,10 @@
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
+#include "exec/QueryContext.h"
 #include "monitor/Monitor.h"
 #include "query/ExecPlanNodeVisitor.h"
+#include "query/PlanProto.h"
 #include "futures/Future.h"
 
 namespace milvus::segcore {
@@ -98,9 +100,14 @@ SegmentInternalInterface::Search(
     Timestamp timestamp,
     const folly::CancellationToken& cancel_token,
     int32_t consistency_level,
-    Timestamp collection_ttl) const {
+    Timestamp collection_ttl,
+    bool filter_only) const {
     std::shared_lock lck(mutex_);
     milvus::tracer::AddEvent("obtained_segment_lock_mutex");
+
+    auto results = std::make_unique<SearchResult>();
+    results->segment_ = (void*)this;
+
     check_search(plan);
     query::ExecPlanNodeVisitor visitor(*this,
                                        timestamp,
@@ -108,7 +115,7 @@ SegmentInternalInterface::Search(
                                        cancel_token,
                                        consistency_level,
                                        collection_ttl);
-    auto results = std::make_unique<SearchResult>();
+    visitor.SetFilterOnly(filter_only);
     *results = visitor.get_moved_result(*plan->plan_node_);
     results->segment_ = (void*)this;
     return results;
