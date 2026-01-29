@@ -2474,28 +2474,30 @@ class SnapshotRestoreChecker(Checker):
     def _capture_snapshot_state(self):
         """Capture current collection state. Must be called while holding _snapshot_lock."""
         try:
-            # Get current row count
+            # Get current row count with strong consistency
             res = self.milvus_client.query(
                 collection_name=self.c_name,
                 filter="",
-                output_fields=["count(*)"]
+                output_fields=["count(*)"],
+                consistency_level="Strong"
             )
             self.snapshot_row_count = res[0]["count(*)"] if res else 0
 
-            # Get sample PKs for verification
+            # Get sample PKs for verification with strong consistency
             if self.snapshot_row_count > 0:
                 sample_size = min(50, self.snapshot_row_count)
                 res = self.milvus_client.query(
                     collection_name=self.c_name,
                     filter=f"{self.int64_field_name} >= 0",
                     output_fields=[self.int64_field_name],
-                    limit=sample_size
+                    limit=sample_size,
+                    consistency_level="Strong"
                 )
                 self.snapshot_sample_pks = [r[self.int64_field_name] for r in res]
             else:
                 self.snapshot_sample_pks = []
 
-            log.debug(f"Captured snapshot state: row_count={self.snapshot_row_count}, sample_pks={len(self.snapshot_sample_pks)}")
+            log.info(f"[SnapshotRestoreChecker] Captured snapshot state: row_count={self.snapshot_row_count}, sample_pks={len(self.snapshot_sample_pks)}")
         except Exception as e:
             log.warning(f"Failed to capture snapshot state: {e}")
             self.snapshot_row_count = 0
@@ -2565,14 +2567,17 @@ class SnapshotRestoreChecker(Checker):
             log.warning(f"Failed to load restored collection: {e}")
             return False, f"Failed to load restored collection: {e}"
 
-        # 2. Verify row count matches snapshot state
+        # 2. Verify row count matches snapshot state (use strong consistency)
         try:
             res = self.milvus_client.query(
                 collection_name=restored_name,
                 filter="",
-                output_fields=["count(*)"]
+                output_fields=["count(*)"],
+                consistency_level="Strong"
             )
             actual_count = res[0]["count(*)"] if res else 0
+
+            log.info(f"[SnapshotRestoreChecker] Verify restored data: expected={self.snapshot_row_count}, actual={actual_count}")
 
             if actual_count != self.snapshot_row_count:
                 return False, f"Row count mismatch: expected {self.snapshot_row_count}, got {actual_count}"
@@ -2583,7 +2588,8 @@ class SnapshotRestoreChecker(Checker):
                 res = self.milvus_client.query(
                     collection_name=restored_name,
                     filter=filter_expr,
-                    output_fields=[self.int64_field_name]
+                    output_fields=[self.int64_field_name],
+                    consistency_level="Strong"
                 )
                 found_pks = {r[self.int64_field_name] for r in res}
                 expected_pks = set(self.snapshot_sample_pks)
@@ -2610,23 +2616,41 @@ class SnapshotRestoreChecker(Checker):
                 self.milvus_client.flush(collection_name=self.c_name)
                 log.debug(f"Flushed collection {self.c_name}")
 
-                # Capture current data state
-                self._capture_snapshot_state()
+                # Wait for flush to be fully visible in queries
+                time.sleep(1)
 
-                # Create snapshot (data is now locked)
+                # Capture data state BEFORE snapshot creation
+                self._capture_snapshot_state()
+                row_count_before = self.snapshot_row_count
+                log.info(f"State before snapshot: row_count={row_count_before}, sample_pks={len(self.snapshot_sample_pks)}")
+
+                # Create snapshot (captures exact state at this moment)
                 self.snapshot_name = cf.gen_unique_str("snapshot_")
                 self.milvus_client.create_snapshot(self.c_name, self.snapshot_name)
-                log.info(f"Created snapshot {self.snapshot_name} for collection {self.c_name}, "
-                         f"row_count={self.snapshot_row_count}")
+                log.info(f"Created snapshot {self.snapshot_name} for collection {self.c_name}")
 
-            # 5. Restore to new collection
+                # Verify state consistency after snapshot creation
+                res = self.milvus_client.query(
+                    collection_name=self.c_name,
+                    filter="",
+                    output_fields=["count(*)"],
+                    consistency_level="Strong"
+                )
+                row_count_after = res[0]["count(*)"] if res else 0
+                log.info(f"State after snapshot: row_count={row_count_after}")
+
+                # If counts differ, log warning but use the before count as expected
+                if row_count_before != row_count_after:
+                    log.warning(f"Row count changed during snapshot creation: {row_count_before} -> {row_count_after}")
+
+            # 3. Restore to new collection
             self.restored_collection = cf.gen_unique_str("restored_")
             job_id = self.milvus_client.restore_snapshot(
                 self.snapshot_name, self.restored_collection
             )
             log.info(f"Started restore job {job_id} to collection {self.restored_collection}")
 
-            # 6. Wait for restore completion
+            # 4. Wait for restore completion
             start_time = time.time()
             restore_timeout = 300  # Wait up to 5 minutes
             while time.time() - start_time < restore_timeout:
@@ -2641,7 +2665,7 @@ class SnapshotRestoreChecker(Checker):
             else:
                 return f"Restore timeout after {restore_timeout}s", False
 
-            # 7. Verify data correctness
+            # 5. Verify data correctness
             verified, msg = self._verify_restored_data(self.restored_collection)
             if not verified:
                 return msg, False
