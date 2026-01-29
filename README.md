@@ -6,6 +6,7 @@
   <a href="https://milvus.io/docs/roadmap.md"><img src="https://img.shields.io/badge/2025-roadmap-orange" alt="fully-managed-milvus"/></a>
   <a href="https://cloud.zilliz.com/signup?utm_source=partner&utm_medium=referral&utm_campaign=2024-11-04_web_github-readme_global"><img src="https://img.shields.io/badge/fully_managed-milvus-blue" alt="fully-managed-milvus"/></a>
   <a href="https://milvus.io/docs/tutorials-overview.md"><img src="https://img.shields.io/badge/tutorials-green" alt="tutorials"/></a>
+  <a href="https://milvus.io/slack"><img src="https://img.shields.io/badge/Slack-%234A154B.svg?style=flat&logo=slack&logoColor=white" alt="slack"/></a>
   <a href="https://discord.gg/mKc3R95yE5"><img height="20" src="https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white" alt="discord"/></a>
   <a href="https://x.com/milvusio"><img src="https://img.shields.io/twitter/follow/milvusio" alt="twitter"/></a>
 </div>
