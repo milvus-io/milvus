@@ -1106,13 +1106,6 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 			PhysicalChannelNames: []string{"by-dev-rootcoord-dml_1"},
 			VirtualChannelNames:  []string{"by-dev-rootcoord-dml_1_1v0"},
 		}, nil).Once()
-		rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
-			Status:               merr.Success(),
-			PartitionIDs:         []typeutil.UniqueID{11},
-			PartitionNames:       []string{"p1"},
-			CreatedTimestamps:    []uint64{11},
-			CreatedUtcTimestamps: []uint64{11},
-		}, nil).Once()
 		c, err := globalMetaCache.GetCollectionInfo(ctx, "foo", "bar", 1)
 		assert.NoError(t, err)
 		assert.Equal(t, c.collID, int64(1))
@@ -1139,13 +1132,6 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 			ShardsNum:            1,
 			PhysicalChannelNames: []string{"by-dev-rootcoord-dml_1"},
 			VirtualChannelNames:  []string{"by-dev-rootcoord-dml_1_1v0"},
-		}, nil).Once()
-		rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
-			Status:               merr.Success(),
-			PartitionIDs:         []typeutil.UniqueID{11},
-			PartitionNames:       []string{"p1"},
-			CreatedTimestamps:    []uint64{11},
-			CreatedUtcTimestamps: []uint64{11},
 		}, nil).Once()
 		c, err := globalMetaCache.GetCollectionInfo(ctx, "foo", "hoo", 0)
 		assert.NoError(t, err)
@@ -2071,4 +2057,410 @@ func TestMetaCache_Parallel(t *testing.T) {
 func TestMetaCache_GetShardLeaderList(t *testing.T) {
 	t.Skip("GetShardLeaderList has been moved to ShardClientMgr in shardclient package")
 	// Test body removed - functionality moved to shardclient package
+}
+
+func TestVersionCache(t *testing.T) {
+	t.Run("Lookup_Miss", func(t *testing.T) {
+		cache := NewVersionCache[string, *int]()
+		entry, ok, release := cache.Lookup("key1")
+		assert.False(t, ok)
+		assert.Nil(t, entry)
+		release(entry)
+	})
+
+	t.Run("Insert_And_Lookup", func(t *testing.T) {
+		cache := NewVersionCache[string, *int]()
+		value := 100
+		entry, release := cache.Insert("key1", &value, 1000)
+		assert.NotNil(t, entry)
+		assert.Equal(t, 100, *entry.value)
+		release(entry)
+
+		entry2, ok, release2 := cache.Lookup("key1")
+		assert.True(t, ok)
+		assert.Equal(t, 100, *entry2.value)
+		release2(entry2)
+	})
+
+	t.Run("Insert_Higher_Version_Overwrites", func(t *testing.T) {
+		cache := NewVersionCache[string, *int]()
+		value1 := 100
+		entry1, release1 := cache.Insert("key1", &value1, 1000)
+		release1(entry1)
+
+		value2 := 200
+		entry2, release2 := cache.Insert("key1", &value2, 2000)
+		assert.Equal(t, 200, *entry2.value)
+		release2(entry2)
+
+		entry3, ok, release3 := cache.Lookup("key1")
+		assert.True(t, ok)
+		assert.Equal(t, 200, *entry3.value)
+		release3(entry3)
+	})
+
+	t.Run("Insert_Lower_Version_Ignored", func(t *testing.T) {
+		cache := NewVersionCache[string, *int]()
+		value1 := 100
+		entry1, release1 := cache.Insert("key1", &value1, 2000)
+		release1(entry1)
+
+		value2 := 200
+		entry2, release2 := cache.Insert("key1", &value2, 1000)
+		assert.Equal(t, 100, *entry2.value)
+		release2(entry2)
+	})
+
+	t.Run("Stale_Erase_When_No_Refs", func(t *testing.T) {
+		cache := NewVersionCache[string, *int]()
+		value := 100
+		entry, release := cache.Insert("key1", &value, 1000)
+		release(entry)
+
+		cache.Stale("key1", 2000)
+
+		_, ok, release2 := cache.Lookup("key1")
+		assert.False(t, ok)
+		release2(nil)
+	})
+
+	t.Run("Stale_Marks_Entry_With_Active_Refs", func(t *testing.T) {
+		cache := NewVersionCache[string, *int]()
+		value := 100
+		entry, release := cache.Insert("key1", &value, 1000)
+		assert.Equal(t, EntryStateActive, entry.state)
+
+		cache.Stale("key1", 2000)
+
+		// Entry should be marked as stale
+		entry2, ok, release2 := cache.Lookup("key1")
+		assert.True(t, ok)
+		assert.Equal(t, EntryStateStale, entry2.state)
+		release2(entry2)
+
+		release(entry)
+
+		// After release, Stale should erase
+		cache.Stale("key1", 3000)
+		_, ok, release3 := cache.Lookup("key1")
+		assert.False(t, ok)
+		release3(nil)
+	})
+
+	t.Run("Prune_Only_Stale_Entries", func(t *testing.T) {
+		cache := NewVersionCache[string, *int]()
+
+		// key1: Active, ref=0 - should NOT be pruned
+		value1 := 100
+		entry1, release1 := cache.Insert("key1", &value1, 1000)
+		release1(entry1)
+
+		// key2: Stale, ref=0 - should be pruned
+		value2 := 200
+		entry2, release2 := cache.Insert("key2", &value2, 2000)
+		release2(entry2)
+		cache.Stale("key2", 2500)
+
+		// key3: Stale, ref=1 - should NOT be pruned
+		value3 := 300
+		entry3, _ := cache.Insert("key3", &value3, 3000)
+		cache.Stale("key3", 3500)
+
+		cache.Prune()
+
+		// key1 should still exist (Active, ref=0)
+		entry1Found, ok1, release1Found := cache.Lookup("key1")
+		assert.True(t, ok1)
+		assert.Equal(t, 100, *entry1Found.value)
+		release1Found(entry1Found)
+
+		// key2 should be gone (Stale, ref=0)
+		_, ok2, release2Found := cache.Lookup("key2")
+		assert.False(t, ok2)
+		release2Found(nil)
+
+		// key3 should still exist (Stale, ref=1)
+		entry3Found, ok3, release3Found := cache.Lookup("key3")
+		assert.True(t, ok3)
+		assert.Equal(t, EntryStateStale, entry3Found.state)
+		release3Found(entry3Found)
+
+		// Release the ref on entry3
+		release1(entry3)
+	})
+}
+
+func TestMetaCache_GetPartitionInfo_CacheHit(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+		Status:               merr.Success(),
+		PartitionIDs:         []int64{100},
+		PartitionNames:       []string{"par1"},
+		CreatedTimestamps:    []uint64{1000},
+		CreatedUtcTimestamps: []uint64{1000},
+	}, nil).Once()
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	info1, err := cache.GetPartitionInfo(ctx, "db", "collection", "par1")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(100), info1.partitionID)
+	assert.Equal(t, "par1", info1.name)
+
+	info2, err := cache.GetPartitionInfo(ctx, "db", "collection", "par1")
+	assert.NoError(t, err)
+	assert.Equal(t, info1, info2)
+}
+
+func TestMetaCache_GetPartitionInfo_DefaultPartition(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	defaultPartitionName := Params.CommonCfg.DefaultPartitionName.GetValue()
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.MatchedBy(func(req *milvuspb.ShowPartitionsRequest) bool {
+		return len(req.PartitionNames) == 0
+	})).Return(&milvuspb.ShowPartitionsResponse{
+		Status:               merr.Success(),
+		PartitionIDs:         []int64{1},
+		PartitionNames:       []string{defaultPartitionName},
+		CreatedTimestamps:    []uint64{1000},
+		CreatedUtcTimestamps: []uint64{1000},
+	}, nil).Once()
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	info, err := cache.GetPartitionInfo(ctx, "db", "collection", "")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), info.partitionID)
+	assert.Equal(t, defaultPartitionName, info.name)
+}
+
+func TestMetaCache_GetPartitionInfo_Error(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(nil, errors.New("connection failed")).Once()
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	_, err = cache.GetPartitionInfo(ctx, "db", "collection", "par1")
+	assert.Error(t, err)
+}
+
+func TestMetaCache_GetPartitionInfos_CacheHit(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:       merr.Success(),
+		CollectionID: 1,
+		Schema: &schemapb.CollectionSchema{
+			Name:   "collection",
+			Fields: []*schemapb.FieldSchema{},
+		},
+		RequestTime: 1000,
+	}, nil).Once()
+
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+		Status:               merr.Success(),
+		PartitionIDs:         []int64{100, 101},
+		PartitionNames:       []string{"par1", "par2"},
+		CreatedTimestamps:    []uint64{1000, 1001},
+		CreatedUtcTimestamps: []uint64{1000, 1001},
+	}, nil).Once()
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	infos1, err := cache.GetPartitionInfos(ctx, "db", "collection")
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(infos1.partitionInfos))
+
+	infos2, err := cache.GetPartitionInfos(ctx, "db", "collection")
+	assert.NoError(t, err)
+	assert.Equal(t, infos1, infos2)
+}
+
+func TestMetaCache_RemovePartition(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+		Status:               merr.Success(),
+		PartitionIDs:         []int64{100},
+		PartitionNames:       []string{"par1"},
+		CreatedTimestamps:    []uint64{1000},
+		CreatedUtcTimestamps: []uint64{1000},
+	}, nil).Times(2)
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	_, err = cache.GetPartitionInfo(ctx, "db", "collection", "par1")
+	assert.NoError(t, err)
+
+	cache.RemovePartition(ctx, "db", "collection", "par1", 2000)
+
+	_, err = cache.GetPartitionInfo(ctx, "db", "collection", "par1")
+	assert.NoError(t, err)
+}
+
+func TestMetaCache_PartitionCache_Concurrent(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	var callCount atomic.Int32
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
+			callCount.Add(1)
+			time.Sleep(50 * time.Millisecond)
+			return &milvuspb.ShowPartitionsResponse{
+				Status:               merr.Success(),
+				PartitionIDs:         []int64{100},
+				PartitionNames:       []string{"par1"},
+				CreatedTimestamps:    []uint64{1000},
+				CreatedUtcTimestamps: []uint64{1000},
+			}, nil
+		})
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	numGoroutines := 10
+	var wg sync.WaitGroup
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := cache.GetPartitionInfo(ctx, "db", "collection", "par1")
+			assert.NoError(t, err)
+		}()
+	}
+
+	wg.Wait()
+
+	assert.Equal(t, int32(1), callCount.Load(), "Singleflight should merge concurrent requests")
+}
+
+func TestMetaCache_GetPartitionInfos_SingleflightKeyIncludesDatabase(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+			time.Sleep(50 * time.Millisecond)
+			return &milvuspb.DescribeCollectionResponse{
+				Status:       merr.Success(),
+				CollectionID: 1,
+				Schema: &schemapb.CollectionSchema{
+					Name:   req.GetCollectionName(),
+					Fields: []*schemapb.FieldSchema{},
+				},
+				RequestTime: 1000,
+			}, nil
+		}).Twice()
+
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
+			return &milvuspb.ShowPartitionsResponse{
+				Status:               merr.Success(),
+				PartitionIDs:         []int64{100},
+				PartitionNames:       []string{req.GetDbName() + "_par"},
+				CreatedTimestamps:    []uint64{1000},
+				CreatedUtcTimestamps: []uint64{1000},
+			}, nil
+		}).Twice()
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	defer cache.Close()
+
+	type result struct {
+		db    string
+		infos *partitionInfos
+		err   error
+	}
+
+	results := make(chan result, 2)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+
+	for _, db := range []string{"db1", "db2"} {
+		wg.Add(1)
+		go func(db string) {
+			defer wg.Done()
+			<-start
+			infos, err := cache.GetPartitionInfos(ctx, db, "collection")
+			results <- result{
+				db:    db,
+				infos: infos,
+				err:   err,
+			}
+		}(db)
+	}
+
+	close(start)
+	wg.Wait()
+	close(results)
+
+	for result := range results {
+		assert.NoError(t, result.err)
+		if assert.NotNil(t, result.infos) && assert.Len(t, result.infos.partitionInfos, 1) {
+			assert.Equal(t, result.db+"_par", result.infos.partitionInfos[0].name)
+		}
+	}
+}
+
+func TestMetaCache_Close(t *testing.T) {
+	rootCoord := mocks.NewMockMixCoordClient(t)
+
+	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+
+	cache.Close()
+	cache.Close()
 }

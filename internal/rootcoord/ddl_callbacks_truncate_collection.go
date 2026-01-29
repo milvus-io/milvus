@@ -38,7 +38,7 @@ func (c *Core) broadcastTruncateCollection(ctx context.Context, req *milvuspb.Tr
 	defer broadcaster.Close()
 
 	// get collection info
-	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
