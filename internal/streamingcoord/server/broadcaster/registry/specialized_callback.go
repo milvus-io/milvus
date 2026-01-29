@@ -78,6 +78,9 @@ var (
 	RegisterCreateSnapshotV2AckCallback  = registerMessageAckCallback[*message.CreateSnapshotMessageHeader, *message.CreateSnapshotMessageBody]
 	RegisterDropSnapshotV2AckCallback    = registerMessageAckCallback[*message.DropSnapshotMessageHeader, *message.DropSnapshotMessageBody]
 	RegisterRestoreSnapshotV2AckCallback = registerMessageAckCallback[*message.RestoreSnapshotMessageHeader, *message.RestoreSnapshotMessageBody]
+
+	// External Collection
+	RegisterRefreshExternalCollectionV2AckCallback = registerMessageAckCallback[*message.RefreshExternalCollectionMessageHeader, *message.RefreshExternalCollectionMessageBody]
 )
 
 // resetMessageAckCallbacks resets the message ack callbacks.
@@ -138,5 +141,8 @@ func resetMessageAckCallbacks() {
 		message.MessageTypeCreateSnapshotV2:  syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeDropSnapshotV2:    syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeRestoreSnapshotV2: syncutil.NewFuture[messageInnerAckCallback](),
+
+		// External Collection
+		message.MessageTypeRefreshExternalCollectionV2: syncutil.NewFuture[messageInnerAckCallback](),
 	}
 }

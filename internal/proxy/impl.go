@@ -55,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -7279,4 +7280,234 @@ func (node *Proxy) BatchUpdateManifest(ctx context.Context, req *milvuspb.BatchU
 
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return bt.result, nil
+}
+
+// RefreshExternalCollection manually triggers a refresh job for an external collection
+func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.RefreshExternalCollectionRequest) (*milvuspb.RefreshExternalCollectionResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.RefreshExternalCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RefreshExternalCollection")
+	defer sp.End()
+
+	method := "RefreshExternalCollection"
+	tr := timerecord.NewTimeRecorder(method)
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("collectionName", req.GetCollectionName()),
+		zap.String("dbName", req.GetDbName()))
+
+	log.Debug(rpcReceived(method))
+
+	// Validate collection name
+	if err := validateCollectionName(req.GetCollectionName()); err != nil {
+		return &milvuspb.RefreshExternalCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	// Get collection info from cache (includes schema for validation)
+	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
+	if err != nil {
+		log.Warn("failed to get collection info", zap.Error(err))
+		return &milvuspb.RefreshExternalCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	// Validate it's an external collection
+	if !typeutil.IsExternalCollection(collectionInfo.schema.CollectionSchema) {
+		log.Warn("collection is not an external collection")
+		return &milvuspb.RefreshExternalCollectionResponse{
+			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
+		}, nil
+	}
+
+	collectionID := collectionInfo.collID
+
+	// Call DataCoord to refresh the external collection
+	resp, err := node.mixCoord.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
+		CollectionId:   collectionID,
+		CollectionName: req.GetCollectionName(),
+		ExternalSource: req.GetExternalSource(),
+		ExternalSpec:   req.GetExternalSpec(),
+	})
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		log.Warn("failed to refresh external collection", zap.Error(err))
+		return &milvuspb.RefreshExternalCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Debug(rpcDone(method), zap.Int64("jobID", resp.GetJobId()))
+
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	return &milvuspb.RefreshExternalCollectionResponse{
+		Status: merr.Success(),
+		JobId:  resp.GetJobId(),
+	}, nil
+}
+
+// GetRefreshExternalCollectionProgress returns the progress of a refresh job
+func (node *Proxy) GetRefreshExternalCollectionProgress(ctx context.Context, req *milvuspb.GetRefreshExternalCollectionProgressRequest) (*milvuspb.GetRefreshExternalCollectionProgressResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.GetRefreshExternalCollectionProgressResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetRefreshExternalCollectionProgress")
+	defer sp.End()
+
+	method := "GetRefreshExternalCollectionProgress"
+	tr := timerecord.NewTimeRecorder(method)
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.Int64("jobID", req.GetJobId()))
+
+	log.Debug(rpcReceived(method))
+
+	// Validate job ID
+	if req.GetJobId() == 0 {
+		return &milvuspb.GetRefreshExternalCollectionProgressResponse{
+			Status: merr.Status(merr.WrapErrParameterInvalidMsg("job_id is required")),
+		}, nil
+	}
+
+	// Call DataCoord to get job progress
+	resp, err := node.mixCoord.GetRefreshExternalCollectionProgress(ctx, &datapb.GetRefreshExternalCollectionProgressRequest{
+		JobId: req.GetJobId(),
+	})
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		log.Warn("failed to get refresh external collection progress", zap.Error(err))
+		return &milvuspb.GetRefreshExternalCollectionProgressResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Debug(rpcDone(method),
+		zap.String("state", resp.GetJobInfo().GetState().String()),
+		zap.Int64("progress", resp.GetJobInfo().GetProgress()))
+
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	// Convert internal JobInfo to external JobInfo
+	return &milvuspb.GetRefreshExternalCollectionProgressResponse{
+		Status:  merr.Success(),
+		JobInfo: convertToExternalCollectionJobInfo(resp.GetJobInfo()),
+	}, nil
+}
+
+// ListRefreshExternalCollectionJobs lists refresh jobs for an external collection
+func (node *Proxy) ListRefreshExternalCollectionJobs(ctx context.Context, req *milvuspb.ListRefreshExternalCollectionJobsRequest) (*milvuspb.ListRefreshExternalCollectionJobsResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.ListRefreshExternalCollectionJobsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListRefreshExternalCollectionJobs")
+	defer sp.End()
+
+	method := "ListRefreshExternalCollectionJobs"
+	tr := timerecord.NewTimeRecorder(method)
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("collectionName", req.GetCollectionName()),
+		zap.String("dbName", req.GetDbName()))
+
+	log.Debug(rpcReceived(method))
+
+	// Validate collection name
+	if err := validateCollectionName(req.GetCollectionName()); err != nil {
+		return &milvuspb.ListRefreshExternalCollectionJobsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	// Get collection info from cache and validate it's an external collection
+	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
+	if err != nil {
+		log.Warn("failed to get collection info", zap.Error(err))
+		return &milvuspb.ListRefreshExternalCollectionJobsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	if !typeutil.IsExternalCollection(collectionInfo.schema.CollectionSchema) {
+		log.Warn("collection is not an external collection")
+		return &milvuspb.ListRefreshExternalCollectionJobsResponse{
+			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
+		}, nil
+	}
+
+	collectionID := collectionInfo.collID
+
+	// Call DataCoord to list jobs
+	resp, err := node.mixCoord.ListRefreshExternalCollectionJobs(ctx, &datapb.ListRefreshExternalCollectionJobsRequest{
+		CollectionId: collectionID,
+	})
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		log.Warn("failed to list refresh external collection jobs", zap.Error(err))
+		return &milvuspb.ListRefreshExternalCollectionJobsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Debug(rpcDone(method), zap.Int("jobCount", len(resp.GetJobs())))
+
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	// Convert internal JobInfos to external JobInfos
+	externalJobs := make([]*milvuspb.RefreshExternalCollectionJobInfo, 0, len(resp.GetJobs()))
+	for _, job := range resp.GetJobs() {
+		externalJobs = append(externalJobs, convertToExternalCollectionJobInfo(job))
+	}
+
+	return &milvuspb.ListRefreshExternalCollectionJobsResponse{
+		Status: merr.Success(),
+		Jobs:   externalJobs,
+	}, nil
+}
+
+// convertToExternalCollectionJobInfo converts internal ExternalCollectionRefreshJob to external RefreshExternalCollectionJobInfo
+func convertToExternalCollectionJobInfo(internal *datapb.ExternalCollectionRefreshJob) *milvuspb.RefreshExternalCollectionJobInfo {
+	if internal == nil {
+		return nil
+	}
+	return &milvuspb.RefreshExternalCollectionJobInfo{
+		JobId:          internal.GetJobId(),
+		CollectionName: internal.GetCollectionName(),
+		State:          convertJobStateToExternalCollectionState(internal.GetState()),
+		Progress:       internal.GetProgress(),
+		Reason:         internal.GetFailReason(),
+		ExternalSource: internal.GetExternalSource(),
+		StartTime:      internal.GetStartTime(),
+		EndTime:        internal.GetEndTime(),
+	}
+}
+
+// convertJobStateToExternalCollectionState converts internal JobState to external RefreshExternalCollectionState
+func convertJobStateToExternalCollectionState(state indexpb.JobState) milvuspb.RefreshExternalCollectionState {
+	switch state {
+	case indexpb.JobState_JobStateInit:
+		return milvuspb.RefreshExternalCollectionState_RefreshPending
+	case indexpb.JobState_JobStateInProgress:
+		return milvuspb.RefreshExternalCollectionState_RefreshInProgress
+	case indexpb.JobState_JobStateFinished:
+		return milvuspb.RefreshExternalCollectionState_RefreshCompleted
+	case indexpb.JobState_JobStateFailed:
+		return milvuspb.RefreshExternalCollectionState_RefreshFailed
+	case indexpb.JobState_JobStateRetry:
+		return milvuspb.RefreshExternalCollectionState_RefreshInProgress
+	default:
+		return milvuspb.RefreshExternalCollectionState_RefreshPending
+	}
 }

@@ -1305,3 +1305,15 @@ func (s *mixCoordImpl) PushClientCommand(ctx context.Context, req *milvuspb.Push
 func (s *mixCoordImpl) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
 	return s.rootcoordServer.DeleteClientCommand(ctx, req)
 }
+
+func (s *mixCoordImpl) RefreshExternalCollection(ctx context.Context, req *datapb.RefreshExternalCollectionRequest) (*datapb.RefreshExternalCollectionResponse, error) {
+	return s.datacoordServer.RefreshExternalCollection(ctx, req)
+}
+
+func (s *mixCoordImpl) GetRefreshExternalCollectionProgress(ctx context.Context, req *datapb.GetRefreshExternalCollectionProgressRequest) (*datapb.GetRefreshExternalCollectionProgressResponse, error) {
+	return s.datacoordServer.GetRefreshExternalCollectionProgress(ctx, req)
+}
+
+func (s *mixCoordImpl) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+	return s.datacoordServer.ListRefreshExternalCollectionJobs(ctx, req)
+}
