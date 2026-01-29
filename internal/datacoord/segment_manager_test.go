@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,6 +46,90 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+// MockAllocationRecycler is a helper struct to verify putAllocation calls.
+type MockAllocationRecycler struct {
+	RecycleCount atomic.Int64
+}
+
+func newMockAllocationRecycler() *MockAllocationRecycler {
+	return &MockAllocationRecycler{}
+}
+
+func (m *MockAllocationRecycler) Put(a *Allocation) {
+	m.RecycleCount.Add(1)
+}
+
+func TestSegmentManager_ExpireAllocations(t *testing.T) {
+	paramtable.Init()
+	// Assume newMockAllocator uses a strictly increasing counter for TSO
+	mockAllocator := newMockAllocator(t)
+	meta, err := newMemoryMeta(t)
+	assert.NoError(t, err)
+
+	schema := newTestSchema()
+	collID, err := mockAllocator.AllocID(context.Background())
+	assert.NoError(t, err)
+	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
+
+	// Setup: Use a mock to track recycling
+	mockRecycler := newMockAllocationRecycler()
+	originalPutAllocation := putAllocation
+	putAllocation = mockRecycler.Put
+	defer func() { putAllocation = originalPutAllocation }()
+
+	segmentManager, _ := newSegmentManager(meta, mockAllocator)
+
+	// 1. Alloc 1 segment. This creates alloc0, which has the smallest ExpireTime (TSO_A).
+	allocs, err := segmentManager.AllocSegment(context.Background(), collID, 100, "c1", 100)
+	assert.NoError(t, err)
+	sid := allocs[0].SegmentID
+
+	// NOTE: allocs[0] (alloc0) is now implicitly referenced only by its segment ID (sid).
+
+	// 2. Manually add 3 allocations (TSO_B, TSO_C, TSO_D). All ExpireTimes are generated dynamically.
+
+	// TSO_B (Will be expired)
+	alloc1 := getAllocation(10)
+	alloc1.SegmentID = sid
+	alloc1.ExpireTime, err = segmentManager.genExpireTs(context.Background())
+	assert.NoError(t, err)
+	meta.AddAllocation(sid, alloc1)
+
+	// TSO_C (Expiration Threshold) - Will be expired because check is <=
+	alloc2 := getAllocation(20)
+	alloc2.SegmentID = sid
+	alloc2.ExpireTime, err = segmentManager.genExpireTs(context.Background())
+	assert.NoError(t, err)
+	meta.AddAllocation(sid, alloc2)
+
+	// Set expiration line: TSO_C is the threshold.
+	// Allocations to be recycled: allocs[0], alloc1, alloc2 (Total 3)
+	tsToExpire := alloc2.ExpireTime
+
+	// TSO_D (Will be retained) - This is the largest ExpireTime.
+	alloc3 := getAllocation(30)
+	alloc3.SegmentID = sid
+	alloc3.ExpireTime, err = segmentManager.genExpireTs(context.Background())
+	assert.NoError(t, err)
+	meta.AddAllocation(sid, alloc3)
+
+	// Action: Expire allocations older than or equal to tsToExpire (TSO_C)
+	segmentManager.ExpireAllocations(context.Background(), "c1", tsToExpire)
+
+	// Assertions
+	// 1. FIX: Recycle Count must be 3 (allocs[0], alloc1, alloc2).
+	assert.Equal(t, int64(3), mockRecycler.RecycleCount.Load(), "Three expired allocation objects should have been recycled (alloc0, alloc1, alloc2)")
+
+	// 2. FIX: Check final list of allocations. Expected 1 (alloc3 only).
+	finalAllocs := meta.GetAllocations(sid)
+	assert.Len(t, finalAllocs, 1, "Final allocations list should only contain non-expired items: alloc3")
+	assert.ElementsMatch(t, []*Allocation{alloc3}, finalAllocs)
+
+	// 3. Check LastExpireTime update (alloc3 is the highest remaining ExpireTime)
+	segment := meta.GetHealthySegment(context.Background(), sid)
+	assert.Equal(t, alloc3.ExpireTime, segment.LastExpireTime, "LastExpireTime should be updated to max remaining ExpireTime (alloc3)")
+}
 
 func TestManagerOptions(t *testing.T) {
 	//	ctx := context.Background()
@@ -475,8 +560,13 @@ func TestExpireAllocation(t *testing.T) {
 	mockPolicy := func(schema *schemapb.CollectionSchema) (int, error) {
 		return 10000000, nil
 	}
+	// NOTE: putAllocation needs to be configured correctly here for recycling,
+	// otherwise there might be memory leaks or warnings.
+	// Assuming putAllocation = getPoolAllocation, or using a MockAllocationRecycler
+	// if tracking is necessary.
 	segmentManager, _ := newSegmentManager(meta, mockAllocator, withCalUpperLimitPolicy(mockPolicy))
-	// alloc 100 times and expire
+
+	// Allocate 100 times and calculate max expire timestamp
 	var maxts Timestamp
 	var id int64 = -1
 	for i := 0; i < 100; i++ {
@@ -493,13 +583,21 @@ func TestExpireAllocation(t *testing.T) {
 		}
 	}
 
+	// Fix 1: Check initial allocation count (using meta.GetAllocations)
+	initialAllocs := meta.GetAllocations(id)
+	assert.Len(t, initialAllocs, 100)
+
+	// Check if LastExpireTime is correctly set to the maximum value
 	segment := meta.GetHealthySegment(context.TODO(), id)
 	assert.NotNil(t, segment)
-	assert.EqualValues(t, 100, len(segment.allocations))
+	assert.Equal(t, maxts, segment.LastExpireTime, "LastExpireTime should match max ExpireTime before expiration")
+
+	// Execute expiration
 	segmentManager.ExpireAllocations(context.TODO(), "ch1", maxts)
-	segment = meta.GetHealthySegment(context.TODO(), id)
-	assert.NotNil(t, segment)
-	assert.EqualValues(t, 0, len(segment.allocations))
+
+	// Fix 2: Check allocation count after expiration (using meta.GetAllocations)
+	finalAllocs := meta.GetAllocations(id)
+	assert.Len(t, finalAllocs, 0)
 }
 
 func TestGetFlushableSegments(t *testing.T) {
