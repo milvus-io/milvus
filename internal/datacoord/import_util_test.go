@@ -127,7 +127,6 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 		return id, id + n, nil
 	})
 	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil)
-	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(rand.Uint64(), nil)
 
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
@@ -197,8 +196,6 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 		id := rand.Int63()
 		return id, id + n, nil
 	})
-	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(800, nil)
-
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)

@@ -184,7 +184,6 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 	// pending -> inProgress
 	const nodeID = 10
 	s.alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
-	s.alloc.EXPECT().AllocTimestamp(mock.Anything).Return(300, nil)
 	s.cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
 		Slots: 1,
 	}, nil)
