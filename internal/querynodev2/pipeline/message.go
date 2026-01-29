@@ -54,6 +54,11 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 		deleteMsg := taskMsg.(*DeleteMsg)
 		msg.deleteMsgs = append(msg.deleteMsgs, deleteMsg)
 		collector.Rate.Add(metricsinfo.DeleteConsumeThroughput, float64(deleteMsg.Size()))
+	case commonpb.MsgType_Upsert:
+		upsertMsg := taskMsg.(*msgstream.UpsertMsg)
+		msg.insertMsgs = append(msg.insertMsgs, upsertMsg.InsertMsg)
+		msg.deleteMsgs = append(msg.deleteMsgs, upsertMsg.DeleteMsg)
+		collector.Rate.Add(metricsinfo.UpsertConsumeThroughput, float64(upsertMsg.Size()))
 	case commonpb.MsgType_AddCollectionField:
 		schemaMsg := taskMsg.(*adaptor.SchemaChangeMessageBody)
 		body, err := schemaMsg.SchemaChangeMessage.Body()
@@ -71,7 +76,7 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 			msg.schemaVersion = taskMsg.BeginTs()
 		}
 	default:
-		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
+		return merr.WrapErrParameterInvalid("msgType is Insert, Delete or Upsert", "not")
 	}
 	return nil
 }

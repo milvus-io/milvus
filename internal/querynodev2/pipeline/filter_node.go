@@ -135,6 +135,33 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 				return err
 			}
 		}
+	case commonpb.MsgType_Upsert:
+		upsertMsg := msg.(*msgstream.UpsertMsg)
+		metrics.QueryNodeConsumeCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.UpsertLabel).Add(float64(upsertMsg.Size()))
+
+		// Apply insert policies to insert part
+		for _, policy := range fNode.InsertMsgPolicys {
+			err := policy(fNode, c, upsertMsg.InsertMsg)
+			if err != nil {
+				return err
+			}
+		}
+
+		// Check segment whether excluded for insert part
+		ok := fNode.delegator.VerifyExcludedSegments(upsertMsg.InsertMsg.SegmentID, upsertMsg.InsertMsg.EndTimestamp)
+		if !ok {
+			m := fmt.Sprintf("skip msg due to segment=%d has been excluded", upsertMsg.InsertMsg.GetSegmentID())
+			return merr.WrapErrServiceInternal(m)
+		}
+
+		// Apply delete policies to delete part
+		for _, policy := range fNode.DeleteMsgPolicys {
+			err := policy(fNode, c, upsertMsg.DeleteMsg)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
 	case commonpb.MsgType_AddCollectionField:
 		schemaMsg := msg.(*adaptor.SchemaChangeMessageBody)
 		header := schemaMsg.SchemaChangeMessage.Header()
@@ -150,7 +177,7 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 		}
 		return nil
 	default:
-		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
+		return merr.WrapErrParameterInvalid("msgType is Insert, Delete or Upsert", "not")
 	}
 	return nil
 }

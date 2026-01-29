@@ -10,6 +10,7 @@ import "data_coord.proto"; // for SegmentLevel, but it's a basic type should not
 import "index_coord.proto";
 import "internal.proto";
 import "milvus.proto";
+import "msg.proto";
 import "rg.proto";
 import "google/protobuf/field_mask.proto";
 
@@ -25,6 +26,7 @@ enum MessageType {
     TimeTick             = 1;
     Insert               = 2;
     Delete               = 3;
+    Upsert               = 42;
     Flush                = 4;
     CreateCollection     = 5;
     DropCollection       = 6;
@@ -141,6 +143,13 @@ message TxnMessageBody {
     repeated Message messages = 1;
 }
 
+// UpsertMessageBody is the body of upsert message.
+// Upsert combines delete and insert operations in a single message.
+message UpsertMessageBody {
+    msg.InsertRequest insert_request = 1;
+    msg.DeleteRequest delete_request = 2;
+}
+
 ///
 /// Message Header Definitions
 /// Used to fast handling at streaming node write ahead.
@@ -174,6 +183,14 @@ message SegmentAssignment {
 message DeleteMessageHeader {
     int64 collection_id = 1;
     uint64 rows = 2;
+}
+
+// UpsertMessageHeader is the header of upsert message.
+// Upsert combines delete and insert operations in a single message.
+message UpsertMessageHeader {
+    int64 collection_id                            = 1;
+    repeated PartitionSegmentAssignment partitions = 2;  // insert partitions
+    uint64 delete_rows                             = 3;  // delete rows count
 }
 
 // FlushMessageHeader just nothing.

@@ -16,7 +16,7 @@ require (
 	google.golang.org/grpc v1.71.0
 )
 
-replace github.com/milvus-io/milvus/client/v2 => ../../../milvus/client
+replace github.com/milvus-io/milvus/client/v2 => ../../client
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

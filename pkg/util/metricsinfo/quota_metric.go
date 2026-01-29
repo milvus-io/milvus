@@ -28,6 +28,7 @@ const (
 	ReadResultThroughput    RateMetricLabel = "ReadResultThroughput"
 	InsertConsumeThroughput RateMetricLabel = "InsertConsumeThroughput"
 	DeleteConsumeThroughput RateMetricLabel = "DeleteConsumeThroughput"
+	UpsertConsumeThroughput RateMetricLabel = "UpsertConsumeThroughput"
 )
 
 const (

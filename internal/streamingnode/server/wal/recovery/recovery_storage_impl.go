@@ -315,6 +315,9 @@ func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 	case message.MessageTypeDelete:
 		immutableMsg := message.MustAsImmutableDeleteMessageV1(msg)
 		r.handleDelete(immutableMsg)
+	case message.MessageTypeUpsert:
+		immutableMsg := message.MustAsImmutableUpsertMessageV2(msg)
+		r.handleUpsert(immutableMsg)
 	case message.MessageTypeCreateSegment:
 		immutableMsg := message.MustAsImmutableCreateSegmentMessageV2(msg)
 		r.handleCreateSegment(immutableMsg)
@@ -416,6 +419,22 @@ func (r *recoveryStorageImpl) handleInsert(msg message.ImmutableInsertMessageV1)
 
 // handleDelete handles the delete message.
 func (r *recoveryStorageImpl) handleDelete(msg message.ImmutableDeleteMessageV1) {
+}
+
+// handleUpsert handles the upsert message.
+// Upsert combines both delete and insert operations.
+func (r *recoveryStorageImpl) handleUpsert(msg message.ImmutableUpsertMessageV2) {
+	// Handle insert part of upsert - similar to handleInsert
+	// Delete part doesn't need special handling in recovery (same as handleDelete)
+	for _, partition := range msg.Header().GetPartitions() {
+		if partition.GetSegmentAssignment() == nil {
+			continue
+		}
+		if segment, ok := r.segments[partition.GetSegmentAssignment().GetSegmentId()]; ok && segment.IsGrowing() {
+			segment.ObserveInsert(msg.TimeTick(), partition)
+		}
+	}
+	// Delete part is handled implicitly (delete operations don't need recovery tracking)
 }
 
 // handleCreateSegment handles the create segment message.
