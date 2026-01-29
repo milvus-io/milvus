@@ -2523,30 +2523,7 @@ class SnapshotRestoreChecker(Checker):
 
     def _verify_restored_data(self, restored_name):
         """Verify data correctness after restore."""
-        # 1. Create index on restored collection (required before load)
-        try:
-            # Get original collection's index info and apply to restored
-            index_names = self.milvus_client.list_indexes(self.c_name)
-            for idx_name in index_names:
-                try:
-                    idx_info = self.milvus_client.describe_index(self.c_name, idx_name)
-                    field_name = idx_info.get('field_name', '')
-                    if field_name:
-                        index_params = IndexParams()
-                        index_params.add_index(
-                            field_name=field_name,
-                            index_type=idx_info.get('index_type', 'AUTOINDEX'),
-                            metric_type=idx_info.get('metric_type', 'L2'),
-                            params=idx_info.get('params', {})
-                        )
-                        self.milvus_client.create_index(restored_name, index_params, timeout=60)
-                        log.debug(f"Created index for field {field_name} on restored collection")
-                except Exception as e:
-                    log.warning(f"Failed to create index {idx_name}: {e}")
-        except Exception as e:
-            log.warning(f"Failed to replicate indexes: {e}")
-
-        # 2. Load restored collection
+        # 1. Load restored collection (index is restored with snapshot)
         expected_count = len(self.pk_set)
         try:
             self.milvus_client.load_collection(restored_name)
@@ -2554,6 +2531,7 @@ class SnapshotRestoreChecker(Checker):
             log.warning(f"Failed to load restored collection: {e}")
             return False, f"Failed to load restored collection: {e}"
 
+        # 2. Verify row count
         try:
             res = self.milvus_client.query(
                 collection_name=restored_name,
@@ -2565,7 +2543,7 @@ class SnapshotRestoreChecker(Checker):
             if actual_count != expected_count:
                 return False, f"Row count mismatch: expected {expected_count}, got {actual_count}"
 
-            # 2. Sample verification of pk existence
+            # 3. Sample verification of pk existence
             if self.pk_set:
                 sample_size = min(10, len(self.pk_set))
                 sample_pks = random.sample(list(self.pk_set), sample_size)
