@@ -1073,19 +1073,20 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 
 	enableMmap := isIndexMmapEnable(fieldSchema, indexInfo)
 	indexInfoProto := &cgopb.LoadIndexInfo{
-		CollectionID:       loadInfo.GetCollectionID(),
-		PartitionID:        loadInfo.GetPartitionID(),
-		SegmentID:          loadInfo.GetSegmentID(),
-		Field:              fieldSchema,
-		EnableMmap:         enableMmap,
-		IndexID:            indexInfo.GetIndexID(),
-		IndexBuildID:       indexInfo.GetBuildID(),
-		IndexVersion:       indexInfo.GetIndexVersion(),
-		IndexParams:        indexParams,
-		IndexFiles:         indexInfo.GetIndexFilePaths(),
-		IndexEngineVersion: indexInfo.GetCurrentIndexVersion(),
-		IndexFileSize:      indexInfo.GetIndexSize(),
-		NumRows:            indexInfo.GetNumRows(),
+		CollectionID:              loadInfo.GetCollectionID(),
+		PartitionID:               loadInfo.GetPartitionID(),
+		SegmentID:                 loadInfo.GetSegmentID(),
+		Field:                     fieldSchema,
+		EnableMmap:                enableMmap,
+		IndexID:                   indexInfo.GetIndexID(),
+		IndexBuildID:              indexInfo.GetBuildID(),
+		IndexVersion:              indexInfo.GetIndexVersion(),
+		IndexParams:               indexParams,
+		IndexFiles:                indexInfo.GetIndexFilePaths(),
+		IndexEngineVersion:        indexInfo.GetCurrentIndexVersion(),
+		IndexFileSize:             indexInfo.GetIndexSize(),
+		NumRows:                   indexInfo.GetNumRows(),
+		CurrentScalarIndexVersion: indexInfo.GetCurrentScalarIndexVersion(),
 	}
 
 	// 2.
@@ -1203,16 +1204,17 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 	// Text match index mmap config is based on the raw data mmap.
 	enableMmap := isDataMmapEnable(f)
 	cgoProto := &indexcgopb.LoadTextIndexInfo{
-		FieldID:      textLogs.GetFieldID(),
-		Version:      textLogs.GetVersion(),
-		BuildID:      textLogs.GetBuildID(),
-		Files:        textLogs.GetFiles(),
-		Schema:       f,
-		CollectionID: s.Collection(),
-		PartitionID:  s.Partition(),
-		LoadPriority: s.LoadInfo().GetPriority(),
-		EnableMmap:   enableMmap,
-		IndexSize:    textLogs.GetMemorySize(),
+		FieldID:                   textLogs.GetFieldID(),
+		Version:                   textLogs.GetVersion(),
+		BuildID:                   textLogs.GetBuildID(),
+		Files:                     textLogs.GetFiles(),
+		Schema:                    f,
+		CollectionID:              s.Collection(),
+		PartitionID:               s.Partition(),
+		LoadPriority:              s.LoadInfo().GetPriority(),
+		EnableMmap:                enableMmap,
+		IndexSize:                 textLogs.GetMemorySize(),
+		CurrentScalarIndexVersion: textLogs.GetCurrentScalarIndexVersion(),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)

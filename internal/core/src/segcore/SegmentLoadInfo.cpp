@@ -17,6 +17,7 @@
 #include <memory>
 
 #include "common/FieldMeta.h"
+#include "index/Meta.h"
 #include "milvus-storage/column_groups.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/loon_ffi/property_singleton.h"
@@ -100,6 +101,13 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
         load_index_info.index_params[kv_pair.key()] = kv_pair.value();
     }
 
+    // Inject scalar index version into index_params for scalar indexes
+    auto scalar_version = field_index_info->current_scalar_index_version();
+    if (scalar_version > 0) {
+        load_index_info
+            .index_params[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
+            std::to_string(scalar_version);
+    }
     size_t dim =
         IsVectorDataType(field_meta.get_data_type()) &&
                 !IsSparseFloatVectorDataType(field_meta.get_data_type())

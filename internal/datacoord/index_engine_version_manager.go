@@ -11,17 +11,36 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 )
 
+// IndexEngineVersionManager manages the index engine versions reported by all QueryNodes in the cluster.
+//
+// Each QueryNode registers its supported index version range [MinimalIndexVersion, CurrentIndexVersion]
+// in its session. This manager aggregates versions from all QNs to determine cluster-wide compatibility:
+//
+//   - GetCurrent*Version(): Returns MIN of all QNs' CurrentIndexVersion.
+//     This is the highest version that ALL QueryNodes can load.
+//     Used when building new indexes to ensure all QNs can load them (rolling upgrade safe).
+//
+//   - GetMinimal*Version(): Returns MAX of all QNs' MinimalIndexVersion.
+//     This is the lowest version that ANY QueryNode requires.
+//     Indexes below this version may fail to load on some QNs.
+//     TODO: This is not currently used in the codebase, could be used to check if the index is of too old to
+//     load on any query nodes.
+//
+// Vector index versions come from knowhere library, while scalar index versions are defined by Milvus.
 type IndexEngineVersionManager interface {
 	Startup(sessions map[string]*sessionutil.Session)
 	AddNode(session *sessionutil.Session)
 	RemoveNode(session *sessionutil.Session)
 	Update(session *sessionutil.Session)
 
+	// Vector index version methods (from knowhere library)
 	GetCurrentIndexEngineVersion() int32
 	GetMinimalIndexEngineVersion() int32
 
+	// Scalar index version methods (Milvus-defined)
 	GetCurrentScalarIndexEngineVersion() int32
 	GetMinimalScalarIndexEngineVersion() int32
+
 	GetIndexNonEncoding() bool
 }
 
@@ -89,7 +108,7 @@ func (m *versionManagerImpl) Update(session *sessionutil.Session) {
 }
 
 func (m *versionManagerImpl) addOrUpdate(session *sessionutil.Session) {
-	log.Info("addOrUpdate version", zap.Int64("nodeId", session.ServerID), zap.Int32("minimal", session.IndexEngineVersion.MinimalIndexVersion), zap.Int32("current", session.IndexEngineVersion.CurrentIndexVersion))
+	log.Info("addOrUpdate version", zap.Int64("nodeId", session.ServerID), zap.Int32("minimal", session.IndexEngineVersion.MinimalIndexVersion), zap.Int32("current", session.IndexEngineVersion.CurrentIndexVersion), zap.Int32("currentScalar", session.ScalarIndexEngineVersion.CurrentIndexVersion))
 	m.versions[session.ServerID] = session.IndexEngineVersion
 	m.scalarIndexVersions[session.ServerID] = session.ScalarIndexEngineVersion
 	m.indexNonEncoding[session.ServerID] = session.IndexNonEncoding

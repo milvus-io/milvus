@@ -1092,18 +1092,19 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 					}
 					ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos,
 						&indexpb.IndexFilePathInfo{
-							SegmentID:           segID,
-							FieldID:             s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
-							IndexID:             segIdx.IndexID,
-							BuildID:             segIdx.BuildID,
-							IndexName:           indexName,
-							IndexParams:         indexParams,
-							IndexFilePaths:      indexFilePaths,
-							SerializedSize:      segIdx.IndexSerializedSize,
-							MemSize:             segIdx.IndexMemSize,
-							IndexVersion:        segIdx.IndexVersion,
-							NumRows:             segIdx.NumRows,
-							CurrentIndexVersion: segIdx.CurrentIndexVersion,
+							SegmentID:                 segID,
+							FieldID:                   s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
+							IndexID:                   segIdx.IndexID,
+							BuildID:                   segIdx.BuildID,
+							IndexName:                 indexName,
+							IndexParams:               indexParams,
+							IndexFilePaths:            indexFilePaths,
+							SerializedSize:            segIdx.IndexSerializedSize,
+							MemSize:                   segIdx.IndexMemSize,
+							IndexVersion:              segIdx.IndexVersion,
+							NumRows:                   segIdx.NumRows,
+							CurrentIndexVersion:       segIdx.CurrentIndexVersion,
+							CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
 						})
 				}
 			}
