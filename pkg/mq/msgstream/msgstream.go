@@ -231,7 +231,7 @@ func NewMarshaledMsg(msg common.Message, group string) (ConsumeMsg, error) {
 
 	idStr, ok := properties[common.MsgIdTypeKey]
 	if !ok {
-		return nil, errors.New("get msgType from msg properties failed")
+		return nil, errors.New("get msgID from msg properties failed")
 	}
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
