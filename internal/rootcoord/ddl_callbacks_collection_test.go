@@ -87,7 +87,7 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 		Schema:         schemaBytes,
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Equal(t, coll.Name, collectionName)
 	// create a collection with same schema should be idempotent.
@@ -105,7 +105,7 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 		PartitionName:  partitionName,
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
-	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Len(t, coll.Partitions, 2)
 	require.Contains(t, lo.Map(coll.Partitions, func(p *model.Partition, _ int) string { return p.PartitionName }), partitionName)
@@ -116,7 +116,7 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 		PartitionName:  partitionName,
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
-	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Len(t, coll.Partitions, 2)
 
@@ -148,7 +148,7 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 	})
 	require.NoError(t, merr.CheckRPCCall(resp.GetStatus(), err))
 	// verify collection still exists after truncate
-	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Equal(t, coll.Name, collectionName)
 	require.Equal(t, 1, len(coll.ShardInfos))
@@ -163,7 +163,7 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 		CollectionName: collectionName,
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
-	_, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	_, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.Error(t, err)
 	// drop a dropped collection should be idempotent.
 	status, err = core.DropCollection(ctx, &milvuspb.DropCollectionRequest{

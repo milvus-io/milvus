@@ -44,7 +44,7 @@ func (t *hasPartitionTask) Execute(ctx context.Context) error {
 	t.Rsp.Status = merr.Success()
 	t.Rsp.Value = false
 	// TODO: why HasPartitionRequest doesn't contain Timestamp but other requests do.
-	coll, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.CollectionName, typeutil.MaxTimestamp)
+	coll, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.CollectionName, typeutil.MaxTimestamp, false)
 	if err != nil {
 		t.Rsp.Status = merr.Status(err)
 		return err

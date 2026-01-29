@@ -483,7 +483,25 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 	}
 
 	syncJob := job.NewSyncNewCreatedPartitionJob(ctx, req, s.meta, s.broker, s.targetObserver, s.targetMgr)
-	s.jobScheduler.Add(syncJob)
+	go func() {
+		defer func() {
+			syncJob.PostExecute()
+			syncJob.Done()
+		}()
+
+		err := syncJob.PreExecute()
+		if err != nil {
+			log.Warn(failedMsg, zap.Error(err))
+			syncJob.SetError(err)
+			return
+		}
+		err = syncJob.Execute()
+		if err != nil {
+			log.Warn(failedMsg, zap.Error(err))
+			syncJob.SetError(err)
+			return
+		}
+	}()
 	err := syncJob.Wait()
 	if err != nil {
 		log.Warn(failedMsg, zap.Error(err))

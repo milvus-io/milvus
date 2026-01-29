@@ -67,7 +67,7 @@ type mockMetaTable struct {
 	ListDatabasesFunc                func(ctx context.Context, ts Timestamp) ([]*model.Database, error)
 	ListCollectionsFunc              func(ctx context.Context, ts Timestamp) ([]*model.Collection, error)
 	AddCollectionFunc                func(ctx context.Context, coll *model.Collection) error
-	GetCollectionByNameFunc          func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error)
+	GetCollectionByNameFunc          func(ctx context.Context, collectionName string, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
 	GetCollectionByIDFunc            func(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
 	ChangeCollectionStateFunc        func(ctx context.Context, collectionID UniqueID, state pb.CollectionState, ts Timestamp) error
 	RemoveCollectionFunc             func(ctx context.Context, collectionID UniqueID, ts Timestamp) error
@@ -125,8 +125,8 @@ func (m mockMetaTable) AddCollection(ctx context.Context, coll *model.Collection
 	return m.AddCollectionFunc(ctx, coll)
 }
 
-func (m mockMetaTable) GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts Timestamp) (*model.Collection, error) {
-	return m.GetCollectionByNameFunc(ctx, collectionName, ts)
+func (m mockMetaTable) GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
+	return m.GetCollectionByNameFunc(ctx, collectionName, ts, allowUnavailable)
 }
 
 func (m mockMetaTable) GetCollectionByID(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
@@ -494,7 +494,7 @@ func withInvalidMeta() Opt {
 	meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
 		return nil, errors.New("error mock ListCollections")
 	}
-	meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
+	meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 		return nil, errors.New("error mock GetCollectionByName")
 	}
 	meta.GetCollectionByIDFunc = func(ctx context.Context, collectionID typeutil.UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {

@@ -1640,7 +1640,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 	}, nil)
 	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
 	meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
-	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
+	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
 
 	paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNum.Key, strconv.Itoa(math.MaxInt64))
 	defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)
@@ -1733,7 +1733,7 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 		}).Once()
 		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
 		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
-		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
 		defer cleanTestEnv()
 
 		collectionName := funcutil.GenRandomStr()
@@ -1796,7 +1796,7 @@ func Test_createCollectionTask_PartitionKey(t *testing.T) {
 	}, nil)
 	meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
 	meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", errors.New("not found"))
-	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
+	meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("not found"))
 
 	paramtable.Get().Save(Params.QuotaConfig.MaxCollectionNum.Key, strconv.Itoa(math.MaxInt64))
 	defer paramtable.Get().Reset(Params.QuotaConfig.MaxCollectionNum.Key)

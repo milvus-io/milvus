@@ -639,7 +639,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			},
 		}
 		ctx := context.Background()
-		_, err := meta.GetCollectionByName(ctx, "not_exist", "name", 101)
+		_, err := meta.GetCollectionByName(ctx, "not_exist", "name", 101, false)
 		assert.Error(t, err)
 	})
 	t.Run("get by alias", func(t *testing.T) {
@@ -661,7 +661,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		}
 		meta.aliases.insert(util.DefaultDBName, "alias", 100)
 		ctx := context.Background()
-		coll, err := meta.GetCollectionByName(ctx, "", "alias", 101)
+		coll, err := meta.GetCollectionByName(ctx, "", "alias", 101, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
@@ -688,7 +688,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		}
 		meta.names.insert(util.DefaultDBName, "name", 100)
 		ctx := context.Background()
-		coll, err := meta.GetCollectionByName(ctx, "", "name", 101)
+		coll, err := meta.GetCollectionByName(ctx, "", "name", 101, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
@@ -713,7 +713,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			catalog: catalog,
 		}
 		ctx := context.Background()
-		_, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101)
+		_, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101, false)
 		assert.Error(t, err)
 	})
 
@@ -735,7 +735,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			catalog: catalog,
 		}
 		ctx := context.Background()
-		_, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101)
+		_, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101, false)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	})
@@ -766,7 +766,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			catalog: catalog,
 		}
 		ctx := context.Background()
-		coll, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101)
+		coll, err := meta.GetCollectionByName(ctx, util.DefaultDBName, "name", 101, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
@@ -782,7 +782,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			names:   newNameDb(),
 			aliases: newNameDb(),
 		}
-		_, err := meta.GetCollectionByName(ctx, "", "not_exist", typeutil.MaxTimestamp)
+		_, err := meta.GetCollectionByName(ctx, "", "not_exist", typeutil.MaxTimestamp, false)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	})
@@ -2263,7 +2263,7 @@ func TestMetaTable_EmtpyDatabaseName(t *testing.T) {
 		}
 
 		mt.aliases.insert(util.DefaultDBName, "aliases", 1)
-		ret, err := mt.getCollectionByNameInternal(context.TODO(), "", "aliases", typeutil.MaxTimestamp)
+		ret, err := mt.getCollectionByNameInternal(context.TODO(), "", "aliases", typeutil.MaxTimestamp, false)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(1), ret.CollectionID)
 	})

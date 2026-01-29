@@ -370,6 +370,7 @@ proxy:
   slowQuerySpanInSeconds: 1 # threshold for slow query detection in seconds. For Search/HybridSearch requests, the time is divided by nq for more accurate per-query measurement. Triggers slow log, WebUI display, and metrics.
   queryNodePooling:
     size: 10 # the size for shardleader(querynode) client pool
+  metaCacheGCTimeInterval: 300 # the time interval for meta cache GC, in seconds
   partialResultRequiredDataRatio: 1 # partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result
   http:
     enabled: true # Whether to enable the http server
