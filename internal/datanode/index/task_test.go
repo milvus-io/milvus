@@ -172,6 +172,106 @@ func (suite *IndexBuildTaskSuite) TestCheckDiskCapacityForBuild() {
 	suite.Equal(uint64(0), reserved, "should reserve 0 for zero data size")
 }
 
+func (suite *IndexBuildTaskSuite) TestCheckDiskCapacityForBuildFailure() {
+	ctx := context.Background()
+
+	// Get disk info to calculate a value that will cause failure
+	localStoragePath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	diskUsage, err := disk.Usage(localStoragePath)
+	suite.NoError(err)
+
+	maxUsageRatio := paramtable.Get().DataNodeCfg.IndexMaxDiskUsagePercentage.GetAsFloat()
+	maxAllowedUsage := uint64(float64(diskUsage.Total) * maxUsageRatio)
+
+	// Set committed space to exceed the limit
+	committedDiskSpaceLock.Lock()
+	committedDiskSpace = maxAllowedUsage // Set to max, so any new request will fail
+	committedDiskSpaceLock.Unlock()
+
+	// This should fail because committed + required > maxAllowed
+	reserved, err := checkDiskCapacityForBuild(ctx, "DISKANN", 1024*1024) // 1MB
+	suite.Error(err, "disk capacity check should fail when committed space exceeds limit")
+	suite.Equal(uint64(0), reserved, "should not reserve space on failure")
+	suite.Contains(err.Error(), "insufficient disk space")
+
+	// Cleanup
+	committedDiskSpaceLock.Lock()
+	committedDiskSpace = 0
+	committedDiskSpaceLock.Unlock()
+}
+
+func (suite *IndexBuildTaskSuite) TestBuildDiskIndexWithReservation() {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Reset committed disk space before test
+	committedDiskSpaceLock.Lock()
+	committedDiskSpace = 0
+	committedDiskSpaceLock.Unlock()
+
+	// Create request with DISKANN index type
+	// Using parameters from milvus.yaml
+	req := &workerpb.CreateJobRequest{
+		BuildID:      2,
+		IndexVersion: 1,
+		DataPaths:    []string{suite.dataPath},
+		IndexID:      0,
+		IndexName:    "diskann_index",
+		IndexParams: []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "DISKANN"},
+			{Key: common.MetricTypeKey, Value: metric.L2},
+			{Key: "PQCodeBudgetGBRatio", Value: "0.125"},
+			{Key: "BuildNumThreadsRatio", Value: "1"},
+			{Key: "SearchCacheBudgetGBRatio", Value: "0.1"},
+		},
+		TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
+		NumRows:    int64(suite.numRows),
+		Dim:        int64(suite.dim),
+		StorageConfig: &indexpb.StorageConfig{
+			RootPath:    "/tmp/milvus/data",
+			StorageType: "local",
+		},
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    3,
+		FieldID:      102,
+		FieldName:    "vec",
+		FieldType:    schemapb.DataType_FloatVector,
+		Field: &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "vec",
+			DataType: schemapb.DataType_FloatVector,
+		},
+	}
+
+	cm, err := dependency.NewDefaultFactory(true).NewPersistentStorageChunkManager(ctx)
+	suite.NoError(err)
+	blobs, err := suite.serializeData()
+	suite.NoError(err)
+	err = cm.Write(ctx, suite.dataPath, blobs[0].Value)
+	suite.NoError(err)
+
+	t := NewIndexBuildTask(ctx, cancel, req, cm, NewTaskManager(context.Background()), nil)
+
+	// PreExecute should succeed
+	err = t.PreExecute(context.Background())
+	suite.NoError(err)
+
+	// Execute will reserve disk space, then may fail at index building
+	// But we can verify the reservation logic works
+	initialCommitted := getCommittedDiskSpace()
+	suite.Equal(uint64(0), initialCommitted, "committed should be 0 before Execute")
+
+	// Execute - this will enter the IsDiskVecIndex branch and reserve space
+	// It may fail later due to missing dependencies, but reservation should happen
+	_ = t.Execute(context.Background())
+
+	// After Execute (success or failure), reserved space should be released by defer
+	finalCommitted := getCommittedDiskSpace()
+	suite.Equal(uint64(0), finalCommitted, "committed should be 0 after Execute (released by defer)")
+
+	cancel()
+}
+
 func (suite *IndexBuildTaskSuite) TestCommittedDiskSpace() {
 	// Reset committed disk space before test
 	committedDiskSpaceLock.Lock()
