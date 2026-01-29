@@ -212,6 +212,134 @@ func TestWithContext(t *testing.T) {
 	assert.NotNil(t, session)
 }
 
+func TestRollbackAllInFlightTransactions(t *testing.T) {
+	resource.InitForTest(t)
+
+	t.Run("RollbackWithNoSessions", func(t *testing.T) {
+		m := NewTxnManager(types.PChannelInfo{Name: "test"}, nil)
+		<-m.RecoverDone()
+
+		// Should not panic and handle empty case
+		m.RollbackAllInFlightTransactions()
+	})
+
+	t.Run("RollbackWithActiveSessions", func(t *testing.T) {
+		m := NewTxnManager(types.PChannelInfo{Name: "test"}, nil)
+		<-m.RecoverDone()
+
+		// Create 3 active sessions
+		cleanupCalled := atomic.NewInt32(0)
+		for i := 0; i < 3; i++ {
+			session, err := m.BeginNewTxn(context.Background(), newBeginTxnMessage(0, 10*time.Second))
+			assert.NoError(t, err)
+			assert.NotNil(t, session)
+
+			session.RegisterCleanup(func() {
+				cleanupCalled.Inc()
+			}, 0)
+		}
+
+		// Verify we have 3 active sessions
+		m.mu.Lock()
+		assert.Equal(t, 3, len(m.sessions))
+		m.mu.Unlock()
+
+		// Rollback all in-flight transactions
+		m.RollbackAllInFlightTransactions()
+
+		// Verify all sessions are cleaned up
+		m.mu.Lock()
+		assert.Equal(t, 0, len(m.sessions))
+		m.mu.Unlock()
+
+		// Verify cleanup was called for all sessions
+		assert.Equal(t, int32(3), cleanupCalled.Load())
+	})
+
+	t.Run("RollbackWithMixedSessionStates", func(t *testing.T) {
+		m := NewTxnManager(types.PChannelInfo{Name: "test"}, nil)
+		<-m.RecoverDone()
+
+		cleanupCalled := atomic.NewInt32(0)
+
+		// Create 3 sessions with different states
+		// Session 1: in-flight
+		session1, err := m.BeginNewTxn(context.Background(), newBeginTxnMessage(0, 10*time.Second))
+		assert.NoError(t, err)
+		session1.RegisterCleanup(func() {
+			cleanupCalled.Inc()
+		}, 0)
+
+		// Session 2: committed (already done, should be removed from manager)
+		session2, err := m.BeginNewTxn(context.Background(), newBeginTxnMessage(0, 10*time.Second))
+		assert.NoError(t, err)
+		session2.RegisterCleanup(func() {
+			cleanupCalled.Inc()
+		}, 0)
+		err = session2.RequestCommitAndWait(context.Background(), 0)
+		assert.NoError(t, err)
+		session2.CommitDone()
+
+		// Session 3: in-flight with messages added
+		session3, err := m.BeginNewTxn(context.Background(), newBeginTxnMessage(0, 10*time.Second))
+		assert.NoError(t, err)
+		session3.RegisterCleanup(func() {
+			cleanupCalled.Inc()
+		}, 0)
+		err = session3.AddNewMessage(context.Background(), 0)
+		assert.NoError(t, err)
+		session3.AddNewMessageDoneAndKeepalive(0)
+
+		// Rollback all in-flight transactions
+		m.RollbackAllInFlightTransactions()
+
+		// Verify all sessions are cleaned up
+		m.mu.Lock()
+		assert.Equal(t, 0, len(m.sessions))
+		m.mu.Unlock()
+
+		// All 3 sessions should have cleanup called
+		assert.Equal(t, int32(3), cleanupCalled.Load())
+	})
+
+	t.Run("RollbackWithRecoveredSessions", func(t *testing.T) {
+		// Create a manager with recovered sessions
+		now := time.Now()
+		beginMsg1 := newImmutableBeginTxnMessageWithVChannel("v1", 1, tsoutil.ComposeTSByTime(now, 0), 10*time.Minute)
+		beginMsg2 := newImmutableBeginTxnMessageWithVChannel("v2", 2, tsoutil.ComposeTSByTime(now, 1), 10*time.Minute)
+
+		builders := map[message.TxnID]*message.ImmutableTxnMessageBuilder{
+			message.TxnID(1): message.NewImmutableTxnMessageBuilder(beginMsg1),
+			message.TxnID(2): message.NewImmutableTxnMessageBuilder(beginMsg2),
+		}
+
+		m := NewTxnManager(types.PChannelInfo{Name: "test"}, builders)
+
+		// RecoverDone should not be done yet
+		select {
+		case <-m.RecoverDone():
+			t.Errorf("txn manager should not be recovered yet")
+		case <-time.After(1 * time.Millisecond):
+		}
+
+		// Rollback all in-flight transactions
+		m.RollbackAllInFlightTransactions()
+
+		// Verify all sessions are cleaned up
+		m.mu.Lock()
+		assert.Equal(t, 0, len(m.sessions))
+		m.mu.Unlock()
+
+		// RecoverDone should be signaled because all recovered sessions are cleaned
+		select {
+		case <-m.RecoverDone():
+			// expected
+		case <-time.After(100 * time.Millisecond):
+			t.Errorf("txn manager should be recovered after rollback")
+		}
+	})
+}
+
 func TestManagerFromReplcateMessage(t *testing.T) {
 	resource.InitForTest(t)
 	manager := NewTxnManager(types.PChannelInfo{Name: "test"}, nil)
