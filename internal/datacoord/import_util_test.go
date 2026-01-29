@@ -192,6 +192,7 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 
 	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(rand.Uint64(), nil)
 	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
 		id := rand.Int63()
 		return id, id + n, nil
