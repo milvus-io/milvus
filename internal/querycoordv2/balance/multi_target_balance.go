@@ -13,6 +13,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -603,6 +604,7 @@ func (b *MultiTargetBalancer) genSegmentPlan(ctx context.Context, replica *meta.
 	plans := b.genPlanByDistributions(nodeSegments, globalNodeSegments)
 	for i := range plans {
 		plans[i].Replica = replica
+		plans[i].LoadPriority = commonpb.LoadPriority_LOW // Balance operations use LOW priority
 	}
 	return plans
 }
