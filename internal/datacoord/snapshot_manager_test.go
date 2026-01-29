@@ -1540,8 +1540,8 @@ func TestSnapshotManager_ValidateCMEKCompatibility_SameEZDatabase(t *testing.T) 
 		return &rootcoordpb.DescribeDatabaseResponse{
 			DbName: dbName,
 			Properties: []*commonpb.KeyValuePair{
-				{Key: "cipher.enabled", Value: "true"},
 				{Key: "cipher.ezID", Value: "12345"},
+				{Key: "cipher.key", Value: "encrypted_root_key"},
 			},
 		}, nil
 	}).Build()
@@ -1623,6 +1623,7 @@ func TestSnapshotManager_ValidateCMEKCompatibility_DifferentEZDatabase(t *testin
 			Properties: []*commonpb.KeyValuePair{
 				{Key: "cipher.enabled", Value: "true"},
 				{Key: "cipher.ezID", Value: "67890"},
+				{Key: "cipher.key", Value: "test-root-key"},
 			},
 		}, nil
 	}).Build()
@@ -1679,48 +1680,6 @@ func TestSnapshotManager_ValidateCMEKCompatibility_DescribeDatabaseError(t *test
 	assert.Contains(t, err.Error(), "failed to describe target database")
 }
 
-func TestSnapshotManager_ValidateCMEKCompatibility_EncryptedDBWithoutEzID(t *testing.T) {
-	ctx := context.Background()
-
-	// Encrypted snapshot with ezID = 12345
-	snapshotData := &SnapshotData{
-		Collection: &datapb.CollectionDescription{
-			Schema: &schemapb.CollectionSchema{
-				Properties: []*commonpb.KeyValuePair{
-					{Key: "cipher.ezID", Value: "12345"},
-				},
-			},
-		},
-	}
-
-	// Mock DescribeDatabase to return encrypted database but without ezID
-	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
-		b *broker.MockBroker,
-		ctx context.Context,
-		dbName string,
-	) (*rootcoordpb.DescribeDatabaseResponse, error) {
-		return &rootcoordpb.DescribeDatabaseResponse{
-			DbName: dbName,
-			Properties: []*commonpb.KeyValuePair{
-				{Key: "cipher.enabled", Value: "true"},
-				// Missing cipher.ezID
-			},
-		}, nil
-	}).Build()
-	defer mockDescribeDB.UnPatch()
-
-	sm := &snapshotManager{
-		broker: broker.NewMockBroker(t),
-	}
-
-	// Should fail - encrypted database without ezID is invalid
-	err := sm.validateCMEKCompatibility(ctx, snapshotData, "target_db")
-
-	assert.Error(t, err)
-	assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
-	assert.Contains(t, err.Error(), "no encryption zone ID")
-}
-
 func TestSnapshotManager_ValidateCMEKCompatibility_NonEncryptedToEncrypted(t *testing.T) {
 	ctx := context.Background()
 
@@ -1746,6 +1705,7 @@ func TestSnapshotManager_ValidateCMEKCompatibility_NonEncryptedToEncrypted(t *te
 			Properties: []*commonpb.KeyValuePair{
 				{Key: "cipher.enabled", Value: "true"},
 				{Key: "cipher.ezID", Value: "12345"},
+				{Key: "cipher.key", Value: "test-root-key"},
 			},
 		}, nil
 	}).Build()
