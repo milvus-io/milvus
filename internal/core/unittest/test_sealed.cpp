@@ -9,7 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <boost/format.hpp>
 #include <optional>
 #include <gtest/gtest.h>
 
@@ -54,17 +53,6 @@ TEST(Sealed, without_predicate) {
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-        >)";
-
     auto N = ROW_COUNT;
 
     auto dataset = DataGen(schema, N);
@@ -81,7 +69,9 @@ TEST(Sealed, without_predicate) {
                     dataset.timestamps_.data(),
                     dataset.raw_);
 
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str =
+        handle.ParseSearch("", "fakevec", 5, "L2", "{\"nprobe\": 10}", 3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -171,24 +161,15 @@ TEST(Sealed, without_search_ef_less_than_limit) {
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    query_info: <
-                                      topk: 100
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"ef\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-        >)";
-
     auto N = ROW_COUNT;
 
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(fake_id);
     auto query_ptr = vec_col.data() + BIAS * dim;
 
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str =
+        handle.ParseSearch("", "fakevec", 100, "L2", "{\"ef\": 10}", 3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -252,32 +233,6 @@ TEST(Sealed, with_predicate) {
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    const char* raw_plan = R"(vector_anns: <
-                                field_id: 100
-                                predicates: <
-                                  binary_range_expr: <
-                                    column_info: <
-                                      field_id: 101
-                                      data_type: Int64
-                                    >
-                                    lower_inclusive: true,
-                                    upper_inclusive: false,
-                                    lower_value: <
-                                      int64_val: 1000
-                                    >
-                                    upper_value: <
-                                      int64_val: 1005
-                                    >
-                                  >
-                                >
-                                query_info: <
-                                  topk: 5
-                                  round_decimal: 6
-                                  metric_type: "L2"
-                                  search_params: "{\"nprobe\": 10}"
-                                >
-                                placeholder_tag: "$0"
-     >)";
 
     auto N = ROW_COUNT;
 
@@ -292,7 +247,14 @@ TEST(Sealed, with_predicate) {
                     dataset.timestamps_.data(),
                     dataset.raw_);
 
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // counter >= 1000 AND counter < 1005
+    auto plan_str = handle.ParseSearch("counter >= 1000 && counter < 1005",
+                                       "fakevec",
+                                       5,
+                                       "L2",
+                                       "{\"nprobe\": 10}",
+                                       6);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -368,39 +330,20 @@ TEST(Sealed, with_predicate_filter_all) {
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    const char* raw_plan = R"(vector_anns: <
-                                field_id: 100
-                                predicates: <
-                                  binary_range_expr: <
-                                    column_info: <
-                                      field_id: 101
-                                      data_type: Int64
-                                    >
-                                    lower_inclusive: true,
-                                    upper_inclusive: false,
-                                    lower_value: <
-                                      int64_val: 4200
-                                    >
-                                    upper_value: <
-                                      int64_val: 4199
-                                    >
-                                  >
-                                >
-                                query_info: <
-                                  topk: 5
-                                  round_decimal: 6
-                                  metric_type: "L2"
-                                  search_params: "{\"nprobe\": 10}"
-                                >
-                                placeholder_tag: "$0"
-     >)";
 
     auto N = ROW_COUNT;
 
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(fake_id);
     auto query_ptr = vec_col.data() + BIAS * dim;
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // counter >= 4200 AND counter < 4199 (impossible range, filters all)
+    auto plan_str = handle.ParseSearch("counter >= 4200 && counter < 4199",
+                                       "fakevec",
+                                       5,
+                                       "L2",
+                                       "{\"nprobe\": 10}",
+                                       6);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -530,34 +473,15 @@ TEST(Sealed, LoadFieldData) {
         N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
     //
     auto segment = CreateSealedSegment(schema);
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 102
-                                          data_type: Double
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          float_val: -1
-                                        >
-                                        upper_value: <
-                                          float_val: 1
-                                        >
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
     Timestamp timestamp = 1000000;
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // double >= -1 AND double < 1
+    auto plan_str = handle.ParseSearch("double >= -1 && double < 1",
+                                       "fakevec",
+                                       5,
+                                       "L2",
+                                       "{\"nprobe\": 10}",
+                                       3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -697,34 +621,15 @@ TEST(Sealed, ClearData) {
         N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
 
     auto segment = CreateSealedSegment(schema);
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 102
-                                          data_type: Double
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          float_val: -1
-                                        >
-                                        upper_value: <
-                                          float_val: 1
-                                        >
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
     Timestamp timestamp = 1000000;
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // double >= -1 AND double < 1
+    auto plan_str = handle.ParseSearch("double >= -1 && double < 1",
+                                       "fakevec",
+                                       5,
+                                       "L2",
+                                       "{\"nprobe\": 10}",
+                                       3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -803,34 +708,15 @@ TEST(Sealed, LoadFieldDataMmap) {
         N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
 
     auto segment = CreateSealedSegment(schema);
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 102
-                                          data_type: Double
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          float_val: -1
-                                        >
-                                        upper_value: <
-                                          float_val: 1
-                                        >
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
     Timestamp timestamp = 1000000;
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // double >= -1 AND double < 1
+    auto plan_str = handle.ParseSearch("double >= -1 && double < 1",
+                                       "fakevec",
+                                       5,
+                                       "L2",
+                                       "{\"nprobe\": 10}",
+                                       3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -915,34 +801,15 @@ TEST(Sealed, LoadScalarIndex) {
     auto indexing = GenVecIndexing(
         N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
 
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 102
-                                          data_type: Double
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          float_val: -1
-                                        >
-                                        upper_value: <
-                                          float_val: 1
-                                        >
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
     Timestamp timestamp = 1000000;
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // double >= -1 AND double < 1
+    auto plan_str = handle.ParseSearch("double >= -1 && double < 1",
+                                       "fakevec",
+                                       5,
+                                       "L2",
+                                       "{\"nprobe\": 10}",
+                                       3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -1022,34 +889,15 @@ TEST(Sealed, Delete) {
     auto fakevec = dataset.get_col<float>(fakevec_id);
 
     auto segment = CreateSealedSegment(schema);
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 102
-                                          data_type: Double
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          float_val: -1
-                                        >
-                                        upper_value: <
-                                          float_val: 1
-                                        >
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
     Timestamp timestamp = 1000000;
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // double >= -1 AND double < 1
+    auto plan_str = handle.ParseSearch("double >= -1 && double < 1",
+                                       "fakevec",
+                                       5,
+                                       "L2",
+                                       "{\"nprobe\": 10}",
+                                       3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -1065,9 +913,9 @@ TEST(Sealed, Delete) {
     std::vector<idx_t> pks{1, 2, 3, 4, 5};
     auto ids = std::make_unique<IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
-    std::vector<Timestamp> timestamps{10, 10, 10, 10, 10};
+    std::vector<Timestamp> timestamps_del{10, 10, 10, 10, 10};
 
-    LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
+    LoadDeletedRecordInfo info = {timestamps_del.data(), ids.get(), row_count};
     segment->LoadDeletedRecord(info);
 
     BitsetType bitset(N, false);
@@ -1104,34 +952,15 @@ TEST(Sealed, OverlapDelete) {
     auto fakevec = dataset.get_col<float>(fakevec_id);
 
     auto segment = CreateSealedSegment(schema);
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 102
-                                          data_type: Double
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          float_val: -1
-                                        >
-                                        upper_value: <
-                                          float_val: 1
-                                        >
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
     Timestamp timestamp = 1000000;
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // double >= -1 AND double < 1
+    auto plan_str = handle.ParseSearch("double >= -1 && double < 1",
+                                       "fakevec",
+                                       5,
+                                       "L2",
+                                       "{\"nprobe\": 10}",
+                                       3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -1147,9 +976,9 @@ TEST(Sealed, OverlapDelete) {
     std::vector<idx_t> pks{1, 2, 3, 4, 5};
     auto ids = std::make_unique<IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
-    std::vector<Timestamp> timestamps{10, 10, 10, 10, 10};
+    std::vector<Timestamp> timestamps_del{10, 10, 10, 10, 10};
 
-    LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
+    LoadDeletedRecordInfo info = {timestamps_del.data(), ids.get(), row_count};
     segment->LoadDeletedRecord(info);
     ASSERT_EQ(segment->get_deleted_count(), pks.size())
         << "deleted_count=" << segment->get_deleted_count()
@@ -1160,9 +989,9 @@ TEST(Sealed, OverlapDelete) {
     pks.insert(pks.end(), {6, 7, 8});
     auto new_ids = std::make_unique<IdArray>();
     new_ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
-    timestamps.insert(timestamps.end(), {11, 11, 11});
+    timestamps_del.insert(timestamps_del.end(), {11, 11, 11});
     LoadDeletedRecordInfo overlap_info = {
-        timestamps.data(), new_ids.get(), row_count};
+        timestamps_del.data(), new_ids.get(), row_count};
     segment->LoadDeletedRecord(overlap_info);
     // NOTE: need to change delete timestamp, so not to hit the cache
     ASSERT_EQ(segment->get_deleted_count(), pks.size())
@@ -1243,21 +1072,11 @@ TEST(Sealed, BF) {
     segment->LoadFieldData(load_info);
 
     auto topK = 1;
-    auto fmt = boost::format(R"(vector_anns: <
-                                            field_id: 100
-                                            query_info: <
-                                                topk: %1%
-                                                metric_type: "L2"
-                                                search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0">
-                                            output_field_ids: 101)") %
-               topK;
-    auto serialized_expr_plan = fmt.str();
-    auto binary_plan =
-        translate_text_plan_to_binary_plan(serialized_expr_plan.data());
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str =
+        handle.ParseSearch("", "fakevec", topK, "L2", "{\"nprobe\": 10}");
     auto plan =
-        CreateSearchPlanByExpr(schema, binary_plan.data(), binary_plan.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
 
     auto num_queries = 10;
     auto query = GenQueryVecs(num_queries, dim);
@@ -1306,21 +1125,11 @@ TEST(Sealed, BF_Overflow) {
     segment->LoadFieldData(vec_load_info);
 
     auto topK = 1;
-    auto fmt = boost::format(R"(vector_anns: <
-                                            field_id: 100
-                                            query_info: <
-                                                topk: %1%
-                                                metric_type: "L2"
-                                                search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0">
-                                            output_field_ids: 101)") %
-               topK;
-    auto serialized_expr_plan = fmt.str();
-    auto binary_plan =
-        translate_text_plan_to_binary_plan(serialized_expr_plan.data());
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str =
+        handle.ParseSearch("", "fakevec", topK, "L2", "{\"nprobe\": 10}");
     auto plan =
-        CreateSearchPlanByExpr(schema, binary_plan.data(), binary_plan.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
 
     auto num_queries = 10;
     auto query = GenQueryVecs(num_queries, dim);
@@ -1484,29 +1293,10 @@ TEST(Sealed, LoadArrayFieldData) {
     auto fakevec = dataset.get_col<float>(fakevec_id);
     auto segment = CreateSealedSegment(schema);
 
-    const char* raw_plan = R"(vector_anns:<
-            field_id:100
-            predicates:<
-                json_contains_expr:<
-                    column_info:<
-                        field_id:102
-                        data_type:Array
-                        element_type:Int64
-                    >
-                    elements:<int64_val:1 >
-                    op:Contains
-                    elements_same_type:true
-                >
-            >
-            query_info:<
-                topk: 5
-                round_decimal: 3
-                metric_type: "L2"
-                search_params: "{\"nprobe\": 10}"
-            > placeholder_tag:"$0"
-        >)";
-
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // array contains 1
+    auto plan_str = handle.ParseSearch(
+        "array_contains(array, 1)", "fakevec", 5, "L2", "{\"nprobe\": 10}", 3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -1542,29 +1332,10 @@ TEST(Sealed, LoadArrayFieldDataWithMMap) {
     auto fakevec = dataset.get_col<float>(fakevec_id);
     auto segment = CreateSealedSegment(schema);
 
-    const char* raw_plan = R"(vector_anns:<
-            field_id:100
-            predicates:<
-                json_contains_expr:<
-                    column_info:<
-                        field_id:102
-                        data_type:Array
-                        element_type:Int64
-                    >
-                    elements:<int64_val:1 >
-                    op:Contains
-                    elements_same_type:true
-                >
-            >
-            query_info:<
-                topk: 5
-                round_decimal: 3
-                metric_type: "L2"
-                search_params: "{\"nprobe\": 10}"
-            > placeholder_tag:"$0"
-        >)";
-
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // array contains 1
+    auto plan_str = handle.ParseSearch(
+        "array_contains(array, 1)", "fakevec", 5, "L2", "{\"nprobe\": 10}", 3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -2554,20 +2325,12 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     // create sealed segment
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
 
+    ScopedSchemaHandle handle(*schema);
+
     // brute force search
     {
-        std::string raw_plan = fmt::format(R"(vector_anns: <
-                                    field_id: 101
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "{}"
-                                      search_params: "{{\"nprobe\": 10}}"
-                                    >
-                                    placeholder_tag: "$0"
-        >)",
-                                           metric_type);
-        auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
+        auto plan_str = handle.ParseSearch(
+            "", "array_vec", 5, metric_type, "{\"nprobe\": 10}", 3);
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
 
@@ -2636,18 +2399,8 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
         sealed_segment->DropFieldData(array_vec);
         sealed_segment->LoadIndex(load_info);
 
-        std::string raw_plan = fmt::format(R"(vector_anns: <
-                                    field_id: 101
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "{}"
-                                      search_params: "{{\"nprobe\": 10}}"
-                                    >
-                                    placeholder_tag: "$0"
-        >)",
-                                           metric_type);
-        auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
+        auto plan_str = handle.ParseSearch(
+            "", "array_vec", 5, metric_type, "{\"nprobe\": 10}", 3);
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
 

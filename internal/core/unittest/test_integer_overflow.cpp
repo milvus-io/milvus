@@ -26,567 +26,85 @@ using namespace milvus::query;
 using namespace milvus::segcore;
 
 TEST(Expr, IntegerOverflow) {
+    // Test cases: string expression and expected predicate function
     std::vector<std::tuple<std::string, std::function<bool(int8_t)>>> testcases = {
         /////////////////////////////////////////////////////////// term
-        {
-            R"(
-term_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  values: <
-    int64_val: 20230704
-  >
-  values: <
-    int64_val: 1
-  >
-  values: <
-    int64_val: -1
-  >
->
-            )",
-            [](int8_t v) { return v == 1 || v == -1; }},
-        {
-            R"(
-unary_expr: <
-  op: Not
-  child: <
-    term_expr: <
-      column_info: <
-        field_id: 101
-        data_type: Int8
-      >
-      values: <
-        int64_val: 20230704
-      >
-      values: <
-        int64_val: 1
-      >
-      values: <
-        int64_val: -1
-      >
-    >
-  >
->
-            )",
-            [](int8_t v) { return v != 1 && v != -1; }},
+        // age in [20230704, 1, -1] - 20230704 overflows Int8
+        {"age in [20230704, 1, -1]",
+         [](int8_t v) { return v == 1 || v == -1; }},
+        // NOT (age in [20230704, 1, -1])
+        {"not (age in [20230704, 1, -1])",
+         [](int8_t v) { return v != 1 && v != -1; }},
 
         /////////////////////////////////////////////////////////// unary range
-        {
-            R"(
-unary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  op: Equal
-  value: <
-    int64_val: 20230704
-  >
->
-            )",
-            [](int8_t v) { return false; }},
-        {
-            R"(
-unary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  op: NotEqual
-  value: <
-    int64_val: 20230704
-  >
->
-            )",
-            [](int8_t v) { return true; }},
-        {
-            R"(
-unary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  op: GreaterEqual
-  value: <
-    int64_val: 20230704
-  >
->
-            )",
-            [](int8_t v) { return false; }},
-        {
-            R"(
-unary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  op: GreaterEqual
-  value: <
-    int64_val: -20230704
-  >
->
-            )",
-            [](int8_t v) { return true; }},
-        {
-            R"(
-unary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  op: GreaterThan
-  value: <
-    int64_val: 20230704
-  >
->
-            )",
-            [](int8_t v) { return false; }},
-        {
-            R"(
-unary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  op: GreaterThan
-  value: <
-    int64_val: -20230704
-  >
->
-            )",
-            [](int8_t v) { return true; }},
-        {
-            R"(
-unary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  op: LessEqual
-  value: <
-    int64_val: 20230704
-  >
->
-            )",
-            [](int8_t v) { return true; }},
-        {
-            R"(
-unary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  op: LessEqual
-  value: <
-    int64_val: -20230704
-  >
->
-            )",
-            [](int8_t v) { return false; }},
-        {
-            R"(
-unary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  op: LessThan
-  value: <
-    int64_val: 20230704
-  >
->
-            )",
-            [](int8_t v) { return true; }},
-        {
-            R"(
-unary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  op: LessThan
-  value: <
-    int64_val: -20230704
-  >
->
-            )",
-            [](int8_t v) { return false; }},
+        // age == 20230704 (overflow, always false)
+        {"age == 20230704", [](int8_t v) { return false; }},
+        // age != 20230704 (overflow, always true)
+        {"age != 20230704", [](int8_t v) { return true; }},
+        // age >= 20230704 (overflow positive, always false)
+        {"age >= 20230704", [](int8_t v) { return false; }},
+        // age >= -20230704 (overflow negative, always true)
+        {"age >= -20230704", [](int8_t v) { return true; }},
+        // age > 20230704 (overflow positive, always false)
+        {"age > 20230704", [](int8_t v) { return false; }},
+        // age > -20230704 (overflow negative, always true)
+        {"age > -20230704", [](int8_t v) { return true; }},
+        // age <= 20230704 (overflow positive, always true)
+        {"age <= 20230704", [](int8_t v) { return true; }},
+        // age <= -20230704 (overflow negative, always false)
+        {"age <= -20230704", [](int8_t v) { return false; }},
+        // age < 20230704 (overflow positive, always true)
+        {"age < 20230704", [](int8_t v) { return true; }},
+        // age < -20230704 (overflow negative, always false)
+        {"age < -20230704", [](int8_t v) { return false; }},
 
         /////////////////////////////////////////////////////////// binary range
-        {
-            R"(
-binary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  lower_value: <
-    int64_val: -20230704
-  >
-  upper_value: <
-    int64_val: 1
-  >
->
-            )",
-            [](int8_t v) { return v < 1; }},
-        {
-            R"(
-binary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  lower_value: <
-    int64_val: -1
-  >
-  upper_value: <
-    int64_val: 20230704
-  >
->
-            )",
-            [](int8_t v) { return v > -1; }},
-        {
-            R"(
-binary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  lower_value: <
-    int64_val: -20230704
-  >
-  upper_value: <
-    int64_val: 20230704
-  >
->
-            )",
-            [](int8_t v) { return true; }},
+        // -20230704 < age < 1 (lower overflow, lower_inclusive=false, upper_inclusive=false)
+        {"age > -20230704 and age < 1", [](int8_t v) { return v < 1; }},
+        // -1 < age < 20230704 (upper overflow, lower_inclusive=false, upper_inclusive=false)
+        {"age > -1 and age < 20230704", [](int8_t v) { return v > -1; }},
+        // -20230704 < age < 20230704 (both overflow, always true)
+        {"age > -20230704 and age < 20230704", [](int8_t v) { return true; }},
 
-        {
-            R"(
-binary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  lower_inclusive: true
-  lower_value: <
-    int64_val: -20230704
-  >
-  upper_value: <
-    int64_val: 1
-  >
->
-            )",
-            [](int8_t v) { return v < 1; }},
-        {
-            R"(
-binary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  lower_inclusive: true
-  lower_value: <
-    int64_val: -1
-  >
-  upper_value: <
-    int64_val: 20230704
-  >
->
-            )",
-            [](int8_t v) { return v >= -1; }},
-        {
-            R"(
-binary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  lower_inclusive: true
-  lower_value: <
-    int64_val: -20230704
-  >
-  upper_value: <
-    int64_val: 20230704
-  >
->
-            )",
-            [](int8_t v) { return true; }},
+        // -20230704 <= age < 1 (lower overflow, lower_inclusive=true, upper_inclusive=false)
+        {"age >= -20230704 and age < 1", [](int8_t v) { return v < 1; }},
+        // -1 <= age < 20230704 (upper overflow, lower_inclusive=true, upper_inclusive=false)
+        {"age >= -1 and age < 20230704", [](int8_t v) { return v >= -1; }},
+        // -20230704 <= age < 20230704 (both overflow, always true)
+        {"age >= -20230704 and age < 20230704", [](int8_t v) { return true; }},
 
-        {
-            R"(
-binary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  upper_inclusive: true
-  lower_value: <
-    int64_val: -20230704
-  >
-  upper_value: <
-    int64_val: 1
-  >
->
-            )",
-            [](int8_t v) { return v <= 1; }},
-        {
-            R"(
-binary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  upper_inclusive: true
-  lower_value: <
-    int64_val: -1
-  >
-  upper_value: <
-    int64_val: 20230704
-  >
->
-            )",
-            [](int8_t v) { return v > -1; }},
-        {
-            R"(
-binary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  upper_inclusive: true
-  lower_value: <
-    int64_val: -20230704
-  >
-  upper_value: <
-    int64_val: 20230704
-  >
->
-            )",
-            [](int8_t v) { return true; }},
+        // -20230704 < age <= 1 (lower overflow, lower_inclusive=false, upper_inclusive=true)
+        {"age > -20230704 and age <= 1", [](int8_t v) { return v <= 1; }},
+        // -1 < age <= 20230704 (upper overflow, lower_inclusive=false, upper_inclusive=true)
+        {"age > -1 and age <= 20230704", [](int8_t v) { return v > -1; }},
+        // -20230704 < age <= 20230704 (both overflow, always true)
+        {"age > -20230704 and age <= 20230704", [](int8_t v) { return true; }},
 
-        {
-            R"(
-binary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  lower_inclusive: true
-  upper_inclusive: true
-  lower_value: <
-    int64_val: -20230704
-  >
-  upper_value: <
-    int64_val: 1
-  >
->
-            )",
-            [](int8_t v) { return v <= 1; }},
-        {
-            R"(
-binary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  lower_inclusive: true
-  upper_inclusive: true
-  lower_value: <
-    int64_val: -1
-  >
-  upper_value: <
-    int64_val: 20230704
-  >
->
-            )",
-            [](int8_t v) { return v >= -1; }},
-        {
-            R"(
-binary_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  lower_inclusive: true
-  upper_inclusive: true
-  lower_value: <
-    int64_val: -20230704
-  >
-  upper_value: <
-    int64_val: 20230704
-  >
->
-            )",
-            [](int8_t v) { return true; }},
+        // -20230704 <= age <= 1 (lower overflow, lower_inclusive=true, upper_inclusive=true)
+        {"age >= -20230704 and age <= 1", [](int8_t v) { return v <= 1; }},
+        // -1 <= age <= 20230704 (upper overflow, lower_inclusive=true, upper_inclusive=true)
+        {"age >= -1 and age <= 20230704", [](int8_t v) { return v >= -1; }},
+        // -20230704 <= age <= 20230704 (both overflow, always true)
+        {"age >= -20230704 and age <= 20230704", [](int8_t v) { return true; }},
 
         /////////////////////////////////////////////////////////// binary arithmetic range
-        // Add
-        {
-            R"(
-binary_arith_op_eval_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  arith_op: Add
-  right_operand: <
-    int64_val: 2560
-  >
-  op: Equal
-  value: <
-    int64_val: 2450
-  >
->
-            )",
-            [](int8_t v) { return v + 2560 == 2450; }},
-        {
-            R"(
-binary_arith_op_eval_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  arith_op: Add
-  right_operand: <
-    int64_val: 2560
-  >
-  op: NotEqual
-  value: <
-    int64_val: 2450
-  >
->
-            )",
-            [](int8_t v) { return v + 2560 != 2450; }},
-        // Sub
-        {
-            R"(
-binary_arith_op_eval_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  arith_op: Sub
-  right_operand: <
-    int64_val: 2560
-  >
-  op: Equal
-  value: <
-    int64_val: 2450
-  >
->
-            )",
-            [](int8_t v) { return v - 2560 == 2450; }},
-        {
-            R"(
-binary_arith_op_eval_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  arith_op: Sub
-  right_operand: <
-    int64_val: 2560
-  >
-  op: NotEqual
-  value: <
-    int64_val: 2450
-  >
->
-            )",
-            [](int8_t v) { return v - 2560 != 2450; }},
-        // Mul
-        {
-            R"(
-binary_arith_op_eval_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  arith_op: Mul
-  right_operand: <
-    int64_val: 256
-  >
-  op: Equal
-  value: <
-    int64_val: 16384
-  >
->
-            )",
-            [](int8_t v) { return v * 256 == 16384; }},
-        {
-            R"(
-binary_arith_op_eval_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  arith_op: Mul
-  right_operand: <
-    int64_val: 256
-  >
-  op: NotEqual
-  value: <
-    int64_val: 16384
-  >
->
-            )",
-            [](int8_t v) { return v * 256 != 16384; }},
-        // Div
-        {
-            R"(
-binary_arith_op_eval_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  arith_op: Div
-  right_operand: <
-    int64_val: 256
-  >
-  op: Equal
-  value: <
-    int64_val: 20230704
-  >
->
-            )",
-            [](int8_t v) { return v / 256 == 20230704; }},
-        {
-            R"(
-binary_arith_op_eval_range_expr: <
-  column_info: <
-    field_id: 101
-    data_type: Int8
-  >
-  arith_op: Div
-  right_operand: <
-    int64_val: 256
-  >
-  op: NotEqual
-  value: <
-    int64_val: 20230704
-  >
->
-            )",
-            [](int8_t v) { return v / 256 != 20230704; }},
+        // Add: age + 2560 == 2450
+        {"age + 2560 == 2450", [](int8_t v) { return v + 2560 == 2450; }},
+        // Add: age + 2560 != 2450
+        {"age + 2560 != 2450", [](int8_t v) { return v + 2560 != 2450; }},
+        // Sub: age - 2560 == 2450
+        {"age - 2560 == 2450", [](int8_t v) { return v - 2560 == 2450; }},
+        // Sub: age - 2560 != 2450
+        {"age - 2560 != 2450", [](int8_t v) { return v - 2560 != 2450; }},
+        // Mul: age * 256 == 16384
+        {"age * 256 == 16384", [](int8_t v) { return v * 256 == 16384; }},
+        // Mul: age * 256 != 16384
+        {"age * 256 != 16384", [](int8_t v) { return v * 256 != 16384; }},
+        // Div: age / 256 == 20230704 (result overflow)
+        {"age / 256 == 20230704", [](int8_t v) { return v / 256 == 20230704; }},
+        // Div: age / 256 != 20230704 (result overflow)
+        {"age / 256 != 20230704", [](int8_t v) { return v / 256 != 20230704; }},
     };
-
-    std::string raw_plan_tmp = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      @@@@
-                                    >
-                                    query_info: <
-                                      topk: 10
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
 
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
@@ -611,12 +129,11 @@ binary_arith_op_eval_range_expr: <
                     raw_data.raw_);
     }
 
+    ScopedSchemaHandle handle(*schema);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    for (auto [clause, ref_func] : testcases) {
-        auto loc = raw_plan_tmp.find("@@@@");
-        auto raw_plan = raw_plan_tmp;
-        raw_plan.replace(loc, 4, clause);
-        auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
+    for (auto [expr, ref_func] : testcases) {
+        auto plan_str = handle.ParseSearch(
+            expr, "fakevec", 10, "L2", "{\"nprobe\": 10}", 3);
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
@@ -635,7 +152,7 @@ binary_arith_op_eval_range_expr: <
             auto val = age_col[i];
             auto ref = ref_func(val);
             ASSERT_EQ(ans, ref)
-                << clause << "@" << i << "!!" << static_cast<int64_t>(val);
+                << expr << "@" << i << "!!" << static_cast<int64_t>(val);
         }
     }
 }

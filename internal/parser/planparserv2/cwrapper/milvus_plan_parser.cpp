@@ -82,5 +82,37 @@ std::vector<uint8_t> PlanParser::Parse(SchemaHandle handle, const std::string& e
     return plan;
 }
 
+std::vector<uint8_t> PlanParser::ParseSearch(SchemaHandle handle,
+                                             const std::string& expr,
+                                             const std::string& vector_field_name,
+                                             const std::vector<uint8_t>& query_info_proto) {
+    char* c_expr = const_cast<char*>(expr.c_str());
+    char* c_vector_field = const_cast<char*>(vector_field_name.c_str());
+    void* query_info_blob = query_info_proto.empty() ? nullptr :
+        const_cast<void*>(static_cast<const void*>(query_info_proto.data()));
+    int query_info_len = static_cast<int>(query_info_proto.size());
+    char* err_msg = nullptr;
+    int length = 0;
+
+    void* result = ::ParseSearch(handle, c_expr, c_vector_field, query_info_blob, query_info_len, &length, &err_msg);
+    if (result == nullptr) {
+        std::string err_str = "Unknown error";
+        if (err_msg != nullptr) {
+            err_str = std::string(err_msg);
+            ::Free(err_msg);
+        }
+        throw std::runtime_error("Failed to parse search expression: " + err_str);
+    }
+
+    std::vector<uint8_t> plan(length);
+    if (length > 0) {
+        std::memcpy(plan.data(), result, length);
+    }
+
+    ::Free(result);
+
+    return plan;
+}
+
 } // namespace planparserv2
 } // namespace milvus
