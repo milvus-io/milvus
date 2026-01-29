@@ -27,8 +27,8 @@ const (
 type SearchType int32
 
 const (
-	SearchType_DEFAULT                     SearchType = 0
-	SearchType_PURE_ANN_SEARCH_NO_FILTER   SearchType = 1 // pure ann search without filter, including range search/groupby/iterator/iterative_filter cases
+	SearchType_DEFAULT                     SearchType = 0 // default search type
+	SearchType_PURE_ANN_SEARCH_NO_FILTER   SearchType = 1 // pure ann search without filter, excluding range search/groupby/iterator/iterative_filter cases
 	SearchType_PURE_ANN_SEARCH_WITH_FILTER SearchType = 2 // pure ann search with filter, excluding range search/groupby/iterator/iterative_filter cases
 )
 

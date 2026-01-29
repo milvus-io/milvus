@@ -2854,7 +2854,6 @@ type SearchRequest struct {
 	Scope           DataScope                 `protobuf:"varint,5,opt,name=scope,proto3,enum=milvus.proto.query.DataScope" json:"scope,omitempty"` // All, Streaming, Historical
 	TotalChannelNum int32                     `protobuf:"varint,6,opt,name=total_channel_num,json=totalChannelNum,proto3" json:"total_channel_num,omitempty"`
 	// If true, only execute filter and return valid counts per segment (two-stage search stage 1).
-	// Results are returned in SearchResults.FilterValidCounts corresponding to SealedSegmentIDsSearched.
 	FilterOnly bool `protobuf:"varint,7,opt,name=filter_only,json=filterOnly,proto3" json:"filter_only,omitempty"`
 }
 

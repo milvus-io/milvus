@@ -85,8 +85,8 @@ message CreateIndexRequest {
 
 // search type will used by optimizer to determine the optimization rule in delegator
 enum SearchType {
-  DEFAULT = 0;
-  PURE_ANN_SEARCH_NO_FILTER = 1;   // pure ann search without filter, including range search/groupby/iterator/iterative_filter cases
+  DEFAULT = 0;                     // default search type
+  PURE_ANN_SEARCH_NO_FILTER = 1;   // pure ann search without filter, excluding range search/groupby/iterator/iterative_filter cases
   PURE_ANN_SEARCH_WITH_FILTER = 2; // pure ann search with filter, excluding range search/groupby/iterator/iterative_filter cases
 }
 
