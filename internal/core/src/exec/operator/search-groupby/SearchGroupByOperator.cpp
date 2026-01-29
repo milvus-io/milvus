@@ -44,14 +44,11 @@ SearchGroupBy(milvus::OpContext* op_ctx,
             auto dataGetter =
                 GetDataGetter<int8_t>(op_ctx, segment, group_by_field_id);
             GroupIteratorsByType<int8_t>(iterators,
-                                         search_info.topk_,
-                                         search_info.group_size_,
-                                         search_info.strict_group_size_,
+                                         search_info,
                                          dataGetter,
                                          group_by_values,
                                          seg_offsets,
                                          distances,
-                                         search_info.metric_type_,
                                          topk_per_nq_prefix_sum);
             break;
         }
@@ -59,14 +56,11 @@ SearchGroupBy(milvus::OpContext* op_ctx,
             auto dataGetter =
                 GetDataGetter<int16_t>(op_ctx, segment, group_by_field_id);
             GroupIteratorsByType<int16_t>(iterators,
-                                          search_info.topk_,
-                                          search_info.group_size_,
-                                          search_info.strict_group_size_,
+                                          search_info,
                                           dataGetter,
                                           group_by_values,
                                           seg_offsets,
                                           distances,
-                                          search_info.metric_type_,
                                           topk_per_nq_prefix_sum);
             break;
         }
@@ -74,14 +68,11 @@ SearchGroupBy(milvus::OpContext* op_ctx,
             auto dataGetter =
                 GetDataGetter<int32_t>(op_ctx, segment, group_by_field_id);
             GroupIteratorsByType<int32_t>(iterators,
-                                          search_info.topk_,
-                                          search_info.group_size_,
-                                          search_info.strict_group_size_,
+                                          search_info,
                                           dataGetter,
                                           group_by_values,
                                           seg_offsets,
                                           distances,
-                                          search_info.metric_type_,
                                           topk_per_nq_prefix_sum);
             break;
         }
@@ -89,14 +80,11 @@ SearchGroupBy(milvus::OpContext* op_ctx,
             auto dataGetter =
                 GetDataGetter<int64_t>(op_ctx, segment, group_by_field_id);
             GroupIteratorsByType<int64_t>(iterators,
-                                          search_info.topk_,
-                                          search_info.group_size_,
-                                          search_info.strict_group_size_,
+                                          search_info,
                                           dataGetter,
                                           group_by_values,
                                           seg_offsets,
                                           distances,
-                                          search_info.metric_type_,
                                           topk_per_nq_prefix_sum);
             break;
         }
@@ -104,14 +92,11 @@ SearchGroupBy(milvus::OpContext* op_ctx,
             auto dataGetter =
                 GetDataGetter<int64_t>(op_ctx, segment, group_by_field_id);
             GroupIteratorsByType<int64_t>(iterators,
-                                          search_info.topk_,
-                                          search_info.group_size_,
-                                          search_info.strict_group_size_,
+                                          search_info,
                                           dataGetter,
                                           group_by_values,
                                           seg_offsets,
                                           distances,
-                                          search_info.metric_type_,
                                           topk_per_nq_prefix_sum);
             break;
         }
@@ -119,14 +104,11 @@ SearchGroupBy(milvus::OpContext* op_ctx,
             auto dataGetter =
                 GetDataGetter<bool>(op_ctx, segment, group_by_field_id);
             GroupIteratorsByType<bool>(iterators,
-                                       search_info.topk_,
-                                       search_info.group_size_,
-                                       search_info.strict_group_size_,
+                                       search_info,
                                        dataGetter,
                                        group_by_values,
                                        seg_offsets,
                                        distances,
-                                       search_info.metric_type_,
                                        topk_per_nq_prefix_sum);
             break;
         }
@@ -134,14 +116,11 @@ SearchGroupBy(milvus::OpContext* op_ctx,
             auto dataGetter =
                 GetDataGetter<std::string>(op_ctx, segment, group_by_field_id);
             GroupIteratorsByType<std::string>(iterators,
-                                              search_info.topk_,
-                                              search_info.group_size_,
-                                              search_info.strict_group_size_,
+                                              search_info,
                                               dataGetter,
                                               group_by_values,
                                               seg_offsets,
                                               distances,
-                                              search_info.metric_type_,
                                               topk_per_nq_prefix_sum);
             break;
         }
@@ -159,17 +138,13 @@ SearchGroupBy(milvus::OpContext* op_ctx,
                             search_info.json_path_,
                             search_info.json_type_,
                             search_info.strict_cast_);
-                        GroupIteratorsByType<bool>(
-                            iterators,
-                            search_info.topk_,
-                            search_info.group_size_,
-                            search_info.strict_group_size_,
-                            data_getter,
-                            group_by_values,
-                            seg_offsets,
-                            distances,
-                            search_info.metric_type_,
-                            topk_per_nq_prefix_sum);
+                        GroupIteratorsByType<bool>(iterators,
+                                                   search_info,
+                                                   data_getter,
+                                                   group_by_values,
+                                                   seg_offsets,
+                                                   distances,
+                                                   topk_per_nq_prefix_sum);
                         break;
                     }
                     case DataType::INT8: {
@@ -180,17 +155,13 @@ SearchGroupBy(milvus::OpContext* op_ctx,
                             search_info.json_path_,
                             search_info.json_type_,
                             search_info.strict_cast_);
-                        GroupIteratorsByType<int8_t>(
-                            iterators,
-                            search_info.topk_,
-                            search_info.group_size_,
-                            search_info.strict_group_size_,
-                            data_getter,
-                            group_by_values,
-                            seg_offsets,
-                            distances,
-                            search_info.metric_type_,
-                            topk_per_nq_prefix_sum);
+                        GroupIteratorsByType<int8_t>(iterators,
+                                                     search_info,
+                                                     data_getter,
+                                                     group_by_values,
+                                                     seg_offsets,
+                                                     distances,
+                                                     topk_per_nq_prefix_sum);
                         break;
                     }
                     case DataType::INT16: {
@@ -201,17 +172,13 @@ SearchGroupBy(milvus::OpContext* op_ctx,
                             search_info.json_path_,
                             search_info.json_type_,
                             search_info.strict_cast_);
-                        GroupIteratorsByType<int16_t>(
-                            iterators,
-                            search_info.topk_,
-                            search_info.group_size_,
-                            search_info.strict_group_size_,
-                            data_getter,
-                            group_by_values,
-                            seg_offsets,
-                            distances,
-                            search_info.metric_type_,
-                            topk_per_nq_prefix_sum);
+                        GroupIteratorsByType<int16_t>(iterators,
+                                                      search_info,
+                                                      data_getter,
+                                                      group_by_values,
+                                                      seg_offsets,
+                                                      distances,
+                                                      topk_per_nq_prefix_sum);
                         break;
                     }
                     case DataType::INT32: {
@@ -222,17 +189,13 @@ SearchGroupBy(milvus::OpContext* op_ctx,
                             search_info.json_path_,
                             search_info.json_type_,
                             search_info.strict_cast_);
-                        GroupIteratorsByType<int32_t>(
-                            iterators,
-                            search_info.topk_,
-                            search_info.group_size_,
-                            search_info.strict_group_size_,
-                            data_getter,
-                            group_by_values,
-                            seg_offsets,
-                            distances,
-                            search_info.metric_type_,
-                            topk_per_nq_prefix_sum);
+                        GroupIteratorsByType<int32_t>(iterators,
+                                                      search_info,
+                                                      data_getter,
+                                                      group_by_values,
+                                                      seg_offsets,
+                                                      distances,
+                                                      topk_per_nq_prefix_sum);
                         break;
                     }
                     case DataType::INT64: {
@@ -243,17 +206,13 @@ SearchGroupBy(milvus::OpContext* op_ctx,
                             search_info.json_path_,
                             search_info.json_type_,
                             search_info.strict_cast_);
-                        GroupIteratorsByType<int64_t>(
-                            iterators,
-                            search_info.topk_,
-                            search_info.group_size_,
-                            search_info.strict_group_size_,
-                            data_getter,
-                            group_by_values,
-                            seg_offsets,
-                            distances,
-                            search_info.metric_type_,
-                            topk_per_nq_prefix_sum);
+                        GroupIteratorsByType<int64_t>(iterators,
+                                                      search_info,
+                                                      data_getter,
+                                                      group_by_values,
+                                                      seg_offsets,
+                                                      distances,
+                                                      topk_per_nq_prefix_sum);
                         break;
                     }
                     case DataType::VARCHAR: {
@@ -267,14 +226,11 @@ SearchGroupBy(milvus::OpContext* op_ctx,
                                 search_info.strict_cast_);
                         GroupIteratorsByType<std::string>(
                             iterators,
-                            search_info.topk_,
-                            search_info.group_size_,
-                            search_info.strict_group_size_,
+                            search_info,
                             data_getter,
                             group_by_values,
                             seg_offsets,
                             distances,
-                            search_info.metric_type_,
                             topk_per_nq_prefix_sum);
                         break;
                     }
@@ -293,17 +249,13 @@ SearchGroupBy(milvus::OpContext* op_ctx,
                     search_info.json_path_,
                     search_info.json_type_,
                     search_info.strict_cast_);
-                GroupIteratorsByType<std::string>(
-                    iterators,
-                    search_info.topk_,
-                    search_info.group_size_,
-                    search_info.strict_group_size_,
-                    data_getter,
-                    group_by_values,
-                    seg_offsets,
-                    distances,
-                    search_info.metric_type_,
-                    topk_per_nq_prefix_sum);
+                GroupIteratorsByType<std::string>(iterators,
+                                                  search_info,
+                                                  data_getter,
+                                                  group_by_values,
+                                                  seg_offsets,
+                                                  distances,
+                                                  topk_per_nq_prefix_sum);
             }
             break;
         }
@@ -320,26 +272,20 @@ template <typename T>
 void
 GroupIteratorsByType(
     const std::vector<std::shared_ptr<VectorIterator>>& iterators,
-    int64_t topK,
-    int64_t group_size,
-    bool strict_group_size,
+    const SearchInfo& search_info,
     const std::shared_ptr<DataGetter<T>>& data_getter,
     std::vector<GroupByValueType>& group_by_values,
     std::vector<int64_t>& seg_offsets,
     std::vector<float>& distances,
-    const knowhere::MetricType& metrics_type,
     std::vector<size_t>& topk_per_nq_prefix_sum) {
     topk_per_nq_prefix_sum.push_back(0);
     for (auto& iterator : iterators) {
         GroupIteratorResult<T>(iterator,
-                               topK,
-                               group_size,
-                               strict_group_size,
+                               search_info,
                                data_getter,
                                group_by_values,
                                seg_offsets,
-                               distances,
-                               metrics_type);
+                               distances);
         topk_per_nq_prefix_sum.push_back(seg_offsets.size());
     }
 }
@@ -347,16 +293,18 @@ GroupIteratorsByType(
 template <typename T>
 void
 GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
-                    int64_t topK,
-                    int64_t group_size,
-                    bool strict_group_size,
+                    const SearchInfo& search_info,
                     const std::shared_ptr<DataGetter<T>>& data_getter,
                     std::vector<GroupByValueType>& group_by_values,
                     std::vector<int64_t>& offsets,
-                    std::vector<float>& distances,
-                    const knowhere::MetricType& metrics_type) {
+                    std::vector<float>& distances) {
     //1.
-    GroupByMap<T> groupMap(topK, group_size, strict_group_size);
+    GroupByMap<T> groupMap(search_info.topk_,
+                           search_info.group_size_,
+                           search_info.strict_group_size_);
+
+    auto is_element_id = search_info.element_level();
+    auto array_offsets = search_info.array_offsets_;
 
     //2. do iteration until fill the whole map or run out of all data
     //note it may enumerate all data inside a segment and can block following
@@ -370,16 +318,24 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
             "tells hasNext, terminate groupBy operation");
         auto offset = offset_dis_pair.value().first;
         auto dis = offset_dis_pair.value().second;
-        std::optional<T> row_data = data_getter->Get(offset);
+
+        // When array_offsets is present, iterator returns element_id,
+        // but DataGetter expects row_id. Convert element_id to row_id.
+        int64_t row_offset = offset;
+        if (is_element_id) {
+            row_offset = array_offsets->ElementIDToRowID(offset).first;
+        }
+
+        std::optional<T> row_data = data_getter->Get(row_offset);
         if (groupMap.Push(row_data)) {
-            res.emplace_back(offset, dis, row_data);
+            res.emplace_back(row_offset, dis, row_data);
         }
     }
 
     //3. sorted based on distances and metrics
     auto customComparator = [&](const auto& lhs, const auto& rhs) {
         return milvus::query::dis_closer(
-            std::get<1>(lhs), std::get<1>(rhs), metrics_type);
+            std::get<1>(lhs), std::get<1>(rhs), search_info.metric_type_);
     };
     std::sort(res.begin(), res.end(), customComparator);
 

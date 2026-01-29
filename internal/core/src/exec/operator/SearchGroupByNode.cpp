@@ -64,6 +64,13 @@ PhySearchGroupByNode::GetOutput() {
 
     auto op_context = query_context_->get_op_context();
     auto search_result = query_context_->get_search_result();
+
+    search_info_.array_offsets_ = query_context_->get_array_offsets();
+    if (search_result.element_level_) {
+        AssertInfo(search_info_.array_offsets_ != nullptr,
+                   "Array offsets not available");
+    }
+
     if (search_result.vector_iterators_.has_value()) {
         AssertInfo(search_result.vector_iterators_.value().size() ==
                        search_result.total_nq_,
@@ -89,6 +96,11 @@ PhySearchGroupByNode::GetOutput() {
     }
     tracer::AddEvent(
         fmt::format("grouped_results: {}", search_result.seg_offsets_.size()));
+
+    // When group by is used with element-level search, the result is row-level
+    // because group by operates on rows, not elements.
+    search_result.element_level_ = false;
+    search_result.element_indices_.clear();
 
     query_context_->set_search_result(std::move(search_result));
     std::chrono::high_resolution_clock::time_point vector_end =
