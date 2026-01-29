@@ -68,9 +68,7 @@ UnaryCompare(const T& get_value, const U& val, proto::plan::OpType op_type) {
         case proto::plan::Match:
             if constexpr (std::is_same_v<U, std::string> ||
                           std::is_same_v<U, std::string_view>) {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(val);
-                RegexMatcher matcher(regex_pattern);
+                auto matcher = RegexMatcher::FromLikePattern(val);
                 return matcher(get_value);
             } else {
                 return false;
@@ -95,9 +93,7 @@ struct UnaryElementFuncForMatch {
             "this override operator() of UnaryElementFuncForMatch does "
             "not support FilterType::random");
 
-        PatternMatchTranslator translator;
-        auto regex_pattern = translator(val);
-        RegexMatcher matcher(regex_pattern);
+        auto matcher = RegexMatcher::FromLikePattern(val);
 
         for (int i = 0; i < size; ++i) {
             res[i] = matcher(src[i]);
@@ -112,9 +108,7 @@ struct UnaryElementFuncForMatch {
                const TargetBitmap& bitmap_input,
                int start_cursor,
                const int32_t* offsets = nullptr) {
-        PatternMatchTranslator translator;
-        auto regex_pattern = translator(val);
-        RegexMatcher matcher(regex_pattern);
+        auto matcher = RegexMatcher::FromLikePattern(val);
         bool has_bitmap_input = !bitmap_input.empty();
         for (int i = 0; i < size; ++i) {
             if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
@@ -409,9 +403,7 @@ struct UnaryElementFuncForArray {
                         res[i] = false;
                         continue;
                     }
-                    PatternMatchTranslator translator;
-                    auto regex_pattern = translator(val);
-                    RegexMatcher matcher(regex_pattern);
+                    auto matcher = RegexMatcher::FromLikePattern(val);
                     auto array_data =
                         src[offset].template get_data<GetType>(index);
                     res[i] = matcher(array_data);
@@ -467,9 +459,7 @@ struct UnaryIndexFuncForMatch {
                 }
                 return res;
             } else {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(val);
-                RegexMatcher matcher(regex_pattern);
+                auto matcher = RegexMatcher::FromLikePattern(val);
                 for (int64_t i = 0; i < cnt; i++) {
                     auto raw = index->Reverse_Lookup(i);
                     if (!raw.has_value()) {
@@ -611,9 +601,7 @@ BatchUnaryCompare(const T* src,
         case proto::plan::Match: {
             if constexpr (std::is_same_v<U, std::string> ||
                           std::is_same_v<U, std::string_view>) {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(val);
-                RegexMatcher matcher(regex_pattern);
+                auto matcher = RegexMatcher::FromLikePattern(val);
                 for (int i = 0; i < size; ++i) {
                     res[i] = matcher(src[i]);
                 }
