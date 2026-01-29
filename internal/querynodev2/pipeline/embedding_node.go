@@ -236,6 +236,11 @@ func (eNode *embeddingNode) embedding(msg *msgstream.InsertMsg, stats map[int64]
 			if err != nil {
 				return err
 			}
+		case schemapb.FunctionType_MolFingerprint:
+			err := eNode.molFingerprintEmbedding(functionRunner, msg)
+			if err != nil {
+				return err
+			}
 		default:
 			log.Warn("pipeline embedding with unknown function type", zap.Any("type", functionSchema.GetType()))
 			return errors.New("unknown function type")
@@ -294,4 +299,43 @@ func getEmbeddingFieldData(datas []*schemapb.FieldData, fieldID int64) ([]string
 		}
 	}
 	return nil, fmt.Errorf("field %d not found", fieldID)
+}
+
+func (eNode *embeddingNode) molFingerprintEmbedding(runner function.FunctionRunner, msg *msgstream.InsertMsg) error {
+	inputFields := runner.GetInputFields()
+	outputField := runner.GetOutputFields()[0]
+
+	datas, err := getEmbeddingFieldDatas(msg.FieldsData, lo.Map(inputFields, func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })...)
+	if err != nil {
+		return err
+	}
+
+	output, err := runner.BatchRun(datas...)
+	if err != nil {
+		return err
+	}
+
+	binaryVectorData, ok := output[0].(*storage.BinaryVectorFieldData)
+	if !ok {
+		return errors.New("MOL fingerprint runner return unknown type output")
+	}
+
+	msg.FieldsData = append(msg.FieldsData, BuildBinaryFieldData(outputField, binaryVectorData))
+	return nil
+}
+
+func BuildBinaryFieldData(field *schemapb.FieldSchema, binaryVectorData *storage.BinaryVectorFieldData) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      field.GetDataType(),
+		FieldName: field.GetName(),
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(binaryVectorData.Dim),
+				Data: &schemapb.VectorField_BinaryVector{
+					BinaryVector: binaryVectorData.Data,
+				},
+			},
+		},
+		FieldId: field.GetFieldID(),
+	}
 }

@@ -71,6 +71,8 @@ func createFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSc
 		return f, nil
 	case schemapb.FunctionType_MinHash:
 		return nil, nil
+	case schemapb.FunctionType_MolFingerprint: // ignore, handled by function.NewFunctionRunner
+		return nil, nil
 	default:
 		return nil, fmt.Errorf("unknown functionRunner type %s", schema.GetType().String())
 	}
