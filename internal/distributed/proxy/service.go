@@ -327,6 +327,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	}
 
 	milvuspb.RegisterMilvusServiceServer(s.grpcExternalServer, s)
+	milvuspb.RegisterClientTelemetryServiceServer(s.grpcExternalServer, s)
 	grpc_health_v1.RegisterHealthServer(s.grpcExternalServer, s)
 	errChan <- nil
 
@@ -1222,4 +1223,24 @@ func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *milvuspb.GetR
 
 func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *milvuspb.ListRestoreSnapshotJobsRequest) (*milvuspb.ListRestoreSnapshotJobsResponse, error) {
 	return s.proxy.ListRestoreSnapshotJobs(ctx, req)
+}
+
+// ClientHeartbeat handles client telemetry heartbeat requests
+func (s *Server) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
+	return s.proxy.ClientHeartbeat(ctx, req)
+}
+
+// GetClientTelemetry retrieves client telemetry data
+func (s *Server) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error) {
+	return s.proxy.GetClientTelemetry(ctx, req)
+}
+
+// PushClientCommand pushes a command to clients
+func (s *Server) PushClientCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
+	return s.proxy.PushClientCommand(ctx, req)
+}
+
+// DeleteClientCommand deletes a client command
+func (s *Server) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
+	return s.proxy.DeleteClientCommand(ctx, req)
 }

@@ -1004,3 +1004,23 @@ func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRes
 func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error) {
 	return s.mixCoord.ListRestoreSnapshotJobs(ctx, req)
 }
+
+// ClientHeartbeat handles client telemetry heartbeat requests
+func (s *Server) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
+	return s.mixCoord.ClientHeartbeat(ctx, req)
+}
+
+// GetClientTelemetry retrieves client telemetry data
+func (s *Server) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error) {
+	return s.mixCoord.GetClientTelemetry(ctx, req)
+}
+
+// PushClientCommand pushes a command to clients
+func (s *Server) PushClientCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
+	return s.mixCoord.PushClientCommand(ctx, req)
+}
+
+// DeleteClientCommand deletes a client command
+func (s *Server) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
+	return s.mixCoord.DeleteClientCommand(ctx, req)
+}
