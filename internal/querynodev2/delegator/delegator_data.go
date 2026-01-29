@@ -496,17 +496,28 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 // idf oracle owns the full lifecycle: download, disk write, register, cleanup.
 func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
 	idfOracle := sd.getIDFOracle()
+	startTs := time.Now()
+	segmentIDs := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 {
+		return info.GetSegmentID()
+	})
 	if idfOracle == nil {
+		mlog.Info(ctx, "load bm25 stats skipped",
+			mlog.FieldCollectionID(req.GetCollectionID()),
+			mlog.Int64s("segmentIDs", segmentIDs),
+			mlog.String("reason", "idf_oracle_nil"),
+			mlog.Duration("totalDuration", time.Since(startTs)))
 		return nil
 	}
 
 	pool := segments.GetLoadPool()
 
 	cm := sd.loader.GetChunkManager()
+	submitStart := time.Now()
 	futures := make([]*conc.Future[any], 0, len(infos))
 	for _, info := range infos {
 		info := info
 		futures = append(futures, pool.Submit(func() (any, error) {
+			segmentStart := time.Now()
 			if err := idfOracle.LoadSealed(ctx, info.GetSegmentID(), info, cm); err != nil {
 				mlog.Warn(ctx, "failed to load bm25 stats for segment",
 					mlog.FieldCollectionID(req.GetCollectionID()),
@@ -514,15 +525,29 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 					mlog.Err(err))
 				return nil, err
 			}
+			mlog.Info(ctx, "load bm25 stats segment done",
+				mlog.FieldCollectionID(req.GetCollectionID()),
+				mlog.FieldSegmentID(info.GetSegmentID()),
+				mlog.Duration("duration", time.Since(segmentStart)))
 			return nil, nil
 		}))
 	}
+	submitDuration := time.Since(submitStart)
 
+	waitStart := time.Now()
 	err := conc.BlockOnAll(futures...)
+	waitDuration := time.Since(waitStart)
 	if err != nil {
 		mlog.Warn(ctx, "failed to load bm25 stats", mlog.Err(err))
 		return err
 	}
+	mlog.Info(ctx, "load bm25 stats done",
+		mlog.FieldCollectionID(req.GetCollectionID()),
+		mlog.Int64s("segmentIDs", segmentIDs),
+		mlog.Int("segmentNum", len(infos)),
+		mlog.Duration("submitDuration", submitDuration),
+		mlog.Duration("waitDuration", waitDuration),
+		mlog.Duration("totalDuration", time.Since(startTs)))
 	return nil
 }
 
@@ -700,25 +725,42 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return sd.handleReopenPostLoad(ctx, req)
 	}
 
+	postWorkerStart := time.Now()
 	return sd.withPostLoadLimit(ctx, func() error {
+		filterStart := time.Now()
 		infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
 			return !sd.distribution.SealedSegmentExistsOnNode(info.GetSegmentID(), targetNodeID)
 		})
+		filterDuration := time.Since(filterStart)
 
+		loadBFStart := time.Now()
 		candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), infos...)
+		loadBFDuration := time.Since(loadBFStart)
 		if err != nil {
 			log.Warn(ctx, "failed to load bloom filter set for segment", mlog.Err(err))
 			return err
 		}
+		log.Info(ctx, "delegator load bloom filter set done",
+			mlog.Int("infoNum", len(infos)),
+			mlog.Int("candidateNum", len(candidates)),
+			mlog.Duration("filterDuration", filterDuration),
+			mlog.Duration("loadBloomFilterSetDuration", loadBFDuration),
+			mlog.Duration("elapsed", time.Since(postWorkerStart)))
 
 		// Load BM25 stats BEFORE loadStreamDelete so stats are ready before segment becomes visible
+		loadBM25Start := time.Now()
 		err = sd.loadBM25Stats(ctx, infos, req)
+		loadBM25Duration := time.Since(loadBM25Start)
 		if err != nil {
 			log.Warn(ctx, "failed to load BM25 stats", mlog.Err(err))
 			return err
 		}
+		log.Info(ctx, "delegator load bm25 stats done",
+			mlog.Duration("loadBM25StatsDuration", loadBM25Duration),
+			mlog.Duration("elapsed", time.Since(postWorkerStart)))
 
 		// Build a map from segmentID to BloomFilterSet
+		buildEntriesStart := time.Now()
 		bfMap := make(map[int64]pkoracle.Candidate)
 		for _, candidate := range candidates {
 			log.Info(ctx, "loaded bloom filter set for sealed segment",
@@ -739,17 +781,30 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 				Candidate:   bfMap[info.GetSegmentID()],
 			})
 		}
+		buildEntriesDuration := time.Since(buildEntriesStart)
 
 		log.Debug(ctx, "load delete...")
 		// loadStreamDelete now handles distribution add atomically in Phase 3
+		loadDeleteStart := time.Now()
 		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker,
 			entries, req.GetLoadMeta().GetSchemaBarrierTs())
+		loadDeleteDuration := time.Since(loadDeleteStart)
 		if err != nil {
 			log.Warn(ctx, "load stream delete failed", mlog.Err(err))
 			// BM25 stats already loaded into idf oracle will be cleaned up
 			// automatically by SyncDistribution when the segment is not in target.
 			return err
 		}
+		log.Info(ctx, "delegator post worker load breakdown",
+			mlog.Int("infoNum", len(infos)),
+			mlog.Int("candidateNum", len(candidates)),
+			mlog.Int("entryNum", len(entries)),
+			mlog.Duration("filterDuration", filterDuration),
+			mlog.Duration("loadBloomFilterSetDuration", loadBFDuration),
+			mlog.Duration("loadBM25StatsDuration", loadBM25Duration),
+			mlog.Duration("buildEntriesDuration", buildEntriesDuration),
+			mlog.Duration("loadStreamDeleteDuration", loadDeleteDuration),
+			mlog.Duration("totalDuration", time.Since(postWorkerStart)))
 		log.Debug(ctx, "load stream delete done")
 
 		return nil

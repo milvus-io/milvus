@@ -161,6 +161,9 @@ func (ex *Executor) Execute(task Task, step int) bool {
 		}
 	} else {
 		cur := ex.nonChannelTaskNum.Inc()
+		mlog.Info(context.TODO(), "non-channel task accepted",
+			mlog.Int32("current", cur),
+			mlog.Int32("cap", ex.GetNonChannelTaskCap()))
 		if cur > ex.GetNonChannelTaskCap() {
 			ex.nonChannelTaskNum.Dec()
 			ex.executingTasks.Remove(task.Index())

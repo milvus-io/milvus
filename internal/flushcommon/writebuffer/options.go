@@ -7,7 +7,6 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type WriteBufferOption func(opt *writeBufferOption)
@@ -37,8 +36,7 @@ type writeBufferOption struct {
 func defaultWBOption(metacache metacache.MetaCache) *writeBufferOption {
 	return &writeBufferOption{
 		syncPolicies: []SyncPolicy{
-			GetFullBufferPolicy(),
-			GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)),
+			// Note: full buffer and stale buffer policies are added in newWriteBufferBase with trackers
 			GetSealedSegmentsPolicy(metacache),
 			GetDroppedSegmentPolicy(metacache),
 		},

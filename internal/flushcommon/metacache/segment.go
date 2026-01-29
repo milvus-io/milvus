@@ -53,6 +53,11 @@ type SegmentInfo struct {
 	// flushSourceMode is process-local runtime state; not persisted.
 	// See FlushSourceMode docs for lifecycle semantics.
 	flushSourceMode FlushSourceMode
+
+	// needAllocAtCoord indicates that this segment was created by streaming mode
+	// and has not yet been registered at DataCoord via AllocSegment.
+	// The first SyncTask for this segment should call AllocSegment before SaveBinlogPaths.
+	needAllocAtCoord bool
 }
 
 func (s *SegmentInfo) SegmentID() int64 {
@@ -80,6 +85,10 @@ func (s *SegmentInfo) FlushedRows() int64 {
 
 func (s *SegmentInfo) StartPosition() *msgpb.MsgPosition {
 	return s.startPosition
+}
+
+func (s *SegmentInfo) StartPosRecorded() bool {
+	return s.startPosRecorded
 }
 
 func (s *SegmentInfo) Checkpoint() *msgpb.MsgPosition {
@@ -145,6 +154,10 @@ func (s *SegmentInfo) FlushSourceMode() FlushSourceMode {
 	return s.flushSourceMode
 }
 
+func (s *SegmentInfo) NeedAllocAtCoord() bool {
+	return s.needAllocAtCoord
+}
+
 func (s *SegmentInfo) Clone() *SegmentInfo {
 	return &SegmentInfo{
 		segmentID:        s.segmentID,
@@ -168,6 +181,7 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 		currentSplit:     s.currentSplit,
 		manifestPath:     s.manifestPath,
 		flushSourceMode:  s.flushSourceMode,
+		needAllocAtCoord: s.needAllocAtCoord,
 	}
 }
 

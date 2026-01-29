@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
-	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -351,116 +350,71 @@ func applyExternalCollectionSegmentUpdate(
 	}
 	upsertSegmentMap = normalizedUpsertSegmentMap
 
-	// Build update operators
-	var operators []UpdateOperator
-	var patchErr error
-
-	validationOperator := func(modPack *updateSegmentPack) bool {
-		for _, incoming := range upsertSegmentMap {
-			existing := modPack.meta.segments.GetSegment(incoming.GetID())
-			if existing != nil {
-				if err := validateExternalRefreshPatch(existing, incoming, collectionID); err != nil {
-					patchErr = err
-					mlog.Warn(context.TODO(), "invalid external refresh segment patch",
-						mlog.Int64("segmentID", incoming.GetID()),
-						mlog.Err(err))
-					return false
-				}
-			}
+	mutations := make(map[int64][]MutateFunc, len(segmentsToDrop))
+	droppedAt := uint64(time.Now().UnixNano())
+	for _, seg := range currentSegments {
+		if seg.GetState() == commonpb.SegmentState_Dropped || keptSegmentMap[seg.GetID()] {
+			continue
 		}
-		return true
-	}
-	operators = append(operators, validationOperator)
-
-	// Operator 1: Drop segments not in kept list
-	dropOperator := func(modPack *updateSegmentPack) bool {
-		if patchErr != nil {
-			return false
+		if upsertSegmentMap[seg.GetID()] != nil {
+			continue
 		}
-		currentSegments := modPack.meta.segments.GetSegments()
-		for _, seg := range currentSegments {
-			// Skip segments not in this collection
-			if seg.GetCollectionID() != collectionID {
-				continue
-			}
-
-			// Skip segments that are already dropped
-			if seg.GetState() == commonpb.SegmentState_Dropped {
-				continue
-			}
-
-			// Drop segment if not kept or upserted by this refresh response.
-			if !keptSegmentMap[seg.GetID()] && upsertSegmentMap[seg.GetID()] == nil {
-				segment := modPack.Get(seg.GetID())
-				if segment != nil {
-					updateSegStateAndPrepareMetrics(segment, commonpb.SegmentState_Dropped, modPack.metricMutation)
-					segment.DroppedAt = uint64(time.Now().UnixNano())
-					modPack.segments[seg.GetID()] = segment
-					mlog.Info(context.TODO(), "marking segment as dropped",
-						mlog.Int64("segmentID", seg.GetID()),
-						mlog.Int64("numRows", seg.GetNumOfRows()))
-				}
-			}
-		}
-		return true
-	}
-	operators = append(operators, dropOperator)
-
-	// Operator 2: Add new segments or patch existing active segments.
-	for _, seg := range normalizedUpdatedSegments {
-		incoming := seg
-		upsertOperator := func(modPack *updateSegmentPack) bool {
-			if patchErr != nil {
+		segID := seg.GetID()
+		numRows := seg.GetNumOfRows()
+		mutations[segID] = append(mutations[segID], func(existing *datapb.SegmentInfo) bool {
+			if existing.GetState() == commonpb.SegmentState_Dropped {
 				return false
 			}
-			existing := modPack.Get(incoming.GetID())
-			if existing != nil {
-				if err := validateExternalRefreshPatch(existing, incoming, collectionID); err != nil {
+			existing.State = commonpb.SegmentState_Dropped
+			existing.DroppedAt = droppedAt
+			return true
+		})
+		mlog.Info(context.TODO(), "marking segment as dropped",
+			mlog.Int64("segmentID", segID),
+			mlog.Int64("numRows", numRows))
+	}
+
+	var patchErr error
+	newSegments := make([]*datapb.SegmentInfo, 0, len(normalizedUpdatedSegments))
+	for _, seg := range normalizedUpdatedSegments {
+		incoming := seg
+		existing := existingSegmentMap[incoming.GetID()]
+		if existing == nil {
+			existing = mt.segments.GetSegment(incoming.GetID())
+		}
+		if existing != nil {
+			segID := incoming.GetID()
+			mutations[segID] = append(mutations[segID], func(existing *datapb.SegmentInfo) bool {
+				existingInfo := NewSegmentInfo(existing)
+				if err := validateExternalRefreshPatch(existingInfo, incoming, collectionID); err != nil {
 					patchErr = err
 					mlog.Warn(context.TODO(), "invalid external refresh segment patch",
 						mlog.Int64("segmentID", incoming.GetID()),
 						mlog.Err(err))
 					return false
 				}
-
-				patched := applyExternalRefreshPatch(existing, incoming)
-				modPack.segments[incoming.GetID()] = patched
-				modPack.increments[incoming.GetID()] = metastore.BinlogsIncrement{
-					Segment: patched.SegmentInfo,
+				existing.ManifestPath = incoming.GetManifestPath()
+				existing.SchemaVersion = incoming.GetSchemaVersion()
+				existing.Binlogs = incoming.GetBinlogs()
+				if incoming.GetStorageVersion() != 0 {
+					existing.StorageVersion = incoming.GetStorageVersion()
 				}
-				mlog.Info(context.TODO(), "patching existing segment",
-					mlog.Int64("segmentID", incoming.GetID()),
-					mlog.Int64("numRows", incoming.GetNumOfRows()),
-					mlog.String("manifestPath", incoming.GetManifestPath()))
 				return true
-			}
-
-			segInfo := NewSegmentInfo(incoming)
-			modPack.segments[incoming.GetID()] = segInfo
-
-			modPack.increments[incoming.GetID()] = metastore.BinlogsIncrement{
-				Segment: incoming,
-			}
-
-			modPack.metricMutation.addNewSeg(
-				commonpb.SegmentState_Flushed,
-				incoming.GetLevel(),
-				incoming.GetIsSorted(),
-				incoming.GetStorageVersion(),
-				segmentMetricFormatLabel(segInfo),
-				incoming.GetNumOfRows(),
-			)
-
-			mlog.Info(context.TODO(), "adding new segment",
+			})
+			mlog.Info(context.TODO(), "patching existing segment",
 				mlog.Int64("segmentID", incoming.GetID()),
-				mlog.Int64("numRows", incoming.GetNumOfRows()))
-			return true
+				mlog.Int64("numRows", incoming.GetNumOfRows()),
+				mlog.String("manifestPath", incoming.GetManifestPath()))
+			continue
 		}
-		operators = append(operators, upsertOperator)
+
+		newSegments = append(newSegments, incoming)
+		mlog.Info(context.TODO(), "adding new segment",
+			mlog.Int64("segmentID", incoming.GetID()),
+			mlog.Int64("numRows", incoming.GetNumOfRows()))
 	}
 
-	// Execute all operators atomically
-	if err := mt.UpdateSegmentsInfo(ctx, operators...); err != nil {
+	if err := mt.UpdateSegmentsInfo(ctx, mutations, newSegments...); err != nil {
 		mlog.Warn(context.TODO(), "failed to update segments atomically", mlog.Err(err))
 		return err
 	}

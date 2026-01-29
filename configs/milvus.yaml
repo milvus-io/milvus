@@ -19,13 +19,13 @@ etcd:
   # Endpoints used to access etcd service. You can change this parameter as the endpoints of your own etcd cluster.
   # Environment variable: ETCD_ENDPOINTS
   # etcd preferentially acquires valid address from environment variable ETCD_ENDPOINTS when Milvus is started.
-  endpoints: localhost:2379
+  endpoints:  10.15.78.23:2379
   # Root prefix of the key to where Milvus stores data in etcd.
   # It is recommended to change this parameter before starting Milvus for the first time.
   # To share an etcd instance among multiple Milvus instances, consider changing this to a different value for each Milvus instance before you start them.
   # Set an easy-to-identify root path for Milvus if etcd service already exists.
   # Changing this for an already running Milvus instance may result in failures to read legacy data.
-  rootPath: by-dev
+  rootPath: by-dev-2
   # Sub-prefix of the key to where Milvus stores metadata-related information in etcd.
   # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
   # It is recommended to change this parameter before starting Milvus for the first time.
@@ -52,7 +52,7 @@ etcd:
     # Optional values: 1.0, 1.1, 1.2, 1.3。
     # We recommend using version 1.2 and above.
     tlsMinVersion: 1.3
-  requestTimeout: 10000 # Etcd operation timeout in milliseconds
+  requestTimeout: 120000 # Etcd operation timeout in milliseconds
   dialTimeout: 5000 # Timeout in milliseconds for establishing the initial connection to etcd endpoints. Increase it for environments where transient network delays are expected during node scale-out.
   dialKeepAliveTime: 3000 # Interval in milliseconds for gRPC dial keepalive pings sent to etcd endpoints.
   dialKeepAliveTimeout: 2000 # Timeout in milliseconds waiting for keepalive responses before marking the connection as unhealthy.
@@ -66,6 +66,7 @@ etcd:
     password: etcdadmin # password for etcd authentication
 
 metastore:
+  readConcurrency: 120
   type: etcd # Default value: etcd, Valid values: [etcd, tikv]
   maxEtcdTxnNum: 64 # maximum number of operations in a single etcd transaction
 
@@ -89,31 +90,32 @@ localStorage:
   # Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
   # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
   # It is recommended to change this parameter before starting Milvus for the first time.
-  path: /var/lib/milvus/data/
+  path: /tmp/milvus/data/
 
 # Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.
 minio:
+  maxConnections: 1000 # Maximum concurrent HTTP connections to object storage
   # IP address of MinIO or S3 service.
   # Environment variable: MINIO_ADDRESS
   # minio.address and minio.port together generate the valid access to MinIO or S3 service.
   # MinIO preferentially acquires the valid IP address from the environment variable MINIO_ADDRESS when Milvus is started.
   # Default value applies when MinIO or S3 is running on the same network with Milvus.
-  address: localhost:9000
-  port: 9000 # Port of MinIO or S3 service.
+  address: s3.us-west-2.amazonaws.com
+  port: 443 # Port of MinIO or S3 service.
   # Access key ID that MinIO or S3 issues to user for authorized access.
   # Environment variable: MINIO_ACCESS_KEY_ID or minio.accessKeyID
   # minio.accessKeyID and minio.secretAccessKey together are used for identity authentication to access the MinIO or S3 service.
   # This configuration must be set identical to the environment variable MINIO_ACCESS_KEY_ID, which is necessary for starting MinIO or S3.
   # The default value applies to MinIO or S3 service that started with the default docker-compose.yml file.
-  accessKeyID: minioadmin
+  accessKeyID: "REDACTED_ACCESS_KEY"
   # Secret key used to encrypt the signature string and verify the signature string on server. It must be kept strictly confidential and accessible only to the MinIO or S3 server and users.
   # Environment variable: MINIO_SECRET_ACCESS_KEY or minio.secretAccessKey
   # minio.accessKeyID and minio.secretAccessKey together are used for identity authentication to access the MinIO or S3 service.
   # This configuration must be set identical to the environment variable MINIO_SECRET_ACCESS_KEY, which is necessary for starting MinIO or S3.
   # The default value applies to MinIO or S3 service that started with the default docker-compose.yml file.
-  secretAccessKey: minioadmin
-  useSSL: false # Switch value to control if to access the MinIO or S3 service through SSL.
+  secretAccessKey: "REDACTED_SECRET_KEY"
+  useSSL: true # Switch value to control if to access the MinIO or S3 service through SSL.
   ssl:
     tlsCACert:  # path to your CACert file
     # TLS minimum version for MinIO/S3 SSL connections.
@@ -128,13 +130,13 @@ minio:
   # To share an MinIO instance among multiple Milvus instances, consider changing this to a different value for each Milvus instance before you start them. For details, see Operation FAQs.
   # The data will be stored in the local Docker if Docker is used to start the MinIO service locally. Ensure that there is sufficient storage space.
   # A bucket name is globally unique in one MinIO or S3 instance.
-  bucketName: a-bucket
+  bucketName: "zilliz-temp-back-uat"
   # Root prefix of the key to where Milvus stores data in MinIO or S3.
   # It is recommended to change this parameter before starting Milvus for the first time.
   # To share an MinIO instance among multiple Milvus instances, consider changing this to a different value for each Milvus instance before you start them. For details, see Operation FAQs.
   # Set an easy-to-identify root key prefix for Milvus if etcd service already exists.
   # Changing this for an already running Milvus instance may result in failures to read legacy data.
-  rootPath: files
+  rootPath: sby
   # Whether to useIAM role to access S3/GCS instead of access/secret keys
   # For more information, refer to
   # aws: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use.html
@@ -158,7 +160,7 @@ minio:
   # Leave it empty if you want to use AWS default endpoint
   iamEndpoint: 
   logLevel: fatal # Log level for aws sdk log. Supported level:  off, fatal, error, warn, info, debug, trace
-  region:  # Specify minio storage system location region
+  region: us-west-2 # Specify minio storage system location region
   useVirtualHost: false # Whether use virtual host mode for bucket. WARNING: For Aliyun OSS and Tencent COS, this parameter is useless and is set to true by default
   requestTimeoutMs: 10000 # minio timeout for request time in milliseconds
   # The maximum number of objects requested per batch in minio ListObjects rpc, 
@@ -270,7 +272,7 @@ pulsar:
   # pulsar.address and pulsar.port together generate the valid access to Pulsar.
   # Pulsar preferentially acquires the valid IP address from the environment variable PULSAR_ADDRESS when Milvus is started.
   # Default value applies when Pulsar is running on the same network with Milvus.
-  address: localhost
+  address: 10.15.73.176
   port: 6650 # Port of Pulsar service.
   webport: 80 # Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.
   # The maximum size of each message in Pulsar. Unit: Byte.
@@ -278,7 +280,7 @@ pulsar:
   # If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.
   maxMessageSize: 2097152
   # Pulsar can be provisioned for specific tenants with appropriate capacity allocated to the tenant.
-  # To share a Pulsar instance among multiple Milvus instances, you can change this to an Pulsar tenant rather than the default one for each Milvus instance before you start them. However, if you do not want Pulsar multi-tenancy, you are advised to change msgChannel.chanNamePrefix.cluster to the different value.
+  # To share a Pulp ar instance among multiple Milvus instances, you can change this to an Pulsar tenant rather than the default one for each Milvus instance before you start them. However, if you do not want Pulsar multi-tenancy, you are advised to change msgChannel.chanNamePrefix.cluster to the different value.
   tenant: public
   namespace: default # A Pulsar namespace is the administrative unit nomenclature within a tenant.
   requestTimeout: 60 # pulsar client global request timeout in seconds
@@ -332,13 +334,13 @@ rootCoord:
   # The maximum number of partitions in each collection.
   # New partitions cannot be created if this parameter is set as 0 or 1.
   # Range: [0, INT64MAX]
-  maxPartitionNum: 1024
+  maxPartitionNum: 100002
   # The minimum row count of a segment required for creating index.
   # Segments with smaller size than this parameter will not be indexed, and will be searched with brute force.
   minSegmentSizeToEnableIndex: 1024
   enableActiveStandby: false
   maxDatabaseNum: 64 # Maximum number of database
-  maxGeneralCapacity: 65536 # upper limit for the sum of of product of partitionNumber and shardNumber
+  maxGeneralCapacity: 200002 # upper limit for the sum of of product of partitionNumber and shardNumber
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   ip:  # TCP/IP address of rootCoord. If not specified, use the first unicastable address
   port: 22125 # TCP port of rootCoord
@@ -445,6 +447,9 @@ proxy:
 
 # Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
 queryCoord:
+  enableSQNServeSegments: true
+  collectionBalanceSegmentBatchSize: 100
+  queryNodeTaskParallelismFactor: 100
   taskMergeCap: 1
   taskExecutionCap: 360
   # Switch value to control if to automatically replace a growing segment with the corresponding indexed sealed segment when the growing segment reaches the sealing threshold.
@@ -481,7 +486,7 @@ queryCoord:
   distPullInterval: 500
   dispatchInterval: 500
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
-  loadTimeoutSeconds: 600
+  loadTimeoutSeconds: 36000
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
   heatbeatWarningLag: 5000 # the lag value for querycoord report warning when last heatbeat is too old, in milliseconds
   checkHandoffInterval: 5000
@@ -520,6 +525,7 @@ queryNode:
   stats:
     publishInterval: 1000 # The interval that query node publishes the node statistics information, including segment status, cpu usage, memory usage, health status, etc. Unit: ms.
   segcore:
+    cgoPoolSizeRatio: 2 # The ratio of cgo pool size to max read concurrency.
     knowhereThreadPoolNumRatio: 4 # The number of threads in knowhere's thread pool. If disk is enabled, the pool size will multiply with knowhereThreadPoolNumRatio([1, 32]).
     chunkRows: 128 # Row count by which Segcore divides a segment into chunks.
     interimIndex:
@@ -547,13 +553,13 @@ queryNode:
         # - "async": data will be loaded into the cache asynchronously in the background after a segment is loaded.
         # - "disable": data will not be proactively loaded into the cache, and loaded only if needed by search/query tasks.
         # Defaults to "sync", except for vector field which defaults to "disable".
-        scalarField: sync
+        scalarField: disable
         # options: sync, async, disable.
         # Cache warmup for scalar indexes and the system PK index.
         # Defaults to "sync".
-        scalarIndex: sync
+        scalarIndex: disable
         vectorField: disable # cache warmup for vector field raw data is by default disabled.
-        vectorIndex: sync
+        vectorIndex: disable
       # If evictionEnabled is true, a background thread will run every evictionIntervalMs to determine if an
       # eviction is necessary and the amount of data to evict from memory/disk.
       # - If the current memory/disk usage exceeds the high watermark, an eviction will be triggered to evict data from memory/disk
@@ -580,7 +586,7 @@ queryNode:
     dynamicPoolSizeFactor: 1 # size factor (CPUNum * factor) of the dynamic cgo pool for segment create/release/statistics/index-info
     deletePoolSizeFactor: 1 # size factor (CPUNum * factor) of the DeleteBatch dispatch pool
     storageV2:
-      cellTargetSizeBytes: 4194304 # Target average byte size per storage v2 cache cell. Parquet row groups are greedily packed so that rgs_per_cell * avg_row_group_size ≈ this target. Each cell always contains at least one row group and cells never cross file boundaries. Tune larger for bigger batch IO (fewer cells) or smaller to get finer cache granularity. Default 4 MiB.
+      cellTargetSizeBytes: 1048576 # Target average byte size per storage v2 cache cell. Parquet row groups are greedily packed so that rgs_per_cell * avg_row_group_size ≈ this target. Each cell always contains at least one row group and cells never cross file boundaries. Tune larger for bigger batch IO (fewer cells) or smaller to get finer cache granularity. Default 4 MiB.
     deleteDumpBatchSize: 10000 # Batch size for delete snapshot dump in segcore.
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
@@ -590,9 +596,9 @@ queryNode:
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
   mmap:
     vectorField: true # Enable mmap for loading vector data
-    vectorIndex: false # Enable mmap for loading vector index
-    scalarField: false # Enable mmap for loading scalar data
-    scalarIndex: false # Enable mmap for loading scalar index
+    vectorIndex: true # Enable mmap for loading vector index
+    scalarField: true # Enable mmap for loading scalar data
+    scalarIndex: true # Enable mmap for loading scalar index
     jsonShredding: true # Enable mmap for loading json stats
     # Enable memory mapping (mmap) to optimize the handling of growing raw data.
     # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized.
@@ -608,7 +614,7 @@ queryNode:
     # It defaults to 2.0, which means max read concurrency would be the value of hardware.GetCPUNum * 2.
     # Max read concurrency must greater than or equal to 1, and less than or equal to hardware.GetCPUNum * 100.
     # (0, 100]
-    maxReadConcurrentRatio: 1
+    maxReadConcurrentRatio: 3
     cpuRatio: 10 # ratio used to estimate read task cpu usage.
     maxTimestampLag: 86400
     scheduleReadPolicy:
@@ -682,9 +688,10 @@ indexCoord:
 
 indexNode:
   scheduler:
-    buildParallel: 1
+    buildParallel: 2
 
 dataCoord:
+  taskCheckInterval: 1
   channel:
     watchTimeoutInterval: 300 # Timeout on watching channels (in seconds). Datanode tickler update watch progress will reset timeout timer.
     legacyVersionWithoutRPCWatch: 2.4.1 # Datanodes <= this version are considered as legacy nodes, which doesn't have rpc based watch(). This is only used during rolling upgrade where legacy nodes won't get new channels
@@ -695,7 +702,7 @@ dataCoord:
   segment:
     maxSize: 1024 # The maximum size of a segment, unit: MB. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     diskSegmentMaxSize: 2048 # Maximum size of a segment in MB for collection which has Disk index
-    sealProportion: 0.12 # The minimum proportion to datacoord.segment.maxSize to seal a segment. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
+    sealProportion: 0.99 # The minimum proportion to datacoord.segment.maxSize to seal a segment. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     sealProportionJitter: 0.1 # segment seal proportion jitter ratio, default value 0.1(10%), if seal proportion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%
     assignmentExpiration: 2000 # Expiration time of the segment assignment, unit: ms
     allocLatestExpireAttempt: 200 # The time attempting to alloc latest lastExpire from rootCoord after restart
@@ -703,8 +710,8 @@ dataCoord:
     # If a segment didn't accept dml records in maxIdleTime and the size of segment is greater than
     # minSizeFromIdleToSealed, Milvus will automatically seal it.
     # The max idle time of segment in seconds, 10*60.
-    maxIdleTime: 600
-    minSizeFromIdleToSealed: 16 # The min size in MB of segment which can be idle from sealed.
+    maxIdleTime: 6000000
+    minSizeFromIdleToSealed: 1600 # The min size in MB of segment which can be idle from sealed.
     # The max number of binlog (which is equal to the binlog file num of primary key) for one segment,
     # the segment will be sealed if the number of binlog file reaches to max value.
     maxBinlogFileNumber: 32
@@ -741,11 +748,11 @@ dataCoord:
   segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flushing operation on same segment
   # Switch value to control if to enable segment compaction.
   # Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.
-  enableCompaction: true
+  enableCompaction: false
   compaction:
     # Switch value to control if to enable automatic segment compaction during which data coord locates and merges compactable segments in the background.
     # This configuration takes effect only when dataCoord.enableCompaction is set as true.
-    enableAutoCompaction: true
+    enableAutoCompaction: false
     indexBasedCompaction: true
     # compaction task prioritizer, options: [default, level, mix].
     # default is FIFO.
@@ -836,7 +843,8 @@ dataCoord:
     mixCompactionUsage: 4 # slot usage of mix compaction task.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction task.
     bumpSchemaVersionCompactionUsage: 1 # slot usage of schema bump compaction task.
-    indexTaskSlotUsage: 64 # slot usage of index task per 512mb
+    backfillCompactionUsage: 1 # slot usage of backfill compaction task.
+    indexTaskSlotUsage: 32 # slot usage of index task per 512mb
     scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
@@ -854,11 +862,13 @@ dataCoord:
     clientMaxRecvSize: 536870912 # The maximum size of each RPC request that the clients on dataCoord can receive, unit: byte
 
 dataNode:
+  index:
+    maxVecIndexBuildConcurrency: 24
   dataSync:
     flowGraph:
       maxQueueLength: 16 # Maximum length of task queue in flowgraph
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
-    maxParallelSyncMgrTasksPerCPUCore: 16 # The max concurrent sync task number of datanode sync mgr per CPU core
+    maxParallelSyncMgrTasksPerCPUCore: 100 # The max concurrent sync task number of datanode sync mgr per CPU core
     skipMode:
       enable: true # Support skip some timetick message to reduce CPU usage
       skipNum: 4 # Consume one for every n records skipped
@@ -1019,13 +1029,15 @@ internaltls:
   sni: localhost # The server name indication (SNI) for internal TLS, should be the same as the name provided by the certificates ref: https://en.wikipedia.org/wiki/Server_Name_Indication
 
 common:
+  requery:
+    searchPolicy: Always
   defaultPartitionName: _default # Name of the default partition when a collection is created
   defaultIndexName: _default_idx # Name of the index when it is created with name unspecified
   indexSliceSize: 16 # Index slice size in MB
   loadTransientBudgetBytes: 0 # Process-wide transient memory budget in bytes shared by scalar index V3 entry streaming and storage v2/v3 field-data loading. It gates in-flight transient data across concurrent load tasks. Lower values reduce peak transient memory at the cost of load throughput. Oversized requests are still allowed to proceed exclusively to guarantee progress. Set to 0 to disable the limit.
   threadCoreCoefficient:
-    highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool
-    middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
+    highPriority: 100 # This parameter specify how many times the number of threads is the number of cores in high priority pool
+    middlePriority: 100 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
     lowPriority: 1 # This parameter specify how many times the number of threads is the number of cores in low priority pool
     maxThreadsSize: 16 # The maximum number of threads in the thread pool, only effective when greater than 0
   buildIndexThreadPoolRatio: 0.75
@@ -1051,7 +1063,7 @@ common:
       splitByAvgSize:
         enabled: true # enable split by average size policy in storage v2
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
-    useLoonFFI: false
+    useLoonFFI: true
     enableGrowingSourceFlush: true # enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
@@ -1436,15 +1448,15 @@ streaming:
     # The threshold of memory usage for one streaming node,
     # If the memory usage is higher than this threshold, the node will try to trigger flush action to decrease the total of growing segment until growingSegmentBytesLwmThreshold,
     # the value should be in the range of (0, 1), 0.6 by default.
-    memoryThreshold: 0.6
+    memoryThreshold: 0.99
     # The high watermark of total growing segment bytes for one streaming node,
     # If the total bytes of growing segment is greater than this threshold,
     # a flush process will be triggered to decrease total bytes of growing segment until growingSegmentBytesLwmThreshold, 0.2 by default
-    growingSegmentBytesHwmThreshold: 0.2
+    growingSegmentBytesHwmThreshold: 0.7
     # The lower watermark of total growing segment bytes for one streaming node,
     # growing segment flush process will try to flush some growing segment into sealed 
     # until the total bytes of growing segment is less than this threshold, 0.1 by default.
-    growingSegmentBytesLwmThreshold: 0.1
+    growingSegmentBytesLwmThreshold: 0.69
     l0:
       # The max lifetime of l0 segment, 10 minutes by default.
       # If the l0 segment is older than this time, it will be flushed.

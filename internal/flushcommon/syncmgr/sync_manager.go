@@ -82,6 +82,26 @@ func NewSyncManager(chunkManager storage.ChunkManager) SyncManager {
 	handler := config.NewHandler("datanode.syncmgr.poolsize", syncMgr.resizeHandler)
 	syncMgr.handler = handler
 	params.Watch(params.DataNodeCfg.MaxParallelSyncMgrTasksPerCPUCore.Key, handler)
+
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			if syncMgr.workerPool.IsClosed() {
+				return
+			}
+			taskCount := syncMgr.tasks.Len()
+			if taskCount > 0 {
+				mlog.Info(context.TODO(), "sync manager stats",
+					mlog.Int("tasks", taskCount),
+					mlog.Int("poolCap", syncMgr.workerPool.Cap()),
+					mlog.Int("poolRunning", syncMgr.workerPool.Running()),
+					mlog.Int("poolFree", syncMgr.workerPool.Free()),
+				)
+			}
+		}
+	}()
+
 	return syncMgr
 }
 

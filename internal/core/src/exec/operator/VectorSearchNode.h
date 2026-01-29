@@ -18,6 +18,7 @@
 
 #include <folly/futures/Future.h>
 #include <stdint.h>
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <string>
@@ -25,12 +26,14 @@
 #include "common/Promise.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
+#include "common/RequestTrace.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "common/protobuf_utils.h"
 #include "exec/Driver.h"
 #include "exec/QueryContext.h"
 #include "exec/operator/Operator.h"
+#include "log/Log.h"
 #include "plan/PlanNode.h"
 #include "query/PlanImpl.h"
 #include "segcore/SegmentInterface.h"
@@ -83,15 +86,40 @@ class PhyVectorSearchNode : public Operator {
                       prefetch_pool) override {
         auto self =
             std::static_pointer_cast<PhyVectorSearchNode>(shared_from_this());
-        prefetch_future_.emplace(folly::via(prefetch_pool.get(), [self]() {
-            auto* op_ctx = self->query_context_->get_op_context();
-            if (op_ctx != nullptr &&
-                op_ctx->cancellation_token.isCancellationRequested()) {
-                return;
-            }
-            self->segment_->prefetch_vector(op_ctx,
-                                            self->search_info_.field_id_);
-        }));
+        const auto submit_time = std::chrono::steady_clock::now();
+        auto* op_ctx = self->query_context_->get_op_context();
+        auto trace_id = milvus::tracer::GetTraceIDAsHexStr(
+            &self->search_info_.trace_ctx_);
+        if (trace_id.empty()) {
+            trace_id = milvus::tracer::GetRequestTraceID(op_ctx);
+        }
+        prefetch_future_.emplace(
+            folly::via(prefetch_pool.get(), [self, submit_time, trace_id]() {
+                auto* op_ctx = self->query_context_->get_op_context();
+                milvus::tracer::ScopedRequestTraceID trace_scope(trace_id);
+                milvus::tracer::ScopedOpContextTraceID op_trace(op_ctx,
+                                                                trace_id);
+                const auto start_time = std::chrono::steady_clock::now();
+                const auto queue_duration_us =
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        start_time - submit_time)
+                        .count();
+                LOG_INFO(
+                    "[sss][www] milvus prefetch task start, traceID: {}, pool: "
+                    "{}, task: {}, segment: {}, field: {}, queueDurationUs: {}",
+                    trace_id,
+                    "MILVUS_PREFETCH",
+                    "vector_search",
+                    self->segment_->get_segment_id(),
+                    self->search_info_.field_id_.get(),
+                    queue_duration_us);
+                if (op_ctx != nullptr &&
+                    op_ctx->cancellation_token.isCancellationRequested()) {
+                    return;
+                }
+                self->segment_->prefetch_vector(op_ctx,
+                                                self->search_info_.field_id_);
+            }));
     }
 
     void

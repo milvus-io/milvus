@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -106,16 +107,13 @@ func TestFlushMsgHandler_HandleManualFlush(t *testing.T) {
 func TestFlushMsgHandler_HandleCreateSegment(t *testing.T) {
 	vchannel := "ch-0"
 
-	// Build a CreateSegment message with L0 level so that createNewGrowingSegment
-	// returns nil immediately (L0 skips MixCoordClient allocation).
-	// This lets us test the growing-source skip logic in HandleCreateSegment without
-	// requiring the full resource.Resource() server context.
 	msg, err := message.NewCreateSegmentMessageBuilderV2().
 		WithHeader(&message.CreateSegmentMessageHeader{
-			CollectionId: 1,
-			PartitionId:  10,
-			SegmentId:    1001,
-			Level:        datapb.SegmentLevel_L0,
+			CollectionId:  1,
+			PartitionId:   10,
+			SegmentId:     1001,
+			Level:         datapb.SegmentLevel_L1,
+			SchemaVersion: 7,
 		}).
 		WithBody(&message.CreateSegmentMessageBody{}).
 		WithVChannel(vchannel).
@@ -130,9 +128,9 @@ func TestFlushMsgHandler_HandleCreateSegment(t *testing.T) {
 	)
 	assert.NoError(t, err)
 
-	t.Run("growing-source collection creates WriteBuffer shell", func(t *testing.T) {
+	t.Run("growing-source collection skips WriteBuffer shell", func(t *testing.T) {
 		wbMgr := writebuffer.NewMockBufferManager(t)
-		wbMgr.EXPECT().CreateNewGrowingSegment(mock.Anything, vchannel, int64(10), int64(1001), mock.Anything).Return(nil)
+		wbMgr.EXPECT().UseGrowingSourceFlush(vchannel).Return(true)
 
 		handler := newMsgHandler(wbMgr)
 		err := handler.HandleCreateSegment(context.Background(), im)
@@ -141,7 +139,19 @@ func TestFlushMsgHandler_HandleCreateSegment(t *testing.T) {
 
 	t.Run("non-growing-source collection calls CreateNewGrowingSegment", func(t *testing.T) {
 		wbMgr := writebuffer.NewMockBufferManager(t)
-		wbMgr.EXPECT().CreateNewGrowingSegment(mock.Anything, vchannel, int64(10), int64(1001), mock.Anything).Return(nil)
+		wbMgr.EXPECT().UseGrowingSourceFlush(vchannel).Return(false)
+		wbMgr.EXPECT().
+			CreateNewGrowingSegment(
+				mock.Anything,
+				vchannel,
+				int64(10),
+				int64(1001),
+				mock.MatchedBy(func(pos *msgpb.MsgPosition) bool {
+					return pos != nil && pos.GetChannelName() == vchannel && pos.GetTimestamp() == 1000
+				}),
+				int32(7),
+			).
+			Return(nil)
 
 		handler := newMsgHandler(wbMgr)
 		err := handler.HandleCreateSegment(context.Background(), im)

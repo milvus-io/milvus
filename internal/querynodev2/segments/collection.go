@@ -23,6 +23,7 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -113,7 +114,9 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 		// separate from the barrier timestamp so stale schema payloads cannot roll
 		// back fields, while newer properties-only payloads can still refresh.
 		if plan, shouldUpdate := prepareCollectionSchemaUpdate(collection, logicalSchemaVersion, schemaBarrierTs); shouldUpdate {
+			collection.mu.Lock()
 			if err := collection.ccollection.UpdateSchema(schema, plan.segcoreSchemaVersion); err != nil {
+				collection.mu.Unlock()
 				return err
 			}
 			collection.setSchema(schema, plan.logicalSchemaVersion, plan.schemaBarrierTs, plan.segcoreSchemaVersion)
@@ -124,12 +127,28 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 				mlog.Uint64("segcoreSchemaVersion", plan.segcoreSchemaVersion),
 				mlog.Any("schema", schema),
 			)
+			collection.mu.Unlock()
 		}
 		// Always update index meta to ensure newly indexed fields are visible
 		// for search plan creation (CollectionIndexMeta::HasField check).
 		if meta != nil {
-			if err := collection.ccollection.UpdateIndexMeta(meta); err != nil {
+			blob, err := proto.Marshal(meta)
+			if err != nil {
 				return err
+			}
+			indexHash, err := typeutil.Hash32Bytes(blob)
+			if err != nil {
+				return err
+			}
+
+			if indexHash != collection.indexHash.Load() {
+				collection.mu.Lock()
+				if err := collection.ccollection.UpdateIndexMeta(meta); err != nil {
+					collection.mu.Unlock()
+					return err
+				}
+				collection.indexHash.Store(indexHash)
+				collection.mu.Unlock()
 			}
 		}
 		collection.Ref(1)
@@ -261,15 +280,15 @@ func (m *collectionManager) updateMetric() {
 }
 
 func (m *collectionManager) Ref(collectionID int64, count uint32) bool {
-	m.mut.Lock()
-	defer m.mut.Unlock()
-
-	if collection, ok := m.collections[collectionID]; ok {
-		collection.Ref(count)
-		return true
+	m.mut.RLock()
+	collection, ok := m.collections[collectionID]
+	m.mut.RUnlock()
+	if !ok {
+		return false
 	}
 
-	return false
+	collection.Ref(count)
+	return true
 }
 
 func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
@@ -325,6 +344,8 @@ type Collection struct {
 	loadFields typeutil.Set[int64]
 
 	refCount *atomic.Uint32
+
+	indexHash atomic.Uint32
 }
 
 // GetDBName returns the database name of collection.

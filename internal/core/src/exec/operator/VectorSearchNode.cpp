@@ -78,6 +78,8 @@ PhyVectorSearchNode::AddInput(RowVectorPtr& input) {
 
 RowVectorPtr
 PhyVectorSearchNode::GetOutput() {
+    WaitPrefetch();
+
     milvus::exec::checkCancellation(query_context_);
 
     if (is_finished_ || !no_more_input_) {

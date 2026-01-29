@@ -111,6 +111,7 @@ func (li *LoadIndexInfo) loadIndex(ctx context.Context) error {
 			).Observe(float64(time.Since(start).Milliseconds()))
 		}()
 		traceCtx := ParseCTraceContext(ctx)
+		defer traceCtx.Close()
 		status = C.AppendIndexV2(traceCtx.ctx, li.cLoadIndexInfo)
 		runtime.KeepAlive(traceCtx)
 		return nil, nil

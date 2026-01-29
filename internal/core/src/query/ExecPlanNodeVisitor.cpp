@@ -13,11 +13,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <utility>
 
-#include "common/Tracer.h"
+#include "common/RequestTrace.h"
 #include "common/protobuf_utils.h"
 #include "exec/Task.h"
 #include "fmt/core.h"

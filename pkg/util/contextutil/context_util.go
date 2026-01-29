@@ -31,6 +31,7 @@ import (
 )
 
 type ctxTenantKey struct{}
+type ctxRequestIDKey struct{}
 
 // WithTenantID creates a new context that has tenantID injected.
 func WithTenantID(ctx context.Context, tenantID string) context.Context {
@@ -44,6 +45,24 @@ func WithTenantID(ctx context.Context, tenantID string) context.Context {
 // If it doesn't exist, an empty string is returned.
 func TenantID(ctx context.Context) string {
 	if requestID, ok := ctx.Value(ctxTenantKey{}).(string); ok {
+		return requestID
+	}
+
+	return ""
+}
+
+// WithRequestID creates a new context that has requestID injected.
+func WithRequestID(ctx context.Context, requestID string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, ctxRequestIDKey{}, requestID)
+}
+
+// RequestID tries to retrieve requestID from the given context.
+// If it doesn't exist, an empty string is returned.
+func RequestID(ctx context.Context) string {
+	if requestID, ok := ctx.Value(ctxRequestIDKey{}).(string); ok {
 		return requestID
 	}
 

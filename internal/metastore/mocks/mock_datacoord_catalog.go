@@ -1976,6 +1976,66 @@ func (_c *DataCoordCatalog_ListIndexes_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// ListPartitionSegmentIndexes provides a mock function with given fields: ctx, collectionID, partitionID
+func (_m *DataCoordCatalog) ListPartitionSegmentIndexes(ctx context.Context, collectionID int64, partitionID int64) ([]*model.SegmentIndex, error) {
+	ret := _m.Called(ctx, collectionID, partitionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListPartitionSegmentIndexes")
+	}
+
+	var r0 []*model.SegmentIndex
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64) ([]*model.SegmentIndex, error)); ok {
+		return rf(ctx, collectionID, partitionID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64) []*model.SegmentIndex); ok {
+		r0 = rf(ctx, collectionID, partitionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*model.SegmentIndex)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, int64) error); ok {
+		r1 = rf(ctx, collectionID, partitionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoordCatalog_ListPartitionSegmentIndexes_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListPartitionSegmentIndexes'
+type DataCoordCatalog_ListPartitionSegmentIndexes_Call struct {
+	*mock.Call
+}
+
+// ListPartitionSegmentIndexes is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - partitionID int64
+func (_e *DataCoordCatalog_Expecter) ListPartitionSegmentIndexes(ctx interface{}, collectionID interface{}, partitionID interface{}) *DataCoordCatalog_ListPartitionSegmentIndexes_Call {
+	return &DataCoordCatalog_ListPartitionSegmentIndexes_Call{Call: _e.mock.On("ListPartitionSegmentIndexes", ctx, collectionID, partitionID)}
+}
+
+func (_c *DataCoordCatalog_ListPartitionSegmentIndexes_Call) Run(run func(ctx context.Context, collectionID int64, partitionID int64)) *DataCoordCatalog_ListPartitionSegmentIndexes_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(int64))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListPartitionSegmentIndexes_Call) Return(_a0 []*model.SegmentIndex, _a1 error) *DataCoordCatalog_ListPartitionSegmentIndexes_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListPartitionSegmentIndexes_Call) RunAndReturn(run func(context.Context, int64, int64) ([]*model.SegmentIndex, error)) *DataCoordCatalog_ListPartitionSegmentIndexes_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListPartitionStatsInfos provides a mock function with given fields: ctx
 func (_m *DataCoordCatalog) ListPartitionStatsInfos(ctx context.Context) ([]*datapb.PartitionStatsInfo, error) {
 	ret := _m.Called(ctx)

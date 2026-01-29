@@ -18,6 +18,7 @@ package segments
 
 import (
 	"context"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
@@ -75,6 +77,17 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 		}
 	}
 
+	fanoutStart := time.Now()
+	logger := mlog.With(
+		mlog.String("segmentType", segType.String()),
+		mlog.Int("segmentNum", len(segments)),
+		mlog.Int64("fieldID", searchReq.SearchFieldID()),
+		mlog.Int64("nq", searchReq.GetNumOfQuery()),
+		mlog.Bool("filterOnly", searchReq.FilterOnly()),
+		mlog.Int("withoutIndexNum", len(segmentsWithoutIndex)),
+		mlog.Int64s("segmentsWithoutIndex", segmentsWithoutIndex))
+	logger.Info(ctx, "search segments fanout start")
+
 	var err error
 	if len(segments) == 1 {
 		// Single segment fast path: skip errgroup/goroutine overhead
@@ -92,6 +105,9 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 	}
 
 	if err != nil {
+		logger.Warn(ctx, "search segments fanout failed",
+			mlog.Duration("duration", time.Since(fanoutStart)),
+			mlog.Err(err))
 		// Collect non-nil results for cleanup
 		validResults := make([]*SearchResult, 0, len(segments))
 		for _, r := range searchResults {
@@ -107,6 +123,10 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 		mlog.Debug(ctx, "search growing/sealed segments without indexes", mlog.Int64s("segmentIDs", segmentsWithoutIndex))
 	}
 
+	logger.Info(ctx, "search segments fanout done",
+		mlog.Duration("duration", time.Since(fanoutStart)),
+		mlog.Int("resultNum", len(searchResults)))
+
 	return searchResults, nil
 }
 
@@ -119,11 +139,39 @@ func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRe
 		return nil, nil, ctx.Err()
 	}
 
+	totalStart := time.Now()
+	logger := mlog.With(
+		mlog.Int64("collectionID", collID),
+		mlog.Int64s("partitionIDs", partIDs),
+		mlog.Int64s("segmentIDs", segIDs),
+		mlog.String("scope", querypb.DataScope_Historical.String()))
+	logger.Info(ctx, "search validate start")
+	validateStart := time.Now()
 	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
+		logger.Warn(ctx, "search validate failed",
+			mlog.Duration("duration", time.Since(validateStart)),
+			mlog.Err(err))
 		return nil, nil, err
 	}
+	logger.Info(ctx, "search validate done",
+		mlog.Duration("duration", time.Since(validateStart)),
+		mlog.Int("validatedSegmentNum", len(segments)))
+	searchStart := time.Now()
 	searchResults, err := searchSegments(ctx, manager, segments, SegmentTypeSealed, searchReq)
+	if err != nil {
+		logger.Warn(ctx, "search historical failed",
+			mlog.Duration("searchDuration", time.Since(searchStart)),
+			mlog.Duration("totalDuration", time.Since(totalStart)),
+			mlog.Int("validatedSegmentNum", len(segments)),
+			mlog.Err(err))
+		return searchResults, segments, err
+	}
+	logger.Info(ctx, "search historical done",
+		mlog.Duration("searchDuration", time.Since(searchStart)),
+		mlog.Duration("totalDuration", time.Since(totalStart)),
+		mlog.Int("validatedSegmentNum", len(segments)),
+		mlog.Int("resultNum", len(searchResults)))
 	return searchResults, segments, err
 }
 
@@ -134,10 +182,38 @@ func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchReq
 		return nil, nil, ctx.Err()
 	}
 
+	totalStart := time.Now()
+	logger := mlog.With(
+		mlog.Int64("collectionID", collID),
+		mlog.Int64s("partitionIDs", partIDs),
+		mlog.Int64s("segmentIDs", segIDs),
+		mlog.String("scope", querypb.DataScope_Streaming.String()))
+	logger.Info(ctx, "search validate start")
+	validateStart := time.Now()
 	segments, err := validateOnStream(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
+		logger.Warn(ctx, "search validate failed",
+			mlog.Duration("duration", time.Since(validateStart)),
+			mlog.Err(err))
 		return nil, nil, err
 	}
+	logger.Info(ctx, "search validate done",
+		mlog.Duration("duration", time.Since(validateStart)),
+		mlog.Int("validatedSegmentNum", len(segments)))
+	searchStart := time.Now()
 	searchResults, err := searchSegments(ctx, manager, segments, SegmentTypeGrowing, searchReq)
+	if err != nil {
+		logger.Warn(ctx, "search streaming failed",
+			mlog.Duration("searchDuration", time.Since(searchStart)),
+			mlog.Duration("totalDuration", time.Since(totalStart)),
+			mlog.Int("validatedSegmentNum", len(segments)),
+			mlog.Err(err))
+		return searchResults, segments, err
+	}
+	logger.Info(ctx, "search streaming done",
+		mlog.Duration("searchDuration", time.Since(searchStart)),
+		mlog.Duration("totalDuration", time.Since(totalStart)),
+		mlog.Int("validatedSegmentNum", len(segments)),
+		mlog.Int("resultNum", len(searchResults)))
 	return searchResults, segments, err
 }

@@ -19,6 +19,7 @@ package syncmgr
 import (
 	"context"
 	"path"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -72,25 +73,45 @@ func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
 	size int64,
 	err error,
 ) {
+	start := time.Now()
 	if inserts, err = bw.writeInserts(ctx, pack); err != nil {
 		mlog.Error(ctx, "failed to write insert data", mlog.Err(err))
 		return inserts, deltas, stats, bm25Stats, size, err
 	}
+	writeInsertsDur := time.Since(start)
+
+	stageStart := time.Now()
 	if stats, err = bw.writeStats(ctx, pack); err != nil {
 		mlog.Error(ctx, "failed to process stats blob", mlog.Err(err))
 		return inserts, deltas, stats, bm25Stats, size, err
 	}
+	writeStatsDur := time.Since(stageStart)
+
+	stageStart = time.Now()
 	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
 		mlog.Error(ctx, "failed to process delta blob", mlog.Err(err))
 		return inserts, deltas, stats, bm25Stats, size, err
 	}
+	writeDeltaDur := time.Since(stageStart)
+
+	stageStart = time.Now()
 	if bm25Stats, err = bw.writeBM25Stasts(ctx, pack); err != nil {
 		mlog.Error(ctx, "failed to process bm25 stats blob", mlog.Err(err))
 		return inserts, deltas, stats, bm25Stats, size, err
 	}
+	writeBM25Dur := time.Since(stageStart)
 
 	size = bw.sizeWritten
 
+	mlog.Info(ctx, "[BulkPackWriter] writeData stages",
+		mlog.Int64("segmentID", pack.segmentID),
+		mlog.Duration("writeInserts", writeInsertsDur),
+		mlog.Duration("writeStats", writeStatsDur),
+		mlog.Duration("writeDelta", writeDeltaDur),
+		mlog.Duration("writeBM25", writeBM25Dur),
+		mlog.Duration("total", time.Since(start)),
+		mlog.Int64("size", size),
+	)
 	return inserts, deltas, stats, bm25Stats, size, err
 }
 

@@ -19,6 +19,7 @@
 #include <assert.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <limits>
@@ -38,6 +39,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/GroupChunk.h"
+#include "common/RequestTrace.h"
 #include "common/Types.h"
 #include "fmt/core.h"
 #include "glog/logging.h"
@@ -137,6 +139,7 @@ GroupChunkTranslator::GroupChunkTranslator(
                                               DataType::ARRAY;
                                    })),
       load_priority_(load_priority) {
+    auto t_body_start = std::chrono::steady_clock::now();
     // Build prefix sum for O(1) lookup in get_cid_from_file_and_row_group_index
     file_row_group_prefix_sum_.reserve(row_group_meta_list_.size() + 1);
     file_row_group_prefix_sum_.push_back(
@@ -147,6 +150,7 @@ GroupChunkTranslator::GroupChunkTranslator(
         file_row_group_prefix_sum_.push_back(file_row_group_prefix_sum_.back() +
                                              file_metas.size());
     }
+    auto t_prefix_done = std::chrono::steady_clock::now();
 
     // Collect row group sizes and row counts
     std::vector<int64_t> row_group_row_counts;
@@ -159,6 +163,7 @@ GroupChunkTranslator::GroupChunkTranslator(
             row_group_row_counts.push_back(row_group_meta.Get(i).row_num());
         }
     }
+    auto t_row_group_vectors_done = std::chrono::steady_clock::now();
 
     // Build cell mapping: cells DO NOT span files — each cell's row groups
     // come entirely from one file. Derive row-groups-per-cell from the
@@ -179,6 +184,7 @@ GroupChunkTranslator::GroupChunkTranslator(
         }
         global_rg_offset += file_rg_count;
     }
+    auto t_cell_ranges_done = std::chrono::steady_clock::now();
 
     size_t num_cells = meta_.cell_row_group_ranges_.size();
 
@@ -198,6 +204,7 @@ GroupChunkTranslator::GroupChunkTranslator(
         meta_.num_rows_until_chunk_.push_back(cumulative_rows);
         meta_.chunk_memory_size_.push_back(cell_size);
     }
+    auto t_chunk_meta_done = std::chrono::steady_clock::now();
 
     AssertInfo(
         meta_.num_rows_until_chunk_.back() == column_group_info_.row_count,
@@ -216,7 +223,12 @@ GroupChunkTranslator::GroupChunkTranslator(
         num_cells,
         cell_target_size_bytes);
 
+    auto t_overhead_start = std::chrono::steady_clock::now();
     // Set loading overhead config to cap total transient memory reservation.
+    // During get_cells, decoded Arrow Tables exist simultaneously in:
+    //   - pool threads (pool_size): reading batches, pending push
+    //   - bounded channel (pool_size * kChannelCapacityMultiplier): pushed, awaiting pop
+    //   - main thread (1): being converted to GroupChunk
     if (!meta_.chunk_memory_size_.empty()) {
         int64_t max_cell_sz = *std::max_element(
             meta_.chunk_memory_size_.begin(), meta_.chunk_memory_size_.end());
@@ -230,6 +242,37 @@ GroupChunkTranslator::GroupChunkTranslator(
         meta_.loading_overhead =
             milvus::cachinglayer::LoadingOverheadConfig{upper_bound, group};
     }
+    auto t_overhead_done = std::chrono::steady_clock::now();
+    LOG_INFO(
+        "[xxx] translator {} ctor detail, file_count={}, field_count={}, "
+        "row_group_count={}, cell_count={}, warmup_policy={}, storage_type={}, "
+        "prefix_sum={}ms, row_group_vectors={}ms, cell_ranges={}ms, "
+        "chunk_meta={}ms, overhead={}ms, body_total={}ms",
+        key_,
+        insert_files_.size(),
+        field_metas_.size(),
+        total_row_groups,
+        num_cells,
+        static_cast<int>(meta_.cache_warmup_policy),
+        static_cast<int>(meta_.storage_type),
+        std::chrono::duration_cast<std::chrono::milliseconds>(t_prefix_done -
+                                                              t_body_start)
+            .count(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            t_row_group_vectors_done - t_prefix_done)
+            .count(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            t_cell_ranges_done - t_row_group_vectors_done)
+            .count(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            t_chunk_meta_done - t_cell_ranges_done)
+            .count(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(t_overhead_done -
+                                                              t_overhead_start)
+            .count(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(t_overhead_done -
+                                                              t_body_start)
+            .count());
 }
 
 GroupChunkTranslator::~GroupChunkTranslator() {
@@ -314,6 +357,7 @@ GroupChunkTranslator::get_global_row_group_idx(size_t file_idx,
 std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>>
 GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
                                 const std::vector<cachinglayer::cid_t>& cids) {
+    const auto t1 = std::chrono::high_resolution_clock::now();
     // Check for cancellation before loading group chunks
     CheckCancellation(ctx, segment_id_, "GroupChunkTranslator::get_cells()");
 
@@ -440,6 +484,17 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
         cells.emplace_back(cid, std::move(it->second));
     }
 
+    const auto t2 = std::chrono::high_resolution_clock::now();
+    const auto d =
+        std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+
+    LOG_INFO(
+        "[sss] group chunk trans get cells. traceID: {}, key: {}, duration: "
+        "{}, cid size: {}",
+        milvus::tracer::GetRequestTraceID(ctx),
+        key_,
+        d,
+        cids.size());
     return cells;
 }
 

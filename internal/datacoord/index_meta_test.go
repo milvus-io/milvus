@@ -46,11 +46,68 @@ import (
 )
 
 func TestReloadFromKV(t *testing.T) {
+	t.Run("scan segment indexes by partition", func(t *testing.T) {
+		collID := int64(100)
+		partID1 := int64(10)
+		partID2 := int64(20)
+		indexID1 := int64(1000)
+		indexID2 := int64(2000)
+		segID1 := int64(10000)
+		segID2 := int64(20000)
+		buildID1 := int64(100000)
+		buildID2 := int64(200000)
+
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{
+			{
+				CollectionID: collID,
+				IndexID:      indexID1,
+			},
+			{
+				CollectionID: collID,
+				IndexID:      indexID2,
+			},
+		}, nil)
+		catalog.EXPECT().ListPartitionSegmentIndexes(mock.Anything, collID, partID1).Return([]*model.SegmentIndex{
+			{
+				CollectionID: collID,
+				PartitionID:  partID1,
+				SegmentID:    segID1,
+				IndexID:      indexID1,
+				BuildID:      buildID1,
+			},
+		}, nil)
+		catalog.EXPECT().ListPartitionSegmentIndexes(mock.Anything, collID, partID2).Return([]*model.SegmentIndex{
+			{
+				CollectionID: collID,
+				PartitionID:  partID2,
+				SegmentID:    segID2,
+				IndexID:      indexID2,
+				BuildID:      buildID2,
+			},
+		}, nil)
+
+		meta, err := newIndexMeta(context.TODO(), catalog, []partitionScanTarget{
+			{collectionID: collID, partitionID: partID1, partitionScoped: true},
+			{collectionID: collID, partitionID: partID2, partitionScoped: true},
+		})
+		assert.NoError(t, err)
+		assert.NotNil(t, meta)
+
+		assert.Len(t, meta.GetSegmentIndexes(collID, segID1), 1)
+		assert.Len(t, meta.GetSegmentIndexes(collID, segID2), 1)
+		_, ok := meta.segmentBuildInfo.Get(buildID1)
+		assert.True(t, ok)
+		_, ok = meta.segmentBuildInfo.Get(buildID2)
+		assert.True(t, ok)
+		catalog.AssertNotCalled(t, "ListSegmentIndexes", mock.Anything, mock.Anything)
+	})
+
 	t.Run("ListIndexes_fail", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, errors.New("mock"))
 		catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-		_, err := newIndexMeta(context.TODO(), catalog, []int64{0})
+		_, err := newIndexMeta(context.TODO(), catalog, collectionScanTargets([]int64{0}))
 		assert.Error(t, err)
 	})
 
@@ -59,7 +116,7 @@ func TestReloadFromKV(t *testing.T) {
 		catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 
-		_, err := newIndexMeta(context.TODO(), catalog, []int64{0})
+		_, err := newIndexMeta(context.TODO(), catalog, collectionScanTargets([]int64{0}))
 		assert.Error(t, err)
 	})
 
@@ -81,7 +138,7 @@ func TestReloadFromKV(t *testing.T) {
 			},
 		}, nil)
 
-		meta, err := newIndexMeta(context.TODO(), catalog, []int64{0})
+		meta, err := newIndexMeta(context.TODO(), catalog, collectionScanTargets([]int64{0}))
 		assert.NoError(t, err)
 		assert.NotNil(t, meta)
 	})
@@ -109,7 +166,7 @@ func TestReloadFromKV(t *testing.T) {
 			{SegmentID: 20, CollectionID: collID, IndexID: deadIndexID, BuildID: 200, IndexSerializedSize: deadSize},
 		}, nil)
 
-		meta, err := newIndexMeta(context.TODO(), catalog, []int64{collID})
+		meta, err := newIndexMeta(context.TODO(), catalog, collectionScanTargets([]int64{collID}))
 		assert.NoError(t, err)
 		assert.NotNil(t, meta)
 

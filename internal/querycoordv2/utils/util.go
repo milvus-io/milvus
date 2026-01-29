@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -86,51 +87,140 @@ func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.Target
 
 func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager *meta.DistributionManager, targetMgr meta.TargetManagerInterface, scope int32) error {
 	// Check whether segments are fully loaded
+	start := time.Now()
+	checkID := start.UnixNano()
+	logger := mlog.With(mlog.Int64("collectionID", collectionID))
 	segmentDist := targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, scope)
+	targetSnapshotDuration := time.Since(start)
+	targetSegmentNum := len(segmentDist)
+	distSnapshotStart := time.Now()
 	distSegments := distManager.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID))
 	distBySegmentID := make(map[int64][]*meta.Segment, len(distSegments))
 	for _, segment := range distSegments {
 		distBySegmentID[segment.GetID()] = append(distBySegmentID[segment.GetID()], segment)
 	}
-
+	distSnapshotDuration := time.Since(distSnapshotStart)
+	logger.Info(ctx, "check segment data ready start",
+		mlog.Int64("checkID", checkID),
+		mlog.Int32("scope", scope),
+		mlog.Int("targetSegmentNum", targetSegmentNum),
+		mlog.Int("distSegmentNum", len(distSegments)),
+		mlog.Duration("targetSnapshotDuration", targetSnapshotDuration),
+		mlog.Duration("distSnapshotDuration", distSnapshotDuration),
+	)
+	checkedSegmentNum := 0
+	lastProgress := time.Now()
 	for segmentID, segmentInfo := range segmentDist {
+		checkedSegmentNum++
+		if checkedSegmentNum%10000 == 0 || time.Since(lastProgress) > 5*time.Second {
+			logger.RatedInfo(ctx, rate.Limit(1), "check segment data ready progress",
+				mlog.Int64("checkID", checkID),
+				mlog.Int32("scope", scope),
+				mlog.Int64("segmentID", segmentID),
+				mlog.Int64("partitionID", segmentInfo.GetPartitionID()),
+				mlog.String("insertChannel", segmentInfo.GetInsertChannel()),
+				mlog.Int("checkedSegmentNum", checkedSegmentNum),
+				mlog.Int("targetSegmentNum", targetSegmentNum),
+				mlog.Duration("elapsed", time.Since(start)),
+			)
+			lastProgress = time.Now()
+		}
+
 		segments := distBySegmentID[segmentID]
 		if len(segments) == 0 {
-			mlog.RatedInfo(context.TODO(), rate.Limit(10), "segment is not available", mlog.Int64("segmentID", segmentID))
+			logger.Info(ctx, "segment is not available",
+				mlog.Int64("checkID", checkID),
+				mlog.Int32("scope", scope),
+				mlog.Int64("segmentID", segmentID),
+				mlog.Int64("partitionID", segmentInfo.GetPartitionID()),
+				mlog.String("insertChannel", segmentInfo.GetInsertChannel()),
+				mlog.String("targetManifest", segmentInfo.GetManifestPath()),
+				mlog.Int32("targetDataVersion", segmentInfo.GetDataVersion()),
+				mlog.Int("checkedSegmentNum", checkedSegmentNum),
+				mlog.Int("targetSegmentNum", targetSegmentNum),
+				mlog.Int("distSegmentNum", len(segments)),
+				mlog.Duration("elapsed", time.Since(start)),
+			)
 			return merr.WrapErrSegmentLack(segmentID)
 		}
 
 		for _, segment := range segments {
 			cmp, err := packed.CompareManifestPath(segment.ManifestPath, segmentInfo.GetManifestPath())
 			if err != nil {
-				mlog.RatedWarn(context.TODO(), rate.Limit(10), "segment manifest path not comparable",
+				logger.Warn(ctx, "segment manifest path not comparable",
+					mlog.Int64("checkID", checkID),
+					mlog.Int32("scope", scope),
 					mlog.Int64("segmentID", segmentID),
+					mlog.Int64("partitionID", segmentInfo.GetPartitionID()),
+					mlog.String("insertChannel", segmentInfo.GetInsertChannel()),
+					mlog.Int64("nodeID", segment.Node),
 					mlog.String("distManifest", segment.ManifestPath),
 					mlog.String("targetManifest", segmentInfo.GetManifestPath()),
+					dataVersionField("distDataVersion", segment.DataVersion),
+					mlog.Int32("targetDataVersion", segmentInfo.GetDataVersion()),
+					mlog.Int("checkedSegmentNum", checkedSegmentNum),
+					mlog.Int("targetSegmentNum", targetSegmentNum),
+					mlog.Duration("elapsed", time.Since(start)),
 					mlog.Err(err))
 				return err
 			}
 			if cmp < 0 {
 				// dist manifest is older than target, segment data is not ready yet
-				mlog.RatedInfo(context.TODO(), rate.Limit(10), "segment manifest is outdated",
+				logger.Info(ctx, "segment manifest is outdated",
+					mlog.Int64("checkID", checkID),
+					mlog.Int32("scope", scope),
 					mlog.Int64("segmentID", segmentID),
+					mlog.Int64("partitionID", segmentInfo.GetPartitionID()),
+					mlog.String("insertChannel", segmentInfo.GetInsertChannel()),
+					mlog.Int64("nodeID", segment.Node),
 					mlog.String("distManifest", segment.ManifestPath),
-					mlog.String("targetManifest", segmentInfo.GetManifestPath()))
+					mlog.String("targetManifest", segmentInfo.GetManifestPath()),
+					dataVersionField("distDataVersion", segment.DataVersion),
+					mlog.Int32("targetDataVersion", segmentInfo.GetDataVersion()),
+					mlog.Int("checkedSegmentNum", checkedSegmentNum),
+					mlog.Int("targetSegmentNum", targetSegmentNum),
+					mlog.Duration("elapsed", time.Since(start)))
 				return merr.WrapErrSegmentNotLoaded(segmentID)
 			}
 			// cmp >= 0: dist manifest is same or newer than target.
 			// Still check DataVersion for storage v2 binlog changes that don't move the manifest.
 			// Skip when the QueryNode did not report DataVersion (old node in mixed-version rollout).
 			if segment.DataVersion != nil && *segment.DataVersion < segmentInfo.GetDataVersion() {
-				mlog.RatedInfo(context.TODO(), rate.Limit(10), "segment data version is outdated",
+				logger.Info(ctx, "segment data version is outdated",
+					mlog.Int64("checkID", checkID),
+					mlog.Int32("scope", scope),
 					mlog.Int64("segmentID", segmentID),
+					mlog.Int64("partitionID", segmentInfo.GetPartitionID()),
+					mlog.String("insertChannel", segmentInfo.GetInsertChannel()),
+					mlog.Int64("nodeID", segment.Node),
+					mlog.String("distManifest", segment.ManifestPath),
+					mlog.String("targetManifest", segmentInfo.GetManifestPath()),
 					mlog.Int32("distDataVersion", *segment.DataVersion),
-					mlog.Int32("targetDataVersion", segmentInfo.GetDataVersion()))
+					mlog.Int32("targetDataVersion", segmentInfo.GetDataVersion()),
+					mlog.Int("checkedSegmentNum", checkedSegmentNum),
+					mlog.Int("targetSegmentNum", targetSegmentNum),
+					mlog.Duration("elapsed", time.Since(start)))
 				return merr.WrapErrSegmentNotLoaded(segmentID)
 			}
 		}
 	}
+	logger.Info(ctx, "check segment data ready done",
+		mlog.Int64("checkID", checkID),
+		mlog.Int32("scope", scope),
+		mlog.Int("targetSegmentNum", targetSegmentNum),
+		mlog.Int("distSegmentNum", len(distSegments)),
+		mlog.Duration("targetSnapshotDuration", targetSnapshotDuration),
+		mlog.Duration("distSnapshotDuration", distSnapshotDuration),
+		mlog.Duration("duration", time.Since(start)),
+	)
 	return nil
+}
+
+func dataVersionField(key string, version *int32) mlog.Field {
+	if version == nil {
+		return mlog.String(key, "nil")
+	}
+	return mlog.Int32(key, *version)
 }
 
 func checkLoadStatus(ctx context.Context, m *meta.Meta, collectionID int64, withUnserviceableShards bool) error {
@@ -331,4 +421,15 @@ func filterNodeLessThan260(nodes []int64, nodeManager *session.NodeManager) []in
 		filteredNodes = append(filteredNodes, nodeID)
 	}
 	return filteredNodes
+}
+
+// GetSegmentRWNodes returns the RW nodes for segment assignment.
+// When streaming service is enabled AND enableSQNServeSegments is true,
+// it returns SQN nodes. Otherwise returns traditional QueryNodes.
+func GetSegmentRWNodes(replica *meta.Replica) []int64 {
+	if streamingutil.IsStreamingServiceEnabled() &&
+		paramtable.Get().QueryCoordCfg.EnableSQNServeSegments.GetAsBool() {
+		return replica.GetRWSQNodes()
+	}
+	return replica.GetRWNodes()
 }

@@ -28,6 +28,7 @@ import (
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -49,13 +50,43 @@ type BloomFilterSet struct {
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
 
+	lazyOnce sync.Once
+	lazyLoad func(*BloomFilterSet) error
+	lazyErr  error
+
 	// Resource tracking
 	trackedSize     int64 // memory size that was charged
 	resourceCharged bool  // tracks whether memory resources were charged for this bloom filter set
 }
 
+func (s *BloomFilterSet) ensureLazyLoaded() {
+	t1 := time.Now()
+	defer func() {
+		d := time.Since(t1)
+		mlog.Info(context.TODO(), "bloom filter ensure loaded",
+			mlog.Int64("partition", s.partitionID),
+			mlog.FieldSegmentID(s.segmentID),
+			mlog.Duration("duration", d),
+		)
+	}()
+	if s.lazyLoad == nil {
+		return
+	}
+	s.lazyOnce.Do(func() {
+		s.lazyErr = s.lazyLoad(s)
+		if s.lazyErr != nil {
+			mlog.Warn(context.TODO(), "failed to lazy load bloom filter set",
+				mlog.FieldSegmentID(s.segmentID),
+				mlog.Err(s.lazyErr))
+			return
+		}
+		s.Charge()
+	})
+}
+
 // MayPkExist returns whether any bloom filters returns positive.
 func (s *BloomFilterSet) MayPkExist(lc *storage.LocationsCache) bool {
+	s.ensureLazyLoaded()
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
 	if s.currentStat != nil && s.currentStat.TestLocationCache(lc) {
@@ -72,6 +103,7 @@ func (s *BloomFilterSet) MayPkExist(lc *storage.LocationsCache) bool {
 }
 
 func (s *BloomFilterSet) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
+	s.ensureLazyLoaded()
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
 
@@ -103,16 +135,19 @@ func (s *BloomFilterSet) Type() commonpb.SegmentState {
 
 // Stats returns the current bloom filter statistics.
 func (s *BloomFilterSet) Stats() *storage.PkStatistics {
+	s.ensureLazyLoaded()
 	return s.currentStat
 }
 
 // PkCandidateExist reports whether bloom filter data has been loaded (current or historical).
 func (s *BloomFilterSet) PkCandidateExist() bool {
+	s.ensureLazyLoaded()
 	return s.currentStat != nil || s.historyStats != nil
 }
 
 // UpdatePkCandidate updates currentStats with provided pks.
 func (s *BloomFilterSet) UpdatePkCandidate(pks []storage.PrimaryKey) {
+	s.ensureLazyLoaded()
 	s.statsMutex.Lock()
 	defer s.statsMutex.Unlock()
 
@@ -147,6 +182,7 @@ func (s *BloomFilterSet) UpdatePkCandidate(pks []storage.PrimaryKey) {
 // GetMinPk returns the global minimum PK across all statistics (current + historical).
 // Returns nil if no statistics with a valid MinPK are available.
 func (s *BloomFilterSet) GetMinPk() *storage.PrimaryKey {
+	s.ensureLazyLoaded()
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
 
@@ -171,6 +207,7 @@ func (s *BloomFilterSet) GetMinPk() *storage.PrimaryKey {
 // GetMaxPk returns the global maximum PK across all statistics (current + historical).
 // Returns nil if no statistics with a valid MaxPK are available.
 func (s *BloomFilterSet) GetMaxPk() *storage.PrimaryKey {
+	s.ensureLazyLoaded()
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
 
@@ -203,6 +240,7 @@ func (s *BloomFilterSet) AddHistoricalStats(stats *storage.PkStatistics) {
 // MemSize returns the total memory size of all bloom filters in bytes.
 // This includes both currentStat and all historyStats.
 func (s *BloomFilterSet) MemSize() int64 {
+	s.ensureLazyLoaded()
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
 
@@ -264,6 +302,7 @@ func (s *BloomFilterSet) Refund() {
 
 // IsResourceCharged returns whether memory resources have been charged for this bloom filter set.
 func (s *BloomFilterSet) IsResourceCharged() bool {
+	s.ensureLazyLoaded()
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
 	return s.resourceCharged
@@ -303,5 +342,14 @@ func NewBloomFilterSet(segmentID int64, partitionID int64, segType commonpb.Segm
 		segmentID:   segmentID,
 		partitionID: partitionID,
 		segType:     segType,
+	}
+}
+
+func NewLazyBloomFilterSet(segmentID int64, partitionID int64, segType commonpb.SegmentState, lazyLoad func(*BloomFilterSet) error) *BloomFilterSet {
+	return &BloomFilterSet{
+		segmentID:   segmentID,
+		partitionID: partitionID,
+		segType:     segType,
+		lazyLoad:    lazyLoad,
 	}
 }

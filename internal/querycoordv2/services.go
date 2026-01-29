@@ -631,11 +631,12 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 
 	// when no dst node specified, default to use all other nodes in same
 	dstNodeSet := typeutil.NewUniqueSet()
+	segmentRWNodes := typeutil.NewUniqueSet(utils.GetSegmentRWNodes(replica)...)
 	if len(req.GetDstNodeIDs()) == 0 {
-		dstNodeSet.Insert(replica.GetRWNodes()...)
+		dstNodeSet.Insert(segmentRWNodes.Collect()...)
 	} else {
 		for _, dstNode := range req.GetDstNodeIDs() {
-			if !replica.Contains(dstNode) {
+			if !segmentRWNodes.Contain(dstNode) {
 				err := merr.WrapErrNodeNotFound(dstNode, "destination node not found in the same replica")
 				mlog.Warn(context.TODO(), "failed to balance to the destination node", mlog.Err(err))
 				return merr.Status(err), nil

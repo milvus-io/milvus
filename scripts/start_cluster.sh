@@ -29,16 +29,16 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
 fi
 
 echo "Starting mixcoord..."
-nohup ./bin/milvus run mixcoord --run-with-subprocess >/tmp/mixcoord.log 2>&1 &
+METRICS_PORT=9093 nohup ./bin/milvus run mixcoord --run-with-subprocess >/tmp/mixcoord.log 2>&1 &
 
 echo "Starting datanode..."
-nohup ./bin/milvus run datanode --run-with-subprocess >/tmp/datanode.log 2>&1 &
+METRICS_PORT=9094 nohup ./bin/milvus run datanode --run-with-subprocess >/tmp/datanode.log 2>&1 &
 
-echo "Starting querynode..."
-nohup ./bin/milvus run querynode --run-with-subprocess >/tmp/querynode.log 2>&1 &
+# echo "Starting querynode..."
+# nohup ./bin/milvus run querynode --run-with-subprocess >/tmp/querynode.log 2>&1 &
 
 echo "Starting streamingnode..."
-nohup ./bin/milvus run streamingnode --run-with-subprocess >/tmp/streamingnode.log 2>&1 &
+METRICS_PORT=9088 nohup ./bin/milvus run streamingnode --run-with-subprocess >/tmp/streamingnode.log 2>&1 &
 
 echo "Starting proxy..."
-nohup ./bin/milvus run proxy --run-with-subprocess >/tmp/proxy.log 2>&1 &
+METRICS_PORT=9091 nohup ./bin/milvus run proxy --run-with-subprocess >/tmp/proxy.log 2>&1 &

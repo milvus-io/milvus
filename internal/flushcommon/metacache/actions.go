@@ -251,6 +251,12 @@ func SetStartPosRecorded(flag bool) SegmentAction {
 	}
 }
 
+func SetNeedAllocAtCoord(flag bool) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.needAllocAtCoord = flag
+	}
+}
+
 func UpdateManifestPath(manifestPath string) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.manifestPath = manifestPath

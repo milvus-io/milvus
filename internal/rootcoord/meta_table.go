@@ -582,6 +582,9 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 			mt.partitionName2ID[coll.CollectionID][partition.PartitionName] = partition.PartitionID
 		}
 	}
+	for _, fileResourceID := range coll.FileResourceIds {
+		mt.fileResourceRefCnt[fileResourceID]++
+	}
 
 	pn := coll.GetPartitionNum(true)
 	mt.generalCnt += pn * int(coll.ShardsNum)

@@ -19,7 +19,9 @@ package grpcquerynodeclient
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/samber/lo"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -155,11 +157,19 @@ func (c *Client) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannel
 
 // LoadSegments loads the segments to search.
 func (c *Client) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+	t1 := time.Now()
 	req = typeutil.Clone(req)
+	mlog.Info(ctx, "client load segments",
+		mlog.Duration("elapsed", time.Since(t1)),
+		mlog.Int64s("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })))
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(c.nodeID))
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*commonpb.Status, error) {
+
+		mlog.Info(ctx, "client load segments request prepared",
+			mlog.Duration("elapsed", time.Since(t1)),
+			mlog.Int64s("segments", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })))
 		return client.LoadSegments(ctx, req)
 	})
 }

@@ -19,6 +19,7 @@ package syncmgr
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/samber/lo"
@@ -45,7 +46,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+var syncTaskIDCounter atomic.Int64
+
 type SyncTask struct {
+	taskID int64
+
 	chunkManager storage.ChunkManager
 	allocator    allocator.Interface
 
@@ -93,6 +98,7 @@ type SyncTask struct {
 
 func (t *SyncTask) getLogger() *mlog.Logger {
 	return mlog.With(
+		mlog.Int64("syncTaskID", t.taskID),
 		mlog.FieldCollectionID(t.collectionID),
 		mlog.FieldPartitionID(t.partitionID),
 		mlog.FieldSegmentID(t.segmentID),
@@ -114,8 +120,14 @@ func (t *SyncTask) HandleError(err error) {
 
 func (t *SyncTask) Run(ctx context.Context) (err error) {
 	t.tr = timerecord.NewTimeRecorder("syncTask")
+	stageStart := time.Now()
 
 	logger := t.getLogger()
+	logger.Info(ctx, "sync task started",
+		mlog.Int64("batchRows", t.batchRows),
+		mlog.Bool("isFlush", t.pack.isFlush),
+		mlog.Bool("isDrop", t.pack.isDrop),
+	)
 	defer func() {
 		if err != nil {
 			t.HandleError(err)
@@ -133,7 +145,10 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	}
 
 	columnGroups := t.getColumnGroups(segmentInfo)
+	getColumnGroupsDur := time.Since(stageStart)
+	logger.Info(ctx, "sync task stage getColumnGroups done", mlog.Duration("duration", getColumnGroupsDur))
 
+	stageStart = time.Now()
 	switch segmentInfo.GetStorageVersion() {
 	case storage.StorageV2:
 		// New sync task means needs to flush data immediately, so do not need to buffer data in writer again.
@@ -156,6 +171,12 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		logger.Warn(ctx, "failed to write sync data with storage v2 format", mlog.Err(err))
 		return err
 	}
+	writeDataDur := time.Since(stageStart)
+	logger.Info(ctx, "sync task stage writeData done",
+		mlog.Duration("duration", writeDataDur),
+		mlog.Int64("flushedSize", t.flushedSize),
+		mlog.Int64("storageVersion", segmentInfo.GetStorageVersion()),
+	)
 
 	getDataCount := func(binlogs ...*datapb.FieldBinlog) int64 {
 		count := int64(0)
@@ -174,6 +195,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 
 	metrics.DataNodeSave2StorageLatency.WithLabelValues(paramtable.GetStringNodeID(), t.level.String()).Observe(float64(t.tr.RecordSpan().Milliseconds()))
 
+	stageStart = time.Now()
 	if t.metaWriter != nil {
 		err = t.writeMeta(ctx)
 		if err != nil {
@@ -181,7 +203,10 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 			return err
 		}
 	}
+	writeMetaDur := time.Since(stageStart)
+	logger.Info(ctx, "sync task stage writeMeta done", mlog.Duration("duration", writeMetaDur))
 
+	stageStart = time.Now()
 	t.pack.ReleaseData()
 
 	actions := []metacache.SegmentAction{metacache.FinishSyncing(t.batchRows), metacache.UpdateManifestPath(t.manifestPath)}
@@ -197,9 +222,17 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		t.metacache.RemoveSegments(metacache.WithSegmentIDs(t.segmentID))
 		logger.Info(ctx, "segment removed", mlog.FieldSegmentID(t.segmentID), mlog.String("channel", t.channelName))
 	}
+	updateMetacacheDur := time.Since(stageStart)
 
 	t.execTime = t.tr.ElapseSpan()
-	logger.Info(ctx, "task done", mlog.Int64("flushedSize", t.flushedSize), mlog.Duration("timeTaken", t.execTime))
+	logger.Info(ctx, "sync task done",
+		mlog.Int64("flushedSize", t.flushedSize),
+		mlog.Duration("total", t.execTime),
+		mlog.Duration("getColumnGroups", getColumnGroupsDur),
+		mlog.Duration("writeData", writeDataDur),
+		mlog.Duration("writeMeta", writeMetaDur),
+		mlog.Duration("updateMetacache", updateMetacacheDur),
+	)
 
 	if !t.pack.isFlush {
 		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.SuccessLabel, t.level.String()).Inc()

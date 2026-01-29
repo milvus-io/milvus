@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -109,7 +110,7 @@ func (b *RoundRobinBalancer) balanceChannels(ctx context.Context, replica *meta.
 // balanceSegments generates segment balance plans for a replica.
 // It requires at least 2 RW nodes to perform balancing.
 func (b *RoundRobinBalancer) balanceSegments(ctx context.Context, replica *meta.Replica) []assign.SegmentAssignPlan {
-	rwNodes := replica.GetRWNodes()
+	rwNodes := utils.GetSegmentRWNodes(replica)
 	if len(rwNodes) < 2 {
 		return nil
 	}

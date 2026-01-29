@@ -1128,6 +1128,18 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 		assert.Equal(t, 1, len(segIdxes))
 	})
 
+	t.Run("cap pagination size", func(t *testing.T) {
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, segmentIndexPaginationSize, mock.Anything).Return(nil)
+		catalog := &Catalog{
+			MetaKv:         metakv,
+			paginationSize: 100000,
+		}
+
+		_, err := catalog.ListSegmentIndexes(context.Background(), 0)
+		assert.NoError(t, err)
+	})
+
 	t.Run("failed", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)
 		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("error"))
@@ -1151,6 +1163,33 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 		_, err := catalog.ListSegmentIndexes(context.Background(), 0)
 		assert.Error(t, err)
 	})
+}
+
+func TestCatalog_ListPartitionSegmentIndexes(t *testing.T) {
+	segIdx := &indexpb.SegmentIndex{
+		CollectionID: 2,
+		PartitionID:  3,
+		SegmentID:    4,
+		IndexID:      5,
+		BuildID:      6,
+	}
+	v, err := proto.Marshal(segIdx)
+	assert.NoError(t, err)
+
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().
+		WalkWithPrefix(mock.Anything, buildSegmentIndexPartitionPrefix(int64(2), int64(3)), mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+			return f([]byte("key"), v)
+		})
+	catalog := &Catalog{
+		MetaKv: metakv,
+	}
+
+	segIdxes, err := catalog.ListPartitionSegmentIndexes(context.Background(), 2, 3)
+	assert.NoError(t, err)
+	assert.Len(t, segIdxes, 1)
+	assert.Equal(t, int64(3), segIdxes[0].PartitionID)
 }
 
 func TestCatalog_AlterSegmentIndexes(t *testing.T) {

@@ -574,7 +574,17 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		channelName = req.GetChannel()
 	)
 
-	mlog.Info(context.TODO(), "receive SaveBinlogPaths request",
+	logger := mlog.With(
+		mlog.Int64("nodeID", nodeID),
+		mlog.String("channel", channelName),
+		mlog.Int64("collectionID", req.GetCollectionID()),
+		mlog.FieldSegmentID(req.GetSegmentID()),
+		mlog.String("level", req.GetSegLevel().String()),
+		mlog.Bool("withFullBinlogs", req.GetWithFullBinlogs()),
+	)
+
+	start := time.Now()
+	logger.Info(ctx, "receive SaveBinlogPaths request",
 		mlog.Bool("isFlush", req.GetFlushed()),
 		mlog.Bool("isDropped", req.GetDropped()),
 		mlog.Any("checkpoints", req.GetCheckPoints()))
@@ -591,7 +601,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channelName)
 		if err != nil || targetID != nodeID {
 			err := merr.WrapErrChannelNotFound(channelName, fmt.Sprintf("for node %d", nodeID))
-			mlog.Warn(context.TODO(), "failed to get latest wal allocated", mlog.Int64("nodeID", nodeID), mlog.Int64("channel nodeID", targetID), mlog.Err(err))
+			logger.Warn(ctx, "failed to get latest wal allocated", mlog.Int64("channel nodeID", targetID), mlog.Err(err))
 			return merr.Status(err), nil
 		}
 	}
@@ -599,87 +609,199 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// try to parse path and fill logid
 	err := binlog.CompressSaveBinlogPaths(req)
 	if err != nil {
-		mlog.Warn(context.TODO(), "fail to CompressSaveBinlogPaths", mlog.String("channel", channelName), mlog.Err(err))
+		logger.Warn(ctx, "fail to CompressSaveBinlogPaths", mlog.Err(err))
 		return merr.Status(err), nil
 	}
 
-	operators := []UpdateOperator{}
+	validateDur := time.Since(start)
+
+	mutations := map[int64][]MutateFunc{}
+	var newSegments []*datapb.SegmentInfo
+	var validationSkipped bool
 
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
-		operators = append(operators, CreateL0Operator(req.GetCollectionID(), req.GetPartitionID(), req.GetSegmentID(), req.GetChannel()))
-	} else {
+		// Insert new L0 segment if it doesn't exist
 		segment := s.meta.GetSegment(ctx, req.GetSegmentID())
+		if segment == nil {
+			newSegments = append(newSegments, &datapb.SegmentInfo{
+				ID:            req.GetSegmentID(),
+				CollectionID:  req.GetCollectionID(),
+				PartitionID:   req.GetPartitionID(),
+				InsertChannel: req.GetChannel(),
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L0,
+			})
+		}
+	} else {
+		startGetSegment := time.Now()
+		segment := s.meta.GetSegment(ctx, req.GetSegmentID())
+		getSegmentDur := time.Since(startGetSegment)
+		logger.Info(ctx, "SaveBinlogPaths get segment done", mlog.Duration("getSegmentDur", getSegmentDur))
 		// validate level one segment
 		if segment == nil {
 			err := merr.WrapErrSegmentNotFound(req.GetSegmentID())
-			mlog.Warn(context.TODO(), "failed to get segment", mlog.Err(err))
+			logger.Warn(ctx, "failed to get segment", mlog.Err(err))
 			return merr.Status(err), nil
 		}
 
 		if segment.State == commonpb.SegmentState_Dropped {
-			mlog.Info(context.TODO(), "save to dropped segment, ignore this request")
+			logger.Info(ctx, "save to dropped segment, ignore this request")
 			return merr.Success(), nil
 		}
 
 		if !isSegmentHealthy(segment) {
 			err := merr.WrapErrSegmentNotFound(req.GetSegmentID())
-			mlog.Warn(context.TODO(), "failed to get segment, the segment not healthy", mlog.Err(err))
+			logger.Warn(ctx, "failed to get segment, the segment not healthy", mlog.Err(err))
 			return merr.Status(err), nil
 		}
 		if err := s.validateTextSegmentStorage(req); err != nil {
-			mlog.Warn(context.TODO(), "invalid TEXT segment storage format", mlog.Err(err))
+			logger.Warn(ctx, "invalid TEXT segment storage format", mlog.Err(err))
 			return merr.Status(err), nil
 		}
 
-		// Set storage version
-		operators = append(operators, SetStorageVersion(req.GetSegmentID(), req.GetStorageVersion()))
-
-		// Set segment state
+		// Set segment state side effects
 		if req.GetDropped() {
-			// segmentManager manages growing segments
 			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
-			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Dropped))
 		} else if req.GetFlushed() {
+			startDropSegment := time.Now()
 			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
-			if enableSortCompaction() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
-				operators = append(operators, SetSegmentIsInvisible(req.GetSegmentID(), true))
+			dropSegmentDur := time.Since(startDropSegment)
+			logger.Info(ctx, "SaveBinlogPaths drop segment done", mlog.Duration("dropSegmentDur", dropSegmentDur))
+		}
+
+		// Validate inside MutateFunc: check against persist value (lock-free CAS)
+		reqCopy := req // capture for closure
+		validate := func(seg *datapb.SegmentInfo) bool {
+			if !reqCopy.GetWithFullBinlogs() {
+				return true
 			}
-			// set segment to SegmentState_Flushed
-			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Flushed))
+			if seg.State == commonpb.SegmentState_Flushed && !reqCopy.GetDropped() {
+				logger.Info(ctx, "segment is already flushed, ignoring save binlog paths",
+					mlog.FieldSegmentID(seg.GetID()))
+				validationSkipped = true
+				return false
+			}
+			for _, cp := range reqCopy.GetCheckPoints() {
+				if cp.SegmentID == seg.GetID() && seg.GetDmlPosition() != nil &&
+					cp.GetPosition().GetTimestamp() < seg.GetDmlPosition().GetTimestamp() {
+					logger.Info(ctx, "dml time tick is stale, ignoring save binlog paths",
+						mlog.FieldSegmentID(seg.GetID()),
+						mlog.Uint64("incoming", cp.GetPosition().GetTimestamp()),
+						mlog.Uint64("existing", seg.GetDmlPosition().GetTimestamp()))
+					validationSkipped = true
+					return false
+				}
+			}
+			return true
+		}
+
+		// Build mutation for the main segment
+		mutate := func(seg *datapb.SegmentInfo) bool {
+			seg.StorageVersion = reqCopy.GetStorageVersion()
+
+			if reqCopy.GetDropped() {
+				seg.State = commonpb.SegmentState_Dropped
+				seg.DroppedAt = uint64(time.Now().UnixNano())
+			} else if reqCopy.GetFlushed() {
+				if enableSortCompaction() && reqCopy.GetSegLevel() != datapb.SegmentLevel_L0 {
+					seg.IsInvisible = true
+				}
+				seg.State = commonpb.SegmentState_Flushed
+			}
+
+			// Binlogs
+			if reqCopy.GetWithFullBinlogs() {
+				seg.Binlogs = mergeFieldBinlogs(nil, reqCopy.GetField2BinlogPaths())
+				seg.Statslogs = mergeFieldBinlogs(nil, reqCopy.GetField2StatslogPaths())
+				seg.Deltalogs = mergeFieldBinlogs(nil, reqCopy.GetDeltalogs())
+				seg.Bm25Statslogs = mergeFieldBinlogs(nil, reqCopy.GetField2Bm25LogPaths())
+			} else {
+				seg.Binlogs = mergeFieldBinlogs(seg.GetBinlogs(), reqCopy.GetField2BinlogPaths())
+				seg.Statslogs = mergeFieldBinlogs(seg.GetStatslogs(), reqCopy.GetField2StatslogPaths())
+				seg.Deltalogs = mergeFieldBinlogs(seg.GetDeltalogs(), reqCopy.GetDeltalogs())
+				seg.Bm25Statslogs = mergeFieldBinlogs(seg.GetBm25Statslogs(), reqCopy.GetField2Bm25LogPaths())
+			}
+
+			// Checkpoint
+			skipCheck := reqCopy.GetWithFullBinlogs()
+			for _, cp := range reqCopy.GetCheckPoints() {
+				if cp.SegmentID != seg.GetID() {
+					continue
+				}
+				if !skipCheck && seg.DmlPosition != nil && seg.DmlPosition.Timestamp >= cp.Position.Timestamp {
+					continue
+				}
+				seg.DmlPosition = cp.GetPosition()
+			}
+
+			// Num rows from binlog
+			count := segmentutil.CalcRowCountFromBinLog(seg)
+			if count > 0 {
+				seg.NumOfRows = count
+			}
+
+			// Manifest
+			if reqCopy.GetManifestPath() != "" {
+				seg.ManifestPath = reqCopy.GetManifestPath()
+			}
+
+			// Start position for this segment
+			for _, pos := range reqCopy.GetStartPositions() {
+				if pos.GetSegmentID() == seg.GetID() && len(pos.GetStartPosition().GetMsgID()) > 0 {
+					seg.StartPosition = pos.GetStartPosition()
+				}
+			}
+
+			// Drop empty flushing segments
+			if seg.Level != datapb.SegmentLevel_L0 && seg.GetNumOfRows() == 0 &&
+				(seg.GetState() == commonpb.SegmentState_Flushing || seg.GetState() == commonpb.SegmentState_Flushed) {
+				seg.State = commonpb.SegmentState_Dropped
+				seg.DroppedAt = uint64(time.Now().UnixNano())
+			}
+			return true
+		}
+
+		mutations[req.GetSegmentID()] = []MutateFunc{validate, mutate}
+
+		// Start positions for other segments
+		for _, pos := range req.GetStartPositions() {
+			if len(pos.GetStartPosition().GetMsgID()) == 0 || pos.GetSegmentID() == req.GetSegmentID() {
+				continue
+			}
+			sp := pos.GetStartPosition()
+			mutations[pos.GetSegmentID()] = []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				seg.StartPosition = sp
+				return true
+			}}
 		}
 	}
 
-	if req.GetWithFullBinlogs() {
-		// check checkpoint will be executed at updateSegmentPack validation to ignore the illegal checkpoint update.
-		operators = append(operators, UpdateBinlogsFromSaveBinlogPathsOperator(
-			req.GetSegmentID(),
-			req.GetField2BinlogPaths(),
-			req.GetField2StatslogPaths(),
-			req.GetDeltalogs(),
-			req.GetField2Bm25LogPaths(),
-		), UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints(), true))
-	} else {
-		operators = append(operators, AddBinlogsOperator(req.GetSegmentID(), req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs(), req.GetField2Bm25LogPaths()),
-			UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()))
-	}
+	buildMutationsDur := time.Since(start) - validateDur
 
-	// save manifest, start positions and checkpoints
-	operators = append(operators,
-		UpdateManifest(req.GetSegmentID(), req.GetManifestPath()),
-		UpdateStartPosition(req.GetStartPositions()),
-		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
-	)
-
-	// Update segment info in memory and meta. Stale updates (segment already
-	// flushed / outdated time tick) are swallowed inside UpdateSegmentsInfo as
-	// benign no-ops, so any error here is a real failure.
-	if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
-		mlog.Error(context.TODO(), "save binlog and checkpoints failed", mlog.Err(err))
+	// Update segment info in memory and meta.
+	stageStart := time.Now()
+	if err := s.meta.UpdateSegmentsInfo(ctx, mutations, newSegments...); err != nil {
+		logger.Error(ctx, "save binlog and checkpoints failed", mlog.Err(err))
 		return merr.Status(err), nil
 	}
+	updateSegmentsInfoDur := time.Since(stageStart)
 
+	if validationSkipped {
+		logger.Info(ctx, "SaveBinlogPaths validation skipped write",
+			mlog.Duration("total", time.Since(start)))
+		return merr.Success(), nil
+	}
+
+	stageStart = time.Now()
 	s.meta.SetLastWrittenTime(req.GetSegmentID())
-	mlog.Info(context.TODO(), "SaveBinlogPaths sync segment with meta",
+	setLastWrittenTimeDur := time.Since(stageStart)
+
+	logger.Info(ctx, "SaveBinlogPaths done",
+		mlog.Duration("total", time.Since(start)),
+		mlog.Duration("validate", validateDur),
+		mlog.Duration("buildMutations", buildMutationsDur),
+		mlog.Duration("updateSegmentsInfo", updateSegmentsInfoDur),
+		mlog.Duration("setLastWrittenTime", setLastWrittenTimeDur),
 		mlog.Any("checkpoints", req.GetCheckPoints()),
 		mlog.Strings("binlogs", stringifyBinlogs(req.GetField2BinlogPaths())),
 		mlog.Strings("deltalogs", stringifyBinlogs(req.GetDeltalogs())),
@@ -690,7 +812,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// Validate manifest segment after update
 	if segment := s.meta.GetSegment(ctx, req.GetSegmentID()); segment != nil {
 		if msg := ValidateManifestSegment(segment); msg != "" {
-			mlog.Warn(context.TODO(), "manifest segment validation warning", mlog.String("detail", msg))
+			logger.Warn(ctx, "manifest segment validation warning", mlog.String("detail", msg))
 		}
 	}
 
@@ -1447,7 +1569,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 			unflushed = append(unflushed, sid)
 		}
 		if len(unflushed) != 0 {
-			log.RatedInfo(ctx, rate.Limit(10), "DataCoord receive GetFlushState request, Flushed is false", mlog.Int64s("unflushed", unflushed), mlog.Int("len", len(unflushed)))
+			mlog.RatedInfo(ctx, rate.Limit(10), "DataCoord receive GetFlushState request, Flushed is false", mlog.Int64s("unflushed", unflushed), mlog.Int("len", len(unflushed)))
 			resp.Flushed = false
 
 			return resp, nil
@@ -1476,7 +1598,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 		if cp == nil || cpTs < req.GetFlushTs() {
 			resp.Flushed = false
 
-			log.RatedInfo(ctx, rate.Limit(10), "GetFlushState failed, channel unflushed", mlog.String("channel", channel.GetName()),
+			mlog.RatedInfo(ctx, rate.Limit(10), "GetFlushState failed, channel unflushed", mlog.String("channel", channel.GetName()),
 				mlog.Time("CP", tsoutil.PhysicalTime(cpTs)),
 				mlog.Duration("lag", tsoutil.PhysicalTime(req.GetFlushTs()).Sub(tsoutil.PhysicalTime(cpTs))))
 			return resp, nil
@@ -2961,17 +3083,36 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	err := s.importMeta.HandleCommitVchannel(ctx, jobID, vchannel, func() error {
 		// Only access s.meta (segment meta) here, NOT s.importMeta.
 		// Set CommitTimestamp and clear isImporting in a single call per segment.
-		ops := make([]UpdateOperator, 0, len(segIDs)*2)
+		mutations := make(map[int64][]MutateFunc, len(segIDs))
 		for _, segID := range segIDs {
-			ops = append(ops,
-				UpdateCommitTimestamp(segID, commitTs),
-				UpdateIsImporting(segID, false),
-			)
+			segID := segID
+			mutations[segID] = []MutateFunc{func(seg *datapb.SegmentInfo) bool {
+				if commitTs != 0 {
+					var maxTsTo uint64
+					for _, fieldBinlogs := range seg.GetBinlogs() {
+						for _, l := range fieldBinlogs.GetBinlogs() {
+							if l.GetTimestampTo() > maxTsTo {
+								maxTsTo = l.GetTimestampTo()
+							}
+						}
+					}
+					if commitTs < maxTsTo {
+						mlog.Error(ctx, "meta update: update commit timestamp rejected - commit_ts < max(binlog.TimestampTo)",
+							mlog.FieldSegmentID(segID),
+							mlog.Uint64("commitTs", commitTs),
+							mlog.Uint64("maxBinlogTimestampTo", maxTsTo))
+						return false
+					}
+				}
+				seg.CommitTimestamp = commitTs
+				seg.IsImporting = false
+				return true
+			}}
 		}
-		if len(ops) == 0 {
+		if len(mutations) == 0 {
 			return nil
 		}
-		return s.meta.UpdateSegmentsInfo(ctx, ops...)
+		return s.meta.UpdateSegmentsInfo(ctx, mutations)
 	})
 	if err != nil {
 		return merr.Status(err), nil

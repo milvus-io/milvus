@@ -223,6 +223,39 @@ func (_c *MockWriteBuffer_EvictBuffer_Call) RunAndReturn(run func(...SyncPolicy)
 	return _c
 }
 
+// EvictOldestBuffers provides a mock function with given fields: num
+func (_m *MockWriteBuffer) EvictOldestBuffers(num int) {
+	_m.Called(num)
+}
+
+// MockWriteBuffer_EvictOldestBuffers_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EvictOldestBuffers'
+type MockWriteBuffer_EvictOldestBuffers_Call struct {
+	*mock.Call
+}
+
+// EvictOldestBuffers is a helper method to define mock.On call
+//   - num int
+func (_e *MockWriteBuffer_Expecter) EvictOldestBuffers(num interface{}) *MockWriteBuffer_EvictOldestBuffers_Call {
+	return &MockWriteBuffer_EvictOldestBuffers_Call{Call: _e.mock.On("EvictOldestBuffers", num)}
+}
+
+func (_c *MockWriteBuffer_EvictOldestBuffers_Call) Run(run func(num int)) *MockWriteBuffer_EvictOldestBuffers_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int))
+	})
+	return _c
+}
+
+func (_c *MockWriteBuffer_EvictOldestBuffers_Call) Return() *MockWriteBuffer_EvictOldestBuffers_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockWriteBuffer_EvictOldestBuffers_Call) RunAndReturn(run func(int)) *MockWriteBuffer_EvictOldestBuffers_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCheckpoint provides a mock function with no fields
 func (_m *MockWriteBuffer) GetCheckpoint() *msgpb.MsgPosition {
 	ret := _m.Called()

@@ -133,8 +133,14 @@ func (s *importInspector) processFailed(task ImportTask) {
 		statsSegmentIDs := task.(*importTask).GetSortedSegmentIDs()
 		segments := append(originSegmentIDs, statsSegmentIDs...)
 		for _, segment := range segments {
-			op := UpdateStatusOperator(segment, commonpb.SegmentState_Dropped)
-			err := s.meta.UpdateSegmentsInfo(s.ctx, op)
+			mutations := map[int64][]MutateFunc{
+				segment: {func(seg *datapb.SegmentInfo) bool {
+					seg.State = commonpb.SegmentState_Dropped
+					seg.DroppedAt = uint64(time.Now().UnixNano())
+					return true
+				}},
+			}
+			err := s.meta.UpdateSegmentsInfo(s.ctx, mutations)
 			if err != nil {
 				mlog.Warn(s.ctx, "drop import segment failed", WrapTaskLog(task, mlog.Int64("segment", segment), mlog.Err(err))...)
 				return

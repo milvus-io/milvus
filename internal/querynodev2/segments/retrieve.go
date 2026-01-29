@@ -19,6 +19,7 @@ package segments
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
@@ -44,12 +45,22 @@ type RetrieveSegmentResult struct {
 func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, req *querypb.QueryRequest) ([]RetrieveSegmentResult, error) {
 	resultCh := make(chan RetrieveSegmentResult, len(segments))
 
-	plan.SetIgnoreNonPk(shouldEnableIgnoreNonPk(req, len(segments), plan.ShouldIgnoreNonPk()))
+	ignoreNonPk := shouldEnableIgnoreNonPk(req, len(segments), plan.ShouldIgnoreNonPk())
+	plan.SetIgnoreNonPk(ignoreNonPk)
 
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
 		label = metrics.GrowingSegmentLabel
 	}
+
+	fanoutStart := time.Now()
+	logger := mlog.With(
+		mlog.String("segmentType", segType.String()),
+		mlog.Int("segmentNum", len(segments)),
+		mlog.String("queryLabel", contextutil.GetQueryLabel(ctx)),
+		mlog.Bool("ignoreNonPk", ignoreNonPk),
+		mlog.Int64("limit", req.GetReq().GetLimit()))
+	logger.Info(ctx, "retrieve segments fanout start")
 
 	retriever := func(ctx context.Context, s Segment) error {
 		tr := timerecord.NewTimeRecorder("retrieveOnSegments")
@@ -89,6 +100,9 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 	err := doOnSegments(ctx, mgr, segments, retriever)
 	close(resultCh)
 	if err != nil {
+		logger.Warn(ctx, "retrieve segments fanout failed",
+			mlog.Duration("duration", time.Since(fanoutStart)),
+			mlog.Err(err))
 		return nil, err
 	}
 
@@ -96,6 +110,9 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 	for r := range resultCh {
 		results = append(results, r)
 	}
+	logger.Info(ctx, "retrieve segments fanout done",
+		mlog.Duration("duration", time.Since(fanoutStart)),
+		mlog.Int("resultNum", len(results)))
 	return results, nil
 }
 
@@ -175,9 +192,17 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 
 	segIDs := req.GetSegmentIDs()
 	collID := req.Req.GetCollectionID()
+	logger := mlog.With(
+		mlog.Int64("collectionID", collID),
+		mlog.Int64s("partitionIDs", req.GetReq().GetPartitionIDs()),
+		mlog.Int64s("segmentIDs", segIDs),
+		mlog.String("scope", req.GetScope().String()),
+		mlog.String("queryLabel", contextutil.GetQueryLabel(ctx)))
+	logger.Debug(ctx, "retrieve on segments")
 
-	mlog.Debug(ctx, "retrieve on segments", mlog.Int64s("segmentIDs", segIDs), mlog.FieldCollectionID(collID))
-
+	totalStart := time.Now()
+	validateStart := time.Now()
+	logger.Info(ctx, "retrieve validate start")
 	if req.GetScope() == querypb.DataScope_Historical {
 		SegType = SegmentTypeSealed
 		retrieveSegments, err = validateOnHistorical(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
@@ -187,10 +212,30 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 	}
 
 	if err != nil {
+		logger.Warn(ctx, "retrieve validate failed",
+			mlog.Duration("duration", time.Since(validateStart)),
+			mlog.Err(err))
 		return nil, retrieveSegments, err
 	}
+	logger.Info(ctx, "retrieve validate done",
+		mlog.Duration("duration", time.Since(validateStart)),
+		mlog.Int("validatedSegmentNum", len(retrieveSegments)))
 
+	retrieveStart := time.Now()
 	result, err := retrieveOnSegments(ctx, manager, retrieveSegments, SegType, plan, req)
+	if err != nil {
+		logger.Warn(ctx, "retrieve failed",
+			mlog.Duration("retrieveDuration", time.Since(retrieveStart)),
+			mlog.Duration("totalDuration", time.Since(totalStart)),
+			mlog.Int("validatedSegmentNum", len(retrieveSegments)),
+			mlog.Err(err))
+		return result, retrieveSegments, err
+	}
+	logger.Info(ctx, "retrieve done",
+		mlog.Duration("retrieveDuration", time.Since(retrieveStart)),
+		mlog.Duration("totalDuration", time.Since(totalStart)),
+		mlog.Int("validatedSegmentNum", len(retrieveSegments)),
+		mlog.Int("resultNum", len(result)))
 	return result, retrieveSegments, err
 }
 

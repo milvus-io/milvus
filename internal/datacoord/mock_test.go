@@ -93,11 +93,15 @@ func (mm *metaMemoryKV) CompareVersionAndSwap(ctx context.Context, key string, v
 	panic("implement me")
 }
 
+func newTestSegmentPersist() OptimisticTxnPersist[string, *datapb.SegmentInfo] {
+	return NewOptimisticTxnMemoryPersist[string, *datapb.SegmentInfo](&SegmentInfoMarshaler{})
+}
+
 func newMemoryMeta(t *testing.T) (*meta, error) {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	return newMeta(context.TODO(), catalog, nil, broker)
+	return newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist())
 }
 
 func newMetaWithEtcd(t *testing.T, rootPath string) (*meta, error) {
@@ -106,7 +110,8 @@ func newMetaWithEtcd(t *testing.T, rootPath string) (*meta, error) {
 	catalog := datacoord.NewCatalog(catalogKV, "", rootPath)
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	return newMeta(context.TODO(), catalog, nil, broker)
+	segmentPersist := NewOptimisticTxnEtcdPersist[string, *datapb.SegmentInfo](etcdCli, &SegmentInfoMarshaler{})
+	return newMeta(context.TODO(), catalog, nil, broker, segmentPersist, rootPath)
 }
 
 func newMockAllocator(t *testing.T) *allocator.MockAllocator {
@@ -1169,4 +1174,14 @@ func newMockHandlerWithMeta(meta *meta) *mockHandler {
 	return &mockHandler{
 		meta: meta,
 	}
+}
+
+// newTestCachedSegmentsInfo creates a *CachedSegmentsInfo pre-populated with the given segments.
+// This replaces the old pattern of &SegmentsInfo{segments: map[int64]*SegmentInfo{...}} in tests.
+func newTestCachedSegmentsInfo(segs map[int64]*SegmentInfo) *CachedSegmentsInfo {
+	s := NewCachedSegmentsInfo()
+	for id, seg := range segs {
+		s.SetSegment(id, seg, 0)
+	}
+	return s
 }

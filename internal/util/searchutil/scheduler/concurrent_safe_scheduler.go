@@ -297,7 +297,16 @@ func (s *scheduler) exec() {
 			continue
 		}
 
+		submitTime := time.Now()
+		poolName := "qn_read_pool"
+		if t.IsGpuIndex() {
+			poolName = "qn_gpu_read_pool"
+		}
 		s.getPool(t).Submit(func() (any, error) {
+			mlog.Info(context.TODO(), "qn scheduler pool task start",
+				mlog.String("pool", poolName),
+				mlog.Duration("queueDuration", time.Since(submitTime)),
+				mlog.Int64("nq", t.NQ()))
 			// Update concurrency metric and notify task done.
 			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(paramtable.GetStringNodeID()).Inc()
 			collector.Counter.Inc(metricsinfo.ExecuteQueueType)

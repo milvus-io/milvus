@@ -1,0 +1,267 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1494" height="512" viewBox="0 0 1494 512">
+<defs>
+  <style>
+    .bg { fill: #fbfbfd; }
+    .title { font: 700 22px Inter, Arial, sans-serif; fill: #202124; }
+    .subtitle { font: 13px Inter, Arial, sans-serif; fill: #5f6368; }
+    .axis { font: 12px Inter, Arial, sans-serif; fill: #5f6368; }
+    .seg { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #2f3437; }
+    .small { font: 11px Inter, Arial, sans-serif; fill: #5f6368; }
+    .barlabel { font: 10px Inter, Arial, sans-serif; fill: white; font-weight: 650; pointer-events: none; }
+    .grid { stroke: #e3e6ea; stroke-width: 1; }
+    .grid-strong { stroke: #cbd1d8; stroke-width: 1; }
+    .rowline { stroke: #edf0f3; stroke-width: 1; }
+    .search-line { stroke: #1f2937; stroke-width: 2; stroke-dasharray: 6 5; }
+    .phase-line { stroke: #a9b0b8; stroke-width: 1; stroke-dasharray: 3 5; }
+  </style>
+</defs>
+<rect class="bg" x="0" y="0" width="1494" height="512"/>
+<text class="title" x="28" y="34">Segment Search Timeline</text>
+<text class="subtitle" x="28" y="57">only stages &gt; 0ms · rows sorted by initial search finish</text>
+<rect x="28" y="78" width="14" height="14" rx="3" fill="#4e79a7"/>
+<text class="small" x="48" y="89">idx102</text>
+<rect x="140" y="78" width="14" height="14" rx="3" fill="#f28e2b"/>
+<text class="small" x="160" y="89">raw101/cg_1</text>
+<rect x="282" y="78" width="14" height="14" rx="3" fill="#59a14f"/>
+<text class="small" x="302" y="89">cg_0</text>
+<rect x="394" y="78" width="14" height="14" rx="3" fill="#e15759"/>
+<text class="small" x="414" y="89">idx105/vector</text>
+<rect x="532" y="78" width="14" height="14" rx="3" fill="#bab0ac"/>
+<text class="small" x="552" y="89">fill pks</text>
+<rect x="644" y="78" width="14" height="14" rx="3" fill="#b07aa1"/>
+<text class="small" x="664" y="89">BF lazy</text>
+<line class="grid-strong" x1="190.0" y1="84" x2="190.0" y2="428"/>
+<text class="axis" x="190.0" y="74" text-anchor="middle">0ms</text>
+<line class="grid" x1="276.9" y1="84" x2="276.9" y2="428"/>
+<line class="grid-strong" x1="363.8" y1="84" x2="363.8" y2="428"/>
+<text class="axis" x="363.8" y="74" text-anchor="middle">200ms</text>
+<line class="grid" x1="450.7" y1="84" x2="450.7" y2="428"/>
+<line class="grid-strong" x1="537.6" y1="84" x2="537.6" y2="428"/>
+<text class="axis" x="537.6" y="74" text-anchor="middle">400ms</text>
+<line class="grid" x1="624.5" y1="84" x2="624.5" y2="428"/>
+<line class="grid-strong" x1="711.4" y1="84" x2="711.4" y2="428"/>
+<text class="axis" x="711.4" y="74" text-anchor="middle">600ms</text>
+<line class="grid" x1="798.3" y1="84" x2="798.3" y2="428"/>
+<line class="grid-strong" x1="885.2" y1="84" x2="885.2" y2="428"/>
+<text class="axis" x="885.2" y="74" text-anchor="middle">800ms</text>
+<line class="grid" x1="972.1" y1="84" x2="972.1" y2="428"/>
+<line class="grid-strong" x1="1059.0" y1="84" x2="1059.0" y2="428"/>
+<text class="axis" x="1059.0" y="74" text-anchor="middle">1000ms</text>
+<line class="grid" x1="1145.9" y1="84" x2="1145.9" y2="428"/>
+<line class="grid-strong" x1="1232.8" y1="84" x2="1232.8" y2="428"/>
+<text class="axis" x="1232.8" y="74" text-anchor="middle">1200ms</text>
+<line class="grid" x1="1319.7" y1="84" x2="1319.7" y2="428"/>
+<line class="grid-strong" x1="1406.6" y1="84" x2="1406.6" y2="428"/>
+<text class="axis" x="1406.6" y="74" text-anchor="middle">1400ms</text>
+<line class="search-line" x1="874.8" y1="56" x2="874.8" y2="436"/>
+<text class="axis" x="880.8" y="53" font-weight="700">search done +788ms</text>
+<line class="phase-line" x1="874.8" y1="84" x2="874.8" y2="436"><title>reduce done +788ms (2ms)</title></line>
+<line class="rowline" x1="28" y1="117" x2="1466" y2="117"/>
+<text class="seg" x="28" y="107">466287752452167576</text>
+<text class="small" x="150" y="107">end 475ms </text>
+<rect x="191.7" y="92.0" width="120.8" height="20" rx="4" fill="#4e79a7">
+<title>466287752452167576 · idx102: 2ms → 141ms (139ms)</title></rect>
+<text class="barlabel" x="252.1" y="106.0" text-anchor="middle">i102</text>
+<text class="small" x="252.1" y="123.0" text-anchor="middle">139ms </text>
+<rect x="313.4" y="92.0" width="49.5" height="20" rx="4" fill="#f28e2b">
+<title>466287752452167576 · raw101/cg_1: 142ms → 199ms (57ms, cid size 2)</title></rect>
+<text class="barlabel" x="338.2" y="106.0" text-anchor="middle">raw</text>
+<rect x="364.7" y="92.0" width="60.0" height="20" rx="4" fill="#59a14f">
+<title>466287752452167576 · cg_0: 201ms → 270ms (69ms, cid size 1)</title></rect>
+<text class="barlabel" x="394.6" y="106.0" text-anchor="middle">cg_0</text>
+<rect x="425.5" y="92.0" width="177.3" height="20" rx="4" fill="#e15759">
+<title>466287752452167576 · idx105/vector: 271ms → 475ms (204ms)</title></rect>
+<text class="barlabel" x="514.1" y="106.0" text-anchor="middle">i105</text>
+<text class="small" x="514.1" y="123.0" text-anchor="middle">204ms </text>
+<rect x="930.8" y="92.0" width="43.9" height="20" rx="4" fill="#b07aa1">
+<title>466287752452167576 · BF lazy: 852.5ms → 903ms (50.5ms)</title></rect>
+<text class="barlabel" x="952.8" y="106.0" text-anchor="middle">BF lazy</text>
+<line class="rowline" x1="28" y1="151" x2="1466" y2="151"/>
+<text class="seg" x="28" y="141">466287752450964354</text>
+<text class="small" x="150" y="141">end 506ms </text>
+<rect x="191.7" y="126.0" width="142.5" height="20" rx="4" fill="#4e79a7">
+<title>466287752450964354 · idx102: 2ms → 166ms (164ms)</title></rect>
+<text class="barlabel" x="263.0" y="140.0" text-anchor="middle">i102</text>
+<text class="small" x="263.0" y="157.0" text-anchor="middle">164ms </text>
+<rect x="335.1" y="126.0" width="52.1" height="20" rx="4" fill="#f28e2b">
+<title>466287752450964354 · raw101/cg_1: 167ms → 227ms (60ms, cid size 2)</title></rect>
+<text class="barlabel" x="361.2" y="140.0" text-anchor="middle">raw</text>
+<rect x="389.0" y="126.0" width="45.2" height="20" rx="4" fill="#59a14f">
+<title>466287752450964354 · cg_0: 229ms → 281ms (52ms, cid size 1)</title></rect>
+<text class="barlabel" x="411.6" y="140.0" text-anchor="middle">cg_0</text>
+<rect x="435.1" y="126.0" width="194.7" height="20" rx="4" fill="#e15759">
+<title>466287752450964354 · idx105/vector: 282ms → 506ms (224ms)</title></rect>
+<text class="barlabel" x="532.4" y="140.0" text-anchor="middle">i105</text>
+<text class="small" x="532.4" y="157.0" text-anchor="middle">224ms </text>
+<rect x="1020.1" y="126.0" width="40.6" height="20" rx="4" fill="#b07aa1">
+<title>466287752450964354 · BF lazy: 955.3ms → 1002ms (46.7ms)</title></rect>
+<text class="barlabel" x="1040.4" y="140.0" text-anchor="middle">BF lazy</text>
+<line class="rowline" x1="28" y1="185" x2="1466" y2="185"/>
+<text class="seg" x="28" y="175">466287752448558306</text>
+<text class="small" x="150" y="175">end 529ms </text>
+<rect x="190.9" y="160.0" width="147.7" height="20" rx="4" fill="#4e79a7">
+<title>466287752448558306 · idx102: 1ms → 171ms (170ms)</title></rect>
+<text class="barlabel" x="264.7" y="174.0" text-anchor="middle">i102</text>
+<text class="small" x="264.7" y="191.0" text-anchor="middle">170ms </text>
+<rect x="339.5" y="160.0" width="52.1" height="20" rx="4" fill="#f28e2b">
+<title>466287752448558306 · raw101/cg_1: 172ms → 232ms (60ms, cid size 2)</title></rect>
+<text class="barlabel" x="365.5" y="174.0" text-anchor="middle">raw</text>
+<rect x="392.5" y="160.0" width="57.4" height="20" rx="4" fill="#59a14f">
+<title>466287752448558306 · cg_0: 233ms → 299ms (66ms, cid size 1)</title></rect>
+<text class="barlabel" x="421.2" y="174.0" text-anchor="middle">cg_0</text>
+<rect x="450.7" y="160.0" width="199.0" height="20" rx="4" fill="#e15759">
+<title>466287752448558306 · idx105/vector: 300ms → 529ms (229ms)</title></rect>
+<text class="barlabel" x="550.2" y="174.0" text-anchor="middle">i105</text>
+<text class="small" x="550.2" y="191.0" text-anchor="middle">229ms </text>
+<rect x="1092.3" y="160.0" width="46.6" height="20" rx="4" fill="#b07aa1">
+<title>466287752448558306 · BF lazy: 1038.3ms → 1092ms (53.7ms)</title></rect>
+<text class="barlabel" x="1115.6" y="174.0" text-anchor="middle">BF lazy</text>
+<line class="rowline" x1="28" y1="219" x2="1466" y2="219"/>
+<text class="seg" x="28" y="209">466287752449159579</text>
+<text class="small" x="150" y="209">end 535ms </text>
+<rect x="190.9" y="194.0" width="133.8" height="20" rx="4" fill="#4e79a7">
+<title>466287752449159579 · idx102: 1ms → 155ms (154ms)</title></rect>
+<text class="barlabel" x="257.8" y="208.0" text-anchor="middle">i102</text>
+<text class="small" x="257.8" y="225.0" text-anchor="middle">154ms </text>
+<rect x="325.6" y="194.0" width="70.4" height="20" rx="4" fill="#f28e2b">
+<title>466287752449159579 · raw101/cg_1: 156ms → 237ms (81ms, cid size 2)</title></rect>
+<text class="barlabel" x="360.8" y="208.0" text-anchor="middle">cg_1</text>
+<text class="small" x="360.8" y="225.0" text-anchor="middle">81ms </text>
+<rect x="397.7" y="194.0" width="55.6" height="20" rx="4" fill="#59a14f">
+<title>466287752449159579 · cg_0: 239ms → 303ms (64ms, cid size 1)</title></rect>
+<text class="barlabel" x="425.5" y="208.0" text-anchor="middle">cg_0</text>
+<rect x="454.2" y="194.0" width="200.7" height="20" rx="4" fill="#e15759">
+<title>466287752449159579 · idx105/vector: 304ms → 535ms (231ms)</title></rect>
+<text class="barlabel" x="554.5" y="208.0" text-anchor="middle">i105</text>
+<text class="small" x="554.5" y="225.0" text-anchor="middle">231ms </text>
+<rect x="1139.0" y="194.0" width="38.2" height="20" rx="4" fill="#b07aa1">
+<title>466287752449159579 · BF lazy: 1092.1ms → 1136ms (43.9ms)</title></rect>
+<text class="barlabel" x="1158.1" y="208.0" text-anchor="middle">BF lazy</text>
+<line class="rowline" x1="28" y1="253" x2="1466" y2="253"/>
+<text class="seg" x="28" y="243">466287752449761637</text>
+<text class="small" x="150" y="243">end 539ms </text>
+<rect x="191.7" y="228.0" width="165.1" height="20" rx="4" fill="#4e79a7">
+<title>466287752449761637 · idx102: 2ms → 192ms (190ms)</title></rect>
+<text class="barlabel" x="274.3" y="242.0" text-anchor="middle">i102</text>
+<text class="small" x="274.3" y="259.0" text-anchor="middle">190ms </text>
+<rect x="357.7" y="228.0" width="89.5" height="20" rx="4" fill="#f28e2b">
+<title>466287752449761637 · raw101/cg_1: 193ms → 296ms (103ms, cid size 2)</title></rect>
+<text class="barlabel" x="402.5" y="242.0" text-anchor="middle">cg_1</text>
+<text class="small" x="402.5" y="259.0" text-anchor="middle">103ms </text>
+<rect x="449.0" y="228.0" width="49.5" height="20" rx="4" fill="#59a14f">
+<title>466287752449761637 · cg_0: 298ms → 355ms (57ms, cid size 1)</title></rect>
+<text class="barlabel" x="473.7" y="242.0" text-anchor="middle">cg_0</text>
+<rect x="499.4" y="228.0" width="159.0" height="20" rx="4" fill="#e15759">
+<title>466287752449761637 · idx105/vector: 356ms → 539ms (183ms)</title></rect>
+<text class="barlabel" x="578.9" y="242.0" text-anchor="middle">i105</text>
+<text class="small" x="578.9" y="259.0" text-anchor="middle">183ms </text>
+<rect x="907.0" y="228.0" width="23.4" height="20" rx="4" fill="#b07aa1">
+<title>466287752449761637 · BF lazy: 825.1ms → 852ms (26.9ms)</title></rect>
+<line class="rowline" x1="28" y1="287" x2="1466" y2="287"/>
+<text class="seg" x="28" y="277">466287752451565564</text>
+<text class="small" x="150" y="277">end 559ms </text>
+<rect x="190.9" y="262.0" width="114.7" height="20" rx="4" fill="#4e79a7">
+<title>466287752451565564 · idx102: 1ms → 133ms (132ms)</title></rect>
+<text class="barlabel" x="248.2" y="276.0" text-anchor="middle">i102</text>
+<text class="small" x="248.2" y="293.0" text-anchor="middle">132ms </text>
+<rect x="306.4" y="262.0" width="68.7" height="20" rx="4" fill="#f28e2b">
+<title>466287752451565564 · raw101/cg_1: 134ms → 213ms (79ms, cid size 2)</title></rect>
+<text class="barlabel" x="340.8" y="276.0" text-anchor="middle">raw</text>
+<text class="small" x="340.8" y="293.0" text-anchor="middle">79ms </text>
+<rect x="376.8" y="262.0" width="52.1" height="20" rx="4" fill="#59a14f">
+<title>466287752451565564 · cg_0: 215ms → 275ms (60ms, cid size 1)</title></rect>
+<text class="barlabel" x="402.9" y="276.0" text-anchor="middle">cg_0</text>
+<rect x="429.8" y="262.0" width="245.9" height="20" rx="4" fill="#e15759">
+<title>466287752451565564 · idx105/vector: 276ms → 559ms (283ms)</title></rect>
+<text class="barlabel" x="552.8" y="276.0" text-anchor="middle">i105</text>
+<text class="small" x="552.8" y="293.0" text-anchor="middle">283ms </text>
+<rect x="1177.8" y="262.0" width="88.9" height="20" rx="4" fill="#b07aa1">
+<title>466287752451565564 · BF lazy: 1136.7ms → 1239ms (102.3ms)</title></rect>
+<text class="barlabel" x="1222.2" y="276.0" text-anchor="middle">BF lazy</text>
+<text class="small" x="1222.2" y="293.0" text-anchor="middle">102.3ms </text>
+<line class="rowline" x1="28" y1="321" x2="1466" y2="321"/>
+<text class="seg" x="28" y="311">466287752449760807</text>
+<text class="small" x="150" y="311">end 609ms </text>
+<rect x="191.7" y="296.0" width="119.1" height="20" rx="4" fill="#4e79a7">
+<title>466287752449760807 · idx102: 2ms → 139ms (137ms)</title></rect>
+<text class="barlabel" x="251.3" y="310.0" text-anchor="middle">i102</text>
+<text class="small" x="251.3" y="327.0" text-anchor="middle">137ms </text>
+<rect x="310.8" y="296.0" width="115.6" height="20" rx="4" fill="#f28e2b">
+<title>466287752449760807 · raw101/cg_1: 139ms → 272ms (133ms, cid size 2)</title></rect>
+<text class="barlabel" x="368.6" y="310.0" text-anchor="middle">cg_1</text>
+<text class="small" x="368.6" y="327.0" text-anchor="middle">133ms </text>
+<rect x="429.0" y="296.0" width="52.1" height="20" rx="4" fill="#59a14f">
+<title>466287752449760807 · cg_0: 275ms → 335ms (60ms, cid size 1)</title></rect>
+<text class="barlabel" x="455.0" y="310.0" text-anchor="middle">cg_0</text>
+<rect x="481.1" y="296.0" width="238.1" height="20" rx="4" fill="#e15759">
+<title>466287752449760807 · idx105/vector: 335ms → 609ms (274ms)</title></rect>
+<text class="barlabel" x="600.2" y="310.0" text-anchor="middle">i105</text>
+<text class="small" x="600.2" y="327.0" text-anchor="middle">274ms </text>
+<rect x="873.9" y="296.0" width="2.0" height="20" rx="4" fill="#bab0ac">
+<title>466287752449760807 · fill pks: 787ms → 788ms (1ms)</title></rect>
+<rect x="974.3" y="296.0" width="45.6" height="20" rx="4" fill="#b07aa1">
+<title>466287752449760807 · BF lazy: 902.5ms → 955ms (52.5ms)</title></rect>
+<text class="barlabel" x="997.1" y="310.0" text-anchor="middle">BF lazy</text>
+<line class="rowline" x1="28" y1="355" x2="1466" y2="355"/>
+<text class="seg" x="28" y="345">466287752450363029</text>
+<text class="small" x="150" y="345">end 609ms </text>
+<rect x="190.9" y="330.0" width="146.0" height="20" rx="4" fill="#4e79a7">
+<title>466287752450363029 · idx102: 1ms → 169ms (168ms)</title></rect>
+<text class="barlabel" x="263.9" y="344.0" text-anchor="middle">i102</text>
+<text class="small" x="263.9" y="361.0" text-anchor="middle">168ms </text>
+<rect x="337.7" y="330.0" width="59.1" height="20" rx="4" fill="#f28e2b">
+<title>466287752450363029 · raw101/cg_1: 170ms → 238ms (68ms, cid size 2)</title></rect>
+<text class="barlabel" x="367.3" y="344.0" text-anchor="middle">raw</text>
+<rect x="398.6" y="330.0" width="73.0" height="20" rx="4" fill="#59a14f">
+<title>466287752450363029 · cg_0: 240ms → 324ms (84ms, cid size 1)</title></rect>
+<text class="barlabel" x="435.1" y="344.0" text-anchor="middle">cg_0</text>
+<text class="small" x="435.1" y="361.0" text-anchor="middle">84ms </text>
+<rect x="472.4" y="330.0" width="246.8" height="20" rx="4" fill="#e15759">
+<title>466287752450363029 · idx105/vector: 325ms → 609ms (284ms)</title></rect>
+<text class="barlabel" x="595.8" y="344.0" text-anchor="middle">i105</text>
+<text class="small" x="595.8" y="361.0" text-anchor="middle">284ms </text>
+<rect x="1060.9" y="330.0" width="32.0" height="20" rx="4" fill="#b07aa1">
+<title>466287752450363029 · BF lazy: 1002.2ms → 1039ms (36.8ms)</title></rect>
+<line class="rowline" x1="28" y1="389" x2="1466" y2="389"/>
+<text class="seg" x="28" y="379">466287752447956955</text>
+<text class="small" x="150" y="379">end 624ms </text>
+<rect x="190.9" y="364.0" width="109.5" height="20" rx="4" fill="#4e79a7">
+<title>466287752447956955 · idx102: 1ms → 127ms (126ms)</title></rect>
+<text class="barlabel" x="245.6" y="378.0" text-anchor="middle">i102</text>
+<text class="small" x="245.6" y="395.0" text-anchor="middle">126ms </text>
+<rect x="301.2" y="364.0" width="53.0" height="20" rx="4" fill="#f28e2b">
+<title>466287752447956955 · raw101/cg_1: 128ms → 189ms (61ms, cid size 2)</title></rect>
+<text class="barlabel" x="327.7" y="378.0" text-anchor="middle">raw</text>
+<rect x="356.0" y="364.0" width="76.5" height="20" rx="4" fill="#59a14f">
+<title>466287752447956955 · cg_0: 191ms → 279ms (88ms, cid size 1)</title></rect>
+<text class="barlabel" x="394.2" y="378.0" text-anchor="middle">cg_0</text>
+<text class="small" x="394.2" y="395.0" text-anchor="middle">88ms </text>
+<rect x="433.3" y="364.0" width="298.9" height="20" rx="4" fill="#e15759">
+<title>466287752447956955 · idx105/vector: 280ms → 624ms (344ms)</title></rect>
+<text class="barlabel" x="582.8" y="378.0" text-anchor="middle">i105</text>
+<text class="small" x="582.8" y="395.0" text-anchor="middle">344ms </text>
+<rect x="876.0" y="364.0" width="30.9" height="20" rx="4" fill="#b07aa1">
+<title>466287752447956955 · BF lazy: 789.5ms → 825ms (35.5ms)</title></rect>
+<line class="rowline" x1="28" y1="423" x2="1466" y2="423"/>
+<text class="seg" x="28" y="413">466287752452166896</text>
+<text class="small" x="150" y="413">end 786ms </text>
+<rect x="191.7" y="398.0" width="266.8" height="20" rx="4" fill="#4e79a7">
+<title>466287752452166896 · idx102: 2ms → 309ms (307ms)</title></rect>
+<text class="barlabel" x="325.1" y="412.0" text-anchor="middle">i102</text>
+<text class="small" x="325.1" y="429.0" text-anchor="middle">307ms </text>
+<rect x="459.4" y="398.0" width="97.3" height="20" rx="4" fill="#f28e2b">
+<title>466287752452166896 · raw101/cg_1: 310ms → 422ms (112ms, cid size 2)</title></rect>
+<text class="barlabel" x="508.1" y="412.0" text-anchor="middle">cg_1</text>
+<text class="small" x="508.1" y="429.0" text-anchor="middle">112ms </text>
+<rect x="558.5" y="398.0" width="79.9" height="20" rx="4" fill="#59a14f">
+<title>466287752452166896 · cg_0: 424ms → 516ms (92ms, cid size 1)</title></rect>
+<text class="barlabel" x="598.4" y="412.0" text-anchor="middle">cg_0</text>
+<text class="small" x="598.4" y="429.0" text-anchor="middle">92ms </text>
+<rect x="639.3" y="398.0" width="233.8" height="20" rx="4" fill="#e15759">
+<title>466287752452166896 · idx105/vector: 517ms → 786ms (269ms)</title></rect>
+<text class="barlabel" x="756.2" y="412.0" text-anchor="middle">i105</text>
+<text class="small" x="756.2" y="429.0" text-anchor="middle">269ms </text>
+<rect x="1266.3" y="398.0" width="54.2" height="20" rx="4" fill="#b07aa1">
+<title>466287752452166896 · BF lazy: 1238.6ms → 1301ms (62.4ms)</title></rect>
+<text class="barlabel" x="1293.5" y="412.0" text-anchor="middle">BF lazy</text>
+</svg>

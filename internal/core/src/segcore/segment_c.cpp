@@ -16,6 +16,7 @@
 #include <folly/ExceptionWrapper.h>
 #include <folly/Try.h>
 #include <folly/futures/Promise.h>
+#include <chrono>
 #include <cstring>
 #include <cstdint>
 #include <exception>
@@ -37,7 +38,7 @@
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/ScopedTimer.h"
-#include "common/Tracer.h"
+#include "common/RequestTrace.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "common/common_type_c.h"
@@ -384,6 +385,7 @@ AsyncSearch(CTraceContext c_trace,
     auto plan = static_cast<milvus::query::Plan*>(c_plan);
     auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
         c_placeholder_group);
+    const auto submit_time = std::chrono::steady_clock::now();
     auto future = milvus::futures::Future<milvus::SearchResult>::async(
         milvus::futures::getSearchCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
@@ -396,12 +398,25 @@ AsyncSearch(CTraceContext c_trace,
          collection_ttl,
          entity_ttl_physical_time_us,
          filter_only,
-         enable_expr_cache](folly::CancellationToken cancel_token) {
+         enable_expr_cache,
+         submit_time](folly::CancellationToken cancel_token) {
             // save trace context into search_info
             auto& trace_ctx = plan->plan_node_->search_info_.trace_ctx_;
             trace_ctx.traceID = c_trace.traceID;
             trace_ctx.spanID = c_trace.spanID;
             trace_ctx.traceFlags = c_trace.traceFlags;
+            const auto executor_start = std::chrono::steady_clock::now();
+            const auto executor_queue_duration_us =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    executor_start - submit_time)
+                    .count();
+            LOG_INFO(
+                "[sss][www] milvus search task start, traceID: {}, pool: {}, "
+                "segment: {}, queueDurationUs: {}",
+                milvus::tracer::GetRequestTraceID(),
+                "MILVUS_SEARCH",
+                segment->get_segment_id(),
+                executor_queue_duration_us);
 
             auto span = milvus::tracer::StartSpan("SegCoreSearch", &trace_ctx);
             milvus::tracer::SetRootSpan(span);
@@ -490,6 +505,7 @@ AsyncRetrieve(CTraceContext c_trace,
               uint64_t entity_ttl_physical_time_us) {
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
+    const auto submit_time = std::chrono::steady_clock::now();
     auto future = milvus::futures::Future<CRetrieveResult>::async(
         milvus::futures::getSearchCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
@@ -501,9 +517,23 @@ AsyncRetrieve(CTraceContext c_trace,
          ignore_non_pk,
          consistency_level,
          collection_ttl,
-         entity_ttl_physical_time_us](folly::CancellationToken cancel_token) {
+         entity_ttl_physical_time_us,
+         submit_time](folly::CancellationToken cancel_token) {
             auto trace_ctx = milvus::tracer::TraceContext{
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
+            const auto executor_start = std::chrono::steady_clock::now();
+            const auto executor_queue_duration_us =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    executor_start - submit_time)
+                    .count();
+            LOG_INFO(
+                "[sss][www] milvus search task start, traceID: {}, pool: {}, "
+                "task: {}, segment: {}, queueDurationUs: {}",
+                milvus::tracer::GetRequestTraceID(),
+                "MILVUS_SEARCH",
+                "retrieve",
+                segment->get_segment_id(),
+                executor_queue_duration_us);
             milvus::tracer::AutoSpan span("SegCoreRetrieve", &trace_ctx, true);
 
             milvus::OpContext op_ctx(cancel_token);
@@ -536,13 +566,24 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
 
+    const auto submit_time = std::chrono::steady_clock::now();
     auto future = milvus::futures::Future<CRetrieveResult>::async(
         milvus::futures::getSearchCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
-        [c_trace, segment, plan, offsets, len](
+        [c_trace, segment, plan, offsets, len, submit_time](
             folly::CancellationToken cancel_token) {
             auto trace_ctx = milvus::tracer::TraceContext{
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
+            const auto executor_start = std::chrono::steady_clock::now();
+            const auto executor_queue_duration_us =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    executor_start - submit_time)
+                    .count();
+            LOG_INFO(
+                "[sss] retrieve by offsets executor task start, "
+                "segment: {}, executorQueueDurationUs: {}",
+                segment->get_segment_id(),
+                executor_queue_duration_us);
             milvus::tracer::AutoSpan span(
                 "SegCoreRetrieveByOffsets", &trace_ctx, true);
 

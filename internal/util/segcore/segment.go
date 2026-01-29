@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"strconv"
 	"strings"
 	"unsafe"
 
@@ -43,6 +44,13 @@ type (
 	SegmentType       = commonpb.SegmentState
 	CSegmentInterface C.CSegmentInterface
 )
+
+func requestIDFromMsgID(msgID int64) string {
+	if msgID == 0 {
+		return ""
+	}
+	return strconv.FormatInt(msgID, 10)
+}
 
 // CreateCSegmentRequest is a request to create a segment.
 type CreateCSegmentRequest struct {
@@ -139,7 +147,8 @@ func (s *cSegmentImpl) HasFieldData(fieldID int64) bool {
 // Search requests a search on the segment.
 // If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error) {
-	traceCtx := ParseCTraceContext(ctx)
+	traceCtx := ParseCTraceContextWithRequestID(ctx, requestIDFromMsgID(searchReq.msgID))
+	defer traceCtx.Close()
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(searchReq)
 
@@ -178,7 +187,8 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 
 // Retrieve retrieves entities from the segment.
 func (s *cSegmentImpl) Retrieve(ctx context.Context, plan *RetrievePlan) (*RetrieveResult, error) {
-	traceCtx := ParseCTraceContext(ctx)
+	traceCtx := ParseCTraceContextWithRequestID(ctx, requestIDFromMsgID(plan.msgID))
+	defer traceCtx.Close()
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(plan)
 
@@ -220,7 +230,8 @@ func (s *cSegmentImpl) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan
 		return nil, merr.WrapErrParameterInvalid("segment offsets", "empty offsets")
 	}
 
-	traceCtx := ParseCTraceContext(ctx)
+	traceCtx := ParseCTraceContextWithRequestID(ctx, requestIDFromMsgID(plan.msgID))
+	defer traceCtx.Close()
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(plan)
 	defer runtime.KeepAlive(plan.Offsets)
@@ -325,6 +336,7 @@ func (s *cSegmentImpl) LoadFieldData(ctx context.Context, request *LoadFieldData
 
 func (s *cSegmentImpl) Load(ctx context.Context) error {
 	traceCtx := ParseCTraceContext(ctx)
+	defer traceCtx.Close()
 	defer runtime.KeepAlive(traceCtx)
 
 	future := cgo.Async(ctx,
@@ -353,6 +365,7 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	}
 
 	traceCtx := ParseCTraceContext(ctx)
+	defer traceCtx.Close()
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(req)
 

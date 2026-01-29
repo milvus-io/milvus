@@ -24,7 +24,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -396,20 +395,18 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 	for _, replica := range replicas {
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
+		segmentRWNodes := typeutil.NewUniqueSet(utils.GetSegmentRWNodes(replica)...)
 		if req.GetToAllNodes() {
-			dstNodeSet.Insert(replica.GetRWNodes()...)
+			dstNodeSet.Insert(segmentRWNodes.Collect()...)
 		} else {
 			// check whether dstNode is healthy
 			if err := s.isStoppingNode(ctx, req.GetTargetNodeID()); err != nil {
 				err := merr.WrapErrNodeNotAvailable(srcNode, "the target node is invalid")
 				return merr.Status(err), nil
 			}
-			if streamingutil.IsStreamingServiceEnabled() {
-				sqn := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
-				if sqn.Contain(req.GetTargetNodeID()) {
-					return merr.Status(
-						merr.WrapErrParameterInvalidMsg("embedded query node in streaming node can't be the destination of transfer segment")), nil
-				}
+			if !segmentRWNodes.Contain(req.GetTargetNodeID()) {
+				return merr.Status(
+					merr.WrapErrNodeNotFound(req.GetTargetNodeID(), "destination node not found in segment-assignable nodes of the replica")), nil
 			}
 			dstNodeSet.Insert(req.GetTargetNodeID())
 		}

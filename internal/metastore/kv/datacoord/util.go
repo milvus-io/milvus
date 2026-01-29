@@ -335,6 +335,10 @@ func buildSegmentIndexCollectionPrefix(collectionID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d/", util.SegmentIndexPrefix, collectionID)
 }
 
+func buildSegmentIndexPartitionPrefix(collectionID, partitionID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d/", util.SegmentIndexPrefix, collectionID, partitionID)
+}
+
 func buildCollectionPrefix(collectionID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d/", SegmentPrefix, collectionID)
 }

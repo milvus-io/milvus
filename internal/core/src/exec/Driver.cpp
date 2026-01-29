@@ -21,12 +21,14 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <exception>
 #include <memory>
 #include <string>
 
 #include "common/EasyAssert.h"
 #include "common/Exception.h"
+#include "common/RequestTrace.h"
 #include "common/Tracer.h"
 #include "common/protobuf_utils.h"
 #include "exec/QueryContext.h"
@@ -252,6 +254,7 @@ Driver::Close() {
 RowVectorPtr
 Driver::Next(std::shared_ptr<BlockingState>& blocking_state) {
     auto self = shared_from_this();
+    std::call_once(self->once_, [self]() { self->PrefetchAsync(); });
 
     RowVectorPtr result;
     auto stop = RunInternal(self, blocking_state, result);

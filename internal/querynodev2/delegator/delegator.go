@@ -29,6 +29,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
@@ -377,6 +378,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	}
 
 	if paramtable.Get().QueryNodeCfg.EnableSegmentFilter.GetAsBool() {
+		t1 := time.Now()
 		PruneSealedSegmentsByPKFilter(ctx,
 			req.GetReq().GetSerializedExprPlan(),
 			req.GetReq().GetPkFilter(),
@@ -384,6 +386,12 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 			req.GetReq().GetCollectionID(),
 			metrics.SearchLabel,
 		)
+		d := time.Since(t1)
+		log.Info("[sss] segment filter search",
+			zap.Int64("requestID", req.GetReq().GetBase().GetMsgID()),
+			zap.Stringer("traceID", trace.SpanFromContext(ctx).SpanContext().TraceID()),
+			zap.Any("partition", req.GetReq().PartitionIDs),
+			zap.Any("duration", d))
 	}
 
 	avgdl, skipSearch, err := sd.prepareSearchFunction(ctx, req.GetReq())

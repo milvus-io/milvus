@@ -31,7 +31,7 @@
 #include "common/OpContext.h"
 #include "common/QueryResult.h"
 #include "common/SystemProperty.h"
-#include "common/Tracer.h"
+#include "common/RequestTrace.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "expr/ITypeExpr.h"
@@ -53,7 +53,9 @@ void
 SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
                                           SearchResult& results,
                                           milvus::OpContext* op_ctx) const {
+    const auto t1 = std::chrono::high_resolution_clock::now();
     std::shared_lock lck(mutex_);
+    const auto fill_pks_start = std::chrono::high_resolution_clock::now();
     AssertInfo(plan, "empty plan");
     auto size = results.distances_.size();
     AssertInfo(results.seg_offsets_.size() == size,
@@ -77,6 +79,14 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
         local_ctx.cancellation_token = op_ctx->cancellation_token;
         local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
     }
+    auto trace_id = plan != nullptr && plan->plan_node_ != nullptr
+                        ? milvus::tracer::GetTraceIDAsHexStr(
+                              &plan->plan_node_->search_info_.trace_ctx_)
+                        : milvus::tracer::GetRequestTraceID(op_ctx);
+    if (trace_id.empty()) {
+        trace_id = milvus::tracer::GetRequestTraceID(op_ctx);
+    }
+    milvus::tracer::ScopedOpContextTraceID local_trace(&local_ctx, trace_id);
     auto field_data = bulk_subscript(
         &local_ctx, pk_field_id, results.seg_offsets_.data(), size);
     results.pk_type_ = DataType(field_data->type());
@@ -86,6 +96,18 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
         local_ctx.storage_usage.scanned_cold_bytes.load();
     results.search_storage_cost_.scanned_total_bytes +=
         local_ctx.storage_usage.scanned_total_bytes.load();
+    const auto t2 = std::chrono::high_resolution_clock::now();
+    double cost =
+        std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+    LOG_INFO(
+        "[sss] fill pks. traceID: {}, segment: {}, duration: {}, "
+        "acquirelockDuration: {}",
+        milvus::tracer::GetRequestTraceID(&local_ctx),
+        get_segment_id(),
+        cost,
+        std::chrono::duration_cast<std::chrono::milliseconds>(t2 -
+                                                              fill_pks_start)
+            .count());
 }
 
 void

@@ -24,7 +24,7 @@ inline std::shared_ptr<folly::CPUThreadPoolExecutor>&
 PrefetchThreadPool() {
     static std::shared_ptr<folly::CPUThreadPoolExecutor> pool =
         std::make_shared<folly::CPUThreadPoolExecutor>(
-            1,
+            24,
             folly::CPUThreadPoolExecutor::makeDefaultPriorityQueue(1),
             std::make_shared<folly::NamedThreadFactory>("MILVUS_PREFETCH_"));
     return pool;

@@ -151,7 +151,9 @@ set( CMAKE_BUILD_RPATH "${CMAKE_BINARY_DIR}/lib" )
 # **************************** Dependencies ****************************
 # Conan 2: CMakeToolchain sets CMAKE_PREFIX_PATH via toolchain file
 # CMakeDeps generates <pkg>-config.cmake files for find_package()
+set( CMAKE_FIND_PACKAGE_PREFER_CONFIG ON )
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR}/conan )
+list( APPEND CMAKE_PREFIX_PATH ${CMAKE_BINARY_DIR}/conan )
 
 find_package(Protobuf REQUIRED)
 find_package(Boost REQUIRED)

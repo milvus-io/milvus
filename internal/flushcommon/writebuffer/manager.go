@@ -27,7 +27,7 @@ type BufferManager interface {
 	// Register adds a WriteBuffer with provided schema & options.
 	Register(channel string, metacache metacache.MetaCache, opts ...WriteBufferOption) error
 	// CreateNewGrowingSegment notifies writeBuffer to create a new growing segment.
-	CreateNewGrowingSegment(ctx context.Context, channel string, partition int64, segmentID int64, schemaVersion int32) error
+	CreateNewGrowingSegment(ctx context.Context, channel string, partition int64, segmentID int64, startPos *msgpb.MsgPosition, schemaVersion int32) error
 	// SealSegments notifies writeBuffer corresponding to provided channel to seal segments.
 	// which will cause segment start flush procedure.
 	SealSegments(ctx context.Context, channel string, segmentIDs []int64) error
@@ -157,9 +157,10 @@ func (m *bufferManager) memoryCheck() {
 		}
 
 		if candidate != nil {
-			candidate.EvictBuffer(GetOldestBufferPolicy(paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()))
+			candidate.EvictOldestBuffers(paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt())
 			mlog.Info(context.TODO(), "notify writebuffer to sync",
-				mlog.String("channel", candiChan), mlog.Float64("bufferSize(MB)", logutil.ToMB(float64(candiSize))))
+				mlog.String("channel", candiChan),
+				mlog.Float64("bufferSize(MB)", logutil.ToMB(float64(candiSize))))
 		}
 	}
 }
@@ -185,7 +186,7 @@ func (m *bufferManager) Register(channel string, metacache metacache.MetaCache, 
 }
 
 // CreateNewGrowingSegment notifies writeBuffer to create a new growing segment.
-func (m *bufferManager) CreateNewGrowingSegment(ctx context.Context, channel string, partitionID int64, segmentID int64, schemaVersion int32) error {
+func (m *bufferManager) CreateNewGrowingSegment(ctx context.Context, channel string, partitionID int64, segmentID int64, startPos *msgpb.MsgPosition, schemaVersion int32) error {
 	buf, loaded := m.buffers.Get(channel)
 	if !loaded {
 		mlog.Warn(ctx, "write buffer not found when create new growing segment",
@@ -194,7 +195,7 @@ func (m *bufferManager) CreateNewGrowingSegment(ctx context.Context, channel str
 			mlog.FieldSegmentID(segmentID))
 		return merr.WrapErrChannelNotFound(channel)
 	}
-	buf.CreateNewGrowingSegment(partitionID, segmentID, nil, schemaVersion)
+	buf.CreateNewGrowingSegment(partitionID, segmentID, startPos, schemaVersion)
 	return nil
 }
 

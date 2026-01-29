@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1494" height="512" viewBox="0 0 1494 512">
+<defs>
+  <style>
+    .bg { fill: #fbfbfd; }
+    .title { font: 700 22px Inter, Arial, sans-serif; fill: #202124; }
+    .subtitle { font: 13px Inter, Arial, sans-serif; fill: #5f6368; }
+    .axis { font: 12px Inter, Arial, sans-serif; fill: #5f6368; }
+    .seg { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #2f3437; }
+    .small { font: 11px Inter, Arial, sans-serif; fill: #5f6368; }
+    .barlabel { font: 10px Inter, Arial, sans-serif; fill: white; font-weight: 650; pointer-events: none; }
+    .grid { stroke: #e3e6ea; stroke-width: 1; }
+    .grid-strong { stroke: #cbd1d8; stroke-width: 1; }
+    .rowline { stroke: #edf0f3; stroke-width: 1; }
+    .search-line { stroke: #1f2937; stroke-width: 2; stroke-dasharray: 6 5; }
+    .phase-line { stroke: #a9b0b8; stroke-width: 1; stroke-dasharray: 3 5; }
+  </style>
+</defs>
+<rect class="bg" x="0" y="0" width="1494" height="512"/>
+<text class="title" x="28" y="34">Segment Search Timeline</text>
+<text class="subtitle" x="28" y="57">partition 466467674319752297 · 10 sealed segments · base 09:51:34.583 UTC · overlapping prefetch shown as mini lanes</text>
+<rect x="28" y="78" width="14" height="14" rx="3" fill="#4e79a7"/>
+<text class="small" x="48" y="89">idx102</text>
+<rect x="140" y="78" width="14" height="14" rx="3" fill="#f28e2b"/>
+<text class="small" x="160" y="89">raw101/cg_1</text>
+<rect x="282" y="78" width="14" height="14" rx="3" fill="#59a14f"/>
+<text class="small" x="302" y="89">cg_0</text>
+<rect x="394" y="78" width="14" height="14" rx="3" fill="#e15759"/>
+<text class="small" x="414" y="89">idx105/vector</text>
+<rect x="532" y="78" width="14" height="14" rx="3" fill="#bab0ac"/>
+<text class="small" x="552" y="89">fill pks omitted (0ms)</text>
+<rect x="700" y="78" width="14" height="14" rx="3" fill="#b07aa1"/>
+<text class="small" x="720" y="89">BF lazy</text>
+<line class="grid-strong" x1="190.0" y1="84" x2="190.0" y2="438"/>
+<text class="axis" x="190.0" y="74" text-anchor="middle">0ms</text>
+<line class="grid" x1="331.8" y1="84" x2="331.8" y2="438"/>
+<line class="grid-strong" x1="473.6" y1="84" x2="473.6" y2="438"/>
+<text class="axis" x="473.6" y="74" text-anchor="middle">200ms</text>
+<line class="grid" x1="615.3" y1="84" x2="615.3" y2="438"/>
+<line class="grid-strong" x1="757.1" y1="84" x2="757.1" y2="438"/>
+<text class="axis" x="757.1" y="74" text-anchor="middle">400ms</text>
+<line class="grid" x1="898.9" y1="84" x2="898.9" y2="438"/>
+<line class="grid-strong" x1="1040.7" y1="84" x2="1040.7" y2="438"/>
+<text class="axis" x="1040.7" y="74" text-anchor="middle">600ms</text>
+<line class="grid" x1="1182.4" y1="84" x2="1182.4" y2="438"/>
+<line class="grid-strong" x1="1324.2" y1="84" x2="1324.2" y2="438"/>
+<text class="axis" x="1324.2" y="74" text-anchor="middle">800ms</text>
+<line class="grid" x1="1466.0" y1="84" x2="1466.0" y2="438"/>
+<line class="search-line" x1="741.5" y1="56" x2="741.5" y2="446"/>
+<text class="axis" x="747.5" y="53" font-weight="700">search done +389ms</text>
+<line class="rowline" x1="28" y1="127" x2="1466" y2="127"/>
+<text class="seg" x="28" y="114">466467674324163977</text>
+<text class="small" x="150" y="114">end 196ms</text>
+<rect x="194.3" y="98.0" width="216.9" height="6" rx="3" fill="#4e79a7"><title>466467674324163977 · idx102/load index si_102: 3.0ms -&gt; 156.0ms (153.0ms)</title></rect>
+<rect x="194.3" y="105.0" width="116.3" height="6" rx="3" fill="#f28e2b"><title>466467674324163977 · raw101/cg_1: 3.0ms -&gt; 85.0ms (82.0ms)</title></rect>
+<rect x="192.8" y="112.0" width="82.2" height="6" rx="3" fill="#59a14f"><title>466467674324163977 · cg_0: 2.0ms -&gt; 60.0ms (58.0ms)</title></rect>
+<rect x="192.8" y="119.0" width="269.4" height="6" rx="3" fill="#e15759"><title>466467674324163977 · idx105/vector index: 2.0ms -&gt; 192.0ms (190.0ms)</title></rect>
+<rect x="805.9" y="119.0" width="36.3" height="6" rx="3" fill="#b07aa1"><title>466467674324163977 · BF lazy: 434.4ms -&gt; 460.0ms (25.6ms)</title></rect>
+<line class="rowline" x1="28" y1="161" x2="1466" y2="161"/>
+<text class="seg" x="28" y="148">466467674322960663</text>
+<text class="small" x="150" y="148">end 196ms</text>
+<rect x="194.3" y="132.0" width="188.6" height="6" rx="3" fill="#4e79a7"><title>466467674322960663 · idx102/load index si_102: 3.0ms -&gt; 136.0ms (133.0ms)</title></rect>
+<rect x="194.3" y="139.0" width="79.4" height="6" rx="3" fill="#f28e2b"><title>466467674322960663 · raw101/cg_1: 3.0ms -&gt; 59.0ms (56.0ms)</title></rect>
+<rect x="192.8" y="146.0" width="92.2" height="6" rx="3" fill="#59a14f"><title>466467674322960663 · cg_0: 2.0ms -&gt; 67.0ms (65.0ms)</title></rect>
+<rect x="194.3" y="153.0" width="269.4" height="6" rx="3" fill="#e15759"><title>466467674322960663 · idx105/vector index: 3.0ms -&gt; 193.0ms (190.0ms)</title></rect>
+<rect x="743.1" y="153.0" width="62.2" height="6" rx="3" fill="#b07aa1"><title>466467674322960663 · BF lazy: 390.1ms -&gt; 434.0ms (43.9ms)</title></rect>
+<line class="rowline" x1="28" y1="195" x2="1466" y2="195"/>
+<text class="seg" x="28" y="182">466467674321757143</text>
+<text class="small" x="150" y="182">end 222ms</text>
+<rect x="194.3" y="166.0" width="233.9" height="6" rx="3" fill="#4e79a7"><title>466467674321757143 · idx102/load index si_102: 3.0ms -&gt; 168.0ms (165.0ms)</title></rect>
+<rect x="194.3" y="173.0" width="82.2" height="6" rx="3" fill="#f28e2b"><title>466467674321757143 · raw101/cg_1: 3.0ms -&gt; 61.0ms (58.0ms)</title></rect>
+<rect x="192.8" y="180.0" width="95.0" height="6" rx="3" fill="#59a14f"><title>466467674321757143 · cg_0: 2.0ms -&gt; 69.0ms (67.0ms)</title></rect>
+<rect x="194.3" y="187.0" width="306.2" height="6" rx="3" fill="#e15759"><title>466467674321757143 · idx105/vector index: 3.0ms -&gt; 219.0ms (216.0ms)</title></rect>
+<rect x="881.5" y="187.0" width="89.7" height="6" rx="3" fill="#b07aa1"><title>466467674321757143 · BF lazy: 487.8ms -&gt; 551.0ms (63.2ms)</title></rect>
+<line class="rowline" x1="28" y1="229" x2="1466" y2="229"/>
+<text class="seg" x="28" y="216">466467674320554591</text>
+<text class="small" x="150" y="216">end 225ms</text>
+<rect x="194.3" y="200.0" width="309.1" height="6" rx="3" fill="#4e79a7"><title>466467674320554591 · idx102/load index si_102: 3.0ms -&gt; 221.0ms (218.0ms)</title></rect>
+<rect x="195.7" y="207.0" width="109.2" height="6" rx="3" fill="#f28e2b"><title>466467674320554591 · raw101/cg_1: 4.0ms -&gt; 81.0ms (77.0ms)</title></rect>
+<rect x="194.3" y="214.0" width="85.1" height="6" rx="3" fill="#59a14f"><title>466467674320554591 · cg_0: 3.0ms -&gt; 63.0ms (60.0ms)</title></rect>
+<rect x="194.3" y="221.0" width="289.2" height="6" rx="3" fill="#e15759"><title>466467674320554591 · idx105/vector index: 3.0ms -&gt; 207.0ms (204.0ms)</title></rect>
+<rect x="1110.5" y="221.0" width="60.6" height="6" rx="3" fill="#b07aa1"><title>466467674320554591 · BF lazy: 649.3ms -&gt; 692.0ms (42.7ms)</title></rect>
+<line class="rowline" x1="28" y1="263" x2="1466" y2="263"/>
+<text class="seg" x="28" y="250">466467674322359403</text>
+<text class="small" x="150" y="250">end 227ms</text>
+<rect x="192.8" y="234.0" width="163.0" height="6" rx="3" fill="#4e79a7"><title>466467674322359403 · idx102/load index si_102: 2.0ms -&gt; 117.0ms (115.0ms)</title></rect>
+<rect x="194.3" y="241.0" width="119.1" height="6" rx="3" fill="#f28e2b"><title>466467674322359403 · raw101/cg_1: 3.0ms -&gt; 87.0ms (84.0ms)</title></rect>
+<rect x="192.8" y="248.0" width="97.8" height="6" rx="3" fill="#59a14f"><title>466467674322359403 · cg_0: 2.0ms -&gt; 71.0ms (69.0ms)</title></rect>
+<rect x="192.8" y="255.0" width="313.3" height="6" rx="3" fill="#e15759"><title>466467674322359403 · idx105/vector index: 2.0ms -&gt; 223.0ms (221.0ms)</title></rect>
+<rect x="1335.2" y="255.0" width="57.1" height="6" rx="3" fill="#b07aa1"><title>466467674322359403 · BF lazy: 807.7ms -&gt; 848.0ms (40.3ms)</title></rect>
+<line class="rowline" x1="28" y1="297" x2="1466" y2="297"/>
+<text class="seg" x="28" y="284">466467674321757938</text>
+<text class="small" x="150" y="284">end 231ms</text>
+<rect x="195.7" y="268.0" width="212.7" height="6" rx="3" fill="#4e79a7"><title>466467674321757938 · idx102/load index si_102: 4.0ms -&gt; 154.0ms (150.0ms)</title></rect>
+<rect x="195.7" y="275.0" width="83.6" height="6" rx="3" fill="#f28e2b"><title>466467674321757938 · raw101/cg_1: 4.0ms -&gt; 63.0ms (59.0ms)</title></rect>
+<rect x="195.7" y="282.0" width="80.8" height="6" rx="3" fill="#59a14f"><title>466467674321757938 · cg_0: 4.0ms -&gt; 61.0ms (57.0ms)</title></rect>
+<rect x="195.7" y="289.0" width="317.6" height="6" rx="3" fill="#e15759"><title>466467674321757938 · idx105/vector index: 4.0ms -&gt; 228.0ms (224.0ms)</title></rect>
+<rect x="1170.7" y="289.0" width="130.8" height="6" rx="3" fill="#b07aa1"><title>466467674321757938 · BF lazy: 691.8ms -&gt; 784.0ms (92.2ms)</title></rect>
+<line class="rowline" x1="28" y1="331" x2="1466" y2="331"/>
+<text class="seg" x="28" y="318">466467674324163189</text>
+<text class="small" x="150" y="318">end 245ms</text>
+<rect x="191.4" y="302.0" width="270.8" height="6" rx="3" fill="#4e79a7"><title>466467674324163189 · idx102/load index si_102: 1.0ms -&gt; 192.0ms (191.0ms)</title></rect>
+<rect x="194.3" y="309.0" width="87.9" height="6" rx="3" fill="#f28e2b"><title>466467674324163189 · raw101/cg_1: 3.0ms -&gt; 65.0ms (62.0ms)</title></rect>
+<rect x="192.8" y="316.0" width="80.8" height="6" rx="3" fill="#59a14f"><title>466467674324163189 · cg_0: 2.0ms -&gt; 59.0ms (57.0ms)</title></rect>
+<rect x="192.8" y="323.0" width="340.3" height="6" rx="3" fill="#e15759"><title>466467674324163189 · idx105/vector index: 2.0ms -&gt; 242.0ms (240.0ms)</title></rect>
+<rect x="1051.1" y="323.0" width="59.0" height="6" rx="3" fill="#b07aa1"><title>466467674324163189 · BF lazy: 607.4ms -&gt; 649.0ms (41.6ms)</title></rect>
+<line class="rowline" x1="28" y1="365" x2="1466" y2="365"/>
+<text class="seg" x="28" y="352">466467674321155913</text>
+<text class="small" x="150" y="352">end 284ms</text>
+<rect x="192.8" y="336.0" width="327.5" height="6" rx="3" fill="#4e79a7"><title>466467674321155913 · idx102/load index si_102: 2.0ms -&gt; 233.0ms (231.0ms)</title></rect>
+<rect x="195.7" y="343.0" width="146.0" height="6" rx="3" fill="#f28e2b"><title>466467674321155913 · raw101/cg_1: 4.0ms -&gt; 107.0ms (103.0ms)</title></rect>
+<rect x="194.3" y="350.0" width="103.5" height="6" rx="3" fill="#59a14f"><title>466467674321155913 · cg_0: 3.0ms -&gt; 76.0ms (73.0ms)</title></rect>
+<rect x="194.3" y="357.0" width="392.7" height="6" rx="3" fill="#e15759"><title>466467674321155913 · idx105/vector index: 3.0ms -&gt; 280.0ms (277.0ms)</title></rect>
+<rect x="971.7" y="357.0" width="78.9" height="6" rx="3" fill="#b07aa1"><title>466467674321155913 · BF lazy: 551.3ms -&gt; 607.0ms (55.7ms)</title></rect>
+<line class="rowline" x1="28" y1="399" x2="1466" y2="399"/>
+<text class="seg" x="28" y="386">466467674319953225</text>
+<text class="small" x="150" y="386">end 284ms</text>
+<rect x="192.8" y="370.0" width="242.4" height="6" rx="3" fill="#4e79a7"><title>466467674319953225 · idx102/load index si_102: 2.0ms -&gt; 173.0ms (171.0ms)</title></rect>
+<rect x="192.8" y="377.0" width="87.9" height="6" rx="3" fill="#f28e2b"><title>466467674319953225 · raw101/cg_1: 2.0ms -&gt; 64.0ms (62.0ms)</title></rect>
+<rect x="192.8" y="384.0" width="112.0" height="6" rx="3" fill="#59a14f"><title>466467674319953225 · cg_0: 2.0ms -&gt; 81.0ms (79.0ms)</title></rect>
+<rect x="194.3" y="391.0" width="394.1" height="6" rx="3" fill="#e15759"><title>466467674319953225 · idx105/vector index: 3.0ms -&gt; 281.0ms (278.0ms)</title></rect>
+<rect x="1300.7" y="391.0" width="33.4" height="6" rx="3" fill="#b07aa1"><title>466467674319953225 · BF lazy: 783.4ms -&gt; 807.0ms (23.6ms)</title></rect>
+<line class="rowline" x1="28" y1="433" x2="1466" y2="433"/>
+<text class="seg" x="28" y="420">466467674323561816</text>
+<text class="small" x="150" y="420">end 388ms</text>
+<rect x="192.8" y="404.0" width="238.2" height="6" rx="3" fill="#4e79a7"><title>466467674323561816 · idx102/load index si_102: 2.0ms -&gt; 170.0ms (168.0ms)</title></rect>
+<rect x="192.8" y="411.0" width="76.6" height="6" rx="3" fill="#f28e2b"><title>466467674323561816 · raw101/cg_1: 2.0ms -&gt; 56.0ms (54.0ms)</title></rect>
+<rect x="192.8" y="418.0" width="78.0" height="6" rx="3" fill="#59a14f"><title>466467674323561816 · cg_0: 2.0ms -&gt; 57.0ms (55.0ms)</title></rect>
+<rect x="192.8" y="425.0" width="541.6" height="6" rx="3" fill="#e15759"><title>466467674323561816 · idx105/vector index: 2.0ms -&gt; 384.0ms (382.0ms)</title></rect>
+<rect x="841.9" y="425.0" width="40.0" height="6" rx="3" fill="#b07aa1"><title>466467674323561816 · BF lazy: 459.8ms -&gt; 488.0ms (28.2ms)</title></rect>
+<text class="small" x="28" y="480">Notes: si_102 and si_105 prefetch mostly overlap from +1..4ms; vector_search itself is ~1ms after idx105 load. Hover bars for exact segment/stage duration.</text>
+<text class="small" x="28" y="498">Critical path inside search: idx105/vector index load reaches +384ms on segment 466467674323561816; request returns at +389ms. BF lazy loads continue after response until +848ms.</text>
+</svg>

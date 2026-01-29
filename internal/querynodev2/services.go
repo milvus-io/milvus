@@ -525,12 +525,15 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Success(), nil
 	}
 
+	t1 := time.Now()
 	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
 		segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
 	if err != nil {
 		log.Warn(ctx, "failed to ref collection", mlog.Err(err))
 		return merr.Status(err), nil
 	}
+	t2 := time.Now()
+	log.Info(ctx, "PutOrRef time", mlog.Duration("time", t2.Sub(t1)))
 	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 
 	switch req.GetLoadScope() {
@@ -791,14 +794,36 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmen
 	}, nil
 }
 
+func sssSearchLogFields(ctx context.Context, req *querypb.SearchRequest) []mlog.Field {
+	searchReq := req.GetReq()
+	return []mlog.Field{
+		mlog.Int64("requestID", searchReq.GetBase().GetMsgID()),
+		mlog.Stringer("traceID", trace.SpanFromContext(ctx).SpanContext().TraceID()),
+		mlog.Int64("collectionID", searchReq.GetCollectionID()),
+		mlog.Int64s("partitionIDs", searchReq.GetPartitionIDs()),
+	}
+}
+
+func withSearchRequestID(ctx context.Context, req *querypb.SearchRequest) context.Context {
+	requestID := req.GetReq().GetBase().GetMsgID()
+	if requestID == 0 {
+		return ctx
+	}
+	return contextutil.WithRequestID(ctx, strconv.FormatInt(requestID, 10))
+}
+
 // SearchSegments performs search on segments.
 // If req.FilterOnly is true, only executes filter and returns valid count per segment (Stage 1 of two-stage search).
 // If req.FilterOnly is false, performs normal vector search and returns search results.
 func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+	ctx = withSearchRequestID(ctx, req)
+	baseLog := mlog.With(sssSearchLogFields(ctx, req)...)
+	baseLog.Info(ctx, "[sss] search segment")
+	defer func() {
+		baseLog.Info(ctx, "[sss] search segment done")
+	}()
 	channel := req.GetDmlChannels()[0]
-	log := mlog.With(
-		mlog.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
-		mlog.Int64("collectionID", req.Req.GetCollectionID()),
+	log := baseLog.With(
 		mlog.String("channel", channel),
 		mlog.String("scope", req.GetScope().String()),
 	)
@@ -846,13 +871,30 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 
 	task := tasks.NewSearchTask(searchCtx, collection, node.manager, req, node.serverID)
 
+	log.Info(ctx, "[sss] search task enqueue",
+		mlog.Int("segmentNum", len(req.GetSegmentIDs())),
+		mlog.Int64("nq", req.GetReq().GetNq()),
+		mlog.Int64("topK", req.GetReq().GetTopk()),
+		mlog.Int64("waitingTaskTotal", node.scheduler.GetWaitingTaskTotal()),
+		mlog.Int64("waitingTaskTotalNQ", node.scheduler.GetWaitingTaskTotalNQ()))
+	addStart := time.Now()
 	if err := node.scheduler.Add(task); err != nil {
 		log.Warn(ctx, "failed to search channel", mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
+	log.Info(ctx, "[sss] search task add done",
+		mlog.Duration("addDuration", time.Since(addStart)),
+		mlog.Int64("waitingTaskTotal", node.scheduler.GetWaitingTaskTotal()),
+		mlog.Int64("waitingTaskTotalNQ", node.scheduler.GetWaitingTaskTotalNQ()))
 
+	waitStart := time.Now()
 	err := task.Wait()
+	log.Info(ctx, "[sss] search task wait done",
+		mlog.Duration("waitDuration", time.Since(waitStart)),
+		mlog.Duration("totalDuration", tr.ElapseSpan()),
+		mlog.Int64("waitingTaskTotal", node.scheduler.GetWaitingTaskTotal()),
+		mlog.Int64("waitingTaskTotalNQ", node.scheduler.GetWaitingTaskTotalNQ()))
 	if err != nil {
 		log.Warn(ctx, "failed to search segments", mlog.Err(err))
 		resp.Status = merr.Status(err)
@@ -877,8 +919,13 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 
 // Search performs replica search tasks.
 func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
-	log := mlog.With(
-		mlog.Int64("collectionID", req.GetReq().GetCollectionID()),
+	ctx = withSearchRequestID(ctx, req)
+	baseLog := mlog.With(sssSearchLogFields(ctx, req)...)
+	baseLog.Info(ctx, "[sss] search request")
+	defer func() {
+		baseLog.Info(ctx, "[sss] search request done")
+	}()
+	log := baseLog.With(
 		mlog.Strings("channels", req.GetDmlChannels()),
 		mlog.Int64("nq", req.GetReq().GetNq()),
 	)
@@ -994,12 +1041,27 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	}()
 	// Send task to scheduler and wait until it finished.
 	task := tasks.NewQueryTask(queryCtx, collection, node.manager, req)
+	log.Info(ctx, "[sss] query task enqueue",
+		mlog.Int("segmentNum", len(req.GetSegmentIDs())),
+		mlog.Int64("waitingTaskTotal", node.scheduler.GetWaitingTaskTotal()),
+		mlog.Int64("waitingTaskTotalNQ", node.scheduler.GetWaitingTaskTotalNQ()))
+	addStart := time.Now()
 	if err := node.scheduler.Add(task); err != nil {
 		log.Warn(ctx, "failed to add query task into scheduler", mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
+	log.Info(ctx, "[sss] query task add done",
+		mlog.Duration("addDuration", time.Since(addStart)),
+		mlog.Int64("waitingTaskTotal", node.scheduler.GetWaitingTaskTotal()),
+		mlog.Int64("waitingTaskTotalNQ", node.scheduler.GetWaitingTaskTotalNQ()))
+	waitStart := time.Now()
 	err := task.Wait()
+	log.Info(ctx, "[sss] query task wait done",
+		mlog.Duration("waitDuration", time.Since(waitStart)),
+		mlog.Duration("totalDuration", tr.ElapseSpan()),
+		mlog.Int64("waitingTaskTotal", node.scheduler.GetWaitingTaskTotal()),
+		mlog.Int64("waitingTaskTotalNQ", node.scheduler.GetWaitingTaskTotalNQ()))
 	if err != nil {
 		log.Warn(ctx, "failed to query channel", mlog.Err(err))
 		resp.Status = merr.Status(err)

@@ -623,7 +623,7 @@ func (rm *ResourceManager) HandleNodeUp(ctx context.Context, node int64) {
 
 func (rm *ResourceManager) handleNodeUp(ctx context.Context, node int64) {
 	nodeInfo := rm.nodeMgr.Get(node)
-	if nodeInfo == nil || nodeInfo.IsEmbeddedQueryNodeInStreamingNode() {
+	if nodeInfo == nil {
 		return
 	}
 	if nodeInfo.IsStoppingState() {

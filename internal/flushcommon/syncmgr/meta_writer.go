@@ -2,11 +2,11 @@ package syncmgr
 
 import (
 	"context"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	storage "github.com/milvus-io/milvus/internal/storage"
@@ -39,11 +39,23 @@ func BrokerMetaWriter(broker broker.Broker, serverID int64, opts ...retry.Option
 }
 
 func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error {
+	totalStart := time.Now()
 	checkPoints := []*datapb.CheckPoint{}
 	// only current segment checkpoint info
 	segment, ok := pack.metacache.GetSegmentByID(pack.segmentID)
 	if !ok {
 		return merr.WrapErrSegmentNotFound(pack.segmentID)
+	}
+
+	// If the segment was created by streaming mode and not yet registered at DataCoord,
+	// call AllocSegment before SaveBinlogPaths. This is idempotent at DataCoord side.
+	var allocDur time.Duration
+	if segment.NeedAllocAtCoord() {
+		allocStart := time.Now()
+		if err := b.allocSegmentAtCoord(ctx, pack, segment); err != nil {
+			return err
+		}
+		allocDur = time.Since(allocStart)
 	}
 
 	insertFieldBinlogs := append(segment.Binlogs(), storage.SortFieldBinlogs(pack.insertBinlogs)...)
@@ -65,20 +77,13 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		Position:  pack.checkpoint,
 	})
 
-	// Get not reported L1's start positions
-	startPos := lo.Map(pack.metacache.GetSegmentsBy(
-		metacache.WithSegmentState(commonpb.SegmentState_Growing, commonpb.SegmentState_Sealed, commonpb.SegmentState_Flushing),
-		metacache.WithLevel(datapb.SegmentLevel_L1), metacache.WithStartPosNotRecorded()),
-		func(info *metacache.SegmentInfo, _ int) *datapb.SegmentStartPosition {
-			return &datapb.SegmentStartPosition{
-				SegmentID:     info.SegmentID(),
-				StartPosition: info.StartPosition(),
-			}
+	// Only report current segment's start position if not yet recorded
+	var startPos []*datapb.SegmentStartPosition
+	if !segment.StartPosRecorded() && segment.StartPosition() != nil {
+		startPos = append(startPos, &datapb.SegmentStartPosition{
+			SegmentID:     pack.segmentID,
+			StartPosition: segment.StartPosition(),
 		})
-
-	// L0 brings its own start position
-	if segment.Level() == datapb.SegmentLevel_L0 {
-		startPos = append(startPos, &datapb.SegmentStartPosition{SegmentID: pack.segmentID, StartPosition: pack.StartPosition()})
 	}
 
 	getBinlogNum := func(fBinlog *datapb.FieldBinlog) int { return len(fBinlog.GetBinlogs()) }
@@ -121,6 +126,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		WithFullBinlogs: true,
 		ManifestPath:    pack.manifestPath,
 	}
+	saveBinlogStart := time.Now()
 	err := retry.Handle(ctx, func() (bool, error) {
 		err := b.broker.SaveBinlogPaths(ctx, req)
 		// Segment not found during stale segment flush. Segment might get compacted already.
@@ -145,6 +151,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 
 		return false, nil
 	}, b.opts...)
+	saveBinlogDur := time.Since(saveBinlogStart)
 	if err != nil {
 		mlog.Warn(ctx, "failed to SaveBinlogPaths",
 			mlog.FieldSegmentID(pack.segmentID),
@@ -152,13 +159,60 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		return err
 	}
 
-	pack.metacache.UpdateSegments(metacache.SetStartPosRecorded(true), metacache.WithSegmentIDs(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) int64 { return pos.GetSegmentID() })...))
+	updateCacheStart := time.Now()
+	if len(startPos) > 0 {
+		pack.metacache.UpdateSegments(metacache.SetStartPosRecorded(true), metacache.WithSegmentIDs(pack.segmentID))
+	}
 	pack.metacache.UpdateSegments(metacache.MergeSegmentAction(
 		metacache.UpdateBinlogs(insertFieldBinlogs),
 		metacache.UpdateStatslogs(statsFieldBinlogs),
 		metacache.UpdateDeltalogs(deltaFieldBinlogs),
 		metacache.UpdateBm25logs(deltaBm25StatsBinlogs),
 	), metacache.WithSegmentIDs(pack.segmentID))
+	updateCacheDur := time.Since(updateCacheStart)
+
+	mlog.Info(ctx, "UpdateSync timing",
+		mlog.Int64("segmentID", pack.segmentID),
+		mlog.Duration("allocSegment", allocDur),
+		mlog.Duration("saveBinlogPaths", saveBinlogDur),
+		mlog.Duration("updateCache", updateCacheDur),
+		mlog.Duration("total", time.Since(totalStart)))
+	return nil
+}
+
+func (b *brokerMetaWriter) allocSegmentAtCoord(ctx context.Context, pack *SyncTask, segment *metacache.SegmentInfo) error {
+	start := time.Now()
+	err := retry.Handle(ctx, func() (bool, error) {
+		err := b.broker.AllocSegment(ctx, &datapb.AllocSegmentRequest{
+			CollectionId:         pack.collectionID,
+			PartitionId:          pack.partitionID,
+			SegmentId:            pack.segmentID,
+			Vchannel:             pack.channelName,
+			StorageVersion:       segment.GetStorageVersion(),
+			IsCreatedByStreaming: true,
+			SchemaVersion:        pack.schema.GetVersion(),
+		})
+		if err != nil {
+			mlog.Warn(ctx, "failed to alloc segment at datacoord before sync",
+				mlog.Int64("segmentID", pack.segmentID),
+				mlog.Err(err))
+			return !merr.IsCanceledOrTimeout(err), err
+		}
+		return false, nil
+	}, b.opts...)
+	rpcDur := time.Since(start)
+	if err != nil {
+		return err
+	}
+	// Clear the flag so subsequent SyncTasks for this segment don't call AllocSegment again.
+	updateStart := time.Now()
+	pack.metacache.UpdateSegments(metacache.SetNeedAllocAtCoord(false), metacache.WithSegmentIDs(pack.segmentID))
+	mlog.Info(ctx, "alloc segment at datacoord before sync",
+		mlog.Int64("segmentID", pack.segmentID),
+		mlog.Int64("collectionID", pack.collectionID),
+		mlog.Duration("rpc", rpcDur),
+		mlog.Duration("updateCache", time.Since(updateStart)),
+		mlog.Duration("total", time.Since(start)))
 	return nil
 }
 

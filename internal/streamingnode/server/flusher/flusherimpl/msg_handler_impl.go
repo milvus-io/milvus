@@ -21,13 +21,13 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 )
 
 func newMsgHandler(wbMgr writebuffer.BufferManager) *msgHandlerImpl {
@@ -44,57 +44,39 @@ func (impl *msgHandlerImpl) HandleCreateSegment(ctx context.Context, createSegme
 	vchannel := createSegmentMsg.VChannel()
 	h := createSegmentMsg.Header()
 
-	if err := impl.createNewGrowingSegment(ctx, vchannel, h); err != nil {
-		return err
+	if h.Level == datapb.SegmentLevel_L0 {
+		return nil
 	}
+
+	// Build MsgPosition from the CreateSegment message to anchor the checkpoint.
+	// This ensures the checkpoint won't advance past this message, so on crash recovery
+	// the CreateSegment message will be replayed and the segment will be re-registered.
+	startPos := &msgpb.MsgPosition{
+		ChannelName: vchannel,
+		MsgID:       adaptor.MustGetMQWrapperIDFromMessage(createSegmentMsg.LastConfirmedMessageID()).Serialize(),
+		Timestamp:   createSegmentMsg.TimeTick(),
+		WALName:     commonpb.WALName(createSegmentMsg.WALName()),
+	}
+
 	logger := mlog.With(mlog.FieldMessage(createSegmentMsg))
 
-	if err := impl.wbMgr.CreateNewGrowingSegment(ctx, vchannel, h.PartitionId, h.SegmentId, h.SchemaVersion); err != nil {
+	// For growing-source collections, skip creating local metacache entry.
+	// Insert data is flushed by QueryNode's GrowingFlushManager, not StreamNode.
+	// This avoids useless empty SyncTasks and manifest path conflicts.
+	if impl.wbMgr.UseGrowingSourceFlush(vchannel) {
+		logger.Info(ctx, "skip CreateNewGrowingSegment for growing-source collection, managed by QueryNode")
+		return nil
+	}
+
+	// AllocSegment at DataCoord is deferred to SyncTask time to avoid creating
+	// many empty segments for partitions that may never receive data.
+	// Only register the segment in WriteBuffer with the message position.
+	if err := impl.wbMgr.CreateNewGrowingSegment(ctx, vchannel, h.PartitionId, h.SegmentId, startPos, h.SchemaVersion); err != nil {
 		logger.Warn(ctx, "fail to create new growing segment")
 		return err
 	}
-	mlog.Info(ctx, "create new growing segment")
 	return nil
 }
-
-func (impl *msgHandlerImpl) createNewGrowingSegment(ctx context.Context, vchannel string, h *message.CreateSegmentMessageHeader) error {
-	if h.Level == datapb.SegmentLevel_L0 {
-		// L0 segment should not be flushed directly, but not create than flush.
-		// the create segment operation is used to protect the binlog from garbage collection.
-		// L0 segment's binlog upload and flush operation is handled once.
-		// so we can skip the create segment operation here. (not strict promise exactly)
-		return nil
-	}
-	// Transfer the pending segment into growing state.
-	// Alloc the growing segment at datacoord first.
-	mix, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
-	if err != nil {
-		return err
-	}
-	logger := mlog.With(mlog.FieldCollectionID(h.CollectionId), mlog.FieldPartitionID(h.PartitionId), mlog.FieldSegmentID(h.SegmentId))
-	return retry.Do(ctx, func() (err error) {
-		// TODO: propagate SchemaVersion from CreateSegmentMessageHeader into AllocSegmentRequest
-		// so that DataCoord records the correct schema version for streaming-created segments.
-		// Without this, new segments get SchemaVersion=0 and will be falsely flagged for backfill.
-		// Tracked in companion PR: https://github.com/milvus-io/milvus/pull/48865
-		resp, err := mix.AllocSegment(ctx, &datapb.AllocSegmentRequest{
-			CollectionId:         h.CollectionId,
-			PartitionId:          h.PartitionId,
-			SegmentId:            h.SegmentId,
-			Vchannel:             vchannel,
-			StorageVersion:       h.StorageVersion,
-			IsCreatedByStreaming: true,
-			SchemaVersion:        h.SchemaVersion,
-		})
-		if err := merr.CheckRPCCall(resp, err); err != nil {
-			logger.Warn(ctx, "failed to alloc growing segment at datacoord")
-			return errors.Wrap(err, "failed to alloc growing segment at datacoord")
-		}
-		logger.Info(ctx, "alloc growing segment at datacoord", mlog.Int32("schemaVersion", h.SchemaVersion))
-		return nil
-	}, retry.AttemptAlways(), retry.RetryErr(func(error) bool { return true }))
-}
-
 func (impl *msgHandlerImpl) HandleFlush(flushMsg message.ImmutableFlushMessageV2) error {
 	vchannel := flushMsg.VChannel()
 	if err := impl.wbMgr.SealSegments(context.Background(), vchannel, []int64{flushMsg.Header().SegmentId}); err != nil {

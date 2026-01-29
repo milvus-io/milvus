@@ -25,6 +25,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -105,7 +107,12 @@ func (b *StoppingBalancer) balanceChannels(ctx context.Context, br *balanceRepor
 }
 
 func (b *StoppingBalancer) balanceSegments(ctx context.Context, br *balanceReport, replica *meta.Replica) []assign.SegmentAssignPlan {
-	rwNodes, roNodes := replica.GetRWNodes(), replica.GetRONodes()
+	rwNodes := utils.GetSegmentRWNodes(replica)
+	roNodes := replica.GetRONodes()
+	if streamingutil.IsStreamingServiceEnabled() &&
+		paramtable.Get().QueryCoordCfg.EnableSQNServeSegments.GetAsBool() {
+		roNodes = replica.GetROSQNodes()
+	}
 	// If there are no RW nodes or no RO nodes, no stopping balance is needed
 	if len(rwNodes) == 0 || len(roNodes) == 0 {
 		br.AddRecord(StrRecordf("no stopping balance needed: rwNodes=%d, roNodes=%d", len(rwNodes), len(roNodes)))

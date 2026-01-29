@@ -19,14 +19,16 @@ package datacoord
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, result message.BroadcastResultBatchUpdateManifestMessageV2) error {
 	body := result.Message.MustBody()
 	var (
-		operators []UpdateOperator
+		mutations = make(map[int64][]MutateFunc, len(body.GetItems()))
 		v2Count   int
 		v3Count   int
 	)
@@ -41,18 +43,76 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 				mlog.FieldSegmentID(segID))
 			continue
 		case hasV2:
-			operators = append(operators, UpdateSegmentColumnGroupsOperator(segID, cg.GetColumnGroups()))
+			groups := cg.GetColumnGroups()
+			mutations[segID] = append(mutations[segID], func(seg *datapb.SegmentInfo) bool {
+				incomingChildFields := make(map[int64]struct{})
+				for _, group := range groups {
+					for _, childField := range group.GetChildFields() {
+						incomingChildFields[childField] = struct{}{}
+					}
+				}
+
+				kept := seg.Binlogs[:0]
+				for _, existing := range seg.GetBinlogs() {
+					if _, replaced := groups[existing.GetFieldID()]; replaced {
+						continue
+					}
+					if len(existing.GetChildFields()) > 0 {
+						childFields := existing.ChildFields[:0]
+						for _, childField := range existing.GetChildFields() {
+							if _, incoming := incomingChildFields[childField]; !incoming {
+								childFields = append(childFields, childField)
+							}
+						}
+						existing.ChildFields = childFields
+						if len(existing.ChildFields) == 0 {
+							continue
+						}
+					}
+					kept = append(kept, existing)
+				}
+				seg.Binlogs = kept
+				for _, group := range groups {
+					seg.Binlogs = append(seg.Binlogs, group)
+				}
+				seg.DataVersion++
+				return true
+			})
 			v2Count++
 		case hasV3:
-			operators = append(operators, UpdateManifestVersion(segID, item.GetManifestVersion()))
+			manifestVersion := item.GetManifestVersion()
+			mutations[segID] = append(mutations[segID], func(seg *datapb.SegmentInfo) bool {
+				if seg.GetManifestPath() == "" {
+					mlog.Warn(ctx, "batch update manifest version skipped: no manifest path",
+						mlog.FieldSegmentID(segID))
+					return false
+				}
+				basePath, currentVer, err := packed.UnmarshalManifestPath(seg.GetManifestPath())
+				if err != nil {
+					mlog.Warn(ctx, "batch update manifest version skipped: invalid manifest path",
+						mlog.FieldSegmentID(segID), mlog.Err(err))
+					return false
+				}
+				if currentVer >= manifestVersion {
+					if currentVer > manifestVersion {
+						mlog.Warn(ctx, "batch update manifest version skipped: version regression",
+							mlog.FieldSegmentID(segID),
+							mlog.Int64("currentVer", currentVer),
+							mlog.Int64("incomingVer", manifestVersion))
+					}
+					return false
+				}
+				seg.ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)
+				return true
+			})
 			v3Count++
 		default:
 			mlog.Warn(ctx, "batch update manifest item has no payload; skipping",
 				mlog.FieldSegmentID(segID))
 		}
 	}
-	if len(operators) > 0 {
-		if err := c.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+	if len(mutations) > 0 {
+		if err := c.meta.UpdateSegmentsInfo(ctx, mutations); err != nil {
 			mlog.Warn(ctx, "batch update manifest failed", mlog.Err(err))
 			return err
 		}

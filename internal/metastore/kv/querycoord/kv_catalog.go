@@ -51,37 +51,68 @@ func NewCatalog(cli kv.MetaKv) Catalog {
 }
 
 func (s Catalog) SaveCollection(ctx context.Context, collection *querypb.CollectionLoadInfo, partitions ...*querypb.PartitionLoadInfo) error {
+	kvs := make(map[string]string, len(partitions)+1)
+
 	k := EncodeCollectionLoadInfoKey(collection.GetCollectionID())
 	v, err := proto.Marshal(collection)
 	if err != nil {
 		return err
 	}
-	err = s.cli.Save(ctx, k, string(v))
-	if err != nil {
-		return err
-	}
-	return s.SavePartition(ctx, partitions...)
-}
+	kvs[k] = string(v)
 
-func (s Catalog) SavePartition(ctx context.Context, info ...*querypb.PartitionLoadInfo) error {
-	kvs := make(map[string]string)
-	for _, partition := range info {
-		k := EncodePartitionLoadInfoKey(partition.GetCollectionID(), partition.GetPartitionID())
-		v, err := proto.Marshal(partition)
+	for _, partition := range partitions {
+		k, v, err := marshalPartitionLoadInfo(partition)
 		if err != nil {
 			return err
 		}
-		kvs[k] = string(v)
-		if len(kvs) >= MetaOpsBatchSize {
-			err := s.cli.MultiSave(ctx, kvs)
-			if err != nil {
-				return err
-			}
-			kvs = make(map[string]string)
-		}
+		kvs[k] = v
 	}
-	if len(kvs) > 0 {
+
+	return s.multiSaveInBatches(ctx, kvs)
+}
+
+func (s Catalog) SavePartition(ctx context.Context, info ...*querypb.PartitionLoadInfo) error {
+	kvs := make(map[string]string, len(info))
+	for _, partition := range info {
+		k, v, err := marshalPartitionLoadInfo(partition)
+		if err != nil {
+			return err
+		}
+		kvs[k] = v
+	}
+	return s.multiSaveInBatches(ctx, kvs)
+}
+
+func marshalPartitionLoadInfo(partition *querypb.PartitionLoadInfo) (string, string, error) {
+	k := EncodePartitionLoadInfoKey(partition.GetCollectionID(), partition.GetPartitionID())
+	v, err := proto.Marshal(partition)
+	if err != nil {
+		return "", "", err
+	}
+	return k, string(v), nil
+}
+
+func (s Catalog) multiSaveInBatches(ctx context.Context, kvs map[string]string) error {
+	if len(kvs) == 0 {
+		return nil
+	}
+	if len(kvs) <= MetaOpsBatchSize {
 		return s.cli.MultiSave(ctx, kvs)
+	}
+
+	batch := make(map[string]string, MetaOpsBatchSize)
+	for k, v := range kvs {
+		batch[k] = v
+		if len(batch) < MetaOpsBatchSize {
+			continue
+		}
+		if err := s.cli.MultiSave(ctx, batch); err != nil {
+			return err
+		}
+		batch = make(map[string]string, MetaOpsBatchSize)
+	}
+	if len(batch) > 0 {
+		return s.cli.MultiSave(ctx, batch)
 	}
 	return nil
 }
