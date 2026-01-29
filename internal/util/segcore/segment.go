@@ -303,15 +303,6 @@ func (s *cSegmentImpl) AddFieldDataInfo(ctx context.Context, request *AddFieldDa
 	return &AddFieldDataInfoResult{}, nil
 }
 
-// FinishLoad wraps up the load process and let segcore do the leftover jobs.
-func (s *cSegmentImpl) FinishLoad() error {
-	status := C.FinishLoad(s.ptr)
-	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return errors.Wrap(err, "failed to finish load segment")
-	}
-	return nil
-}
-
 func (s *cSegmentImpl) Load(ctx context.Context) error {
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)

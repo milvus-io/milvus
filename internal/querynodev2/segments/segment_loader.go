@@ -961,9 +961,6 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 			return struct{}{}, errors.Wrap(err, "At Load")
 		}
 
-		if err = segment.FinishLoad(); err != nil {
-			return struct{}{}, errors.Wrap(err, "At FinishLoad")
-		}
 		return struct{}{}, nil
 	}).Await()
 	if err != nil {
@@ -1060,10 +1057,11 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		if err := segment.Load(ctx); err != nil {
 			return err
 		}
-		if err := segment.FinishLoad(); err != nil {
-			return errors.Wrap(err, "At FinishLoad")
-		}
 	}
+
+	binlogSize := calculateSegmentMemorySize(segment.LoadInfo())
+	segment.manager.AddLoadedBinlogSize(binlogSize)
+	segment.binlogSize.Store(binlogSize)
 
 	// load statslog if it's growing segment
 	if segment.segmentType == SegmentTypeGrowing {

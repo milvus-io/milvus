@@ -266,9 +266,6 @@ CreateTextIndex(CSegmentInterface c_segment,
                 CLoadCancellationSource source);
 
 CStatus
-FinishLoad(CSegmentInterface c_segment);
-
-CStatus
 ExprResCacheEraseSegment(int64_t segment_id);
 
 #ifdef __cplusplus
