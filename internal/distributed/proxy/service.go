@@ -168,6 +168,11 @@ func (s *Server) registerHTTPServer() {
 	metricsGinHandler := gin.Default()
 	apiv1 := metricsGinHandler.Group(apiPathPrefix)
 	apiv1.Use(httpserver.RequestHandlerFunc)
+	// Add authentication middleware if authorization is enabled
+	// This ensures the metrics port follows the same security policy as the main HTTP server
+	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		apiv1.Use(authenticate)
+	}
 	handlers := httpserver.NewHandlers(s.proxy)
 	handlers.RegisterRoutesTo(apiv1)
 	if p, ok := s.proxy.(*proxy.Proxy); ok {
