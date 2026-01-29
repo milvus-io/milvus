@@ -109,8 +109,8 @@ func (ob *ReplicaObserver) scheduleStreamingQN(ctx context.Context) {
 			return
 		}
 
-		ids := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
-		ob.checkStreamingQueryNodesInReplica(ids)
+		idsByRG := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup()
+		ob.checkStreamingQueryNodesInReplica(idsByRG)
 	}
 }
 
@@ -120,13 +120,13 @@ func (ob *ReplicaObserver) waitNodeChangedOrTimeout(ctx context.Context, listene
 	listener.Wait(ctxWithTimeout)
 }
 
-func (ob *ReplicaObserver) checkStreamingQueryNodesInReplica(sqNodeIDs typeutil.UniqueSet) {
+func (ob *ReplicaObserver) checkStreamingQueryNodesInReplica(sqNodeIDsByRG map[string]typeutil.UniqueSet) {
 	ctx := context.Background()
 	log := log.Ctx(ctx).WithRateGroup("qcv2.checkStreamingQueryNodesInReplica", 1, 60)
 	collections := ob.meta.GetAll(context.Background())
 
 	for _, collectionID := range collections {
-		ob.meta.RecoverSQNodesInCollection(context.Background(), collectionID, sqNodeIDs)
+		ob.meta.RecoverSQNodesInCollection(context.Background(), collectionID, sqNodeIDsByRG)
 	}
 
 	for _, collectionID := range collections {

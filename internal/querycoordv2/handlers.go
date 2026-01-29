@@ -526,3 +526,9 @@ func (s *Server) fillReplicaInfo(ctx context.Context, replica *meta.Replica, wit
 	info.ShardReplicas = shardReplicas
 	return info
 }
+
+// GetInternalReplicasByCollection returns the internal replica metadata for a given collection.
+// This includes fields like StreamingResourceGroup that are not exposed in the public API.
+func (s *Server) GetInternalReplicasByCollection(ctx context.Context, collectionID int64) []*meta.Replica {
+	return s.meta.GetByCollection(ctx, collectionID)
+}
