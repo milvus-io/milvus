@@ -28,6 +28,7 @@
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "test_utils/DataGen.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "segcore/Utils.h"
 #include "mmap/ChunkedColumnGroup.h"
 
 #include <memory>
@@ -118,7 +119,8 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
         use_mmap,
         true,
         schema_->get_field_ids().size(),
-        milvus::proto::common::LoadPriority::LOW);
+        milvus::proto::common::LoadPriority::LOW,
+        /* warmup_policy */ "");
 
     // num cells - get the expected number from the file directly
     auto reader_result =
@@ -282,7 +284,8 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         use_mmap,
         true,
         schema_->get_field_ids().size(),
-        milvus::proto::common::LoadPriority::LOW);
+        milvus::proto::common::LoadPriority::LOW,
+        /* warmup_policy */ "");
 
     // Test total number of cells across all files
     int64_t expected_total_cells = 0;

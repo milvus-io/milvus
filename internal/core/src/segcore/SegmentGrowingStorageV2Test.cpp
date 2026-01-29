@@ -174,6 +174,7 @@ TEST_F(TestGrowingStorageV2, LoadFieldData) {
                          std::vector<int64_t>{3000},
                          std::vector<int64_t>{3000},
                          false,
+                         "",
                          std::vector<std::string>{paths[0]}}},
         {1,
          FieldBinlogInfo{1,
@@ -181,6 +182,7 @@ TEST_F(TestGrowingStorageV2, LoadFieldData) {
                          std::vector<int64_t>{3000},
                          std::vector<int64_t>{3000},
                          false,
+                         "",
                          std::vector<std::string>{paths[1]}}},
     };
     load_info.storage_version = 2;
@@ -399,6 +401,7 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
                          std::vector<int64_t>{total_rows},
                          std::vector<int64_t>{total_rows * 4},
                          false,
+                         "",
                          std::vector<std::string>{paths[0]}}},
         {1,
          FieldBinlogInfo{1,
@@ -406,6 +409,7 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
                          std::vector<int64_t>{total_rows},
                          std::vector<int64_t>{total_rows * 4},
                          false,
+                         "",
                          std::vector<std::string>{paths[1]}}},
     };
     load_info.storage_version = 2;

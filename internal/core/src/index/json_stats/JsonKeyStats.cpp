@@ -931,7 +931,8 @@ JsonKeyStats::LoadShreddingMeta(
 
 void
 JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
-                              const std::vector<int64_t>& file_ids) {
+                              const std::vector<int64_t>& file_ids,
+                              const std::string& warmup_policy) {
     if (file_ids.empty()) {
         return;
     }
@@ -1016,7 +1017,8 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
         enable_mmap,
         mmap_config.GetMmapPopulate(),
         milvus_field_ids.size(),
-        load_priority_);
+        load_priority_,
+        warmup_policy);
 
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
@@ -1041,7 +1043,8 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
 }
 
 void
-JsonKeyStats::LoadShreddingData(const std::vector<std::string>& index_files) {
+JsonKeyStats::LoadShreddingData(const std::vector<std::string>& index_files,
+                                const std::string& warmup_policy) {
     // sort files by column group id and file id
     auto sorted_files = SortByParquetPath(index_files);
 
@@ -1050,7 +1053,7 @@ JsonKeyStats::LoadShreddingData(const std::vector<std::string>& index_files) {
 
     // load shredding data
     for (const auto& [column_group_id, file_ids] : sorted_files) {
-        LoadColumnGroup(column_group_id, file_ids);
+        LoadColumnGroup(column_group_id, file_ids, warmup_policy);
     }
 }
 
@@ -1058,7 +1061,8 @@ void
 JsonKeyStats::LoadSharedKeyIndex(
     const std::vector<std::string>& shared_key_index_files,
     bool enable_mmap,
-    int64_t index_size) {
+    int64_t index_size,
+    const std::string& warmup_policy) {
     segcore::storagev1translator::BsonInvertedIndexLoadInfo load_info;
     load_info.enable_mmap = enable_mmap;
     load_info.segment_id = segment_id_;
@@ -1066,7 +1070,7 @@ JsonKeyStats::LoadSharedKeyIndex(
     load_info.index_files = shared_key_index_files;
     load_info.index_size = index_size;
     load_info.load_priority = load_priority_;
-
+    load_info.warmup_policy = warmup_policy;
     std::unique_ptr<cachinglayer::Translator<index::BsonInvertedIndex>>
         translator = std::make_unique<
             segcore::storagev1translator::BsonInvertedIndexTranslator>(
@@ -1145,7 +1149,8 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     }
 
     // load shredding data
-    LoadShreddingData(shredding_data_files);
+    LoadShreddingData(shredding_data_files,
+                      config.contains(WARMUP) ? config.at(WARMUP) : "");
 
     // get all index files size as shared key index size,
     // no accurate way to get the shared key index size,
@@ -1154,7 +1159,10 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
         GetValueFromConfig<int64_t>(config, milvus::index::INDEX_SIZE)
             .value_or(0);
     // load shared key index
-    LoadSharedKeyIndex(shared_key_index_files, enable_mmap, index_size);
+    LoadSharedKeyIndex(shared_key_index_files,
+                       enable_mmap,
+                       index_size,
+                       config.contains(WARMUP) ? config.at(WARMUP) : "");
 }
 
 IndexStatsPtr

@@ -291,6 +291,110 @@ func TestGetCollectionTTL(t *testing.T) {
 	})
 }
 
+func TestWarmupPolicy(t *testing.T) {
+	t.Run("GetWarmupPolicy", func(t *testing.T) {
+		// Test when warmup key exists
+		props := []*commonpb.KeyValuePair{
+			{Key: WarmupKey, Value: WarmupSync},
+		}
+		policy, exist := GetWarmupPolicy(props...)
+		assert.True(t, exist)
+		assert.Equal(t, WarmupSync, policy)
+
+		// Test when warmup key doesn't exist
+		props = []*commonpb.KeyValuePair{
+			{Key: "other_key", Value: "other_value"},
+		}
+		policy, exist = GetWarmupPolicy(props...)
+		assert.False(t, exist)
+		assert.Equal(t, "", policy)
+
+		// Test empty props
+		policy, exist = GetWarmupPolicy()
+		assert.False(t, exist)
+		assert.Equal(t, "", policy)
+	})
+
+	t.Run("GetWarmupPolicyByKey", func(t *testing.T) {
+		props := []*commonpb.KeyValuePair{
+			{Key: WarmupScalarFieldKey, Value: WarmupSync},
+			{Key: WarmupVectorIndexKey, Value: WarmupDisable},
+		}
+
+		// Test getting scalar field warmup
+		policy, exist := GetWarmupPolicyByKey(WarmupScalarFieldKey, props...)
+		assert.True(t, exist)
+		assert.Equal(t, WarmupSync, policy)
+
+		// Test getting vector index warmup
+		policy, exist = GetWarmupPolicyByKey(WarmupVectorIndexKey, props...)
+		assert.True(t, exist)
+		assert.Equal(t, WarmupDisable, policy)
+
+		// Test key not found
+		policy, exist = GetWarmupPolicyByKey(WarmupScalarIndexKey, props...)
+		assert.False(t, exist)
+		assert.Equal(t, "", policy)
+	})
+
+	t.Run("ValidateWarmupPolicy", func(t *testing.T) {
+		// Valid values
+		assert.NoError(t, ValidateWarmupPolicy(WarmupSync))
+		assert.NoError(t, ValidateWarmupPolicy(WarmupDisable))
+
+		// Invalid values
+		assert.Error(t, ValidateWarmupPolicy("invalid"))
+		assert.Error(t, ValidateWarmupPolicy(""))
+		assert.Error(t, ValidateWarmupPolicy("async"))
+	})
+
+	t.Run("IsWarmupKey", func(t *testing.T) {
+		// Valid warmup keys
+		assert.True(t, IsWarmupKey(WarmupKey))
+		assert.True(t, IsWarmupKey(WarmupScalarFieldKey))
+		assert.True(t, IsWarmupKey(WarmupScalarIndexKey))
+		assert.True(t, IsWarmupKey(WarmupVectorFieldKey))
+		assert.True(t, IsWarmupKey(WarmupVectorIndexKey))
+
+		// Invalid keys
+		assert.False(t, IsWarmupKey("warmup.invalid"))
+		assert.False(t, IsWarmupKey("other_key"))
+		assert.False(t, IsWarmupKey(""))
+	})
+
+	t.Run("IsFieldWarmupKey", func(t *testing.T) {
+		// Only WarmupKey is a field-level warmup key
+		assert.True(t, IsFieldWarmupKey(WarmupKey))
+
+		// Collection-level warmup keys are not field-level
+		assert.False(t, IsFieldWarmupKey(WarmupScalarFieldKey))
+		assert.False(t, IsFieldWarmupKey(WarmupScalarIndexKey))
+		assert.False(t, IsFieldWarmupKey(WarmupVectorFieldKey))
+		assert.False(t, IsFieldWarmupKey(WarmupVectorIndexKey))
+
+		// Invalid keys
+		assert.False(t, IsFieldWarmupKey("warmup.invalid"))
+		assert.False(t, IsFieldWarmupKey("other_key"))
+		assert.False(t, IsFieldWarmupKey(""))
+	})
+
+	t.Run("IsCollectionWarmupKey", func(t *testing.T) {
+		// Collection-level warmup keys
+		assert.True(t, IsCollectionWarmupKey(WarmupScalarFieldKey))
+		assert.True(t, IsCollectionWarmupKey(WarmupScalarIndexKey))
+		assert.True(t, IsCollectionWarmupKey(WarmupVectorFieldKey))
+		assert.True(t, IsCollectionWarmupKey(WarmupVectorIndexKey))
+
+		// WarmupKey is field-level, not collection-level
+		assert.False(t, IsCollectionWarmupKey(WarmupKey))
+
+		// Invalid keys
+		assert.False(t, IsCollectionWarmupKey("warmup.invalid"))
+		assert.False(t, IsCollectionWarmupKey("other_key"))
+		assert.False(t, IsCollectionWarmupKey(""))
+	})
+}
+
 func TestWKTWKBConversion(t *testing.T) {
 	testCases := []struct {
 		name string

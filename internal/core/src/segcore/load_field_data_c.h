@@ -51,10 +51,6 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
                         const char* file_path);
 
 void
-AppendWarmupPolicy(CLoadFieldDataInfo c_load_field_data_info,
-                   CacheWarmupPolicy warmup_policy);
-
-void
 SetStorageVersion(CLoadFieldDataInfo c_load_field_data_info,
                   int64_t storage_version);
 
@@ -62,6 +58,11 @@ void
 EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
            int64_t field_id,
            bool enabled);
+
+void
+SetFieldWarmupPolicy(CLoadFieldDataInfo c_load_field_data_info,
+                     int64_t field_id,
+                     CacheWarmupPolicy warmup_policy);
 
 void
 SetLoadPriority(CLoadFieldDataInfo c_load_field_data_info, int32_t priority);

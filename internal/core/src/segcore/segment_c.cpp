@@ -664,6 +664,9 @@ LoadJsonKeyIndex(CTraceContext c_trace,
         if (info_proto->enable_mmap()) {
             config[milvus::index::MMAP_FILE_PATH] = info_proto->mmap_dir_path();
         }
+        if (info_proto->warmup_policy() != "") {
+            config[milvus::index::WARMUP] = info_proto->warmup_policy();
+        }
         config[milvus::index::INDEX_SIZE] = info_proto->stats_size();
 
         milvus::storage::FileManagerContext file_ctx(

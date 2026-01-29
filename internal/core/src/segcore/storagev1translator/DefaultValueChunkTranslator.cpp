@@ -24,7 +24,8 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
     FieldMeta field_meta,
     FieldDataInfo field_data_info,
     bool use_mmap,
-    bool mmap_populate)
+    bool mmap_populate,
+    const std::string& warmup_policy)
     : total_rows_(field_data_info.row_count),
       segment_id_(segment_id),
       key_(
@@ -42,6 +43,7 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false),
             milvus::segcore::getCacheWarmupPolicy(
+                warmup_policy,
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false,
                 /* in_load_list, set to false to reduce memory usage */ false),
