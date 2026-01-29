@@ -108,7 +108,7 @@ class GitOperations:
                 stdout=subprocess.PIPE if capture_output else None,
                 stderr=subprocess.PIPE if capture_output else None,
             )
-            return result.stdout.strip() if capture_output else ""
+            return result.stdout.rstrip() if capture_output else ""
         except subprocess.CalledProcessError as e:
             if check:
                 raise Exception(f"Command failed: {' '.join(command)}\n{e.stderr}")
@@ -1213,6 +1213,33 @@ class GitHubOperations:
         GitOperations.run_command(cmd)
 
     @staticmethod
+    def get_existing_pr_for_branch(branch: str) -> Optional[Dict]:
+        """
+        Check if a PR already exists for the given branch.
+
+        Returns: Dict with PR info (url, body, number) or None if no PR exists
+        """
+        try:
+            _, fork_owner = GitOperations.get_fork_info()
+            cmd = [
+                "gh",
+                "pr",
+                "view",
+                "--repo",
+                "milvus-io/milvus",
+                "--head",
+                f"{fork_owner}:{branch}",
+                "--json",
+                "url,body,number,labels",
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                return json.loads(result.stdout)
+            return None
+        except Exception:
+            return None
+
+    @staticmethod
     def get_release_branches() -> List[str]:
         """Get list of release branches (2.x)"""
         try:
@@ -1452,13 +1479,11 @@ class GitHubOperations:
         if not pr_body:
             return None
 
-        # Common patterns: "Related to #123", "issue: #123", "Fixes #123", etc.
+        # Match #123 format (GitHub issue/PR reference)
+        # Also match full GitHub URL: https://github.com/.../issues/123
         patterns = [
-            r"[Rr]elated\s+(?:to\s+)?#(\d+)",
-            r"[Ii]ssue:\s*#(\d+)",
-            r"[Ff]ixes\s+#(\d+)",
-            r"[Cc]loses\s+#(\d+)",
-            r"[Rr]esolves\s+#(\d+)",
+            r"#(\d+)",
+            r"github\.com/[^/]+/[^/]+/issues/(\d+)",
         ]
 
         for pattern in patterns:
@@ -2392,20 +2417,38 @@ def workflow_pr():
     # 3. Handle issue
     print_header("\n📋 GitHub Issue")
 
-    print_warning("Milvus requires all PRs to reference an issue!")
-
-    choice = UserInteraction.select_option(
-        "Issue management:",
-        [
-            ("c", "Create new issue"),
-            ("e", "Use existing issue number"),
-        ],
-    )
-
     issue_number = None
     issue_type = "feature"
+    choice = None
 
-    if choice == "c":
+    # Check if there's an existing PR with a linked issue
+    existing_pr = GitHubOperations.get_existing_pr_for_branch(branch)
+    if existing_pr:
+        pr_body = existing_pr.get("body", "")
+        linked_issue = GitHubOperations.extract_related_issue(pr_body)
+        if linked_issue:
+            issue_number = linked_issue
+            # Try to extract issue type from PR labels
+            labels = existing_pr.get("labels", [])
+            for label in labels:
+                label_name = label.get("name", "") if isinstance(label, dict) else label
+                if label_name.startswith("kind/"):
+                    issue_type = label_name.replace("kind/", "")
+                    break
+            print_success(f"PR already linked to issue #{issue_number}, skipping issue creation")
+
+    if not issue_number:
+        print_warning("Milvus requires all PRs to reference an issue!")
+
+        choice = UserInteraction.select_option(
+            "Issue management:",
+            [
+                ("c", "Create new issue"),
+                ("e", "Use existing issue number"),
+            ],
+        )
+
+    if not issue_number and choice == "c":
         # Create new issue - select type first
         issue_type = UserInteraction.select_option(
             "Issue type:",
@@ -2507,7 +2550,7 @@ def workflow_pr():
             print_error(f"Failed to create issue: {e}")
             sys.exit(1)
 
-    elif choice == "e":
+    elif not issue_number and choice == "e":
         issue_number = UserInteraction.prompt("Enter issue number:")
         issue_type = UserInteraction.select_option(
             "Issue type:",
