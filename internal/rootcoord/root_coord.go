@@ -1101,7 +1101,7 @@ func (c *Core) getCollectionIDStr(ctx context.Context, db, collectionName string
 		return strconv.FormatInt(collectionID, 10)
 	}
 
-	coll, err := c.meta.GetCollectionByName(ctx, db, collectionName, typeutil.MaxTimestamp)
+	coll, err := c.meta.GetCollectionByName(ctx, db, collectionName, typeutil.MaxTimestamp, false)
 	if err != nil {
 		return "-1"
 	}
@@ -1111,7 +1111,7 @@ func (c *Core) getCollectionIDStr(ctx context.Context, db, collectionName string
 func (c *Core) describeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest, allowUnavailable bool) (*model.Collection, error) {
 	ts := getTravelTs(in)
 	if in.GetCollectionName() != "" {
-		return c.meta.GetCollectionByName(ctx, in.GetDbName(), in.GetCollectionName(), ts)
+		return c.meta.GetCollectionByName(ctx, in.GetDbName(), in.GetCollectionName(), ts, false)
 	}
 	return c.meta.GetCollectionByID(ctx, in.GetDbName(), in.GetCollectionID(), ts, allowUnavailable)
 }
@@ -1138,10 +1138,11 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
 	resp.PhysicalChannelNames = collInfo.PhysicalChannelNames
-	if collInfo.ShardsNum == 0 {
-		collInfo.ShardsNum = int32(len(collInfo.VirtualChannelNames))
+	shardsNum := collInfo.ShardsNum
+	if shardsNum == 0 {
+		shardsNum = int32(len(collInfo.VirtualChannelNames))
 	}
-	resp.ShardsNum = collInfo.ShardsNum
+	resp.ShardsNum = shardsNum
 	resp.ConsistencyLevel = collInfo.ConsistencyLevel
 
 	resp.CreatedTimestamp = collInfo.CreateTime
@@ -1542,7 +1543,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 		zap.String("partitionName", in.GetPartitionName()))
 	logger.Info("received request to create partition")
 
-	if err := c.broadcastCreatePartition(ctx, in); err != nil {
+	if _, err := c.broadcastCreatePartition(ctx, in); err != nil {
 		if errors.Is(err, errIgnoerdCreatePartition) {
 			logger.Info("create partition that already exists, ignore it")
 			metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.SuccessLabel).Inc()
@@ -1557,6 +1558,37 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 	metrics.RootCoordDDLReqLatency.WithLabelValues("CreatePartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	logger.Info("done to create partition")
 	return merr.Success(), nil
+}
+
+func (c *Core) CreatePartitionV2(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*rootcoordpb.CreatePartitionResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &rootcoordpb.CreatePartitionResponse{Status: merr.Status(err)}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("CreatePartition")
+	logger := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
+		zap.String("collectionName", in.GetCollectionName()),
+		zap.String("partitionName", in.GetPartitionName()))
+	logger.Info("received request to create partition")
+
+	partitionID, err := c.broadcastCreatePartition(ctx, in)
+	if err != nil {
+		if errors.Is(err, errIgnoerdCreatePartition) {
+			logger.Info("create partition that already exists, ignore it")
+			metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.SuccessLabel).Inc()
+			return &rootcoordpb.CreatePartitionResponse{Status: merr.Success(), PartitionID: partitionID}, nil
+		}
+		logger.Info("failed to create partition", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.FailLabel).Inc()
+		return &rootcoordpb.CreatePartitionResponse{Status: merr.Status(err)}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("CreatePartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	logger.Info("done to create partition")
+	return &rootcoordpb.CreatePartitionResponse{Status: merr.Success(), PartitionID: partitionID}, nil
 }
 
 // DropPartition drop partition

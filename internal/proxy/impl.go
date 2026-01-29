@@ -31,6 +31,7 @@ import (
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -172,11 +173,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 				log.Warn("invalidate collection meta cache failed. partitionName is empty")
 				return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
 			}
-			// drop all the alias as well
-			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), false)
-			}
-			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName, request.GetBase().GetTimestamp())
+			globalMetaCache.RemovePartition(ctx, request.GetDbName(), collectionName, request.GetPartitionName(), request.GetBase().GetTimestamp())
 			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_DropDatabase:
 			node.shardMgr.RemoveDatabase(request.GetDbName())
@@ -1487,6 +1484,8 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 	return act.result, nil
 }
 
+var taskid = atomic.NewUint32(0)
+
 // CreatePartition create a partition in specific collection.
 func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -1509,6 +1508,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		CreatePartitionRequest: request,
 		mixCoord:               node.mixCoord,
 		result:                 nil,
+		id:                     taskid.Inc(),
 	}
 
 	log := log.Ctx(ctx).With(

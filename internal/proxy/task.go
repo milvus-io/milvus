@@ -1811,6 +1811,7 @@ type createPartitionTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
+	id       uint32
 }
 
 func (t *createPartitionTask) TraceCtx() context.Context {
@@ -1878,25 +1879,31 @@ func (t *createPartitionTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *createPartitionTask) Execute(ctx context.Context) (err error) {
-	t.result, err = t.mixCoord.CreatePartition(ctx, t.CreatePartitionRequest)
+	t1 := time.Now()
+	resp, err := t.mixCoord.CreatePartitionV2(ctx, t.CreatePartitionRequest)
+	if err != nil {
+		return err
+	}
+	t.result = resp.Status
 	if err := merr.CheckRPCCall(t.result, err); err != nil {
 		return err
 	}
+	t2 := time.Now()
+	log.Info("[create partition] create partition rpc time", zap.Duration("time", t2.Sub(t1)), zap.Uint32("id", t.id))
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.GetCollectionName())
 	if err != nil {
 		t.result = merr.Status(err)
 		return err
 	}
-	partitionID, err := globalMetaCache.GetPartitionID(ctx, t.GetDbName(), t.GetCollectionName(), t.GetPartitionName())
-	if err != nil {
-		t.result = merr.Status(err)
-		return err
-	}
+	t3 := time.Now()
+	log.Info("[create partition] get collection id time", zap.Duration("time", t3.Sub(t2)), zap.Uint32("id", t.id))
 	t.result, err = t.mixCoord.SyncNewCreatedPartition(ctx, &querypb.SyncNewCreatedPartitionRequest{
 		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleasePartitions)),
 		CollectionID: collectionID,
-		PartitionID:  partitionID,
+		PartitionID:  resp.PartitionID,
 	})
+	t4 := time.Now()
+	log.Info("[create partition] sync time", zap.Duration("time", t4.Sub(t3)), zap.Uint32("id", t.id))
 	return merr.CheckRPCCall(t.result, err)
 }
 

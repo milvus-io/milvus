@@ -91,7 +91,7 @@ localStorage:
   # Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
   # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
   # It is recommended to change this parameter before starting Milvus for the first time.
-  path: /var/lib/milvus/data/
+  path: /tmp/milvus/data/
 
 # Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.
@@ -292,13 +292,13 @@ rootCoord:
   # The maximum number of partitions in each collection.
   # New partitions cannot be created if this parameter is set as 0 or 1.
   # Range: [0, INT64MAX]
-  maxPartitionNum: 1024
+  maxPartitionNum: 120000
   # The minimum row count of a segment required for creating index.
   # Segments with smaller size than this parameter will not be indexed, and will be searched with brute force.
   minSegmentSizeToEnableIndex: 1024
   enableActiveStandby: false
   maxDatabaseNum: 64 # Maximum number of database
-  maxGeneralCapacity: 65536 # upper limit for the sum of of product of partitionNumber and shardNumber
+  maxGeneralCapacity: 120000 # upper limit for the sum of of product of partitionNumber and shardNumber
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   ip:  # TCP/IP address of rootCoord. If not specified, use the first unicastable address
   port: 22125 # TCP port of rootCoord

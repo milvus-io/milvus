@@ -46,6 +46,7 @@ const (
 	RootCoord_AlterCollectionFunction_FullMethodName       = "/milvus.proto.rootcoord.RootCoord/AlterCollectionFunction"
 	RootCoord_DropCollectionFunction_FullMethodName        = "/milvus.proto.rootcoord.RootCoord/DropCollectionFunction"
 	RootCoord_CreatePartition_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/CreatePartition"
+	RootCoord_CreatePartitionV2_FullMethodName             = "/milvus.proto.rootcoord.RootCoord/CreatePartitionV2"
 	RootCoord_DropPartition_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/DropPartition"
 	RootCoord_HasPartition_FullMethodName                  = "/milvus.proto.rootcoord.RootCoord/HasPartition"
 	RootCoord_ShowPartitions_FullMethodName                = "/milvus.proto.rootcoord.RootCoord/ShowPartitions"
@@ -166,6 +167,7 @@ type RootCoordClient interface {
 	//
 	// @return Status
 	CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	CreatePartitionV2(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*CreatePartitionResponse, error)
 	// *
 	// @brief This method is used to drop partition
 	//
@@ -444,6 +446,15 @@ func (c *rootCoordClient) DropCollectionFunction(ctx context.Context, in *milvus
 func (c *rootCoordClient) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, RootCoord_CreatePartition_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) CreatePartitionV2(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*CreatePartitionResponse, error) {
+	out := new(CreatePartitionResponse)
+	err := c.cc.Invoke(ctx, RootCoord_CreatePartitionV2_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -944,6 +955,7 @@ type RootCoordServer interface {
 	//
 	// @return Status
 	CreatePartition(context.Context, *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
+	CreatePartitionV2(context.Context, *milvuspb.CreatePartitionRequest) (*CreatePartitionResponse, error)
 	// *
 	// @brief This method is used to drop partition
 	//
@@ -1085,6 +1097,9 @@ func (UnimplementedRootCoordServer) DropCollectionFunction(context.Context, *mil
 }
 func (UnimplementedRootCoordServer) CreatePartition(context.Context, *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreatePartition not implemented")
+}
+func (UnimplementedRootCoordServer) CreatePartitionV2(context.Context, *milvuspb.CreatePartitionRequest) (*CreatePartitionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreatePartitionV2 not implemented")
 }
 func (UnimplementedRootCoordServer) DropPartition(context.Context, *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropPartition not implemented")
@@ -1649,6 +1664,24 @@ func _RootCoord_CreatePartition_Handler(srv interface{}, ctx context.Context, de
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RootCoordServer).CreatePartition(ctx, req.(*milvuspb.CreatePartitionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_CreatePartitionV2_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.CreatePartitionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).CreatePartitionV2(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_CreatePartitionV2_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).CreatePartitionV2(ctx, req.(*milvuspb.CreatePartitionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2597,6 +2630,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreatePartition",
 			Handler:    _RootCoord_CreatePartition_Handler,
+		},
+		{
+			MethodName: "CreatePartitionV2",
+			Handler:    _RootCoord_CreatePartitionV2_Handler,
 		},
 		{
 			MethodName: "DropPartition",

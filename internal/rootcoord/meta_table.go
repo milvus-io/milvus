@@ -90,7 +90,7 @@ type IMetaTable interface {
 	// If the collection does not exist, it will return InvalidCollectionID.
 	// Please use the function with caution.
 	GetCollectionID(ctx context.Context, dbName string, collectionName string) UniqueID
-	GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts Timestamp) (*model.Collection, error)
+	GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
 	GetCollectionByID(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
 	GetCollectionByIDWithMaxTs(ctx context.Context, collectionID UniqueID) (*model.Collection, error)
 	ListCollections(ctx context.Context, dbName string, ts Timestamp, onlyAvail bool) ([]*model.Collection, error)
@@ -102,6 +102,7 @@ type IMetaTable interface {
 	GetCollectionVirtualChannels(ctx context.Context, colID int64) []string
 	GetPChannelInfo(ctx context.Context, pchannel string) *rootcoordpb.GetPChannelInfoResponse
 	AddPartition(ctx context.Context, partition *model.Partition) error
+	GetPartitionIDByName(collectionID int64, partitionName string) (int64, bool)
 	DropPartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
 	RemovePartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
 
@@ -164,6 +165,9 @@ type MetaTable struct {
 	dbName2Meta map[string]*model.Database              // database name ->  db meta
 	collID2Meta map[typeutil.UniqueID]*model.Collection // collection id -> collection meta
 
+	// partition name index: collectionID -> partitionName -> partitionID
+	partitionName2ID map[int64]map[string]int64
+
 	fileResourceName2Meta map[string]*internalpb.FileResourceInfo // file resource name -> file resource meta
 	fileResourceID2Meta   map[int64]*internalpb.FileResourceInfo  // file resource id -> file resource meta
 	fileResourceRefCnt    map[int64]int                           // file resource id -> reference count
@@ -199,6 +203,7 @@ func (mt *MetaTable) reload() error {
 	record := timerecord.NewTimeRecorder("rootcoord")
 	mt.dbName2Meta = make(map[string]*model.Database)
 	mt.collID2Meta = make(map[UniqueID]*model.Collection)
+	mt.partitionName2ID = make(map[int64]map[string]int64)
 	mt.fileResourceRefCnt = make(map[int64]int)
 	mt.names = newNameDb()
 	mt.aliases = newNameDb()
@@ -252,6 +257,13 @@ func (mt *MetaTable) reload() error {
 				collection.DBName = dbName
 			}
 			mt.collID2Meta[collection.CollectionID] = collection
+			// Build partition name index
+			mt.partitionName2ID[collection.CollectionID] = make(map[string]int64)
+			for _, partition := range collection.Partitions {
+				if partition.Available() {
+					mt.partitionName2ID[collection.CollectionID][partition.PartitionName] = partition.PartitionID
+				}
+			}
 			if collection.Available() {
 				mt.names.insert(dbName, collection.Name, collection.CollectionID)
 				for _, fileResourceID := range collection.FileResourceIds {
@@ -657,6 +669,7 @@ func (mt *MetaTable) removeAllNamesIfMatchedInternal(ctx context.Context, collec
 
 func (mt *MetaTable) removeCollectionByIDInternal(ctx context.Context, collectionID UniqueID) {
 	delete(mt.collID2Meta, collectionID)
+	delete(mt.partitionName2ID, collectionID)
 	log.Ctx(ctx).Info("delete from collID2Meta",
 		zap.Int64("collectionID", collectionID),
 	)
@@ -731,7 +744,7 @@ func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collec
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 	if allowUnavailable {
-		return coll.Clone(), nil
+		return coll.ShallowClone(), nil
 	}
 	if !coll.Available() {
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
@@ -768,7 +781,7 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, dbName strin
 	}
 
 	if allowUnavailable {
-		return coll.Clone(), nil
+		return coll.ShallowClone(), nil
 	}
 
 	if !coll.Available() {
@@ -779,10 +792,10 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, dbName strin
 	return filterUnavailable(coll), nil
 }
 
-func (mt *MetaTable) GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts Timestamp) (*model.Collection, error) {
+func (mt *MetaTable) GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-	return mt.getCollectionByNameInternal(ctx, dbName, collectionName, ts)
+	return mt.getCollectionByNameInternal(ctx, dbName, collectionName, ts, allowUnavailable)
 }
 
 // GetCollectionID retrieves the corresponding collectionID based on the collectionName.
@@ -817,7 +830,7 @@ func (mt *MetaTable) GetCollectionID(ctx context.Context, dbName string, collect
 
 // Note: The returned model.Collection is read-only. Do NOT modify it directly,
 // as it may cause unexpected behavior or inconsistencies.
-func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName string, collectionName string, ts Timestamp) (*model.Collection, error) {
+func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName string, collectionName string, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 	// backward compatibility for rolling  upgrade
 	if dbName == "" {
 		log.Ctx(ctx).Warn("db name is empty", zap.String("collectionName", collectionName), zap.Uint64("ts", ts))
@@ -831,12 +844,12 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 
 	collectionID, ok := mt.aliases.get(dbName, collectionName)
 	if ok {
-		return mt.getCollectionByIDInternal(ctx, dbName, collectionID, ts, false)
+		return mt.getCollectionByIDInternal(ctx, dbName, collectionID, ts, allowUnavailable)
 	}
 
 	collectionID, ok = mt.names.get(dbName, collectionName)
 	if ok {
-		return mt.getCollectionByIDInternal(ctx, dbName, collectionID, ts, false)
+		return mt.getCollectionByIDInternal(ctx, dbName, collectionID, ts, allowUnavailable)
 	}
 
 	if isMaxTs(ts) {
@@ -852,6 +865,9 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 
 	if coll == nil || !coll.Available() {
 		return nil, merr.WrapErrCollectionNotFoundWithDB(dbName, collectionName)
+	}
+	if allowUnavailable {
+		return coll, nil
 	}
 	return filterUnavailable(coll), nil
 }
@@ -1138,7 +1154,7 @@ func (mt *MetaTable) CheckIfCollectionRenamable(ctx context.Context, dbName stri
 	}
 
 	// check new collection already exists
-	coll, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, typeutil.MaxTimestamp)
+	coll, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, typeutil.MaxTimestamp, false)
 	if coll != nil {
 		log.Warn("duplicated new collection name, already taken by another collection or alias.")
 		return fmt.Errorf("duplicated new collection name %s:%s with other collection name or alias", newDBName, newName)
@@ -1149,7 +1165,7 @@ func (mt *MetaTable) CheckIfCollectionRenamable(ctx context.Context, dbName stri
 	}
 
 	// get old collection meta
-	oldColl, err := mt.getCollectionByNameInternal(ctx, dbName, oldName, typeutil.MaxTimestamp)
+	oldColl, err := mt.getCollectionByNameInternal(ctx, dbName, oldName, typeutil.MaxTimestamp, false)
 	if err != nil {
 		log.Warn("fail to find collection with old name", zap.Error(err))
 		return err
@@ -1231,7 +1247,18 @@ func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partitio
 	if err := mt.catalog.CreatePartition(ctx, coll.DBID, partition, partition.PartitionCreatedTimestamp); err != nil {
 		return err
 	}
-	mt.collID2Meta[partition.CollectionID].Partitions = append(mt.collID2Meta[partition.CollectionID].Partitions, partition.Clone())
+	// COW: create new slice to avoid data race with concurrent readers
+	oldPartitions := coll.Partitions
+	newPartitions := make([]*model.Partition, len(oldPartitions)+1)
+	copy(newPartitions, oldPartitions)
+	newPartitions[len(oldPartitions)] = partition.Clone()
+	coll.Partitions = newPartitions
+
+	// Update partition name index
+	if mt.partitionName2ID[partition.CollectionID] == nil {
+		mt.partitionName2ID[partition.CollectionID] = make(map[string]int64)
+	}
+	mt.partitionName2ID[partition.CollectionID][partition.PartitionName] = partition.PartitionID
 
 	log.Ctx(ctx).Info("add partition to meta table",
 		zap.Int64("collection", partition.CollectionID), zap.String("partition", partition.PartitionName),
@@ -1241,6 +1268,20 @@ func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partitio
 	metrics.RootCoordNumOfPartitions.WithLabelValues().Inc()
 
 	return nil
+}
+
+// GetPartitionIDByName returns partition ID by collection ID and partition name.
+// Returns (partitionID, true) if found, (0, false) if not found.
+func (mt *MetaTable) GetPartitionIDByName(collectionID int64, partitionName string) (int64, bool) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	if partitions, ok := mt.partitionName2ID[collectionID]; ok {
+		if partitionID, exists := partitions[partitionName]; exists {
+			return partitionID, true
+		}
+	}
+	return 0, false
 }
 
 func (mt *MetaTable) DropPartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
@@ -1264,6 +1305,11 @@ func (mt *MetaTable) DropPartition(ctx context.Context, collectionID UniqueID, p
 				return err
 			}
 			mt.collID2Meta[collectionID].Partitions[idx] = clone
+
+			// Remove from partition name index when dropping
+			if mt.partitionName2ID[collectionID] != nil {
+				delete(mt.partitionName2ID[collectionID], part.PartitionName)
+			}
 
 			log.Ctx(ctx).Info("drop partition", zap.Int64("collection", collectionID),
 				zap.Int64("partition", partitionID),
@@ -1307,7 +1353,18 @@ func (mt *MetaTable) RemovePartition(ctx context.Context, collectionID UniqueID,
 	if err := mt.catalog.DropPartition(ctx1, coll.DBID, collectionID, partitionID, ts); err != nil {
 		return err
 	}
-	coll.Partitions = append(coll.Partitions[:loc], coll.Partitions[loc+1:]...)
+	// COW: create new slice to avoid data race with concurrent readers
+	oldPartitions := coll.Partitions
+	newPartitions := make([]*model.Partition, len(oldPartitions)-1)
+	copy(newPartitions[:loc], oldPartitions[:loc])
+	copy(newPartitions[loc:], oldPartitions[loc+1:])
+	coll.Partitions = newPartitions
+
+	// Remove from partition name index
+	if mt.partitionName2ID[collectionID] != nil {
+		delete(mt.partitionName2ID[collectionID], partition.PartitionName)
+	}
+
 	log.Ctx(ctx).Info("remove partition", zap.Int64("collection", collectionID), zap.Int64("partition", partitionID), zap.Uint64("ts", ts))
 	return nil
 }

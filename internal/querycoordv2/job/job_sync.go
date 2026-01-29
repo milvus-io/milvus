@@ -63,22 +63,28 @@ func (job *SyncNewCreatedPartitionJob) PreExecute() error {
 }
 
 func (job *SyncNewCreatedPartitionJob) Execute() error {
+	tid := taskid.Add(1)
 	req := job.req
 	log := log.Ctx(job.ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("partitionID", req.GetPartitionID()),
 	)
 
+	t1 := time.Now()
 	// check if collection not load or loadType is loadPartition
 	collection := job.meta.GetCollection(job.ctx, job.req.GetCollectionID())
 	if collection == nil || collection.GetLoadType() == querypb.LoadType_LoadPartition {
 		return nil
 	}
-
+	t2 := time.Now()
+	log.Info("SyncNewCreatedPartitionJob collection not load or loadType is loadPartition", zap.Uint32("tid", tid), zap.Duration("duration", t2.Sub(t1)))
 	// check if partition already existed
 	if partition := job.meta.GetPartition(job.ctx, job.req.GetPartitionID()); partition != nil {
 		return nil
 	}
+
+	t3 := time.Now()
+	log.Info("SyncNewCreatedPartitionJob partition already existed", zap.Uint32("tid", tid), zap.Duration("duration", t3.Sub(t2)))
 
 	partition := &meta.Partition{
 		PartitionLoadInfo: &querypb.PartitionLoadInfo{
@@ -90,11 +96,14 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 		CreatedAt:      time.Now(),
 	}
 	err := job.meta.CollectionManager.PutPartition(job.ctx, partition)
+
+	t4 := time.Now()
+	log.Info("SyncNewCreatedPartitionJob put partition", zap.Uint32("tid", tid), zap.Duration("duration", t4.Sub(t3)))
 	if err != nil {
 		msg := "failed to store partitions"
 		log.Warn(msg, zap.Error(err))
 		return errors.Wrap(err, msg)
 	}
 
-	return WaitCurrentTargetUpdated(job.ctx, job.targetObserver, job.req.GetCollectionID())
+	return WaitUpdatePartition(job.ctx, job.targetObserver, job.req.GetCollectionID(), job.req.GetPartitionID())
 }
