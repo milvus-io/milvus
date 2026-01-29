@@ -65,6 +65,27 @@ ToString(ScalarIndexType type) {
     }
 }
 
+inline ScalarIndexType
+FromString(const std::string& type) {
+    if (type == "BITMAP") {
+        return ScalarIndexType::BITMAP;
+    } else if (type == "STLSORT" || type == "STL_SORT") {
+        return ScalarIndexType::STLSORT;
+    } else if (type == "MARISA" || type == "Trie" || type == "TRIE") {
+        return ScalarIndexType::MARISA;
+    } else if (type == "INVERTED") {
+        return ScalarIndexType::INVERTED;
+    } else if (type == "HYBRID") {
+        return ScalarIndexType::HYBRID;
+    } else if (type == "RTREE") {
+        return ScalarIndexType::RTREE;
+    } else if (type == "NGRAM") {
+        return ScalarIndexType::NGRAM;
+    } else {
+        return ScalarIndexType::NONE;
+    }
+}
+
 template <typename T>
 class ScalarIndex : public IndexBase {
  public:

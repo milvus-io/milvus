@@ -143,3 +143,9 @@ const std::string NAMESPACE_FIELD_NAME = "$namespace_id";
 const std::string MMAP_ENABLED_KEY = "mmap.enabled";
 
 const int64_t LOGICAL_BITS = 18;
+
+// Scalar index version constants
+// Version 3 introduces hybrid index configuration support
+constexpr int32_t kHybridIndexConfigVersion = 3;
+// The last version before hybrid index config support was added
+constexpr int32_t kLastVersionWithoutHybridIndexConfig = 2;
