@@ -2464,13 +2464,16 @@ class SnapshotRestoreChecker(Checker):
     def _init_pk_set(self):
         """Initialize pk_set with existing data's primary keys."""
         try:
+            # Flush to ensure data is queryable
+            self.milvus_client.flush(self.c_name)
+
             # Query all existing pks in batches
             offset = 0
             batch_size = 16384
             while True:
                 res = self.milvus_client.query(
                     collection_name=self.c_name,
-                    filter="",
+                    filter=f"{self.int64_field_name} >= 0",
                     output_fields=[self.int64_field_name],
                     limit=batch_size,
                     offset=offset
