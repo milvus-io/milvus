@@ -30,14 +30,20 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -235,15 +241,43 @@ func (suite *HTTPServerTestSuite) TestExprHandler() {
 		suite.True(strings.Contains(string(body), "only available on Proxy nodes"))
 	})
 
-	suite.Run("enabled_on_proxy_requires_root_auth", func() {
-		// When enabled on Proxy node (proxy registered and passwordVerifyFunc set),
-		// it should require root user authentication
+	suite.Run("enabled_on_proxy_with_authorization_disabled", func() {
+		// When authorization is disabled, any authenticated user can access
 		paramtable.Get().Save("common.security.exprEnabled", "true")
+		paramtable.Get().Save("common.security.authorizationEnabled", "false")
 		expr.Register("proxy", "mock_proxy")
 
-		// Register a mock password verify function
+		// Register mock functions
 		RegisterPasswordVerifyFunc(func(ctx context.Context, username, password string) bool {
-			return username == "root" && password == "Milvus"
+			return (username == "root" && password == "Milvus") ||
+				(username == "admin" && password == "admin123")
+		})
+
+		// With any valid credentials - should succeed when authorization is disabled
+		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
+		client := http.Client{}
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		req.SetBasicAuth("admin", "admin123")
+		resp, err := client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		suite.Equal(http.StatusOK, resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		suite.True(strings.Contains(string(body), "hello"))
+	})
+
+	suite.Run("enabled_on_proxy_with_rbac_root_bypass", func() {
+		// When authorization is enabled but RootShouldBindRole is false,
+		// root user should be able to access via bypass
+		paramtable.Get().Save("common.security.exprEnabled", "true")
+		paramtable.Get().Save("common.security.authorizationEnabled", "true")
+		paramtable.Get().Save("common.security.rootShouldBindRole", "false")
+		expr.Register("proxy", "mock_proxy")
+
+		// Register mock functions
+		RegisterPasswordVerifyFunc(func(ctx context.Context, username, password string) bool {
+			return (username == "root" && password == "Milvus") ||
+				(username == "admin" && password == "admin123")
 		})
 
 		// Without auth header - should fail with 401
@@ -257,16 +291,16 @@ func (suite *HTTPServerTestSuite) TestExprHandler() {
 		body, _ := io.ReadAll(resp.Body)
 		suite.True(strings.Contains(string(body), "authentication required"))
 
-		// With non-root user - should fail with 401
+		// With non-root user (without Expr privilege) - should fail with 401 (invalid credentials)
 		url = "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
 		req, _ = http.NewRequest(http.MethodGet, url, nil)
-		req.SetBasicAuth("admin", "password")
+		req.SetBasicAuth("admin", "wrong_password")
 		resp, err = client.Do(req)
 		suite.Nil(err)
 		defer resp.Body.Close()
 		suite.Equal(http.StatusUnauthorized, resp.StatusCode)
 		body, _ = io.ReadAll(resp.Body)
-		suite.True(strings.Contains(string(body), "only root user"))
+		suite.True(strings.Contains(string(body), "invalid credentials"))
 
 		// With root user but wrong password - should fail with 401
 		url = "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
@@ -277,9 +311,9 @@ func (suite *HTTPServerTestSuite) TestExprHandler() {
 		defer resp.Body.Close()
 		suite.Equal(http.StatusUnauthorized, resp.StatusCode)
 		body, _ = io.ReadAll(resp.Body)
-		suite.True(strings.Contains(string(body), "invalid root password"))
+		suite.True(strings.Contains(string(body), "invalid credentials"))
 
-		// With correct root credentials - should succeed
+		// With correct root credentials - should succeed via root bypass
 		url = "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
 		req, _ = http.NewRequest(http.MethodGet, url, nil)
 		req.SetBasicAuth("root", "Milvus")
@@ -291,8 +325,112 @@ func (suite *HTTPServerTestSuite) TestExprHandler() {
 		suite.True(strings.Contains(string(body), "hello"))
 	})
 
+	suite.Run("enabled_on_proxy_non_root_user_without_privilege", func() {
+		// Non-root user with valid credentials but without PrivilegeExpr privilege
+		// should get 403 Forbidden
+		paramtable.Get().Save("common.security.exprEnabled", "true")
+		paramtable.Get().Save("common.security.authorizationEnabled", "true")
+		paramtable.Get().Save("common.security.rootShouldBindRole", "false")
+		expr.Register("proxy", "mock_proxy")
+		privilege.InitPrivilegeGroups()
+
+		// Register mock password verify function
+		RegisterPasswordVerifyFunc(func(ctx context.Context, username, password string) bool {
+			return (username == "root" && password == "Milvus") ||
+				(username == "admin" && password == "admin123")
+		})
+
+		// Register mock getUserRoleFunc - admin has role1 but no PrivilegeExpr
+		RegisterGetUserRoleFunc(func(username string) ([]string, error) {
+			if username == "admin" {
+				return []string{"role1"}, nil
+			}
+			return []string{}, nil
+		})
+
+		// Set up privilege cache with policies that do NOT include PrivilegeExpr for role1
+		mockMixCoord := mocks.NewMockMixCoordClient(suite.T())
+		mockMixCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				// role1 only has PrivilegeLoad on Collection, not PrivilegeExpr
+				funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "col1", commonpb.ObjectPrivilege_PrivilegeLoad.String(), "default"),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("admin", "role1"),
+			},
+		}, nil).Maybe()
+		privilege.InitPrivilegeCache(context.Background(), mockMixCoord)
+		defer privilege.CleanPrivilegeCache()
+
+		// Non-root user with valid credentials but without PrivilegeExpr - should fail with 403
+		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
+		client := http.Client{}
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		req.SetBasicAuth("admin", "admin123")
+		resp, err := client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		suite.Equal(http.StatusForbidden, resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		suite.True(strings.Contains(string(body), "permission denied"))
+	})
+
+	suite.Run("enabled_on_proxy_non_root_user_with_privilege", func() {
+		// Non-root user with valid credentials and PrivilegeExpr privilege
+		// should get 200 OK
+		paramtable.Get().Save("common.security.exprEnabled", "true")
+		paramtable.Get().Save("common.security.authorizationEnabled", "true")
+		paramtable.Get().Save("common.security.rootShouldBindRole", "false")
+		expr.Register("proxy", "mock_proxy")
+		privilege.InitPrivilegeGroups()
+
+		// Register mock password verify function
+		RegisterPasswordVerifyFunc(func(ctx context.Context, username, password string) bool {
+			return (username == "root" && password == "Milvus") ||
+				(username == "admin" && password == "admin123")
+		})
+
+		// Register mock getUserRoleFunc - admin has role1 with PrivilegeExpr
+		RegisterGetUserRoleFunc(func(username string) ([]string, error) {
+			if username == "admin" {
+				return []string{"role1"}, nil
+			}
+			return []string{}, nil
+		})
+
+		// Set up privilege cache with policies that include PrivilegeExpr for role1
+		mockMixCoord := mocks.NewMockMixCoordClient(suite.T())
+		mockMixCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				// role1 has PrivilegeExpr on Global
+				funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeExpr.String(), "default"),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("admin", "role1"),
+			},
+		}, nil).Maybe()
+		privilege.InitPrivilegeCache(context.Background(), mockMixCoord)
+		defer privilege.CleanPrivilegeCache()
+
+		// Non-root user with valid credentials and PrivilegeExpr - should succeed with 200
+		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
+		client := http.Client{}
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		req.SetBasicAuth("admin", "admin123")
+		resp, err := client.Do(req)
+		suite.Nil(err)
+		defer resp.Body.Close()
+		suite.Equal(http.StatusOK, resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		suite.True(strings.Contains(string(body), "hello"))
+	})
+
 	// Reset config
 	paramtable.Get().Save("common.security.exprEnabled", "false")
+	paramtable.Get().Save("common.security.authorizationEnabled", "false")
+	paramtable.Get().Save("common.security.rootShouldBindRole", "false")
 }
 
 func TestHTTPServerSuite(t *testing.T) {
