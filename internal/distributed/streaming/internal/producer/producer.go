@@ -37,13 +37,14 @@ func NewResumableProducer(f factory, opts *ProducerOptions) *ResumableProducer {
 		stopResumingCh: make(chan struct{}),
 		resumingExitCh: make(chan struct{}),
 		lifetime:       typeutil.NewLifetime(),
-		logger:         log.With(zap.String("pchannel", opts.PChannel)),
 		opts:           opts,
 		producer:       newProducerWithResumingError(opts.PChannel), // lazy initialized.
 		cond:           syncutil.NewContextCond(&sync.Mutex{}),
 		factory:        f,
 		metrics:        newResumingProducerMetrics(opts.PChannel),
+		rateLimiter:    newProduceRateLimiter(opts.PChannel),
 	}
+	p.SetLogger(log.With(zap.String("pchannel", opts.PChannel)))
 	go p.resumeLoop()
 	return p
 }
@@ -56,6 +57,7 @@ type factory func(ctx context.Context, opts *handler.ProducerOptions) (producer.
 // ResumableProducer will do automatic resume from stream broken and streaming node re-balance.
 // All error in these package should be marked by streaming/errs package.
 type ResumableProducer struct {
+	log.Binder
 	ctx            context.Context
 	cancel         context.CancelFunc
 	resumingExitCh chan struct{}
@@ -64,7 +66,6 @@ type ResumableProducer struct {
 	// Use producer Close is better way to stop producer.
 
 	lifetime *typeutil.Lifetime
-	logger   *log.MLogger
 	opts     *ProducerOptions
 
 	producer producerWithResumingError
@@ -74,10 +75,45 @@ type ResumableProducer struct {
 	factory factory
 
 	metrics *resumingProducerMetrics
+
+	rateLimiter *produceRateLimiter
 }
 
-// Produce produce a new message to log service.
-func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMessage) (result *types.AppendResult, err error) {
+// BeginProduce begins a new produce task.
+func (p *ResumableProducer) BeginProduce(ctx context.Context, msgs ...message.MutableMessage) (*ProduceGuard, error) {
+	if len(msgs) == 0 {
+		panic("begin produce with no messages")
+	}
+	vchannel := msgs[0].VChannel()
+	isNotDML := false
+	for i := 1; i < len(msgs); i++ {
+		if msgs[i].VChannel() != vchannel {
+			panic("begin produce with messages of different vchannels")
+		}
+		if !msgs[i].MessageType().IsDMLMessageType() {
+			isNotDML = true
+		}
+	}
+	if isNotDML {
+		return &ProduceGuard{
+			producer: p,
+			msgs:     msgs,
+			r:        nil,
+		}, nil
+	}
+
+	r, err := p.rateLimiter.RequestReservation(ctx, msgs...)
+	if err != nil {
+		return nil, err
+	}
+	return &ProduceGuard{
+		producer: p,
+		msgs:     msgs,
+		r:        r,
+	}, nil
+}
+
+func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.MutableMessage) (result *types.AppendResult, err error) {
 	if !p.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, errors.Wrapf(errs.ErrClosed, "produce on closed producer")
 	}
@@ -89,7 +125,6 @@ func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMess
 		if err != nil {
 			return nil, err
 		}
-
 		produceResult, err := producerHandler.Append(ctx, msg)
 		if err == nil {
 			return produceResult, nil
@@ -108,6 +143,12 @@ func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMess
 			if sErr.IsIgnoredOperation() {
 				return nil, errors.Mark(err, errs.ErrIgnoredOperation)
 			}
+			if sErr.IsRateLimitRejected() {
+				// current message is rate limit rejected, wait until the rate limit is available.
+				if err := p.rateLimiter.WaitUntilAvailable(ctx); err != nil {
+					return nil, errors.Mark(err, errs.ErrCanceledOrDeadlineExceed)
+				}
+			}
 		}
 	}
 }
@@ -115,7 +156,7 @@ func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMess
 // resumeLoop is used to resume producer from error.
 func (p *ResumableProducer) resumeLoop() {
 	defer func() {
-		p.logger.Info("stop resuming")
+		p.Logger().Info("stop resuming")
 		p.metrics.IntoUnavailable()
 		close(p.resumingExitCh)
 	}()
@@ -146,7 +187,7 @@ func (p *ResumableProducer) waitUntilUnavailable(producer handler.Producer) erro
 		return p.ctx.Err()
 	case <-producer.Available():
 		// Wait old producer unavailable, trigger a new resuming operation.
-		p.logger.Warn("producer encounter error, try to resume...")
+		p.Logger().Warn("producer encounter error, try to resume...")
 		return nil
 	}
 }
@@ -164,7 +205,8 @@ func (p *ResumableProducer) createNewProducer() (producer.Producer, error) {
 		// a underlying stream producer life time should be equal to the resumable producer.
 		// so ctx of resumable producer is passed to underlying stream producer creation.
 		producerHandler, err := p.factory(p.ctx, &handler.ProducerOptions{
-			PChannel: p.opts.PChannel,
+			PChannel:          p.opts.PChannel,
+			RateLimitObserver: p.rateLimiter,
 		})
 
 		// Can not resumable:
@@ -177,7 +219,7 @@ func (p *ResumableProducer) createNewProducer() (producer.Producer, error) {
 		// Otherwise, perform a resuming operation.
 		if err != nil {
 			nextBackoff := backoff.NextBackOff()
-			p.logger.Warn("create producer failed, retry...", zap.Error(err), zap.Duration("nextRetryInterval", nextBackoff))
+			p.Logger().Warn("create producer failed, retry...", zap.Error(err), zap.Duration("nextRetryInterval", nextBackoff))
 			time.Sleep(nextBackoff)
 			continue
 		}
@@ -203,7 +245,7 @@ func (p *ResumableProducer) gracefulClose() error {
 // Close close the producer.
 func (p *ResumableProducer) Close() {
 	if err := p.gracefulClose(); err != nil {
-		p.logger.Warn("graceful close a producer fail, force close is applied")
+		p.Logger().Warn("graceful close a producer fail, force close is applied")
 	}
 
 	// cancel is always need to be called, even graceful close is success.

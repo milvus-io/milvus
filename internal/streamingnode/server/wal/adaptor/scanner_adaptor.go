@@ -1,9 +1,26 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package adaptor
 
 import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
@@ -19,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/ratelimit"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
@@ -49,17 +67,18 @@ func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 	}
 
 	s := &scannerAdaptorImpl{
-		logger:        logger,
-		recovery:      true,
-		innerWAL:      l,
-		readOption:    readOption,
-		filterFunc:    func(message.ImmutableMessage) bool { return true },
-		reorderBuffer: utility.NewReOrderBuffer(),
-		pendingQueue:  utility.NewPendingQueue(),
-		txnBuffer:     utility.NewTxnBuffer(logger, scanMetrics),
-		cleanup:       func() {},
-		ScannerHelper: helper.NewScannerHelper(name),
-		metrics:       scanMetrics,
+		logger:          logger,
+		recovery:        true,
+		innerWAL:        l,
+		readOption:      readOption,
+		filterFunc:      func(message.ImmutableMessage) bool { return true },
+		reorderBuffer:   utility.NewReOrderBuffer(),
+		pendingQueue:    utility.NewPendingQueue(),
+		txnBuffer:       utility.NewTxnBuffer(logger, scanMetrics),
+		cleanup:         func() {},
+		ScannerHelper:   helper.NewScannerHelper(name),
+		metrics:         scanMetrics,
+		readRateCounter: utility.NewRateCounter(10 * time.Second), // 15 second sliding window
 	}
 	go s.execute()
 	return s
@@ -84,17 +103,18 @@ func newScannerAdaptor(
 		zap.String("channel", l.Channel().Name),
 	)
 	s := &scannerAdaptorImpl{
-		logger:        logger,
-		recovery:      recovery,
-		innerWAL:      l,
-		readOption:    readOption,
-		filterFunc:    options.GetFilterFunc(readOption.MessageFilter),
-		reorderBuffer: utility.NewReOrderBuffer(),
-		pendingQueue:  utility.NewPendingQueue(),
-		txnBuffer:     utility.NewTxnBuffer(logger, scanMetrics),
-		cleanup:       cleanup,
-		ScannerHelper: helper.NewScannerHelper(name),
-		metrics:       scanMetrics,
+		logger:          logger,
+		recovery:        recovery,
+		innerWAL:        l,
+		readOption:      readOption,
+		filterFunc:      options.GetFilterFunc(readOption.MessageFilter),
+		reorderBuffer:   utility.NewReOrderBuffer(),
+		pendingQueue:    utility.NewPendingQueue(),
+		txnBuffer:       utility.NewTxnBuffer(logger, scanMetrics),
+		cleanup:         cleanup,
+		ScannerHelper:   helper.NewScannerHelper(name),
+		metrics:         scanMetrics,
+		readRateCounter: utility.NewRateCounter(10 * time.Second), // 10 second sliding window
 	}
 	go s.execute()
 	return s
@@ -112,9 +132,10 @@ type scannerAdaptorImpl struct {
 	pendingQueue  *utility.PendingQueue
 	txnBuffer     *utility.TxnBuffer // txn buffer for txn message.
 
-	cleanup   func()
-	clearOnce sync.Once
-	metrics   *metricsutil.ScannerMetrics
+	cleanup         func()
+	clearOnce       sync.Once
+	metrics         *metricsutil.ScannerMetrics
+	readRateCounter *utility.RateCounter // tracks read rate (bytes/sec)
 }
 
 // Channel returns the channel assignment info of the wal.
@@ -196,6 +217,21 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 	scanner := newSwithableScanner(s.Name(), s.logger, s.innerWAL, wb, s.readOption.DeliverPolicy, msgChan)
 	s.logger.Info("start produce loop of scanner at model", zap.String("model", getScannerModel(scanner)))
 	for {
+		if s.readOption.RateLimitControl != nil {
+			// if the scanner is working with rate limit control,
+			// 1. when the scanner is working at catchup mode, the write operation is fast than the consume operation,
+			// so we need to enter slowdown mode to protect the wal from being overloaded.
+			// 2. when the scanner is working at tailing mode, the write operation is slow than the consume operation,
+			// so we enter into recovery mode to speed up the rate limit.
+			if _, ok := scanner.(*catchupScanner); ok {
+				// Create a checker that returns false when read rate > append rate.
+				// This indicates the scanner has caught up and slowdown should stop.
+				checker := s.createSlowdownChecker()
+				s.readOption.RateLimitControl.EnterSlowdownMode(checker)
+			} else {
+				s.readOption.RateLimitControl.EnterRecoveryMode()
+			}
+		}
 		if scanner, err = scanner.Do(s.Context()); err != nil {
 			return err
 		}
@@ -266,6 +302,39 @@ func (s *scannerAdaptorImpl) waitUntilStartConsumption() {
 	}
 }
 
+// createSlowdownChecker creates a SlowdownChecker for rate limit control.
+// The checker returns false when read rate > append rate, indicating the scanner has caught up.
+func (s *scannerAdaptorImpl) createSlowdownChecker() ratelimit.SlowdownChecker {
+	appendRateCounter := s.readOption.AppendRateCounter
+	if appendRateCounter == nil {
+		// No append rate counter available, always continue slowdown.
+		return nil
+	}
+	return &slowdownCheckerImpl{
+		readRateCounter:   s.readRateCounter,
+		appendRateCounter: appendRateCounter,
+	}
+}
+
+// slowdownCheckerImpl implements ratelimit.SlowdownChecker interface.
+type slowdownCheckerImpl struct {
+	readRateCounter   *utility.RateCounter
+	appendRateCounter *utility.RateCounter
+}
+
+// Check returns true if slowdown should continue, false if it should exit to recovery.
+// Continue slowdown if read rate <= append rate (still catching up).
+// Stop slowdown if read rate > append rate (caught up).
+func (c *slowdownCheckerImpl) Check() bool {
+	return c.readRateCounter.Rate() < c.appendRateCounter.Rate()*0.9
+}
+
+// SlowdownStartupHWM returns the high watermark to start slowdown from.
+// Uses the current append rate as the startup HWM.
+func (c *slowdownCheckerImpl) SlowdownStartupHWM() int64 {
+	return int64(c.readRateCounter.Rate())
+}
+
 // handleUpstream handles the incoming message from the upstream.
 func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 	// Filtering the message if needed.
@@ -273,6 +342,9 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 	if s.filterFunc != nil && !s.filterFunc(msg) {
 		return
 	}
+
+	// Track read rate for rate limiting control.
+	s.readRateCounter.Add(int64(msg.EstimateSize()))
 
 	// Observe the message.
 	var isTailing bool
