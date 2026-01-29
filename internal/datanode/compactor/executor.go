@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -147,6 +148,12 @@ func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResul
 			task.result = result
 		} else {
 			task.state = datapb.CompactionTaskState_failed
+		}
+
+		// Publish filesystem metrics after compaction task completion
+		storageConfig := task.compactor.GetStorageConfig()
+		if _, err := storagev2.PublishFilesystemMetricsWithConfig(storageConfig); err != nil {
+			log.Warn("failed to publish filesystem metrics", zap.Error(err))
 		}
 
 		// Adjust slot usage
