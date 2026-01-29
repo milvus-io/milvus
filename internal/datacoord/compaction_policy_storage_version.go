@@ -64,7 +64,7 @@ func (policy *storageVersionUpgradePolicy) targetVersion() int64 {
 }
 
 func (policy *storageVersionUpgradePolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {
-	versionReqStr := paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.GetValue()
+	versionReqStr := paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.GetValue()
 	versionRequirement, err := semver.Parse(versionReqStr)
 	if err != nil {
 		log.Warn("failed to parse storage version upgrade version requirement", zap.String("versionStr", versionReqStr), zap.Error(err))

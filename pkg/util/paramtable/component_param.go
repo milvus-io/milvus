@@ -4684,10 +4684,10 @@ type dataCoordConfig struct {
 	SingleCompactionExpiredLogMaxSize ParamItem `refreshable:"true"`
 	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
 
-	StorageVersionCompactionEnabled           ParamItem `refreshable:"true"`
-	StorageVersionCompactionRateLimitTokens   ParamItem `refreshable:"true"`
-	StorageVersionCompactionRateLimitInterval ParamItem `refreshable:"true"`
-	StorageVersionCompactionMinSessionVersion ParamItem `refreshable:"true"`
+	StorageVersionCompactionEnabled                   ParamItem `refreshable:"true"`
+	StorageVersionCompactionRateLimitTokens           ParamItem `refreshable:"true"`
+	StorageVersionCompactionRateLimitInterval         ParamItem `refreshable:"true"`
+	StorageVersionCompactionSessionVersionRequirement ParamItem `refreshable:"true"`
 
 	ChannelCheckpointMaxLag ParamItem `refreshable:"true"`
 	SyncSegmentsInterval    ParamItem `refreshable:"false"`
@@ -5234,14 +5234,14 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.StorageVersionCompactionRateLimitInterval.Init(base.mgr)
 
-	p.StorageVersionCompactionMinSessionVersion = ParamItem{
+	p.StorageVersionCompactionSessionVersionRequirement = ParamItem{
 		Key:          "dataCoord.compaction.storageVersion.sessionVersionRequirement",
 		Version:      "2.6.10",
 		DefaultValue: "2.6.9",
 		Doc:          "The minimal session version requirements for triggering storage version upgrade compaction",
 		Export:       false,
 	}
-	p.StorageVersionCompactionMinSessionVersion.Init(base.mgr)
+	p.StorageVersionCompactionSessionVersionRequirement.Init(base.mgr)
 
 	p.GlobalCompactionInterval = ParamItem{
 		Key:          "dataCoord.compaction.global.interval",

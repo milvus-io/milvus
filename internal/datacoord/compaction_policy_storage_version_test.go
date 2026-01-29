@@ -712,13 +712,13 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerSkippedDueToVersionRequire
 
 	// Setup params with a higher version requirement
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.Key, "2.7.0")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.Key, "2.7.0")
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "1")
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "10")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
 	defer func() {
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
-		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.Key)
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
 		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
@@ -778,13 +778,13 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerVersionRequirementSatisfie
 
 	// Setup params
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.Key, "2.6.0")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.Key, "2.6.0")
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "1")
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "10")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
 	defer func() {
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
-		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.Key)
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
 		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
@@ -843,8 +843,8 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerVersionRequirementSatisfie
 
 func (s *StorageVersionUpgradePolicySuite) TestTriggerInvalidVersionRequirement() {
 	// Setup params with an invalid version string
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.Key, "invalid-version")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.Key)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.Key, "invalid-version")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.Key)
 
 	// Should return error because version requirement is invalid
 	events, err := s.policy.Trigger(context.Background())
@@ -858,13 +858,13 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerVersionExactlyEqual() {
 
 	// Setup params - minVersion equals requirement exactly
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.Key, "2.6.10")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.Key, "2.6.10")
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "1")
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "10")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
 	defer func() {
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
-		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionMinSessionVersion.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.Key)
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
 		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
 		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
