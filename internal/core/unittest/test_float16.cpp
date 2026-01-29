@@ -93,17 +93,14 @@ TEST(Float16, ExecWithoutPredicateFlat) {
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-        >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str = handle.ParseSearch("",         // no predicate
+                                       "fakevec",  // vector field name
+                                       5,          // topk
+                                       "L2",       // metric_type
+                                       R"({"nprobe": 10})",  // search_params
+                                       3                     // round_decimal
+    );
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     int64_t N = ROW_COUNT;
@@ -235,32 +232,6 @@ TEST(Float16, ExecWithPredicate) {
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 101
-                                          data_type: Float
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          float_val: -1
-                                        >
-                                        upper_value: <
-                                          float_val: 1
-                                        >
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
@@ -271,7 +242,15 @@ TEST(Float16, ExecWithPredicate) {
                     dataset.timestamps_.data(),
                     dataset.raw_);
 
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str = handle.ParseSearch(
+        "age >= -1 and age < 1",  // predicate: lower_inclusive=true, upper_inclusive=false
+        "fakevec",                // vector field name
+        5,                        // topk
+        "L2",                     // metric_type
+        R"({"nprobe": 10})",  // search_params
+        3                     // round_decimal
+    );
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -331,17 +310,14 @@ TEST(BFloat16, ExecWithoutPredicateFlat) {
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-        >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str = handle.ParseSearch("",         // no predicate
+                                       "fakevec",  // vector field name
+                                       5,          // topk
+                                       "L2",       // metric_type
+                                       R"({"nprobe": 10})",  // search_params
+                                       3                     // round_decimal
+    );
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     int64_t N = ROW_COUNT;
@@ -473,32 +449,6 @@ TEST(BFloat16, ExecWithPredicate) {
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 101
-                                          data_type: Float
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          float_val: -1
-                                        >
-                                        upper_value: <
-                                          float_val: 1
-                                        >
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
@@ -509,7 +459,15 @@ TEST(BFloat16, ExecWithPredicate) {
                     dataset.timestamps_.data(),
                     dataset.raw_);
 
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str = handle.ParseSearch(
+        "age >= -1 and age < 1",  // predicate: lower_inclusive=true, upper_inclusive=false
+        "fakevec",                // vector field name
+        5,                        // topk
+        "L2",                     // metric_type
+        R"({"nprobe": 10})",  // search_params
+        3                     // round_decimal
+    );
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;

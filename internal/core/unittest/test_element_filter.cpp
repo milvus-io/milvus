@@ -225,69 +225,26 @@ TEST_P(ElementFilterSealed, RangeExpr) {
     int topK = 5;
 
     // Step 5: Test with element-level filter
-    // Query: Search array elements, filter by element_value in (100, 400)
+    // Query: Search array elements, filter by element_value in (100, 400) and id % 2 == 0
     {
-        std::string hints_line =
-            with_hints ? R"(hints: "iterative_filter")" : "";
-        std::string raw_plan =
-            boost::str(boost::format(R"(vector_anns: <
-                                        field_id: %1%
-                                        predicates: <
-                                          element_filter_expr: <
-                                            element_expr: <
-                                              binary_range_expr: <
-                                                column_info: <
-                                                  field_id: %2%
-                                                  data_type: Int32
-                                                  element_type: Int32
-                                                  is_element_level: true
-                                                >
-                                                lower_inclusive: false
-                                                upper_inclusive: false
-                                                lower_value: <
-                                                  int64_val: 100
-                                                >
-                                                upper_value: <
-                                                  int64_val: 400
-                                                >
-                                              >
-                                            >
-                                            predicate: <
-                                              binary_arith_op_eval_range_expr: <
-                                                column_info: <
-                                                  field_id: %3%
-                                                  data_type: Int64
-                                                >
-                                                arith_op: Mod
-                                                right_operand: <
-                                                  int64_val: 2
-                                                >
-                                                op: Equal
-                                                value: <
-                                                  int64_val: 0
-                                                >
-                                              >
-                                            >
-                                            struct_name: "structA"
-                                          >
-                                        >
-                                        query_info: <
-                                          topk: 5
-                                          round_decimal: 3
-                                          metric_type: "%4%"
-                                          %5%
-                                          search_params: "{\"ef\": 50}"
-                                        >
-                                        placeholder_tag: "$0">)") %
-                       vec_fid.get() % int_array_fid.get() % int64_fid.get() %
-                       metric % hints_line);
+        ScopedSchemaHandle handle(*schema);
 
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        ASSERT_TRUE(ok) << "Failed to parse element-level filter plan";
+        // Build search params with optional hints
+        std::string search_params =
+            with_hints ? R"({"ef": 50, "hints": "iterative_filter"})"
+                       : R"({"ef": 50})";
 
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        // Expression: id % 2 == 0 && element_filter(structA, 400 > $[price_array] > 100)
+        // binary_range with lower_inclusive=false, upper_inclusive=false means: 100 < x < 400
+        std::string expr =
+            "id % 2 == 0 && element_filter(structA, 400 > $[price_array] > "
+            "100)";
+
+        auto plan_bytes = handle.ParseSearch(
+            expr, "structA[array_vec]", topK, metric, search_params, 3);
+
+        auto plan = CreateSearchPlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
         ASSERT_NE(plan, nullptr);
 
         auto num_queries = 1;
@@ -493,65 +450,24 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
     int topK = 5;
 
     // Step 5: Test with element-level filter
-    // Query: Search array elements, filter by element_value > 10
+    // Query: Search array elements, filter by element_value > 10 and id % 2 == 0
     {
-        std::string hints_line =
-            with_hints ? R"(hints: "iterative_filter")" : "";
-        std::string raw_plan =
-            boost::str(boost::format(R"(vector_anns: <
-                                      field_id: %1%
-                                      predicates: <
-                                        element_filter_expr: <
-                                          element_expr: <
-                                            unary_range_expr: <
-                                              column_info: <
-                                                field_id: %2%
-                                                data_type: Int32
-                                                element_type: Int32
-                                                is_element_level: true
-                                              >
-                                              op: GreaterThan
-                                              value: <
-                                                int64_val: 10
-                                              >
-                                            >
-                                          >
-                                          predicate: <
-                                            binary_arith_op_eval_range_expr: <
-                                              column_info: <
-                                                field_id: %3%
-                                                data_type: Int64
-                                              >
-                                              arith_op: Mod
-                                              right_operand: <
-                                                int64_val: 2
-                                              >
-                                              op: Equal
-                                              value: <
-                                                int64_val: 0
-                                              >
-                                            >
-                                          >
-                                          struct_name: "structA"
-                                        >
-                                      >
-                                      query_info: <
-                                        topk: 5
-                                        round_decimal: 3
-                                        metric_type: "%4%"
-                                        %5%
-                                        search_params: "{\"ef\": 50}"
-                                      >
-                                      placeholder_tag: "$0">)") %
-                       vec_fid.get() % int_array_fid.get() % int64_fid.get() %
-                       metric % hints_line);
+        ScopedSchemaHandle handle(*schema);
 
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        ASSERT_TRUE(ok) << "Failed to parse element-level filter plan";
+        // Build search params with optional hints
+        std::string search_params =
+            with_hints ? R"({"ef": 50, "hints": "iterative_filter"})"
+                       : R"({"ef": 50})";
 
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        // Expression: id % 2 == 0 && element_filter(structA, $[price_array] > 10)
+        std::string expr =
+            "id % 2 == 0 && element_filter(structA, $[price_array] > 10)";
+
+        auto plan_bytes = handle.ParseSearch(
+            expr, "structA[array_vec]", topK, metric, search_params, 3);
+
+        auto plan = CreateSearchPlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
         ASSERT_NE(plan, nullptr);
 
         auto num_queries = 1;
@@ -942,67 +858,24 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
 
     // Execute element-level search with iterative filter
     {
-        std::string hints_line =
-            with_hints ? R"(hints: "iterative_filter")" : "";
-        std::string raw_plan =
-            boost::str(boost::format(R"(vector_anns: <
-                                        field_id: %1%
-                                        predicates: <
-                                          element_filter_expr: <
-                                            element_expr: <
-                                              binary_range_expr: <
-                                                column_info: <
-                                                  field_id: %2%
-                                                  data_type: Int32
-                                                  element_type: Int32
-                                                  is_element_level: true
-                                                >
-                                                lower_inclusive: false
-                                                upper_inclusive: false
-                                                lower_value: <
-                                                  int64_val: 100
-                                                >
-                                                upper_value: <
-                                                  int64_val: 400
-                                                >
-                                              >
-                                            >
-                                            predicate: <
-                                              binary_arith_op_eval_range_expr: <
-                                                column_info: <
-                                                  field_id: %3%
-                                                  data_type: Int64
-                                                >
-                                                arith_op: Mod
-                                                right_operand: <
-                                                  int64_val: 2
-                                                >
-                                                op: Equal
-                                                value: <
-                                                  int64_val: 0
-                                                >
-                                              >
-                                            >
-                                            struct_name: "structA"
-                                          >
-                                        >
-                                        query_info: <
-                                          topk: 5
-                                          round_decimal: 3
-                                          metric_type: "%4%"
-                                          %5%
-                                          search_params: "{\"ef\": 50}"
-                                        >
-                                        placeholder_tag: "$0">)") %
-                       vec_fid.get() % int_array_fid.get() % int64_fid.get() %
-                       metric % hints_line);
+        ScopedSchemaHandle handle(*schema);
 
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        ASSERT_TRUE(ok) << "Failed to parse element-level filter plan";
+        // Build search params with optional hints
+        std::string search_params =
+            with_hints ? R"({"ef": 50, "hints": "iterative_filter"})"
+                       : R"({"ef": 50})";
 
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        // Expression: id % 2 == 0 && element_filter(structA, 400 > $[price_array] > 100)
+        // binary_range with lower_inclusive=false, upper_inclusive=false means: 100 < x < 400
+        std::string expr =
+            "id % 2 == 0 && element_filter(structA, 400 > $[price_array] > "
+            "100)";
+
+        auto plan_bytes = handle.ParseSearch(
+            expr, "structA[array_vec]", topK, metric, search_params, 3);
+
+        auto plan = CreateSearchPlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
         ASSERT_NE(plan, nullptr);
 
         auto num_queries = 1;

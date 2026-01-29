@@ -45,6 +45,8 @@
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "storage/Util.h"
 #include "milvus-storage/common/constants.h"
+#include "milvus_plan_parser.h"
+#include "pb/plan.pb.h"
 
 using boost::algorithm::starts_with;
 
@@ -1910,6 +1912,178 @@ replace_metric_and_translate_text_plan_to_binary_plan(
     }
     return translate_text_plan_to_binary_plan(plan.c_str());
 }
+
+// Parse a string expression using the plan parser shared library.
+// This function takes a schema and expression string and returns the binary plan.
+// The schema is serialized to protobuf and registered with the plan parser,
+// then the expression is parsed and the schema is unregistered.
+inline std::vector<char>
+parse_expr_to_binary_plan(const Schema& schema, const std::string& expr) {
+    // Serialize schema to protobuf
+    auto schema_proto = schema.ToProto();
+    std::string schema_bytes;
+    schema_proto.SerializeToString(&schema_bytes);
+
+    // Register schema with plan parser
+    std::vector<uint8_t> schema_vec(schema_bytes.begin(), schema_bytes.end());
+    auto handle = milvus::planparserv2::PlanParser::RegisterSchema(schema_vec);
+
+    // Parse expression
+    std::vector<uint8_t> plan_bytes;
+    try {
+        plan_bytes = milvus::planparserv2::PlanParser::Parse(handle, expr);
+    } catch (...) {
+        // Ensure schema is unregistered even on error
+        milvus::planparserv2::PlanParser::UnregisterSchema(handle);
+        throw;
+    }
+
+    // Unregister schema
+    milvus::planparserv2::PlanParser::UnregisterSchema(handle);
+
+    // Convert to vector<char>
+    std::vector<char> ret(plan_bytes.begin(), plan_bytes.end());
+    return ret;
+}
+
+// RAII wrapper for PlanParser schema registration to ensure proper cleanup.
+// This is useful when you need to parse multiple expressions with the same schema.
+class ScopedSchemaHandle {
+ public:
+    explicit ScopedSchemaHandle(const Schema& schema) {
+        auto schema_proto = schema.ToProto();
+        std::string schema_bytes;
+        schema_proto.SerializeToString(&schema_bytes);
+        std::vector<uint8_t> schema_vec(schema_bytes.begin(),
+                                        schema_bytes.end());
+        handle_ = milvus::planparserv2::PlanParser::RegisterSchema(schema_vec);
+    }
+
+    ~ScopedSchemaHandle() {
+        if (handle_ != milvus::planparserv2::kInvalidSchemaHandle) {
+            milvus::planparserv2::PlanParser::UnregisterSchema(handle_);
+        }
+    }
+
+    ScopedSchemaHandle(const ScopedSchemaHandle&) = delete;
+    ScopedSchemaHandle&
+    operator=(const ScopedSchemaHandle&) = delete;
+
+    ScopedSchemaHandle(ScopedSchemaHandle&& other) noexcept
+        : handle_(other.handle_) {
+        other.handle_ = milvus::planparserv2::kInvalidSchemaHandle;
+    }
+
+    ScopedSchemaHandle&
+    operator=(ScopedSchemaHandle&& other) noexcept {
+        if (this != &other) {
+            if (handle_ != milvus::planparserv2::kInvalidSchemaHandle) {
+                milvus::planparserv2::PlanParser::UnregisterSchema(handle_);
+            }
+            handle_ = other.handle_;
+            other.handle_ = milvus::planparserv2::kInvalidSchemaHandle;
+        }
+        return *this;
+    }
+
+    milvus::planparserv2::SchemaHandle
+    get() const {
+        return handle_;
+    }
+
+    std::vector<char>
+    Parse(const std::string& expr) const {
+        auto plan_bytes =
+            milvus::planparserv2::PlanParser::Parse(handle_, expr);
+        return std::vector<char>(plan_bytes.begin(), plan_bytes.end());
+    }
+
+    // Parse a search expression with vector search parameters.
+    // This creates a VectorANNS plan node for search operations.
+    std::vector<char>
+    ParseSearch(const std::string& expr,
+                const std::string& vector_field_name,
+                int64_t topk,
+                const std::string& metric_type,
+                const std::string& search_params = "{}",
+                int64_t round_decimal = -1,
+                const std::string& hints = "",
+                bool materialized_view_involved = false) const {
+        // Build QueryInfo protobuf
+        milvus::proto::plan::QueryInfo query_info;
+        query_info.set_topk(topk);
+        query_info.set_metric_type(metric_type);
+        query_info.set_search_params(search_params);
+        query_info.set_round_decimal(round_decimal);
+        if (!hints.empty()) {
+            query_info.set_hints(hints);
+        }
+        query_info.set_materialized_view_involved(materialized_view_involved);
+
+        // Serialize QueryInfo
+        std::string query_info_bytes;
+        query_info.SerializeToString(&query_info_bytes);
+        std::vector<uint8_t> query_info_vec(query_info_bytes.begin(),
+                                            query_info_bytes.end());
+
+        auto plan_bytes = milvus::planparserv2::PlanParser::ParseSearch(
+            handle_, expr, vector_field_name, query_info_vec);
+        return std::vector<char>(plan_bytes.begin(), plan_bytes.end());
+    }
+
+    // Parse a group-by search expression with vector search parameters.
+    // This creates a VectorANNS plan node with group-by settings for search operations.
+    // group_by_field_id: the field to group by
+    // group_size: number of results per group
+    // json_path: path within JSON field (e.g., "/int8")
+    // json_type: data type of the JSON value (e.g., milvus::proto::schema::DataType::Int8)
+    // strict_group_size: if true, return exactly group_size results per group
+    // strict_cast: if true, throw error for type mismatch
+    std::vector<char>
+    ParseGroupBySearch(const std::string& expr,
+                       const std::string& vector_field_name,
+                       int64_t topk,
+                       const std::string& metric_type,
+                       const std::string& search_params,
+                       int64_t group_by_field_id,
+                       int64_t group_size,
+                       const std::string& json_path = "",
+                       milvus::proto::schema::DataType json_type =
+                           milvus::proto::schema::DataType::None,
+                       bool strict_group_size = false,
+                       bool strict_cast = false,
+                       int64_t round_decimal = -1) const {
+        // Build QueryInfo protobuf
+        milvus::proto::plan::QueryInfo query_info;
+        query_info.set_topk(topk);
+        query_info.set_metric_type(metric_type);
+        query_info.set_search_params(search_params);
+        query_info.set_round_decimal(round_decimal);
+        query_info.set_group_by_field_id(group_by_field_id);
+        query_info.set_group_size(group_size);
+        query_info.set_strict_group_size(strict_group_size);
+        if (!json_path.empty()) {
+            query_info.set_json_path(json_path);
+        }
+        if (json_type != milvus::proto::schema::DataType::None) {
+            query_info.set_json_type(json_type);
+        }
+        query_info.set_strict_cast(strict_cast);
+
+        // Serialize QueryInfo
+        std::string query_info_bytes;
+        query_info.SerializeToString(&query_info_bytes);
+        std::vector<uint8_t> query_info_vec(query_info_bytes.begin(),
+                                            query_info_bytes.end());
+
+        auto plan_bytes = milvus::planparserv2::PlanParser::ParseSearch(
+            handle_, expr, vector_field_name, query_info_vec);
+        return std::vector<char>(plan_bytes.begin(), plan_bytes.end());
+    }
+
+ private:
+    milvus::planparserv2::SchemaHandle handle_;
+};
 
 inline auto
 GenTss(int64_t num, int64_t begin_ts) {
