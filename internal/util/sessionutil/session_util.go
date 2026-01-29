@@ -302,7 +302,9 @@ func (s *Session) Init(serverName, address string, exclusive bool, triggerKill b
 	s.Address = address
 	s.Exclusive = exclusive
 	s.TriggerKill = triggerKill
-	s.checkIDExist()
+	if err := s.checkIDExist(); err != nil {
+		panic(err)
+	}
 	serverID, err := s.getServerID()
 	if err != nil {
 		panic(err)
@@ -395,13 +397,17 @@ func (s *Session) getServerID() (int64, error) {
 	return nodeID, nil
 }
 
-func (s *Session) checkIDExist() {
-	s.etcdCli.Txn(s.ctx).If(
+func (s *Session) checkIDExist() error {
+	_, err := s.etcdCli.Txn(s.ctx).If(
 		clientv3.Compare(
 			clientv3.Version(path.Join(s.metaRoot, DefaultServiceRoot, DefaultIDKey)),
 			"=",
 			0)).
 		Then(clientv3.OpPut(path.Join(s.metaRoot, DefaultServiceRoot, DefaultIDKey), "1")).Commit()
+	if err != nil {
+		log.Ctx(s.ctx).Warn("failed to check/create ID key in etcd", zap.Error(err))
+	}
+	return err
 }
 
 func (s *Session) getServerIDWithKey(key string) (int64, error) {
@@ -411,6 +417,12 @@ func (s *Session) getServerIDWithKey(key string) (int64, error) {
 	}
 	log := log.Ctx(s.ctx)
 	for {
+		select {
+		case <-s.ctx.Done():
+			return -1, s.ctx.Err()
+		default:
+		}
+
 		getResp, err := s.etcdCli.Get(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, key))
 		if err != nil {
 			log.Warn("Session get etcd key error", zap.String("key", key), zap.Error(err))
@@ -613,11 +625,40 @@ func (s *Session) processKeepAliveResponse() {
 		}
 
 		// Block until the keep alive failure.
-		for range ch {
+		// Add timeout protection: if no keepalive response is received within the TTL,
+		// the session is considered expired.
+		keepaliveTimeout := time.Duration(s.sessionTTL) * time.Second
+		timer := time.NewTimer(keepaliveTimeout)
+	keepaliveLoop:
+		for {
+			select {
+			case _, ok := <-ch:
+				if !ok {
+					break keepaliveLoop
+				}
+				// Reset timeout on successful keepalive response
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(keepaliveTimeout)
+			case <-timer.C:
+				s.Logger().Error("keepalive response timeout, session expired",
+					zap.Int64("leaseID", int64(*s.LeaseID)),
+					zap.Int64("ttlSeconds", s.sessionTTL))
+				log.Cleanup()
+				os.Exit(exitCodeSessionLeaseExpired)
+			case <-s.ctx.Done():
+				timer.Stop()
+				return
+			}
 		}
+		timer.Stop()
 
-		// receive a keep alive response, continue the opeartion.
-		// the keep alive channel may be closed because of network error, we should retry the keep alive.
+		// The keep alive channel was closed, possibly due to network error.
+		// Retry the keep alive.
 		ch = nil
 		nextKeepaliveInstant = time.Now().Add(time.Duration(s.sessionTTL) * time.Second)
 		lastErr = nil
@@ -758,6 +799,7 @@ type SessionEvent struct {
 
 type sessionWatcher struct {
 	s         *Session
+	ctx       context.Context
 	cancel    context.CancelFunc
 	rch       clientv3.WatchChan
 	eventCh   chan *SessionEvent
@@ -778,13 +820,13 @@ func (w *sessionWatcher) start(ctx context.Context) {
 	w.wg.Add(1)
 	go func() {
 		defer w.wg.Done()
+		defer w.closeEventCh()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case wresp, ok := <-w.rch:
 				if !ok {
-					w.closeEventCh()
 					log.Warn("session watch channel closed")
 					return
 				}
@@ -825,9 +867,10 @@ func (s *Session) WatchServices(prefix string, revision int64, rewatch Rewatch) 
 	ctx, cancel := context.WithCancel(s.ctx)
 	w := &sessionWatcher{
 		s:        s,
+		ctx:      ctx,
 		cancel:   cancel,
 		eventCh:  make(chan *SessionEvent, 100),
-		rch:      s.etcdCli.Watch(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
+		rch:      s.etcdCli.Watch(ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
 		prefix:   prefix,
 		rewatch:  rewatch,
 		validate: func(s *Session) bool { return true },
@@ -846,9 +889,10 @@ func (s *Session) WatchServicesWithVersionRange(prefix string, r semver.Range, r
 	ctx, cancel := context.WithCancel(s.ctx)
 	w := &sessionWatcher{
 		s:        s,
+		ctx:      ctx,
 		cancel:   cancel,
 		eventCh:  make(chan *SessionEvent, 100),
-		rch:      s.etcdCli.Watch(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
+		rch:      s.etcdCli.Watch(ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
 		prefix:   prefix,
 		rewatch:  rewatch,
 		validate: func(s *Session) bool { return r(s.Version) },
@@ -890,6 +934,11 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 		case mvccpb.DELETE:
 			log.Debug("watch services",
 				zap.Any("delete kv", ev.PrevKv))
+			if ev.PrevKv == nil {
+				log.Warn("watch services: DELETE event with nil PrevKv, skipping",
+					zap.String("key", string(ev.Kv.Key)))
+				continue
+			}
 			err := json.Unmarshal(ev.PrevKv.Value, session)
 			if err != nil {
 				log.Error("watch services", zap.Error(err))
@@ -908,16 +957,15 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 	}
 }
 
-func (w *sessionWatcher) handleWatchErr(err error) error {
+func (w *sessionWatcher) handleWatchErr(watchErr error) error {
 	// if not ErrCompacted, just close the channel
-	if err != v3rpc.ErrCompacted {
-		// close event channel
-		log.Warn("Watch service found error", zap.Error(err))
+	if watchErr != v3rpc.ErrCompacted {
+		log.Warn("Watch service found error", zap.Error(watchErr))
 		w.closeEventCh()
-		return err
+		return watchErr
 	}
 
-	sessions, revision, err := w.s.GetSessions(w.s.ctx, w.prefix)
+	sessions, revision, err := w.s.GetSessions(w.ctx, w.prefix)
 	if err != nil {
 		log.Warn("GetSession before rewatch failed", zap.String("prefix", w.prefix), zap.Error(err))
 		w.closeEventCh()
@@ -926,16 +974,16 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 	// rewatch is nil, no logic to handle
 	if w.rewatch == nil {
 		log.Warn("Watch service with ErrCompacted but no rewatch logic provided")
-	} else {
-		err = w.rewatch(sessions)
+		w.closeEventCh()
+		return nil
 	}
-	if err != nil {
+	if err := w.rewatch(sessions); err != nil {
 		log.Warn("WatchServices rewatch failed", zap.String("prefix", w.prefix), zap.Error(err))
 		w.closeEventCh()
 		return err
 	}
 
-	w.rch = w.s.etcdCli.Watch(w.s.ctx, path.Join(w.s.metaRoot, DefaultServiceRoot, w.prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
+	w.rch = w.s.etcdCli.Watch(w.ctx, path.Join(w.s.metaRoot, DefaultServiceRoot, w.prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
 	return nil
 }
 
@@ -1084,24 +1132,47 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 		}
 		log.Info(fmt.Sprintf("%s start to watch ACTIVE key %s", s.ServerName, s.activeKey))
 		ctx, cancel := context.WithCancel(s.ctx)
-		watchChan := s.etcdCli.Watch(ctx, s.activeKey, clientv3.WithPrevKV(), clientv3.WithRev(revision))
-		select {
-		case <-ctx.Done():
-			cancel()
-		case wresp, ok := <-watchChan:
-			if !ok {
-				cancel()
-			}
-			if wresp.Err() != nil {
-				cancel()
-			}
-			for _, event := range wresp.Events {
-				switch event.Type {
-				case mvccpb.PUT:
-					log.Debug("watch the ACTIVE key", zap.Any("ADD", event.Kv))
-				case mvccpb.DELETE:
-					log.Debug("watch the ACTIVE key", zap.Any("DELETE", event.Kv))
-					cancel()
+	watchLoop:
+		for {
+			watchChan := s.etcdCli.Watch(ctx, s.activeKey, clientv3.WithPrevKV(), clientv3.WithRev(revision))
+			for {
+				select {
+				case <-ctx.Done():
+					break watchLoop
+				case wresp, ok := <-watchChan:
+					if !ok {
+						// Watch channel closed, break to rewatch
+						break watchLoop
+					}
+					if wresp.Err() != nil {
+						if wresp.Err() == v3rpc.ErrCompacted {
+							// Need to get the latest revision and rewatch
+							log.Warn("watch ACTIVE key compacted, rewatch with latest revision",
+								zap.String("key", s.activeKey), zap.Error(wresp.Err()))
+							resp, err := s.etcdCli.Get(ctx, s.activeKey)
+							if err != nil {
+								log.Warn("failed to get ACTIVE key after compaction", zap.Error(err))
+								break watchLoop
+							}
+							if resp.Count == 0 {
+								// Active key deleted, break to try register
+								break watchLoop
+							}
+							revision = resp.Header.Revision + 1
+							continue watchLoop
+						}
+						log.Warn("watch ACTIVE key error", zap.Error(wresp.Err()))
+						break watchLoop
+					}
+					for _, event := range wresp.Events {
+						switch event.Type {
+						case mvccpb.PUT:
+							log.Debug("watch the ACTIVE key", zap.Any("ADD", event.Kv))
+						case mvccpb.DELETE:
+							log.Debug("watch the ACTIVE key", zap.Any("DELETE", event.Kv))
+							break watchLoop
+						}
+					}
 				}
 			}
 		}
