@@ -454,17 +454,18 @@ func convertFieldIndexInfos(src []*querypb.FieldIndexInfo) []*segcorepb.FieldInd
 		}
 
 		result = append(result, &segcorepb.FieldIndexInfo{
-			FieldID:             fii.GetFieldID(),
-			EnableIndex:         fii.GetEnableIndex(),
-			IndexName:           fii.GetIndexName(),
-			IndexID:             fii.GetIndexID(),
-			BuildID:             fii.GetBuildID(),
-			IndexParams:         fii.GetIndexParams(),
-			IndexFilePaths:      fii.GetIndexFilePaths(),
-			IndexSize:           fii.GetIndexSize(),
-			IndexVersion:        fii.GetIndexVersion(),
-			NumRows:             fii.GetNumRows(),
-			CurrentIndexVersion: fii.GetCurrentIndexVersion(),
+			FieldID:                   fii.GetFieldID(),
+			EnableIndex:               fii.GetEnableIndex(),
+			IndexName:                 fii.GetIndexName(),
+			IndexID:                   fii.GetIndexID(),
+			BuildID:                   fii.GetBuildID(),
+			IndexParams:               fii.GetIndexParams(),
+			IndexFilePaths:            fii.GetIndexFilePaths(),
+			IndexSize:                 fii.GetIndexSize(),
+			IndexVersion:              fii.GetIndexVersion(),
+			NumRows:                   fii.GetNumRows(),
+			CurrentIndexVersion:       fii.GetCurrentIndexVersion(),
+			CurrentScalarIndexVersion: fii.GetCurrentScalarIndexVersion(),
 		})
 	}
 	return result

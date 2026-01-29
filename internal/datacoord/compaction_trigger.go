@@ -755,18 +755,22 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool
 			indexType := GetIndexType(indexParams)
 			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 
-			if !isVectorIndex {
-				continue
+			var currentEngineVersion int32
+			if isVectorIndex {
+				currentEngineVersion = t.indexEngineVersionManager.GetCurrentIndexEngineVersion()
+			} else {
+				currentEngineVersion = t.indexEngineVersionManager.GetCurrentScalarIndexEngineVersion()
 			}
 
-			if index.CurrentIndexVersion < t.indexEngineVersionManager.GetCurrentIndexEngineVersion() {
+			if index.CurrentIndexVersion < currentEngineVersion {
 				log.Info("index version is too old, trigger compaction",
 					zap.Int64("segmentID", segment.ID),
 					zap.Int64("indexID", index.IndexID),
 					zap.String("indexType", indexType),
+					zap.Bool("isVectorIndex", isVectorIndex),
 					zap.Strings("indexFileKeys", index.IndexFileKeys),
 					zap.Int32("currentIndexVersion", index.CurrentIndexVersion),
-					zap.Int32("currentEngineVersion", t.indexEngineVersionManager.GetCurrentIndexEngineVersion()))
+					zap.Int32("currentEngineVersion", currentEngineVersion))
 				return true
 			}
 		}
