@@ -23,7 +23,7 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	}
 	defer broadcaster.Close()
 
-	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
