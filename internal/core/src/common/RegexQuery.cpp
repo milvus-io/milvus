@@ -58,6 +58,12 @@ translate_pattern_match_to_regex(const std::string& pattern) {
             }
         }
     }
+    // Trailing backslash is a parse error - nothing to escape
+    if (escape_mode) {
+        ThrowInfo(ExprInvalid,
+                  "Invalid LIKE pattern: trailing backslash with nothing "
+                  "to escape");
+    }
     return r;
 }
 
@@ -80,6 +86,12 @@ extract_fixed_prefix_from_pattern(const std::string& pattern) {
                 prefix += c;
             }
         }
+    }
+    // Trailing backslash is a parse error - nothing to escape
+    if (escape_mode) {
+        ThrowInfo(ExprInvalid,
+                  "Invalid LIKE pattern: trailing backslash with nothing "
+                  "to escape");
     }
     return prefix;
 }

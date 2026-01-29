@@ -5645,6 +5645,231 @@ TEST(BitmapIndexTest, PatternMatchTest) {
     EXPECT_TRUE(posix_result == posix_result2);
 }
 
+TEST(BitmapIndexTest, LikePatternMatchTest) {
+    // Test OpType::Match (LIKE pattern) with SmartPatternMatcher
+    using namespace milvus::index;
+    BitmapIndex<std::string> index;
+
+    std::vector<std::string> data = {
+        "apple",        // 0
+        "application",  // 1
+        "banana",       // 2
+        "cherry",       // 3
+        "app",          // 4
+        "pineapple",    // 5
+        "100%",         // 6 - literal %
+        "a_b",          // 7 - literal _
+    };
+
+    index.Build(data.size(), data.data(), nullptr);
+
+    // Test prefix pattern: "app%"
+    {
+        auto result = index.PatternMatch("app%", proto::plan::OpType::Match);
+        EXPECT_TRUE(result[0]);   // apple
+        EXPECT_TRUE(result[1]);   // application
+        EXPECT_FALSE(result[2]);  // banana
+        EXPECT_FALSE(result[3]);  // cherry
+        EXPECT_TRUE(result[4]);   // app
+        EXPECT_FALSE(result[5]);  // pineapple
+    }
+
+    // Test suffix pattern: "%apple"
+    {
+        auto result = index.PatternMatch("%apple", proto::plan::OpType::Match);
+        EXPECT_TRUE(result[0]);   // apple
+        EXPECT_FALSE(result[1]);  // application
+        EXPECT_FALSE(result[2]);  // banana
+        EXPECT_FALSE(result[3]);  // cherry
+        EXPECT_FALSE(result[4]);  // app
+        EXPECT_TRUE(result[5]);   // pineapple
+    }
+
+    // Test contains pattern: "%app%"
+    {
+        auto result = index.PatternMatch("%app%", proto::plan::OpType::Match);
+        EXPECT_TRUE(result[0]);   // apple
+        EXPECT_TRUE(result[1]);   // application
+        EXPECT_FALSE(result[2]);  // banana
+        EXPECT_FALSE(result[3]);  // cherry
+        EXPECT_TRUE(result[4]);   // app
+        EXPECT_TRUE(result[5]);   // pineapple
+    }
+
+    // Test underscore wildcard: "a_p%"
+    {
+        auto result = index.PatternMatch("a_p%", proto::plan::OpType::Match);
+        EXPECT_TRUE(result[0]);   // apple (a-p-ple)
+        EXPECT_TRUE(result[1]);   // application (a-p-plication)
+        EXPECT_FALSE(result[2]);  // banana
+        EXPECT_FALSE(result[3]);  // cherry
+        EXPECT_FALSE(result[4]);  // app (too short for a_p)
+        EXPECT_FALSE(result[5]);  // pineapple
+    }
+
+    // Test escaped %: "100\\%"
+    {
+        auto result = index.PatternMatch("100\\%", proto::plan::OpType::Match);
+        EXPECT_FALSE(result[0]);  // apple
+        EXPECT_FALSE(result[1]);  // application
+        EXPECT_FALSE(result[2]);  // banana
+        EXPECT_FALSE(result[3]);  // cherry
+        EXPECT_FALSE(result[4]);  // app
+        EXPECT_FALSE(result[5]);  // pineapple
+        EXPECT_TRUE(result[6]);   // 100%
+        EXPECT_FALSE(result[7]);  // a_b
+    }
+
+    // Test escaped _: "a\\_b"
+    {
+        auto result = index.PatternMatch("a\\_b", proto::plan::OpType::Match);
+        EXPECT_FALSE(result[0]);  // apple
+        EXPECT_FALSE(result[6]);  // 100%
+        EXPECT_TRUE(result[7]);   // a_b
+    }
+
+    // Test exact match (no wildcards): "banana"
+    {
+        auto result = index.PatternMatch("banana", proto::plan::OpType::Match);
+        EXPECT_FALSE(result[0]);  // apple
+        EXPECT_FALSE(result[1]);  // application
+        EXPECT_TRUE(result[2]);   // banana
+        EXPECT_FALSE(result[3]);  // cherry
+    }
+
+    // Test match all: "%"
+    {
+        auto result = index.PatternMatch("%", proto::plan::OpType::Match);
+        for (size_t i = 0; i < data.size(); ++i) {
+            EXPECT_TRUE(result[i]) << "Failed at index " << i;
+        }
+    }
+}
+
+TEST(BitmapIndexTest, LikePatternMatchBitsetMode) {
+    // Test LIKE pattern with BITSET build mode (high cardinality)
+    using namespace milvus::index;
+    BitmapIndex<std::string> index;
+
+    // Create data with cardinality > 100 to trigger BITSET mode
+    std::vector<std::string> data;
+    for (int i = 0; i < 200; ++i) {
+        data.push_back("item_" + std::to_string(i));
+    }
+    data.push_back("special_test");
+    data.push_back("another_special");
+
+    index.Build(data.size(), data.data(), nullptr);
+
+    // Test pattern matching in BITSET mode
+    {
+        auto result = index.PatternMatch("item_%", proto::plan::OpType::Match);
+        for (int i = 0; i < 200; ++i) {
+            EXPECT_TRUE(result[i]) << "Failed at index " << i;
+        }
+        EXPECT_FALSE(result[200]);  // special_test
+        EXPECT_FALSE(result[201]);  // another_special
+    }
+
+    {
+        auto result =
+            index.PatternMatch("%special%", proto::plan::OpType::Match);
+        for (int i = 0; i < 200; ++i) {
+            EXPECT_FALSE(result[i]) << "Unexpected match at index " << i;
+        }
+        EXPECT_TRUE(result[200]);  // special_test
+        EXPECT_TRUE(result[201]);  // another_special
+    }
+}
+
+TEST(BitmapIndexTest, LikePatternMatchMmapMode) {
+    // Test LIKE pattern with mmap mode (simulated by setting is_mmap_ flag)
+    using namespace milvus::index;
+    BitmapIndex<std::string> index;
+
+    std::vector<std::string> data = {
+        "apple",        // 0
+        "application",  // 1
+        "banana",       // 2
+        "cherry",       // 3
+        "app",          // 4
+        "pineapple",    // 5
+    };
+
+    // Build the index first (populates data_ in ROARING mode)
+    index.Build(data.size(), data.data(), nullptr);
+
+    // Simulate mmap mode by copying data_ to bitmap_info_map_ and setting flags
+    index.bitmap_info_map_ = index.data_;
+    index.is_mmap_ = true;
+
+    // Test prefix pattern: "app%"
+    {
+        auto result = index.PatternMatch("app%", proto::plan::OpType::Match);
+        EXPECT_TRUE(result[0]);   // apple
+        EXPECT_TRUE(result[1]);   // application
+        EXPECT_FALSE(result[2]);  // banana
+        EXPECT_FALSE(result[3]);  // cherry
+        EXPECT_TRUE(result[4]);   // app
+        EXPECT_FALSE(result[5]);  // pineapple
+    }
+
+    // Test suffix pattern: "%apple"
+    {
+        auto result = index.PatternMatch("%apple", proto::plan::OpType::Match);
+        EXPECT_TRUE(result[0]);   // apple
+        EXPECT_FALSE(result[1]);  // application
+        EXPECT_FALSE(result[2]);  // banana
+        EXPECT_FALSE(result[3]);  // cherry
+        EXPECT_FALSE(result[4]);  // app
+        EXPECT_TRUE(result[5]);   // pineapple
+    }
+
+    // Test contains pattern: "%an%"
+    {
+        auto result = index.PatternMatch("%an%", proto::plan::OpType::Match);
+        EXPECT_FALSE(result[0]);  // apple
+        EXPECT_FALSE(result[1]);  // application
+        EXPECT_TRUE(result[2]);   // banana
+        EXPECT_FALSE(result[3]);  // cherry
+        EXPECT_FALSE(result[4]);  // app
+        EXPECT_FALSE(result[5]);  // pineapple
+    }
+
+    // Test underscore wildcard: "a_p%"
+    {
+        auto result = index.PatternMatch("a_p%", proto::plan::OpType::Match);
+        EXPECT_TRUE(result[0]);   // apple (a-p-ple)
+        EXPECT_TRUE(result[1]);   // application (a-p-plication)
+        EXPECT_FALSE(result[2]);  // banana
+        EXPECT_FALSE(result[3]);  // cherry
+        EXPECT_FALSE(result[4]);  // app (too short for a_p)
+        EXPECT_FALSE(result[5]);  // pineapple
+    }
+
+    // Disable mmap flag to avoid destructor trying to unmap
+    index.is_mmap_ = false;
+}
+
+TEST(BitmapIndexTest, LikePatternMatchTrailingBackslashError) {
+    // Test that trailing backslash in LIKE pattern throws an error
+    using namespace milvus::index;
+    BitmapIndex<std::string> index;
+
+    std::vector<std::string> data = {"test", "data"};
+    index.Build(data.size(), data.data(), nullptr);
+
+    // Trailing backslash should throw ExprInvalid error
+    EXPECT_ANY_THROW(index.PatternMatch("abc\\", proto::plan::OpType::Match));
+    EXPECT_ANY_THROW(index.PatternMatch("\\", proto::plan::OpType::Match));
+    EXPECT_ANY_THROW(index.PatternMatch("%\\", proto::plan::OpType::Match));
+
+    // Valid escape sequences should not throw
+    EXPECT_NO_THROW(index.PatternMatch("\\%", proto::plan::OpType::Match));
+    EXPECT_NO_THROW(index.PatternMatch("\\_", proto::plan::OpType::Match));
+    EXPECT_NO_THROW(index.PatternMatch("\\\\", proto::plan::OpType::Match));
+}
+
 TEST(Expr, TestExprNull) {
     auto schema = std::make_shared<Schema>();
     auto bool_fid = schema->AddDebugField("bool", DataType::BOOL, true);

@@ -68,9 +68,7 @@ UnaryCompare(const T& get_value, const U& val, proto::plan::OpType op_type) {
         case proto::plan::Match:
             if constexpr (std::is_same_v<U, std::string> ||
                           std::is_same_v<U, std::string_view>) {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(val);
-                RegexMatcher matcher(regex_pattern);
+                SmartPatternMatcher matcher(val);
                 return matcher(get_value);
             } else {
                 return false;
@@ -95,12 +93,19 @@ struct UnaryElementFuncForMatch {
             "this override operator() of UnaryElementFuncForMatch does "
             "not support FilterType::random");
 
-        PatternMatchTranslator translator;
-        auto regex_pattern = translator(val);
-        RegexMatcher matcher(regex_pattern);
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            // Use SmartPatternMatcher which is optimized for LIKE patterns
+            SmartPatternMatcher matcher(val);
 
-        for (int i = 0; i < size; ++i) {
-            res[i] = matcher(src[i]);
+            for (int i = 0; i < size; ++i) {
+                res[i] = matcher(src[i]);
+            }
+        } else {
+            // Match operation is only supported for string types
+            for (int i = 0; i < size; ++i) {
+                res[i] = false;
+            }
         }
     }
 
@@ -112,18 +117,25 @@ struct UnaryElementFuncForMatch {
                const TargetBitmap& bitmap_input,
                int start_cursor,
                const int32_t* offsets = nullptr) {
-        PatternMatchTranslator translator;
-        auto regex_pattern = translator(val);
-        RegexMatcher matcher(regex_pattern);
-        bool has_bitmap_input = !bitmap_input.empty();
-        for (int i = 0; i < size; ++i) {
-            if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
-                continue;
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            // Use SmartPatternMatcher which is optimized for LIKE patterns
+            SmartPatternMatcher matcher(val);
+            bool has_bitmap_input = !bitmap_input.empty();
+            for (int i = 0; i < size; ++i) {
+                if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
+                    continue;
+                }
+                if constexpr (filter_type == FilterType::random) {
+                    res[i] = matcher(src[offsets ? offsets[i] : i]);
+                } else {
+                    res[i] = matcher(src[i]);
+                }
             }
-            if constexpr (filter_type == FilterType::random) {
-                res[i] = matcher(src[offsets ? offsets[i] : i]);
-            } else {
-                res[i] = matcher(src[i]);
+        } else {
+            // Match operation is only supported for string types
+            for (int i = 0; i < size; ++i) {
+                res[i] = false;
             }
         }
     }
@@ -404,17 +416,20 @@ struct UnaryElementFuncForArray {
             } else if constexpr (op == proto::plan::OpType::Match) {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                     res[i] = false;
-                } else {
+                } else if constexpr (std::is_same_v<GetType,
+                                                    std::string_view> ||
+                                     std::is_same_v<GetType, std::string>) {
                     if (index >= src[offset].length()) {
                         res[i] = false;
                         continue;
                     }
-                    PatternMatchTranslator translator;
-                    auto regex_pattern = translator(val);
-                    RegexMatcher matcher(regex_pattern);
+                    SmartPatternMatcher matcher(val);
                     auto array_data =
                         src[offset].template get_data<GetType>(index);
                     res[i] = matcher(array_data);
+                } else {
+                    // Match operation is only supported for string types
+                    res[i] = false;
                 }
             } else {
                 ThrowInfo(OpTypeInvalid,
@@ -448,7 +463,7 @@ struct UnaryIndexFuncForMatch {
 
             if (!index->HasRawData()) {
                 ThrowInfo(Unsupported,
-                          "index don't support regex query and don't have "
+                          "index don't support pattern match and don't have "
                           "raw data");
             }
             // retrieve raw data to do brute force query, may be very slow.
@@ -467,9 +482,7 @@ struct UnaryIndexFuncForMatch {
                 }
                 return res;
             } else {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(val);
-                RegexMatcher matcher(regex_pattern);
+                SmartPatternMatcher matcher(val);
                 for (int64_t i = 0; i < cnt; i++) {
                     auto raw = index->Reverse_Lookup(i);
                     if (!raw.has_value()) {
@@ -611,9 +624,7 @@ BatchUnaryCompare(const T* src,
         case proto::plan::Match: {
             if constexpr (std::is_same_v<U, std::string> ||
                           std::is_same_v<U, std::string_view>) {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(val);
-                RegexMatcher matcher(regex_pattern);
+                SmartPatternMatcher matcher(val);
                 for (int i = 0; i < size; ++i) {
                     res[i] = matcher(src[i]);
                 }
@@ -917,7 +928,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     std::optional<VectorPtr>
     ExecNgramMatch(EvalCtx& context);
 
-    std::pair<std::string, std::string>
+    static std::pair<std::string, std::string>
     SplitAtFirstSlashDigit(std::string input);
 
  private:

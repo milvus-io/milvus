@@ -16,7 +16,7 @@
 
 #include "UnaryExpr.h"
 #include <optional>
-#include <boost/regex.hpp>
+#include <cctype>
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/Types.h"
@@ -916,27 +916,57 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                 break;
             }
             case proto::plan::Match: {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(val);
-                RegexMatcher matcher(regex_pattern);
-                for (size_t i = 0; i < size; ++i) {
-                    auto offset = i;
-                    if constexpr (filter_type == FilterType::random) {
-                        offset = (offsets) ? offsets[i] : i;
-                    }
-                    if (valid_data != nullptr && !valid_data[offset]) {
-                        res[i] = valid_res[i] = false;
-                        continue;
-                    }
-                    if (has_bitmap_input &&
-                        !bitmap_input[i + processed_cursor]) {
-                        continue;
-                    }
-                    if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+                if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+                    for (size_t i = 0; i < size; ++i) {
+                        auto offset = i;
+                        if constexpr (filter_type == FilterType::random) {
+                            offset = (offsets) ? offsets[i] : i;
+                        }
+                        if (valid_data != nullptr && !valid_data[offset]) {
+                            res[i] = valid_res[i] = false;
+                            continue;
+                        }
+                        if (has_bitmap_input &&
+                            !bitmap_input[i + processed_cursor]) {
+                            continue;
+                        }
                         res[i] = false;
-                    } else {
+                    }
+                } else if constexpr (std::is_same_v<ExprValueType,
+                                                    std::string>) {
+                    SmartPatternMatcher matcher(val);
+                    for (size_t i = 0; i < size; ++i) {
+                        auto offset = i;
+                        if constexpr (filter_type == FilterType::random) {
+                            offset = (offsets) ? offsets[i] : i;
+                        }
+                        if (valid_data != nullptr && !valid_data[offset]) {
+                            res[i] = valid_res[i] = false;
+                            continue;
+                        }
+                        if (has_bitmap_input &&
+                            !bitmap_input[i + processed_cursor]) {
+                            continue;
+                        }
                         UnaryRangeJSONCompare(
                             matcher(ExprValueType(x.value())));
+                    }
+                } else {
+                    // Match operation is only supported for string types
+                    for (size_t i = 0; i < size; ++i) {
+                        auto offset = i;
+                        if constexpr (filter_type == FilterType::random) {
+                            offset = (offsets) ? offsets[i] : i;
+                        }
+                        if (valid_data != nullptr && !valid_data[offset]) {
+                            res[i] = valid_res[i] = false;
+                            continue;
+                        }
+                        if (has_bitmap_input &&
+                            !bitmap_input[i + processed_cursor]) {
+                            continue;
+                        }
+                        res[i] = false;
                     }
                 }
                 break;
@@ -968,15 +998,16 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
 
 std::pair<std::string, std::string>
 PhyUnaryRangeFilterExpr::SplitAtFirstSlashDigit(std::string input) {
-    boost::regex rgx("/\\d+");
-    boost::smatch match;
-    if (boost::regex_search(input, match, rgx)) {
-        std::string firstPart = input.substr(0, match.position());
-        std::string secondPart = input.substr(match.position());
-        return {firstPart, secondPart};
-    } else {
-        return {input, ""};
+    // Find pattern /\d+ (slash followed by ASCII digits) without regex
+    // Use explicit ASCII range check to avoid locale-dependent std::isdigit behavior
+    auto is_ascii_digit = [](char c) { return c >= '0' && c <= '9'; };
+    for (size_t i = 0; i < input.size(); ++i) {
+        if (input[i] == '/' && i + 1 < input.size() &&
+            is_ascii_digit(input[i + 1])) {
+            return {input.substr(0, i), input.substr(i)};
+        }
     }
+    return {input, ""};
 }
 
 template <typename ExprValueType>

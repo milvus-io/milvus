@@ -1987,10 +1987,10 @@ class SegmentExpr : public Expr {
             auto scalar_index =
                 dynamic_cast<const Index*>(pinned_index_[0].get());
             auto* index_ptr = const_cast<Index*>(scalar_index);
-            // 1, index support regex query and try use it, then index handles the query;
+            // 1, index support pattern query and try use it, then index handles the query;
             // 2, index has raw data, then call index.Reverse_Lookup to handle the query;
-            return (index_ptr->TryUseRegexQuery() &&
-                    index_ptr->SupportRegexQuery()) ||
+            return (index_ptr->TryUsePatternQuery() &&
+                    index_ptr->SupportPatternQuery()) ||
                    index_ptr->HasRawData();
         }
         return true;
