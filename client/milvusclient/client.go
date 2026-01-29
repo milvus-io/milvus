@@ -43,9 +43,10 @@ import (
 )
 
 type Client struct {
-	conn    *grpc.ClientConn
-	service milvuspb.MilvusServiceClient
-	config  *ClientConfig
+	conn             *grpc.ClientConn
+	service          milvuspb.MilvusServiceClient
+	telemetryService milvuspb.ClientTelemetryServiceClient
+	config           *ClientConfig
 
 	// mutable status
 	stateMut   sync.RWMutex
@@ -55,6 +56,9 @@ type Client struct {
 	metadataHeaders map[string]string
 
 	collCache *CollectionCache
+
+	// Telemetry manager for metrics collection and heartbeat
+	telemetry *ClientTelemetryManager
 }
 
 func New(ctx context.Context, config *ClientConfig) (*Client, error) {
@@ -83,6 +87,10 @@ func New(ctx context.Context, config *ClientConfig) (*Client, error) {
 	c.collCache = NewCollectionCache(func(ctx context.Context, collName string) (*entity.Collection, error) {
 		return c.DescribeCollection(ctx, NewDescribeCollectionOption(collName))
 	})
+
+	// Initialize and start telemetry manager
+	c.telemetry = NewClientTelemetryManager(c, config.TelemetryConfig)
+	c.telemetry.Start()
 
 	return c, nil
 }
@@ -137,6 +145,11 @@ func (c *Client) parseAuthentication() {
 }
 
 func (c *Client) Close(ctx context.Context) error {
+	// Stop telemetry manager first
+	if c.telemetry != nil {
+		c.telemetry.Stop()
+	}
+
 	if c.conn == nil {
 		return nil
 	}
@@ -153,6 +166,12 @@ func (c *Client) usingDatabase(dbName string) {
 	c.stateMut.Lock()
 	defer c.stateMut.Unlock()
 	c.currentDB = dbName
+}
+
+func (c *Client) getCurrentDB() string {
+	c.stateMut.RLock()
+	defer c.stateMut.RUnlock()
+	return c.currentDB
 }
 
 func (c *Client) setIdentifier(identifier string) {
@@ -172,6 +191,7 @@ func (c *Client) connect(ctx context.Context, addr string, options ...grpc.DialO
 
 	c.conn = conn
 	c.service = milvuspb.NewMilvusServiceClient(c.conn)
+	c.telemetryService = milvuspb.NewClientTelemetryServiceClient(c.conn)
 
 	if !c.config.DisableConn {
 		err = c.connectInternal(ctx)
@@ -240,4 +260,16 @@ func (c *Client) callService(fn func(milvusService milvuspb.MilvusServiceClient)
 
 func (c *Client) GetService() milvuspb.MilvusServiceClient {
 	return c.service
+}
+
+// GetTelemetry returns the telemetry manager for this client
+func (c *Client) GetTelemetry() *ClientTelemetryManager {
+	return c.telemetry
+}
+
+// recordOperation records an operation for telemetry metrics (internal use only)
+func (c *Client) recordOperation(operation, collection string, startTime time.Time, err error) {
+	if c.telemetry != nil {
+		c.telemetry.RecordOperation(operation, collection, startTime, err)
+	}
 }
