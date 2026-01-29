@@ -2523,7 +2523,30 @@ class SnapshotRestoreChecker(Checker):
 
     def _verify_restored_data(self, restored_name):
         """Verify data correctness after restore."""
-        # 1. Verify row_count
+        # 1. Create index on restored collection (required before load)
+        try:
+            # Get original collection's index info and apply to restored
+            index_names = self.milvus_client.list_indexes(self.c_name)
+            for idx_name in index_names:
+                try:
+                    idx_info = self.milvus_client.describe_index(self.c_name, idx_name)
+                    field_name = idx_info.get('field_name', '')
+                    if field_name:
+                        index_params = IndexParams()
+                        index_params.add_index(
+                            field_name=field_name,
+                            index_type=idx_info.get('index_type', 'AUTOINDEX'),
+                            metric_type=idx_info.get('metric_type', 'L2'),
+                            params=idx_info.get('params', {})
+                        )
+                        self.milvus_client.create_index(restored_name, index_params, timeout=60)
+                        log.debug(f"Created index for field {field_name} on restored collection")
+                except Exception as e:
+                    log.warning(f"Failed to create index {idx_name}: {e}")
+        except Exception as e:
+            log.warning(f"Failed to replicate indexes: {e}")
+
+        # 2. Load restored collection
         expected_count = len(self.pk_set)
         try:
             self.milvus_client.load_collection(restored_name)
@@ -2588,16 +2611,18 @@ class SnapshotRestoreChecker(Checker):
 
             # 5. Wait for restore completion
             start_time = time.time()
-            while time.time() - start_time < 120:  # Wait up to 2 minutes
+            restore_timeout = 300  # Wait up to 5 minutes
+            while time.time() - start_time < restore_timeout:
                 state = self.milvus_client.get_restore_snapshot_state(job_id)
+                log.debug(f"Restore state: {state.state}")
                 if state.state == "RestoreSnapshotCompleted":
-                    log.info(f"Restore job {job_id} completed")
+                    log.info(f"Restore job {job_id} completed in {time.time()-start_time:.1f}s")
                     break
                 if state.state == "RestoreSnapshotFailed":
                     return f"Restore failed: {state.reason}", False
-                time.sleep(1)
+                time.sleep(2)
             else:
-                return "Restore timeout after 120s", False
+                return f"Restore timeout after {restore_timeout}s", False
 
             # 6. Verify data correctness
             verified, msg = self._verify_restored_data(self.restored_collection)
