@@ -538,8 +538,18 @@ IndexFactory::CreateNestedIndex(
     IndexType index_type,
     int32_t tantivy_index_version,
     const storage::FileManagerContext& file_manager_context) {
-    AssertInfo(index_type == INVERTED_INDEX_TYPE,
-               "Nested index only supports inverted index for now");
+    if (index_type == INVERTED_INDEX_TYPE) {
+        return CreateNestedIndexInverted(tantivy_index_version,
+                                         file_manager_context);
+    }
+
+    return CreateNestedIndexScalarIndexSort(file_manager_context);
+}
+
+IndexBasePtr
+IndexFactory::CreateNestedIndexInverted(
+    int32_t tantivy_index_version,
+    const storage::FileManagerContext& file_manager_context) {
     DataType element_type = static_cast<DataType>(
         file_manager_context.fieldDataMeta.field_schema.element_type());
     switch (element_type) {
@@ -572,6 +582,42 @@ IndexFactory::CreateNestedIndex(
         case DataType::VARCHAR:
             return std::make_unique<InvertedIndexTantivy<std::string>>(
                 tantivy_index_version, file_manager_context, false, true, true);
+        default:
+            ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type);
+    }
+}
+
+IndexBasePtr
+IndexFactory::CreateNestedIndexScalarIndexSort(
+    const storage::FileManagerContext& file_manager_context) {
+    DataType element_type = static_cast<DataType>(
+        file_manager_context.fieldDataMeta.field_schema.element_type());
+    switch (element_type) {
+        case DataType::BOOL:
+            return std::make_unique<ScalarIndexSort<bool>>(file_manager_context,
+                                                           true);
+        case DataType::INT8:
+            return std::make_unique<ScalarIndexSort<int8_t>>(
+                file_manager_context, true);
+        case DataType::INT16:
+            return std::make_unique<ScalarIndexSort<int16_t>>(
+                file_manager_context, true);
+        case DataType::INT32:
+            return std::make_unique<ScalarIndexSort<int32_t>>(
+                file_manager_context, true);
+        case DataType::INT64:
+            return std::make_unique<ScalarIndexSort<int64_t>>(
+                file_manager_context, true);
+        case DataType::FLOAT:
+            return std::make_unique<ScalarIndexSort<float>>(
+                file_manager_context, true);
+        case DataType::DOUBLE:
+            return std::make_unique<ScalarIndexSort<double>>(
+                file_manager_context, true);
+        case DataType::STRING:
+        case DataType::VARCHAR:
+            return std::make_unique<StringIndexSort>(file_manager_context,
+                                                     true);
         default:
             ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type);
     }

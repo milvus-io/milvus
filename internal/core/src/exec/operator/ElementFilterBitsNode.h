@@ -78,7 +78,9 @@ class PhyElementFilterBitsNode : public Operator {
 
  private:
     std::pair<TargetBitmap, TargetBitmap>
-    EvaluateElementExpression(FixedVector<int32_t>& element_offsets);
+    EvaluateElementExpression(const TargetBitmapView& doc_bitset,
+                              const TargetBitmapView& doc_bitset_valid,
+                              const IArrayOffsets* array_offsets);
 
     std::unique_ptr<ExprSet> element_exprs_;
     QueryContext* query_context_;

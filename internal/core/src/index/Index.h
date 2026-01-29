@@ -70,6 +70,12 @@ class IndexBase {
     virtual bool
     IsMmapSupported() const = 0;
 
+    // Check if this index is a nested index (for array element-level indexing)
+    virtual bool
+    IsNestedIndex() const {
+        return false;
+    }
+
     const IndexType&
     Type() const {
         return index_type_;
