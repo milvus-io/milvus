@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -61,6 +62,20 @@ func TestIndexInspector_inspect(t *testing.T) {
 				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
 		}
+		meta.collections.Insert(2, &collectionInfo{
+			ID: 2,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      101,
+						Name:         "",
+						IsPrimaryKey: false,
+						Description:  "",
+						DataType:     schemapb.DataType_FloatVector,
+					},
+				},
+			},
+		})
 
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
@@ -133,6 +148,20 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 		},
 	}
+	meta.collections.Insert(2, &collectionInfo{
+		ID: 2,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "",
+					IsPrimaryKey: false,
+					Description:  "",
+					DataType:     schemapb.DataType_FloatVector,
+				},
+			},
+		},
+	})
 
 	inspector := newIndexInspector(ctx, notifyChan, meta, scheduler, alloc, handler, storage, versionManager)
 
