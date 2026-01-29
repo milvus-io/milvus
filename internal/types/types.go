@@ -293,6 +293,10 @@ type MixCoord interface {
 	GetQcMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	// GetMetrics notifies MixCoordComponent to collect metrics for specified component
 	NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error
+
+	DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error
+
+	ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error
 }
 
 // MixCoordComponent is used by grpc server of MixCoord

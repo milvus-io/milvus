@@ -49,6 +49,7 @@ func TestDatabaseInterceptor(t *testing.T) {
 		availableReqs := []proto.Message{
 			&milvuspb.CreateCollectionRequest{},
 			&milvuspb.DropCollectionRequest{},
+			&milvuspb.TruncateCollectionRequest{},
 			&milvuspb.HasCollectionRequest{},
 			&milvuspb.LoadCollectionRequest{},
 			&milvuspb.ReleaseCollectionRequest{},

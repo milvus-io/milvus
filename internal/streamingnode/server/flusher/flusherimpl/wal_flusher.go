@@ -226,14 +226,23 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		}
 	}
 	timetick := msg.TimeTick()
-	// TODO: We will merge the flusher into recovery storage in future.
-	// Currently, flusher works as a separate component.
-	defer func() {
-		impl.lastDispatchTimeTick = timetick
-		if err = impl.RecoveryStorage.ObserveMessage(impl.notifier.Context(), msg); err != nil {
+	// TODO: should be removed at 3.0, after merge the flusher logic into recovery storage.
+	// only for truncate api now.
+	if bh := msg.BroadcastHeader(); bh != nil && bh.AckSyncUp {
+		if err := impl.RecoveryStorage.ObserveMessage(impl.notifier.Context(), msg); err != nil {
 			impl.logger.Warn("failed to observe message", zap.Error(err))
+			return err
 		}
-	}()
+	} else {
+		// TODO: We will merge the flusher into recovery storage in future.
+		// Currently, flusher works as a separate component.
+		defer func() {
+			impl.lastDispatchTimeTick = timetick
+			if err = impl.RecoveryStorage.ObserveMessage(impl.notifier.Context(), msg); err != nil {
+				impl.logger.Warn("failed to observe message", zap.Error(err))
+			}
+		}()
+	}
 
 	// wal flusher will not handle the control channel message.
 	if funcutil.IsControlChannel(msg.VChannel()) && !msg.MessageType().IsBroadcastToAll() {

@@ -8,6 +8,7 @@ import (
 
 // init the message ack callbacks
 func init() {
+	resetMessageAckOnceCallbacks()
 	resetMessageAckCallbacks()
 	resetMessageCheckCallbacks()
 }
@@ -29,11 +30,12 @@ var (
 	RegisterFlushAllV2AckCallback             = registerMessageAckCallback[*message.FlushAllMessageHeader, *message.FlushAllMessageBody]
 
 	// Collection
-	RegisterAlterCollectionV2AckCallback  = registerMessageAckCallback[*message.AlterCollectionMessageHeader, *message.AlterCollectionMessageBody]
-	RegisterCreateCollectionV1AckCallback = registerMessageAckCallback[*message.CreateCollectionMessageHeader, *message.CreateCollectionRequest]
-	RegisterDropCollectionV1AckCallback   = registerMessageAckCallback[*message.DropCollectionMessageHeader, *message.DropCollectionRequest]
-	RegisterAlterLoadConfigV2AckCallback  = registerMessageAckCallback[*message.AlterLoadConfigMessageHeader, *message.AlterLoadConfigMessageBody]
-	RegisterDropLoadConfigV2AckCallback   = registerMessageAckCallback[*message.DropLoadConfigMessageHeader, *message.DropLoadConfigMessageBody]
+	RegisterAlterCollectionV2AckCallback    = registerMessageAckCallback[*message.AlterCollectionMessageHeader, *message.AlterCollectionMessageBody]
+	RegisterCreateCollectionV1AckCallback   = registerMessageAckCallback[*message.CreateCollectionMessageHeader, *message.CreateCollectionRequest]
+	RegisterDropCollectionV1AckCallback     = registerMessageAckCallback[*message.DropCollectionMessageHeader, *message.DropCollectionRequest]
+	RegisterTruncateCollectionV2AckCallback = registerMessageAckCallback[*message.TruncateCollectionMessageHeader, *message.TruncateCollectionMessageBody]
+	RegisterAlterLoadConfigV2AckCallback    = registerMessageAckCallback[*message.AlterLoadConfigMessageHeader, *message.AlterLoadConfigMessageBody]
+	RegisterDropLoadConfigV2AckCallback     = registerMessageAckCallback[*message.DropLoadConfigMessageHeader, *message.DropLoadConfigMessageBody]
 
 	// Partition
 	RegisterCreatePartitionV1AckCallback = registerMessageAckCallback[*message.CreatePartitionMessageHeader, *message.CreatePartitionRequest]
@@ -81,11 +83,12 @@ func resetMessageAckCallbacks() {
 		message.MessageTypeFlushAllV2:             syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Collection
-		message.MessageTypeAlterCollectionV2:  syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeCreateCollectionV1: syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeDropCollectionV1:   syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeAlterLoadConfigV2:  syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeDropLoadConfigV2:   syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeAlterCollectionV2:    syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeCreateCollectionV1:   syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropCollectionV1:     syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeTruncateCollectionV2: syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeAlterLoadConfigV2:    syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropLoadConfigV2:     syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Partition
 		message.MessageTypeCreatePartitionV1: syncutil.NewFuture[messageInnerAckCallback](),

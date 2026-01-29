@@ -77,6 +77,13 @@ var (
 				Value: "v",
 			},
 		},
+		ShardInfos: map[string]*ShardInfo{
+			"vch": {
+				PChannelName:         "pch",
+				VChannelName:         "vch",
+				LastTruncateTimeTick: 0,
+			},
+		},
 	}
 
 	deprecatedColPb = &pb.CollectionInfo{
@@ -588,6 +595,18 @@ func TestClone(t *testing.T) {
 		Properties:           []*commonpb.KeyValuePair{{Key: "32", Value: "33"}},
 		State:                pb.CollectionState_CollectionCreated,
 		EnableDynamicField:   true,
+		ShardInfos: map[string]*ShardInfo{
+			"c1": {
+				PChannelName:         "c3",
+				VChannelName:         "c1",
+				LastTruncateTimeTick: 0,
+			},
+			"c2": {
+				PChannelName:         "c4",
+				VChannelName:         "c2",
+				LastTruncateTimeTick: 0,
+			},
+		},
 	}
 
 	clone1 := collection.Clone()

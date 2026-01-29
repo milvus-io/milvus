@@ -162,8 +162,24 @@ func (b *mutableMesasgeBuilder[H, B]) WithVChannel(vchannel string) *mutableMesa
 	return b
 }
 
+// OptBuildBroadcast is the option for building broadcast message.
+type OptBuildBroadcast func(*messagespb.BroadcastHeader)
+
+// OptBuildBroadcastAckSyncUp sets the ack sync up of the broadcast message.
+// Whether the broadcast operation is need to be synced up between the streaming node and the coordinator.
+// If set, the broadcast operation will be acked after the checkpoint of current vchannel reach current message.
+// the fast ack operation can not be applied to speed up the broadcast operation, because the ack operation need to be synced up with streaming node.
+// TODO: current implementation doesn't promise the ack sync up semantic,
+// it only promise FastAck operation will not be applied, wait for 3.0 to implement the ack sync up semantic.
+// only for truncate api now.
+func OptBuildBroadcastAckSyncUp() OptBuildBroadcast {
+	return func(bh *messagespb.BroadcastHeader) {
+		bh.AckSyncUp = true
+	}
+}
+
 // WithBroadcast creates a new builder with broadcast property.
-func (b *mutableMesasgeBuilder[H, B]) WithBroadcast(vchannels []string, resourceKeys ...ResourceKey) *mutableMesasgeBuilder[H, B] {
+func (b *mutableMesasgeBuilder[H, B]) WithBroadcast(vchannels []string, opts ...OptBuildBroadcast) *mutableMesasgeBuilder[H, B] {
 	if len(vchannels) < 1 {
 		panic("broadcast message must have at least one vchannel")
 	}
@@ -174,11 +190,14 @@ func (b *mutableMesasgeBuilder[H, B]) WithBroadcast(vchannels []string, resource
 		panic("a broadcast message cannot set up vchannel property")
 	}
 	deduplicated := typeutil.NewSet(vchannels...)
+	bhpb := &messagespb.BroadcastHeader{
+		Vchannels: deduplicated.Collect(),
+	}
+	for _, opt := range opts {
+		opt(bhpb)
+	}
 
-	bh, err := EncodeProto(&messagespb.BroadcastHeader{
-		Vchannels:    deduplicated.Collect(),
-		ResourceKeys: newProtoFromResourceKey(resourceKeys...),
-	})
+	bh, err := EncodeProto(bhpb)
 	if err != nil {
 		panic("failed to encode vchannels")
 	}

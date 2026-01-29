@@ -305,6 +305,20 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			} else {
 				logger.Info("handle put collection message success")
 			}
+		case commonpb.MsgType_TruncateCollection:
+			truncateCollectionMsg := msg.(*adaptor.TruncateCollectionMessageBody)
+			logger := log.With(
+				zap.String("vchannel", ddn.Name()),
+				zap.Int32("msgType", int32(msg.Type())),
+				zap.Uint64("timetick", truncateCollectionMsg.TruncateCollectionMessage.TimeTick()),
+				zap.Int64s("segmentIDs", truncateCollectionMsg.TruncateCollectionMessage.Header().SegmentIds),
+			)
+			logger.Info("receive truncate collection message")
+			if err := ddn.msgHandler.HandleTruncateCollection(truncateCollectionMsg.TruncateCollectionMessage); err != nil {
+				logger.Warn("handle truncate collection message failed", zap.Error(err))
+			} else {
+				logger.Info("handle truncate collection message success")
+			}
 		}
 	}
 

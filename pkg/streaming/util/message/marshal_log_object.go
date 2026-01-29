@@ -12,6 +12,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 )
 
+const maxPrintedIDs = 1024
+
 // MarshalLogObject encodes the message into zap log object.
 func (m *messageImpl) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	if m == nil {
@@ -30,6 +32,7 @@ func (m *messageImpl) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	if broadcast := m.BroadcastHeader(); broadcast != nil {
 		enc.AddInt64("broadcastID", int64(broadcast.BroadcastID))
 		enc.AddString("broadcastVChannels", strings.Join(broadcast.VChannels, ","))
+		enc.AddBool("ackSyncUp", broadcast.AckSyncUp)
 	}
 	if replicate := m.ReplicateHeader(); replicate != nil {
 		enc.AddString("rClusterID", replicate.ClusterID)
@@ -118,6 +121,8 @@ func marshalSpecializedHeader(t MessageType, v Version, h string, enc zapcore.Ob
 	case *CreateCollectionMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
 	case *DropCollectionMessageHeader:
+		enc.AddInt64("collectionID", header.GetCollectionId())
+	case *TruncateCollectionMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
 	case *CreatePartitionMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
@@ -215,6 +220,10 @@ func marshalSpecializedHeader(t MessageType, v Version, h string, enc zapcore.Ob
 func encodeIDs(name string, targetIDs []int64, enc zapcore.ObjectEncoder) {
 	ids := make([]string, 0, len(targetIDs))
 	for _, id := range targetIDs {
+		if len(ids) > maxPrintedIDs {
+			ids = append(ids, fmt.Sprintf("(with more %d)", len(targetIDs)))
+			break
+		}
 		ids = append(ids, strconv.FormatInt(id, 10))
 	}
 	enc.AddString(name, strings.Join(ids, "|"))
