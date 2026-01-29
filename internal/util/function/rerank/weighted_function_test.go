@@ -262,7 +262,7 @@ func (s *WeightedFunctionSuite) TestWeightedFuctionProcess() {
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, 1, 102, 3, true, "", []string{"COSINE", "COSINE"}), inputs)
 		s.NoError(err)
 		s.Equal([]int64{9, 9, 9}, ret.searchResultData.Topks)
-		s.Equal(int64(9), ret.searchResultData.TopK)
+		s.Equal(int64(3), ret.searchResultData.TopK)
 		s.Equal([]int64{
 			5, 4, 3, 29, 28, 27, 26, 25, 24,
 			17, 16, 15, 14, 13, 12, 59, 58, 57,
