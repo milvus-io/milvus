@@ -143,7 +143,7 @@ func (s *ManagerSuite) TestFlushAllSegments() {
 
 func (s *ManagerSuite) TestCreateNewGrowingSegment() {
 	manager := s.manager
-	err := manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1, 0)
+	err := manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1, nil, 0)
 	s.Error(err)
 
 	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false).Once()
@@ -157,7 +157,7 @@ func (s *ManagerSuite) TestCreateNewGrowingSegment() {
 	s.NoError(err)
 
 	s.manager.buffers.Insert(s.channelName, wb)
-	err = manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1, 100)
+	err = manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1, nil, 100)
 	s.NoError(err)
 }
 

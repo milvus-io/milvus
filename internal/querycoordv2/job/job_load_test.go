@@ -19,6 +19,7 @@ package job
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
@@ -416,6 +417,63 @@ func (suite *LoadCollectionJobSuite) TestGetLocalReplicaConfig_AllocIDError() {
 	replicas, err := getLocalReplicaConfig(context.Background(), m, 0)
 	suite.Error(err)
 	suite.Nil(replicas)
+}
+
+func (suite *LoadCollectionJobSuite) TestBuildPartitionsToPersistOnlyNewPartitions() {
+	current := map[int64]*meta.Partition{
+		100: {
+			PartitionLoadInfo: &querypb.PartitionLoadInfo{
+				CollectionID:  1,
+				PartitionID:   100,
+				ReplicaNumber: 1,
+				Status:        querypb.LoadStatus_Loaded,
+				FieldIndexID:  map[int64]int64{1: 10},
+			},
+			LoadPercentage: 100,
+			CreatedAt:      time.Now(),
+		},
+		101: {
+			PartitionLoadInfo: &querypb.PartitionLoadInfo{
+				CollectionID:  1,
+				PartitionID:   101,
+				ReplicaNumber: 1,
+				Status:        querypb.LoadStatus_Loaded,
+				FieldIndexID:  map[int64]int64{1: 10},
+			},
+			LoadPercentage: 100,
+			CreatedAt:      time.Now(),
+		},
+	}
+
+	partitions, newCount := buildPartitionsToPersist(1, []int64{100, 101, 102}, current, 1, map[int64]int64{1: 10})
+	suite.Len(partitions, 1)
+	suite.Equal(1, newCount)
+	suite.EqualValues(102, partitions[0].GetPartitionID())
+	suite.Equal(querypb.LoadStatus_Loading, partitions[0].GetStatus())
+}
+
+func (suite *LoadCollectionJobSuite) TestBuildPartitionsToPersistKeepExistingStatus() {
+	current := map[int64]*meta.Partition{
+		100: {
+			PartitionLoadInfo: &querypb.PartitionLoadInfo{
+				CollectionID:  1,
+				PartitionID:   100,
+				ReplicaNumber: 1,
+				Status:        querypb.LoadStatus_Loaded,
+				FieldIndexID:  map[int64]int64{1: 10},
+			},
+			LoadPercentage: 100,
+			CreatedAt:      time.Now(),
+		},
+	}
+
+	partitions, newCount := buildPartitionsToPersist(1, []int64{100}, current, 2, map[int64]int64{1: 20})
+	suite.Len(partitions, 1)
+	suite.Equal(0, newCount)
+	suite.EqualValues(100, partitions[0].GetPartitionID())
+	suite.Equal(querypb.LoadStatus_Loaded, partitions[0].GetStatus())
+	suite.EqualValues(2, partitions[0].GetReplicaNumber())
+	suite.Equal(map[int64]int64{1: 20}, partitions[0].GetFieldIndexID())
 }
 
 func TestLoadCollectionJob(t *testing.T) {

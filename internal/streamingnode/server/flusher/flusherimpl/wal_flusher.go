@@ -2,6 +2,7 @@ package flusherimpl
 
 import (
 	"context"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -223,6 +224,7 @@ func (impl *WALFlusherImpl) generateScanner(ctx context.Context, l wal.WAL, chec
 
 // dispatch dispatches the message to the related handler for flusher components.
 func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
+	dispatchStart := time.Now()
 	if msg.MessageType() == message.MessageTypeTimeTick && !msg.IsPersisted() {
 		// Currently, milvus use the timetick to synchronize the system periodically,
 		// so the wal will still produce empty timetick message after the last write operation is done.
@@ -254,8 +256,17 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		// TODO: We will merge the flusher into recovery storage in future.
 		// Currently, flusher works as a separate component.
 		defer func() {
-			if err = impl.ObserveMessage(impl.notifier.Context(), msg); err != nil {
+			observeStart := time.Now()
+			if err = impl.RecoveryStorage.ObserveMessage(impl.notifier.Context(), msg); err != nil {
 				impl.logger.Warn("failed to observe message", zap.Error(err))
+			}
+			observeElapsed := time.Since(observeStart)
+			totalElapsed := time.Since(dispatchStart)
+			if totalElapsed > 10*time.Millisecond {
+				log.Info("[DispatchTiming] dispatch slow",
+					zap.String("msgType", msg.MessageType().String()),
+					zap.Duration("observeElapsed", observeElapsed),
+					zap.Duration("totalElapsed", totalElapsed))
 			}
 		}()
 	}

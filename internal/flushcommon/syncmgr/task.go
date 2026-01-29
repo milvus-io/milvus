@@ -19,6 +19,7 @@ package syncmgr
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/samber/lo"
@@ -46,7 +47,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+var syncTaskIDCounter atomic.Int64
+
 type SyncTask struct {
+	taskID int64
+
 	chunkManager storage.ChunkManager
 	allocator    allocator.Interface
 
@@ -94,6 +99,7 @@ type SyncTask struct {
 
 func (t *SyncTask) getLogger() *log.MLogger {
 	return log.Ctx(context.Background()).With(
+		zap.Int64("syncTaskID", t.taskID),
 		zap.Int64("collectionID", t.collectionID),
 		zap.Int64("partitionID", t.partitionID),
 		zap.Int64("segmentID", t.segmentID),
@@ -115,8 +121,14 @@ func (t *SyncTask) HandleError(err error) {
 
 func (t *SyncTask) Run(ctx context.Context) (err error) {
 	t.tr = timerecord.NewTimeRecorder("syncTask")
+	stageStart := time.Now()
 
 	log := t.getLogger()
+	log.Info("[SyncTask] started",
+		zap.Int64("batchRows", t.batchRows),
+		zap.Bool("isFlush", t.pack.isFlush),
+		zap.Bool("isDrop", t.pack.isDrop),
+	)
 	defer func() {
 		if err != nil {
 			t.HandleError(err)
@@ -126,15 +138,18 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	segmentInfo, has := t.metacache.GetSegmentByID(t.segmentID)
 	if !has {
 		if t.pack.isDrop {
-			log.Info("segment dropped, discard sync task")
+			log.Info("[SyncTask] segment dropped, discard sync task")
 			return nil
 		}
-		log.Warn("segment not found in metacache, may be already synced")
+		log.Warn("[SyncTask] segment not found in metacache, may be already synced")
 		return nil
 	}
 
 	columnGroups := t.getColumnGroups(segmentInfo)
+	getColumnGroupsDur := time.Since(stageStart)
+	log.Info("[SyncTask] stage getColumnGroups done", zap.Duration("duration", getColumnGroupsDur))
 
+	stageStart = time.Now()
 	switch segmentInfo.GetStorageVersion() {
 	case storage.StorageV2:
 		// New sync task means needs to flush data immediately, so do not need to buffer data in writer again.
@@ -157,6 +172,12 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		log.Warn("failed to write sync data with storage v2 format", zap.Error(err))
 		return err
 	}
+	writeDataDur := time.Since(stageStart)
+	log.Info("[SyncTask] stage writeData done",
+		zap.Duration("duration", writeDataDur),
+		zap.Int64("flushedSize", t.flushedSize),
+		zap.Int64("storageVersion", segmentInfo.GetStorageVersion()),
+	)
 
 	getDataCount := func(binlogs ...*datapb.FieldBinlog) int64 {
 		count := int64(0)
@@ -175,14 +196,18 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 
 	metrics.DataNodeSave2StorageLatency.WithLabelValues(paramtable.GetStringNodeID(), t.level.String()).Observe(float64(t.tr.RecordSpan().Milliseconds()))
 
+	stageStart = time.Now()
 	if t.metaWriter != nil {
 		err = t.writeMeta(ctx)
 		if err != nil {
-			log.Warn("failed to save serialized data into storage", zap.Error(err))
+			log.Warn("[SyncTask] failed to save serialized data into storage", zap.Error(err))
 			return err
 		}
 	}
+	writeMetaDur := time.Since(stageStart)
+	log.Info("[SyncTask] stage writeMeta done", zap.Duration("duration", writeMetaDur))
 
+	stageStart = time.Now()
 	t.pack.ReleaseData()
 
 	actions := []metacache.SegmentAction{metacache.FinishSyncing(t.batchRows), metacache.UpdateManifestPath(t.manifestPath)}
@@ -196,11 +221,19 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 
 	if t.pack.isDrop {
 		t.metacache.RemoveSegments(metacache.WithSegmentIDs(t.segmentID))
-		log.Info("segment removed", zap.Int64("segmentID", t.segmentID), zap.String("channel", t.channelName))
+		log.Info("[SyncTask] segment removed", zap.Int64("segmentID", t.segmentID), zap.String("channel", t.channelName))
 	}
+	updateMetacacheDur := time.Since(stageStart)
 
 	t.execTime = t.tr.ElapseSpan()
-	log.Info("task done", zap.Int64("flushedSize", t.flushedSize), zap.Duration("timeTaken", t.execTime))
+	log.Info("[SyncTask] done",
+		zap.Int64("flushedSize", t.flushedSize),
+		zap.Duration("total", t.execTime),
+		zap.Duration("getColumnGroups", getColumnGroupsDur),
+		zap.Duration("writeData", writeDataDur),
+		zap.Duration("writeMeta", writeMetaDur),
+		zap.Duration("updateMetacache", updateMetacacheDur),
+	)
 
 	if !t.pack.isFlush {
 		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.SuccessLabel, t.level.String()).Inc()

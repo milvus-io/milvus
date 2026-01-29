@@ -579,6 +579,9 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 			mt.partitionName2ID[coll.CollectionID][partition.PartitionName] = partition.PartitionID
 		}
 	}
+	for _, fileResourceID := range coll.FileResourceIds {
+		mt.fileResourceRefCnt[fileResourceID]++
+	}
 
 	pn := coll.GetPartitionNum(true)
 	mt.generalCnt += pn * int(coll.ShardsNum)
@@ -1358,6 +1361,11 @@ func (mt *MetaTable) DropPartition(ctx context.Context, collectionID UniqueID, p
 			copy(newPartitions, coll.Partitions)
 			newPartitions[idx] = clone
 			mt.collID2Meta[collectionID].Partitions = newPartitions
+
+			// Remove from partition name index when dropping
+			if mt.partitionName2ID[collectionID] != nil {
+				delete(mt.partitionName2ID[collectionID], part.PartitionName)
+			}
 
 			// Remove from partition name index when dropping
 			if mt.partitionName2ID[collectionID] != nil {

@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
-	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -306,71 +305,35 @@ func applyExternalCollectionSegmentUpdate(
 		}
 	}
 
-	// Build update operators
-	var operators []UpdateOperator
-
-	// Operator 1: Drop segments not in kept list
-	dropOperator := func(modPack *updateSegmentPack) bool {
-		currentSegments := modPack.meta.segments.GetSegments()
-		for _, seg := range currentSegments {
-			// Skip segments not in this collection
-			if seg.GetCollectionID() != collectionID {
-				continue
-			}
-
-			// Skip segments that are already dropped
-			if seg.GetState() == commonpb.SegmentState_Dropped {
-				continue
-			}
-
-			// Drop segment if not in kept list
-			if !keptSegmentMap[seg.GetID()] {
-				segment := modPack.Get(seg.GetID())
-				if segment != nil {
-					updateSegStateAndPrepareMetrics(segment, commonpb.SegmentState_Dropped, modPack.metricMutation)
-					segment.DroppedAt = uint64(time.Now().UnixNano())
-					modPack.segments[seg.GetID()] = segment
-					log.Info("marking segment as dropped",
-						zap.Int64("segmentID", seg.GetID()),
-						zap.Int64("numRows", seg.GetNumOfRows()))
-				}
-			}
+	mutations := make(map[int64][]MutateFunc, len(segmentsToDrop))
+	droppedAt := uint64(time.Now().UnixNano())
+	for _, seg := range currentSegments {
+		if seg.GetState() == commonpb.SegmentState_Dropped || keptSegmentMap[seg.GetID()] {
+			continue
 		}
-		return true
-	}
-	operators = append(operators, dropOperator)
 
-	// Operator 2: Add new segments
-	for _, seg := range updatedSegments {
-		newSeg := seg // capture for closure
-		addOperator := func(modPack *updateSegmentPack) bool {
-			segInfo := NewSegmentInfo(newSeg)
-			modPack.segments[newSeg.GetID()] = segInfo
-
-			// Add binlogs increment
-			modPack.increments[newSeg.GetID()] = metastore.BinlogsIncrement{
-				Segment: newSeg,
+		segID := seg.GetID()
+		numRows := seg.GetNumOfRows()
+		mutations[segID] = []MutateFunc{func(existing *datapb.SegmentInfo) bool {
+			if existing.GetState() == commonpb.SegmentState_Dropped {
+				return false
 			}
-
-			// Update metrics
-			modPack.metricMutation.addNewSeg(
-				commonpb.SegmentState_Flushed,
-				newSeg.GetLevel(),
-				newSeg.GetIsSorted(),
-				newSeg.GetStorageVersion(),
-				newSeg.GetNumOfRows(),
-			)
-
-			log.Info("adding new segment",
-				zap.Int64("segmentID", newSeg.GetID()),
-				zap.Int64("numRows", newSeg.GetNumOfRows()))
+			existing.State = commonpb.SegmentState_Dropped
+			existing.DroppedAt = droppedAt
 			return true
-		}
-		operators = append(operators, addOperator)
+		}}
+		log.Info("marking segment as dropped",
+			zap.Int64("segmentID", segID),
+			zap.Int64("numRows", numRows))
 	}
 
-	// Execute all operators atomically
-	if err := mt.UpdateSegmentsInfo(ctx, operators...); err != nil {
+	for _, seg := range updatedSegments {
+		log.Info("adding new segment",
+			zap.Int64("segmentID", seg.GetID()),
+			zap.Int64("numRows", seg.GetNumOfRows()))
+	}
+
+	if err := mt.UpdateSegmentsInfo(ctx, mutations, updatedSegments...); err != nil {
 		log.Warn("failed to update segments atomically", zap.Error(err))
 		return err
 	}

@@ -52,7 +52,7 @@ func TestIndexInspector_inspect(t *testing.T) {
 		catalog := mocks2.NewDataCoordCatalog(t)
 
 		meta := &meta{
-			segments:    NewSegmentsInfo(),
+			segments:    NewCachedSegmentsInfo(),
 			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 			indexMeta: &indexMeta{
 				keyLock:          lock.NewKeyLock[UniqueID](),
@@ -73,7 +73,7 @@ func TestIndexInspector_inspect(t *testing.T) {
 				IsSorted:     true,
 			},
 		}
-		meta.segments.SetSegment(segment.GetID(), segment)
+		meta.segments.SetSegment(segment.GetID(), segment, 0)
 
 		meta.indexMeta.indexes[2] = map[UniqueID]*model.Index{
 			5: {
@@ -124,7 +124,7 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -146,7 +146,7 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 			State:        commonpb.SegmentState_Flushed,
 		},
 	}
-	meta.segments.SetSegment(seg1.ID, seg1)
+	meta.segments.SetSegment(seg1.ID, seg1, 0)
 
 	segIndex1 := &model.SegmentIndex{
 		SegmentID:  seg1.ID,
@@ -327,7 +327,7 @@ func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -349,7 +349,7 @@ func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 			Level:        datapb.SegmentLevel_L1,
 		},
 	}
-	meta.segments.SetSegment(segment.GetID(), segment)
+	meta.segments.SetSegment(segment.GetID(), segment, 0)
 
 	meta.indexMeta.indexes[2] = map[UniqueID]*model.Index{
 		5: {

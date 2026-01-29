@@ -443,7 +443,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		zap.Int64("dstNodeID", req.GetDstNodeID()),
 	)
 
-	log.Info("received load segments request",
+	log.Info("[xxx] received load segments request",
 		zap.Int64("version", req.GetVersion()),
 		zap.Bool("needTransfer", req.GetNeedTransfer()),
 		zap.String("loadScope", req.GetLoadScope().String()))
@@ -503,12 +503,15 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Success(), nil
 	}
 
+	t1 := time.Now()
 	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
 		node.composeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
 	if err != nil {
 		log.Warn("failed to ref collection", zap.Error(err))
 		return merr.Status(err), nil
 	}
+	t2 := time.Now()
+	log.Info("PutOrRef time", zap.Duration("time", t2.Sub(t1)))
 	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 
 	switch req.GetLoadScope() {
@@ -1372,11 +1375,11 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				continue
 			}
 
-			log.Info("sync action",
-				zap.Int64("TargetVersion", action.GetTargetVersion()),
-				zap.Time("checkPoint", tsoutil.PhysicalTime(action.GetCheckpoint().GetTimestamp())),
-				zap.Time("deleteCP", tsoutil.PhysicalTime(action.GetDeleteCP().GetTimestamp())),
-				zap.Int64s("partitions", req.GetLoadMeta().GetPartitionIDs()))
+			// log.Info("sync action",
+			// 	zap.Int64("TargetVersion", action.GetTargetVersion()),
+			// 	zap.Time("checkPoint", tsoutil.PhysicalTime(action.GetCheckpoint().GetTimestamp())),
+			// 	zap.Time("deleteCP", tsoutil.PhysicalTime(action.GetDeleteCP().GetTimestamp())),
+			// 	zap.Int64s("partitions", req.GetLoadMeta().GetPartitionIDs()))
 			droppedInfos := lo.SliceToMap(action.GetDroppedInTarget(), func(id int64) (int64, uint64) {
 				if action.GetCheckpoint() == nil {
 					return id, typeutil.MaxTimestamp

@@ -417,6 +417,53 @@ func (_c *MockBroker_UpdateChannelCheckpoint_Call) RunAndReturn(run func(context
 	return _c
 }
 
+// AllocSegment provides a mock function with given fields: ctx, req
+func (_m *MockBroker) AllocSegment(ctx context.Context, req *datapb.AllocSegmentRequest) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AllocSegment")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AllocSegmentRequest) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBroker_AllocSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AllocSegment'
+type MockBroker_AllocSegment_Call struct {
+	*mock.Call
+}
+
+// AllocSegment is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *datapb.AllocSegmentRequest
+func (_e *MockBroker_Expecter) AllocSegment(ctx interface{}, req interface{}) *MockBroker_AllocSegment_Call {
+	return &MockBroker_AllocSegment_Call{Call: _e.mock.On("AllocSegment", ctx, req)}
+}
+
+func (_c *MockBroker_AllocSegment_Call) Run(run func(ctx context.Context, req *datapb.AllocSegmentRequest)) *MockBroker_AllocSegment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.AllocSegmentRequest))
+	})
+	return _c
+}
+
+func (_c *MockBroker_AllocSegment_Call) Return(_a0 error) *MockBroker_AllocSegment_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBroker_AllocSegment_Call) RunAndReturn(run func(context.Context, *datapb.AllocSegmentRequest) error) *MockBroker_AllocSegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockBroker creates a new instance of MockBroker. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockBroker(t interface {

@@ -2820,7 +2820,7 @@ func TestServer_InitMessageCallback(t *testing.T) {
 		meta: &meta{
 			catalog:      mockCatalog,
 			chunkManager: mockChunkManager,
-			segments:     NewSegmentsInfo(),
+			segments:     NewCachedSegmentsInfo(),
 		},
 		importMeta:     &importMeta{},
 		segmentManager: mockManager,

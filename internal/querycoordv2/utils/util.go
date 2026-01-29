@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -341,4 +342,15 @@ func filterNodeLessThan260(nodes []int64, nodeManager *session.NodeManager) []in
 		filteredNodes = append(filteredNodes, nodeID)
 	}
 	return filteredNodes
+}
+
+// GetSegmentRWNodes returns the RW nodes for segment assignment.
+// When streaming service is enabled AND enableSQNServeSegments is true,
+// it returns SQN nodes. Otherwise returns traditional QueryNodes.
+func GetSegmentRWNodes(replica *meta.Replica) []int64 {
+	if streamingutil.IsStreamingServiceEnabled() &&
+		paramtable.Get().QueryCoordCfg.EnableSQNServeSegments.GetAsBool() {
+		return replica.GetRWSQNodes()
+	}
+	return replica.GetRWNodes()
 }
