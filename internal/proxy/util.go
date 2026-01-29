@@ -1387,6 +1387,11 @@ func ValidateCollectionName(entity string) error {
 	return validateName(entity, "collection name")
 }
 
+// ValidateSnapshotName validates snapshot name using standard naming rules.
+func ValidateSnapshotName(snapshotName string) error {
+	return validateName(snapshotName, "snapshot name")
+}
+
 func ValidateObjectType(entity string) error {
 	return validateName(entity, "ObjectType")
 }

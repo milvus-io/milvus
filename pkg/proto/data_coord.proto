@@ -1484,6 +1484,7 @@ message RestoreSnapshotInfo {
   int32 progress = 5; // progress percentage (0-100)
   string reason = 6; // error reason if failed
   uint64 time_cost = 7; // time cost in milliseconds
+  uint64 start_time = 8; // start time in milliseconds since Unix epoch
 }
 
 message DescribeSnapshotRequest {
