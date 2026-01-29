@@ -2,6 +2,7 @@ package distance
 
 import (
 	"math"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -130,14 +131,20 @@ func CalcFloatDistance(dim int64, left, right []float32, metric string) ([]float
 
 	distArray := make([]float32, leftNum*rightNum)
 
-	// Multi-threads to calculate distance. TODO: avoid too many go routines
+	// Limit the number of concurrent goroutines
+	maxGoroutines := runtime.NumCPU() * 2
+	guard := make(chan struct{}, maxGoroutines)
+
 	var waitGroup sync.WaitGroup
 	CalcWorker := func(index int64) {
+		defer waitGroup.Done()
 		CalcFFBatch(dim, left, index, right, metricUpper, &distArray)
-		waitGroup.Done()
+		<-guard
 	}
+
 	for i := int64(0); i < leftNum; i++ {
 		waitGroup.Add(1)
+		guard <- struct{}{}
 		go CalcWorker(i)
 	}
 	waitGroup.Wait()
