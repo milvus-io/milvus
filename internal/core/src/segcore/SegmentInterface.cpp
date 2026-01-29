@@ -646,6 +646,16 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                 }
                 break;
             }
+            case DataType::MOL: {
+                auto data_ptr = result->mutable_scalars()
+                                    ->mutable_mol_data()
+                                    ->mutable_data();
+
+                for (int64_t i = 0; i < count; ++i) {
+                    data_ptr->at(i) = field_meta.default_value()->bytes_data();
+                }
+                break;
+            }
             default: {
                 ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported default value type {}",
