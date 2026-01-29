@@ -87,3 +87,7 @@ func UpdateDefaultConfigParamTypeCheck(enable bool) {
 func UpdateDefaultEnableParquetStatsSkipIndex(enable bool) {
 	C.SetDefaultEnableParquetStatsSkipIndex(C.bool(enable))
 }
+
+func UpdateEnableLatestDeleteSnapshotOptimization(enable bool) {
+	C.SetEnableLatestDeleteSnapshotOptimization(C.bool(enable))
+}

@@ -81,6 +81,11 @@ SetDefaultEnableParquetStatsSkipIndex(bool val) {
 }
 
 void
+SetEnableLatestDeleteSnapshotOptimization(bool val) {
+    milvus::SetEnableLatestDeleteSnapshotOptimization(val);
+}
+
+void
 SetLogLevel(const char* level) {
     milvus::SetLogLevel(level);
 }
