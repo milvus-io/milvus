@@ -15,7 +15,8 @@ InterimSealedIndexTranslator::InterimSealedIndexTranslator(
     knowhere::Json build_config,
     int64_t dim,
     bool is_sparse,
-    DataType vec_data_type)
+    DataType vec_data_type,
+    const std::string& warmup_policy)
     : vec_data_(vec_data),
       segment_id_(segment_id),
       field_id_(field_id),
@@ -31,9 +32,9 @@ InterimSealedIndexTranslator::InterimSealedIndexTranslator(
             milvus::segcore::getCellDataType(
                 /* is_vector */ true,
                 /* is_index */ true),
-            milvus::segcore::getCacheWarmupPolicy(
-                /* is_vector */ true,
-                /* is_index */ true),
+            milvus::segcore::getCacheWarmupPolicy(warmup_policy,
+                                                  /* is_vector */ true,
+                                                  /* is_index */ true),
             /* support_eviction */ false) {
 }
 
