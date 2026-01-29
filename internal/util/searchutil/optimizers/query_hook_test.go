@@ -72,7 +72,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				IsTopkReduce:       true,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, false)
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 50, true, false, `{"param": 2}`)
 
@@ -84,7 +84,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				IsTopkReduce:       true,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, false)
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 50, false, true, `{"param": 2}`)
 	})
@@ -112,7 +112,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				SerializedExprPlan: bs,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, false)
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 100, false, false, `{"param": 1}`)
 	})
@@ -140,7 +140,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				IsTopkReduce:       true,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, false)
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 100, false, false, `{"param": 1}`)
 	})
@@ -169,7 +169,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				SerializedExprPlan: bs,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, false)
 		suite.NoError(err)
 		suite.Equal(bs, req.GetReq().GetSerializedExprPlan())
 	})
@@ -184,7 +184,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 		_, err := OptimizeSearchParams(ctx, &querypb.SearchRequest{
 			Req:             &internalpb.SearchRequest{},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, false)
 		suite.Error(err)
 	})
 
@@ -218,7 +218,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 			Req: &internalpb.SearchRequest{
 				SerializedExprPlan: bs,
 			},
-		}, suite.queryHook, 2)
+		}, suite.queryHook, 2, false)
 		suite.Error(err)
 	})
 }
@@ -239,4 +239,105 @@ func (suite *QueryHookSuite) verifyQueryInfo(req *querypb.SearchRequest, topK in
 
 func TestOptimizeSearchParam(t *testing.T) {
 	suite.Run(t, new(QueryHookSuite))
+}
+
+func TestCalculateEffectiveSegmentNum(t *testing.T) {
+	tests := []struct {
+		name      string
+		rowCounts []int64
+		topk      int64
+		expected  int
+	}{
+		{
+			name:      "empty rowCounts",
+			rowCounts: []int64{},
+			topk:      100,
+			expected:  0,
+		},
+		{
+			name:      "single segment with enough rows",
+			rowCounts: []int64{200},
+			topk:      100,
+			expected:  1,
+		},
+		{
+			name:      "single segment with insufficient rows",
+			rowCounts: []int64{50},
+			topk:      100,
+			expected:  0, // Can't get 100 items from 50 rows
+		},
+		{
+			name:      "multiple segments all with enough rows",
+			rowCounts: []int64{100, 100, 100},
+			topk:      100,
+			expected:  2, // segmentNum=3: perLimit=33, total=99<100; segmentNum=2: perLimit=50, total=150>=100
+		},
+		{
+			name:      "mixed segment sizes",
+			rowCounts: []int64{200, 50, 50},
+			topk:      100,
+			expected:  2, // segmentNum=2: perLimit=50, total=50+50+50=150>=100
+		},
+		{
+			name:      "all small segments",
+			rowCounts: []int64{30, 30, 30},
+			topk:      100,
+			expected:  0, // Total rows = 90 < 100, can never reach topk
+		},
+		{
+			name:      "large segments can contribute more",
+			rowCounts: []int64{1000, 1000, 1000},
+			topk:      100,
+			expected:  2, // segmentNum=3: perLimit=33, total=99<100; segmentNum=2: perLimit=50, total=150>=100
+		},
+		{
+			name:      "exact match with two segments",
+			rowCounts: []int64{50, 50},
+			topk:      100,
+			expected:  2, // segmentNum=2: perLimit=50, total=50+50=100>=100 (max valid)
+		},
+		{
+			name:      "unsorted rowCounts should work",
+			rowCounts: []int64{10, 200, 50, 300, 20},
+			topk:      100,
+			expected:  4, // Should work regardless of order
+		},
+		{
+			name:      "many segments with varying sizes",
+			rowCounts: []int64{50, 50, 50, 50},
+			topk:      100,
+			expected:  4, // segmentNum=4: perLimit=25, total=100>=100
+		},
+		{
+			name:      "topk equals total rows",
+			rowCounts: []int64{25, 25, 25, 25},
+			topk:      100,
+			expected:  4, // segmentNum=4: perLimit=25, total=25+25+25+25=100>=100 (max valid)
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := CalculateEffectiveSegmentNum(tt.rowCounts, tt.topk)
+			if result != tt.expected {
+				// Calculate what the total would be for debugging
+				if tt.expected > 0 {
+					perLimit := tt.topk / int64(tt.expected)
+					total := int64(0)
+					for _, rc := range tt.rowCounts {
+						if rc >= perLimit {
+							total += perLimit
+						} else {
+							total += rc
+						}
+					}
+					t.Errorf("CalculateEffectiveSegmentNum(%v, %d) = %d, want %d (expected total at segmentNum=%d: %d)",
+						tt.rowCounts, tt.topk, result, tt.expected, tt.expected, total)
+				} else {
+					t.Errorf("CalculateEffectiveSegmentNum(%v, %d) = %d, want %d",
+						tt.rowCounts, tt.topk, result, tt.expected)
+				}
+			}
+		})
+	}
 }

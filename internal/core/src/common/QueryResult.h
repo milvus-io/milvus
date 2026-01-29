@@ -354,6 +354,10 @@ struct SearchResult {
             return vector_iterators_;
         }
     }
+    // For two-stage search: count of rows that pass the filter in this segment
+    // Set to -1 when not applicable (normal search mode)
+    // Each segment's SearchResult has its own valid_count, preserved separately
+    int64_t valid_count_ = -1;
 };
 
 using SearchResultPtr = std::shared_ptr<SearchResult>;

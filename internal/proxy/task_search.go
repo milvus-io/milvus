@@ -52,9 +52,10 @@ const (
 	// If the number of estimated search results exceeds this threshold,
 	// a second query request will be initiated to retrieve output fields data.
 	// In this case, the first search will not return any output field from QueryNodes.
-	requeryThreshold = 0.5 * 1024 * 1024
-	radiusKey        = "radius"
-	rangeFilterKey   = "range_filter"
+	requeryThreshold   = 0.5 * 1024 * 1024
+	radiusKey          = "radius"
+	rangeFilterKey     = "range_filter"
+	iterativeFilterKey = "iterative_filter"
 )
 
 // type requery func(span trace.Span, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, error)
@@ -448,7 +449,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
 	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
-		plan, queryInfo, offset, _, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
+		plan, queryInfo, offset, _, searchType, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
 		if err != nil {
 			return err
 		}
@@ -474,6 +475,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			GroupByFieldId:     t.rankParams.GetGroupByFieldId(),
 			GroupSize:          t.rankParams.GetGroupSize(),
 			IgnoreGrowing:      ignoreGrowing,
+			SearchType:         searchType,
 		}
 
 		// set analyzer name for sub search
@@ -647,10 +649,12 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 
 	log := log.Ctx(ctx).With(zap.Int64("collID", t.GetCollectionID()), zap.String("collName", t.collectionName))
 
-	plan, queryInfo, offset, isIterator, err := t.tryGeneratePlan(t.request.GetSearchParams(), t.request.GetDsl(), t.request.GetExprTemplateValues())
+	plan, queryInfo, offset, isIterator, searchType, err := t.tryGeneratePlan(t.request.GetSearchParams(), t.request.GetDsl(), t.request.GetExprTemplateValues())
 	if err != nil {
 		return err
 	}
+
+	t.SearchRequest.SearchType = searchType
 
 	if t.request.FunctionScore != nil {
 		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()}); err != nil {
@@ -765,34 +769,49 @@ func (t *searchTask) convertPlaceholderIfNeeded(phgBytes []byte, fieldID int64) 
 	return ConvertPlaceholderGroup(phgBytes, field)
 }
 
-func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, error) {
+func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, internalpb.SearchType, error) {
 	annsFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, params)
 	if err != nil || len(annsFieldName) == 0 {
 		vecFields := typeutil.GetVectorFieldSchemas(t.schema.CollectionSchema)
 		if len(vecFields) == 0 {
-			return nil, nil, 0, false, errors.New(AnnsFieldKey + " not found in schema")
+			return nil, nil, 0, false, internalpb.SearchType_DEFAULT, errors.New(AnnsFieldKey + " not found in schema")
 		}
 
 		if enableMultipleVectorFields && len(vecFields) > 1 {
-			return nil, nil, 0, false, errors.New("multiple anns_fields exist, please specify a anns_field in search_params")
+			return nil, nil, 0, false, 0, errors.New("multiple anns_fields exist, please specify a anns_field in search_params")
 		}
 		annsFieldName = vecFields[0].Name
 	}
 	searchInfo, err := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams)
 	if err != nil {
-		return nil, nil, 0, false, err
+		return nil, nil, 0, false, internalpb.SearchType_DEFAULT, err
 	}
 	if searchInfo.collectionID > 0 && searchInfo.collectionID != t.GetCollectionID() {
-		return nil, nil, 0, false, merr.WrapErrParameterInvalidMsg("collection id:%d in the request is not consistent to that in the search context,"+
+		return nil, nil, 0, false, internalpb.SearchType_DEFAULT, merr.WrapErrParameterInvalidMsg("collection id:%d in the request is not consistent to that in the search context,"+
 			"alias or database may have been changed: %d", searchInfo.collectionID, t.GetCollectionID())
 	}
 
 	annField := typeutil.GetFieldByName(t.schema.CollectionSchema, annsFieldName)
 	if searchInfo.planInfo.GetGroupByFieldId() != -1 && annField.GetDataType() == schemapb.DataType_BinaryVector {
-		return nil, nil, 0, false, errors.New("not support search_group_by operation based on binary vector column")
+		return nil, nil, 0, false, internalpb.SearchType_DEFAULT, errors.New("not support search_group_by operation based on binary vector column")
 	}
 
 	searchInfo.planInfo.QueryFieldId = annField.GetFieldID()
+
+	// Determine if this is a pure ANN search with filter (Go side only)
+	// Conditions: has filter, NOT range search, NOT groupBy, NOT iterator, NOT iterative_filter hints
+	hasFilter := dsl != "" || len(exprTemplateValues) > 0
+	isRangeSearch := strings.Contains(searchInfo.planInfo.GetSearchParams(), radiusKey)
+	hasGroupBy := searchInfo.planInfo.GetGroupByFieldId() > 0
+	searchType := internalpb.SearchType_DEFAULT
+	if !isRangeSearch && !hasGroupBy && !searchInfo.isIterator && !searchInfo.iterativeFilter {
+		if !hasFilter {
+			searchType = internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER
+		} else {
+			searchType = internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER
+		}
+	}
+
 	start := time.Now()
 	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
 	if planErr != nil {
@@ -800,13 +819,13 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 			zap.String("dsl", dsl), // may be very large if large term passed.
 			zap.String("anns field", annsFieldName), zap.Any("query info", searchInfo.planInfo))
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.FailLabel).Observe(float64(time.Since(start).Milliseconds()))
-		return nil, nil, 0, false, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", planErr)
+		return nil, nil, 0, false, internalpb.SearchType_DEFAULT, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", planErr)
 	}
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.SuccessLabel).Observe(float64(time.Since(start).Milliseconds()))
 	log.Ctx(t.ctx).Debug("create query plan",
 		zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
 		zap.String("anns field", annsFieldName), zap.Any("query info", searchInfo.planInfo))
-	return plan, searchInfo.planInfo, searchInfo.offset, searchInfo.isIterator, nil
+	return plan, searchInfo.planInfo, searchInfo.offset, searchInfo.isIterator, searchType, nil
 }
 
 func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int64, error) {
