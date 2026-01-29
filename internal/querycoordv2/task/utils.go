@@ -149,8 +149,7 @@ func packLoadSegmentRequest(
 		loadScope = querypb.LoadScope_Delta
 	}
 
-	schema = applyCollectionMmapSetting(schema, collectionProperties)
-	schema = applyCollectionWarmupSetting(schema, collectionProperties)
+	finalSchema := applyCollectionSettings(schema, collectionProperties)
 	applyIndexWarmupSetting(loadInfo, schema, collectionProperties)
 
 	return &querypb.LoadSegmentsRequest{
@@ -159,8 +158,8 @@ func packLoadSegmentRequest(
 			commonpbutil.WithMsgID(task.ID()),
 		),
 		Infos:          []*querypb.SegmentLoadInfo{loadInfo},
-		Schema:         schema,   // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		LoadMeta:       loadMeta, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		Schema:         finalSchema, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		LoadMeta:       loadMeta,    // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
 		CollectionID:   task.CollectionID(),
 		ReplicaID:      task.ReplicaID(),
 		DeltaPositions: []*msgpb.MsgPosition{loadInfo.GetDeltaPosition()}, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
@@ -211,8 +210,7 @@ func packSubChannelRequest(
 	partitions []int64,
 	targetVersion int64,
 ) *querypb.WatchDmChannelsRequest {
-	schema = applyCollectionMmapSetting(schema, collectionProperties)
-	schema = applyCollectionWarmupSetting(schema, collectionProperties)
+	finalSchema := applyCollectionSettings(schema, collectionProperties)
 	return &querypb.WatchDmChannelsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_WatchDmChannels),
@@ -222,8 +220,8 @@ func packSubChannelRequest(
 		CollectionID:  task.CollectionID(),
 		PartitionIDs:  partitions,
 		Infos:         []*datapb.VchannelInfo{channel.VchannelInfo},
-		Schema:        schema,   // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		LoadMeta:      loadMeta, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		Schema:        finalSchema, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		LoadMeta:      loadMeta,    // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
 		ReplicaID:     task.ReplicaID(),
 		Version:       time.Now().UnixNano(),
 		IndexInfoList: indexInfo,
@@ -274,11 +272,23 @@ func packUnsubDmChannelRequest(task *ChannelTask, action Action) *querypb.UnsubD
 	}
 }
 
+// applyCollectionSettings applies collection-level mmap and warmup settings to all fields.
+// It combines applyCollectionMmapSetting and applyCollectionWarmupSetting into a single call.
+func applyCollectionSettings(schema *schemapb.CollectionSchema,
+	collectionProperties []*commonpb.KeyValuePair,
+) *schemapb.CollectionSchema {
+	// first clone the schema then apply some settings to it
+	schemaCloned := typeutil.Clone(schema)
+	schemaCloned.Properties = mergeCollectionProps(schemaCloned.Properties, collectionProperties)
+
+	schemaCloned = applyCollectionMmapSetting(schemaCloned, collectionProperties)
+	schemaCloned = applyCollectionWarmupSetting(schemaCloned, collectionProperties)
+	return schemaCloned
+}
+
 func applyCollectionMmapSetting(schema *schemapb.CollectionSchema,
 	collectionProperties []*commonpb.KeyValuePair,
 ) *schemapb.CollectionSchema {
-	schema = typeutil.Clone(schema)
-	schema.Properties = mergeCollectionProps(schema.Properties, collectionProperties)
 	// field mmap enabled if collection-level mmap enabled or the field mmap enabled
 	collectionMmapEnabled, exist := common.IsMmapDataEnabled(collectionProperties...)
 	for _, field := range schema.GetFields() {
