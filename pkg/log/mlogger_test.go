@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -130,4 +131,54 @@ func TestNewIntentContext(t *testing.T) {
 	ts.assertLastMessageContains(fmt.Sprintf("role=%s", testName))
 	ts.assertLastMessageContains(fmt.Sprintf("intent=%s", testIntent))
 	ts.assertLastMessageContains(fmt.Sprintf("traceID=%s", traceID))
+}
+
+func TestMLoggerWithContext(t *testing.T) {
+	ts := newTestLogSpy(t)
+	conf := &Config{Level: "debug", DisableTimestamp: true}
+	logger, p, _ := InitTestLogger(ts, conf)
+	ReplaceGlobals(logger, p)
+
+	// Create a valid span context manually
+	traceIDBytes := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	spanIDBytes := [8]byte{1, 2, 3, 4, 5, 6, 7, 8}
+	traceID := trace.TraceID(traceIDBytes)
+	spanID := trace.SpanID(spanIDBytes)
+
+	validSpanCtx := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: trace.FlagsSampled,
+		Remote:     true,
+	})
+	ctx := trace.ContextWithSpanContext(context.Background(), validSpanCtx)
+
+	// Use WithContext to create a logger with trace info (With() returns *MLogger)
+	With().WithContext(ctx).Info("test message with trace")
+	With().WithContext(ctx).Sync()
+
+	ts.assertLastMessageContains(fmt.Sprintf("traceID=%s", traceID.String()))
+
+	// Test with nil context - should return the original logger
+	ts.CleanBuffer()
+	originalLogger := With()
+	loggerWithNilCtx := originalLogger.WithContext(nil)
+	assert.Equal(t, originalLogger, loggerWithNilCtx)
+
+	// Test with context without span - should return original logger
+	ts.CleanBuffer()
+	ctxWithoutSpan := context.Background()
+	loggerWithoutSpan := With().WithContext(ctxWithoutSpan)
+	loggerWithoutSpan.Info("test message without trace")
+	loggerWithoutSpan.Sync()
+	ts.assertLastMessageNotContains("traceID=")
+
+	// Test with invalid span context (all zeros)
+	ts.CleanBuffer()
+	invalidSpanCtx := trace.NewSpanContext(trace.SpanContextConfig{})
+	ctxWithInvalidSpan := trace.ContextWithSpanContext(context.Background(), invalidSpanCtx)
+	loggerWithInvalidSpan := With().WithContext(ctxWithInvalidSpan)
+	loggerWithInvalidSpan.Info("test message with invalid span")
+	loggerWithInvalidSpan.Sync()
+	ts.assertLastMessageNotContains("traceID=")
 }

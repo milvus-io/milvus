@@ -18,6 +18,8 @@ require (
 	github.com/dave/jennifer v1.7.1
 	github.com/expr-lang/expr v1.15.7
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
+	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.1.0
+	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.2
 	github.com/huaweicloud/huaweicloud-sdk-go-v3 v0.1.174
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12
@@ -65,14 +67,14 @@ require (
 	golang.org/x/sys v0.38.0
 	google.golang.org/api v0.224.0
 	google.golang.org/grpc v1.71.1
-	google.golang.org/protobuf v1.36.5
+	google.golang.org/protobuf v1.36.6
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/apimachinery v0.32.3
 )
 
 require (
-	cel.dev/expr v0.19.1 // indirect
+	cel.dev/expr v0.23.1 // indirect
 	cloud.google.com/go v0.118.3 // indirect
 	cloud.google.com/go/auth v0.15.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.7 // indirect

@@ -13,6 +13,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/mcontext"
 )
 
 const (
@@ -39,46 +40,21 @@ func StreamTraceLoggerInterceptor(srv interface{}, ss grpc.ServerStream, info *g
 
 func withLevelAndTrace(ctx context.Context) context.Context {
 	newctx := ctx
-	var traceID trace.TraceID
-	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		levels := GetMetadata(md, logLevelRPCMetaKey, logLevelRPCMetaKeyLegacy)
-		// get log level
-		if len(levels) >= 1 {
-			level := zapcore.DebugLevel
-			if err := level.UnmarshalText([]byte(levels[0])); err != nil {
-				newctx = ctx
-			} else {
-				switch level {
-				case zapcore.DebugLevel:
-					newctx = log.WithDebugLevel(ctx)
-				case zapcore.InfoLevel:
-					newctx = log.WithInfoLevel(ctx)
-				case zapcore.WarnLevel:
-					newctx = log.WithWarnLevel(ctx)
-				case zapcore.ErrorLevel:
-					newctx = log.WithErrorLevel(ctx)
-				case zapcore.FatalLevel:
-					newctx = log.WithFatalLevel(ctx)
-				default:
-					newctx = ctx
-				}
-			}
-			// inject log level to outgoing meta
-			newctx = metadata.AppendToOutgoingContext(newctx, logLevelRPCMetaKey, level.String())
-		}
-		// client request id
-		requestID := GetMetadata(md, clientRequestIDKey, clientRequestIDKeyLegacy)
-		if len(requestID) >= 1 {
-			// inject traceid in order to pass client request id
-			newctx = metadata.AppendToOutgoingContext(newctx, clientRequestIDKey, requestID[0])
-			var err error
-			// if client-request-id is a valid traceID, use traceID path
-			traceID, err = trace.TraceIDFromHex(requestID[0])
-			if err != nil {
-				// set request id to custom field
-				newctx = log.WithFields(newctx, zap.String(clientRequestIDKey, requestID[0]))
-			}
-		}
+	mctx := mcontext.FromContext(ctx)
+
+	switch mctx.LogLevel {
+	case zapcore.DebugLevel:
+		newctx = log.WithDebugLevel(ctx)
+	case zapcore.InfoLevel:
+		newctx = log.WithInfoLevel(ctx)
+	case zapcore.WarnLevel:
+		newctx = log.WithWarnLevel(ctx)
+	case zapcore.ErrorLevel:
+		newctx = log.WithErrorLevel(ctx)
+	case zapcore.FatalLevel:
+		newctx = log.WithFatalLevel(ctx)
+	default:
+		newctx = ctx
 	}
 	// client request unixsecs
 	requestUnixmsec, ok := GetClientReqUnixmsecGrpc(newctx)
@@ -87,13 +63,8 @@ func withLevelAndTrace(ctx context.Context) context.Context {
 	}
 
 	// traceID not valid, generate a new one
-	if !traceID.IsValid() {
-		traceID = trace.SpanContextFromContext(newctx).TraceID()
-	}
-	if traceID.IsValid() {
-		newctx = log.WithTraceID(newctx, traceID.String())
-	}
-	return newctx
+	traceID := trace.SpanContextFromContext(newctx).TraceID()
+	return log.WithTraceID(newctx, traceID.String())
 }
 
 func GetClientReqUnixmsecGrpc(ctx context.Context) (int64, bool) {

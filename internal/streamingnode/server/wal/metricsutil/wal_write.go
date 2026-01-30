@@ -1,6 +1,7 @@
 package metricsutil
 
 import (
+	"context"
 	"strconv"
 	"time"
 
@@ -73,7 +74,7 @@ func (m *WriteMetrics) StartAppend(msg message.MutableMessage) *AppendMetrics {
 	}
 }
 
-func (m *WriteMetrics) done(appendMetrics *AppendMetrics) {
+func (m *WriteMetrics) done(ctx context.Context, appendMetrics *AppendMetrics) {
 	if !appendMetrics.msg.IsPersisted() {
 		return
 	}
@@ -94,18 +95,20 @@ func (m *WriteMetrics) done(appendMetrics *AppendMetrics) {
 			}
 		}
 	}
+	// Use WithTraceID to add only traceID from the context (no spanID)
+	logger := m.Logger().WithContext(ctx)
 	if appendMetrics.err != nil {
-		m.Logger().Warn("append message into wal failed", appendMetrics.IntoLogFields()...)
+		logger.Warn("append message into wal failed", appendMetrics.IntoLogFields()...)
 		return
 	}
 	if appendMetrics.appendDuration >= m.slowLogThreshold {
 		// log slow append catch
-		m.Logger().Warn("append message into wal too slow", appendMetrics.IntoLogFields()...)
+		logger.Warn("append message into wal too slow", appendMetrics.IntoLogFields()...)
 		return
 	}
 	logLV := appendMetrics.msg.MessageType().LogLevel()
-	if m.Logger().Level().Enabled(logLV) {
-		m.Logger().Log(logLV, "append message into wal", appendMetrics.IntoLogFields()...)
+	if logger.Level().Enabled(logLV) {
+		logger.Log(logLV, "append message into wal", appendMetrics.IntoLogFields()...)
 	}
 }
 

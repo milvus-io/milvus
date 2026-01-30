@@ -34,7 +34,6 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/soheilhy/cmux"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -249,11 +248,14 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 			streaming.ForwardLegacyProxyUnaryServerInterceptor(),
 			proxy.DatabaseInterceptor(),
 			UnaryRequestStatsInterceptor,
+			interceptor.NewMilvusContextUnaryServerInterceptor(),
+			interceptor.NewMetricsServerUnaryInterceptor(),
+			interceptor.NewLogUnaryServerInterceptor(),
+			logutil.UnaryTraceLoggerInterceptor,
 			accesslog.UnaryAccessLogInterceptor,
 			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptor),
 			proxy.UnaryServerHookInterceptor(),
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
-			logutil.UnaryTraceLoggerInterceptor,
 			proxy.RateLimitInterceptor(limiter),
 			accesslog.UnaryUpdateAccessInfoInterceptor,
 			proxy.TraceLogInterceptor,
@@ -355,31 +357,22 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
 
-	opts := tracer.GetInterceptorOpts()
 	grpcOpts := []grpc.ServerOption{
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			otelgrpc.UnaryServerInterceptor(opts...),
+			interceptor.NewMilvusContextUnaryServerInterceptor(),
+			interceptor.NewMetricsServerUnaryInterceptor(),
+			interceptor.NewLogUnaryServerInterceptor(),
 			logutil.UnaryTraceLoggerInterceptor,
-			interceptor.ClusterValidationUnaryServerInterceptor(),
-			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
-				if s.serverID.Load() == 0 {
-					s.serverID.Store(paramtable.GetNodeID())
-				}
-				return s.serverID.Load()
-			}),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			interceptor.ClusterValidationStreamServerInterceptor(),
-			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
-				if s.serverID.Load() == 0 {
-					s.serverID.Store(paramtable.GetNodeID())
-				}
-				return s.serverID.Load()
-			}),
+			interceptor.NewMilvusContextStreamServerInterceptor(),
+			interceptor.NewMetricsStreamServerInterceptor(),
+			interceptor.NewLogStreamServerInterceptor(),
+			logutil.StreamTraceLoggerInterceptor,
 		)),
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
 	}
@@ -394,7 +387,6 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 	log.Info("create Proxy internal grpc server",
 		zap.Any("enforcement policy", kaep),
 		zap.Any("server parameters", kasp))
-
 	if err := s.grpcInternalServer.Serve(s.listenerManager.InternalGrpcListener()); err != nil {
 		log.Error("failed to internal serve on Proxy's listener", zap.Error(err))
 		errChan <- err

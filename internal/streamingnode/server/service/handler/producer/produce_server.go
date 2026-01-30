@@ -1,10 +1,13 @@
 package producer
 
 import (
+	"context"
+	"crypto/rand"
 	"io"
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -171,6 +174,24 @@ func (p *ProduceServer) recvLoop() (err error) {
 
 // handleProduce handles the produce message request.
 func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
+	// Create a completely new context to ensure we only use message-level traceID.
+	// Do not inherit from stream's context to avoid using stream-level traceID.
+	ctx := context.Background()
+	if req.GetTraceId() != "" {
+		traceID, err := trace.TraceIDFromHex(req.GetTraceId())
+		if err == nil {
+			var spanID trace.SpanID
+			rand.Read(spanID[:])
+			sc := trace.NewSpanContext(trace.SpanContextConfig{
+				TraceID:    traceID,
+				SpanID:     spanID,
+				TraceFlags: trace.FlagsSampled,
+				Remote:     true,
+			})
+			ctx = trace.ContextWithSpanContext(ctx, sc)
+		}
+	}
+
 	// Stop handling if the wal is not available any more.
 	// The counter of  appendWG will never increased.
 	if !p.wal.IsAvailable() {
@@ -178,12 +199,12 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 	}
 
 	p.appendWG.Add(1)
-	p.logger.Debug("recv produce message from client", zap.Int64("requestID", req.RequestId))
+	log.Ctx(ctx).Debug("recv produce message from client", zap.Int64("requestID", req.RequestId))
 	// Update metrics.
 	msg := message.NewMutableMessageBeforeAppend(req.GetMessage().GetPayload(), req.GetMessage().GetProperties())
 	metricsGuard := p.metrics.StartProduce()
 	if err := p.validateMessage(msg); err != nil {
-		p.logger.Warn("produce message validation failed", zap.Int64("requestID", req.RequestId), zap.Error(err))
+		log.Ctx(ctx).Warn("produce message validation failed", zap.Int64("requestID", req.RequestId), zap.Error(err))
 		p.sendProduceResult(req.RequestId, nil, err)
 		metricsGuard.Finish(err)
 		p.appendWG.Done()
@@ -192,7 +213,7 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 
 	// Append message to wal.
 	// Concurrent append request can be executed concurrently.
-	p.wal.AppendAsync(p.produceServer.Context(), msg, func(appendResult *wal.AppendResult, err error) {
+	p.wal.AppendAsync(ctx, msg, func(appendResult *wal.AppendResult, err error) {
 		defer func() {
 			metricsGuard.Finish(err)
 			p.appendWG.Done()

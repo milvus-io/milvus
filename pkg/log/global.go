@@ -171,15 +171,20 @@ func NewIntentContext(name string, intent string) (context.Context, trace.Span) 
 	return intentCtx, initSpan
 }
 
-// Ctx returns a logger which will log contextual messages attached in ctx
+// Ctx returns a logger which will log contextual messages attached in ctx.
+// It automatically extracts traceID from OpenTelemetry span context if available.
 func Ctx(ctx context.Context) *MLogger {
 	if ctx == nil {
 		return &MLogger{Logger: ctxL()}
 	}
+
+	// First check if there's already a logger attached to context
 	if ctxLogger, ok := ctx.Value(CtxLogKey).(*MLogger); ok {
 		return ctxLogger
 	}
-	return &MLogger{Logger: ctxL()}
+
+	// Use WithContext to extract traceID from OpenTelemetry span context
+	return (&MLogger{Logger: ctxL()}).WithContext(ctx)
 }
 
 // withLogLevel returns ctx with a leveled logger, notes that it will overwrite logger previous attached!

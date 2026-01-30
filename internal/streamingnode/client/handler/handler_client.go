@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/json"
@@ -159,17 +158,20 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 		grpc.WithResolvers(rb),
 		grpc.WithTransportCredentials(creds),
 		grpc.WithChainUnaryInterceptor(
-			otelgrpc.UnaryClientInterceptor(tracer.GetInterceptorOpts()...),
-			interceptor.ClusterInjectionUnaryClientInterceptor(),
+			interceptor.NewMilvusContextUnaryClientInterceptor(0),
+			interceptor.NewMetricsClientUnaryInterceptor(),
+			interceptor.NewLogClientUnaryInterceptor(),
 			streamingserviceinterceptor.NewStreamingServiceUnaryClientInterceptor(),
 		),
 		grpc.WithChainStreamInterceptor(
-			otelgrpc.StreamClientInterceptor(tracer.GetInterceptorOpts()...),
-			interceptor.ClusterInjectionStreamClientInterceptor(),
+			interceptor.NewMilvusContextStreamClientInterceptor(0),
+			interceptor.NewMetricsClientStreamInterceptor(),
+			interceptor.NewLogClientStreamInterceptor(),
 			streamingserviceinterceptor.NewStreamingServiceStreamClientInterceptor(),
 		),
 		grpc.WithReturnConnectionError(),
 		grpc.WithDefaultServiceConfig(string(defaultServiceConfigJSON)),
+		grpc.WithStatsHandler(tracer.GetDynamicOtelGrpcClientStatsHandler()),
 	)
 	return dialOptions
 }

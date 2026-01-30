@@ -17,9 +17,11 @@
 package log
 
 import (
+	"context"
 	"sync/atomic"
 
 	"github.com/uber/jaeger-client-go/utils"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -85,4 +87,18 @@ func (l *MLogger) RatedWarn(cost float64, msg string, fields ...zap.Field) bool 
 		return true
 	}
 	return false
+}
+
+// WithContext returns a new MLogger with traceID and spanID extracted from the context.
+// If the context contains a valid OpenTelemetry span context, the traceID and spanID
+// will be automatically added as log fields.
+func (l *MLogger) WithContext(ctx context.Context) *MLogger {
+	if ctx == nil {
+		return l
+	}
+	spanCtx := trace.SpanContextFromContext(ctx)
+	if !spanCtx.IsValid() {
+		return l
+	}
+	return l.With(zap.String("traceID", spanCtx.TraceID().String()))
 }
