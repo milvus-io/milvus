@@ -168,11 +168,26 @@ func NewAzureObjectStorageClient(ctx context.Context, c *Config) (*service.Clien
 	var client *service.Client
 	var err error
 	if c.UseIAM {
-		cred, credErr := azidentity.NewWorkloadIdentityCredential(&azidentity.WorkloadIdentityCredentialOptions{
-			ClientID:      os.Getenv("AZURE_CLIENT_ID"),
-			TenantID:      os.Getenv("AZURE_TENANT_ID"),
-			TokenFilePath: os.Getenv("AZURE_FEDERATED_TOKEN_FILE"),
-		})
+		var cred azcore.TokenCredential
+		var credErr error
+		if os.Getenv("AZURE_FEDERATED_TOKEN_FILE") != "" {
+			cred, credErr = azidentity.NewWorkloadIdentityCredential(&azidentity.WorkloadIdentityCredentialOptions{
+				ClientID:      os.Getenv("AZURE_CLIENT_ID"),
+				TenantID:      os.Getenv("AZURE_TENANT_ID"),
+				TokenFilePath: os.Getenv("AZURE_FEDERATED_TOKEN_FILE"),
+			})
+		} else {
+			clientID := os.Getenv("AZURE_CLIENT_ID")
+			managedIdentityID := azidentity.ClientID("") // Default to System Assigned
+
+			if clientID != "" {
+				managedIdentityID = azidentity.ClientID(clientID)
+			}
+
+			cred, credErr = azidentity.NewManagedIdentityCredential(&azidentity.ManagedIdentityCredentialOptions{
+				ID: managedIdentityID,
+			})
+		}
 		if credErr != nil {
 			return nil, credErr
 		}
