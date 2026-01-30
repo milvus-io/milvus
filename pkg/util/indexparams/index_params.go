@@ -57,6 +57,7 @@ var configableIndexParams = typeutil.NewSet[string]()
 func init() {
 	configableIndexParams.Insert(common.MmapEnabledKey)
 	configableIndexParams.Insert(common.IndexOffsetCacheEnabledKey)
+	configableIndexParams.Insert(common.WarmupKey)
 }
 
 func IsConfigableIndexParam(key string) bool {

@@ -407,6 +407,28 @@ class Schema {
     std::pair<bool, bool>
     MmapEnabled(const FieldId& field) const;
 
+    /**
+     * @brief Get the warmup policy for a specific field.
+     *
+     * This function checks warmup policy at the field level first. If no field-level
+     * setting is found, it falls back to the appropriate collection-level warmup
+     * configuration based on whether the field is vector/scalar and index/field.
+     *
+     * @param field The field ID to check warmup policy for.
+     * @param is_vector Whether the field is a vector field.
+     * @param is_index Whether this is for index loading (vs raw field data).
+     *
+     * @return A pair where:
+     *         - first:  Whether a warmup policy exists (at field or collection level).
+     *         - second: The warmup policy string ("disable", "sync", etc.).
+     *                   Only meaningful when first is true.
+     *
+     * @note If no warmup policy exists at any level, first will be false and second
+     *       should be ignored (use global config fallback).
+     */
+    std::pair<bool, std::string>
+    WarmupPolicy(const FieldId& field, bool is_vector, bool is_index) const;
+
  private:
     int64_t debug_id = START_USER_FIELDID;
     std::vector<FieldId> field_ids_;
@@ -432,6 +454,16 @@ class Schema {
     bool has_mmap_setting_ = false;
     bool mmap_enabled_ = false;
     std::unordered_map<FieldId, bool> mmap_fields_;
+
+    // warmup policy settings
+    // Valid values: "disable", "sync" (empty string means no setting)
+    // Collection-level warmup policies for different data types
+    std::optional<std::string> warmup_vector_index_ = std::nullopt;
+    std::optional<std::string> warmup_scalar_index_ = std::nullopt;
+    std::optional<std::string> warmup_scalar_field_ = std::nullopt;
+    std::optional<std::string> warmup_vector_field_ = std::nullopt;
+    // Per-field warmup policy (key: "warmup" in field type_params)
+    std::unordered_map<FieldId, std::string> warmup_fields_;
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;

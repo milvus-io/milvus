@@ -5767,3 +5767,84 @@ func TestValidateCollectionTTL(t *testing.T) {
 		})
 	}
 }
+
+func TestHasWarmupProp(t *testing.T) {
+	t.Run("has generic warmup key", func(t *testing.T) {
+		props := []*commonpb.KeyValuePair{
+			{Key: common.WarmupKey, Value: common.WarmupSync},
+		}
+		assert.True(t, hasWarmupProp(props...))
+	})
+
+	t.Run("has scalar field warmup key", func(t *testing.T) {
+		props := []*commonpb.KeyValuePair{
+			{Key: common.WarmupScalarFieldKey, Value: common.WarmupDisable},
+		}
+		assert.True(t, hasWarmupProp(props...))
+	})
+
+	t.Run("has scalar index warmup key", func(t *testing.T) {
+		props := []*commonpb.KeyValuePair{
+			{Key: common.WarmupScalarIndexKey, Value: common.WarmupSync},
+		}
+		assert.True(t, hasWarmupProp(props...))
+	})
+
+	t.Run("has vector field warmup key", func(t *testing.T) {
+		props := []*commonpb.KeyValuePair{
+			{Key: common.WarmupVectorFieldKey, Value: common.WarmupDisable},
+		}
+		assert.True(t, hasWarmupProp(props...))
+	})
+
+	t.Run("has vector index warmup key", func(t *testing.T) {
+		props := []*commonpb.KeyValuePair{
+			{Key: common.WarmupVectorIndexKey, Value: common.WarmupSync},
+		}
+		assert.True(t, hasWarmupProp(props...))
+	})
+
+	t.Run("no warmup key", func(t *testing.T) {
+		props := []*commonpb.KeyValuePair{
+			{Key: "other_key", Value: "other_value"},
+		}
+		assert.False(t, hasWarmupProp(props...))
+	})
+
+	t.Run("empty props", func(t *testing.T) {
+		assert.False(t, hasWarmupProp())
+	})
+}
+
+func TestHasPropInDeletekeys(t *testing.T) {
+	t.Run("has mmap key", func(t *testing.T) {
+		keys := []string{common.MmapEnabledKey}
+		assert.Equal(t, common.MmapEnabledKey, hasPropInDeletekeys(keys))
+	})
+
+	t.Run("has lazyload key", func(t *testing.T) {
+		keys := []string{common.LazyLoadEnableKey}
+		assert.Equal(t, common.LazyLoadEnableKey, hasPropInDeletekeys(keys))
+	})
+
+	t.Run("has generic warmup key", func(t *testing.T) {
+		keys := []string{common.WarmupKey}
+		assert.Equal(t, common.WarmupKey, hasPropInDeletekeys(keys))
+	})
+
+	t.Run("has granular warmup keys", func(t *testing.T) {
+		assert.Equal(t, common.WarmupScalarFieldKey, hasPropInDeletekeys([]string{common.WarmupScalarFieldKey}))
+		assert.Equal(t, common.WarmupScalarIndexKey, hasPropInDeletekeys([]string{common.WarmupScalarIndexKey}))
+		assert.Equal(t, common.WarmupVectorFieldKey, hasPropInDeletekeys([]string{common.WarmupVectorFieldKey}))
+		assert.Equal(t, common.WarmupVectorIndexKey, hasPropInDeletekeys([]string{common.WarmupVectorIndexKey}))
+	})
+
+	t.Run("no special key", func(t *testing.T) {
+		keys := []string{"other_key"}
+		assert.Equal(t, "", hasPropInDeletekeys(keys))
+	})
+
+	t.Run("empty keys", func(t *testing.T) {
+		assert.Equal(t, "", hasPropInDeletekeys([]string{}))
+	})
+}

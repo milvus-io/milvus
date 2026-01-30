@@ -138,8 +138,14 @@ upper_bound(const ConcurrentVector<Timestamp>& timestamps,
             int64_t last,
             Timestamp value);
 
+// Get the cache warmup policy for the given content type.
+// If warmup_policy is not empty, parse it and return the corresponding policy.
+// If warmup_policy is empty, fall back to the global config.
 CacheWarmupPolicy
-getCacheWarmupPolicy(bool is_vector, bool is_index, bool in_load_list = true);
+getCacheWarmupPolicy(const std::string& warmup_policy,
+                     bool is_vector,
+                     bool is_index,
+                     bool in_load_list = true);
 
 milvus::cachinglayer::CellDataType
 getCellDataType(bool is_vector, bool is_index);

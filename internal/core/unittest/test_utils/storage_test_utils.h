@@ -98,8 +98,10 @@ PrepareInsertBinlog(int64_t collection_id,
             FieldBinlogInfo{field_id,
                             static_cast<int64_t>(row_count),
                             std::vector<int64_t>{int64_t(row_count)},
-                            std::vector<int64_t>{serialized_insert_size},
+                            std::vector<int64_t>{
+                                static_cast<int64_t>(serialized_insert_size)},
                             enable_mmap,
+                            "",
                             std::vector<std::string>{file}});
     };
 
@@ -184,6 +186,7 @@ PrepareSingleFieldInsertBinlog(int64_t collection_id,
                         row_counts,
                         serialized_insert_sizes,
                         enable_mmap,
+                        "",
                         files});
 
     return load_info;

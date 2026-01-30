@@ -18,6 +18,7 @@
 #include "cachinglayer/Utils.h"
 #include "common/Chunk.h"
 #include "common/FieldMeta.h"
+#include "common/Types.h"
 #include "mmap/Types.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
 
@@ -30,7 +31,8 @@ class DefaultValueChunkTranslator
     DefaultValueChunkTranslator(int64_t segment_id,
                                 FieldMeta field_meta,
                                 FieldDataInfo field_data_info,
-                                bool use_mmap);
+                                bool use_mmap,
+                                const std::string& warmup_policy = "");
 
     ~DefaultValueChunkTranslator() override;
 
