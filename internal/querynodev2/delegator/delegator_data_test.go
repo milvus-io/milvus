@@ -61,6 +61,25 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+// segmentEntryCoreFields extracts core fields from SegmentEntry for comparison,
+// excluding Candidate field which varies between tests.
+func segmentEntryCoreFields(entries []SegmentEntry) []SegmentEntry {
+	result := make([]SegmentEntry, len(entries))
+	for i, e := range entries {
+		result[i] = SegmentEntry{
+			NodeID:        e.NodeID,
+			SegmentID:     e.SegmentID,
+			PartitionID:   e.PartitionID,
+			Version:       e.Version,
+			TargetVersion: e.TargetVersion,
+			Level:         e.Level,
+			Offline:       e.Offline,
+			// Candidate is intentionally excluded
+		}
+	}
+	return result
+}
+
 type DelegatorDataSuite struct {
 	suite.Suite
 
@@ -519,6 +538,8 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	s.True(s.delegator.distribution.Serviceable())
 
 	s.delegator.Close()
+	// After Close(), distribution candidates are cleared, so ProcessDelete becomes a no-op.
+	// This is expected behavior - the delegator is being decommissioned.
 	s.delegator.ProcessDelete([]*DeleteData{
 		{
 			PartitionID: 500,
@@ -536,9 +557,10 @@ func (s *DelegatorDataSuite) TestLoadGrowingWithBM25() {
 	mockSegment := segments.NewMockSegment(s.T())
 	s.loader.EXPECT().Load(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]segments.Segment{mockSegment}, nil)
 
-	mockSegment.EXPECT().Partition().Return(111)
-	mockSegment.EXPECT().ID().Return(111)
-	mockSegment.EXPECT().Type().Return(commonpb.SegmentState_Growing)
+	mockSegment.EXPECT().Partition().Return(int64(111))
+	mockSegment.EXPECT().ID().Return(int64(111))
+	// Note: Type() is no longer called since pkOracle was removed
+	// Candidate is now stored directly in SegmentEntry
 	mockSegment.EXPECT().GetBM25Stats().Return(map[int64]*storage.BM25Stats{})
 
 	err := s.delegator.LoadGrowing(context.Background(), []*querypb.SegmentLoadInfo{{SegmentID: 1}}, 1)
@@ -609,7 +631,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 				TargetVersion: unreadableTargetVersion,
 				Level:         datapb.SegmentLevel_L1,
 			},
-		}, sealed[0].Segments)
+		}, segmentEntryCoreFields(sealed[0].Segments))
 	})
 
 	s.Run("loadBM25_failed", func() {
@@ -709,7 +731,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 				TargetVersion: unreadableTargetVersion,
 				Level:         datapb.SegmentLevel_L1,
 			},
-		}, sealed[0].Segments)
+		}, segmentEntryCoreFields(sealed[0].Segments))
 	})
 
 	s.Run("load_segments_with_delete", func() {
@@ -1278,7 +1300,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 			PartitionID:   500,
 			TargetVersion: unreadableTargetVersion,
 		},
-	}, sealed[0].Segments)
+	}, segmentEntryCoreFields(sealed[0].Segments))
 
 	s.ElementsMatch([]SegmentEntry{
 		{
@@ -1287,7 +1309,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 			PartitionID:   500,
 			TargetVersion: unreadableTargetVersion,
 		},
-	}, growing)
+	}, segmentEntryCoreFields(growing))
 
 	err = s.delegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
 		Base:       commonpbutil.NewMsgBase(),
