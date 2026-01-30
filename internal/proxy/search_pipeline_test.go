@@ -633,6 +633,245 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpEmptyResults() {
 	s.Len(result.Results.HighlightResults[0].Datas, 0)
 }
 
+func (s *SearchPipelineSuite) TestSemanticHighlightOpDynamicField() {
+	ctx := context.Background()
+
+	// Mock SemanticHighlight methods for schema fields
+	mockProcess := mockey.Mock((*highlight.SemanticHighlight).Process).To(
+		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, [][]float32, error) {
+			return [][]string{
+					{"<em>dynamic</em> content 1"},
+					{"<em>dynamic</em> content 2"},
+				}, [][]float32{
+					{0.95},
+					{0.85},
+				}, nil
+		}).Build()
+	defer mockProcess.UnPatch()
+
+	mockFieldIDs := mockey.Mock((*highlight.SemanticHighlight).FieldIDs).Return([]int64{}).Build()
+	defer mockFieldIDs.UnPatch()
+
+	mockHasDynamicFields := mockey.Mock((*highlight.SemanticHighlight).HasDynamicFields).Return(true).Build()
+	defer mockHasDynamicFields.UnPatch()
+
+	mockDynamicFieldNames := mockey.Mock((*highlight.SemanticHighlight).DynamicFieldNames).Return([]string{"dyn_content"}).Build()
+	defer mockDynamicFieldNames.UnPatch()
+
+	mockDynamicFieldID := mockey.Mock((*highlight.SemanticHighlight).DynamicFieldID).Return(int64(102)).Build()
+	defer mockDynamicFieldID.UnPatch()
+
+	// Create operator
+	op := &semanticHighlightOperator{
+		highlight: &highlight.SemanticHighlight{},
+	}
+
+	// Create search results with $meta JSON field data
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       2,
+			Topks:      []int64{2},
+			Scores:     []float32{0.9, 0.8},
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   102,
+					FieldName: "$meta",
+					Type:      schemapb.DataType_JSON,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_JsonData{
+								JsonData: &schemapb.JSONArray{
+									Data: [][]byte{
+										[]byte(`{"dyn_content": "dynamic content 1"}`),
+										[]byte(`{"dyn_content": "dynamic content 2"}`),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Run the operator
+	results, err := op.run(ctx, s.span, searchResults)
+	s.NoError(err)
+	s.NotNil(results)
+
+	// Verify results
+	result := results[0].(*milvuspb.SearchResults)
+	s.NotNil(result.Results.HighlightResults)
+	s.Len(result.Results.HighlightResults, 1)
+
+	highlightResult := result.Results.HighlightResults[0]
+	s.Equal("dyn_content", highlightResult.FieldName)
+	s.Len(highlightResult.Datas, 2)
+	s.Equal([]string{"<em>dynamic</em> content 1"}, highlightResult.Datas[0].Fragments)
+	s.Equal([]string{"<em>dynamic</em> content 2"}, highlightResult.Datas[1].Fragments)
+}
+
+func (s *SearchPipelineSuite) TestSemanticHighlightOpMixedFields() {
+	ctx := context.Background()
+
+	// Track calls to distinguish schema field vs dynamic field processing
+	callCount := 0
+	mockProcess := mockey.Mock((*highlight.SemanticHighlight).Process).To(
+		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, [][]float32, error) {
+			callCount++
+			if callCount == 1 {
+				// Schema field
+				return [][]string{{"<em>schema</em> text"}}, [][]float32{{0.95}}, nil
+			}
+			// Dynamic field
+			return [][]string{{"<em>dynamic</em> text"}}, [][]float32{{0.90}}, nil
+		}).Build()
+	defer mockProcess.UnPatch()
+
+	mockFieldIDs := mockey.Mock((*highlight.SemanticHighlight).FieldIDs).Return([]int64{101}).Build()
+	defer mockFieldIDs.UnPatch()
+
+	mockGetFieldName := mockey.Mock((*highlight.SemanticHighlight).GetFieldName).Return(testVarCharField).Build()
+	defer mockGetFieldName.UnPatch()
+
+	mockHasDynamicFields := mockey.Mock((*highlight.SemanticHighlight).HasDynamicFields).Return(true).Build()
+	defer mockHasDynamicFields.UnPatch()
+
+	mockDynamicFieldNames := mockey.Mock((*highlight.SemanticHighlight).DynamicFieldNames).Return([]string{"dyn_content"}).Build()
+	defer mockDynamicFieldNames.UnPatch()
+
+	mockDynamicFieldID := mockey.Mock((*highlight.SemanticHighlight).DynamicFieldID).Return(int64(102)).Build()
+	defer mockDynamicFieldID.UnPatch()
+
+	// Create operator
+	op := &semanticHighlightOperator{
+		highlight: &highlight.SemanticHighlight{},
+	}
+
+	// Create search results with both schema field and $meta JSON field
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       1,
+			Topks:      []int64{1},
+			Scores:     []float32{0.9},
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   101,
+					FieldName: testVarCharField,
+					Type:      schemapb.DataType_VarChar,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{
+									Data: []string{"schema text"},
+								},
+							},
+						},
+					},
+				},
+				{
+					FieldId:   102,
+					FieldName: "$meta",
+					Type:      schemapb.DataType_JSON,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_JsonData{
+								JsonData: &schemapb.JSONArray{
+									Data: [][]byte{
+										[]byte(`{"dyn_content": "dynamic text"}`),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Run the operator
+	results, err := op.run(ctx, s.span, searchResults)
+	s.NoError(err)
+	s.NotNil(results)
+
+	// Verify results
+	result := results[0].(*milvuspb.SearchResults)
+	s.NotNil(result.Results.HighlightResults)
+	s.Len(result.Results.HighlightResults, 2)
+
+	// Schema field result
+	s.Equal(testVarCharField, result.Results.HighlightResults[0].FieldName)
+	s.Equal([]string{"<em>schema</em> text"}, result.Results.HighlightResults[0].Datas[0].Fragments)
+
+	// Dynamic field result
+	s.Equal("dyn_content", result.Results.HighlightResults[1].FieldName)
+	s.Equal([]string{"<em>dynamic</em> text"}, result.Results.HighlightResults[1].Datas[0].Fragments)
+}
+
+func (s *SearchPipelineSuite) TestExtractMultipleDynamicFieldTexts() {
+	// Test normal extraction with multiple fields
+	jsonData := [][]byte{
+		[]byte(`{"field1": "value1", "field2": "value2"}`),
+		[]byte(`{"field1": "value3", "field2": "value4"}`),
+	}
+	result, err := extractMultipleDynamicFieldTexts(jsonData, []string{"field1", "field2"})
+	s.NoError(err)
+	s.Equal([]string{"value1", "value3"}, result["field1"])
+	s.Equal([]string{"value2", "value4"}, result["field2"])
+
+	// Test single field extraction
+	result2, err := extractMultipleDynamicFieldTexts(jsonData, []string{"field1"})
+	s.NoError(err)
+	s.Equal([]string{"value1", "value3"}, result2["field1"])
+
+	// Test missing field (graceful degradation)
+	jsonData2 := [][]byte{
+		[]byte(`{"field1": "value1"}`),
+		[]byte(`{"other": "value"}`),
+	}
+	result3, err := extractMultipleDynamicFieldTexts(jsonData2, []string{"field1"})
+	s.NoError(err)
+	s.Equal([]string{"value1", ""}, result3["field1"])
+
+	// Test empty JSON
+	jsonData3 := [][]byte{
+		[]byte(`{"field1": "value1"}`),
+		[]byte(``),
+	}
+	result4, err := extractMultipleDynamicFieldTexts(jsonData3, []string{"field1"})
+	s.NoError(err)
+	s.Equal([]string{"value1", ""}, result4["field1"])
+
+	// Test non-string value
+	jsonData4 := [][]byte{
+		[]byte(`{"field1": 123}`),
+	}
+	_, err = extractMultipleDynamicFieldTexts(jsonData4, []string{"field1"})
+	s.Error(err)
+	s.Contains(err.Error(), "is not a string type")
+
+	// Test invalid JSON
+	jsonData5 := [][]byte{
+		[]byte(`{invalid json}`),
+	}
+	_, err = extractMultipleDynamicFieldTexts(jsonData5, []string{"field1"})
+	s.Error(err)
+	s.Contains(err.Error(), "failed to unmarshal")
+
+	// Test multiple fields with partial data
+	jsonData6 := [][]byte{
+		[]byte(`{"field1": "a", "field2": "b"}`),
+		[]byte(`{"field1": "c"}`), // field2 missing
+		[]byte(`{"field2": "d"}`), // field1 missing
+	}
+	result5, err := extractMultipleDynamicFieldTexts(jsonData6, []string{"field1", "field2"})
+	s.NoError(err)
+	s.Equal([]string{"a", "c", ""}, result5["field1"])
+	s.Equal([]string{"b", "", "d"}, result5["field2"])
+}
+
 func (s *SearchPipelineSuite) TestSearchPipeline() {
 	collectionName := "test"
 	task := &searchTask{
