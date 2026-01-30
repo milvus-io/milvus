@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -39,6 +40,9 @@ const (
 type Highlighter interface {
 	AsSearchPipelineOperator(t *searchTask) (operator, error)
 	FieldIDs() []int64
+	DynamicFieldNames() []string
+	InputFields() []string
+	SetDynamicFieldNames(names []string)
 }
 
 // highlight task for one field
@@ -149,6 +153,17 @@ func (h *LexicalHighlighter) AsSearchPipelineOperator(t *searchTask) (operator, 
 
 func (h *LexicalHighlighter) FieldIDs() []int64 {
 	return append(lo.Keys(h.tasks), h.extraFields...)
+}
+
+func (h *LexicalHighlighter) DynamicFieldNames() []string {
+	return []string{}
+}
+
+func (h *LexicalHighlighter) InputFields() []string {
+	return []string{}
+}
+
+func (h *LexicalHighlighter) SetDynamicFieldNames(names []string) {
 }
 
 func NewLexicalHighlighter(highlighter *commonpb.Highlighter) (*LexicalHighlighter, error) {
@@ -434,6 +449,18 @@ func (h *SemanticHighlighter) FieldIDs() []int64 {
 	return h.highlight.FieldIDs()
 }
 
+func (h *SemanticHighlighter) DynamicFieldNames() []string {
+	return h.highlight.DynamicFieldNames()
+}
+
+func (h *SemanticHighlighter) InputFields() []string {
+	return h.highlight.InputFields()
+}
+
+func (h *SemanticHighlighter) SetDynamicFieldNames(names []string) {
+	h.highlight.SetDynamicFieldNames(names)
+}
+
 func (h *SemanticHighlighter) AsSearchPipelineOperator(t *searchTask) (operator, error) {
 	return &semanticHighlightOperator{highlight: h.highlight}, nil
 }
@@ -449,30 +476,121 @@ func (op *semanticHighlightOperator) run(ctx context.Context, span trace.Span, i
 		return []any{result}, nil
 	}
 	highlightResults := []*commonpb.HighlightResult{}
+	topks := result.Results.GetTopks()
+
+	// Process schema fields
 	for _, fieldID := range op.highlight.FieldIDs() {
 		fieldDatas, ok := lo.Find(datas, func(data *schemapb.FieldData) bool { return data.FieldId == fieldID })
 		if !ok {
 			return nil, errors.Errorf("get highlight failed, text field not in output field %d", fieldID)
 		}
 		texts := fieldDatas.GetScalars().GetStringData().GetData()
-		highlights, scores, err := op.highlight.Process(ctx, result.Results.GetTopks(), texts)
+		fieldName := op.highlight.GetFieldName(fieldID)
+
+		highlightResult, err := op.processFieldHighlight(ctx, fieldName, texts, topks)
+		if err != nil {
+			return nil, err
+		}
+		highlightResults = append(highlightResults, highlightResult)
+	}
+
+	// Process dynamic fields
+	if op.highlight.HasDynamicFields() {
+		// Find $meta field data
+		dynamicFieldID := op.highlight.DynamicFieldID()
+		metaFieldData, ok := lo.Find(datas, func(data *schemapb.FieldData) bool {
+			return data.FieldId == dynamicFieldID || data.FieldName == common.MetaFieldName
+		})
+		if !ok {
+			return nil, errors.Errorf("get highlight failed, dynamic field ($meta) not in output field")
+		}
+
+		// Safely get JSON data with nil checks
+		scalars := metaFieldData.GetScalars()
+		if scalars == nil {
+			return nil, errors.Errorf("get highlight failed, dynamic field ($meta) has no scalar data")
+		}
+		jsonData := scalars.GetJsonData()
+		if jsonData == nil {
+			return nil, errors.Errorf("get highlight failed, dynamic field ($meta) has no JSON data")
+		}
+		jsonDataBytes := jsonData.GetData()
+		dynFieldNames := op.highlight.DynamicFieldNames()
+
+		// Extract all dynamic fields in one pass to avoid parsing JSON multiple times
+		allDynFieldTexts, err := extractMultipleDynamicFieldTexts(jsonDataBytes, dynFieldNames)
 		if err != nil {
 			return nil, err
 		}
 
-		if len(highlights) != len(scores) {
-			return nil, errors.Errorf("Highlights size must equal to scores size, but got highlights size [%d], scores size [%d]", len(highlights), len(scores))
-		}
+		for _, dynFieldName := range dynFieldNames {
+			texts := allDynFieldTexts[dynFieldName]
 
-		singleFieldHighlights := &commonpb.HighlightResult{
-			FieldName: op.highlight.GetFieldName(fieldID),
-			Datas:     make([]*commonpb.HighlightData, len(highlights)),
+			highlightResult, err := op.processFieldHighlight(ctx, dynFieldName, texts, topks)
+			if err != nil {
+				return nil, err
+			}
+			highlightResults = append(highlightResults, highlightResult)
 		}
-		for i := range highlights {
-			singleFieldHighlights.Datas[i] = &commonpb.HighlightData{Fragments: highlights[i], Scores: scores[i]}
-		}
-		highlightResults = append(highlightResults, singleFieldHighlights)
 	}
+
 	result.Results.HighlightResults = highlightResults
 	return []any{result}, nil
+}
+
+// processFieldHighlight processes highlight for a single field and returns the result
+func (op *semanticHighlightOperator) processFieldHighlight(ctx context.Context, fieldName string, texts []string, topks []int64) (*commonpb.HighlightResult, error) {
+	highlights, scores, err := op.highlight.Process(ctx, topks, texts)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(highlights) != len(scores) {
+		return nil, errors.Errorf("Highlights size must equal to scores size, but got highlights size [%d], scores size [%d]", len(highlights), len(scores))
+	}
+
+	result := &commonpb.HighlightResult{
+		FieldName: fieldName,
+		Datas:     make([]*commonpb.HighlightData, len(highlights)),
+	}
+	for i := range highlights {
+		result.Datas[i] = &commonpb.HighlightData{Fragments: highlights[i], Scores: scores[i]}
+	}
+	return result, nil
+}
+
+// extractMultipleDynamicFieldTexts extracts text values from JSON data for multiple field names in one pass
+// This avoids parsing JSON multiple times when there are multiple dynamic fields
+func extractMultipleDynamicFieldTexts(jsonDataBytes [][]byte, fieldNames []string) (map[string][]string, error) {
+	result := make(map[string][]string, len(fieldNames))
+	for _, fieldName := range fieldNames {
+		result[fieldName] = make([]string, len(jsonDataBytes))
+	}
+
+	for i, jsonBytes := range jsonDataBytes {
+		if len(jsonBytes) == 0 {
+			// JSON is empty, all fields use empty string (graceful degradation)
+			continue
+		}
+
+		var jsonMap map[string]interface{}
+		if err := json.Unmarshal(jsonBytes, &jsonMap); err != nil {
+			return nil, errors.Errorf("failed to unmarshal dynamic field JSON: %v", err)
+		}
+
+		for _, fieldName := range fieldNames {
+			value, ok := jsonMap[fieldName]
+			if !ok {
+				// field missing, use empty string (graceful degradation)
+				continue
+			}
+
+			strValue, ok := value.(string)
+			if !ok {
+				return nil, errors.Errorf("dynamic field %s is not a string type, got %T", fieldName, value)
+			}
+			result[fieldName][i] = strValue
+		}
+	}
+	return result, nil
 }

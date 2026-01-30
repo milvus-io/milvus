@@ -192,34 +192,9 @@ func (s *SemanticHighlightSuite) TestNewSemanticHighlight_InvalidInputFieldsJSON
 	s.Contains(err.Error(), "Parse input_field failed")
 }
 
-func (s *SemanticHighlightSuite) TestNewSemanticHighlight_FieldNotFound() {
-	queries := []string{"machine learning"}
-	inputFields := []string{"nonexistent_field"}
-
-	queriesJSON, _ := json.Marshal(queries)
-	inputFieldsJSON, _ := json.Marshal(inputFields)
-
-	params := []*commonpb.KeyValuePair{
-		{Key: queryKeyName, Value: string(queriesJSON)},
-		{Key: inputFieldKeyName, Value: string(inputFieldsJSON)},
-		{Key: models.ModelDeploymentIDKey, Value: "test-deployment"},
-	}
-
-	conf := map[string]string{
-		"endpoint": "localhost:8080",
-	}
-
-	extraInfo := &models.ModelExtraInfo{
-		ClusterID: "test-cluster",
-		DBName:    "test-db",
-	}
-
-	highlight, err := NewSemanticHighlight(s.schema, params, conf, extraInfo)
-
-	s.Error(err)
-	s.Nil(highlight)
-	s.Contains(err.Error(), "not found")
-}
+// Note: TestNewSemanticHighlight_FieldNotFound is removed because field validation
+// is now handled by translateOutputFields in proxy layer. Non-existent fields
+// will be treated as dynamic fields and validated there.
 
 func (s *SemanticHighlightSuite) TestNewSemanticHighlight_InvalidFieldType() {
 	queries := []string{"machine learning"}
@@ -572,3 +547,153 @@ func (s *SemanticHighlightSuite) TestBaseSemanticHighlightProvider_MaxBatch() {
 	provider2 := &baseSemanticHighlightProvider{batchSize: 32}
 	s.Equal(32, provider2.maxBatch())
 }
+
+func (s *SemanticHighlightSuite) TestNewSemanticHighlight_DynamicField() {
+	// Create schema with dynamic field enabled
+	schemaWithDynamic := &schemapb.CollectionSchema{
+		Name:               "test_collection_dynamic",
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "title", DataType: schemapb.DataType_VarChar},
+			{FieldID: 102, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+			{FieldID: 103, Name: "embedding", DataType: schemapb.DataType_FloatVector},
+		},
+	}
+
+	queries := []string{"machine learning"}
+	inputFields := []string{"dyn_content"} // dynamic field (not in schema)
+
+	queriesJSON, _ := json.Marshal(queries)
+	inputFieldsJSON, _ := json.Marshal(inputFields)
+
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+		return &zilliz.ZillizClient{}, nil
+	}).Build()
+	defer mock1.UnPatch()
+
+	params := []*commonpb.KeyValuePair{
+		{Key: queryKeyName, Value: string(queriesJSON)},
+		{Key: inputFieldKeyName, Value: string(inputFieldsJSON)},
+		{Key: models.ModelDeploymentIDKey, Value: "test-deployment"},
+	}
+
+	conf := map[string]string{
+		"endpoint": "localhost:8080",
+	}
+
+	extraInfo := &models.ModelExtraInfo{
+		ClusterID: "test-cluster",
+		DBName:    "test-db",
+	}
+
+	highlight, err := NewSemanticHighlight(schemaWithDynamic, params, conf, extraInfo)
+
+	s.NoError(err)
+	s.NotNil(highlight)
+	s.Equal([]int64{}, highlight.FieldIDs()) // no schema field IDs
+	s.Equal([]string{"dyn_content"}, highlight.InputFields())
+
+	// Dynamic fields are set via SetDynamicFieldNames (parsed by translateOutputFields in proxy layer)
+	highlight.SetDynamicFieldNames([]string{"dyn_content"})
+	s.Equal([]string{"dyn_content"}, highlight.DynamicFieldNames())
+	s.True(highlight.HasDynamicFields())
+	s.Equal(int64(102), highlight.DynamicFieldID())
+}
+
+// Note: $meta["field_name"] syntax parsing is now handled by translateOutputFields in proxy layer
+// So we don't test it here anymore
+
+func (s *SemanticHighlightSuite) TestNewSemanticHighlight_MixedFields() {
+	// Create schema with dynamic field enabled
+	schemaWithDynamic := &schemapb.CollectionSchema{
+		Name:               "test_collection_dynamic",
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "title", DataType: schemapb.DataType_VarChar},
+			{FieldID: 102, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+			{FieldID: 103, Name: "embedding", DataType: schemapb.DataType_FloatVector},
+		},
+	}
+
+	queries := []string{"machine learning"}
+	inputFields := []string{"title", "dyn_content"} // schema field + dynamic field
+
+	queriesJSON, _ := json.Marshal(queries)
+	inputFieldsJSON, _ := json.Marshal(inputFields)
+
+	mock1 := mockey.Mock(zilliz.NewZilliClient).To(func(_ string, _ string, _ string, _ map[string]string) (*zilliz.ZillizClient, error) {
+		return &zilliz.ZillizClient{}, nil
+	}).Build()
+	defer mock1.UnPatch()
+
+	params := []*commonpb.KeyValuePair{
+		{Key: queryKeyName, Value: string(queriesJSON)},
+		{Key: inputFieldKeyName, Value: string(inputFieldsJSON)},
+		{Key: models.ModelDeploymentIDKey, Value: "test-deployment"},
+	}
+
+	conf := map[string]string{
+		"endpoint": "localhost:8080",
+	}
+
+	extraInfo := &models.ModelExtraInfo{
+		ClusterID: "test-cluster",
+		DBName:    "test-db",
+	}
+
+	highlight, err := NewSemanticHighlight(schemaWithDynamic, params, conf, extraInfo)
+
+	s.NoError(err)
+	s.NotNil(highlight)
+	s.Equal([]int64{101}, highlight.FieldIDs())
+	s.Equal([]string{"title", "dyn_content"}, highlight.InputFields())
+
+	// Dynamic fields are set via SetDynamicFieldNames (parsed by translateOutputFields in proxy layer)
+	highlight.SetDynamicFieldNames([]string{"dyn_content"})
+	s.Equal([]string{"dyn_content"}, highlight.DynamicFieldNames())
+	s.True(highlight.HasDynamicFields())
+}
+
+func (s *SemanticHighlightSuite) TestNewSemanticHighlight_FieldNotFoundWithoutDynamicField() {
+	// Schema without dynamic field enabled
+	schemaWithoutDynamic := &schemapb.CollectionSchema{
+		Name:               "test_collection_no_dynamic",
+		EnableDynamicField: false,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "title", DataType: schemapb.DataType_VarChar},
+			{FieldID: 102, Name: "embedding", DataType: schemapb.DataType_FloatVector},
+		},
+	}
+
+	queries := []string{"machine learning"}
+	inputFields := []string{"non_existent_field"} // field not in schema
+
+	queriesJSON, _ := json.Marshal(queries)
+	inputFieldsJSON, _ := json.Marshal(inputFields)
+
+	params := []*commonpb.KeyValuePair{
+		{Key: queryKeyName, Value: string(queriesJSON)},
+		{Key: inputFieldKeyName, Value: string(inputFieldsJSON)},
+		{Key: models.ModelDeploymentIDKey, Value: "test-deployment"},
+	}
+
+	conf := map[string]string{
+		"endpoint": "localhost:8080",
+	}
+
+	extraInfo := &models.ModelExtraInfo{
+		ClusterID: "test-cluster",
+		DBName:    "test-db",
+	}
+
+	highlight, err := NewSemanticHighlight(schemaWithoutDynamic, params, conf, extraInfo)
+
+	s.Error(err)
+	s.Nil(highlight)
+	s.Contains(err.Error(), "input_field non_existent_field not found in schema")
+}
+
+// Note: parseDynamicFieldName test is removed because the parsing logic is now in translateOutputFields

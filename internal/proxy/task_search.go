@@ -624,6 +624,18 @@ func (t *searchTask) addHighlightTask(highlighter *commonpb.Highlighter, metricT
 			return err
 		}
 		t.highlighter = h
+
+		// Process input_fields to get dynamic field names using translateOutputFields
+		inputFields := h.InputFields()
+		if len(inputFields) > 0 {
+			_, _, dynFields, _, err := translateOutputFields(inputFields, t.schema, false)
+			if err != nil {
+				return err
+			}
+			if len(dynFields) > 0 {
+				h.SetDynamicFieldNames(dynFields)
+			}
+		}
 		return nil
 	default:
 		return merr.WrapErrParameterInvalidMsg("unsupported highlight type: %v", highlighter.GetType())
@@ -702,6 +714,15 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		allFieldIDs.Insert(primaryFieldSchema.FieldID)
 		plan.OutputFieldIds = allFieldIDs.Collect()
 		plan.DynamicFields = t.userDynamicFields
+		// Merge highlight dynamic fields into plan.DynamicFields
+		if t.highlighter != nil {
+			highlightDynFields := t.highlighter.DynamicFieldNames()
+			if len(highlightDynFields) > 0 {
+				dynFieldSet := typeutil.NewSet[string](plan.DynamicFields...)
+				dynFieldSet.Insert(highlightDynFields...)
+				plan.DynamicFields = dynFieldSet.Collect()
+			}
+		}
 	}
 
 	t.SearchRequest.SerializedExprPlan, err = proto.Marshal(plan)
