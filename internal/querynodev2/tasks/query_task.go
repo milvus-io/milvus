@@ -92,7 +92,9 @@ func (t *QueryTask) PreExecute() error {
 		Observe(inQueueDurationMS)
 
 	// Unmarshal the origin plan
-	proto.Unmarshal(t.req.Req.GetSerializedExprPlan(), t.plan)
+	if err := proto.Unmarshal(t.req.Req.GetSerializedExprPlan(), t.plan); err != nil {
+		return err
+	}
 
 	return nil
 }
