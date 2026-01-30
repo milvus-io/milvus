@@ -667,13 +667,17 @@ LoadJsonKeyIndex(CTraceContext c_trace,
         if (info_proto->enable_mmap()) {
             config[milvus::index::MMAP_FILE_PATH] = info_proto->mmap_dir_path();
         }
+        if (info_proto->warmup_policy() != "") {
+            config[milvus::index::WARMUP] = info_proto->warmup_policy();
+        }
 
         milvus::segcore::storagev2translator::JsonStatsLoadInfo load_info{
             info_proto->enable_mmap(),
             info_proto->mmap_dir_path(),
             segment->get_segment_id(),
             info_proto->fieldid(),
-            info_proto->stats_size()};
+            info_proto->stats_size(),
+            info_proto->warmup_policy()};
         milvus::storage::FileManagerContext file_ctx(
             field_meta, index_meta, remote_chunk_manager, fs);
 

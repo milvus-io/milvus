@@ -18,6 +18,7 @@
 
 #include <string>
 #include <map>
+#include <optional>
 #include <google/protobuf/text_format.h>
 #include <google/protobuf/repeated_field.h>
 
@@ -69,6 +70,25 @@ GetBoolFromRepeatedKVs(
         }
     }
     return {false, false};
+}
+
+/**
+ * @brief Get a string value from repeated KeyValuePair by key.
+ *
+ * @param kvs The repeated KeyValuePair field to search.
+ * @param key The key to look for.
+ * @return std::optional<std::string> containing the value if found, std::nullopt otherwise.
+ */
+static std::optional<std::string>
+GetStringFromRepeatedKVs(
+    const google::protobuf::RepeatedPtrField<proto::common::KeyValuePair>& kvs,
+    const std::string& key) {
+    for (const auto& kv : kvs) {
+        if (kv.key() == key) {
+            return kv.value();
+        }
+    }
+    return std::nullopt;
 }
 
 class ProtoLayout;

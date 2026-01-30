@@ -245,7 +245,7 @@ const (
 // common properties
 const (
 	MmapEnabledKey             = "mmap.enabled"
-	LazyLoadEnableKey          = "lazyload.enabled"
+	LazyLoadEnableKey          = "lazyload.enabled" // deprecated by warmup related params
 	LoadPriorityKey            = "load_priority"
 	PartitionKeyIsolationKey   = "partitionkey.isolation"
 	FieldSkipLoadKey           = "field.skipLoad"
@@ -260,6 +260,15 @@ const (
 	TimezoneKey             = "timezone"
 	AllowInsertAutoIDKey    = "allow_insert_auto_id"
 	DisableFuncRuntimeCheck = "disable_func_runtime_check"
+
+	// warmup related
+	WarmupKey            = "warmup"
+	WarmupScalarFieldKey = "warmup.scalarField"
+	WarmupScalarIndexKey = "warmup.scalarIndex"
+	WarmupVectorFieldKey = "warmup.vectorField"
+	WarmupVectorIndexKey = "warmup.vectorIndex"
+	WarmupDisable        = "disable"
+	WarmupSync           = "sync"
 )
 
 const (
@@ -301,6 +310,89 @@ func IsMmapIndexEnabled(kvs ...*commonpb.KeyValuePair) (bool, bool) {
 		}
 	}
 	return false, false
+}
+
+// GetWarmupPolicy returns the warmup policy value and whether it exists from key-value pairs
+func GetWarmupPolicy(kvs ...*commonpb.KeyValuePair) (string, bool) {
+	for _, kv := range kvs {
+		if kv.Key == WarmupKey {
+			return kv.Value, true
+		}
+	}
+	return "", false
+}
+
+// GetWarmupPolicyByKey returns the warmup policy for a specific key from key-value pairs
+func GetWarmupPolicyByKey(key string, kvs ...*commonpb.KeyValuePair) (string, bool) {
+	for _, kv := range kvs {
+		if kv.Key == key {
+			return kv.Value, true
+		}
+	}
+	return "", false
+}
+
+// IsWarmupKey checks if a key is any of the warmup-related keys
+func IsWarmupKey(key string) bool {
+	return IsFieldWarmupKey(key) || IsCollectionWarmupKey(key)
+}
+
+// IsFieldWarmupKey checks if a key is the field-level warmup key
+func IsFieldWarmupKey(key string) bool {
+	return key == WarmupKey
+}
+
+// IsCollectionWarmupKey checks if a key is a collection/table-level warmup key
+func IsCollectionWarmupKey(key string) bool {
+	return key == WarmupScalarFieldKey ||
+		key == WarmupScalarIndexKey ||
+		key == WarmupVectorFieldKey ||
+		key == WarmupVectorIndexKey
+}
+
+// ValidateWarmupPolicy validates that the warmup policy value is valid
+func ValidateWarmupPolicy(value string) error {
+	if value != WarmupDisable && value != WarmupSync {
+		return fmt.Errorf("invalid warmup policy: %s, must be '%s' or '%s'", value, WarmupDisable, WarmupSync)
+	}
+	return nil
+}
+
+// FieldHasWarmupKey checks if a field has warmup key set in its TypeParams
+func FieldHasWarmupKey(schema *schemapb.CollectionSchema, fieldID int64) bool {
+	for _, field := range schema.GetFields() {
+		if field.GetFieldID() == fieldID {
+			for _, kv := range field.GetTypeParams() {
+				if kv.Key == WarmupKey {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	// Check struct array fields
+	for _, structField := range schema.GetStructArrayFields() {
+		if structField.GetFieldID() == fieldID {
+			for _, kv := range structField.GetTypeParams() {
+				if kv.Key == WarmupKey {
+					return true
+				}
+			}
+			return false
+		}
+		// Check fields inside struct
+		for _, field := range structField.GetFields() {
+			if field.GetFieldID() == fieldID {
+				for _, kv := range field.GetTypeParams() {
+					if kv.Key == WarmupKey {
+						return true
+					}
+				}
+				return false
+			}
+		}
+	}
+	return false
 }
 
 func GetIndexType(indexParams []*commonpb.KeyValuePair) string {
