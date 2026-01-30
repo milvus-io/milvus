@@ -21,8 +21,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/shirou/gopsutil/v3/disk"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -44,6 +46,36 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
+// committedDiskSpace tracks disk space reserved by concurrent index build tasks.
+// This prevents race conditions where multiple tasks pass disk checks but their
+// combined requirements exceed available space.
+var (
+	committedDiskSpace     uint64
+	committedDiskSpaceLock sync.Mutex
+)
+
+func addCommittedDiskSpace(size uint64) {
+	committedDiskSpaceLock.Lock()
+	defer committedDiskSpaceLock.Unlock()
+	committedDiskSpace += size
+}
+
+func subCommittedDiskSpace(size uint64) {
+	committedDiskSpaceLock.Lock()
+	defer committedDiskSpaceLock.Unlock()
+	if committedDiskSpace < size {
+		committedDiskSpace = 0
+	} else {
+		committedDiskSpace -= size
+	}
+}
+
+func getCommittedDiskSpace() uint64 {
+	committedDiskSpaceLock.Lock()
+	defer committedDiskSpaceLock.Unlock()
+	return committedDiskSpace
+}
+
 // IndexBuildTask is used to record the information of the index tasks.
 type indexBuildTask struct {
 	ident  string
@@ -59,7 +91,8 @@ type indexBuildTask struct {
 	queueDur       time.Duration
 	manager        *TaskManager
 
-	pluginContext *indexcgopb.StoragePluginContext
+	pluginContext     *indexcgopb.StoragePluginContext
+	reservedDiskSpace uint64 // disk space reserved for this task, released after PostExecute
 }
 
 func NewIndexBuildTask(ctx context.Context,
@@ -106,6 +139,7 @@ func (it *indexBuildTask) Reset() {
 	it.newIndexParams = nil
 	it.tr = nil
 	it.manager = nil
+	it.reservedDiskSpace = 0
 }
 
 // Ctx is the context of index tasks.
@@ -236,10 +270,32 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	indexType := it.newIndexParams[common.IndexTypeKey]
 	var fieldDataSize uint64
 	var err error
+	var executeSuccess bool
 
 	// Ignore the error here, this param will only be used for diskann and aisaq
 	fieldDataSize, _ = estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType())
-	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
+	if vecindexmgr.GetVecIndexMgrInstance().IsDiskVecIndex(indexType) {
+		// Check disk capacity and reserve space before building disk-intensive index
+		reserved, err := checkDiskCapacityForBuild(ctx, indexType, fieldDataSize)
+		if err != nil {
+			log.Warn("disk capacity check failed for disk index build",
+				zap.String("indexType", indexType),
+				zap.Uint64("fieldDataSize", fieldDataSize),
+				zap.Error(err))
+			return err
+		}
+		it.reservedDiskSpace = reserved
+
+		// Release reserved space if Execute fails after this point
+		defer func() {
+			if !executeSuccess && it.reservedDiskSpace > 0 {
+				subCommittedDiskSpace(it.reservedDiskSpace)
+				log.Info("released reserved disk space due to execute failure",
+					zap.Uint64("released", it.reservedDiskSpace))
+				it.reservedDiskSpace = 0
+			}
+		}()
+
 		err = indexparams.SetDiskIndexBuildParams(it.newIndexParams, int64(fieldDataSize))
 		if err != nil {
 			log.Warn("failed to fill disk index params", zap.Error(err))
@@ -335,6 +391,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	metrics.DataNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(buildIndexLatency.Seconds())
 
 	log.Info("Successfully build index")
+	executeSuccess = true
 	return nil
 }
 
@@ -342,6 +399,16 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 	log := log.Ctx(ctx).With(zap.String("clusterID", it.req.GetClusterID()), zap.Int64("buildID", it.req.GetBuildID()),
 		zap.Int64("collection", it.req.GetCollectionID()), zap.Int64("segmentID", it.req.GetSegmentID()),
 		zap.Int32("currentIndexVersion", it.req.GetCurrentIndexVersion()))
+
+	// Release reserved disk space when PostExecute completes (success or failure)
+	defer func() {
+		if it.reservedDiskSpace > 0 {
+			subCommittedDiskSpace(it.reservedDiskSpace)
+			log.Info("released reserved disk space after PostExecute",
+				zap.Uint64("released", it.reservedDiskSpace))
+			it.reservedDiskSpace = 0
+		}
+	}()
 
 	gcIndex := func() {
 		if err := it.index.Delete(); err != nil {
@@ -421,4 +488,72 @@ func (it *indexBuildTask) parseFieldMetaFromBinlog(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// checkDiskCapacityForBuild checks disk space for disk-intensive index build.
+// Returns the reserved size if check passes, or error if projected usage exceeds threshold.
+func checkDiskCapacityForBuild(ctx context.Context, indexType string, fieldDataSize uint64) (uint64, error) {
+	log := log.Ctx(ctx)
+	localStoragePath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+
+	// 1. Get disk usage of the mounted filesystem (outside lock to avoid blocking on I/O)
+	diskUsage, err := disk.Usage(localStoragePath)
+	if err != nil {
+		log.Warn("failed to get disk usage, skipping disk capacity check", zap.Error(err))
+		return 0, nil
+	}
+
+	// 2. Estimate index build disk cost (raw data + index files)
+	indexDiskCost := estimateIndexDiskCost(fieldDataSize)
+	requiredSize := fieldDataSize + uint64(indexDiskCost)
+
+	// 3. Calculate threshold
+	maxUsageRatio := paramtable.Get().DataNodeCfg.IndexMaxDiskUsagePercentage.GetAsFloat()
+	maxAllowedUsage := uint64(float64(diskUsage.Total) * maxUsageRatio)
+
+	// 4. Atomic check-and-reserve within lock to prevent TOCTOU race
+	// Use closure with defer to ensure lock is always released
+	reserved, committed, totalCommitted, projectedUsage, checkErr := func() (uint64, uint64, uint64, uint64, error) {
+		committedDiskSpaceLock.Lock()
+		defer committedDiskSpaceLock.Unlock()
+
+		projected := diskUsage.Used + committedDiskSpace + requiredSize
+		if projected > maxAllowedUsage {
+			return 0, committedDiskSpace, 0, projected, fmt.Errorf("insufficient disk space for index build: projected usage %d bytes exceeds limit %d bytes (%.1f%% of %d total)",
+				projected, maxAllowedUsage, maxUsageRatio*100, diskUsage.Total)
+		}
+
+		committedDiskSpace += requiredSize
+		return requiredSize, 0, committedDiskSpace, projected, nil
+	}()
+
+	if checkErr != nil {
+		log.Warn("insufficient disk space for index build",
+			zap.String("indexType", indexType),
+			zap.Uint64("diskUsed", diskUsage.Used),
+			zap.Uint64("committed", committed),
+			zap.Uint64("diskTotal", diskUsage.Total),
+			zap.Uint64("required", requiredSize),
+			zap.Uint64("projectedUsage", projectedUsage),
+			zap.Uint64("maxAllowed", maxAllowedUsage),
+			zap.Float64("maxUsageRatio", maxUsageRatio))
+		return 0, checkErr
+	}
+
+	log.Info("disk capacity check passed, space reserved",
+		zap.String("indexType", indexType),
+		zap.Uint64("diskUsed", diskUsage.Used),
+		zap.Uint64("reserved", reserved),
+		zap.Uint64("totalCommitted", totalCommitted),
+		zap.Uint64("maxAllowed", maxAllowedUsage))
+
+	return reserved, nil
+}
+
+// estimateIndexDiskCost estimates disk cost for index build.
+// Uses 2x multiplier. TODO: use CGO for accurate estimation.
+const diskUsageRatioForBuild = 2.0
+
+func estimateIndexDiskCost(fieldDataSize uint64) int64 {
+	return int64(float64(fieldDataSize) * diskUsageRatioForBuild)
 }
