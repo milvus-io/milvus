@@ -42,6 +42,7 @@
 #include "cachinglayer/Utils.h"
 #include "common/ChunkWriter.h"
 #include "segcore/Utils.h"
+#include "storage/Util.h"
 
 namespace milvus::segcore::storagev2translator {
 
@@ -319,24 +320,19 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
     auto strategy =
         std::make_unique<ParallelDegreeSplitStrategy>(parallel_degree);
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     auto channel = std::make_shared<ArrowReaderChannel>();
     auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                   .GetArrowFileSystem();
 
-    auto load_future = pool.Submit([&, ctx]() {
-        // Early exit if cancelled while queued
-        CheckCancellation(
-            ctx, segment_id_, "GroupChunkTranslator::get_cells()");
-        return LoadWithStrategy(insert_files_,
-                                channel,
-                                DEFAULT_FIELD_MAX_MEMORY_LIMIT,
-                                std::move(strategy),
-                                row_group_lists,
-                                fs,
-                                nullptr,
-                                load_priority_);
-    });
+    auto load_futures = LoadWithStrategyAsync(ctx,
+                                              insert_files_,
+                                              channel,
+                                              DEFAULT_FIELD_MAX_MEMORY_LIMIT,
+                                              std::move(strategy),
+                                              row_group_lists,
+                                              fs,
+                                              nullptr,
+                                              load_priority_);
     LOG_INFO(
         "[StorageV2] translator {} submits load column group {} task to thread "
         "pool",
@@ -362,8 +358,8 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
         }
     }
 
-    // access underlying feature to get exception if any
-    load_future.get();
+    // access underlying future to get exception if any
+    storage::WaitAllFutures(load_futures);
 
     // Build cells from collected tables
     for (auto cid : cids) {

@@ -183,6 +183,27 @@ GetObjectData(
 
 // Helper function to wait for all futures and collect exceptions
 // This ensures all background threads complete before rethrowing exception
+inline void
+WaitAllFutures(std::vector<std::future<void>>& futures) {
+    std::exception_ptr first_exception = nullptr;
+
+    for (auto& future : futures) {
+        try {
+            future.get();  // return type is void
+        } catch (...) {
+            if (!first_exception) {
+                first_exception = std::current_exception();
+            }
+        }
+    }
+
+    if (first_exception) {
+        std::rethrow_exception(first_exception);
+    }
+}
+
+// Helper function to wait for all futures and collect exceptions
+// This ensures all background threads complete before rethrowing exception
 template <typename T>
 std::vector<T>
 WaitAllFutures(std::vector<std::future<T>> futures) {
