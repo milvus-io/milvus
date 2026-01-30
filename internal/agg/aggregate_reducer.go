@@ -327,7 +327,11 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 			for col := 0; col < outputColumnCount; col++ {
 				fieldData := result.GetFieldDatas()[col]
 				accumulators[col].SetVals(fieldData)
-				fieldValues[col] = NewFieldValue(accumulators[col].ValAt(0))
+				if accumulators[col].IsNullAt(0) {
+					fieldValues[col] = NewNullFieldValue()
+				} else {
+					fieldValues[col] = NewFieldValue(accumulators[col].ValAt(0))
+				}
 			}
 			rows[idx] = NewRow(fieldValues)
 		}
@@ -395,9 +399,17 @@ processResults:
 					} else {
 						hashVal = hashers[col].Hash(row)
 					}
-					rowFieldValues[col] = NewFieldValue(hashers[col].ValAt(row))
+					if hashers[col].IsNullAt(row) {
+						rowFieldValues[col] = NewNullFieldValue()
+					} else {
+						rowFieldValues[col] = NewFieldValue(hashers[col].ValAt(row))
+					}
 				} else {
-					rowFieldValues[col] = NewFieldValue(accumulators[col-numGroupingKeys].ValAt(row))
+					if accumulators[col-numGroupingKeys].IsNullAt(row) {
+						rowFieldValues[col] = NewNullFieldValue()
+					} else {
+						rowFieldValues[col] = NewFieldValue(accumulators[col-numGroupingKeys].ValAt(row))
+					}
 				}
 			}
 			newRow := NewRow(rowFieldValues)

@@ -102,7 +102,19 @@ func AccumulateFieldValue(target *FieldValue, new *FieldValue) error {
 		return fmt.Errorf("target or new field value is nil")
 	}
 
-	// Handle nil `val` for initialization
+	// Skip null values during accumulation
+	if new.IsNull() {
+		return nil
+	}
+
+	// If target is null and new is not null, initialize target with new value
+	if target.IsNull() {
+		target.val = new.val
+		target.isNull = false
+		return nil
+	}
+
+	// Handle nil `val` for initialization (backward compatibility)
 	if target.val == nil {
 		target.val = new.val
 		return nil
@@ -138,11 +150,25 @@ func AggregatesToPB(aggregates []AggregateBase) []*planpb.Aggregate {
 }
 
 type FieldValue struct {
-	val interface{}
+	val    interface{}
+	isNull bool
 }
 
 func NewFieldValue(v interface{}) *FieldValue {
-	return &FieldValue{val: v}
+	return &FieldValue{val: v, isNull: false}
+}
+
+func NewNullFieldValue() *FieldValue {
+	return &FieldValue{val: nil, isNull: true}
+}
+
+func (fv *FieldValue) IsNull() bool {
+	return fv.isNull
+}
+
+func (fv *FieldValue) SetNull() {
+	fv.isNull = true
+	fv.val = nil
 }
 
 type Row struct {
@@ -157,13 +183,29 @@ func (r *Row) ValAt(col int) interface{} {
 	return r.fieldValues[col].val
 }
 
+func (r *Row) FieldValueAt(col int) *FieldValue {
+	return r.fieldValues[col]
+}
+
 func (r *Row) Equal(other *Row, keyCount int) bool {
 	// Ensure both rows have enough fields for key comparison
 	if len(r.fieldValues) < keyCount || len(other.fieldValues) < keyCount || len(r.fieldValues) != len(other.fieldValues) {
 		return false
 	}
 	// Compare each field value for equality
+	// For grouping: null == null is considered equal
 	for i := 0; i < keyCount; i++ {
+		rIsNull := r.fieldValues[i].IsNull()
+		otherIsNull := other.fieldValues[i].IsNull()
+		if rIsNull && otherIsNull {
+			// Both are null, considered equal for grouping
+			continue
+		}
+		if rIsNull != otherIsNull {
+			// One is null, the other is not
+			return false
+		}
+		// Both are not null, compare values
 		if r.fieldValues[i].val != other.fieldValues[i].val {
 			return false
 		}
