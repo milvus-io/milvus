@@ -61,8 +61,8 @@ FunctionFactory::RegisterAllFunctions() {
 
 void
 FunctionFactory::RegisterFilterFunction(
-    std::string func_name,
-    std::vector<DataType> func_param_type_list,
+    const std::string& func_name,
+    const std::vector<DataType>& func_param_type_list,
     FilterFunctionPtr func) {
     filter_function_map_[FilterFunctionRegisterKey{
         func_name, func_param_type_list}] = func;

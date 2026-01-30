@@ -87,37 +87,19 @@ TEST(IterativeFilter, SealedIndex) {
     int topK = 10;
     int group_size = 3;
 
-    // int8 binaryRange
+    ScopedSchemaHandle handle(*schema);
+
+    // int8 binaryRange: int8 >= -1 AND int8 < 100
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 100
-                                        predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 101
-                                          data_type: Int8
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          int64_val: -1
-                                        >
-                                        upper_value: <
-                                          int64_val: 100
-                                        >
-                                        >
-                                      >
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          hints: "iterative_filter"
-                                          search_params: "{\"ef\": 50}"
-                                        >
-                                        placeholder_tag: "$0">)";
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto plan_bytes = handle.ParseSearch("int8 >= -1 AND int8 < 100",
+                                             "fakevec",
+                                             10,
+                                             "L2",
+                                             "{\"ef\": 50}",
+                                             -1,
+                                             "iterative_filter");
+        auto plan = CreateSearchPlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -126,64 +108,27 @@ TEST(IterativeFilter, SealedIndex) {
         auto search_result =
             segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
 
-        const char* raw_plan2 = R"(vector_anns: <
-                                        field_id: 100
-                                        predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 101
-                                          data_type: Int8
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          int64_val: -1
-                                        >
-                                        upper_value: <
-                                          int64_val: 100
-                                        >
-                                        >
-                                      >
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 50}"
-                                        >
-                                        placeholder_tag: "$0">)";
-        proto::plan::PlanNode plan_node2;
-        auto ok2 = google::protobuf::TextFormat::ParseFromString(raw_plan2,
-                                                                 &plan_node2);
-        auto plan2 = CreateSearchPlanFromPlanNode(schema, plan_node2);
+        auto plan_bytes2 = handle.ParseSearch(
+            "int8 >= -1 AND int8 < 100", "fakevec", 10, "L2", "{\"ef\": 50}");
+        auto plan2 = CreateSearchPlanByExpr(
+            schema, plan_bytes2.data(), plan_bytes2.size());
         auto search_result2 =
             segment->Search(plan2.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckFilterSearchResult(
             *search_result, *search_result2, topK, num_queries);
     }
 
-    // int16 Termexpr
+    // int16 Termexpr: int16 in [1, 2]
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 100
-                                        predicates: <
-                                       term_expr: <
-                                        column_info: <
-                                          field_id: 102
-                                          data_type: Int16
-                                        >
-                                        values:<int64_val:1> values:<int64_val:2 >
-                                        >
-                                      >
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          hints: "iterative_filter"
-                                          search_params: "{\"ef\": 50}"
-                                        >
-                                        placeholder_tag: "$0">)";
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto plan_bytes = handle.ParseSearch("int16 in [1, 2]",
+                                             "fakevec",
+                                             10,
+                                             "L2",
+                                             "{\"ef\": 50}",
+                                             -1,
+                                             "iterative_filter");
+        auto plan = CreateSearchPlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -192,27 +137,10 @@ TEST(IterativeFilter, SealedIndex) {
         auto search_result =
             segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
 
-        const char* raw_plan2 = R"(vector_anns: <
-                                        field_id: 100
-                                        predicates: <
-                                       term_expr: <
-                                        column_info: <
-                                          field_id: 102
-                                          data_type: Int16
-                                        >
-                                        values:<int64_val:1> values:<int64_val:2 >
-                                        >
-                                      >
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 50}"
-                                        >
-                                        placeholder_tag: "$0">)";
-        proto::plan::PlanNode plan_node2;
-        auto ok2 = google::protobuf::TextFormat::ParseFromString(raw_plan2,
-                                                                 &plan_node2);
-        auto plan2 = CreateSearchPlanFromPlanNode(schema, plan_node2);
+        auto plan_bytes2 = handle.ParseSearch(
+            "int16 in [1, 2]", "fakevec", 10, "L2", "{\"ef\": 50}");
+        auto plan2 = CreateSearchPlanByExpr(
+            schema, plan_bytes2.data(), plan_bytes2.size());
         auto search_result2 =
             segment->Search(plan2.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckFilterSearchResult(
@@ -221,19 +149,10 @@ TEST(IterativeFilter, SealedIndex) {
 
     // no expr
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 100
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          hints: "iterative_filter"
-                                          search_params: "{\"ef\": 50}"
-                                        >
-                                        placeholder_tag: "$0">)";
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto plan_bytes = handle.ParseSearch(
+            "", "fakevec", 10, "L2", "{\"ef\": 50}", -1, "iterative_filter");
+        auto plan = CreateSearchPlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -242,18 +161,10 @@ TEST(IterativeFilter, SealedIndex) {
         auto search_result =
             segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
 
-        const char* raw_plan2 = R"(vector_anns: <
-                                        field_id: 100
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 50}"
-                                        >
-                                        placeholder_tag: "$0">)";
-        proto::plan::PlanNode plan_node2;
-        auto ok2 = google::protobuf::TextFormat::ParseFromString(raw_plan2,
-                                                                 &plan_node2);
-        auto plan2 = CreateSearchPlanFromPlanNode(schema, plan_node2);
+        auto plan_bytes2 =
+            handle.ParseSearch("", "fakevec", 10, "L2", "{\"ef\": 50}");
+        auto plan2 = CreateSearchPlanByExpr(
+            schema, plan_bytes2.data(), plan_bytes2.size());
         auto search_result2 =
             segment->Search(plan2.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckFilterSearchResult(
@@ -285,37 +196,20 @@ TEST(IterativeFilter, SealedData) {
     auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
 
     int topK = 10;
-    // int8 binaryRange
+
+    ScopedSchemaHandle handle(*schema);
+
+    // int8 binaryRange: int8 >= -1 AND int8 < 100
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 100
-                                        predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 101
-                                          data_type: Int8
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          int64_val: -1
-                                        >
-                                        upper_value: <
-                                          int64_val: 100
-                                        >
-                                        >
-                                      >
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          hints: "iterative_filter"
-                                          search_params: "{\"ef\": 50}"
-                                        >
-                                        placeholder_tag: "$0">)";
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto plan_bytes = handle.ParseSearch("int8 >= -1 AND int8 < 100",
+                                             "fakevec",
+                                             10,
+                                             "L2",
+                                             "{\"ef\": 50}",
+                                             -1,
+                                             "iterative_filter");
+        auto plan = CreateSearchPlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -324,34 +218,10 @@ TEST(IterativeFilter, SealedData) {
         auto search_result =
             segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
 
-        const char* raw_plan2 = R"(vector_anns: <
-                                        field_id: 100
-                                        predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 101
-                                          data_type: Int8
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          int64_val: -1
-                                        >
-                                        upper_value: <
-                                          int64_val: 100
-                                        >
-                                        >
-                                      >
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 50}"
-                                        >
-                                        placeholder_tag: "$0">)";
-        proto::plan::PlanNode plan_node2;
-        auto ok2 = google::protobuf::TextFormat::ParseFromString(raw_plan2,
-                                                                 &plan_node2);
-        auto plan2 = CreateSearchPlanFromPlanNode(schema, plan_node2);
+        auto plan_bytes2 = handle.ParseSearch(
+            "int8 >= -1 AND int8 < 100", "fakevec", 10, "L2", "{\"ef\": 50}");
+        auto plan2 = CreateSearchPlanByExpr(
+            schema, plan_bytes2.data(), plan_bytes2.size());
         auto search_result2 =
             segment->Search(plan2.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckFilterSearchResult(
@@ -392,37 +262,20 @@ TEST(IterativeFilter, GrowingRawData) {
     }
 
     auto topK = 10;
-    // int8 binaryRange
+
+    ScopedSchemaHandle handle(*schema);
+
+    // int64 binaryRange: int64 >= -1 AND int64 < 1
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 102
-                                        predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 100
-                                          data_type: Int64
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          int64_val: -1
-                                        >
-                                        upper_value: <
-                                          int64_val: 1
-                                        >
-                                        >
-                                      >
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          hints: "iterative_filter"
-                                          search_params: "{\"ef\": 50}"
-                                        >
-                                        placeholder_tag: "$0">)";
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto plan_bytes = handle.ParseSearch("int64 >= -1 AND int64 < 1",
+                                             "embeddings",
+                                             10,
+                                             "L2",
+                                             "{\"ef\": 50}",
+                                             -1,
+                                             "iterative_filter");
+        auto plan = CreateSearchPlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -431,34 +284,13 @@ TEST(IterativeFilter, GrowingRawData) {
         auto search_result = segment_growing_impl->Search(
             plan.get(), ph_group.get(), MAX_TIMESTAMP);
 
-        const char* raw_plan2 = R"(vector_anns: <
-                                        field_id: 102
-                                        predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 100
-                                          data_type: Int64
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          int64_val: -1
-                                        >
-                                        upper_value: <
-                                          int64_val: 1
-                                        >
-                                        >
-                                      >
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 50}"
-                                        >
-                                        placeholder_tag: "$0">)";
-        proto::plan::PlanNode plan_node2;
-        auto ok2 = google::protobuf::TextFormat::ParseFromString(raw_plan2,
-                                                                 &plan_node2);
-        auto plan2 = CreateSearchPlanFromPlanNode(schema, plan_node2);
+        auto plan_bytes2 = handle.ParseSearch("int64 >= -1 AND int64 < 1",
+                                              "embeddings",
+                                              10,
+                                              "L2",
+                                              "{\"ef\": 50}");
+        auto plan2 = CreateSearchPlanByExpr(
+            schema, plan_bytes2.data(), plan_bytes2.size());
         auto search_result2 = segment_growing_impl->Search(
             plan2.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckFilterSearchResult(
@@ -513,36 +345,20 @@ TEST(IterativeFilter, GrowingIndex) {
     }
 
     auto topK = 10;
+
+    ScopedSchemaHandle handle(*schema);
+
+    // int64 binaryRange: int64 >= -1 AND int64 < 1
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 102
-                                        predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 100
-                                          data_type: Int64
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          int64_val: -1
-                                        >
-                                        upper_value: <
-                                          int64_val: 1
-                                        >
-                                        >
-                                      >
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          hints: "iterative_filter"
-                                          search_params: "{\"nprobe\": 4}"
-                                        >
-                                        placeholder_tag: "$0">)";
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto plan_bytes = handle.ParseSearch("int64 >= -1 AND int64 < 1",
+                                             "embeddings",
+                                             10,
+                                             "L2",
+                                             "{\"nprobe\": 4}",
+                                             -1,
+                                             "iterative_filter");
+        auto plan = CreateSearchPlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -551,34 +367,13 @@ TEST(IterativeFilter, GrowingIndex) {
         auto search_result = segment_growing_impl->Search(
             plan.get(), ph_group.get(), MAX_TIMESTAMP);
 
-        const char* raw_plan2 = R"(vector_anns: <
-                                        field_id: 102
-                                        predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 100
-                                          data_type: Int64
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          int64_val: -1
-                                        >
-                                        upper_value: <
-                                          int64_val: 1
-                                        >
-                                        >
-                                      >
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"nprobe\": 4}"
-                                        >
-                                        placeholder_tag: "$0">)";
-        proto::plan::PlanNode plan_node2;
-        auto ok2 = google::protobuf::TextFormat::ParseFromString(raw_plan2,
-                                                                 &plan_node2);
-        auto plan2 = CreateSearchPlanFromPlanNode(schema, plan_node2);
+        auto plan_bytes2 = handle.ParseSearch("int64 >= -1 AND int64 < 1",
+                                              "embeddings",
+                                              10,
+                                              "L2",
+                                              "{\"nprobe\": 4}");
+        auto plan2 = CreateSearchPlanByExpr(
+            schema, plan_bytes2.data(), plan_bytes2.size());
         auto search_result2 = segment_growing_impl->Search(
             plan2.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckFilterSearchResult(

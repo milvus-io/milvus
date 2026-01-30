@@ -34,7 +34,8 @@ IndexStats::New(int64_t mem_size,
 IndexStats::IndexStats(
     int64_t mem_size,
     std::vector<SerializedIndexFileInfo>&& serialized_index_infos)
-    : mem_size_(mem_size), serialized_index_infos_(serialized_index_infos) {
+    : mem_size_(mem_size),
+      serialized_index_infos_(std::move(serialized_index_infos)) {
 }
 
 void
@@ -58,7 +59,8 @@ IndexStats::SerializeAt(milvus::ProtoLayout* layout) {
 std::vector<std::string>
 IndexStats::GetIndexFiles() const {
     std::vector<std::string> files;
-    for (auto& info : serialized_index_infos_) {
+    files.reserve(serialized_index_infos_.size());
+    for (const auto& info : serialized_index_infos_) {
         files.push_back(info.file_name);
     }
     return files;

@@ -139,9 +139,6 @@ type rerankOutputs struct {
 
 func newRerankOutputs(inputs *rerankInputs, searchParams *SearchParams) *rerankOutputs {
 	topk := searchParams.limit
-	if searchParams.isGrouping() {
-		topk = topk * searchParams.groupSize
-	}
 	ret := &schemapb.SearchResultData{
 		NumQueries: searchParams.nq,
 		TopK:       topk,
@@ -335,12 +332,17 @@ func newGroupingIDScores[T PKType](idScores map[T]float32, idLocations map[T]IDL
 	}
 
 	ret := IDScores[T]{
-		make([]T, 0, searchParams.limit),
-		make([]float32, 0, searchParams.limit),
+		make([]T, 0, searchParams.limit*searchParams.groupSize),
+		make([]float32, 0, searchParams.limit*searchParams.groupSize),
 		0,
-		make([]IDLoc, 0, searchParams.limit),
+		make([]IDLoc, 0, searchParams.limit*searchParams.groupSize),
 	}
-	for index := int(searchParams.offset); index < len(groupList); index++ {
+	// Explicitly calculate end index to ensure we output exactly limit groups
+	endIndex := int(searchParams.offset + searchParams.limit)
+	if endIndex > len(groupList) {
+		endIndex = len(groupList)
+	}
+	for index := int(searchParams.offset); index < endIndex; index++ {
 		group := groupList[index]
 		for i, score := range group.scoreList {
 			// idList and scoreList must have same length

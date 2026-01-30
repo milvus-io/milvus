@@ -89,6 +89,7 @@ Disassemble(BinarySet& binarySet) {
     }
 
     std::vector<std::string> slice_key_list;
+    slice_key_list.reserve(binarySet.binary_map_.size());
     for (auto& kv : binarySet.binary_map_) {
         if (kv.second->size > FILE_SLICE_SIZE.load()) {
             slice_key_list.push_back(kv.first);

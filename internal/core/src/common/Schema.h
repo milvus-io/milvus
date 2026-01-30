@@ -50,8 +50,19 @@ class Schema {
                   bool nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
-        this->AddField(
-            FieldName(name), field_id, data_type, nullable, std::nullopt);
+        if (IsStringDataType(data_type)) {
+            // String types require max_length to be set for proper serialization
+            constexpr int64_t kDefaultMaxLength = 65535;
+            this->AddField(FieldName(name),
+                           field_id,
+                           data_type,
+                           kDefaultMaxLength,
+                           nullable,
+                           std::nullopt);
+        } else {
+            this->AddField(
+                FieldName(name), field_id, data_type, nullable, std::nullopt);
+        }
         return field_id;
     }
 
@@ -62,8 +73,22 @@ class Schema {
                                   bool nullable = true) {
         auto field_id = FieldId(debug_id);
         debug_id++;
-        this->AddField(
-            FieldName(name), field_id, data_type, nullable, std::move(value));
+        if (IsStringDataType(data_type)) {
+            // String types require max_length to be set for proper serialization
+            constexpr int64_t kDefaultMaxLength = 65535;
+            this->AddField(FieldName(name),
+                           field_id,
+                           data_type,
+                           kDefaultMaxLength,
+                           nullable,
+                           std::move(value));
+        } else {
+            this->AddField(FieldName(name),
+                           field_id,
+                           data_type,
+                           nullable,
+                           std::move(value));
+        }
         return field_id;
     }
 

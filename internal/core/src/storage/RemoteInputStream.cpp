@@ -41,9 +41,9 @@ RemoteInputStream::Read(int fd, size_t size) {
         ssize_t ret = ::write(fd, data.data(), read_size);
         AssertInfo(ret == static_cast<ssize_t>(read_size),
                    "Failed to write to file");
-        ::fsync(fd);
         rest_size -= read_size;
     }
+    ::fsync(fd);
     return size;
 }
 

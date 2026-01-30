@@ -239,12 +239,98 @@ func (s *RRFFunctionSuite) TestRRFFuctionProcess() {
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, 3, 102, 3, true, "", []string{"COSINE", "COSINE"}), inputs)
 		s.NoError(err)
 		s.Equal([]int64{9, 9, 9}, ret.searchResultData.Topks)
-		s.Equal(int64(9), ret.searchResultData.TopK)
+		s.Equal(int64(3), ret.searchResultData.TopK)
 		s.Equal([]int64{
 			6, 7, 8, 9, 10, 11, 12, 13, 14,
 			15, 16, 17, 33, 34, 35, 18, 19, 20,
 			27, 28, 29, 63, 64, 65, 30, 31, 32,
 		},
 			ret.searchResultData.Ids.GetIntId().Data)
+	}
+
+	// nq = 1, grouping = true, limit > number of groups (tests endIndex bounds check)
+	{
+		nq := int64(1)
+		f, err := newRRFFunction(schema, functionSchema)
+		s.NoError(err)
+
+		// Create data with only 2 groups (topk=2, groupSize=3 -> 6 items in 2 groups)
+		// Group values: 0,0,0,1,1,1 (groups 0 and 1)
+		data1 := embedding.GenSearchResultDataWithGrouping(nq, 2, schemapb.DataType_Int64, "", 0, "ts", 102, 3)
+		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1}, f.GetInputFieldIDs(), true)
+		// limit=5, offset=0: endIndex=5 but only 2 groups exist, so endIndex should be clamped to 2
+		ret, err := f.Process(context.Background(), NewSearchParams(nq, 5, 0, 3, 102, 3, true, "", []string{"COSINE"}), inputs)
+		s.NoError(err)
+		// Topks contains actual results: 2 groups * 3 items per group = 6 items
+		// TopK is user-defined limit: 5
+		s.Equal([]int64{6}, ret.searchResultData.Topks)
+		s.Equal(int64(5), ret.searchResultData.TopK)
+		s.Equal([]int64{0, 1, 2, 3, 4, 5}, ret.searchResultData.Ids.GetIntId().Data)
+	}
+
+	// nq = 3, grouping = true, limit > number of groups (tests endIndex bounds check with multiple queries)
+	{
+		nq := int64(3)
+		f, err := newRRFFunction(schema, functionSchema)
+		s.NoError(err)
+
+		// Create data with only 2 groups per nq (topk=2, groupSize=3 -> 6 items per nq)
+		// nq1: ids 0-5, group values: 0,0,0,1,1,1
+		// nq2: ids 6-11, group values: 2,2,2,3,3,3
+		// nq3: ids 12-17, group values: 4,4,4,5,5,5
+		data1 := embedding.GenSearchResultDataWithGrouping(nq, 2, schemapb.DataType_Int64, "", 0, "ts", 102, 3)
+		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1}, f.GetInputFieldIDs(), true)
+		// limit=5, offset=0: endIndex=5 but only 2 groups exist per nq, so endIndex should be clamped to 2
+		ret, err := f.Process(context.Background(), NewSearchParams(nq, 5, 0, 3, 102, 3, true, "", []string{"COSINE"}), inputs)
+		s.NoError(err)
+		// Each nq returns 2 groups * 3 items = 6 items
+		// TopK is user-defined limit: 5
+		s.Equal([]int64{6, 6, 6}, ret.searchResultData.Topks)
+		s.Equal(int64(5), ret.searchResultData.TopK)
+		s.Equal([]int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17}, ret.searchResultData.Ids.GetIntId().Data)
+	}
+
+	// nq = 1, grouping = true, offset > 0, limit > remaining groups (tests pagination with bounds check)
+	{
+		nq := int64(1)
+		f, err := newRRFFunction(schema, functionSchema)
+		s.NoError(err)
+
+		// Create data with 3 groups (topk=3, groupSize=3 -> 9 items in 3 groups)
+		// Group values: 0,0,0,1,1,1,2,2,2 (groups 0, 1, 2)
+		data1 := embedding.GenSearchResultDataWithGrouping(nq, 3, schemapb.DataType_Int64, "", 0, "ts", 102, 3)
+		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1}, f.GetInputFieldIDs(), true)
+		// offset=1, limit=5: startIndex=1, endIndex=6 but only 3 groups exist, so endIndex clamped to 3
+		// Should return groups 1 and 2 (2 groups * 3 items = 6 items)
+		ret, err := f.Process(context.Background(), NewSearchParams(nq, 5, 1, 3, 102, 3, true, "", []string{"COSINE"}), inputs)
+		s.NoError(err)
+		s.Equal([]int64{6}, ret.searchResultData.Topks)
+		s.Equal(int64(5), ret.searchResultData.TopK)
+		// Groups 1 and 2: ids 3,4,5 (group 1) and 6,7,8 (group 2)
+		s.Equal([]int64{3, 4, 5, 6, 7, 8}, ret.searchResultData.Ids.GetIntId().Data)
+	}
+
+	// nq = 3, grouping = true, offset > 0, limit > remaining groups (tests pagination with bounds check for multiple queries)
+	{
+		nq := int64(3)
+		f, err := newRRFFunction(schema, functionSchema)
+		s.NoError(err)
+
+		// Create data with 3 groups per nq (topk=3, groupSize=3 -> 9 items per nq)
+		// nq1: ids 0-8, group values: 0,0,0,1,1,1,2,2,2
+		// nq2: ids 9-17, group values: 3,3,3,4,4,4,5,5,5
+		// nq3: ids 18-26, group values: 6,6,6,7,7,7,8,8,8
+		data1 := embedding.GenSearchResultDataWithGrouping(nq, 3, schemapb.DataType_Int64, "", 0, "ts", 102, 3)
+		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1}, f.GetInputFieldIDs(), true)
+		// offset=1, limit=5: startIndex=1, endIndex=6 but only 3 groups exist per nq, so endIndex clamped to 3
+		// Each nq returns groups 1 and 2 (2 groups * 3 items = 6 items)
+		ret, err := f.Process(context.Background(), NewSearchParams(nq, 5, 1, 3, 102, 3, true, "", []string{"COSINE"}), inputs)
+		s.NoError(err)
+		s.Equal([]int64{6, 6, 6}, ret.searchResultData.Topks)
+		s.Equal(int64(5), ret.searchResultData.TopK)
+		// nq1: groups 1,2 -> ids 3,4,5,6,7,8
+		// nq2: groups 4,5 -> ids 12,13,14,15,16,17
+		// nq3: groups 7,8 -> ids 21,22,23,24,25,26
+		s.Equal([]int64{3, 4, 5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 21, 22, 23, 24, 25, 26}, ret.searchResultData.Ids.GetIntId().Data)
 	}
 }
