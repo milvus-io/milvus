@@ -327,13 +327,11 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         // if multiple fields share same column group
         // hint for not loading certain field shall not be working for now
         // warmup will be disabled only when all columns are not in load list
-        // warmup uses OR logic: if ANY field wants sync warmup, group uses sync
         bool merged_in_load_list = false;
         std::vector<FieldId> milvus_field_ids;
         milvus_field_ids.reserve(field_id_list.size());
         for (int i = 0; i < field_id_list.size(); ++i) {
-            auto child_field_id = FieldId(field_id_list.Get(i));
-            milvus_field_ids.emplace_back(child_field_id);
+            milvus_field_ids.emplace_back(field_id_list.Get(i));
             merged_in_load_list = merged_in_load_list ||
                                   schema_->ShouldLoadField(milvus_field_ids[i]);
         }
@@ -3305,7 +3303,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         LoadFieldDataInfo load_field_data_info;
         load_field_data_info.storage_version =
             segment_load_info_.GetStorageVersion();
-        // xds specified, field id is group id, child field ids are actual id values here
+        // when child fields specified, field id is group id, child field ids are actual id values here
         if (field_binlog.child_fields_size() > 0) {
             field_ids.reserve(field_binlog.child_fields_size());
             for (auto field_id : field_binlog.child_fields()) {

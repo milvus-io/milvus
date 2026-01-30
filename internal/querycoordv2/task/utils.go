@@ -150,7 +150,7 @@ func packLoadSegmentRequest(
 	}
 
 	finalSchema := applyCollectionSettings(schema, collectionProperties)
-	applyIndexWarmupSetting(loadInfo, schema, collectionProperties)
+	applyIndexWarmupSetting(loadInfo, finalSchema, collectionProperties)
 
 	return &querypb.LoadSegmentsRequest{
 		Base: commonpbutil.NewMsgBase(
