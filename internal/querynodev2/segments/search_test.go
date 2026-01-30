@@ -25,11 +25,14 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type SearchSuite struct {
@@ -40,6 +43,7 @@ type SearchSuite struct {
 	collectionID int64
 	partitionID  int64
 	segmentID    int64
+	schema       *schemapb.CollectionSchema
 	collection   *Collection
 	sealed       Segment
 	growing      Segment
@@ -66,10 +70,10 @@ func (suite *SearchSuite) SetupTest() {
 	suite.segmentID = 1
 
 	suite.manager = NewManager()
-	schema := mock_segcore.GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64, true)
-	indexMeta := mock_segcore.GenTestIndexMeta(suite.collectionID, schema)
+	suite.schema = mock_segcore.GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64, true)
+	indexMeta := mock_segcore.GenTestIndexMeta(suite.collectionID, suite.schema)
 	suite.manager.Collection.PutOrRef(suite.collectionID,
-		schema,
+		suite.schema,
 		indexMeta,
 		&querypb.LoadMetaInfo{
 			LoadType:     querypb.LoadType_LoadCollection,
@@ -100,7 +104,7 @@ func (suite *SearchSuite) SetupTest() {
 		suite.partitionID,
 		suite.segmentID,
 		msgLength,
-		schema,
+		suite.schema,
 		suite.chunkManager,
 	)
 	suite.Require().NoError(err)
@@ -150,7 +154,7 @@ func (suite *SearchSuite) TestSearchSealed() {
 	searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection.GetCCollection(), []int64{suite.sealed.ID()}, mock_segcore.IndexFaissIDMap, nq)
 	suite.NoError(err)
 
-	_, segments, err := SearchHistorical(ctx, suite.manager, searchReq, suite.collectionID, nil, []int64{suite.sealed.ID()})
+	_, segments, err := SearchHistorical(ctx, suite.manager, searchReq, suite.collectionID, nil, []int64{suite.sealed.ID()}, nil)
 	suite.NoError(err)
 	suite.manager.Segment.Unpin(segments)
 }
@@ -163,10 +167,227 @@ func (suite *SearchSuite) TestSearchGrowing() {
 		suite.collectionID,
 		[]int64{suite.partitionID},
 		[]int64{suite.growing.ID()},
+		nil,
 	)
 	suite.NoError(err)
 	suite.Len(res, 1)
 	suite.manager.Segment.Unpin(segments)
+}
+
+func (suite *SearchSuite) TestSearchWithFilter() {
+	ctx := context.Background()
+
+	// create more sealed segments with different pk ranges for testing
+	// seg1: pk [0], seg2: pk [0,1], ..., seg10: pk [0..9]
+	loader := NewLoader(ctx, suite.manager, suite.chunkManager)
+	for i := range 10 {
+		segID := int64(i + 1000)
+		msgLen := i + 1
+		binlogs, statslogs, err := mock_segcore.SaveBinLog(ctx,
+			suite.collectionID,
+			suite.partitionID,
+			segID,
+			msgLen,
+			suite.schema,
+			suite.chunkManager,
+		)
+		suite.Require().NoError(err)
+
+		loadInfo := &querypb.SegmentLoadInfo{
+			SegmentID:     segID,
+			CollectionID:  suite.collectionID,
+			PartitionID:   suite.partitionID,
+			NumOfRows:     int64(msgLen),
+			BinlogPaths:   binlogs,
+			Statslogs:     statslogs,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+			Level:         datapb.SegmentLevel_Legacy,
+		}
+
+		seg, err := NewSegment(ctx,
+			suite.collection,
+			suite.manager.Segment,
+			SegmentTypeSealed,
+			0,
+			loadInfo,
+		)
+		suite.Require().NoError(err)
+
+		bfs, err := loader.loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeSealed)
+		suite.Require().NoError(err)
+		seg.SetBloomFilter(bfs)
+
+		for _, binlog := range binlogs {
+			err = seg.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLen), binlog)
+			suite.Require().NoError(err)
+		}
+
+		suite.manager.Segment.Put(ctx, SegmentTypeSealed, seg)
+	}
+
+	segIDs := []int64{1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009}
+
+	suite.Run("SearchWithSparseFilter", func() {
+		searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection.GetCCollection(), segIDs, mock_segcore.IndexFaissIDMap, 1)
+		suite.NoError(err)
+
+		// create search plan with filter expression "int64Field == 5"
+		// this should filter out segments that don't contain pk=5
+		schemaHelper, _ := typeutil.CreateSchemaHelper(suite.schema)
+		planNode, err := planparserv2.CreateSearchPlan(schemaHelper, "int64Field == 5", "floatVectorField", &planpb.QueryInfo{
+			Topk:         10,
+			MetricType:   "L2",
+			SearchParams: `{"nprobe": 10}`,
+			RoundDecimal: -1,
+		}, nil, nil)
+		suite.NoError(err)
+
+		// search with filter - should only search segments containing pk=5 (seg6-seg10)
+		res, segments, err := SearchHistorical(ctx, suite.manager, searchReq,
+			suite.collectionID,
+			[]int64{suite.partitionID},
+			segIDs,
+			planNode,
+		)
+		suite.NoError(err)
+		// with sparse filter enabled, only 5 segments (seg6-seg10) should be searched
+		suite.Len(segments, 5)
+		suite.manager.Segment.Unpin(segments)
+		DeleteSearchResults(res)
+	})
+
+	suite.Run("SearchWithoutFilter", func() {
+		searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection.GetCCollection(), segIDs, mock_segcore.IndexFaissIDMap, 1)
+		suite.NoError(err)
+
+		// search without filter - should search all segments
+		res, segments, err := SearchHistorical(ctx, suite.manager, searchReq,
+			suite.collectionID,
+			[]int64{suite.partitionID},
+			segIDs,
+			nil,
+		)
+		suite.NoError(err)
+		suite.Len(segments, 10)
+		suite.manager.Segment.Unpin(segments)
+		DeleteSearchResults(res)
+	})
+
+	// cleanup
+	for _, segID := range segIDs {
+		suite.manager.Segment.Remove(ctx, segID, querypb.DataScope_Historical)
+	}
+}
+
+func (suite *SearchSuite) TestSearchStreamWithFilter() {
+	ctx := context.Background()
+
+	// create sealed segments with different pk ranges for testing
+	loader := NewLoader(ctx, suite.manager, suite.chunkManager)
+	for i := range 10 {
+		segID := int64(i + 2000)
+		msgLen := i + 1
+		binlogs, statslogs, err := mock_segcore.SaveBinLog(ctx,
+			suite.collectionID,
+			suite.partitionID,
+			segID,
+			msgLen,
+			suite.schema,
+			suite.chunkManager,
+		)
+		suite.Require().NoError(err)
+
+		loadInfo := &querypb.SegmentLoadInfo{
+			SegmentID:     segID,
+			CollectionID:  suite.collectionID,
+			PartitionID:   suite.partitionID,
+			NumOfRows:     int64(msgLen),
+			BinlogPaths:   binlogs,
+			Statslogs:     statslogs,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+			Level:         datapb.SegmentLevel_Legacy,
+		}
+
+		seg, err := NewSegment(ctx,
+			suite.collection,
+			suite.manager.Segment,
+			SegmentTypeSealed,
+			0,
+			loadInfo,
+		)
+		suite.Require().NoError(err)
+
+		bfs, err := loader.loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeSealed)
+		suite.Require().NoError(err)
+		seg.SetBloomFilter(bfs)
+
+		for _, binlog := range binlogs {
+			err = seg.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLen), binlog)
+			suite.Require().NoError(err)
+		}
+
+		suite.manager.Segment.Put(ctx, SegmentTypeSealed, seg)
+	}
+
+	segIDs := []int64{2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009}
+
+	suite.Run("SearchHistoricalStreamlyWithFilter", func() {
+		searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection.GetCCollection(), segIDs, mock_segcore.IndexFaissIDMap, 1)
+		suite.NoError(err)
+
+		// create search plan with filter expression "int64Field == 5"
+		schemaHelper, _ := typeutil.CreateSchemaHelper(suite.schema)
+		planNode, err := planparserv2.CreateSearchPlan(schemaHelper, "int64Field == 5", "floatVectorField", &planpb.QueryInfo{
+			Topk:         10,
+			MetricType:   "L2",
+			SearchParams: `{"nprobe": 10}`,
+			RoundDecimal: -1,
+		}, nil, nil)
+		suite.NoError(err)
+
+		streamReduceFunc := func(result *SearchResult) error {
+			return nil
+		}
+
+		// search with filter - should only search segments containing pk=5 (seg6-seg10)
+		segments, err := SearchHistoricalStreamly(ctx, suite.manager, searchReq,
+			suite.collectionID,
+			nil,
+			segIDs,
+			planNode,
+			streamReduceFunc,
+		)
+		suite.NoError(err)
+		// with sparse filter enabled, only 5 segments (seg6-seg10) should be searched
+		suite.Len(segments, 5)
+		suite.manager.Segment.Unpin(segments)
+	})
+
+	suite.Run("SearchHistoricalStreamlyWithoutFilter", func() {
+		searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection.GetCCollection(), segIDs, mock_segcore.IndexFaissIDMap, 1)
+		suite.NoError(err)
+
+		streamReduceFunc := func(result *SearchResult) error {
+			return nil
+		}
+
+		// search without filter - should search all segments
+		segments, err := SearchHistoricalStreamly(ctx, suite.manager, searchReq,
+			suite.collectionID,
+			nil,
+			segIDs,
+			nil,
+			streamReduceFunc,
+		)
+		suite.NoError(err)
+		suite.Len(segments, 10)
+		suite.manager.Segment.Unpin(segments)
+	})
+
+	// cleanup
+	for _, segID := range segIDs {
+		suite.manager.Segment.Remove(ctx, segID, querypb.DataScope_Historical)
+	}
 }
 
 func TestSearch(t *testing.T) {
