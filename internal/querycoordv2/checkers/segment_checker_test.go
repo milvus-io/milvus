@@ -807,7 +807,8 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriorityHandoff() {
 
 	// segment1 is in currentTarget but missing in dist -> Recovery scenario -> HIGH priority
 	suite.Equal(commonpb.LoadPriority_HIGH, segment1Priority, "segment1 should have HIGH priority (recovery)")
-	// segment2 is NOT in currentTarget, collection is Loaded -> Handoff scenario -> LOW priority
+	// segment2 is NOT in currentTarget, collection is Loaded AND no refresh in progress (IsRefreshed()=true)
+	// -> Handoff scenario (growing -> sealed flush) -> LOW priority
 	// Even though replica's priority is HIGH, handoff should use LOW
 	suite.Equal(commonpb.LoadPriority_LOW, segment2Priority, "segment2 should have LOW priority (handoff)")
 }
@@ -878,6 +879,81 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriorityUserLoad() {
 
 	// segment is NOT in currentTarget, collection is Loading -> User-initiated load -> Use replica's priority (HIGH)
 	suite.Equal(commonpb.LoadPriority_HIGH, loadPriorities[0], "segment should use replica's priority (HIGH) for user-initiated load")
+}
+
+func (suite *SegmentCheckerTestSuite) TestLoadPriorityRefresh() {
+	ctx := context.Background()
+	collectionID := int64(4)
+	replicaID := int64(4)
+
+	// Create a collection with Loaded status
+	collection := utils.CreateTestCollectionWithStatus(collectionID, 1, querypb.LoadStatus_Loaded)
+	suite.meta.CollectionManager.PutCollection(ctx, collection)
+
+	// Set refresh notifier to simulate refresh in progress (e.g., after import)
+	// This makes IsRefreshed() return false
+	refreshNotifier := make(chan struct{})
+	suite.meta.CollectionManager.UpdateCollection(ctx, collectionID, meta.SetNotifierCollectionOp(refreshNotifier))
+
+	// prepare replica with HIGH priority
+	replica := meta.NewReplicaWithPriority(&querypb.Replica{
+		ID:           replicaID,
+		CollectionID: collectionID,
+		Nodes:        []int64{1, 2},
+	}, commonpb.LoadPriority_HIGH)
+	suite.meta.ReplicaManager.Put(ctx, replica)
+
+	// prepare a new segment (not in currentTarget) - simulates imported segment
+	segment := &datapb.SegmentInfo{
+		ID:            301,
+		CollectionID:  collectionID,
+		PartitionID:   -1,
+		InsertChannel: "channel4",
+		State:         commonpb.SegmentState_Sealed,
+		NumOfRows:     100,
+		StartPosition: &msgpb.MsgPosition{Timestamp: 100},
+		DmlPosition:   &msgpb.MsgPosition{Timestamp: 200},
+	}
+
+	// set up empty current target
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		[]*datapb.VchannelInfo{
+			{
+				CollectionID: collectionID,
+				ChannelName:  "channel4",
+			},
+		},
+		[]*datapb.SegmentInfo{},
+		nil,
+	).Once()
+	suite.checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+	suite.checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+
+	// set up next target with the imported segment
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		[]*datapb.VchannelInfo{
+			{
+				CollectionID: collectionID,
+				ChannelName:  "channel4",
+			},
+		},
+		[]*datapb.SegmentInfo{segment},
+		nil,
+	).Once()
+	suite.checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+
+	// test getSealedSegmentDiff
+	dist := suite.checker.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
+	toLoad, loadPriorities, _, _ := suite.checker.getSealedSegmentDiff(ctx, collectionID, replica, dist)
+
+	// verify results
+	suite.Equal(1, len(toLoad))
+	suite.Equal(1, len(loadPriorities))
+
+	// segment is NOT in currentTarget, collection is Loaded BUT refresh is in progress
+	// -> Should use replica's priority (HIGH), NOT LOW
+	// This is the import/refresh scenario where we want user's configured priority
+	suite.Equal(commonpb.LoadPriority_HIGH, loadPriorities[0], "segment should use replica's priority (HIGH) during refresh/import")
 }
 
 func (suite *SegmentCheckerTestSuite) TestFilterOutExistedOnLeader() {

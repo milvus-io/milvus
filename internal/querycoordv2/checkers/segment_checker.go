@@ -260,9 +260,13 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	nextTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.NextTarget)
 	currentTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.CurrentTarget)
 
-	// Check collection status to distinguish handoff from user-initiated load
+	// Check collection status to distinguish handoff from user-initiated load/refresh
 	collection := c.meta.GetCollection(ctx, collectionID)
-	isCollectionLoaded := collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded
+	// Handoff scenario: collection is loaded AND no refresh in progress
+	// Import/Refresh scenario: collection is loaded BUT refresh is in progress (IsRefreshed() returns false)
+	isHandoffScenario := collection != nil &&
+		collection.GetStatus() == querypb.LoadStatus_Loaded &&
+		collection.IsRefreshed()
 
 	// Segment which exist on next target, but not on dist
 	for _, segment := range nextTargetMap {
@@ -271,11 +275,11 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 			if existOnCurrent {
 				// Segment exists in current target but missing in dist -> Recovery scenario (HIGH priority)
 				loadPriorities = append(loadPriorities, commonpb.LoadPriority_HIGH)
-			} else if isCollectionLoaded {
-				// Collection already loaded, new segment is from handoff (growing -> sealed flush) -> LOW priority
+			} else if isHandoffScenario {
+				// Collection already loaded and no refresh in progress -> Handoff (growing -> sealed flush) -> LOW priority
 				loadPriorities = append(loadPriorities, commonpb.LoadPriority_LOW)
 			} else {
-				// Collection is loading, new segment is from user-initiated load -> Use user's configured priority
+				// Collection is loading OR refresh in progress (import) -> Use user's configured priority
 				loadPriorities = append(loadPriorities, replica.LoadPriority())
 			}
 			toLoad = append(toLoad, segment)
