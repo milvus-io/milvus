@@ -14,7 +14,6 @@
 
 #include <gtest/gtest.h>
 #include <boost/container/vector.hpp>
-#include <boost/format.hpp>
 #include <iostream>
 #include <random>
 #include <set>
@@ -24,10 +23,8 @@
 #include "common/Common.h"
 #include "common/Schema.h"
 #include "index/InvertedIndexTantivy.h"
-#include "pb/plan.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/Plan.h"
-#include "query/PlanProto.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/cachinglayer_test_utils.h"
@@ -161,74 +158,44 @@ class MatchExprTest : public ::testing::Test {
         return count;
     }
 
-    // Create plan with specified match type and count
+    // Create filter expression with specified match type and count
     std::string
-    CreatePlanText(const std::string& match_type, int64_t count) {
-        return boost::str(boost::format(R"(vector_anns: <
-            field_id: %1%
-            predicates: <
-                match_expr: <
-                    struct_name: "struct_array"
-                    match_type: %4%
-                    count: %5%
-                    predicate: <
-                        binary_expr: <
-                            op: LogicalAnd
-                            left: <
-                                unary_range_expr: <
-                                    column_info: <
-                                        field_id: %2%
-                                        data_type: Array
-                                        element_type: VarChar
-                                        nested_path: "sub_str"
-                                        is_element_level: true
-                                    >
-                                    op: Equal
-                                    value: <
-                                        string_val: "aaa"
-                                    >
-                                >
-                            >
-                            right: <
-                                unary_range_expr: <
-                                    column_info: <
-                                        field_id: %3%
-                                        data_type: Array
-                                        element_type: Int32
-                                        nested_path: "sub_int"
-                                        is_element_level: true
-                                    >
-                                    op: GreaterThan
-                                    value: <
-                                        int64_val: 100
-                                    >
-                                >
-                            >
-                        >
-                    >
-                >
-            >
-            query_info: <
-                topk: 10
-                round_decimal: 3
-                metric_type: "L2"
-                search_params: "{\"nprobe\": 10}"
-            >
-            placeholder_tag: "$0"
-        >)") % vec_fid_.get() %
-                          sub_str_fid_.get() % sub_int_fid_.get() % match_type %
-                          count);
+    CreateFilterExpr(const std::string& match_type, int64_t count) {
+        // match_type is like "MatchAny", "MatchAll", "MatchLeast", "MatchMost", "MatchExact"
+        // Convert to expression format: match_any, match_all, match_least, match_most, match_exact
+        std::string predicate = R"($[sub_str] == "aaa" && $[sub_int] > 100)";
+
+        if (match_type == "MatchAny") {
+            return "match_any(struct_array, " + predicate + ")";
+        } else if (match_type == "MatchAll") {
+            return "match_all(struct_array, " + predicate + ")";
+        } else if (match_type == "MatchLeast") {
+            return "match_least(struct_array, " + predicate +
+                   ", threshold=" + std::to_string(count) + ")";
+        } else if (match_type == "MatchMost") {
+            return "match_most(struct_array, " + predicate +
+                   ", threshold=" + std::to_string(count) + ")";
+        } else if (match_type == "MatchExact") {
+            return "match_exact(struct_array, " + predicate +
+                   ", threshold=" + std::to_string(count) + ")";
+        }
+        return "";
     }
 
     // Execute search and return results
     std::unique_ptr<SearchResult>
-    ExecuteSearch(const std::string& raw_plan) {
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        EXPECT_TRUE(ok) << "Failed to parse plan";
-
-        auto plan = CreateSearchPlanFromPlanNode(schema_, plan_node);
+    ExecuteSearch(const std::string& filter_expr) {
+        ScopedSchemaHandle schema_handle(*schema_);
+        auto plan_str =
+            schema_handle.ParseSearch(filter_expr,          // expression
+                                      "vec",                // vector field name
+                                      10,                   // topK
+                                      "L2",                 // metric_type
+                                      R"({"nprobe": 10})",  // search_params
+                                      3                     // round_decimal
+            );
+        auto plan =
+            CreateSearchPlanByExpr(schema_, plan_str.data(), plan_str.size());
         EXPECT_NE(plan, nullptr);
 
         auto num_queries = 1;
@@ -325,8 +292,8 @@ class MatchExprTest : public ::testing::Test {
 };
 
 TEST_F(MatchExprTest, MatchAny) {
-    auto raw_plan = CreatePlanText("MatchAny", 0);
-    auto result = ExecuteSearch(raw_plan);
+    auto filter_expr = CreateFilterExpr("MatchAny", 0);
+    auto result = ExecuteSearch(filter_expr);
 
     VerifyResults(
         result.get(),
@@ -339,8 +306,8 @@ TEST_F(MatchExprTest, MatchAny) {
 }
 
 TEST_F(MatchExprTest, MatchAll) {
-    auto raw_plan = CreatePlanText("MatchAll", 0);
-    auto result = ExecuteSearch(raw_plan);
+    auto filter_expr = CreateFilterExpr("MatchAll", 0);
+    auto result = ExecuteSearch(filter_expr);
 
     VerifyResults(
         result.get(),
@@ -354,8 +321,8 @@ TEST_F(MatchExprTest, MatchAll) {
 
 TEST_F(MatchExprTest, MatchLeast) {
     const int64_t threshold = 3;
-    auto raw_plan = CreatePlanText("MatchLeast", threshold);
-    auto result = ExecuteSearch(raw_plan);
+    auto filter_expr = CreateFilterExpr("MatchLeast", threshold);
+    auto result = ExecuteSearch(filter_expr);
 
     VerifyResults(
         result.get(),
@@ -369,8 +336,8 @@ TEST_F(MatchExprTest, MatchLeast) {
 
 TEST_F(MatchExprTest, MatchMost) {
     const int64_t threshold = 2;
-    auto raw_plan = CreatePlanText("MatchMost", threshold);
-    auto result = ExecuteSearch(raw_plan);
+    auto filter_expr = CreateFilterExpr("MatchMost", threshold);
+    auto result = ExecuteSearch(filter_expr);
 
     VerifyResults(
         result.get(),
@@ -384,8 +351,8 @@ TEST_F(MatchExprTest, MatchMost) {
 
 TEST_F(MatchExprTest, MatchExact) {
     const int64_t threshold = 2;
-    auto raw_plan = CreatePlanText("MatchExact", threshold);
-    auto result = ExecuteSearch(raw_plan);
+    auto filter_expr = CreateFilterExpr("MatchExact", threshold);
+    auto result = ExecuteSearch(filter_expr);
 
     VerifyResults(
         result.get(),
@@ -400,8 +367,8 @@ TEST_F(MatchExprTest, MatchExact) {
 // Edge case: MatchLeast with threshold = 1 (equivalent to MatchAny)
 TEST_F(MatchExprTest, MatchLeastOne) {
     const int64_t threshold = 1;
-    auto raw_plan = CreatePlanText("MatchLeast", threshold);
-    auto result = ExecuteSearch(raw_plan);
+    auto filter_expr = CreateFilterExpr("MatchLeast", threshold);
+    auto result = ExecuteSearch(filter_expr);
 
     VerifyResults(
         result.get(),
@@ -415,8 +382,8 @@ TEST_F(MatchExprTest, MatchLeastOne) {
 // Edge case: MatchMost with threshold = 0 (no elements should match)
 TEST_F(MatchExprTest, MatchMostZero) {
     const int64_t threshold = 0;
-    auto raw_plan = CreatePlanText("MatchMost", threshold);
-    auto result = ExecuteSearch(raw_plan);
+    auto filter_expr = CreateFilterExpr("MatchMost", threshold);
+    auto result = ExecuteSearch(filter_expr);
 
     VerifyResults(
         result.get(),
@@ -430,8 +397,8 @@ TEST_F(MatchExprTest, MatchMostZero) {
 // Edge case: MatchExact with threshold = 0 (no elements should match)
 TEST_F(MatchExprTest, MatchExactZero) {
     const int64_t threshold = 0;
-    auto raw_plan = CreatePlanText("MatchExact", threshold);
-    auto result = ExecuteSearch(raw_plan);
+    auto filter_expr = CreateFilterExpr("MatchExact", threshold);
+    auto result = ExecuteSearch(filter_expr);
 
     VerifyResults(
         result.get(),
@@ -611,77 +578,47 @@ class SealedMatchExprTest : public ::testing::Test {
         return count;
     }
 
-    // Create plan with specified match type and count
+    // Create filter expression with specified match type, count, and target values
     std::string
-    CreateSealedPlanText(const std::string& match_type,
-                         int64_t count,
-                         const std::string& target_str,
-                         int32_t target_int) {
-        return boost::str(boost::format(R"(vector_anns: <
-            field_id: %1%
-            predicates: <
-                match_expr: <
-                    struct_name: "struct_array"
-                    match_type: %4%
-                    count: %5%
-                    predicate: <
-                        binary_expr: <
-                            op: LogicalAnd
-                            left: <
-                                unary_range_expr: <
-                                    column_info: <
-                                        field_id: %2%
-                                        data_type: Array
-                                        element_type: VarChar
-                                        nested_path: "sub_str"
-                                        is_element_level: true
-                                    >
-                                    op: Equal
-                                    value: <
-                                        string_val: "%6%"
-                                    >
-                                >
-                            >
-                            right: <
-                                unary_range_expr: <
-                                    column_info: <
-                                        field_id: %3%
-                                        data_type: Array
-                                        element_type: Int32
-                                        nested_path: "sub_int"
-                                        is_element_level: true
-                                    >
-                                    op: GreaterThan
-                                    value: <
-                                        int64_val: %7%
-                                    >
-                                >
-                            >
-                        >
-                    >
-                >
-            >
-            query_info: <
-                topk: 10
-                round_decimal: 3
-                metric_type: "L2"
-                search_params: "{\"nprobe\": 10}"
-            >
-            placeholder_tag: "$0"
-        >)") % vec_fid_.get() %
-                          sub_str_fid_.get() % sub_int_fid_.get() % match_type %
-                          count % target_str % target_int);
+    CreateSealedFilterExpr(const std::string& match_type,
+                           int64_t count,
+                           const std::string& target_str,
+                           int32_t target_int) {
+        std::string predicate = "$[sub_str] == \"" + target_str +
+                                "\" && $[sub_int] > " +
+                                std::to_string(target_int);
+
+        if (match_type == "MatchAny") {
+            return "match_any(struct_array, " + predicate + ")";
+        } else if (match_type == "MatchAll") {
+            return "match_all(struct_array, " + predicate + ")";
+        } else if (match_type == "MatchLeast") {
+            return "match_least(struct_array, " + predicate +
+                   ", threshold=" + std::to_string(count) + ")";
+        } else if (match_type == "MatchMost") {
+            return "match_most(struct_array, " + predicate +
+                   ", threshold=" + std::to_string(count) + ")";
+        } else if (match_type == "MatchExact") {
+            return "match_exact(struct_array, " + predicate +
+                   ", threshold=" + std::to_string(count) + ")";
+        }
+        return "";
     }
 
     // Execute search and return results
     std::unique_ptr<SearchResult>
-    ExecuteSealedSearch(const std::string& raw_plan) {
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        EXPECT_TRUE(ok) << "Failed to parse plan";
-
-        auto plan = CreateSearchPlanFromPlanNode(schema_, plan_node);
+    ExecuteSealedSearch(const std::string& filter_expr) {
+        ScopedSchemaHandle schema_handle(*schema_);
+        auto plan_str =
+            schema_handle.ParseSearch(filter_expr,          // expression
+                                      "vec",                // vector field name
+                                      10,                   // topK
+                                      "L2",                 // metric_type
+                                      R"({"nprobe": 10})",  // search_params
+                                      3                     // round_decimal
+            );
+        auto plan =
+            CreateSearchPlanByExpr(schema_, plan_str.data(), plan_str.size());
         EXPECT_NE(plan, nullptr);
 
         auto num_queries = 1;
@@ -762,71 +699,24 @@ class SealedMatchExprTest : public ::testing::Test {
         std::cout << "==============================" << std::endl;
     }
 
-    // Create retrieve plan (no vector search, only predicates)
+    // Create retrieve filter expression - reuses the sealed filter expression
     std::string
-    CreateRetrievePlanText(const std::string& match_type,
-                           int64_t count,
-                           const std::string& target_str,
-                           int32_t target_int) {
-        return boost::str(boost::format(R"(query: <
-            predicates: <
-                match_expr: <
-                    struct_name: "struct_array"
-                    match_type: %1%
-                    count: %2%
-                    predicate: <
-                        binary_expr: <
-                            op: LogicalAnd
-                            left: <
-                                unary_range_expr: <
-                                    column_info: <
-                                        field_id: %3%
-                                        data_type: Array
-                                        element_type: VarChar
-                                        nested_path: "sub_str"
-                                        is_element_level: true
-                                    >
-                                    op: Equal
-                                    value: <
-                                        string_val: "%5%"
-                                    >
-                                >
-                            >
-                            right: <
-                                unary_range_expr: <
-                                    column_info: <
-                                        field_id: %4%
-                                        data_type: Array
-                                        element_type: Int32
-                                        nested_path: "sub_int"
-                                        is_element_level: true
-                                    >
-                                    op: GreaterThan
-                                    value: <
-                                        int64_val: %6%
-                                    >
-                                >
-                            >
-                        >
-                    >
-                >
-            >
-        >
-        output_field_ids: %7%)") %
-                          match_type % count % sub_str_fid_.get() %
-                          sub_int_fid_.get() % target_str % target_int %
-                          int64_fid_.get());
+    CreateRetrieveFilterExpr(const std::string& match_type,
+                             int64_t count,
+                             const std::string& target_str,
+                             int32_t target_int) {
+        // Same expression format as search filter
+        return CreateSealedFilterExpr(
+            match_type, count, target_str, target_int);
     }
 
     // Execute retrieve and return results
     std::unique_ptr<proto::segcore::RetrieveResults>
-    ExecuteRetrieve(const std::string& raw_plan) {
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        EXPECT_TRUE(ok) << "Failed to parse plan";
-
-        auto plan = ProtoParser(schema_).CreateRetrievePlan(plan_node);
+    ExecuteRetrieve(const std::string& filter_expr) {
+        ScopedSchemaHandle schema_handle(*schema_);
+        auto plan_str = schema_handle.Parse(filter_expr);
+        auto plan =
+            CreateRetrievePlanByExpr(schema_, plan_str.data(), plan_str.size());
         EXPECT_NE(plan, nullptr);
 
         return seg_->Retrieve(
@@ -948,8 +838,9 @@ TEST_F(SealedMatchExprTest, MatchAnyWithNestedIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan = CreateSealedPlanText("MatchAny", 0, target_str, target_int);
-    auto result = ExecuteSealedSearch(raw_plan);
+    auto filter_expr =
+        CreateSealedFilterExpr("MatchAny", 0, target_str, target_int);
+    auto result = ExecuteSealedSearch(filter_expr);
 
     VerifySealedResults(
         result.get(),
@@ -967,8 +858,9 @@ TEST_F(SealedMatchExprTest, MatchAllWithNestedIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan = CreateSealedPlanText("MatchAll", 0, target_str, target_int);
-    auto result = ExecuteSealedSearch(raw_plan);
+    auto filter_expr =
+        CreateSealedFilterExpr("MatchAll", 0, target_str, target_int);
+    auto result = ExecuteSealedSearch(filter_expr);
 
     VerifySealedResults(
         result.get(),
@@ -987,9 +879,9 @@ TEST_F(SealedMatchExprTest, MatchLeastWithNestedIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateSealedPlanText("MatchLeast", threshold, target_str, target_int);
-    auto result = ExecuteSealedSearch(raw_plan);
+    auto filter_expr =
+        CreateSealedFilterExpr("MatchLeast", threshold, target_str, target_int);
+    auto result = ExecuteSealedSearch(filter_expr);
 
     VerifySealedResults(
         result.get(),
@@ -1008,9 +900,9 @@ TEST_F(SealedMatchExprTest, MatchMostWithNestedIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateSealedPlanText("MatchMost", threshold, target_str, target_int);
-    auto result = ExecuteSealedSearch(raw_plan);
+    auto filter_expr =
+        CreateSealedFilterExpr("MatchMost", threshold, target_str, target_int);
+    auto result = ExecuteSealedSearch(filter_expr);
 
     VerifySealedResults(
         result.get(),
@@ -1029,9 +921,9 @@ TEST_F(SealedMatchExprTest, MatchExactWithNestedIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateSealedPlanText("MatchExact", threshold, target_str, target_int);
-    auto result = ExecuteSealedSearch(raw_plan);
+    auto filter_expr =
+        CreateSealedFilterExpr("MatchExact", threshold, target_str, target_int);
+    auto result = ExecuteSealedSearch(filter_expr);
 
     VerifySealedResults(
         result.get(),
@@ -1078,8 +970,9 @@ TEST_F(SealedMatchExprTestNoIndex, MatchAnyNoIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan = CreateSealedPlanText("MatchAny", 0, target_str, target_int);
-    auto result = ExecuteSealedSearch(raw_plan);
+    auto filter_expr =
+        CreateSealedFilterExpr("MatchAny", 0, target_str, target_int);
+    auto result = ExecuteSealedSearch(filter_expr);
 
     VerifySealedResults(
         result.get(),
@@ -1096,8 +989,9 @@ TEST_F(SealedMatchExprTestNoIndex, MatchAllNoIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan = CreateSealedPlanText("MatchAll", 0, target_str, target_int);
-    auto result = ExecuteSealedSearch(raw_plan);
+    auto filter_expr =
+        CreateSealedFilterExpr("MatchAll", 0, target_str, target_int);
+    auto result = ExecuteSealedSearch(filter_expr);
 
     VerifySealedResults(
         result.get(),
@@ -1115,9 +1009,9 @@ TEST_F(SealedMatchExprTestNoIndex, MatchLeastNoIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateSealedPlanText("MatchLeast", threshold, target_str, target_int);
-    auto result = ExecuteSealedSearch(raw_plan);
+    auto filter_expr =
+        CreateSealedFilterExpr("MatchLeast", threshold, target_str, target_int);
+    auto result = ExecuteSealedSearch(filter_expr);
 
     VerifySealedResults(
         result.get(),
@@ -1135,9 +1029,9 @@ TEST_F(SealedMatchExprTestNoIndex, MatchMostNoIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateSealedPlanText("MatchMost", threshold, target_str, target_int);
-    auto result = ExecuteSealedSearch(raw_plan);
+    auto filter_expr =
+        CreateSealedFilterExpr("MatchMost", threshold, target_str, target_int);
+    auto result = ExecuteSealedSearch(filter_expr);
 
     VerifySealedResults(
         result.get(),
@@ -1155,9 +1049,9 @@ TEST_F(SealedMatchExprTestNoIndex, MatchExactNoIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateSealedPlanText("MatchExact", threshold, target_str, target_int);
-    auto result = ExecuteSealedSearch(raw_plan);
+    auto filter_expr =
+        CreateSealedFilterExpr("MatchExact", threshold, target_str, target_int);
+    auto result = ExecuteSealedSearch(filter_expr);
 
     VerifySealedResults(
         result.get(),
@@ -1220,8 +1114,9 @@ TEST_F(SealedMatchExprTestPartialIndex, MatchAnyPartialIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan = CreateSealedPlanText("MatchAny", 0, target_str, target_int);
-    auto result = ExecuteSealedSearch(raw_plan);
+    auto filter_expr =
+        CreateSealedFilterExpr("MatchAny", 0, target_str, target_int);
+    auto result = ExecuteSealedSearch(filter_expr);
 
     VerifySealedResults(
         result.get(),
@@ -1238,8 +1133,9 @@ TEST_F(SealedMatchExprTestPartialIndex, MatchAllPartialIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan = CreateSealedPlanText("MatchAll", 0, target_str, target_int);
-    auto result = ExecuteSealedSearch(raw_plan);
+    auto filter_expr =
+        CreateSealedFilterExpr("MatchAll", 0, target_str, target_int);
+    auto result = ExecuteSealedSearch(filter_expr);
 
     VerifySealedResults(
         result.get(),
@@ -1257,9 +1153,9 @@ TEST_F(SealedMatchExprTestPartialIndex, MatchLeastPartialIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateSealedPlanText("MatchLeast", threshold, target_str, target_int);
-    auto result = ExecuteSealedSearch(raw_plan);
+    auto filter_expr =
+        CreateSealedFilterExpr("MatchLeast", threshold, target_str, target_int);
+    auto result = ExecuteSealedSearch(filter_expr);
 
     VerifySealedResults(
         result.get(),
@@ -1277,9 +1173,9 @@ TEST_F(SealedMatchExprTestPartialIndex, MatchMostPartialIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateSealedPlanText("MatchMost", threshold, target_str, target_int);
-    auto result = ExecuteSealedSearch(raw_plan);
+    auto filter_expr =
+        CreateSealedFilterExpr("MatchMost", threshold, target_str, target_int);
+    auto result = ExecuteSealedSearch(filter_expr);
 
     VerifySealedResults(
         result.get(),
@@ -1297,9 +1193,9 @@ TEST_F(SealedMatchExprTestPartialIndex, MatchExactPartialIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateSealedPlanText("MatchExact", threshold, target_str, target_int);
-    auto result = ExecuteSealedSearch(raw_plan);
+    auto filter_expr =
+        CreateSealedFilterExpr("MatchExact", threshold, target_str, target_int);
+    auto result = ExecuteSealedSearch(filter_expr);
 
     VerifySealedResults(
         result.get(),
@@ -1320,9 +1216,9 @@ TEST_F(SealedMatchExprTest, RetrieveMatchAnyWithIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateRetrievePlanText("MatchAny", 0, target_str, target_int);
-    auto result = ExecuteRetrieve(raw_plan);
+    auto filter_expr =
+        CreateRetrieveFilterExpr("MatchAny", 0, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
 
     VerifyRetrieveResults(
         result.get(),
@@ -1339,9 +1235,9 @@ TEST_F(SealedMatchExprTest, RetrieveMatchAllWithIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateRetrievePlanText("MatchAll", 0, target_str, target_int);
-    auto result = ExecuteRetrieve(raw_plan);
+    auto filter_expr =
+        CreateRetrieveFilterExpr("MatchAll", 0, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
 
     VerifyRetrieveResults(
         result.get(),
@@ -1359,9 +1255,9 @@ TEST_F(SealedMatchExprTest, RetrieveMatchLeastWithIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateRetrievePlanText("MatchLeast", threshold, target_str, target_int);
-    auto result = ExecuteRetrieve(raw_plan);
+    auto filter_expr = CreateRetrieveFilterExpr(
+        "MatchLeast", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
 
     VerifyRetrieveResults(
         result.get(),
@@ -1379,9 +1275,9 @@ TEST_F(SealedMatchExprTest, RetrieveMatchMostWithIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateRetrievePlanText("MatchMost", threshold, target_str, target_int);
-    auto result = ExecuteRetrieve(raw_plan);
+    auto filter_expr = CreateRetrieveFilterExpr(
+        "MatchMost", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
 
     VerifyRetrieveResults(
         result.get(),
@@ -1399,9 +1295,9 @@ TEST_F(SealedMatchExprTest, RetrieveMatchExactWithIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateRetrievePlanText("MatchExact", threshold, target_str, target_int);
-    auto result = ExecuteRetrieve(raw_plan);
+    auto filter_expr = CreateRetrieveFilterExpr(
+        "MatchExact", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
 
     VerifyRetrieveResults(
         result.get(),
@@ -1418,9 +1314,9 @@ TEST_F(SealedMatchExprTestNoIndex, RetrieveMatchAnyNoIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateRetrievePlanText("MatchAny", 0, target_str, target_int);
-    auto result = ExecuteRetrieve(raw_plan);
+    auto filter_expr =
+        CreateRetrieveFilterExpr("MatchAny", 0, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
 
     VerifyRetrieveResults(
         result.get(),
@@ -1437,9 +1333,9 @@ TEST_F(SealedMatchExprTestNoIndex, RetrieveMatchAllNoIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateRetrievePlanText("MatchAll", 0, target_str, target_int);
-    auto result = ExecuteRetrieve(raw_plan);
+    auto filter_expr =
+        CreateRetrieveFilterExpr("MatchAll", 0, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
 
     VerifyRetrieveResults(
         result.get(),
@@ -1457,9 +1353,9 @@ TEST_F(SealedMatchExprTestNoIndex, RetrieveMatchLeastNoIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateRetrievePlanText("MatchLeast", threshold, target_str, target_int);
-    auto result = ExecuteRetrieve(raw_plan);
+    auto filter_expr = CreateRetrieveFilterExpr(
+        "MatchLeast", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
 
     VerifyRetrieveResults(
         result.get(),
@@ -1477,9 +1373,9 @@ TEST_F(SealedMatchExprTestNoIndex, RetrieveMatchMostNoIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateRetrievePlanText("MatchMost", threshold, target_str, target_int);
-    auto result = ExecuteRetrieve(raw_plan);
+    auto filter_expr = CreateRetrieveFilterExpr(
+        "MatchMost", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
 
     VerifyRetrieveResults(
         result.get(),
@@ -1497,9 +1393,9 @@ TEST_F(SealedMatchExprTestNoIndex, RetrieveMatchExactNoIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateRetrievePlanText("MatchExact", threshold, target_str, target_int);
-    auto result = ExecuteRetrieve(raw_plan);
+    auto filter_expr = CreateRetrieveFilterExpr(
+        "MatchExact", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
 
     VerifyRetrieveResults(
         result.get(),
@@ -1516,9 +1412,9 @@ TEST_F(SealedMatchExprTestPartialIndex, RetrieveMatchAnyPartialIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateRetrievePlanText("MatchAny", 0, target_str, target_int);
-    auto result = ExecuteRetrieve(raw_plan);
+    auto filter_expr =
+        CreateRetrieveFilterExpr("MatchAny", 0, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
 
     VerifyRetrieveResults(
         result.get(),
@@ -1535,9 +1431,9 @@ TEST_F(SealedMatchExprTestPartialIndex, RetrieveMatchAllPartialIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateRetrievePlanText("MatchAll", 0, target_str, target_int);
-    auto result = ExecuteRetrieve(raw_plan);
+    auto filter_expr =
+        CreateRetrieveFilterExpr("MatchAll", 0, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
 
     VerifyRetrieveResults(
         result.get(),
@@ -1555,9 +1451,9 @@ TEST_F(SealedMatchExprTestPartialIndex, RetrieveMatchLeastPartialIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateRetrievePlanText("MatchLeast", threshold, target_str, target_int);
-    auto result = ExecuteRetrieve(raw_plan);
+    auto filter_expr = CreateRetrieveFilterExpr(
+        "MatchLeast", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
 
     VerifyRetrieveResults(
         result.get(),
@@ -1575,9 +1471,9 @@ TEST_F(SealedMatchExprTestPartialIndex, RetrieveMatchMostPartialIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateRetrievePlanText("MatchMost", threshold, target_str, target_int);
-    auto result = ExecuteRetrieve(raw_plan);
+    auto filter_expr = CreateRetrieveFilterExpr(
+        "MatchMost", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
 
     VerifyRetrieveResults(
         result.get(),
@@ -1595,9 +1491,9 @@ TEST_F(SealedMatchExprTestPartialIndex, RetrieveMatchExactPartialIndex) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    auto raw_plan =
-        CreateRetrievePlanText("MatchExact", threshold, target_str, target_int);
-    auto result = ExecuteRetrieve(raw_plan);
+    auto filter_expr = CreateRetrieveFilterExpr(
+        "MatchExact", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
 
     VerifyRetrieveResults(
         result.get(),
@@ -1615,75 +1511,13 @@ TEST_F(SealedMatchExprTestNoIndex, MatchWithOtherExpr) {
     std::string target_str = "aaa";
     int32_t target_int = 100;
 
-    // Plan: (id % 2 == 0) && match_any(sub_str == "aaa" && sub_int > 100)
-    auto raw_plan = boost::str(boost::format(R"(query: <
-        predicates: <
-            binary_expr: <
-                op: LogicalAnd
-                left: <
-                    binary_arith_op_eval_range_expr: <
-                        column_info: <
-                            field_id: %1%
-                            data_type: Int64
-                        >
-                        arith_op: Mod
-                        right_operand: <
-                            int64_val: 2
-                        >
-                        op: Equal
-                        value: <
-                            int64_val: 0
-                        >
-                    >
-                >
-                right: <
-                    match_expr: <
-                        struct_name: "struct_array"
-                        match_type: MatchAny
-                        count: 0
-                        predicate: <
-                            binary_expr: <
-                                op: LogicalAnd
-                                left: <
-                                    unary_range_expr: <
-                                        column_info: <
-                                            field_id: %2%
-                                            data_type: Array
-                                            element_type: VarChar
-                                            nested_path: "sub_str"
-                                            is_element_level: true
-                                        >
-                                        op: Equal
-                                        value: <
-                                            string_val: "%4%"
-                                        >
-                                    >
-                                >
-                                right: <
-                                    unary_range_expr: <
-                                        column_info: <
-                                            field_id: %3%
-                                            data_type: Array
-                                            element_type: Int32
-                                            nested_path: "sub_int"
-                                            is_element_level: true
-                                        >
-                                        op: GreaterThan
-                                        value: <
-                                            int64_val: %5%
-                                        >
-                                    >
-                                >
-                            >
-                        >
-                    >
-                >
-            >
-        >
-    >)") % int64_fid_.get() % sub_str_fid_.get() %
-                               sub_int_fid_.get() % target_str % target_int);
+    // Expression: (id % 2 == 0) && match_any(struct_array, $[sub_str] == "aaa" && $[sub_int] > 100)
+    std::string predicate = "$[sub_str] == \"" + target_str +
+                            "\" && $[sub_int] > " + std::to_string(target_int);
+    std::string filter_expr =
+        "id % 2 == 0 && match_any(struct_array, " + predicate + ")";
 
-    auto result = ExecuteRetrieve(raw_plan);
+    auto result = ExecuteRetrieve(filter_expr);
 
     // Verify: all results should have id % 2 == 0 AND match_count > 0
     std::cout << "=== MatchWithOtherExpr (id %% 2 == 0 && MatchAny) ==="
@@ -1851,83 +1685,39 @@ class SealedMatchExprIntTypeTest
         return count;
     }
 
+    // Create retrieve filter expression with specified match type, count, and target values
     std::string
-    GetElementTypeString() const {
-        switch (int_type_) {
-            case DataType::INT8:
-                return "Int8";
-            case DataType::INT16:
-                return "Int16";
-            case DataType::INT32:
-                return "Int32";
-            default:
-                return "Unknown";
-        }
-    }
+    CreateRetrieveFilterExpr(const std::string& match_type,
+                             int64_t count,
+                             const std::string& target_str,
+                             int32_t target_int) {
+        std::string predicate = "$[sub_str] == \"" + target_str +
+                                "\" && $[sub_int] > " +
+                                std::to_string(target_int);
 
-    std::string
-    CreateRetrievePlanText(const std::string& match_type,
-                           int64_t count,
-                           const std::string& target_str,
-                           int32_t target_int) {
-        return boost::str(boost::format(R"(query: <
-            predicates: <
-                match_expr: <
-                    struct_name: "struct_array"
-                    match_type: %1%
-                    count: %2%
-                    predicate: <
-                        binary_expr: <
-                            op: LogicalAnd
-                            left: <
-                                unary_range_expr: <
-                                    column_info: <
-                                        field_id: %3%
-                                        data_type: Array
-                                        element_type: VarChar
-                                        nested_path: "sub_str"
-                                        is_element_level: true
-                                    >
-                                    op: Equal
-                                    value: <
-                                        string_val: "%5%"
-                                    >
-                                >
-                            >
-                            right: <
-                                unary_range_expr: <
-                                    column_info: <
-                                        field_id: %4%
-                                        data_type: Array
-                                        element_type: %7%
-                                        nested_path: "sub_int"
-                                        is_element_level: true
-                                    >
-                                    op: GreaterThan
-                                    value: <
-                                        int64_val: %6%
-                                    >
-                                >
-                            >
-                        >
-                    >
-                >
-            >
-        >
-        output_field_ids: %8%)") %
-                          match_type % count % sub_str_fid_.get() %
-                          sub_int_fid_.get() % target_str % target_int %
-                          GetElementTypeString() % int64_fid_.get());
+        if (match_type == "MatchAny") {
+            return "match_any(struct_array, " + predicate + ")";
+        } else if (match_type == "MatchAll") {
+            return "match_all(struct_array, " + predicate + ")";
+        } else if (match_type == "MatchLeast") {
+            return "match_least(struct_array, " + predicate +
+                   ", threshold=" + std::to_string(count) + ")";
+        } else if (match_type == "MatchMost") {
+            return "match_most(struct_array, " + predicate +
+                   ", threshold=" + std::to_string(count) + ")";
+        } else if (match_type == "MatchExact") {
+            return "match_exact(struct_array, " + predicate +
+                   ", threshold=" + std::to_string(count) + ")";
+        }
+        return "";
     }
 
     std::unique_ptr<proto::segcore::RetrieveResults>
-    ExecuteRetrieve(const std::string& raw_plan) {
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        EXPECT_TRUE(ok) << "Failed to parse plan";
-
-        auto plan = ProtoParser(schema_).CreateRetrievePlan(plan_node);
+    ExecuteRetrieve(const std::string& filter_expr) {
+        ScopedSchemaHandle schema_handle(*schema_);
+        auto plan_str = schema_handle.Parse(filter_expr);
+        auto plan =
+            CreateRetrievePlanByExpr(schema_, plan_str.data(), plan_str.size());
         EXPECT_NE(plan, nullptr);
 
         return seg_->Retrieve(
@@ -1972,9 +1762,9 @@ TEST_P(SealedMatchExprIntTypeTest, MatchAnyBruteForce) {
     std::string target_str = "aaa";
     int32_t target_int = 0;  // Use 0 as threshold for more matches
 
-    auto raw_plan =
-        CreateRetrievePlanText("MatchAny", 0, target_str, target_int);
-    auto result = ExecuteRetrieve(raw_plan);
+    auto filter_expr =
+        CreateRetrieveFilterExpr("MatchAny", 0, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
 
     auto expected_rows = ComputeExpectedRows(
         target_str,
@@ -2042,9 +1832,9 @@ TEST_P(SealedMatchExprIntTypeTest, MatchLeastBruteForce) {
     int32_t target_int = 0;
     int64_t threshold = 2;
 
-    auto raw_plan =
-        CreateRetrievePlanText("MatchLeast", threshold, target_str, target_int);
-    auto result = ExecuteRetrieve(raw_plan);
+    auto filter_expr = CreateRetrieveFilterExpr(
+        "MatchLeast", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(filter_expr);
 
     auto expected_rows = ComputeExpectedRows(
         target_str,
