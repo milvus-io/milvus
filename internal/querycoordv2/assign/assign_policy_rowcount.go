@@ -19,6 +19,7 @@ package assign
 import (
 	"context"
 	"sort"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -34,6 +35,50 @@ type RowCountBasedAssignPolicy struct {
 	nodeManager *session.NodeManager
 	scheduler   task.Scheduler
 	dist        *meta.DistributionManager
+
+	mu      sync.Mutex
+	status  *rowcountWorkloadStatus
+	version int64
+}
+
+type rowcountWorkloadStatus struct {
+	nodeGlobalRowCount        map[int64]int
+	nodeGlobalChannelRowCount map[int64]int
+	nodeGlobalChannelCount    map[int64]int
+}
+
+// getWorkloadStatus refreshes and returns the workload status if the underlying distribution version has changed.
+func (p *RowCountBasedAssignPolicy) getWorkloadStatus() *rowcountWorkloadStatus {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	currVer := p.dist.SegmentDistManager.GetVersion() + p.dist.ChannelDistManager.GetVersion()
+	if currVer == p.version && p.status != nil {
+		return p.status
+	}
+
+	status := &rowcountWorkloadStatus{
+		nodeGlobalRowCount:        make(map[int64]int),
+		nodeGlobalChannelRowCount: make(map[int64]int),
+		nodeGlobalChannelCount:    make(map[int64]int),
+	}
+
+	allSegments := p.dist.SegmentDistManager.GetByFilter()
+	for _, s := range allSegments {
+		status.nodeGlobalRowCount[s.Node] += int(s.GetNumOfRows())
+	}
+
+	allChannels := p.dist.ChannelDistManager.GetByFilter()
+	for _, ch := range allChannels {
+		status.nodeGlobalChannelCount[ch.Node]++
+		if ch.View != nil {
+			status.nodeGlobalChannelRowCount[ch.Node] += int(ch.View.NumOfGrowingRows)
+		}
+	}
+
+	p.status = status
+	p.version = currVer
+	return p.status
 }
 
 // newRowCountBasedAssignPolicy creates a new RowCountBasedAssignPolicy
@@ -47,6 +92,7 @@ func newRowCountBasedAssignPolicy(
 		nodeManager: nodeManager,
 		scheduler:   scheduler,
 		dist:        dist,
+		version:     -1,
 	}
 }
 
@@ -169,20 +215,12 @@ func (p *RowCountBasedAssignPolicy) AssignChannel(
 
 // convertToNodeItemsBySegment creates node items with row count scores
 func (p *RowCountBasedAssignPolicy) convertToNodeItemsBySegment(nodeIDs []int64) map[int64]*NodeItem {
+	status := p.getWorkloadStatus()
+
 	ret := make(map[int64]*NodeItem, len(nodeIDs))
 	for _, node := range nodeIDs {
-		// Calculate sealed segment row count on node
-		segments := p.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(node))
-		rowcnt := 0
-		for _, s := range segments {
-			rowcnt += int(s.GetNumOfRows())
-		}
-
-		// Calculate growing segment row count on node
-		channels := p.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(node))
-		for _, channel := range channels {
-			rowcnt += int(channel.View.NumOfGrowingRows)
-		}
+		// Get pre-aggregated global row counts from status
+		rowcnt := status.nodeGlobalRowCount[node] + status.nodeGlobalChannelRowCount[node]
 
 		// Calculate executing task cost in scheduler
 		rowcnt += p.scheduler.GetSegmentTaskDelta(node, -1)
@@ -196,11 +234,13 @@ func (p *RowCountBasedAssignPolicy) convertToNodeItemsBySegment(nodeIDs []int64)
 
 // convertToNodeItemsByChannel creates node items with channel count scores
 func (p *RowCountBasedAssignPolicy) convertToNodeItemsByChannel(nodeIDs []int64) map[int64]*NodeItem {
+	status := p.getWorkloadStatus()
+
 	ret := make(map[int64]*NodeItem, len(nodeIDs))
 	for _, node := range nodeIDs {
-		channels := p.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(node))
+		// Get pre-aggregated channel count from status
+		channelCount := status.nodeGlobalChannelCount[node]
 
-		channelCount := len(channels)
 		// Calculate executing task cost in scheduler
 		channelCount += p.scheduler.GetChannelTaskDelta(node, -1)
 

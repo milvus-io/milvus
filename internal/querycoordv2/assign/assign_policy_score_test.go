@@ -532,3 +532,46 @@ func TestScoreBasedAssignPolicy_AssignChannel_EmptyNodes(t *testing.T) {
 
 	assert.Nil(t, plans)
 }
+
+// TestScoreBasedAssignPolicy_WorkloadStatusOnDemandUpdate tests the on-demand workload status update mechanism
+func TestScoreBasedAssignPolicy_WorkloadStatusOnDemandUpdate(t *testing.T) {
+	nodeManager := session.NewNodeManager()
+	mockScheduler := task.NewMockScheduler(t)
+	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	dist := meta.NewDistributionManager(nodeManager)
+	metaMgr := meta.NewMeta(nil, nil, nodeManager)
+
+	policy := newScoreBasedAssignPolicy(nodeManager, mockScheduler, dist, metaMgr)
+
+	// 1. Init status
+	firstStatus := policy.getWorkloadStatus()
+	firstVersion := policy.version
+	assert.NotNil(t, firstStatus)
+
+	// 2. Update without meta change
+	secondStatus := policy.getWorkloadStatus()
+	// Should be identical pointer
+	assert.Equal(t, firstStatus, secondStatus, "Status pointer should be identical when version hasn't changed")
+	assert.Equal(t, firstVersion, policy.version)
+
+	// 3. Update with segment meta change
+	dist.SegmentDistManager.Update(1, &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 100}, Node: 1})
+
+	// 4. Update again
+	thirdStatus := policy.getWorkloadStatus()
+	// Should be new pointer
+	assert.NotEqual(t, firstStatus, thirdStatus, "Status should be refreshed when segment version changed")
+	assert.Greater(t, policy.version, firstVersion)
+
+	secondVersion := policy.version
+
+	// 5. Update with channel meta change
+	dist.ChannelDistManager.Update(1, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{ChannelName: "v1"}, Node: 1, View: &meta.LeaderView{ID: 1}})
+
+	// 6. Update again
+	fourthStatus := policy.getWorkloadStatus()
+	// Should be new pointer
+	assert.NotEqual(t, thirdStatus, fourthStatus, "Status should be refreshed when channel version changed")
+	assert.Greater(t, policy.version, secondVersion)
+}

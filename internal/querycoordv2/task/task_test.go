@@ -1791,7 +1791,7 @@ func (suite *TaskSuite) TestTaskDeltaCache() {
 			context.TODO(),
 			10*time.Second,
 			WrapIDSource(0),
-			1,
+			collectionID,
 			suite.replica,
 			NewChannelAction(nodeID, ActionTypeGrow, "channel"),
 		)
@@ -1809,6 +1809,8 @@ func (suite *TaskSuite) TestTaskDeltaCache() {
 		etd.Sub(tasks[i])
 	}
 	suite.Equal(0, etd.Get(nodeID, collectionID))
+	suite.Equal(0, etd.Get(nodeID, -1))
+	suite.Equal(0, etd.Get(-1, -1))
 }
 
 func (suite *TaskSuite) TestRemoveTaskWithError() {

@@ -545,15 +545,12 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 			func() *assign.PriorityQueue { return b.normalBalanceQueue },
 			config)
 
-		// Submit normal balance tasks if any were generated
-		// Update the auto balance timestamp to enforce the interval
 		if generatedSegmentTaskNum > 0 || generatedChannelTaskNum > 0 {
-			b.autoBalanceTs = time.Now()
-
 			// clean up the stopping balance queue when normal balance generated tasks
 			// make sure that next time when trigger stopping balance, a new stopping balance round will be started
 			b.stoppingBalanceQueue = nil
 		}
+		b.autoBalanceTs = time.Now()
 	}
 
 	// Always return nil as tasks are submitted directly to scheduler

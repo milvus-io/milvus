@@ -159,16 +159,18 @@ func (queue *taskQueue) Range(fn func(task Task) bool) {
 }
 
 type ExecutingTaskDelta struct {
-	data map[int64]map[int64]int // nodeID -> collectionID -> taskDelta
-	mu   sync.RWMutex            // Mutex to protect the map
+	data           map[int64]map[int64]int // nodeID -> collectionID -> taskDelta
+	nodeTotalDelta map[int64]int           // nodeID -> totalTaskDelta
+	mu             sync.RWMutex            // Mutex to protect the map
 
 	taskIDRecords UniqueSet
 }
 
 func NewExecutingTaskDelta() *ExecutingTaskDelta {
 	return &ExecutingTaskDelta{
-		data:          make(map[int64]map[int64]int),
-		taskIDRecords: NewUniqueSet(),
+		data:           make(map[int64]map[int64]int),
+		nodeTotalDelta: make(map[int64]int),
+		taskIDRecords:  NewUniqueSet(),
 	}
 }
 
@@ -194,6 +196,7 @@ func (etd *ExecutingTaskDelta) Add(task Task) {
 			etd.data[nodeID] = make(map[int64]int)
 		}
 		etd.data[nodeID][collectionID] += delta
+		etd.nodeTotalDelta[nodeID] += delta
 	}
 }
 
@@ -220,6 +223,7 @@ func (etd *ExecutingTaskDelta) Sub(task Task) {
 		}
 
 		etd.data[nodeID][collectionID] -= delta
+		etd.nodeTotalDelta[nodeID] -= delta
 	}
 }
 
@@ -229,22 +233,29 @@ func (etd *ExecutingTaskDelta) Get(nodeID, collectionID int64) int {
 	etd.mu.RLock()
 	defer etd.mu.RUnlock()
 
-	var sum int
-
-	for nID, collections := range etd.data {
-		if nodeID != -1 && nID != nodeID {
-			continue
+	if nodeID != -1 && collectionID != -1 {
+		nodeData, ok := etd.data[nodeID]
+		if !ok {
+			return 0
 		}
-
-		for cID, delta := range collections {
-			if collectionID != -1 && cID != collectionID {
-				continue
-			}
-
-			sum += delta
-		}
+		return nodeData[collectionID]
 	}
 
+	if nodeID != -1 {
+		return etd.nodeTotalDelta[nodeID]
+	}
+
+	var sum int
+	if collectionID != -1 {
+		for _, collections := range etd.data {
+			sum += collections[collectionID]
+		}
+		return sum
+	}
+
+	for _, delta := range etd.nodeTotalDelta {
+		sum += delta
+	}
 	return sum
 }
 
@@ -253,7 +264,11 @@ func (etd *ExecutingTaskDelta) printDetailInfos() {
 	defer etd.mu.RUnlock()
 
 	if etd.taskIDRecords.Len() > 0 {
-		log.Info("task delta cache info", zap.Any("taskIDRecords", etd.taskIDRecords.Collect()), zap.Any("data", etd.data))
+		log.Info("task delta cache info",
+			zap.Any("taskIDRecords", etd.taskIDRecords.Collect()),
+			zap.Any("data", etd.data),
+			zap.Any("nodeTotalDelta", etd.nodeTotalDelta),
+		)
 	}
 }
 
@@ -261,6 +276,7 @@ func (etd *ExecutingTaskDelta) Clear() {
 	etd.mu.Lock()
 	defer etd.mu.Unlock()
 	etd.data = make(map[int64]map[int64]int)
+	etd.nodeTotalDelta = make(map[int64]int)
 	etd.taskIDRecords.Clear()
 }
 
