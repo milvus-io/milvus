@@ -22,6 +22,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -112,6 +113,11 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 
 	// Do not block and async updateCheckPoint
 	channelPos, needUpdate, err := ttn.writeBufferManager.GetCheckpoint(ttn.vChannelName)
+
+	if fgMsg.isAlterWal && !needUpdate {
+		channelPos, needUpdate, err = ttn.waitForCheckpointUpdate(fgMsg, curTs)
+	}
+
 	if err != nil {
 		log.Warn("channel removed", zap.String("channel", ttn.vChannelName), zap.Error(err))
 		return []Msg{}
@@ -127,6 +133,63 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 	return []Msg{}
 }
 
+// waitForCheckpointUpdate waits for checkpoint to be ready using exponential backoff retry
+func (ttn *ttNode) waitForCheckpointUpdate(fgMsg *FlowGraphMsg, curTs time.Time) (*msgpb.MsgPosition, bool, error) {
+	ctx := context.Background()
+	backoffConfig := backoff.NewExponentialBackOff()
+	backoffConfig.InitialInterval = 100 * time.Millisecond
+	backoffConfig.MaxInterval = 1 * time.Second
+	backoffConfig.Multiplier = 1.5
+	backoffConfig.MaxElapsedTime = 0 // No max elapsed time limit
+	backoffConfig.Reset()
+
+	var channelPos *msgpb.MsgPosition
+	var needUpdate bool
+
+	operation := func() error {
+		var retryErr error
+		channelPos, needUpdate, retryErr = ttn.writeBufferManager.GetCheckpoint(ttn.vChannelName)
+		if retryErr != nil {
+			return retryErr
+		}
+		if !needUpdate {
+			// Return a temporary error to trigger retry with backoff
+			return fmt.Errorf("checkpoint not ready yet")
+		}
+		// needUpdate is true, operation succeeded
+		return nil
+	}
+
+	notify := func(err error, duration time.Duration) {
+		var channelCheckpointTS uint64
+		if channelPos != nil {
+			channelCheckpointTS = channelPos.GetTimestamp()
+		}
+		log.Ctx(ctx).Info("waiting for checkpoint update, retrying with backoff",
+			zap.String("channel", ttn.vChannelName),
+			zap.Uint64("currentCheckpointTS", channelCheckpointTS),
+			zap.Uint64("requiredTimeTick", fgMsg.TimeTick()),
+			zap.Uint64("alterWalTimeTick", fgMsg.alterWalTimeTick),
+			zap.Duration("retryInterval", duration),
+		)
+	}
+
+	backoffCtx := backoff.WithContext(backoffConfig, ctx)
+	if err := backoff.RetryNotify(operation, backoffCtx, notify); err != nil {
+		log.Ctx(ctx).Warn("failed to wait for checkpoint update",
+			zap.String("channel", ttn.vChannelName),
+			zap.Error(err),
+		)
+		return channelPos, needUpdate, err
+	}
+
+	log.Ctx(ctx).Info("checkpoint update ready",
+		zap.String("channel", ttn.vChannelName),
+		zap.Uint64("checkpointTS", channelPos.GetTimestamp()),
+	)
+	return channelPos, needUpdate, nil
+}
+
 func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Time, flush bool) {
 	callBack := func() {
 		channelCPTs, _ := tsoutil.ParseTS(channelPos.GetTimestamp())
@@ -135,6 +198,7 @@ func (ttn *ttNode) updateChannelCP(channelPos *msgpb.MsgPosition, curTs time.Tim
 		log.Ctx(context.TODO()).Debug("UpdateChannelCheckpoint success",
 			zap.String("channel", ttn.vChannelName),
 			zap.Uint64("cpTs", channelPos.GetTimestamp()),
+			zap.Stringer("walName", channelPos.WALName),
 			zap.Time("cpTime", channelCPTs))
 	}
 	ttn.cpUpdater.AddTask(channelPos, flush, callBack)
