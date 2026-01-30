@@ -28,6 +28,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 )
 
 type SearchTaskSuite struct {
@@ -139,6 +141,136 @@ func (s *SearchTaskSuite) TestCombinePlaceHolderGroups() {
 
 		err = task.combinePlaceHolderGroups()
 		s.Error(err)
+	})
+}
+
+func (s *SearchTaskSuite) TestMergeFilterOnly() {
+	s.Run("same_filter_only_can_merge", func() {
+		task1 := &SearchTask{
+			nq:   10,
+			topk: 100,
+			req: &querypb.SearchRequest{
+				FilterOnly: true,
+				Req: &internalpb.SearchRequest{
+					DbID:               1,
+					CollectionID:       1000,
+					MvccTimestamp:      100,
+					PartitionIDs:       []int64{1, 2},
+					SerializedExprPlan: []byte("plan"),
+				},
+				DmlChannels: []string{"channel1"},
+				SegmentIDs:  []int64{1, 2, 3},
+			},
+			originTopks: []int64{100},
+			originNqs:   []int64{10},
+		}
+		task2 := &SearchTask{
+			nq:   5,
+			topk: 100,
+			req: &querypb.SearchRequest{
+				FilterOnly: true,
+				Req: &internalpb.SearchRequest{
+					DbID:               1,
+					CollectionID:       1000,
+					MvccTimestamp:      100,
+					PartitionIDs:       []int64{1, 2},
+					SerializedExprPlan: []byte("plan"),
+				},
+				DmlChannels: []string{"channel1"},
+				SegmentIDs:  []int64{1, 2, 3},
+			},
+			originTopks: []int64{100},
+			originNqs:   []int64{5},
+		}
+
+		merged := task1.Merge(task2)
+		s.True(merged, "tasks with same FilterOnly=true should merge")
+		s.Equal(int64(15), task1.nq)
+	})
+
+	s.Run("different_filter_only_cannot_merge", func() {
+		task1 := &SearchTask{
+			nq:   10,
+			topk: 100,
+			req: &querypb.SearchRequest{
+				FilterOnly: true,
+				Req: &internalpb.SearchRequest{
+					DbID:               1,
+					CollectionID:       1000,
+					MvccTimestamp:      100,
+					PartitionIDs:       []int64{1, 2},
+					SerializedExprPlan: []byte("plan"),
+				},
+				DmlChannels: []string{"channel1"},
+				SegmentIDs:  []int64{1, 2, 3},
+			},
+			originTopks: []int64{100},
+			originNqs:   []int64{10},
+		}
+		task2 := &SearchTask{
+			nq:   5,
+			topk: 100,
+			req: &querypb.SearchRequest{
+				FilterOnly: false,
+				Req: &internalpb.SearchRequest{
+					DbID:               1,
+					CollectionID:       1000,
+					MvccTimestamp:      100,
+					PartitionIDs:       []int64{1, 2},
+					SerializedExprPlan: []byte("plan"),
+				},
+				DmlChannels: []string{"channel1"},
+				SegmentIDs:  []int64{1, 2, 3},
+			},
+			originTopks: []int64{100},
+			originNqs:   []int64{5},
+		}
+
+		merged := task1.Merge(task2)
+		s.False(merged, "tasks with different FilterOnly should not merge")
+	})
+
+	s.Run("filter_only_false_can_merge", func() {
+		task1 := &SearchTask{
+			nq:   10,
+			topk: 100,
+			req: &querypb.SearchRequest{
+				FilterOnly: false,
+				Req: &internalpb.SearchRequest{
+					DbID:               1,
+					CollectionID:       1000,
+					MvccTimestamp:      100,
+					PartitionIDs:       []int64{1, 2},
+					SerializedExprPlan: []byte("plan"),
+				},
+				DmlChannels: []string{"channel1"},
+				SegmentIDs:  []int64{1, 2, 3},
+			},
+			originTopks: []int64{100},
+			originNqs:   []int64{10},
+		}
+		task2 := &SearchTask{
+			nq:   5,
+			topk: 100,
+			req: &querypb.SearchRequest{
+				FilterOnly: false,
+				Req: &internalpb.SearchRequest{
+					DbID:               1,
+					CollectionID:       1000,
+					MvccTimestamp:      100,
+					PartitionIDs:       []int64{1, 2},
+					SerializedExprPlan: []byte("plan"),
+				},
+				DmlChannels: []string{"channel1"},
+				SegmentIDs:  []int64{1, 2, 3},
+			},
+			originTopks: []int64{100},
+			originNqs:   []int64{5},
+		}
+
+		merged := task1.Merge(task2)
+		s.True(merged, "tasks with same FilterOnly=false should merge")
+		s.Equal(int64(15), task1.nq)
 	})
 }
 
