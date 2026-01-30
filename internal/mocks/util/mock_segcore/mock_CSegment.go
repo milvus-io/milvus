@@ -703,6 +703,53 @@ func (_c *MockCSegment_Release_Call) RunAndReturn(run func()) *MockCSegment_Rele
 	return _c
 }
 
+// Reopen provides a mock function with given fields: ctx, request
+func (_m *MockCSegment) Reopen(ctx context.Context, request *segcore.ReopenRequest) error {
+	ret := _m.Called(ctx, request)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Reopen")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.ReopenRequest) error); ok {
+		r0 = rf(ctx, request)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCSegment_Reopen_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Reopen'
+type MockCSegment_Reopen_Call struct {
+	*mock.Call
+}
+
+// Reopen is a helper method to define mock.On call
+//   - ctx context.Context
+//   - request *segcore.ReopenRequest
+func (_e *MockCSegment_Expecter) Reopen(ctx interface{}, request interface{}) *MockCSegment_Reopen_Call {
+	return &MockCSegment_Reopen_Call{Call: _e.mock.On("Reopen", ctx, request)}
+}
+
+func (_c *MockCSegment_Reopen_Call) Run(run func(ctx context.Context, request *segcore.ReopenRequest)) *MockCSegment_Reopen_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*segcore.ReopenRequest))
+	})
+	return _c
+}
+
+func (_c *MockCSegment_Reopen_Call) Return(_a0 error) *MockCSegment_Reopen_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCSegment_Reopen_Call) RunAndReturn(run func(context.Context, *segcore.ReopenRequest) error) *MockCSegment_Reopen_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Retrieve provides a mock function with given fields: ctx, plan
 func (_m *MockCSegment) Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcore.RetrieveResult, error) {
 	ret := _m.Called(ctx, plan)

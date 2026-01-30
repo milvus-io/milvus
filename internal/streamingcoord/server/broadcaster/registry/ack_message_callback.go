@@ -12,6 +12,7 @@ import (
 )
 
 // MessageAckCallback is the callback function for the message type.
+// It will be called when all the message are acked.
 type (
 	MessageAckCallback[H proto.Message, B proto.Message] = func(ctx context.Context, result message.BroadcastResult[H, B]) error
 	messageInnerAckCallback                              = func(ctx context.Context, msg message.BroadcastMutableMessage, result map[string]*message.AppendResult) error

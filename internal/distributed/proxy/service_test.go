@@ -248,6 +248,12 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("TruncateCollection", func(t *testing.T) {
+		mockProxy.EXPECT().TruncateCollection(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.TruncateCollection(ctx, nil)
+		assert.NoError(t, err)
+	})
+
 	t.Run("HasCollection", func(t *testing.T) {
 		mockProxy.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(nil, nil)
 		mockProxy.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(nil, nil)

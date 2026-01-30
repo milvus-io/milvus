@@ -201,3 +201,27 @@ func NewAlterCollectionMessageBody(msg message.ImmutableMessage) (msgstream.TsMs
 		AlterCollectionMessage: alterCollMsg,
 	}, nil
 }
+
+type TruncateCollectionMessageBody struct {
+	*tsMsgImpl
+	TruncateCollectionMessage message.ImmutableTruncateCollectionMessageV2
+}
+
+func NewTruncateCollectionMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+	truncateCollMsg, err := message.AsImmutableTruncateCollectionMessageV2(msg)
+	if err != nil {
+		return nil, err
+	}
+	return &TruncateCollectionMessageBody{
+		tsMsgImpl: &tsMsgImpl{
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: msg.TimeTick(),
+				EndTimestamp:   msg.TimeTick(),
+			},
+			ts:      msg.TimeTick(),
+			sz:      msg.EstimateSize(),
+			msgType: MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()),
+		},
+		TruncateCollectionMessage: truncateCollMsg,
+	}, nil
+}

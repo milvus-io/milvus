@@ -100,6 +100,7 @@ func TestFlowGraph_DDNode_OperateFlush(t *testing.T) {
 	h.EXPECT().HandleFlush(mock.Anything).Return(nil)
 	h.EXPECT().HandleManualFlush(mock.Anything).Return(nil)
 	h.EXPECT().HandleFlushAll(mock.Anything, mock.Anything).Return(nil)
+	h.EXPECT().HandleTruncateCollection(mock.Anything).Return(nil)
 
 	ddn := ddNode{
 		ctx:          context.Background(),
@@ -140,6 +141,14 @@ func TestFlowGraph_DDNode_OperateFlush(t *testing.T) {
 	assert.NoError(t, err)
 	immutableFlushAllMsg := flushAllMsg.WithTimeTick(4).IntoImmutableMessage(mock_message.NewMockMessageID(t))
 
+	truncateCollectionMsg, err := message.NewTruncateCollectionMessageBuilderV2().
+		WithHeader(&message.TruncateCollectionMessageHeader{}).
+		WithBody(&message.TruncateCollectionMessageBody{}).
+		WithVChannel("v1").
+		BuildMutable()
+	assert.NoError(t, err)
+	immutableTruncateCollectionMsg := truncateCollectionMsg.WithTimeTick(4).IntoImmutableMessage(mock_message.NewMockMessageID(t))
+
 	msg1, err := adaptor.NewCreateSegmentMessageBody(immutableCreateSegmentMsg)
 	assert.NoError(t, err)
 	msg2, err := adaptor.NewFlushMessageBody(immutableFlushMsg)
@@ -148,8 +157,9 @@ func TestFlowGraph_DDNode_OperateFlush(t *testing.T) {
 	assert.NoError(t, err)
 	msg4, err := adaptor.NewFlushAllMessageBody(immutableFlushAllMsg)
 	assert.NoError(t, err)
-
-	tsMessages := []msgstream.TsMsg{msg1, msg2, msg3, msg4}
+	msg5, err := adaptor.NewTruncateCollectionMessageBody(immutableTruncateCollectionMsg)
+	assert.NoError(t, err)
+	tsMessages := []msgstream.TsMsg{msg1, msg2, msg3, msg4, msg5}
 	var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
 	outputMsgs := ddn.Operate([]Msg{msgStreamMsg})
 	assert.NotNil(t, outputMsgs)

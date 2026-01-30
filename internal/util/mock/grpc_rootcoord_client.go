@@ -322,6 +322,10 @@ func (m *GrpcRootCoordClient) GetQuotaMetrics(ctx context.Context, in *internalp
 	return &internalpb.GetQuotaMetricsResponse{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error) {
+	return &milvuspb.TruncateCollectionResponse{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error) {
 	return &internalpb.BackupEzkResponse{}, m.Err
 }
