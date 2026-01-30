@@ -699,7 +699,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 
 	// add highlight field ids to output fields id
 	if t.highlighter != nil {
-		t.SearchRequest.OutputFieldsId = append(t.SearchRequest.OutputFieldsId, t.highlighter.FieldIDs()...)
+		t.SearchRequest.OutputFieldsId = append(t.SearchRequest.OutputFieldsId, t.highlighter.RequiredFieldIDs()...)
 	}
 
 	if t.partitionKeyMode {
@@ -734,6 +734,15 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		allFieldIDs.Insert(primaryFieldSchema.FieldID)
 		plan.OutputFieldIds = allFieldIDs.Collect()
 		plan.DynamicFields = t.userDynamicFields
+		// Merge highlight dynamic fields into plan.DynamicFields
+		if t.highlighter != nil {
+			highlightDynFields := t.highlighter.DynamicFieldNames()
+			if len(highlightDynFields) > 0 {
+				dynFieldSet := typeutil.NewSet[string](plan.DynamicFields...)
+				dynFieldSet.Insert(highlightDynFields...)
+				plan.DynamicFields = dynFieldSet.Collect()
+			}
+		}
 	}
 	plan.Namespace = t.request.Namespace
 
