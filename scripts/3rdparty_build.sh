@@ -85,7 +85,7 @@ source ${ROOT_DIR}/scripts/setenv.sh
 pushd ${BUILD_OUTPUT_DIR}
 
 export CONAN_REVISIONS_ENABLED=1
-export CXXFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"
+export CXXFLAGS="-Wno-error=address -Wno-error=deprecated-declarations -include cstdint"
 export CFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"
 
 # Determine the Conan remote URL, using the environment variable if set, otherwise defaulting
