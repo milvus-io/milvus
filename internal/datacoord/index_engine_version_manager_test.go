@@ -3,6 +3,7 @@ package datacoord
 import (
 	"testing"
 
+	"github.com/blang/semver/v4"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -315,4 +316,104 @@ func Test_IndexEngineVersionManager_removeNodeByID(t *testing.T) {
 	assert.False(t, exists, "node should be removed from scalarIndexVersions map")
 	_, exists = vm.indexNonEncoding[1]
 	assert.False(t, exists, "node should be removed from indexNonEncoding map")
+}
+
+func Test_IndexEngineVersionManager_GetMinimalSessionVer(t *testing.T) {
+	m := newIndexEngineVersionManager()
+
+	// empty - should return zero version
+	assert.Equal(t, semver.Version{}, m.GetMinimalSessionVer())
+
+	// startup with single node
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			Version: semver.MustParse("2.6.0"),
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: 1,
+			},
+		},
+	})
+	assert.Equal(t, semver.MustParse("2.6.0"), m.GetMinimalSessionVer())
+
+	// add node with lower version - should return the lower one
+	m.AddNode(&sessionutil.Session{
+		Version: semver.MustParse("2.5.0"),
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: 2,
+		},
+	})
+	assert.Equal(t, semver.MustParse("2.5.0"), m.GetMinimalSessionVer())
+
+	// add node with higher version - should still return the lowest
+	m.AddNode(&sessionutil.Session{
+		Version: semver.MustParse("2.7.0"),
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: 3,
+		},
+	})
+	assert.Equal(t, semver.MustParse("2.5.0"), m.GetMinimalSessionVer())
+
+	// update node 2 to higher version - should now return 2.6.0
+	m.Update(&sessionutil.Session{
+		Version: semver.MustParse("2.8.0"),
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: 2,
+		},
+	})
+	assert.Equal(t, semver.MustParse("2.6.0"), m.GetMinimalSessionVer())
+
+	// remove node 1 - should return 2.7.0 (min of 2.8.0 and 2.7.0)
+	m.RemoveNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID: 1,
+		},
+	})
+	assert.Equal(t, semver.MustParse("2.7.0"), m.GetMinimalSessionVer())
+
+	// verify sessionVersion map is correctly updated
+	vm := m.(*versionManagerImpl)
+	_, exists := vm.sessionVersion[1]
+	assert.False(t, exists, "removed node should not exist in sessionVersion map")
+	_, exists = vm.sessionVersion[2]
+	assert.True(t, exists, "node 2 should exist in sessionVersion map")
+	_, exists = vm.sessionVersion[3]
+	assert.True(t, exists, "node 3 should exist in sessionVersion map")
+}
+
+func Test_IndexEngineVersionManager_SessionVersionCleanupOnStartup(t *testing.T) {
+	m := newIndexEngineVersionManager()
+
+	// First startup with initial nodes
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			Version: semver.MustParse("2.6.0"),
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: 1,
+			},
+		},
+		"2": {
+			Version: semver.MustParse("2.5.0"),
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: 2,
+			},
+		},
+	})
+	assert.Equal(t, semver.MustParse("2.5.0"), m.GetMinimalSessionVer())
+
+	// Second startup with only node 1 online (node 2 is offline)
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			Version: semver.MustParse("2.6.5"),
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: 1,
+			},
+		},
+	})
+
+	// Verify offline node 2 is cleaned up
+	assert.Equal(t, semver.MustParse("2.6.5"), m.GetMinimalSessionVer())
+
+	vm := m.(*versionManagerImpl)
+	_, exists := vm.sessionVersion[2]
+	assert.False(t, exists, "offline node should be removed from sessionVersion map")
 }
