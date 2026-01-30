@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include "cachinglayer/Utils.h"
+#include "common/Common.h"
 #include "common/Types.h"
 #include "index/IndexFactory.h"
 #include "knowhere/version.h"
@@ -1226,6 +1227,143 @@ TEST(Sealed, RealCount) {
     status = segment->Delete(c, del_ids3.get(), del_tss3.data());
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(0, segment->get_real_count());
+}
+
+// Test for DeletedRecord atomic snapshot optimization fast path
+// When query_timestamp >= max_delete_timestamp, we can directly use the snapshot bitset
+TEST(Sealed, DeleteSnapshotOptimizationFastPath) {
+    // Save original value and ensure optimization is enabled
+    bool original_value = ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.load();
+    ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(true);
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    int64_t N = 100;
+    auto dataset = DataGen(schema, N);
+    auto pks = dataset.get_col<int64_t>(pk);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // Delete some records with timestamps
+    int64_t delete_count = 10;
+    auto del_ids = GenPKs(pks.begin(), pks.begin() + delete_count);
+    Timestamp delete_ts = 1000;
+    auto del_tss = GenTss(delete_count, delete_ts);
+    auto status = segment->Delete(delete_count, del_ids.get(), del_tss.data());
+    ASSERT_TRUE(status.ok());
+
+    // Query with timestamp >= max_delete_ts should use fast path
+    BitsetType bitset1(N, false);
+    auto bitset_view1 = BitsetTypeView(bitset1);
+    Timestamp query_ts_fast =
+        delete_ts + delete_count + 100;  // >= max_delete_ts
+    segment->mask_with_delete(bitset_view1, N, query_ts_fast);
+    ASSERT_EQ(bitset1.count(), delete_count);
+
+    // Query with timestamp < max_delete_ts should use slow path
+    BitsetType bitset2(N, false);
+    auto bitset_view2 = BitsetTypeView(bitset2);
+    Timestamp query_ts_slow =
+        delete_ts + 5;  // < max_delete_ts, covers some but not all
+    segment->mask_with_delete(bitset_view2, N, query_ts_slow);
+    // Should have fewer deletions visible since query_ts is in the middle
+    ASSERT_LT(bitset2.count(), delete_count);
+    ASSERT_GT(bitset2.count(), 0);
+
+    // Restore original value
+    ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(original_value);
+}
+
+// Test for DeletedRecord atomic snapshot optimization disabled
+TEST(Sealed, DeleteSnapshotOptimizationDisabled) {
+    // Save original value and disable optimization
+    bool original_value = ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.load();
+    ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(false);
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    int64_t N = 100;
+    auto dataset = DataGen(schema, N);
+    auto pks = dataset.get_col<int64_t>(pk);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // Delete some records
+    int64_t delete_count = 10;
+    auto del_ids = GenPKs(pks.begin(), pks.begin() + delete_count);
+    Timestamp delete_ts = 1000;
+    auto del_tss = GenTss(delete_count, delete_ts);
+    auto status = segment->Delete(delete_count, del_ids.get(), del_tss.data());
+    ASSERT_TRUE(status.ok());
+
+    // Query should still work correctly via slow path
+    BitsetType bitset(N, false);
+    auto bitset_view = BitsetTypeView(bitset);
+    Timestamp query_ts = delete_ts + delete_count + 100;
+    segment->mask_with_delete(bitset_view, N, query_ts);
+    ASSERT_EQ(bitset.count(), delete_count);
+
+    // Restore original value
+    ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(original_value);
+}
+
+// Test for multiple sequential deletes updating snapshot correctly
+TEST(Sealed, DeleteSnapshotMultipleDeletes) {
+    bool original_value = ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.load();
+    ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(true);
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    int64_t N = 100;
+    auto dataset = DataGen(schema, N);
+    auto pks = dataset.get_col<int64_t>(pk);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // First batch of deletes
+    int64_t delete_count1 = 5;
+    auto del_ids1 = GenPKs(pks.begin(), pks.begin() + delete_count1);
+    Timestamp delete_ts1 = 1000;
+    auto del_tss1 = GenTss(delete_count1, delete_ts1);
+    auto status =
+        segment->Delete(delete_count1, del_ids1.get(), del_tss1.data());
+    ASSERT_TRUE(status.ok());
+
+    // Query after first delete batch
+    BitsetType bitset1(N, false);
+    auto bitset_view1 = BitsetTypeView(bitset1);
+    Timestamp query_ts1 = delete_ts1 + delete_count1 + 100;
+    segment->mask_with_delete(bitset_view1, N, query_ts1);
+    ASSERT_EQ(bitset1.count(), delete_count1);
+
+    // Second batch of deletes
+    int64_t delete_count2 = 5;
+    auto del_ids2 = GenPKs(pks.begin() + delete_count1,
+                           pks.begin() + delete_count1 + delete_count2);
+    Timestamp delete_ts2 = 2000;
+    auto del_tss2 = GenTss(delete_count2, delete_ts2);
+    status = segment->Delete(delete_count2, del_ids2.get(), del_tss2.data());
+    ASSERT_TRUE(status.ok());
+
+    // Query after second delete batch - should see all deletes
+    BitsetType bitset2(N, false);
+    auto bitset_view2 = BitsetTypeView(bitset2);
+    Timestamp query_ts2 = delete_ts2 + delete_count2 + 100;
+    segment->mask_with_delete(bitset_view2, N, query_ts2);
+    ASSERT_EQ(bitset2.count(), delete_count1 + delete_count2);
+
+    // Query with timestamp between batches - should only see first batch
+    BitsetType bitset3(N, false);
+    auto bitset_view3 = BitsetTypeView(bitset3);
+    Timestamp query_ts_between =
+        delete_ts1 + delete_count1 + 50;  // Between batch1 and batch2
+    segment->mask_with_delete(bitset_view3, N, query_ts_between);
+    ASSERT_EQ(bitset3.count(), delete_count1);
+
+    ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(original_value);
 }
 
 TEST(Sealed, GetVector) {

@@ -83,3 +83,7 @@ func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {
 func UpdateDefaultConfigParamTypeCheck(enable bool) {
 	C.SetDefaultConfigParamTypeCheck(C.bool(enable))
 }
+
+func UpdateEnableLatestDeleteSnapshotOptimization(enable bool) {
+	C.SetEnableLatestDeleteSnapshotOptimization(C.bool(enable))
+}

@@ -3372,6 +3372,9 @@ type queryNodeConfig struct {
 	// delete snapshot dump batch size
 	DeleteDumpBatchSize ParamItem `refreshable:"false"`
 
+	// delete snapshot optimization
+	EnableLatestDeleteSnapshotOptimization ParamItem `refreshable:"true"`
+
 	// expr cache
 	ExprResCacheEnabled       ParamItem `refreshable:"false"`
 	ExprResCacheCapacityBytes ParamItem `refreshable:"false"`
@@ -4483,6 +4486,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.DeleteDumpBatchSize.Init(base.mgr)
+
+	p.EnableLatestDeleteSnapshotOptimization = ParamItem{
+		Key:          "queryNode.segcore.enableLatestDeleteSnapshotOptimization",
+		Version:      "2.6.11",
+		DefaultValue: "true",
+		Doc:          "Enable latest delete snapshot optimization for fast path query when query_timestamp >= max_delete_timestamp.",
+		Export:       false,
+	}
+	p.EnableLatestDeleteSnapshotOptimization.Init(base.mgr)
 
 	// expr cache
 	p.ExprResCacheEnabled = ParamItem{
