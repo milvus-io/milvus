@@ -18,145 +18,532 @@ package datacoord
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
-type ImportCallbacksTestSuite struct {
+// ================================
+// Import Callbacks Test Suite
+// ================================
+
+type ImportCallbacksSuite struct {
 	suite.Suite
-	server *Server
-	meta   *meta
 }
 
-func TestImportCallbacksTestSuite(t *testing.T) {
-	suite.Run(t, new(ImportCallbacksTestSuite))
+func TestImportCallbacksSuite(t *testing.T) {
+	suite.Run(t, new(ImportCallbacksSuite))
 }
 
-func (s *ImportCallbacksTestSuite) SetupTest() {
-	s.server = &Server{}
-	s.meta = &meta{}
-	s.server.meta = s.meta
-}
+// --------------------------------
+// validateImportRequest Tests
+// --------------------------------
 
-func (s *ImportCallbacksTestSuite) TestValidateImportRequest_BalanceError() {
-	// Use a context with timeout to prevent hanging
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
-	mockey.PatchConvey("TestValidateImportRequest_BalanceError", s.T(), func() {
-		// Mock importMeta.CountJobBy to pass max jobs check
-		mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
-			return 1
-		}).Build()
-
-		s.server.importMeta = &importMeta{}
-
-		// Create test files and options
-		files := []*msgpb.ImportFile{
-			{Id: 1, Paths: []string{"/test/file1.json"}},
-		}
-		options := []*commonpb.KeyValuePair{
-			{Key: "timeout", Value: "300s"},
-		}
-
-		// Test without proper balance setup - should timeout or return error
-		err := s.server.validateImportRequest(ctx, files, options)
-		s.Assert().Error(err)
-	})
-}
-
-func TestValidateImportRequest_SuccessWithMock(t *testing.T) {
-	mockey.PatchConvey("TestValidateImportRequest with mock balancer", t, func() {
-		ctx := context.Background()
-
-		// Create server
-		server := &Server{}
-
-		// Mock importMeta.CountJobBy
-		mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
-			return 1
-		}).Build()
-
-		server.importMeta = &importMeta{}
-
-		// Mock balance.GetWithContext to return a balancer with nil replication config
-		mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
-			// Create a mock balancer that returns nil replication config
-			mockBalancer := &struct{ balancer.Balancer }{}
-
-			// Mock GetLatestChannelAssignment method
-			mockey.Mock((*struct{ balancer.Balancer }).GetLatestChannelAssignment).To(
-				func(_ *struct{ balancer.Balancer }) (*channel.WatchChannelAssignmentsCallbackParam, error) {
-					return &channel.WatchChannelAssignmentsCallbackParam{
-						ReplicateConfiguration: nil, // No replication configuration
-					}, nil
-				}).Build()
-
-			return mockBalancer, nil
-		}).Build()
-
-		files := []*msgpb.ImportFile{
-			{Id: 1, Paths: []string{"/test/file1.json"}},
-		}
-		options := []*commonpb.KeyValuePair{
-			{Key: "timeout", Value: "300s"},
-		}
-
-		err := server.validateImportRequest(ctx, files, options)
-		if err != nil {
-			t.Fatalf("Expected no error, got: %v", err)
-		}
-	})
-}
-
-func (s *ImportCallbacksTestSuite) TestValidateImportRequest_InvalidTimeout() {
+func (s *ImportCallbacksSuite) TestValidateImportRequest_InvalidTimeoutReturnsError() {
 	ctx := context.Background()
+	server := &Server{}
 
 	files := []*msgpb.ImportFile{
 		{Id: 1, Paths: []string{"/test/file1.json"}},
 	}
 	options := []*commonpb.KeyValuePair{
-		{Key: "timeout", Value: "invalid"},
+		{Key: "timeout", Value: "invalid_timeout_format"},
 	}
 
-	err := s.server.validateImportRequest(ctx, files, options)
-	s.Assert().Error(err)
-	s.Assert().Contains(err.Error(), "timeout")
+	err := server.validateImportRequest(ctx, files, options)
+
+	s.Error(err)
+	s.Contains(err.Error(), "timeout")
 }
 
-func (s *ImportCallbacksTestSuite) TestValidateImportRequest_MaxJobsExceeded() {
+func (s *ImportCallbacksSuite) TestValidateImportRequest_MaxJobsExceededReturnsError() {
 	ctx := context.Background()
 
-	mockey.PatchConvey("TestValidateImportRequest_MaxJobsExceeded", s.T(), func() {
-		// Mock importMeta.CountJobBy to return max jobs exceeded
-		mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
-			return 2000 // Exceeds default MaxImportJobNum (1024)
+	mock := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 2000 // Exceeds default MaxImportJobNum (1024)
+	}).Build()
+	defer mock.UnPatch()
+
+	server := &Server{
+		importMeta: &importMeta{},
+	}
+
+	files := []*msgpb.ImportFile{
+		{Id: 1, Paths: []string{"/test/file1.json"}},
+	}
+	options := []*commonpb.KeyValuePair{
+		{Key: "timeout", Value: "300s"},
+	}
+
+	err := server.validateImportRequest(ctx, files, options)
+
+	s.Error(err)
+	// ValidateMaxImportJobExceed returns WrapErrImportFailed, not ErrServiceQuotaExceeded
+	s.True(errors.Is(err, merr.ErrImportFailed))
+	s.Contains(err.Error(), "The number of jobs has reached the limit")
+}
+
+func (s *ImportCallbacksSuite) TestValidateImportRequest_BalancerGetFailsReturnsError() {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 1
+	}).Build()
+	defer mockCount.UnPatch()
+
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return nil, errors.New("balancer not available")
+	}).Build()
+	defer mockBalance.UnPatch()
+
+	server := &Server{
+		importMeta: &importMeta{},
+	}
+
+	files := []*msgpb.ImportFile{
+		{Id: 1, Paths: []string{"/test/file1.json"}},
+	}
+	options := []*commonpb.KeyValuePair{
+		{Key: "timeout", Value: "300s"},
+	}
+
+	err := server.validateImportRequest(ctx, files, options)
+
+	s.Error(err)
+	s.Contains(err.Error(), "balancer not available")
+}
+
+func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterReturnsError() {
+	ctx := context.Background()
+
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 1
+	}).Build()
+	defer mockCount.UnPatch()
+
+	mockBalancer := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancer, nil
+	}).Build()
+	defer mockBalance.UnPatch()
+
+	// Mock GetLatestChannelAssignment to return replicating cluster config
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{
+				ReplicateConfiguration: &commonpb.ReplicateConfiguration{
+					Clusters: []*commonpb.MilvusCluster{
+						{ClusterId: "cluster1"},
+						{ClusterId: "cluster2"},
+					},
+				},
+			}, nil
 		}).Build()
+	defer mockAssignment.UnPatch()
 
-		s.server.importMeta = &importMeta{}
+	server := &Server{
+		importMeta: &importMeta{},
+	}
 
-		files := []*msgpb.ImportFile{
-			{Id: 1, Paths: []string{"/test/file1.json"}},
-		}
-		options := []*commonpb.KeyValuePair{
-			{Key: "timeout", Value: "300s"},
-		}
+	files := []*msgpb.ImportFile{
+		{Id: 1, Paths: []string{"/test/file1.json"}},
+	}
+	options := []*commonpb.KeyValuePair{
+		{Key: "timeout", Value: "300s"},
+	}
 
-		err := s.server.validateImportRequest(ctx, files, options)
-		s.Assert().Error(err)
+	err := server.validateImportRequest(ctx, files, options)
+
+	s.Error(err)
+	s.True(errors.Is(err, merr.ErrImportFailed))
+	s.Contains(err.Error(), "replicating cluster")
+}
+
+func (s *ImportCallbacksSuite) TestValidateImportRequest_SuccessWithValidInput() {
+	ctx := context.Background()
+
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 1
+	}).Build()
+	defer mockCount.UnPatch()
+
+	mockBalancer := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancer, nil
+	}).Build()
+	defer mockBalance.UnPatch()
+
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{
+				ReplicateConfiguration: nil, // No replication
+			}, nil
+		}).Build()
+	defer mockAssignment.UnPatch()
+
+	server := &Server{
+		importMeta: &importMeta{},
+	}
+
+	files := []*msgpb.ImportFile{
+		{Id: 1, Paths: []string{"/test/file1.json"}},
+	}
+	options := []*commonpb.KeyValuePair{
+		{Key: "timeout", Value: "300s"},
+	}
+
+	err := server.validateImportRequest(ctx, files, options)
+
+	s.NoError(err)
+}
+
+// --------------------------------
+// broadcastImport Tests
+// --------------------------------
+
+func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError() {
+	ctx := context.Background()
+
+	// Mock validateImportRequest to fail
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 2000 // Exceeds limit
+	}).Build()
+	defer mockCount.UnPatch()
+
+	server := &Server{
+		importMeta: &importMeta{},
+	}
+
+	err := server.broadcastImport(
+		ctx,
+		"test_db",
+		"test_collection",
+		100,
+		[]int64{1},
+		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
+		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		&schemapb.CollectionSchema{Name: "test_collection"},
+		1000,
+		[]string{"v1"},
+	)
+
+	s.Error(err)
+	s.Contains(err.Error(), "failed to validate import request")
+}
+
+func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsError() {
+	ctx := context.Background()
+
+	// Setup validation to pass
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 1
+	}).Build()
+	defer mockCount.UnPatch()
+
+	mockBalancer := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancer, nil
+	}).Build()
+	defer mockBalance.UnPatch()
+
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{
+				ReplicateConfiguration: nil,
+			}, nil
+		}).Build()
+	defer mockAssignment.UnPatch()
+
+	// Mock StartBroadcastWithResourceKeys to fail
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return nil, errors.New("failed to acquire resource lock")
+		}).Build()
+	defer mockBroadcast.UnPatch()
+
+	server := &Server{
+		importMeta: &importMeta{},
+	}
+
+	err := server.broadcastImport(
+		ctx,
+		"test_db",
+		"test_collection",
+		100,
+		[]int64{1},
+		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
+		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		&schemapb.CollectionSchema{Name: "test_collection"},
+		1000,
+		[]string{"v1"},
+	)
+
+	s.Error(err)
+	s.Contains(err.Error(), "failed to start broadcast with resource lock")
+}
+
+func (s *ImportCallbacksSuite) TestBroadcastImport_CollectionNotExistsReturnsError() {
+	ctx := context.Background()
+
+	// Setup validation to pass
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 1
+	}).Build()
+	defer mockCount.UnPatch()
+
+	mockBalancer := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancer, nil
+	}).Build()
+	defer mockBalance.UnPatch()
+
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{
+				ReplicateConfiguration: nil,
+			}, nil
+		}).Build()
+	defer mockAssignment.UnPatch()
+
+	// Mock StartBroadcastWithResourceKeys to succeed
+	mockBroadcastAPI := newMockBroadcastAPIImpl()
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return mockBroadcastAPI, nil
+		}).Build()
+	defer mockBroadcast.UnPatch()
+
+	// Mock broker.HasCollection to return false (collection not exists)
+	mockBroker := broker.NewMockBroker(s.T())
+	mockBroker.EXPECT().HasCollection(ctx, int64(100)).Return(false, nil)
+
+	server := &Server{
+		importMeta: &importMeta{},
+		broker:     mockBroker,
+	}
+
+	err := server.broadcastImport(
+		ctx,
+		"test_db",
+		"test_collection",
+		100,
+		[]int64{1},
+		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
+		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		&schemapb.CollectionSchema{Name: "test_collection"},
+		1000,
+		[]string{"v1"},
+	)
+
+	s.Error(err)
+	s.True(errors.Is(err, merr.ErrCollectionNotFound))
+}
+
+func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() {
+	ctx := context.Background()
+
+	// Setup validation to pass
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 1
+	}).Build()
+	defer mockCount.UnPatch()
+
+	mockBalancer := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancer, nil
+	}).Build()
+	defer mockBalance.UnPatch()
+
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{
+				ReplicateConfiguration: nil,
+			}, nil
+		}).Build()
+	defer mockAssignment.UnPatch()
+
+	// Mock StartBroadcastWithResourceKeys to succeed
+	mockBroadcastAPI := newMockBroadcastAPIImpl()
+	mockBroadcastAPI.broadcastErr = errors.New("broadcast failed")
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return mockBroadcastAPI, nil
+		}).Build()
+	defer mockBroadcast.UnPatch()
+
+	// Mock broker.HasCollection to return true
+	mockBroker := broker.NewMockBroker(s.T())
+	mockBroker.EXPECT().HasCollection(ctx, int64(100)).Return(true, nil)
+
+	server := &Server{
+		importMeta: &importMeta{},
+		broker:     mockBroker,
+	}
+
+	err := server.broadcastImport(
+		ctx,
+		"test_db",
+		"test_collection",
+		100,
+		[]int64{1},
+		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
+		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		&schemapb.CollectionSchema{Name: "test_collection"},
+		1000,
+		[]string{"v1"},
+	)
+
+	s.Error(err)
+	s.Contains(err.Error(), "broadcast failed")
+}
+
+func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
+	ctx := context.Background()
+
+	// Setup validation to pass
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 1
+	}).Build()
+	defer mockCount.UnPatch()
+
+	mockBalancer := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancer, nil
+	}).Build()
+	defer mockBalance.UnPatch()
+
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{
+				ReplicateConfiguration: nil,
+			}, nil
+		}).Build()
+	defer mockAssignment.UnPatch()
+
+	// Mock StartBroadcastWithResourceKeys to succeed
+	mockBroadcastAPI := newMockBroadcastAPIImpl()
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return mockBroadcastAPI, nil
+		}).Build()
+	defer mockBroadcast.UnPatch()
+
+	// Mock broker.HasCollection to return true
+	mockBroker := broker.NewMockBroker(s.T())
+	mockBroker.EXPECT().HasCollection(ctx, int64(100)).Return(true, nil)
+
+	server := &Server{
+		importMeta: &importMeta{},
+		broker:     mockBroker,
+	}
+
+	err := server.broadcastImport(
+		ctx,
+		"test_db",
+		"test_collection",
+		100,
+		[]int64{1},
+		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
+		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		&schemapb.CollectionSchema{Name: "test_collection"},
+		1000,
+		[]string{"v1"},
+	)
+
+	s.NoError(err)
+}
+
+// --------------------------------
+// RegisterImportCallbacks Tests
+// --------------------------------
+
+func (s *ImportCallbacksSuite) TestRegisterImportCallbacks_DoesNotPanic() {
+	server := &Server{}
+
+	s.NotPanics(func() {
+		RegisterImportCallbacks(server)
 	})
 }
 
-// Note: importV1AckCallback tests require complex mocking of broadcast results
-// These are better tested in integration tests rather than unit tests
+// --------------------------------
+// Helper Types for Mocking
+// --------------------------------
 
-// Additional integration-style tests can be added here
+// mockBalancerImpl is a mock implementation for balancer.Balancer interface
+type mockBalancerImpl struct {
+	balancer.Balancer
+}
+
+func (m *mockBalancerImpl) GetLatestChannelAssignment() (*channel.WatchChannelAssignmentsCallbackParam, error) {
+	// Add some operations to ensure the function is long enough for mockey to patch
+	result := &channel.WatchChannelAssignmentsCallbackParam{}
+	if result != nil {
+		return result, nil
+	}
+	return nil, nil
+}
+
+// mockBroadcastAPIImpl is a mock implementation for broadcaster.BroadcastAPI interface
+// This implementation has configurable behavior and uses enough code to be patchable by mockey
+type mockBroadcastAPIImpl struct {
+	broadcastResult *types.BroadcastAppendResult
+	broadcastErr    error
+	closeCalled     atomic.Bool
+}
+
+func newMockBroadcastAPIImpl() *mockBroadcastAPIImpl {
+	// Initialize with default success result
+	mock := &mockBroadcastAPIImpl{
+		broadcastResult: &types.BroadcastAppendResult{
+			BroadcastID: 12345,
+		},
+		broadcastErr: nil,
+	}
+	mock.closeCalled.Store(false)
+	return mock
+}
+
+func (m *mockBroadcastAPIImpl) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	// Add operations to ensure the function is long enough for mockey
+	if ctx == nil {
+		return nil, errors.New("context is nil")
+	}
+	if msg == nil {
+		return nil, errors.New("message is nil")
+	}
+	if m.broadcastErr != nil {
+		return nil, m.broadcastErr
+	}
+	if m.broadcastResult != nil {
+		return m.broadcastResult, nil
+	}
+	return &types.BroadcastAppendResult{BroadcastID: 0}, nil
+}
+
+func (m *mockBroadcastAPIImpl) Close() {
+	// Add operations to ensure the function is long enough for mockey
+	m.closeCalled.Store(true)
+	if m.closeCalled.Load() {
+		// Already closed, do nothing
+		return
+	}
+}
