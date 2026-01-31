@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -95,6 +94,11 @@ func (cst *createSnapshotTask) OnEnqueue() error {
 }
 
 func (cst *createSnapshotTask) PreExecute(ctx context.Context) error {
+	// Validate snapshot_name using standard naming rules
+	if err := ValidateSnapshotName(cst.req.GetName()); err != nil {
+		return err
+	}
+
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, cst.req.GetDbName(), cst.req.GetCollectionName())
 	if err != nil {
 		return err
@@ -181,7 +185,10 @@ func (dst *dropSnapshotTask) OnEnqueue() error {
 }
 
 func (dst *dropSnapshotTask) PreExecute(ctx context.Context) error {
-	// No additional validation needed for drop snapshot
+	// Validate snapshot_name using standard naming rules
+	if err := ValidateSnapshotName(dst.req.GetName()); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -258,7 +265,10 @@ func (dst *describeSnapshotTask) OnEnqueue() error {
 }
 
 func (dst *describeSnapshotTask) PreExecute(ctx context.Context) error {
-	// No additional validation needed for describe snapshot
+	// Validate snapshot_name using standard naming rules
+	if err := ValidateSnapshotName(dst.req.GetName()); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -369,6 +379,12 @@ func (lst *listSnapshotsTask) OnEnqueue() error {
 }
 
 func (lst *listSnapshotsTask) PreExecute(ctx context.Context) error {
+	// If collection_name is empty, set collectionID to 0 to list all snapshots
+	if lst.req.GetCollectionName() == "" {
+		lst.collectionID = 0
+		return nil
+	}
+
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, lst.req.GetDbName(), lst.req.GetCollectionName())
 	if err != nil {
 		return err
@@ -460,7 +476,16 @@ func (rst *restoreSnapshotTask) OnEnqueue() error {
 }
 
 func (rst *restoreSnapshotTask) PreExecute(ctx context.Context) error {
-	// No additional validation needed for restore snapshot pre-execute
+	// Validate snapshot_name using standard naming rules
+	if err := ValidateSnapshotName(rst.req.GetName()); err != nil {
+		return err
+	}
+	// Validate target collection_name if provided
+	if rst.req.GetCollectionName() != "" {
+		if err := ValidateCollectionName(rst.req.GetCollectionName()); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -597,7 +622,7 @@ func (grst *getRestoreSnapshotStateTask) Execute(ctx context.Context) error {
 			State:          milvuspb.RestoreSnapshotState(info.GetState()),
 			Progress:       info.GetProgress(),
 			Reason:         info.GetReason(),
-			StartTime:      0, // datapb doesn't have start_time
+			StartTime:      info.GetStartTime(),
 			TimeCost:       info.GetTimeCost(),
 		}
 	}
@@ -718,7 +743,7 @@ func (lrst *listRestoreSnapshotJobsTask) Execute(ctx context.Context) error {
 			State:          milvuspb.RestoreSnapshotState(job.GetState()),
 			Progress:       job.GetProgress(),
 			Reason:         job.GetReason(),
-			StartTime:      uint64(time.Now().UnixNano() - int64(job.GetTimeCost())),
+			StartTime:      job.GetStartTime(),
 			TimeCost:       job.GetTimeCost(),
 		})
 	}
