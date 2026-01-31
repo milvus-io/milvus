@@ -55,6 +55,10 @@ type Broker interface {
 	// DropCollection drops a collection via RootCoord.
 	// Used for rollback when snapshot restore fails.
 	DropCollection(ctx context.Context, dbName, collectionName string) error
+
+	// DescribeDatabase retrieves database information via RootCoord.
+	// Used for CMEK validation during snapshot restore.
+	DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error)
 }
 
 type coordinatorBroker struct {
@@ -297,4 +301,26 @@ func (b *coordinatorBroker) DropCollection(ctx context.Context, dbName, collecti
 
 	log.Info("DropCollection succeeded")
 	return nil
+}
+
+// DescribeDatabase retrieves database information via RootCoord.
+// Used for CMEK validation during snapshot restore.
+func (b *coordinatorBroker) DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+	log := log.Ctx(ctx).With(zap.String("dbName", dbName))
+
+	resp, err := b.mixCoord.DescribeDatabase(ctx, &rootcoordpb.DescribeDatabaseRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_DescribeDatabase),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		DbName: dbName,
+	})
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		log.Warn("DescribeDatabase failed", zap.Error(err))
+		return nil, err
+	}
+
+	return resp, nil
 }
