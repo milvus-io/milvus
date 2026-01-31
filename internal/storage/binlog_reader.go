@@ -23,11 +23,8 @@ import (
 	"io"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 // BinlogReader is an object to read binlog file. Binlog file's format can be
@@ -107,49 +104,8 @@ func (reader *BinlogReader) Close() {
 	reader.isClose = true
 }
 
-type BinlogReaderOption func(base *BinlogReader) error
-
-func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
-	return func(base *BinlogReader) error {
-		edek, ok := base.descriptorEvent.GetEdek()
-		if !ok {
-			return nil
-		}
-
-		decryptor, err := hookutil.GetCipher().GetDecryptor(ezID, collectionID, []byte(edek))
-		if err != nil {
-			log.Error("failed to get decryptor", zap.Int64("ezID", ezID), zap.Int64("collectionID", collectionID), zap.Error(err))
-			return err
-		}
-
-		cipherText := make([]byte, base.buffer.Len())
-		if err := binary.Read(base.buffer, common.Endian, cipherText); err != nil {
-			return err
-		}
-
-		log.Debug("Binlog reader starts to decypt cipher text",
-			zap.Int64("collectionID", collectionID),
-			zap.Int64("fieldID", base.descriptorEvent.FieldID),
-			zap.Int("cipher size", len(cipherText)),
-		)
-		decrypted, err := decryptor.Decrypt(cipherText)
-		if err != nil {
-			log.Error("failed to decrypt", zap.Int64("ezID", ezID), zap.Int64("collectionID", collectionID), zap.Error(err))
-			return err
-		}
-		log.Debug("Binlog reader decrypted cipher text",
-			zap.Int64("collectionID", collectionID),
-			zap.Int64("fieldID", base.descriptorEvent.FieldID),
-			zap.Int("cipher size", len(cipherText)),
-			zap.Int("plain size", len(decrypted)),
-		)
-		base.buffer = bytes.NewBuffer(decrypted)
-		return nil
-	}
-}
-
 // NewBinlogReader creates binlogReader to read binlog file.
-func NewBinlogReader(data []byte, opts ...BinlogReaderOption) (*BinlogReader, error) {
+func NewBinlogReader(data []byte) (*BinlogReader, error) {
 	buffer := bytes.NewBuffer(data)
 	if _, err := readMagicNumber(buffer); err != nil {
 		return nil, err
@@ -164,12 +120,6 @@ func NewBinlogReader(data []byte, opts ...BinlogReaderOption) (*BinlogReader, er
 		isClose:         false,
 		descriptorEvent: *descriptor,
 		buffer:          buffer,
-	}
-
-	for _, opt := range opts {
-		if err := opt(&reader); err != nil {
-			return nil, err
-		}
 	}
 
 	return &reader, nil
