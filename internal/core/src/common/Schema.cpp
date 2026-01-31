@@ -69,6 +69,13 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         if (has_setting) {
             schema->mmap_fields_[field_id] = enabled;
         }
+
+        // Parse warmup policy for the field (key: "warmup")
+        auto warmup_policy =
+            GetStringFromRepeatedKVs(child.type_params(), WARMUP_KEY);
+        if (warmup_policy.has_value()) {
+            schema->warmup_fields_[field_id] = warmup_policy.value();
+        }
     };
 
     for (const milvus::proto::schema::FieldSchema& child :
@@ -105,6 +112,15 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         }
         AssertInfo(found, "ttl field name not found in schema fields");
     }
+    // Parse collection-level warmup policies
+    schema->warmup_vector_index_ = GetStringFromRepeatedKVs(
+        schema_proto.properties(), WARMUP_VECTOR_INDEX_KEY);
+    schema->warmup_scalar_index_ = GetStringFromRepeatedKVs(
+        schema_proto.properties(), WARMUP_SCALAR_INDEX_KEY);
+    schema->warmup_scalar_field_ = GetStringFromRepeatedKVs(
+        schema_proto.properties(), WARMUP_SCALAR_FIELD_KEY);
+    schema->warmup_vector_field_ = GetStringFromRepeatedKVs(
+        schema_proto.properties(), WARMUP_VECTOR_FIELD_KEY);
 
     AssertInfo(schema->get_primary_field_id().has_value(),
                "primary key should be specified");
@@ -204,4 +220,32 @@ Schema::GetFirstArrayFieldInStruct(const std::string& struct_name) const {
               "No array field found in struct: {}",
               struct_name);
 }
+
+std::pair<bool, std::string>
+Schema::WarmupPolicy(const FieldId& field_id,
+                     bool is_vector,
+                     bool is_index) const {
+    // First check field-level warmup policy
+    auto it = warmup_fields_.find(field_id);
+    if (it != warmup_fields_.end()) {
+        return {true, it->second};
+    }
+
+    // Fallback to appropriate collection-level config based on field type
+    if (is_vector) {
+        if (is_index) {
+            return {warmup_vector_index_.has_value(),
+                    warmup_vector_index_.value_or("")};
+        }
+        return {warmup_vector_field_.has_value(),
+                warmup_vector_field_.value_or("")};
+    }
+    if (is_index) {
+        return {warmup_scalar_index_.has_value(),
+                warmup_scalar_index_.value_or("")};
+    }
+    return {warmup_scalar_field_.has_value(),
+            warmup_scalar_field_.value_or("")};
+}
+
 }  // namespace milvus

@@ -65,7 +65,8 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
                     std::vector<FileInfo>&& file_infos,
                     bool use_mmap,
                     bool mmap_populate,
-                    milvus::proto::common::LoadPriority load_priority);
+                    milvus::proto::common::LoadPriority load_priority,
+                    const std::string& warmup_policy);
 
     size_t
     num_cells() const override;

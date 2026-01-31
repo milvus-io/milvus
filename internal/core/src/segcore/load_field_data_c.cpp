@@ -120,13 +120,20 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
     }
 }
 
-void
-AppendWarmupPolicy(CLoadFieldDataInfo c_load_field_data_info,
-                   CacheWarmupPolicy warmup_policy) {
-    auto load_field_data_info =
-        static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
-    load_field_data_info->warmup_policy = warmup_policy;
+namespace {
+// Helper to convert CacheWarmupPolicy enum to string
+std::string
+WarmupPolicyToString(CacheWarmupPolicy policy) {
+    switch (policy) {
+        case CacheWarmupPolicy_Sync:
+            return "sync";
+        case CacheWarmupPolicy_Disable:
+            return "disable";
+        default:
+            return "";
+    }
 }
+}  // namespace
 
 void
 SetStorageVersion(CLoadFieldDataInfo c_load_field_data_info,
@@ -145,6 +152,17 @@ EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
 
     auto info = static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
     info->field_infos[field_id].enable_mmap = enabled;
+}
+
+void
+SetFieldWarmupPolicy(CLoadFieldDataInfo c_load_field_data_info,
+                     int64_t field_id,
+                     CacheWarmupPolicy warmup_policy) {
+    SCOPE_CGO_CALL_METRIC();
+
+    auto info = static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
+    info->field_infos[field_id].warmup_policy =
+        WarmupPolicyToString(warmup_policy);
 }
 
 void

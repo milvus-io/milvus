@@ -368,7 +368,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 info.enable_mmap,
                 mmap_config.GetMmapPopulate(),
                 milvus_field_ids.size(),
-                load_info.load_priority);
+                load_info.load_priority,
+                info.warmup_policy);
 
         auto file_metas = translator->parquet_file_metas();
         auto field_id_mapping = translator->field_id_mapping();
@@ -510,7 +511,8 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                     std::move(file_infos),
                     info.enable_mmap,
                     mmap_config.GetMmapPopulate(),
-                    load_info.load_priority);
+                    load_info.load_priority,
+                    info.warmup_policy);
 
             auto data_type = field_meta.get_data_type();
             auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
@@ -1922,6 +1924,9 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
     config[milvus::index::INDEX_FILES] = files;
     config[milvus::LOAD_PRIORITY] = info_proto->load_priority();
     config[milvus::index::ENABLE_MMAP] = info_proto->enable_mmap();
+    if (info_proto->warmup_policy() != "") {
+        config[milvus::index::WARMUP] = info_proto->warmup_policy();
+    }
     milvus::storage::FileManagerContext file_ctx(
         field_data_meta, index_meta, remote_chunk_manager, fs);
 
@@ -1932,7 +1937,8 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
         this->get_segment_id(),
         info_proto->fieldid(),
         field_meta.get_analyzer_params(),
-        info_proto->index_size()};
+        info_proto->index_size(),
+        info_proto->warmup_policy()};
 
     std::unique_ptr<
         milvus::cachinglayer::Translator<milvus::index::TextMatchIndex>>
@@ -2948,13 +2954,18 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
     int64_t size = num_rows_.value();
     AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
     auto field_data_info = FieldDataInfo(field_id.get(), size, mmap_dir_path);
+
+    auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
+        field_id, IsVectorDataType(data_type), /*is_index=*/false);
+    std::string warmup_policy = field_has_warmup ? field_warmup_policy : "";
     std::unique_ptr<Translator<milvus::Chunk>> translator =
         std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
             get_segment_id(),
             field_meta,
             field_data_info,
             use_mmap,
-            mmap_config.GetMmapPopulate());
+            mmap_config.GetMmapPopulate(),
+            warmup_policy);
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
         std::move(translator), nullptr);
     auto column = MakeChunkedColumnBase(data_type, std::move(slot), field_meta);
@@ -3088,6 +3099,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     bool is_vector = false;
     bool has_mmap_setting = false;
     bool mmap_enabled = false;
+    bool has_warmup_setting = false;
+    bool warmup_sync = false;
     for (auto& [field_id, field_meta] : field_metas) {
         if (IsVectorDataType(field_meta.get_data_type())) {
             is_vector = true;
@@ -3102,6 +3115,18 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             schema_->MmapEnabled(field_id);
         has_mmap_setting = has_mmap_setting || field_has_setting;
         mmap_enabled = mmap_enabled || field_mmap_enabled;
+
+        // if field has warmup setting, use it
+        // - warmup setting at collection level, uses appropriate key based on field type
+        // - warmup setting at field level, use the most aggressive policy (sync > disable)
+        // Note: this is for field data loading, not index (is_index = false)
+        bool field_is_vector = IsVectorDataType(field_meta.get_data_type());
+        auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
+            field_id, field_is_vector, /*is_index=*/false);
+        if (field_has_warmup) {
+            has_warmup_setting = true;
+            warmup_sync = warmup_sync || (field_warmup_policy == "sync");
+        }
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
@@ -3125,6 +3150,11 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             .GetChunkManager()
             ->GetRootPath();
 
+    // Determine warmup policy: use per-field settings if any,
+    // otherwise pass empty string to fall back to global config
+    std::string warmup_policy =
+        has_warmup_setting ? (warmup_sync ? "sync" : "disable") : "";
+
     auto translator =
         std::make_unique<storagev2translator::ManifestGroupTranslator>(
             get_segment_id(),
@@ -3137,7 +3167,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             mmap_dir_path,
             column_group->columns.size(),
             segment_load_info_.GetPriority(),
-            eager_load);
+            eager_load,
+            warmup_policy);
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -3286,6 +3317,9 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         bool has_mmap_setting = false;
         bool mmap_enabled = false;
         bool is_vector = false;
+
+        bool has_warmup_setting = false;
+        bool warmup_sync = false;
         for (const auto& child_field_id : field_ids) {
             auto& field_meta = schema_->operator[](child_field_id);
             if (IsVectorDataType(field_meta.get_data_type())) {
@@ -3305,6 +3339,16 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
                 index_has_raw_data = index_has_raw_data && iter->second;
             } else {
                 index_has_raw_data = false;
+            }
+
+            auto [field_has_warmup, field_warmup_policy] =
+                schema_->WarmupPolicy(
+                    child_field_id,
+                    IsVectorDataType(field_meta.get_data_type()),
+                    /*is_index=*/false);
+            if (field_has_warmup) {
+                has_warmup_setting = true;
+                warmup_sync = warmup_sync || (field_warmup_policy == "sync");
             }
         }
 
@@ -3344,6 +3388,11 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
                                    : mmap_config.GetScalarFieldEnableMmap();
         field_binlog_info.enable_mmap =
             has_mmap_setting ? mmap_enabled : global_use_mmap;
+
+        // Determine group warmup policy: use per-field settings if any,
+        // otherwise fall back to global warmup policy
+        field_binlog_info.warmup_policy =
+            has_warmup_setting ? (warmup_sync ? "sync" : "disable") : "";
 
         // Store in map
         load_field_data_info.field_infos[group_id] = field_binlog_info;

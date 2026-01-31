@@ -570,7 +570,8 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     }
 
     void
-    LoadShreddingData(const std::vector<std::string>& index_files);
+    LoadShreddingData(const std::vector<std::string>& index_files,
+                      const std::string& warmup_policy = "");
 
     void
     ApplyValidData(const bool* valid_data,
@@ -608,7 +609,8 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
     void
     LoadColumnGroup(int64_t column_group_id,
-                    const std::vector<int64_t>& file_ids);
+                    const std::vector<int64_t>& file_ids,
+                    const std::string& warmup_policy = "");
 
     void
     LoadShreddingMeta(
@@ -620,7 +622,8 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     void
     LoadSharedKeyIndex(const std::vector<std::string>& shared_key_index_files,
                        bool enable_mmap,
-                       int64_t index_size);
+                       int64_t index_size,
+                       const std::string& warmup_policy = "");
 
  private:
     proto::schema::FieldSchema schema_;

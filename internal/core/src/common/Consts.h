@@ -143,3 +143,11 @@ const std::string NAMESPACE_FIELD_NAME = "$namespace_id";
 const std::string MMAP_ENABLED_KEY = "mmap.enabled";
 
 const int64_t LOGICAL_BITS = 18;
+// Warmup policy keys
+// Field-level key (in field type_params)
+const std::string WARMUP_KEY = "warmup";
+// Collection-level keys (in collection properties)
+const std::string WARMUP_VECTOR_INDEX_KEY = "warmup.vectorIndex";
+const std::string WARMUP_SCALAR_INDEX_KEY = "warmup.scalarIndex";
+const std::string WARMUP_SCALAR_FIELD_KEY = "warmup.scalarField";
+const std::string WARMUP_VECTOR_FIELD_KEY = "warmup.vectorField";
