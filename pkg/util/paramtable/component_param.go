@@ -258,6 +258,7 @@ type commonConfig struct {
 	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
 
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
+	MaintainerModeEnabled ParamItem `refreshable:"true"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
@@ -782,6 +783,17 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 		Export:       true,
 	}
 	p.AuthorizationEnabled.Init(base.mgr)
+
+	p.MaintainerModeEnabled = ParamItem{
+		Key:     "common.security.maintainerModeEnabled",
+		Version: "2.6.8",
+		Doc: `maintainer mode for system maintenance. When enabled, bypasses RBAC and old password verification.
+This is a dangerous mode that should only be used for emergency password recovery.
+Default is false. Only enable this temporarily and disable immediately after use.`,
+		DefaultValue: "false",
+		Export:       true,
+	}
+	p.MaintainerModeEnabled.Init(base.mgr)
 
 	p.SuperUsers = ParamItem{
 		Key:     "common.security.superUsers",
