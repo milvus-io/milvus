@@ -1,3 +1,6 @@
+//go:build test
+// +build test
+
 // Licensed to the LF AI & Data foundation under one
 // or more contributor license agreements. See the NOTICE file
 // distributed with this work for additional information
@@ -136,7 +139,7 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 
 	err := suite.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(suite.collectionID, 2))
 	suite.NoError(err)
-	replicas, err := suite.meta.Spawn(ctx, suite.collectionID, map[string]int{
+	replicas, err := suite.meta.ReplicaManager.Spawn(ctx, suite.collectionID, map[string]int{
 		"rg1": 1,
 		"rg2": 1,
 	}, nil, commonpb.LoadPriority_LOW)
@@ -226,16 +229,16 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 		<-ctx.Done()
 		return ctx.Err()
 	})
-	b.EXPECT().GetAllStreamingNodes(mock.Anything).RunAndReturn(func(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
-		pchans := []map[int64]*types.StreamingNodeInfo{
+	b.EXPECT().GetAllStreamingNodes(mock.Anything).RunAndReturn(func(ctx context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error) {
+		pchans := []map[int64]*types.StreamingNodeInfoWithResourceGroup{
 			{
-				1: {ServerID: 1, Address: "localhost:1"},
-				2: {ServerID: 2, Address: "localhost:2"},
-				3: {ServerID: 3, Address: "localhost:3"},
+				1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}, ResourceGroup: "rg1"},
+				2: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 2, Address: "localhost:2"}, ResourceGroup: "rg2"},
+				3: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 3, Address: "localhost:3"}, ResourceGroup: "rg1"},
 			},
 			{
-				1: {ServerID: 1, Address: "localhost:1"},
-				2: {ServerID: 2, Address: "localhost:2"},
+				1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}, ResourceGroup: "rg1"},
+				2: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 2, Address: "localhost:2"}, ResourceGroup: "rg2"},
 			},
 		}
 		select {
@@ -250,9 +253,18 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 	suite.observer.Start()
 
 	ctx := context.Background()
+	// Add resource groups
+	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 2},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 2},
+	})
+	suite.meta.ResourceManager.AddResourceGroup(ctx, "rg2", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 2},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 2},
+	})
 	err := suite.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(suite.collectionID, 2))
 	suite.NoError(err)
-	replicas, err := suite.meta.Spawn(ctx, suite.collectionID, map[string]int{
+	replicas, err := suite.meta.ReplicaManager.Spawn(ctx, suite.collectionID, map[string]int{
 		"rg1": 1,
 		"rg2": 1,
 	}, nil, commonpb.LoadPriority_LOW)

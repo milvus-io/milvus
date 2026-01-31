@@ -87,6 +87,8 @@ const (
 	ConfigAlterPath = "/management/config/alter"
 
 	DataGCPath = "/management/data_gc"
+
+	ReplicaReadinessPath = "/management/replica/readiness"
 )
 
 // for WebUI restful api root path

@@ -755,6 +755,7 @@ message Replica {
     repeated int64 rw_sq_nodes = 7; // all (read and write) nodes. mutual exclusive with ro_sq_nodes.
     repeated int64 ro_sq_nodes = 8; // the in-using node but should not be assigned to these replica.
     // cannot watch channel on it anymore.
+    string streaming_resource_group = 9; // the resource group that the replica should use for streaming nodes.
 }
 
 enum SyncType {
@@ -1004,6 +1005,7 @@ message UpdateLoadConfigRequest {
     repeated int64 collectionIDs = 3;
     int32 replica_number = 4;
     repeated string resource_groups = 5;
+    repeated string streaming_resource_groups = 6;
 }
 
 message UpdateSchemaRequest {

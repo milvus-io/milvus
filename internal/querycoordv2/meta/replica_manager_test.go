@@ -371,7 +371,7 @@ type ReplicaManagerV2Suite struct {
 	suite.Suite
 
 	rgs             map[string]typeutil.UniqueSet
-	sqNodes         typeutil.UniqueSet
+	sqNodesByRG     map[string]typeutil.UniqueSet
 	outboundSQNodes []int64
 	collections     map[int64]collectionLoadConfig
 	kv              kv.MetaKv
@@ -390,7 +390,14 @@ func (suite *ReplicaManagerV2Suite) SetupSuite() {
 		"RG4": typeutil.NewUniqueSet(7, 8, 9, 10),
 		"RG5": typeutil.NewUniqueSet(11, 12, 13, 14, 15),
 	}
-	suite.sqNodes = typeutil.NewUniqueSet(16, 17, 18, 19, 20)
+	// sqNodes are grouped by resource group, each RG has sqNodes with offset 15 from rg nodes
+	suite.sqNodesByRG = map[string]typeutil.UniqueSet{
+		"RG1": typeutil.NewUniqueSet(16),
+		"RG2": typeutil.NewUniqueSet(17, 18),
+		"RG3": typeutil.NewUniqueSet(19, 20, 21),
+		"RG4": typeutil.NewUniqueSet(22, 23, 24, 25),
+		"RG5": typeutil.NewUniqueSet(26, 27, 28, 29, 30),
+	}
 	suite.outboundSQNodes = []int64{}
 	suite.collections = map[int64]collectionLoadConfig{
 		1000: {
@@ -448,7 +455,7 @@ func (suite *ReplicaManagerV2Suite) TestSpawn() {
 			rgsOfCollection[rg] = suite.rgs[rg]
 		}
 		mgr.RecoverNodesInCollection(ctx, id, rgsOfCollection)
-		mgr.RecoverSQNodesInCollection(ctx, id, suite.sqNodes)
+		mgr.RecoverSQNodesInCollection(ctx, id, suite.sqNodesByRG)
 		for rg := range cfg.spawnConfig {
 			for _, node := range suite.rgs[rg].Collect() {
 				replica := mgr.GetByCollectionAndNode(ctx, id, node)
@@ -472,13 +479,13 @@ func (suite *ReplicaManagerV2Suite) testIfBalanced() {
 			rgToReplica[r.GetResourceGroup()] = append(rgToReplica[r.GetResourceGroup()], r)
 		}
 
-		maximumSQNodes := -1
-		minimumSQNodes := -1
-		sqNodes := make([]int64, 0)
-		for _, replicas := range rgToReplica {
+		for rgName, replicas := range rgToReplica {
 			maximumNodes := -1
 			minimumNodes := -1
+			maximumSQNodes := -1
+			minimumSQNodes := -1
 			nodes := make([]int64, 0)
+			sqNodes := make([]int64, 0)
 			for _, r := range replicas {
 				availableNodes := suite.rgs[r.GetResourceGroup()]
 				if maximumNodes == -1 || r.RWNodesCount() > maximumNodes {
@@ -505,11 +512,12 @@ func (suite *ReplicaManagerV2Suite) testIfBalanced() {
 			}
 			suite.ElementsMatch(nodes, suite.rgs[replicas[0].GetResourceGroup()].Collect())
 			suite.True(maximumNodes-minimumNodes <= 1)
+			// Check SQ nodes are from the correct resource group
+			availableSQNodes := suite.sqNodesByRG[rgName].Clone()
+			availableSQNodes.Remove(suite.outboundSQNodes...)
+			suite.ElementsMatch(availableSQNodes.Collect(), sqNodes)
+			suite.True(maximumSQNodes-minimumSQNodes <= 1)
 		}
-		availableSQNodes := suite.sqNodes.Clone()
-		availableSQNodes.Remove(suite.outboundSQNodes...)
-		suite.ElementsMatch(availableSQNodes.Collect(), sqNodes)
-		suite.True(maximumSQNodes-minimumSQNodes <= 1)
 	}
 }
 
@@ -534,7 +542,7 @@ func (suite *ReplicaManagerV2Suite) TestTransferReplicaAndAddNode() {
 	suite.mgr.TransferReplica(ctx, 1005, "RG4", "RG5", 1)
 	suite.recoverReplica(1, false)
 	suite.rgs["RG5"].Insert(16, 17, 18)
-	suite.sqNodes.Insert(20, 21, 22)
+	suite.sqNodesByRG["RG5"].Insert(31, 32, 33)
 	suite.recoverReplica(2, true)
 	suite.testIfBalanced()
 }
@@ -558,10 +566,14 @@ func (suite *ReplicaManagerV2Suite) recoverReplica(k int, clearOutbound bool) {
 			for rg := range cfg.spawnConfig {
 				rgsOfCollection[rg] = suite.rgs[rg]
 			}
-			sqNodes := suite.sqNodes.Clone()
-			sqNodes.Remove(suite.outboundSQNodes...)
+			// Clone sqNodesByRG and remove outbound nodes
+			sqNodesByRG := make(map[string]typeutil.UniqueSet)
+			for rg, nodes := range suite.sqNodesByRG {
+				sqNodesByRG[rg] = nodes.Clone()
+				sqNodesByRG[rg].Remove(suite.outboundSQNodes...)
+			}
 			suite.mgr.RecoverNodesInCollection(ctx, id, rgsOfCollection)
-			suite.mgr.RecoverSQNodesInCollection(ctx, id, sqNodes)
+			suite.mgr.RecoverSQNodesInCollection(ctx, id, sqNodesByRG)
 		}
 
 		// clear all outbound nodes

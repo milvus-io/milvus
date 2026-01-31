@@ -127,11 +127,15 @@ func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error
 		if len(replica.GetResourceGroup()) == 0 {
 			replica.ResourceGroup = DefaultResourceGroupName
 		}
-
+		if len(replica.GetStreamingResourceGroup()) == 0 {
+			replica.StreamingResourceGroup = DefaultResourceGroupName
+		}
 		if collectionSet.Contain(replica.GetCollectionID()) {
 			rep := NewReplicaWithPriority(replica, commonpb.LoadPriority_HIGH)
 			m.putReplicaInMemory(rep)
 			log.Info("recover replica",
+				zap.String("streamingResourceGroup", replica.GetStreamingResourceGroup()),
+				zap.String("resourceGroup", replica.GetResourceGroup()),
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replicaID", replica.GetID()),
 				zap.Int64s("rwNodes", replica.GetNodes()),
@@ -174,21 +178,27 @@ func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params Spaw
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
+	return m.spawnWithReplicaConfig(ctx, params)
+}
+
+func (m *ReplicaManager) spawnWithReplicaConfig(ctx context.Context, params SpawnWithReplicaConfigParams) ([]*Replica, error) {
 	balancePolicy := paramtable.Get().QueryCoordCfg.Balancer.GetValue()
 	enableChannelExclusiveMode := balancePolicy == ChannelLevelScoreBalancerName
 	replicas := make([]*Replica, 0)
 	for _, config := range params.Configs {
 		if existedReplica, ok := m.replicas[config.GetReplicaId()]; ok {
-			// if the replica is already existed, just update the resource group
+			// if the replica is already existed, just update the resource group and streaming resource group
 			mutableReplica := existedReplica.CopyForWrite()
 			mutableReplica.SetResourceGroup(config.GetResourceGroupName())
+			mutableReplica.SetStreamingResourceGroup(config.GetStreamingResourceGroupName())
 			replicas = append(replicas, mutableReplica.IntoReplica())
 			continue
 		}
 		replica := NewReplicaWithPriority(&querypb.Replica{
-			ID:            config.GetReplicaId(),
-			CollectionID:  params.CollectionID,
-			ResourceGroup: config.ResourceGroupName,
+			ID:                     config.GetReplicaId(),
+			CollectionID:           params.CollectionID,
+			ResourceGroup:          config.ResourceGroupName,
+			StreamingResourceGroup: config.StreamingResourceGroupName,
 		}, config.GetPriority())
 		if enableChannelExclusiveMode {
 			mutableReplica := replica.CopyForWrite()
@@ -200,6 +210,7 @@ func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params Spaw
 			zap.Int64("collectionID", params.CollectionID),
 			zap.Int64("replicaID", config.GetReplicaId()),
 			zap.String("resourceGroup", config.GetResourceGroupName()),
+			zap.String("streamingResourceGroup", config.GetStreamingResourceGroupName()),
 		)
 	}
 	if err := m.put(ctx, replicas...); err != nil {
@@ -232,6 +243,91 @@ func (m *ReplicaManager) removeRedundantReplicas(ctx context.Context, params Spa
 		}
 	}
 	return m.removeReplicas(ctx, params.CollectionID, toRemoveReplicas...)
+}
+
+// UpdateWithReplicaConfig updates replicas with replica config by matching (ResourceGroup, StreamingResourceGroup).
+// For configs without ReplicaID:
+// - If a replica with matching (ResourceGroup, StreamingResourceGroup) exists, reuse it
+// - Otherwise, allocate a new ReplicaID and create a new replica
+// Existing replicas that don't match any config will be removed.
+func (m *ReplicaManager) UpdateWithReplicaConfig(ctx context.Context, params SpawnWithReplicaConfigParams) ([]*Replica, error) {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	// Get existing replicas for this collection
+	existingReplicas := m.getByCollection(params.CollectionID)
+
+	// Build available replica pool (all existing replicas that haven't been matched yet)
+	availableReplicas := make(map[int64]*Replica)
+	for _, replica := range existingReplicas {
+		availableReplicas[replica.GetID()] = replica
+	}
+
+	// Track which config has been matched to which replica
+	configToReplicaID := make(map[int]int64) // config index -> replica ID
+
+	matchers := []func(config *messagespb.LoadReplicaConfig, replica *Replica) bool{
+		// Priority 1: Match configs where both resourceGroup and streamingResourceGroup match exactly.
+		func(config *messagespb.LoadReplicaConfig, replica *Replica) bool {
+			return replica.GetResourceGroup() == config.GetResourceGroupName() && replica.GetStreamingResourceGroup() == config.GetStreamingResourceGroupName()
+		},
+		// Priority 2: Match configs where resourceGroup matches exactly but streamingResourceGroup does not match.
+		func(config *messagespb.LoadReplicaConfig, replica *Replica) bool {
+			return replica.GetResourceGroup() == config.GetResourceGroupName() && replica.GetStreamingResourceGroup() != config.GetStreamingResourceGroupName()
+		},
+		// Priority 3: Match configs where streamingResourceGroup matches exactly but resourceGroup does not match.
+		func(config *messagespb.LoadReplicaConfig, replica *Replica) bool {
+			return replica.GetStreamingResourceGroup() == config.GetStreamingResourceGroupName() && replica.GetResourceGroup() != config.GetResourceGroupName()
+		},
+		// anything.
+		func(config *messagespb.LoadReplicaConfig, replica *Replica) bool {
+			return true
+		},
+	}
+
+	for _, matcher := range matchers {
+		for i, config := range params.Configs {
+			if _, matched := configToReplicaID[i]; matched {
+				continue
+			}
+			for id, replica := range availableReplicas {
+				if matcher(config, replica) {
+					configToReplicaID[i] = id
+					delete(availableReplicas, id)
+					break
+				}
+			}
+		}
+	}
+
+	configsWithID := make([]*messagespb.LoadReplicaConfig, 0, len(params.Configs))
+	for i, config := range params.Configs {
+		var replicaID int64
+
+		if id, matched := configToReplicaID[i]; matched {
+			replicaID = id
+		} else {
+			// No available replica, allocate new one
+			newID, err := m.idAllocator()
+			if err != nil {
+				return nil, err
+			}
+			replicaID = newID
+		}
+
+		configWithID := &messagespb.LoadReplicaConfig{
+			ReplicaId:                  replicaID,
+			ResourceGroupName:          config.GetResourceGroupName(),
+			Priority:                   config.GetPriority(),
+			StreamingResourceGroupName: config.GetStreamingResourceGroupName(),
+		}
+		configsWithID = append(configsWithID, configWithID)
+	}
+	return m.spawnWithReplicaConfig(ctx, SpawnWithReplicaConfigParams{
+		CollectionID: params.CollectionID,
+		Channels:     params.Channels,
+		Configs:      configsWithID,
+	})
 }
 
 // AllocateReplicaID allocates a replica ID.
@@ -687,7 +783,8 @@ func (m *ReplicaManager) GetReplicasJSON(ctx context.Context, meta *Meta) string
 // 1. Move the rw nodes to ro nodes if current replica use too much sqn.
 // 2. Add new incoming nodes into the replica if they are not ro node of other replicas in same collection.
 // 3. replicas will shared the nodes in resource group fairly.
-func (m *ReplicaManager) RecoverSQNodesInCollection(ctx context.Context, collectionID int64, sqnNodeIDs typeutil.UniqueSet) error {
+// 4. Only nodes with matching resource group can be assigned to a replica.
+func (m *ReplicaManager) RecoverSQNodesInCollection(ctx context.Context, collectionID int64, sqnNodeIDsByRG map[string]typeutil.UniqueSet) error {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
@@ -696,39 +793,60 @@ func (m *ReplicaManager) RecoverSQNodesInCollection(ctx context.Context, collect
 		return errors.Errorf("collection %d not loaded", collectionID)
 	}
 
-	helper := newReplicaSQNAssignmentHelper(collReplicas.replicas, sqnNodeIDs)
-	helper.updateExpectedNodeCountForReplicas(len(sqnNodeIDs))
-
-	modifiedReplicas := make([]*Replica, 0)
-	// recover node by given sqn node list.
-	helper.RangeOverReplicas(func(assignment *replicaAssignmentInfo) {
-		roNodes := assignment.GetNewRONodes()
-		recoverableNodes, incomingNodeCount := assignment.GetRecoverNodesAndIncomingNodeCount()
-		// There may be not enough incoming nodes for current replica,
-		// Even we filtering the nodes that are used by other replica of same collection in other resource group,
-		// current replica's expected node may be still used by other replica of same collection in same resource group.
-		incomingNode := helper.AllocateIncomingNodes(incomingNodeCount)
-		if len(roNodes) == 0 && len(recoverableNodes) == 0 && len(incomingNode) == 0 {
-			// nothing to do.
-			return
+	// Group replicas by resource group.
+	rgToReplicas := make(map[string][]*Replica)
+	for _, replica := range collReplicas.replicas {
+		rgName := replica.GetResourceGroup()
+		if _, ok := rgToReplicas[rgName]; !ok {
+			rgToReplicas[rgName] = make([]*Replica, 0)
 		}
-		mutableReplica := m.replicas[assignment.GetReplicaID()].CopyForWrite()
-		mutableReplica.AddROSQNode(roNodes...)          // rw -> ro
-		mutableReplica.AddRWSQNode(recoverableNodes...) // ro -> rw
-		mutableReplica.AddRWSQNode(incomingNode...)     // unused -> rw
-		log.Info(
-			"new replica recovery streaming query node found",
-			zap.Int64("collectionID", collectionID),
-			zap.Int64("replicaID", assignment.GetReplicaID()),
-			zap.Int64s("newRONodes", roNodes),
-			zap.Int64s("roToRWNodes", recoverableNodes),
-			zap.Int64s("newIncomingNodes", incomingNode),
-			zap.Int64s("rwNodes", mutableReplica.GetRWNodes()),
-			zap.Int64s("roNodes", mutableReplica.GetRONodes()),
-			zap.Int64s("rwSQNodes", mutableReplica.GetRWSQNodes()),
-			zap.Int64s("roSQNodes", mutableReplica.GetROSQNodes()),
-		)
-		modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
-	})
+		rgToReplicas[rgName] = append(rgToReplicas[rgName], replica)
+	}
+	modifiedReplicas := make([]*Replica, 0)
+
+	// Recover nodes for each resource group separately.
+	for rgName, replicas := range rgToReplicas {
+		// Get the sqn nodes for this resource group.
+		sqnNodeIDs, ok := sqnNodeIDsByRG[rgName]
+		if !ok {
+			// No sqn nodes in this resource group, use empty set.
+			sqnNodeIDs = typeutil.NewUniqueSet()
+		}
+
+		helper := newReplicaSQNAssignmentHelper(replicas, sqnNodeIDs)
+		helper.updateExpectedNodeCountForReplicas(sqnNodeIDs.Len())
+
+		// recover node by given sqn node list.
+		helper.RangeOverReplicas(func(assignment *replicaAssignmentInfo) {
+			roNodes := assignment.GetNewRONodes()
+			recoverableNodes, incomingNodeCount := assignment.GetRecoverNodesAndIncomingNodeCount()
+			// There may be not enough incoming nodes for current replica,
+			// Even we filtering the nodes that are used by other replica of same collection in other resource group,
+			// current replica's expected node may be still used by other replica of same collection in same resource group.
+			incomingNode := helper.AllocateIncomingNodes(incomingNodeCount)
+			if len(roNodes) == 0 && len(recoverableNodes) == 0 && len(incomingNode) == 0 {
+				// nothing to do.
+				return
+			}
+			mutableReplica := m.replicas[assignment.GetReplicaID()].CopyForWrite()
+			mutableReplica.AddROSQNode(roNodes...)          // rw -> ro
+			mutableReplica.AddRWSQNode(recoverableNodes...) // ro -> rw
+			mutableReplica.AddRWSQNode(incomingNode...)     // unused -> rw
+			log.Info(
+				"new replica recovery streaming query node found",
+				zap.Int64("collectionID", collectionID),
+				zap.Int64("replicaID", assignment.GetReplicaID()),
+				zap.String("resourceGroup", rgName),
+				zap.Int64s("newRONodes", roNodes),
+				zap.Int64s("roToRWNodes", recoverableNodes),
+				zap.Int64s("newIncomingNodes", incomingNode),
+				zap.Int64s("rwNodes", mutableReplica.GetRWNodes()),
+				zap.Int64s("roNodes", mutableReplica.GetRONodes()),
+				zap.Int64s("rwSQNodes", mutableReplica.GetRWSQNodes()),
+				zap.Int64s("roSQNodes", mutableReplica.GetROSQNodes()),
+			)
+			modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
+		})
+	}
 	return m.put(ctx, modifiedReplicas...)
 }

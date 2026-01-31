@@ -47,8 +47,9 @@ type LoadConfigWatcher struct {
 	notifier  *syncutil.AsyncTaskNotifier[struct{}]
 	s         *Server
 
-	previousReplicaNum int32
-	previousRGs        []string
+	previousReplicaNum   int32
+	previousRGs          []string
+	previousStreamingRGs []string
 }
 
 // Trigger triggers a load config change.
@@ -97,6 +98,7 @@ func (w *LoadConfigWatcher) background() {
 func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 	newReplicaNum := paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt32()
 	newRGs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+	newStreamingRGs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadStreamingResourceGroups.GetAsStrings()
 
 	if newReplicaNum == 0 && len(newRGs) == 0 {
 		// default cluster level load config, nothing to do for it.
@@ -113,10 +115,25 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 		return nil
 	}
 
+	// Check if streaming resource groups are valid
+	if len(newStreamingRGs) > 0 && len(newStreamingRGs) != 1 && len(newStreamingRGs) != int(newReplicaNum) {
+		w.Logger().Info("illegal cluster level load streaming resource groups config, skip it",
+			zap.Int32("replica_num", newReplicaNum),
+			zap.Strings("streaming_resource_groups", newStreamingRGs))
+		return nil
+	}
+
 	left, right := lo.Difference(w.previousRGs, newRGs)
 	rgChanged := len(left) > 0 || len(right) > 0
-	if w.previousReplicaNum == newReplicaNum && !rgChanged {
-		w.Logger().Info("no need to update load config, skip it", zap.Int32("replica_num", newReplicaNum), zap.Strings("resource_groups", newRGs))
+
+	leftStreaming, rightStreaming := lo.Difference(w.previousStreamingRGs, newStreamingRGs)
+	streamingRGChanged := len(leftStreaming) > 0 || len(rightStreaming) > 0
+
+	if w.previousReplicaNum == newReplicaNum && !rgChanged && !streamingRGChanged {
+		w.Logger().Info("no need to update load config, skip it",
+			zap.Int32("replica_num", newReplicaNum),
+			zap.Strings("resource_groups", newRGs),
+			zap.Strings("streaming_resource_groups", newStreamingRGs))
 		return nil
 	}
 
@@ -135,7 +152,7 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 		w.Logger().Info("no collection to update load config, skip it")
 	}
 
-	if err := w.s.updateLoadConfig(w.notifier.Context(), collectionIDs, newReplicaNum, newRGs); err != nil {
+	if err := w.s.updateLoadConfig(w.notifier.Context(), collectionIDs, newReplicaNum, newRGs, newStreamingRGs); err != nil {
 		w.Logger().Warn("failed to update load config", zap.Error(err))
 		return err
 	}
@@ -143,10 +160,13 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 		zap.Int64s("collectionIDs", collectionIDs),
 		zap.Int32("previousReplicaNum", w.previousReplicaNum),
 		zap.Strings("previousResourceGroups", w.previousRGs),
+		zap.Strings("previousStreamingResourceGroups", w.previousStreamingRGs),
 		zap.Int32("replicaNum", newReplicaNum),
-		zap.Strings("resourceGroups", newRGs))
+		zap.Strings("resourceGroups", newRGs),
+		zap.Strings("streamingResourceGroups", newStreamingRGs))
 	w.previousReplicaNum = newReplicaNum
 	w.previousRGs = newRGs
+	w.previousStreamingRGs = newStreamingRGs
 	return nil
 }
 

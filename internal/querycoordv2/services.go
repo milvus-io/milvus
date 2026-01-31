@@ -1055,6 +1055,7 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 		zap.Int64s("collectionIDs", req.GetCollectionIDs()),
 		zap.Int32("replicaNumber", req.GetReplicaNumber()),
 		zap.Strings("resourceGroups", req.GetResourceGroups()),
+		zap.Strings("streamingResourceGroups", req.GetStreamingResourceGroups()),
 	)
 
 	log.Info("update load config request received")
@@ -1064,7 +1065,7 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 		return merr.Status(errors.Wrap(err, msg)), nil
 	}
 
-	err := s.updateLoadConfig(ctx, req.GetCollectionIDs(), req.GetReplicaNumber(), req.GetResourceGroups())
+	err := s.updateLoadConfig(ctx, req.GetCollectionIDs(), req.GetReplicaNumber(), req.GetResourceGroups(), req.GetStreamingResourceGroups())
 	if err != nil {
 		msg := "failed to update load config"
 		log.Warn(msg, zap.Error(err))
@@ -1076,7 +1077,7 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 	return merr.Success(), nil
 }
 
-func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string) error {
+func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, newStreamingRGs []string) error {
 	jobs := make([]job.Job, 0, len(collectionIDs))
 	for _, collectionID := range collectionIDs {
 		collection := s.meta.GetCollection(ctx, collectionID)
@@ -1092,9 +1093,10 @@ func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, ne
 		replicaChanged := collection.GetReplicaNumber() != newReplicaNum
 
 		subReq := &querypb.UpdateLoadConfigRequest{
-			CollectionIDs:  []int64{collectionID},
-			ReplicaNumber:  newReplicaNum,
-			ResourceGroups: newRGs,
+			CollectionIDs:           []int64{collectionID},
+			ReplicaNumber:           newReplicaNum,
+			ResourceGroups:          newRGs,
+			StreamingResourceGroups: newStreamingRGs,
 		}
 		if len(subReq.GetResourceGroups()) == 0 {
 			subReq.ResourceGroups = collectionUsedRG

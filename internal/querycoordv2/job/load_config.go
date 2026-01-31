@@ -60,6 +60,7 @@ func (req *AlterLoadConfigRequest) CheckIfLoadPartitionsExecutable() error {
 type ExpectedLoadConfig struct {
 	ExpectedPartitionIDs             []int64
 	ExpectedReplicaNumber            map[string]int // map resource group name to replica number in resource group
+	ExpectedStreamingResourceGroups  []string       // streaming resource group names
 	ExpectedFieldIndexID             map[int64]int64
 	ExpectedLoadFields               []int64
 	ExpectedPriority                 commonpb.LoadPriority
@@ -195,6 +196,9 @@ func generateLoadFields(loadedFields []int64, fieldIndexID map[int64]int64) []*m
 
 // generateReplicas generates the replicas for the collection.
 func (req *AlterLoadConfigRequest) generateReplicas(ctx context.Context) ([]*messagespb.LoadReplicaConfig, error) {
+	// Compute the streaming resource group assignment for each resource group
+	streamingRGAssignment := req.computeStreamingResourceGroupAssignment()
+
 	// fill up the existsReplicaNum found the redundant replicas and the replicas that should be kept
 	existsReplicaNum := make(map[string]int)
 	keptReplicas := make(map[int64]struct{}) // replica that should be kept
@@ -207,9 +211,10 @@ func (req *AlterLoadConfigRequest) generateReplicas(ctx context.Context) ([]*mes
 		}
 		keptReplicas[replica.GetID()] = struct{}{}
 		loadReplicaConfigs = append(loadReplicaConfigs, &messagespb.LoadReplicaConfig{
-			ReplicaId:         replica.GetID(),
-			ResourceGroupName: replica.GetResourceGroup(),
-			Priority:          replica.LoadPriority(),
+			ReplicaId:                  replica.GetID(),
+			ResourceGroupName:          replica.GetResourceGroup(),
+			Priority:                   replica.LoadPriority(),
+			StreamingResourceGroupName: streamingRGAssignment[replica.GetResourceGroup()][existsReplicaNum[replica.GetResourceGroup()]],
 		})
 		existsReplicaNum[replica.GetResourceGroup()]++
 	}
@@ -217,15 +222,17 @@ func (req *AlterLoadConfigRequest) generateReplicas(ctx context.Context) ([]*mes
 	// check if there should generate new incoming replicas.
 	for rg, num := range req.Expected.ExpectedReplicaNumber {
 		for i := existsReplicaNum[rg]; i < num; i++ {
+			streamingRG := streamingRGAssignment[rg][i]
 			if len(redundantReplicas) > 0 {
 				// reuse the replica from redundant replicas.
 				// make a transfer operation from a resource group to another resource group.
 				replicaID := redundantReplicas[0]
 				redundantReplicas = redundantReplicas[1:]
 				loadReplicaConfigs = append(loadReplicaConfigs, &messagespb.LoadReplicaConfig{
-					ReplicaId:         replicaID,
-					ResourceGroupName: rg,
-					Priority:          req.Expected.ExpectedPriority,
+					ReplicaId:                  replicaID,
+					ResourceGroupName:          rg,
+					Priority:                   req.Expected.ExpectedPriority,
+					StreamingResourceGroupName: streamingRG,
 				})
 			} else {
 				// allocate a new replica.
@@ -234,9 +241,10 @@ func (req *AlterLoadConfigRequest) generateReplicas(ctx context.Context) ([]*mes
 					return nil, err
 				}
 				loadReplicaConfigs = append(loadReplicaConfigs, &messagespb.LoadReplicaConfig{
-					ReplicaId:         newID,
-					ResourceGroupName: rg,
-					Priority:          req.Expected.ExpectedPriority,
+					ReplicaId:                  newID,
+					ResourceGroupName:          rg,
+					Priority:                   req.Expected.ExpectedPriority,
+					StreamingResourceGroupName: streamingRG,
 				})
 			}
 		}
@@ -245,4 +253,43 @@ func (req *AlterLoadConfigRequest) generateReplicas(ctx context.Context) ([]*mes
 		return loadReplicaConfigs[i].GetReplicaId() < loadReplicaConfigs[j].GetReplicaId()
 	})
 	return loadReplicaConfigs, nil
+}
+
+// computeStreamingResourceGroupAssignment computes the streaming resource group assignment for each resource group
+// Returns a map: resourceGroup -> []streamingResourceGroup (one for each replica in the resource group)
+func (req *AlterLoadConfigRequest) computeStreamingResourceGroupAssignment() map[string][]string {
+	assignment := make(map[string][]string)
+
+	totalReplicas := 0
+	for _, num := range req.Expected.ExpectedReplicaNumber {
+		totalReplicas += num
+	}
+
+	// Determine streaming resource group assignment strategy
+	singleStreamingRG := len(req.Expected.ExpectedStreamingResourceGroups) <= 1
+	matchesReplicaCount := len(req.Expected.ExpectedStreamingResourceGroups) == totalReplicas
+
+	currentStreamingIdx := 0
+	for rg, num := range req.Expected.ExpectedReplicaNumber {
+		assignment[rg] = make([]string, num)
+		for i := 0; i < num; i++ {
+			if len(req.Expected.ExpectedStreamingResourceGroups) == 0 {
+				// No streaming resource groups specified
+				assignment[rg][i] = ""
+			} else if singleStreamingRG {
+				// All replicas use the same streaming resource group
+				assignment[rg][i] = req.Expected.ExpectedStreamingResourceGroups[0]
+			} else if matchesReplicaCount {
+				// 1-to-1 mapping: each replica gets a unique streaming resource group
+				assignment[rg][i] = req.Expected.ExpectedStreamingResourceGroups[currentStreamingIdx]
+				currentStreamingIdx++
+			} else {
+				// Fallback: round-robin assignment
+				assignment[rg][i] = req.Expected.ExpectedStreamingResourceGroups[currentStreamingIdx%len(req.Expected.ExpectedStreamingResourceGroups)]
+				currentStreamingIdx++
+			}
+		}
+	}
+
+	return assignment
 }

@@ -326,6 +326,7 @@ message LoadReplicaConfig {
     int64 replica_id = 1;
     string resource_group_name = 2;
     common.LoadPriority priority = 3;
+    string streaming_resource_group_name = 4;
 }
 
 message DropLoadConfigMessageHeader {

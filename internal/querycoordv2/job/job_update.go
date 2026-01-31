@@ -27,20 +27,22 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type UpdateLoadConfigJob struct {
 	*BaseJob
-	collectionID             int64
-	newReplicaNumber         int32
-	newResourceGroups        []string
-	meta                     *meta.Meta
-	targetMgr                meta.TargetManagerInterface
-	targetObserver           *observers.TargetObserver
-	collectionObserver       *observers.CollectionObserver
-	userSpecifiedReplicaMode bool
+	collectionID               int64
+	newReplicaNumber           int32
+	newResourceGroups          []string
+	newStreamingResourceGroups []string
+	meta                       *meta.Meta
+	targetMgr                  meta.TargetManagerInterface
+	targetObserver             *observers.TargetObserver
+	collectionObserver         *observers.CollectionObserver
+	userSpecifiedReplicaMode   bool
 }
 
 func NewUpdateLoadConfigJob(ctx context.Context,
@@ -53,15 +55,16 @@ func NewUpdateLoadConfigJob(ctx context.Context,
 ) *UpdateLoadConfigJob {
 	collectionID := req.GetCollectionIDs()[0]
 	return &UpdateLoadConfigJob{
-		BaseJob:                  NewBaseJob(ctx, req.Base.GetMsgID(), collectionID),
-		meta:                     meta,
-		targetMgr:                targetMgr,
-		targetObserver:           targetObserver,
-		collectionObserver:       collectionObserver,
-		collectionID:             collectionID,
-		newReplicaNumber:         req.GetReplicaNumber(),
-		newResourceGroups:        req.GetResourceGroups(),
-		userSpecifiedReplicaMode: userSpecifiedReplicaMode,
+		BaseJob:                    NewBaseJob(ctx, req.Base.GetMsgID(), collectionID),
+		meta:                       meta,
+		targetMgr:                  targetMgr,
+		targetObserver:             targetObserver,
+		collectionObserver:         collectionObserver,
+		collectionID:               collectionID,
+		newReplicaNumber:           req.GetReplicaNumber(),
+		newResourceGroups:          req.GetResourceGroups(),
+		newStreamingResourceGroups: req.GetStreamingResourceGroups(),
+		userSpecifiedReplicaMode:   userSpecifiedReplicaMode,
 	}
 }
 
@@ -85,83 +88,34 @@ func (job *UpdateLoadConfigJob) Execute() error {
 		job.newResourceGroups = []string{meta.DefaultResourceGroupName}
 	}
 
-	var err error
-	// 2. reassign
-	toSpawn, toTransfer, toRelease, err := utils.ReassignReplicaToRG(job.ctx, job.meta, job.collectionID, job.newReplicaNumber, job.newResourceGroups)
-	if err != nil {
-		log.Warn("failed to reassign replica", zap.Error(err))
-		return err
-	}
+	// 2. Build target replica configs based on new replica number and resource groups
+	channels := job.targetMgr.GetDmChannelsByCollection(job.ctx, job.collectionID, meta.CurrentTargetFirst)
+	replicaConfigs := job.buildReplicaConfigs()
 
-	log.Info("reassign replica",
+	log.Info("update load config",
 		zap.Int64("collectionID", job.collectionID),
 		zap.Int32("replicaNumber", job.newReplicaNumber),
 		zap.Strings("resourceGroups", job.newResourceGroups),
-		zap.Any("toSpawn", toSpawn),
-		zap.Any("toTransfer", toTransfer),
-		zap.Any("toRelease", toRelease))
+		zap.Strings("streamingResourceGroups", job.newStreamingResourceGroups),
+		zap.Int("targetReplicaCount", len(replicaConfigs)))
 
-	// 3. try to spawn new replica
-	channels := job.targetMgr.GetDmChannelsByCollection(job.ctx, job.collectionID, meta.CurrentTargetFirst)
-	newReplicas, spawnErr := job.meta.ReplicaManager.Spawn(job.ctx, job.collectionID, toSpawn, lo.Keys(channels), commonpb.LoadPriority_LOW)
-	if spawnErr != nil {
-		log.Warn("failed to spawn replica", zap.Error(spawnErr))
-		err := spawnErr
-		return err
-	}
-	defer func() {
-		if err != nil {
-			// roll back replica from meta
-			replicaIDs := lo.Map(newReplicas, func(r *meta.Replica, _ int) int64 { return r.GetID() })
-			err := job.meta.ReplicaManager.RemoveReplicas(job.ctx, job.collectionID, replicaIDs...)
-			if err != nil {
-				log.Warn("failed to remove replicas", zap.Int64s("replicaIDs", replicaIDs), zap.Error(err))
-			}
-		}
-	}()
-
-	// 4. try to transfer replicas
-	replicaOldRG := make(map[int64]string)
-	for rg, replicas := range toTransfer {
-		collectionReplicas := lo.GroupBy(replicas, func(r *meta.Replica) int64 { return r.GetCollectionID() })
-		for collectionID, replicas := range collectionReplicas {
-			for _, replica := range replicas {
-				replicaOldRG[replica.GetID()] = replica.GetResourceGroup()
-			}
-
-			if transferErr := job.meta.ReplicaManager.MoveReplica(job.ctx, rg, replicas); transferErr != nil {
-				log.Warn("failed to transfer replica for collection", zap.Int64("collectionID", collectionID), zap.Error(transferErr))
-				err = transferErr
-				return err
-			}
-		}
-	}
-	defer func() {
-		if err != nil {
-			for _, replicas := range toTransfer {
-				for _, replica := range replicas {
-					oldRG := replicaOldRG[replica.GetID()]
-					if replica.GetResourceGroup() != oldRG {
-						if err := job.meta.ReplicaManager.TransferReplica(job.ctx, replica.GetID(), replica.GetResourceGroup(), oldRG, 1); err != nil {
-							log.Warn("failed to roll back replicas", zap.Int64("replica", replica.GetID()), zap.Error(err))
-						}
-					}
-				}
-			}
-		}
-	}()
-
-	// 5. remove replica from meta
-	err = job.meta.ReplicaManager.RemoveReplicas(job.ctx, job.collectionID, toRelease...)
+	// 3. Update replicas using UpdateWithReplicaConfig
+	// This will match existing replicas by (ResourceGroup, StreamingResourceGroup),
+	// reuse matched replicas, create new ones, and remove unmatched ones
+	_, err := job.meta.ReplicaManager.UpdateWithReplicaConfig(job.ctx, meta.SpawnWithReplicaConfigParams{
+		CollectionID: job.collectionID,
+		Channels:     lo.Keys(channels),
+		Configs:      replicaConfigs,
+	})
 	if err != nil {
-		log.Warn("failed to remove replicas", zap.Int64s("replicaIDs", toRelease), zap.Error(err))
+		log.Warn("failed to update replicas", zap.Error(err))
 		return err
 	}
 
-	// 6. recover node distribution among replicas
+	// 4. recover node distribution among replicas
 	utils.RecoverReplicaOfCollection(job.ctx, job.meta, job.collectionID)
 
-	// 7. update replica number in meta
+	// 5. update replica number in meta
 	err = job.meta.UpdateReplicaNumber(job.ctx, job.collectionID, job.newReplicaNumber, job.userSpecifiedReplicaMode)
 	if err != nil {
 		msg := "failed to update replica number"
@@ -169,7 +123,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 		return err
 	}
 
-	// 8. update next target, no need to rollback if pull target failed, target observer will pull target in periodically
+	// 6. update next target, no need to rollback if pull target failed, target observer will pull target in periodically
 	_, err = job.targetObserver.UpdateNextTarget(job.collectionID)
 	if err != nil {
 		msg := "failed to update next target"
@@ -177,4 +131,47 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	}
 
 	return nil
+}
+
+// buildReplicaConfigs builds LoadReplicaConfig array based on newReplicaNumber and resource groups
+// Returns configs without ReplicaID set - IDs will be assigned by UpdateWithReplicaConfig
+// Resource group assignment rules:
+// - If len(resourceGroups) == 1: all replicas use this single resource group
+// - If len(resourceGroups) == newReplicaNumber: replica i uses resourceGroups[i] (1-to-1 mapping in input order)
+// Same rules apply to streamingResourceGroups
+func (job *UpdateLoadConfigJob) buildReplicaConfigs() []*messagespb.LoadReplicaConfig {
+	configs := make([]*messagespb.LoadReplicaConfig, 0, job.newReplicaNumber)
+
+	singleRG := len(job.newResourceGroups) == 1
+	singleStreamingRG := len(job.newStreamingResourceGroups) == 1
+
+	for i := 0; i < int(job.newReplicaNumber); i++ {
+		// Assign resource group
+		rg := ""
+		if singleRG {
+			rg = job.newResourceGroups[0]
+		} else {
+			rg = job.newResourceGroups[i]
+		}
+
+		// Assign streaming resource group
+		streamingRG := ""
+		if len(job.newStreamingResourceGroups) > 0 {
+			if singleStreamingRG {
+				streamingRG = job.newStreamingResourceGroups[0]
+			} else {
+				streamingRG = job.newStreamingResourceGroups[i]
+			}
+		}
+
+		config := &messagespb.LoadReplicaConfig{
+			ReplicaId:                  0, // Not set, will be assigned by UpdateWithReplicaConfig
+			ResourceGroupName:          rg,
+			Priority:                   commonpb.LoadPriority_LOW,
+			StreamingResourceGroupName: streamingRG,
+		}
+		configs = append(configs, config)
+	}
+
+	return configs
 }

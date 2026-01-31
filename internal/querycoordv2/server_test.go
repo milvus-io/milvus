@@ -431,11 +431,13 @@ func TestApplyLoadConfigChanges(t *testing.T) {
 		var capturedCollectionIDs []int64
 		var capturedReplicaNum int32
 		var capturedRGs []string
-		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string) error {
+		var capturedStreamingRGs []string
+		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, newStreamingRGs []string) error {
 			updateLoadConfigCalled = true
 			capturedCollectionIDs = collectionIDs
 			capturedReplicaNum = newReplicaNum
 			capturedRGs = newRGs
+			capturedStreamingRGs = newStreamingRGs
 			return nil
 		}).Build()
 
@@ -454,6 +456,7 @@ func TestApplyLoadConfigChanges(t *testing.T) {
 		assert.Equal(t, []int64{1001}, capturedCollectionIDs, "Only collections with IsUserSpecifiedReplicaMode = false should be included")
 		assert.Equal(t, int32(2), capturedReplicaNum, "ReplicaNumber should match cluster level config")
 		assert.Equal(t, []string{"default", "rg1"}, capturedRGs, "ResourceGroups should match cluster level config")
+		assert.Equal(t, []string{"default", "rg1"}, capturedStreamingRGs, "StreamingResourceGroups should match cluster level config")
 
 		watcher = NewLoadConfigWatcher(testServer)
 		watcher.Trigger()
@@ -647,6 +650,7 @@ func (suite *ServerSuite) hackServer() {
 			CollectionName: "collection_" + strconv.FormatInt(collection, 10),
 			Schema:         &schemapb.CollectionSchema{},
 		}, nil).Maybe()
+		suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, collection).Return([]string{}, []string{}, 0, nil).Maybe()
 		suite.expectGetRecoverInfo(collection)
 	}
 	log.Debug("server hacked")
