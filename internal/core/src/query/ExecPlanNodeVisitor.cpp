@@ -142,6 +142,31 @@ fillDataArrayFromColumnVector(const ColumnVectorPtr& column_vector,
                               DataArray& data_array) {
     auto column_raw_data = column_vector->GetRawData();
     auto column_data_size = column_vector->size();
+
+    // Always copy validity data from ColumnVector
+    // ColumnVector always tracks validity via valid_values_, so we should
+    // always propagate it to ensure correctness for nullable fields
+    auto valid_data = data_array.mutable_valid_data();
+    const uint8_t* src_bitmap =
+        static_cast<const uint8_t*>(column_vector->GetValidRawData());
+    // Process 8 bits at a time for better performance
+    size_t full_bytes = column_data_size / 8;
+    size_t remainder = column_data_size % 8;
+    size_t idx = 0;
+    for (size_t byte_idx = 0; byte_idx < full_bytes; byte_idx++) {
+        uint8_t byte_val = src_bitmap[byte_idx];
+        for (int bit = 0; bit < 8; bit++) {
+            (*valid_data)[idx++] = (byte_val >> bit) & 1;
+        }
+    }
+    // Handle remaining bits
+    if (remainder > 0) {
+        uint8_t byte_val = src_bitmap[full_bytes];
+        for (size_t bit = 0; bit < remainder; bit++) {
+            (*valid_data)[idx++] = (byte_val >> bit) & 1;
+        }
+    }
+
     switch (column_vector->type()) {
         case DataType::BOOL: {
             auto bool_data = data_array.mutable_scalars()->mutable_bool_data();
@@ -295,11 +320,14 @@ ExecPlanNodeVisitor::setupRetrieveResult(
                 column_vec,
                 "children inside row vector must be of column vector for now");
             DataArray data_array;
+            // Always allocate valid_data to ensure proper null handling
+            // The actual validity values will be copied from ColumnVector
+            // in fillDataArrayFromColumnVector
             milvus::segcore::CreateScalarDataArray(data_array,
                                                    column_vec->size(),
                                                    column_vec->type(),
                                                    column_vec->type(),
-                                                   column_vec->nullCount() > 0);
+                                                   true);
             fillDataArrayFromColumnVector(column_vec, data_array);
             tmp_retrieve_result.field_data_[i] = std::move(data_array);
         }
