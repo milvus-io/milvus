@@ -11,9 +11,9 @@ func TestFIFOQueue_Push(t *testing.T) {
 
 	// Test adding tasks
 	task1 := NewMockTask(t)
-	task1.EXPECT().GetTaskID().Return(int64(1))
+	task1.EXPECT().GetTaskID().Maybe().Return(int64(1))
 	task2 := NewMockTask(t)
-	task2.EXPECT().GetTaskID().Return(int64(2))
+	task2.EXPECT().GetTaskID().Maybe().Return(int64(2))
 
 	queue.Push(task1)
 	queue.Push(task2)
@@ -38,9 +38,9 @@ func TestFIFOQueue_Pop(t *testing.T) {
 
 	// Test normal pop operation
 	task1 := NewMockTask(t)
-	task1.EXPECT().GetTaskID().Return(int64(1))
+	task1.EXPECT().GetTaskID().Maybe().Return(int64(1))
 	task2 := NewMockTask(t)
-	task2.EXPECT().GetTaskID().Return(int64(2))
+	task2.EXPECT().GetTaskID().Maybe().Return(int64(2))
 	queue.Push(task1)
 	queue.Push(task2)
 
@@ -61,7 +61,7 @@ func TestFIFOQueue_Get(t *testing.T) {
 
 	// Test getting existing task
 	task := NewMockTask(t)
-	task.EXPECT().GetTaskID().Return(int64(1))
+	task.EXPECT().GetTaskID().Maybe().Return(int64(1))
 	queue.Push(task)
 
 	retrievedTask := queue.Get(1)
@@ -77,11 +77,11 @@ func TestFIFOQueue_Remove(t *testing.T) {
 
 	// Test removing existing task
 	task1 := NewMockTask(t)
-	task1.EXPECT().GetTaskID().Return(int64(1))
+	task1.EXPECT().GetTaskID().Maybe().Return(int64(1))
 	task2 := NewMockTask(t)
-	task2.EXPECT().GetTaskID().Return(int64(2))
+	task2.EXPECT().GetTaskID().Maybe().Return(int64(2))
 	task3 := NewMockTask(t)
-	task3.EXPECT().GetTaskID().Return(int64(3))
+	task3.EXPECT().GetTaskID().Maybe().Return(int64(3))
 
 	queue.Push(task1)
 	queue.Push(task2)
@@ -105,9 +105,9 @@ func TestFIFOQueue_TaskIDs(t *testing.T) {
 
 	// Test queue with tasks
 	task1 := NewMockTask(t)
-	task1.EXPECT().GetTaskID().Return(int64(1))
+	task1.EXPECT().GetTaskID().Maybe().Return(int64(1))
 	task2 := NewMockTask(t)
-	task2.EXPECT().GetTaskID().Return(int64(2))
+	task2.EXPECT().GetTaskID().Maybe().Return(int64(2))
 
 	queue.Push(task1)
 	queue.Push(task2)

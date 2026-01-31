@@ -80,6 +80,16 @@ func (at *analyzeTask) GetTaskSlot() int64 {
 	return Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64()
 }
 
+func (at *analyzeTask) GetTaskSlotV2() (float64, float64) {
+	slot := Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsFloat()
+	return slot, slot
+}
+
+func (at *analyzeTask) AllowCpuOversubscription() bool {
+	// Analyze tasks are lightweight, allow CPU over-subscription for better resource utilization
+	return true
+}
+
 func (at *analyzeTask) SetState(state indexpb.JobState, failReason string) {
 	at.State = state
 	at.FailReason = failReason
@@ -137,6 +147,7 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		log.Warn("failed to update task version", zap.Error(err))
 		return
 	}
+	taskSlot := Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsFloat()
 	req := &workerpb.AnalyzeRequest{
 		ClusterID:     Params.CommonCfg.ClusterPrefix.GetValue(),
 		TaskID:        at.GetTaskID(),
@@ -148,7 +159,10 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		Dim:           task.Dim,
 		SegmentStats:  make(map[int64]*indexpb.SegmentStats),
 		Version:       task.Version + 1,
+		TaskSlot:      int64(taskSlot), // deprecated, kept for backward compatibility
 		StorageConfig: createStorageConfig(),
+		CpuSlot:       taskSlot,
+		MemorySlot:    taskSlot,
 	}
 	WrapPluginContext(task.CollectionID, at.schema.GetProperties(), req)
 
