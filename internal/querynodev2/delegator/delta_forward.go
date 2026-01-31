@@ -188,6 +188,11 @@ func (sd *shardDelegator) getLevel0Deltalogs(partitionID int64) []*datapb.FieldB
 }
 
 func (sd *shardDelegator) forwardStreamingByBF(ctx context.Context, deleteData []*DeleteData) {
+	offlineSegments := typeutil.NewConcurrentSet[int64]()
+
+	// Pin segments first to protect candidates from being released during BF check
+	sealed, growing, version := sd.distribution.PinOnlineSegments()
+
 	start := time.Now()
 	retMap := sd.applyBFInParallel(deleteData, segments.GetBFApplyPool())
 	// segment => delete data
@@ -213,10 +218,6 @@ func (sd *shardDelegator) forwardStreamingByBF(ctx context.Context, deleteData [
 		return true
 	})
 	bfCost := time.Since(start)
-
-	offlineSegments := typeutil.NewConcurrentSet[int64]()
-
-	sealed, growing, version := sd.distribution.PinOnlineSegments()
 
 	start = time.Now()
 	eg, ctx := errgroup.WithContext(context.Background())
