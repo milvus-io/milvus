@@ -1716,6 +1716,65 @@ func (_c *MockQueryNodeServer_UnsubDmChannel_Call) RunAndReturn(run func(context
 	return _c
 }
 
+// UpdateIndex provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryNodeServer) UpdateIndex(_a0 context.Context, _a1 *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateIndex")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.UpdateIndexRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.UpdateIndexRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.UpdateIndexRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryNodeServer_UpdateIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateIndex'
+type MockQueryNodeServer_UpdateIndex_Call struct {
+	*mock.Call
+}
+
+// UpdateIndex is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.UpdateIndexRequest
+func (_e *MockQueryNodeServer_Expecter) UpdateIndex(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_UpdateIndex_Call {
+	return &MockQueryNodeServer_UpdateIndex_Call{Call: _e.mock.On("UpdateIndex", _a0, _a1)}
+}
+
+func (_c *MockQueryNodeServer_UpdateIndex_Call) Run(run func(_a0 context.Context, _a1 *querypb.UpdateIndexRequest)) *MockQueryNodeServer_UpdateIndex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.UpdateIndexRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryNodeServer_UpdateIndex_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryNodeServer_UpdateIndex_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryNodeServer_UpdateIndex_Call) RunAndReturn(run func(context.Context, *querypb.UpdateIndexRequest) (*commonpb.Status, error)) *MockQueryNodeServer_UpdateIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateSchema provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryNodeServer) UpdateSchema(_a0 context.Context, _a1 *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)

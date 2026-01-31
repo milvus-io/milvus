@@ -168,6 +168,10 @@ func (qn *qnServerWrapper) DropIndex(ctx context.Context, in *querypb.DropIndexR
 	return qn.QueryNode.DropIndex(ctx, in)
 }
 
+func (qn *qnServerWrapper) UpdateIndex(ctx context.Context, in *querypb.UpdateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return qn.QueryNode.UpdateIndex(ctx, in)
+}
+
 func (qn *qnServerWrapper) ValidateAnalyzer(ctx context.Context, in *querypb.ValidateAnalyzerRequest, _ ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error) {
 	return qn.QueryNode.ValidateAnalyzer(ctx, in)
 }

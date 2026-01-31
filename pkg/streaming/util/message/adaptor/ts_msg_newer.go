@@ -250,3 +250,31 @@ func NewAlterWALMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, erro
 		AlterWALMessage: alterWALMsg,
 	}, nil
 }
+
+type CreateIndexMessageBody struct {
+	*tsMsgImpl
+	CreateIndexMessage message.ImmutableCreateIndexMessageV2
+}
+
+func (c *CreateIndexMessageBody) ID() msgstream.UniqueID {
+	return 0
+}
+
+func NewCreateIndexMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+	createIndexMsg, err := message.AsImmutableCreateIndexMessageV2(msg)
+	if err != nil {
+		return nil, err
+	}
+	return &CreateIndexMessageBody{
+		tsMsgImpl: &tsMsgImpl{
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: msg.TimeTick(),
+				EndTimestamp:   msg.TimeTick(),
+			},
+			ts:      msg.TimeTick(),
+			sz:      msg.EstimateSize(),
+			msgType: MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()),
+		},
+		CreateIndexMessage: createIndexMsg,
+	}, nil
+}
