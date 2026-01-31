@@ -59,6 +59,8 @@ define_option_string(MILVUS_DEPENDENCY_SOURCE
 
 define_option(MILVUS_USE_CCACHE "Use ccache when compiling (if available)" ON)
 
+define_option(MILVUS_USE_MOLD "Use mold linker for faster linking (if available)" ON)
+
 define_option(MILVUS_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)
 

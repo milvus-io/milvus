@@ -44,4 +44,9 @@ if ( NOT milvus-common_POPULATED )
                       ${milvus-common_BINARY_DIR} )
 endif()
 
+# On Linux with GCC, 128-bit atomic operations require linking with libatomic
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_link_libraries(milvus-common PUBLIC atomic)
+endif()
+
 set( MILVUS_COMMON_INCLUDE_DIR ${milvus-common_SOURCE_DIR}/include CACHE INTERNAL "Path to milvus-common include directory" )

@@ -37,6 +37,11 @@ if(USE_OPENDAL)
     set(SOURCE_FILES ${SOURCE_FILES} opendal/OpenDALChunkManager.cpp)
 endif()
 
+# Add AWS SDK include directories on macOS (Homebrew)
+if(APPLE)
+    include_directories(/opt/homebrew/include)
+endif()
+
 # Add loon_ffi subdirectory to include loon FFI source files
 add_subdirectory(loon_ffi)
 

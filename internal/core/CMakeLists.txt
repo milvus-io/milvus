@@ -110,6 +110,7 @@ include( CTest )
 include( BuildUtils )
 include( DefineOptions )
 using_ccache_if_defined(MILVUS_USE_CCACHE)
+using_mold_if_available(MILVUS_USE_MOLD)
 
 include( ExternalProject )
 include( GNUInstallDirs )

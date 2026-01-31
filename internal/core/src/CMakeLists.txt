@@ -88,6 +88,11 @@ set(LINK_TARGETS
     ${CONAN_LIBS}
     )
 
+# On Linux with GCC, 128-bit atomic operations require linking with libatomic
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    list(APPEND LINK_TARGETS atomic)
+endif()
+
 if(USE_OPENDAL)
     set(LINK_TARGETS ${LINK_TARGETS} opendal)
 endif()
@@ -101,6 +106,11 @@ endif()
 if (ENABLE_GCP_NATIVE)
     set(LINK_TARGETS ${LINK_TARGETS} gcp-native-storage)
 endif()
+
+# Ensure tantivy_binding is built before milvus_core
+# This is needed because tantivy_binding is an IMPORTED library and CMake
+# doesn't automatically propagate custom target dependencies for IMPORTED targets
+add_dependencies(milvus_core install_tantivy_target)
 
 target_link_libraries(milvus_core ${LINK_TARGETS})
 

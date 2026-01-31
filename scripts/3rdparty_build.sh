@@ -82,11 +82,24 @@ if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
 fi
 
 source ${ROOT_DIR}/scripts/setenv.sh
+
+# Activate Python virtual environment if available (for conan)
+MILVUS_VENV_DIR="${ROOT_DIR}/.venv"
+if [[ -f "${MILVUS_VENV_DIR}/bin/activate" ]]; then
+    source "${MILVUS_VENV_DIR}/bin/activate"
+    echo "Using Python virtual environment: ${MILVUS_VENV_DIR}"
+elif [[ -f "$HOME/.local/bin/conan" ]]; then
+    # Fallback: Add conan to PATH if installed in user's local bin directory
+    export PATH="$HOME/.local/bin:$PATH"
+fi
+
 pushd ${BUILD_OUTPUT_DIR}
 
 export CONAN_REVISIONS_ENABLED=1
 export CXXFLAGS="-Wno-error=address -Wno-error=deprecated-declarations -include cstdint"
 export CFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"
+# Allow CMake 4.x to build packages with old cmake_minimum_required versions (< 3.5)
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
 
 # Determine the Conan remote URL, using the environment variable if set, otherwise defaulting
 CONAN_ARTIFACTORY_URL="${CONAN_ARTIFACTORY_URL:-https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local}"

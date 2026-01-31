@@ -237,3 +237,16 @@ MACRO(using_ccache_if_defined MILVUS_USE_CCACHE)
     endif ()
 ENDMACRO(using_ccache_if_defined)
 
+MACRO(using_mold_if_available MILVUS_USE_MOLD)
+    if (MILVUS_USE_MOLD)
+        find_program(MOLD_FOUND mold)
+        if (MOLD_FOUND)
+            message(STATUS "Using mold linker: ${MOLD_FOUND}")
+            # Add mold linker flag to all targets
+            add_link_options("-fuse-ld=mold")
+        else()
+            message(STATUS "mold linker not found, using default linker")
+        endif()
+    endif ()
+ENDMACRO(using_mold_if_available)
+
