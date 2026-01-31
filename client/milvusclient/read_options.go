@@ -66,6 +66,7 @@ type searchOption struct {
 
 type AnnRequest struct {
 	vectors []entity.Vector
+	ids     column.Column // Primary key IDs for search by ID
 
 	annField        string
 	metricsType     entity.MetricType
@@ -95,19 +96,39 @@ func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *AnnReq
 
 func (r *AnnRequest) searchRequest() (*milvuspb.SearchRequest, error) {
 	request := &milvuspb.SearchRequest{
-		Nq:      int64(len(r.vectors)),
 		Dsl:     r.expr,
 		DslType: commonpb.DslType_BoolExprV1,
 	}
 
-	var err error
-	// placeholder group
-	placeHolderGroupBytes, err := vector2PlaceholderGroupBytes(r.vectors)
-	if err != nil {
-		return nil, err
-	}
-	request.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
-		PlaceholderGroup: placeHolderGroupBytes,
+	// Determine search mode and build request accordingly
+	if r.ids != nil {
+		// Search by primary key IDs mode
+		if r.ids.Len() == 0 {
+			return nil, errors.New("IDs column for search cannot be empty")
+		}
+
+		request.Nq = int64(r.ids.Len())
+
+		// Convert IDs to protobuf format
+		pbIDs, err := column2IDs(r.ids)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to convert IDs column")
+		}
+		request.SearchInput = &milvuspb.SearchRequest_Ids{
+			Ids: pbIDs,
+		}
+	} else {
+		// Traditional search by vectors mode
+		request.Nq = int64(len(r.vectors))
+
+		// Convert vectors to placeholder group
+		placeHolderGroupBytes, err := vector2PlaceholderGroupBytes(r.vectors)
+		if err != nil {
+			return nil, err
+		}
+		request.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: placeHolderGroupBytes,
+		}
 	}
 
 	params := map[string]string{
@@ -241,6 +262,15 @@ func slice2TmplValue(val any) (*schemapb.TemplateValue, error) {
 
 func (r *AnnRequest) WithANNSField(annsField string) *AnnRequest {
 	r.annField = annsField
+	return r
+}
+
+// WithIDs sets the primary key IDs for search by ID functionality.
+// When IDs are provided, the search will use these IDs to fetch vectors
+// internally and perform ANN search with those vectors.
+// Note: vectors field will be ignored when IDs are set.
+func (r *AnnRequest) WithIDs(ids column.Column) *AnnRequest {
+	r.ids = ids
 	return r
 }
 
@@ -380,6 +410,9 @@ func (opt *searchOption) WithFunctionReranker(fr *entity.Function) *searchOption
 	return opt
 }
 
+// NewSearchOption creates a new search option for traditional vector search.
+// Provide the query vectors to search for similar vectors in the collection.
+// For search by primary key IDs, use NewSearchByIDsOption instead.
 func NewSearchOption(collectionName string, limit int, vectors []entity.Vector) *searchOption {
 	return &searchOption{
 		annRequest:                 NewAnnRequest("", limit, vectors...),
@@ -387,6 +420,15 @@ func NewSearchOption(collectionName string, limit int, vectors []entity.Vector) 
 		useDefaultConsistencyLevel: true,
 		consistencyLevel:           entity.ClBounded,
 	}
+}
+
+// NewSearchByIDsOption creates a new search option for searching by primary key IDs.
+// When using this option, the search will use the provided IDs to fetch vectors
+// internally and perform ANN search with those vectors.
+func NewSearchByIDsOption(collectionName string, limit int, ids column.Column) *searchOption {
+	opt := NewSearchOption(collectionName, limit, nil)
+	opt.annRequest.WithIDs(ids)
+	return opt
 }
 
 func vector2PlaceholderGroupBytes(vectors []entity.Vector) ([]byte, error) {
@@ -642,6 +684,36 @@ func pks2Expr(ids column.Column) string {
 		expr = fmt.Sprintf("%s in [%s]", pkName, strings.Join(data, ","))
 	}
 	return expr
+}
+
+// column2IDs converts a column.Column of primary keys to schemapb.IDs
+// Used for search by primary key functionality
+func column2IDs(ids column.Column) (*schemapb.IDs, error) {
+	if ids == nil {
+		return nil, errors.New("ids column cannot be nil")
+	}
+
+	result := &schemapb.IDs{}
+	switch ids.Type() {
+	case entity.FieldTypeInt64:
+		data := ids.FieldData().GetScalars().GetLongData().GetData()
+		result.IdField = &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: data,
+			},
+		}
+	case entity.FieldTypeVarChar, entity.FieldTypeString:
+		data := ids.FieldData().GetScalars().GetStringData().GetData()
+		result.IdField = &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{
+				Data: data,
+			},
+		}
+	default:
+		return nil, fmt.Errorf("unsupported primary key type %v for search by IDs", ids.Type())
+	}
+
+	return result, nil
 }
 
 func NewQueryOption(collectionName string) *queryOption {
