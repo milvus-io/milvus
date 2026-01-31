@@ -509,12 +509,36 @@ func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, resu
 		return funcutil.ToPhysicalChannel(key)
 	})
 	newIncomingCDCTasks := cm.getNewIncomingTask(config, appendResults)
-	if err := resource.Resource().StreamingCatalog().SaveReplicateConfiguration(ctx,
-		&streamingpb.ReplicateConfigurationMeta{ReplicateConfiguration: config.GetReplicateConfiguration()},
-		newIncomingCDCTasks); err != nil {
+
+	// Check if this is a force promote based on message header
+	isForcePromote := msg.Header().ForcePromote
+
+	var configMeta *streamingpb.ReplicateConfigurationMeta
+	if isForcePromote {
+		// For force promotes, mark the config with force flags
+		configMeta = &streamingpb.ReplicateConfigurationMeta{
+			ReplicateConfiguration: config.GetReplicateConfiguration(),
+			ForcePromoted:          true,
+			ForcePromoteTimestamp:  msg.TimeTick(),
+		}
+		cm.Logger().Info("Applying force promote to replicate configuration",
+			replicateutil.ConfigLogField(config.GetReplicateConfiguration()),
+		)
+	} else {
+		// For normal replicate configuration updates, don't set force flags
+		configMeta = &streamingpb.ReplicateConfigurationMeta{
+			ReplicateConfiguration: config.GetReplicateConfiguration(),
+			ForcePromoted:          false,
+			ForcePromoteTimestamp:  0,
+		}
+	}
+
+	if err := resource.Resource().StreamingCatalog().SaveReplicateConfiguration(ctx, configMeta, newIncomingCDCTasks); err != nil {
 		cm.Logger().Error("failed to save replicate configuration", zap.Error(err))
 		return err
 	}
+
+	cm.Logger().Info("Saved replicate configuration", replicateutil.ConfigLogField(config.GetReplicateConfiguration()))
 
 	cm.replicateConfig = config
 	cm.cond.UnsafeBroadcast()

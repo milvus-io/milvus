@@ -53,15 +53,15 @@ func ExampleClient_UpdateReplicateConfiguration() {
 		WithPchannels("target-channel-1", "target-channel-2").
 		Build()
 
-	// Use builder pattern to build replicate configuration
-	config := milvusclient.NewReplicateConfigurationBuilder().
+	// Use builder pattern to build replicate configuration request
+	req := milvusclient.NewReplicateConfigurationBuilder().
 		WithCluster(sourceCluster).
 		WithCluster(targetCluster).
 		WithTopology("source-cluster", "target-cluster").
 		Build()
 
 	// Update replicate configuration
-	err = cli.UpdateReplicateConfiguration(ctx, config)
+	err = cli.UpdateReplicateConfiguration(ctx, req)
 	if err != nil {
 		log.Printf("Failed to update replicate configuration: %v", err)
 		return
