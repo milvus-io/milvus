@@ -1952,10 +1952,7 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     if (!field_data_info.field_infos.empty()) {
         LoadFieldData(field_data_info);
     }
-}
 
-void
-SegmentGrowingImpl::FinishLoad() {
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
