@@ -1012,6 +1012,306 @@ func (suite *SegmentLoaderDetailSuite) TestCheckSegmentSizeWithMemoryLimit() {
 	suite.True(errors.Is(err, merr.ErrSegmentRequestResourceFailed))
 }
 
+func Test_checkAllVectorFieldsIndexed(t *testing.T) {
+	tests := []struct {
+		name           string
+		schema         *schemapb.CollectionSchema
+		indexedFields  []int64
+		expectedResult bool
+	}{
+		{
+			name: "all vector fields indexed",
+			schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, DataType: schemapb.DataType_Int64},
+					{FieldID: 101, DataType: schemapb.DataType_FloatVector},
+					{FieldID: 102, DataType: schemapb.DataType_BinaryVector},
+				},
+			},
+			indexedFields:  []int64{101, 102},
+			expectedResult: true,
+		},
+		{
+			name: "partial vector fields indexed",
+			schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, DataType: schemapb.DataType_Int64},
+					{FieldID: 101, DataType: schemapb.DataType_FloatVector},
+					{FieldID: 102, DataType: schemapb.DataType_BinaryVector},
+				},
+			},
+			indexedFields:  []int64{101},
+			expectedResult: false,
+		},
+		{
+			name: "no vector fields indexed",
+			schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, DataType: schemapb.DataType_Int64},
+					{FieldID: 101, DataType: schemapb.DataType_FloatVector},
+					{FieldID: 102, DataType: schemapb.DataType_Float16Vector},
+				},
+			},
+			indexedFields:  []int64{},
+			expectedResult: false,
+		},
+		{
+			name: "no vector fields in schema",
+			schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, DataType: schemapb.DataType_Int64},
+					{FieldID: 101, DataType: schemapb.DataType_VarChar},
+				},
+			},
+			indexedFields:  []int64{},
+			expectedResult: true,
+		},
+		{
+			name: "multiple vector types all indexed",
+			schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, DataType: schemapb.DataType_Int64},
+					{FieldID: 101, DataType: schemapb.DataType_FloatVector},
+					{FieldID: 102, DataType: schemapb.DataType_Float16Vector},
+					{FieldID: 103, DataType: schemapb.DataType_BFloat16Vector},
+					{FieldID: 104, DataType: schemapb.DataType_SparseFloatVector},
+				},
+			},
+			indexedFields:  []int64{101, 102, 103, 104},
+			expectedResult: true,
+		},
+		{
+			name:           "nil schema",
+			schema:         nil,
+			indexedFields:  []int64{},
+			expectedResult: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create mock segment
+			mockSegment := NewMockSegment(t)
+			for _, fieldID := range tt.indexedFields {
+				mockSegment.EXPECT().ExistIndex(fieldID).Return(true).Maybe()
+			}
+			// For non-indexed fields, return false
+			if tt.schema != nil {
+				for _, field := range tt.schema.GetFields() {
+					isIndexed := false
+					for _, indexedID := range tt.indexedFields {
+						if field.GetFieldID() == indexedID {
+							isIndexed = true
+							break
+						}
+					}
+					if !isIndexed {
+						mockSegment.EXPECT().ExistIndex(field.GetFieldID()).Return(false).Maybe()
+					}
+				}
+			}
+
+			result := checkAllVectorFieldsIndexed(mockSegment, tt.schema)
+			if result != tt.expectedResult {
+				t.Errorf("checkAllVectorFieldsIndexed() = %v, want %v", result, tt.expectedResult)
+			}
+		})
+	}
+}
+
+func Test_updateSegmentIndexMetric(t *testing.T) {
+	paramtable.Init()
+
+	tests := []struct {
+		name      string
+		oldStatus IndexStatus
+		newStatus IndexStatus
+	}{
+		{
+			name:      "unindexed to indexed",
+			oldStatus: IndexStatusUnindexed,
+			newStatus: IndexStatusIndexed,
+		},
+		{
+			name:      "indexed to unindexed",
+			oldStatus: IndexStatusIndexed,
+			newStatus: IndexStatusUnindexed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockSegment := NewMockSegment(t)
+			mockSegment.EXPECT().CompareAndSetIndexStatus(tt.oldStatus, tt.newStatus).Return(true).Once()
+			mockSegment.EXPECT().Collection().Return(int64(1)).Maybe()
+			mockSegment.EXPECT().Type().Return(SegmentTypeSealed).Maybe()
+
+			updateSegmentIndexMetric(mockSegment, tt.oldStatus, tt.newStatus)
+		})
+	}
+}
+
+func Test_storageVersionLabel(t *testing.T) {
+	tests := []struct {
+		name           string
+		storageVersion int64
+		expectedLabel  string
+	}{
+		{
+			name:           "StorageV1",
+			storageVersion: 0,
+			expectedLabel:  "0",
+		},
+		{
+			name:           "StorageV2",
+			storageVersion: 2,
+			expectedLabel:  "2",
+		},
+		{
+			name:           "StorageV3",
+			storageVersion: 3,
+			expectedLabel:  "3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockSegment := NewMockSegment(t)
+			mockLoadInfo := &querypb.SegmentLoadInfo{
+				StorageVersion: tt.storageVersion,
+			}
+			mockSegment.EXPECT().LoadInfo().Return(mockLoadInfo).Maybe()
+			mockSegment.EXPECT().Collection().Return(int64(1)).Maybe()
+			mockSegment.EXPECT().Type().Return(SegmentTypeSealed).Maybe()
+
+			label := fmt.Sprint(mockSegment.LoadInfo().GetStorageVersion())
+			if label != tt.expectedLabel {
+				t.Errorf("storage version label = %v, want %v", label, tt.expectedLabel)
+			}
+		})
+	}
+}
+
+func Test_IndexStatusString(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   IndexStatus
+		expected string
+	}{
+		{
+			name:     "IndexStatusUnindexed",
+			status:   IndexStatusUnindexed,
+			expected: "unindexed",
+		},
+		{
+			name:     "IndexStatusIndexed",
+			status:   IndexStatusIndexed,
+			expected: "indexed",
+		},
+		{
+			name:     "Invalid status defaults to unindexed",
+			status:   IndexStatus(999),
+			expected: "unindexed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.status.String()
+			if result != tt.expected {
+				t.Errorf("IndexStatus.String() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func Test_checkAllVectorFieldsIndexed_EdgeCases(t *testing.T) {
+	t.Run("schema with mixed field types", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, DataType: schemapb.DataType_Int64},
+				{FieldID: 101, DataType: schemapb.DataType_FloatVector},
+				{FieldID: 102, DataType: schemapb.DataType_VarChar},
+				{FieldID: 103, DataType: schemapb.DataType_Float},
+				{FieldID: 104, DataType: schemapb.DataType_BinaryVector},
+				{FieldID: 105, DataType: schemapb.DataType_JSON},
+			},
+		}
+
+		mockSegment := NewMockSegment(t)
+		mockSegment.EXPECT().ExistIndex(int64(101)).Return(true)
+		mockSegment.EXPECT().ExistIndex(int64(104)).Return(true)
+		mockSegment.EXPECT().ExistIndex(int64(100)).Return(false).Maybe()
+		mockSegment.EXPECT().ExistIndex(int64(102)).Return(false).Maybe()
+		mockSegment.EXPECT().ExistIndex(int64(103)).Return(false).Maybe()
+		mockSegment.EXPECT().ExistIndex(int64(105)).Return(false).Maybe()
+
+		result := checkAllVectorFieldsIndexed(mockSegment, schema)
+		if !result {
+			t.Errorf("Expected true when all vector fields are indexed, got false")
+		}
+	})
+
+	t.Run("empty schema", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{},
+		}
+		mockSegment := NewMockSegment(t)
+		result := checkAllVectorFieldsIndexed(mockSegment, schema)
+		if !result {
+			t.Errorf("Expected true for empty schema, got false")
+		}
+	})
+
+	t.Run("one vector field not indexed", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 101, DataType: schemapb.DataType_FloatVector},
+				{FieldID: 102, DataType: schemapb.DataType_Float16Vector},
+				{FieldID: 103, DataType: schemapb.DataType_BFloat16Vector},
+			},
+		}
+
+		mockSegment := NewMockSegment(t)
+		mockSegment.EXPECT().ExistIndex(int64(101)).Return(true)
+		mockSegment.EXPECT().ExistIndex(int64(102)).Return(false)
+
+		result := checkAllVectorFieldsIndexed(mockSegment, schema)
+		if result {
+			t.Errorf("Expected false when one vector field is not indexed, got true")
+		}
+	})
+}
+
+func Test_updateSegmentIndexMetric_Transitions(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("transition with same status should return early", func(t *testing.T) {
+		mockSegment := NewMockSegment(t)
+		// Should not call any methods when old and new status are the same
+		updateSegmentIndexMetric(mockSegment, IndexStatusIndexed, IndexStatusIndexed)
+	})
+
+	t.Run("transition for growing segment", func(t *testing.T) {
+		mockSegment := NewMockSegment(t)
+		mockSegment.EXPECT().CompareAndSetIndexStatus(IndexStatusUnindexed, IndexStatusIndexed).Return(true).Once()
+		mockSegment.EXPECT().Collection().Return(int64(200))
+		mockSegment.EXPECT().Type().Return(SegmentTypeGrowing)
+
+		updateSegmentIndexMetric(mockSegment, IndexStatusUnindexed, IndexStatusIndexed)
+	})
+
+	t.Run("concurrent update should skip if CAS fails", func(t *testing.T) {
+		mockSegment := NewMockSegment(t)
+		mockSegment.EXPECT().CompareAndSetIndexStatus(IndexStatusUnindexed, IndexStatusIndexed).Return(false).Once()
+		mockSegment.EXPECT().ID().Return(int64(123)).Maybe()
+		mockSegment.EXPECT().GetIndexStatus().Return(IndexStatusIndexed).Maybe()
+
+		// Should return early if CAS fails (status was already updated by another thread)
+		updateSegmentIndexMetric(mockSegment, IndexStatusUnindexed, IndexStatusIndexed)
+	})
+}
+
 func TestSegmentLoader(t *testing.T) {
 	suite.Run(t, &SegmentLoaderSuite{})
 	suite.Run(t, &SegmentLoaderDetailSuite{})

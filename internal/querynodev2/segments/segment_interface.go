@@ -79,6 +79,9 @@ type Segment interface {
 	Indexes() []*IndexedFieldInfo
 	HasRawData(fieldID int64) bool
 	DropIndex(ctx context.Context, indexID int64) error
+	GetIndexStatus() IndexStatus
+	SetIndexStatus(status IndexStatus)
+	CompareAndSetIndexStatus(old, new IndexStatus) bool
 
 	// Modification related
 	Insert(ctx context.Context, rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error
