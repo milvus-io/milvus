@@ -179,13 +179,6 @@ func (n *noopWALAccesser) Local() Local {
 	return &noopLocal{}
 }
 
-func (n *noopWALAccesser) Txn(ctx context.Context, opts TxnOption) (Txn, error) {
-	if err := getExpectErr(); err != nil {
-		return nil, err
-	}
-	return &noopTxn{}, nil
-}
-
 func (n *noopWALAccesser) RawAppend(ctx context.Context, msgs message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error) {
 	if err := getExpectErr(); err != nil {
 		return nil, err
@@ -219,10 +212,6 @@ func (n *noopWALAccesser) AppendMessages(ctx context.Context, msgs ...message.Mu
 			},
 		}
 	}
-	return AppendResponses{}
-}
-
-func (n *noopWALAccesser) AppendMessagesWithOption(ctx context.Context, opts AppendOption, msgs ...message.MutableMessage) AppendResponses {
 	return AppendResponses{}
 }
 

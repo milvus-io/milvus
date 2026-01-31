@@ -3,8 +3,10 @@ package wal
 import (
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/ratelimit"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
@@ -27,6 +29,15 @@ type ReadOption struct {
 
 	// IgnorePauseConsumption is the flag to ignore the consumption pause of the scanner.
 	IgnorePauseConsumption bool
+
+	// RateLimitControl is the rate limit controller to enable the rate limit control of the scanner.
+	// If the scanner is working with catchup mode, the rate limit slowdown mode will be triggered to protect the wal from being overloaded.
+	// And the rate limit recovery mode will be triggered if the scanner is working with tailing mode.
+	RateLimitControl *ratelimit.AdaptiveRateLimitController
+
+	// AppendRateCounter is a reference to the WAL's append rate counter.
+	// Used by the scanner to compare read rate vs append rate for slowdown control.
+	AppendRateCounter *utility.RateCounter
 }
 
 // Scanner is the interface for reading records from the wal.

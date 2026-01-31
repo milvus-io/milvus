@@ -9,6 +9,7 @@ var messageTypeToCommonpbMsgType = map[message.MessageType]commonpb.MsgType{
 	message.MessageTypeTimeTick:           commonpb.MsgType_TimeTick,
 	message.MessageTypeInsert:             commonpb.MsgType_Insert,
 	message.MessageTypeDelete:             commonpb.MsgType_Delete,
+	message.MessageTypeUpsert:             commonpb.MsgType_Upsert,
 	message.MessageTypeFlush:              commonpb.MsgType_FlushSegment,
 	message.MessageTypeManualFlush:        commonpb.MsgType_ManualFlush,
 	message.MessageTypeFlushAll:           commonpb.MsgType_FlushAll,

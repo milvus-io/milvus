@@ -56,6 +56,7 @@ type ProtoUDFactory struct{}
 func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	insertMsg := InsertMsg{}
 	deleteMsg := DeleteMsg{}
+	upsertMsg := UpsertMsg{}
 	timeTickMsg := TimeTickMsg{}
 	createCollectionMsg := CreateCollectionMsg{}
 	dropCollectionMsg := DropCollectionMsg{}
@@ -102,6 +103,7 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	p.TempMap = make(map[commonpb.MsgType]UnmarshalFunc)
 	p.TempMap[commonpb.MsgType_Insert] = insertMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_Delete] = deleteMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_Upsert] = upsertMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_TimeTick] = timeTickMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_CreateCollection] = createCollectionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DropCollection] = dropCollectionMsg.Unmarshal

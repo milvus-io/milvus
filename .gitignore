@@ -4,10 +4,12 @@
 #   cmake-build-debug/
 #   proxy/cmake-build-debug/
 #   a/b/c/cmake-build-debug/
+cmake_build
 **/cmake-build-debug/*
 **/cmake-build-debug-coverage/*
 **/cmake-build-release/*
 **/cmake_build_release/*
+cmake_build
 **/cmake_build/*
 **/CMakeFiles/*
 **/.cmake/*
@@ -15,6 +17,7 @@ CMakeCache.txt
 .cache
 coverage_report/
 
+internal/core/output
 internal/core/output/*
 internal/core/build/*
 **/.idea/*
@@ -110,7 +113,6 @@ internal/proto/**/*.pb.go
 pkg/streaming/**/*.pb.go
 internal/core/src/pb/*.pb.h
 internal/core/src/pb/*.pb.cc
-**/legacypb/*.pb.go
 pkg/streaming/proto/**/*.pb.go
 
 #AI rules
@@ -121,6 +123,9 @@ WARP.md
 
 # Gocache
 **/.gocache/
+docs/plans/
+
+# Claude
 claude.md
 docs/plans/
 
@@ -136,5 +141,5 @@ docs/plans/
 .ripgreprc
 .zprofile
 .zshrc
-
-
+.claude
+CLAUDE.md
