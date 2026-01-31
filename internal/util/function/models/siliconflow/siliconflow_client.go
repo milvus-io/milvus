@@ -21,6 +21,7 @@ import (
 	"sort"
 
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type SiliconflowClient struct {
@@ -29,7 +30,7 @@ type SiliconflowClient struct {
 
 func NewSiliconflowClient(apiKey string) (*SiliconflowClient, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials conifg or configure the %s environment variable in the Milvus service.", models.SiliconflowAKEnvStr)
+		return nil, merr.WrapErrFunctionFailedMsg("Missing credentials conifg or configure the %s environment variable in the Milvus service.", models.SiliconflowAKEnvStr)
 	}
 
 	return &SiliconflowClient{

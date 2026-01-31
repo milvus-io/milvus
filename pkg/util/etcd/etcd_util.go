@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type ClientOption func(*clientv3.Config)
@@ -240,13 +241,13 @@ func RemoveByBatchWithLimit(removals []string, limit int, op func(partialKeys []
 
 func buildKvGroup(keys, values []string) (map[string]string, error) {
 	if len(keys) != len(values) {
-		return nil, fmt.Errorf("length of keys (%d) and values (%d) are not equal", len(keys), len(values))
+		return nil, merr.WrapErrServiceInternalMsg("length of keys (%d) and values (%d) are not equal", len(keys), len(values))
 	}
 	ret := make(map[string]string, len(keys))
 	for i, k := range keys {
 		_, ok := ret[k]
 		if ok {
-			return nil, fmt.Errorf("duplicated key was found: %s", k)
+			return nil, merr.WrapErrServiceInternalMsg("duplicated key was found: %s", k)
 		}
 		ret[k] = values[i]
 	}

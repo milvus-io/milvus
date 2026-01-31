@@ -18,7 +18,6 @@ package querycoordv2
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -322,7 +321,7 @@ func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 		}
 		return string(bs), nil
 	}
-	return "", fmt.Errorf("invalid param value in=[%s], it should be qc or qn", in)
+	return "", merr.WrapErrServiceInternalMsg("invalid param value in=[%s], it should be qc or qn", in)
 }
 
 // TODO(dragondriver): add more detail metrics

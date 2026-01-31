@@ -28,7 +28,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
@@ -673,7 +672,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
 			if !ok {
 				log.Warn("convert interface to map wrong")
-				return errors.New("unexpected error")
+				return merr.WrapErrServiceInternalMsg("unexpected error, mappingSegment failed to assert type map[typeutil.UniqueID]interface{}")
 			}
 			expireTs := int64(-1)
 			if hasTTLField {
@@ -938,7 +937,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 		binlogs = segment.GetFieldBinlogs()
 	default:
 		log.Warn("unsupported storage version", zap.Int64("storage version", segment.GetStorageVersion()))
-		return nil, fmt.Errorf("unsupported storage version %d", segment.GetStorageVersion())
+		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", segment.GetStorageVersion())
 	}
 	var rr storage.RecordReader
 	var err error
@@ -1011,7 +1010,7 @@ func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage
 		// rowValue := vIter.GetData().(*iterators.InsertRow).GetValue()
 		row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
 		if !ok {
-			return nil, 0, errors.New("unexpected error")
+			return nil, 0, merr.WrapErrServiceInternalMsg("unexpected error, iterAndGetScalarAnalyzeResult failed to assert type map[typeutil.UniqueID]interface{}")
 		}
 
 		expireTs := int64(-1)

@@ -19,17 +19,16 @@ package accesslog
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"path"
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -79,7 +78,7 @@ func (l *CacheWriter) Write(p []byte) (n int, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.closed {
-		return 0, errors.New("write to closed writer")
+		return 0, merr.WrapErrServiceInternalMsg("write to closed writer")
 	}
 
 	return l.writer.Write(p)
@@ -198,12 +197,12 @@ func (l *RotateWriter) Write(p []byte) (n int, err error) {
 	defer l.mu.Unlock()
 
 	if l.closed {
-		return 0, errors.New("write to closed writer")
+		return 0, merr.WrapErrServiceInternalMsg("write to closed writer")
 	}
 
 	writeLen := int64(len(p))
 	if writeLen > l.max() {
-		return 0, fmt.Errorf(
+		return 0, merr.WrapErrServiceInternalMsg(
 			"write length %d exceeds maximum file size %d", writeLen, l.max(),
 		)
 	}
@@ -270,7 +269,7 @@ func (l *RotateWriter) openFileExistingOrNew() error {
 		return l.openNewFile()
 	}
 	if err != nil {
-		return fmt.Errorf("file to get log file info: %s", err)
+		return merr.WrapErrServiceInternalErr(err, "file to get log file info")
 	}
 
 	file, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY, 0o644)
@@ -286,7 +285,7 @@ func (l *RotateWriter) openFileExistingOrNew() error {
 func (l *RotateWriter) openNewFile() error {
 	err := os.MkdirAll(l.dir(), 0o744)
 	if err != nil {
-		return fmt.Errorf("make directories for new log file filed: %s", err)
+		return merr.WrapErrServiceInternalErr(err, "make directories for new log file filed")
 	}
 
 	name := l.filename()
@@ -296,7 +295,7 @@ func (l *RotateWriter) openNewFile() error {
 		mode = info.Mode()
 		newName := l.newBackupName()
 		if err := os.Rename(name, newName); err != nil {
-			return fmt.Errorf("can't rename log file: %s", err)
+			return merr.WrapErrServiceInternalErr(err, "can't rename log file")
 		}
 		log.Info("seal old log to: " + newName)
 		if l.handler != nil {
@@ -311,7 +310,7 @@ func (l *RotateWriter) openNewFile() error {
 
 	f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
-		return fmt.Errorf("can't open new logfile: %s", err)
+		return merr.WrapErrServiceInternalErr(err, "can't open new logfile")
 	}
 	l.file = f
 	l.size = 0
@@ -429,7 +428,7 @@ func (l *RotateWriter) newBackupName() string {
 func (l *RotateWriter) oldLogFiles() ([]logInfo, error) {
 	files, err := os.ReadDir(l.dir())
 	if err != nil {
-		return nil, fmt.Errorf("can't read log file directory: %s", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "can't read log file directory")
 	}
 
 	logFiles := []logInfo{}

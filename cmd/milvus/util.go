@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/gofrs/flock"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -24,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -33,7 +33,7 @@ func makeRuntimeDir(dir string) error {
 	err := os.MkdirAll(dir, perm)
 	if err != nil {
 		// err will be raised only when dir exists and dir is a file instead of a directory.
-		return fmt.Errorf("create runtime dir %s failed, err: %s", dir, err.Error())
+		return merr.WrapErrServiceInternalErr(err, "create runtime dir %s failed", dir)
 	}
 
 	tmpFile, err := os.CreateTemp(dir, "tmp")
@@ -79,7 +79,7 @@ func createPidFile(w io.Writer, filename string, runtimeDir string) (*flock.Floc
 
 	fd, err := os.OpenFile(fileFullName, os.O_CREATE|os.O_RDWR, 0o664)
 	if err != nil {
-		return nil, fmt.Errorf("file %s is locked, error = %w", filename, err)
+		return nil, merr.WrapErrServiceInternalErr(err, "file %s is locked", filename)
 	}
 	fmt.Fprintln(w, "open pid file:", fileFullName)
 
@@ -88,13 +88,13 @@ func createPidFile(w io.Writer, filename string, runtimeDir string) (*flock.Floc
 	fd.Truncate(0)
 	_, err = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
 	if err != nil {
-		return nil, fmt.Errorf("file %s write fail, error = %w", filename, err)
+		return nil, merr.WrapErrServiceInternalErr(err, "file %s write fail", filename)
 	}
 
 	lock := flock.New(fileFullName)
 	_, err = lock.TryLock()
 	if err != nil {
-		return nil, fmt.Errorf("file %s is locked, error = %w", filename, err)
+		return nil, merr.WrapErrServiceInternalErr(err, "file %s is locked", filename)
 	}
 
 	fmt.Fprintln(w, "lock pid file:", fileFullName)
@@ -289,7 +289,7 @@ func getServerID(ctx context.Context, client *clientv3.Client, key string) (int6
 	}
 
 	if len(resp.Kvs) == 0 {
-		return 0, errors.New("not found value")
+		return 0, merr.WrapErrServiceInternalMsg("not found value")
 	}
 
 	value := resp.Kvs[0].Value

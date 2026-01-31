@@ -21,12 +21,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type AccessKey struct{}
@@ -75,10 +75,10 @@ func join(path1, path2 string) string {
 
 func timeFromName(filename, prefix, ext string) (time.Time, error) {
 	if !strings.HasPrefix(filename, prefix) {
-		return time.Time{}, errors.New("mismatched prefix")
+		return time.Time{}, merr.WrapErrServiceInternalMsg("mismatched prefix")
 	}
 	if !strings.HasSuffix(filename, ext) {
-		return time.Time{}, errors.New("mismatched extension")
+		return time.Time{}, merr.WrapErrServiceInternalMsg("mismatched extension")
 	}
 	ts := filename[len(prefix) : len(filename)-len(ext)]
 	return time.Parse(timeNameFormat, ts)

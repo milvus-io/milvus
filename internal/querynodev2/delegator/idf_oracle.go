@@ -26,7 +26,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -37,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -85,7 +85,7 @@ func (s bm25Stats) Minus(stats bm25Stats) {
 func (s bm25Stats) GetStats(fieldID int64) (*storage.BM25Stats, error) {
 	stats, ok := s[fieldID]
 	if !ok {
-		return nil, errors.New("field not found in idf oracle BM25 stats")
+		return nil, merr.WrapErrServiceInternalMsg("field not found in idf oracle BM25 stats")
 	}
 	return stats, nil
 }
@@ -207,13 +207,13 @@ func (s *sealedBm25Stats) FetchStats() (map[int64]*storage.BM25Stats, error) {
 		path := path.Join(s.localDir, fmt.Sprintf("%d.data", fieldID))
 		b, err := os.ReadFile(path)
 		if err != nil {
-			return nil, errors.Newf("read local file %s: failed: %v", path, err)
+			return nil, merr.WrapErrServiceInternalMsg("read local file %s: failed: %v", path, err)
 		}
 
 		stats[fieldID] = storage.NewBM25Stats()
 		err = stats[fieldID].Deserialize(b)
 		if err != nil {
-			return nil, errors.Newf("deserialize local file : %s failed: %v", path, err)
+			return nil, merr.WrapErrServiceInternalMsg("deserialize local file : %s failed: %v", path, err)
 		}
 	}
 

@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -132,7 +133,7 @@ func (n *shardClient) roundRobinSelectClient() (types.QueryNodeClient, error) {
 	}
 
 	if len(n.clients) == 0 {
-		return nil, errors.New("no available clients")
+		return nil, merr.WrapErrServiceInternalMsg("no available clients")
 	}
 
 	nextClientIndex := n.idx.Inc() % int64(len(n.clients))

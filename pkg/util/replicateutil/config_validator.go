@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // ReplicateConfigValidator validates ReplicateConfiguration according to business rules
@@ -49,11 +50,11 @@ func NewReplicateConfigValidator(incomingConfig, currentConfig *commonpb.Replica
 // Validate performs all validation checks on the configuration
 func (v *ReplicateConfigValidator) Validate() error {
 	if v.incomingConfig == nil {
-		return fmt.Errorf("config cannot be nil")
+		return merr.WrapErrParameterInvalidMsg("config cannot be nil")
 	}
 	clusters := v.incomingConfig.GetClusters()
 	if len(clusters) == 0 {
-		return fmt.Errorf("clusters list cannot be empty")
+		return merr.WrapErrParameterInvalidMsg("clusters list cannot be empty")
 	}
 	// Perform all validation checks
 	if err := v.validateClusterBasic(clusters); err != nil {
@@ -85,47 +86,47 @@ func (v *ReplicateConfigValidator) validateClusterBasic(clusters []*commonpb.Mil
 	uriSet := make(map[string]string)
 	for i, cluster := range clusters {
 		if cluster == nil {
-			return fmt.Errorf("cluster at index %d is nil", i)
+			return merr.WrapErrParameterInvalidMsg("cluster at index %d is nil", i)
 		}
 		// clusterID validation: non-empty and no whitespace
 		clusterID := cluster.GetClusterId()
 		if clusterID == "" {
-			return fmt.Errorf("cluster at index %d has empty clusterID", i)
+			return merr.WrapErrParameterInvalidMsg("cluster at index %d has empty clusterID", i)
 		}
 		if strings.ContainsAny(clusterID, " \t\n\r") {
-			return fmt.Errorf("cluster at index %d has clusterID '%s' containing whitespace characters", i, clusterID)
+			return merr.WrapErrParameterInvalidMsg("cluster at index %d has clusterID '%s' containing whitespace characters", i, clusterID)
 		}
 		// connection_param.uri validation: non-empty and basic URI format
 		connParam := cluster.GetConnectionParam()
 		if connParam == nil {
-			return fmt.Errorf("cluster '%s' has nil connection_param", clusterID)
+			return merr.WrapErrParameterInvalidMsg("cluster '%s' has nil connection_param", clusterID)
 		}
 		uri := connParam.GetUri()
 		if uri == "" {
-			return fmt.Errorf("cluster '%s' has empty URI", clusterID)
+			return merr.WrapErrParameterInvalidMsg("cluster '%s' has empty URI", clusterID)
 		}
 		_, err := url.ParseRequestURI(uri)
 		if err != nil {
-			return fmt.Errorf("cluster '%s' has invalid URI format: '%s'", clusterID, uri)
+			return merr.WrapErrParameterInvalidErr(err, "cluster '%s' has invalid URI format: '%s'", clusterID, uri)
 		}
 		// Check URI uniqueness
 		if existingClusterID, exists := uriSet[uri]; exists {
-			return fmt.Errorf("duplicate URI found: '%s' is used by both cluster '%s' and cluster '%s'", uri, existingClusterID, clusterID)
+			return merr.WrapErrParameterInvalidMsg("duplicate URI found: '%s' is used by both cluster '%s' and cluster '%s'", uri, existingClusterID, clusterID)
 		}
 		uriSet[uri] = clusterID
 		// pchannels validation: non-empty
 		pchannels := cluster.GetPchannels()
 		if len(pchannels) == 0 {
-			return fmt.Errorf("cluster '%s' has empty pchannels", clusterID)
+			return merr.WrapErrParameterInvalidMsg("cluster '%s' has empty pchannels", clusterID)
 		}
 		// pchannels uniqueness within cluster
 		pchannelSet := make(map[string]bool)
 		for j, pchannel := range pchannels {
 			if pchannel == "" {
-				return fmt.Errorf("cluster '%s' has empty pchannel at index %d", clusterID, j)
+				return merr.WrapErrParameterInvalidMsg("cluster '%s' has empty pchannel at index %d", clusterID, j)
 			}
 			if pchannelSet[pchannel] {
-				return fmt.Errorf("cluster '%s' has duplicate pchannel: '%s'", clusterID, pchannel)
+				return merr.WrapErrParameterInvalidMsg("cluster '%s' has duplicate pchannel: '%s'", clusterID, pchannel)
 			}
 			pchannelSet[pchannel] = true
 		}
@@ -134,12 +135,12 @@ func (v *ReplicateConfigValidator) validateClusterBasic(clusters []*commonpb.Mil
 			expectedPchannelCount = len(pchannels)
 			firstClusterID = clusterID
 		} else if len(pchannels) != expectedPchannelCount {
-			return fmt.Errorf("cluster '%s' has %d pchannels, but expected %d (same as cluster '%s')",
+			return merr.WrapErrParameterInvalidMsg("cluster '%s' has %d pchannels, but expected %d (same as cluster '%s')",
 				clusterID, len(pchannels), expectedPchannelCount, firstClusterID)
 		}
 		// Build cluster maps
 		if _, exists := v.clusterMap[clusterID]; exists {
-			return fmt.Errorf("duplicate clusterID found: '%s'", clusterID)
+			return merr.WrapErrParameterInvalidMsg("duplicate clusterID found: '%s'", clusterID)
 		}
 		v.clusterMap[clusterID] = cluster
 	}
@@ -150,10 +151,10 @@ func (v *ReplicateConfigValidator) validateClusterBasic(clusters []*commonpb.Mil
 func (v *ReplicateConfigValidator) validateRelevance() error {
 	currentCluster, exists := v.clusterMap[v.currentClusterID]
 	if !exists {
-		return fmt.Errorf("current Milvus cluster '%s' must be included in the clusters list", v.currentClusterID)
+		return merr.WrapErrParameterInvalidMsg("current Milvus cluster '%s' must be included in the clusters list", v.currentClusterID)
 	}
 	if !equalIgnoreOrder(v.currentPChannels, currentCluster.GetPchannels()) {
-		return fmt.Errorf("current pchannels do not match the pchannels in the config, current pchannels: %v, config pchannels: %v", v.currentPChannels, currentCluster.GetPchannels())
+		return merr.WrapErrParameterInvalidMsg("current pchannels do not match the pchannels in the config, current pchannels: %v, config pchannels: %v", v.currentPChannels, currentCluster.GetPchannels())
 	}
 	return nil
 }
@@ -166,21 +167,21 @@ func (v *ReplicateConfigValidator) validateTopologyEdgeUniqueness(topologies []*
 	edgeSet := make(map[string]struct{})
 	for i, topology := range topologies {
 		if topology == nil {
-			return fmt.Errorf("topology at index %d is nil", i)
+			return merr.WrapErrParameterInvalidMsg("topology at index %d is nil", i)
 		}
 		sourceClusterID := topology.GetSourceClusterId()
 		targetClusterID := topology.GetTargetClusterId()
 		// Validate edge endpoints exist
 		if _, exists := v.clusterMap[sourceClusterID]; !exists {
-			return fmt.Errorf("topology at index %d references non-existent source cluster: '%s'", i, sourceClusterID)
+			return merr.WrapErrParameterInvalidMsg("topology at index %d references non-existent source cluster: '%s'", i, sourceClusterID)
 		}
 		if _, exists := v.clusterMap[targetClusterID]; !exists {
-			return fmt.Errorf("topology at index %d references non-existent target cluster: '%s'", i, targetClusterID)
+			return merr.WrapErrParameterInvalidMsg("topology at index %d references non-existent target cluster: '%s'", i, targetClusterID)
 		}
 		// Edge uniqueness
 		edgeKey := fmt.Sprintf("%s->%s", sourceClusterID, targetClusterID)
 		if _, exists := edgeSet[edgeKey]; exists {
-			return fmt.Errorf("duplicate topology relationship found: '%s'", edgeKey)
+			return merr.WrapErrParameterInvalidMsg("duplicate topology relationship found: '%s'", edgeKey)
 		}
 		edgeSet[edgeKey] = struct{}{}
 	}
@@ -214,14 +215,14 @@ func (v *ReplicateConfigValidator) validateTopologyTypeConstraint(topologies []*
 		if outDegree[clusterID] == clusterCount-1 && inDegree[clusterID] == 0 {
 			if centerNode != "" {
 				// Multiple center nodes found
-				return fmt.Errorf("multiple center nodes found, only one center node is allowed in star topology")
+				return merr.WrapErrParameterInvalidMsg("multiple center nodes found, only one center node is allowed in star topology")
 			}
 			centerNode = clusterID
 		}
 	}
 	if centerNode == "" {
 		// No center node found
-		return fmt.Errorf("no center node found, star topology must have exactly one center node")
+		return merr.WrapErrParameterInvalidMsg("no center node found, star topology must have exactly one center node")
 	}
 	// Validate other nodes (in-degree = 1, out-degree = 0)
 	for clusterID := range v.clusterMap {
@@ -229,7 +230,7 @@ func (v *ReplicateConfigValidator) validateTopologyTypeConstraint(topologies []*
 			continue
 		}
 		if inDegree[clusterID] != 1 || outDegree[clusterID] != 0 {
-			return fmt.Errorf("cluster '%s' does not follow star topology pattern (in-degree=%d, out-degree=%d)",
+			return merr.WrapErrParameterInvalidMsg("cluster '%s' does not follow star topology pattern (in-degree=%d, out-degree=%d)",
 				clusterID, inDegree[clusterID], outDegree[clusterID])
 		}
 	}
@@ -269,7 +270,7 @@ func (v *ReplicateConfigValidator) validateConfigComparison() error {
 func (v *ReplicateConfigValidator) validateClusterConsistency(current, incoming *commonpb.MilvusCluster) error {
 	// Check Pchannels consistency
 	if !slices.Equal(current.GetPchannels(), incoming.GetPchannels()) {
-		return fmt.Errorf("cluster '%s' pchannels cannot be changed: current=%v, incoming=%v",
+		return merr.WrapErrParameterInvalidMsg("cluster '%s' pchannels cannot be changed: current=%v, incoming=%v",
 			current.GetClusterId(), current.GetPchannels(), incoming.GetPchannels())
 	}
 
@@ -278,11 +279,11 @@ func (v *ReplicateConfigValidator) validateClusterConsistency(current, incoming 
 	incomingConn := incoming.GetConnectionParam()
 
 	if currentConn.GetUri() != incomingConn.GetUri() {
-		return fmt.Errorf("cluster '%s' connection_param.uri cannot be changed: current=%s, incoming=%s",
+		return merr.WrapErrParameterInvalidMsg("cluster '%s' connection_param.uri cannot be changed: current=%s, incoming=%s",
 			current.GetClusterId(), currentConn.GetUri(), incomingConn.GetUri())
 	}
 	if currentConn.GetToken() != incomingConn.GetToken() {
-		return fmt.Errorf("cluster '%s' connection_param.token cannot be changed",
+		return merr.WrapErrParameterInvalidMsg("cluster '%s' connection_param.token cannot be changed",
 			current.GetClusterId())
 	}
 

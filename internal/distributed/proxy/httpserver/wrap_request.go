@@ -17,15 +17,13 @@
 package httpserver
 
 import (
-	"fmt"
-
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -35,7 +33,7 @@ import (
 // It's very inconvenient for an HTTP clien to do this,
 // so we change the type to a struct,
 // and does the conversion for user.
-// 2. Some fields uses proto.oneof, does not supported directly json marshal
+// 2. Some fields use proto.oneof, does not supported directly json marshal
 // so we have to implements the marshal procedure. example: InsertReqeust
 
 // WrappedCreateCollectionRequest wraps CreateCollectionRequest
@@ -70,7 +68,7 @@ type WrappedInsertRequest struct {
 func (w *WrappedInsertRequest) AsInsertRequest() (*milvuspb.InsertRequest, error) {
 	fieldData, err := convertFieldDataArray(w.FieldsData)
 	if err != nil {
-		return nil, fmt.Errorf("%w: convert field data failed: %v", errBadRequest, err)
+		return nil, merr.WrapErrHTTPBadRequest(err, "convert field data failed")
 	}
 	return &milvuspb.InsertRequest{
 		Base:           w.Base,
@@ -98,12 +96,12 @@ func (f *FieldData) makePbFloat16OrBfloat16Array(raw json.RawMessage, serializeF
 		return nil, 0, newFieldDataError(f.FieldName, err)
 	}
 	if len(wrappedData) < 1 {
-		return nil, 0, errors.New("at least one row for insert")
+		return nil, 0, merr.WrapErrParameterInvalidMsg("at least one row for insert")
 	}
 	array0 := wrappedData[0]
 	dim := len(array0)
 	if dim < 1 {
-		return nil, 0, errors.New("dim must >= 1")
+		return nil, 0, merr.WrapErrParameterInvalidMsg("dim must >= 1")
 	}
 	data := make([]byte, 0, len(wrappedData)*dim*2)
 	for _, fp32Array := range wrappedData {
@@ -238,12 +236,12 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 			return nil, newFieldDataError(f.FieldName, err)
 		}
 		if len(wrappedData) < 1 {
-			return nil, errors.New("at least one row for insert")
+			return nil, merr.WrapErrParameterInvalidMsg("at least one row for insert")
 		}
 		array0 := wrappedData[0]
 		dim := len(array0)
 		if dim < 1 {
-			return nil, errors.New("dim must >= 1")
+			return nil, merr.WrapErrParameterInvalidMsg("dim must >= 1")
 		}
 		data := make([]float32, len(wrappedData)*dim)
 
@@ -299,7 +297,7 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 			return nil, newFieldDataError(f.FieldName, err)
 		}
 		if len(wrappedData) < 1 {
-			return nil, errors.New("at least one row for insert")
+			return nil, merr.WrapErrParameterInvalidMsg("at least one row for insert")
 		}
 		data := make([][]byte, len(wrappedData))
 		dim := int64(0)
@@ -333,12 +331,12 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 			return nil, newFieldDataError(f.FieldName, err)
 		}
 		if len(wrappedData) < 1 {
-			return nil, errors.New("at least one row for insert")
+			return nil, merr.WrapErrParameterInvalidMsg("at least one row for insert")
 		}
 		array0 := wrappedData[0]
 		dim := len(array0)
 		if dim < 1 {
-			return nil, errors.New("dim must >= 1")
+			return nil, merr.WrapErrParameterInvalidMsg("dim must >= 1")
 		}
 		data := make([]byte, len(wrappedData)*dim)
 
@@ -358,13 +356,13 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 			},
 		}
 	default:
-		return nil, errors.New("unsupported data type")
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported data type")
 	}
 	return &ret, nil
 }
 
 func newFieldDataError(field string, err error) error {
-	return fmt.Errorf("parse field[%s]: %s", field, err.Error())
+	return merr.WrapErrSerializationFailed(err, "parse field[%s]", field)
 }
 
 func convertFieldDataArray(input []*FieldData) ([]*schemapb.FieldData, error) {

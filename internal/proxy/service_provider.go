@@ -57,7 +57,7 @@ func NewInterceptor[Req Request, Resp Response](proxy *Proxy, method string) (*I
 		}
 		return interface{}(interceptor).(*InterceptorImpl[Req, Resp]), nil
 	default:
-		return nil, fmt.Errorf("method %s not supported", method)
+		return nil, merr.WrapErrServiceInternalMsg("method %s not supported", method)
 	}
 }
 
@@ -215,10 +215,7 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	}
 
 	// Restore struct field names from internal format (structName[fieldName]) to original format
-	if err := restoreStructFieldNames(resp.Schema); err != nil {
-		log.Error("failed to restore struct field names", zap.Error(err))
-		return nil, err
-	}
+	restoreStructFieldNames(resp.Schema)
 
 	err = timestamptz.RewriteTimestampTzDefaultValueToString(resp.Schema)
 	if err != nil {

@@ -23,13 +23,13 @@
 package balancer
 
 import (
-	"fmt"
-
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/balancer/base"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/resolver"
+
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 var (
@@ -151,12 +151,12 @@ func (b *baseBalancer) mergeErrors() error {
 	// connErr must always be non-nil unless there are no SubConns, in which
 	// case resolverErr must be non-nil.
 	if b.connErr == nil {
-		return fmt.Errorf("last resolver error: %v", b.resolverErr)
+		return merr.WrapErrServiceInternalErr(b.resolverErr, "last resolver error")
 	}
 	if b.resolverErr == nil {
-		return fmt.Errorf("last connection error: %v", b.connErr)
+		return merr.WrapErrServiceInternalErr(b.connErr, "last connection error")
 	}
-	return fmt.Errorf("last connection error: %v; last resolver error: %v", b.connErr, b.resolverErr)
+	return merr.WrapErrServiceInternalMsg("last connection error: %w; last resolver error: %w", b.connErr, b.resolverErr)
 }
 
 // regeneratePicker takes a snapshot of the balancer, and generates a picker

@@ -41,7 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-// Response response interface for verification
+// Response interface for verification
 type Response interface {
 	GetStatus() *commonpb.Status
 }

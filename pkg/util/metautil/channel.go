@@ -124,7 +124,7 @@ func (c Channel) IsZero() bool {
 
 func ParseChannel(virtualName string, mapper ChannelMapper) (Channel, error) {
 	if !channelNameFormat.MatchString(virtualName) {
-		return Channel{}, merr.WrapErrParameterInvalidMsg("virtual channel name(%s) is not valid", virtualName)
+		return Channel{}, merr.WrapErrServiceInternalMsg("virtual channel name(%s) is not valid", virtualName)
 	}
 	matches := channelNameFormat.FindStringSubmatch(virtualName)
 

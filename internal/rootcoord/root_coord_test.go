@@ -1454,7 +1454,7 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 	// 	c := newTestCore(withAbnormalCode())
 	// 	resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 	// 	assert.NoError(t, err)
-	// 	assert.Equal(t, false, resp.IsHealthy)
+	// 	assert.Equal(t, false, resp.CheckHealthy)
 	// 	assert.NotEmpty(t, resp.Reasons)
 	// })
 
@@ -1467,7 +1467,7 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 	// 	ctx := context.Background()
 	// 	resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 	// 	assert.NoError(t, err)
-	// 	assert.Equal(t, true, resp.IsHealthy)
+	// 	assert.Equal(t, true, resp.CheckHealthy)
 	// 	assert.Empty(t, resp.Reasons)
 	// })
 
@@ -1481,7 +1481,7 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 	// 	ctx := context.Background()
 	// 	resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 	// 	assert.NoError(t, err)
-	// 	assert.Equal(t, false, resp.IsHealthy)
+	// 	assert.Equal(t, false, resp.CheckHealthy)
 	// 	assert.NotEmpty(t, resp.Reasons)
 	// })
 
@@ -1497,7 +1497,7 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 	// 		ctx := context.Background()
 	// 		resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 	// 		assert.NoError(t, err)
-	// 		assert.Equal(t, false, resp.IsHealthy)
+	// 		assert.Equal(t, false, resp.CheckHealthy)
 	// 		assert.NotEmpty(t, resp.Reasons)
 	// 	}
 
@@ -1508,7 +1508,7 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 	// 		ctx := context.Background()
 	// 		resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 	// 		assert.NoError(t, err)
-	// 		assert.Equal(t, false, resp.IsHealthy)
+	// 		assert.Equal(t, false, resp.CheckHealthy)
 	// 		assert.NotEmpty(t, resp.Reasons)
 	// 	}
 	// })
@@ -1523,7 +1523,7 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 	// 	ctx := context.Background()
 	// 	resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 	// 	assert.NoError(t, err)
-	// 	assert.Equal(t, false, resp.IsHealthy)
+	// 	assert.Equal(t, false, resp.CheckHealthy)
 	// 	assert.NotEmpty(t, resp.Reasons)
 	// })
 
@@ -1537,7 +1537,7 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 	// 	ctx := context.Background()
 	// 	resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 	// 	assert.NoError(t, err)
-	// 	assert.Equal(t, true, resp.IsHealthy)
+	// 	assert.Equal(t, true, resp.CheckHealthy)
 	// 	assert.Empty(t, resp.Reasons)
 	// })
 }

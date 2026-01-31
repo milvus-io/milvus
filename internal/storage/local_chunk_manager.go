@@ -254,7 +254,7 @@ func (lcm *LocalChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 	if len(prefix) == 0 {
 		errMsg := "empty prefix is not allowed for ChunkManager remove operation"
 		log.Warn(errMsg)
-		return merr.WrapErrParameterInvalidMsg(errMsg)
+		return merr.WrapErrServiceInternal(errMsg)
 	}
 	var removeErr error
 	if err := lcm.WalkWithPrefix(ctx, prefix, true, func(chunkInfo *ChunkObjectInfo) bool {

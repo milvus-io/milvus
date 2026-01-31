@@ -1,9 +1,8 @@
 package proxy
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -29,7 +28,7 @@ func (v *searchTaskValidator) validateSubSearch(subReq *internalpb.SubSearchRequ
 		nEntries *= subReq.GroupSize
 	}
 	if nEntries > maxResultEntries {
-		return fmt.Errorf("number of result entries is too large")
+		return merr.WrapErrParameterInvalidMsg("number of result entries is too large")
 	}
 	return nil
 }
@@ -46,7 +45,7 @@ func (v *searchTaskValidator) validateSearch(search *searchTask) error {
 		nEntries *= search.GroupSize
 	}
 	if nEntries > maxResultEntries {
-		return fmt.Errorf("number of result entries is too large")
+		return merr.WrapErrParameterInvalidMsg("number of result entries is too large")
 	}
 	return nil
 }

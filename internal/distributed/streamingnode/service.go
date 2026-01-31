@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/netutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
@@ -259,7 +260,7 @@ func (s *Server) start() (err error) {
 func (s *Server) initSession() error {
 	s.session = sessionutil.NewSession(s.ctx)
 	if s.session == nil {
-		return errors.New("session is nil, the etcd client connection may have failed")
+		return merr.WrapErrServiceInternalMsg("session is nil, the etcd client connection may have failed")
 	}
 	s.session.Init(typeutil.StreamingNodeRole, s.listener.Address(), false, true)
 	paramtable.SetNodeID(s.session.ServerID)

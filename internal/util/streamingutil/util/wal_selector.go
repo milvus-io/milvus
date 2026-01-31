@@ -1,9 +1,8 @@
 package util
 
 import (
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -65,21 +64,21 @@ func mustSelectWALName(standalone bool, mqType string, enable walEnable) message
 	if enable.Woodpecker {
 		return message.WALNameWoodpecker
 	}
-	panic(errors.Errorf("no available wal config found, %s, enable: %+v", mqType, enable))
+	panic(merr.WrapErrServiceInternalMsg("no available wal config found, %s, enable: %+v", mqType, enable))
 }
 
 // Validate mq type.
 func validateWALName(standalone bool, mqType string) (message.WALName, error) {
 	mqName := message.NewWALName(mqType)
 	if mqName == message.WALNameUnknown || mqName == message.WALNameTest {
-		return mqName, errors.Errorf("mq %s is not valid", mqType)
+		return mqName, merr.WrapErrServiceInternalMsg("mq %s is not valid", mqType)
 	}
 
 	// we may register more mq type by plugin.
 	// so we should not check all mq type here.
 	// only check standalone type.
 	if !standalone && mqName == message.WALNameRocksmq {
-		return mqName, errors.Newf("mq %s is only valid in standalone mode", mqType)
+		return mqName, merr.WrapErrServiceInternalMsg("mq %s is only valid in standalone mode", mqType)
 	}
 	return mqName, nil
 }

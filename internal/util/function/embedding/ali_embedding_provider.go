@@ -20,13 +20,13 @@ package embedding
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/ali"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -45,7 +45,7 @@ type AliEmbeddingProvider struct {
 
 func createAliEmbeddingClient(apiKey string, url string) (*ali.AliDashScopeEmbedding, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", models.DashscopeAKEnvStr)
+		return nil, merr.WrapErrFunctionFailedMsg("Missing credentials config or configure the %s environment variable in the Milvus service.", models.DashscopeAKEnvStr)
 	}
 
 	if url == "" {
@@ -131,11 +131,11 @@ func (provider *AliEmbeddingProvider) CallEmbedding(ctx context.Context, texts [
 			return nil, err
 		}
 		if end-i != len(resp.Output.Embeddings) {
-			return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Output.Embeddings))
+			return nil, merr.WrapErrFunctionFailedMsg("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Output.Embeddings))
 		}
 		for _, item := range resp.Output.Embeddings {
 			if len(item.Embedding) != int(provider.fieldDim) {
-				return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+				return nil, merr.WrapErrFunctionFailedMsg("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 					provider.fieldDim, len(item.Embedding))
 			}
 			data = append(data, item.Embedding)

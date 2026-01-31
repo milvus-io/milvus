@@ -38,7 +38,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -47,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -296,7 +296,7 @@ func ConvertCacheWarmupPolicy(policy string) (C.CacheWarmupPolicy, error) {
 	case "disable":
 		return C.CacheWarmupPolicy_Disable, nil
 	default:
-		return C.CacheWarmupPolicy_Disable, fmt.Errorf("invalid Tiered Storage cache warmup policy: %s", policy)
+		return C.CacheWarmupPolicy_Disable, merr.WrapErrServiceInternalMsg("invalid Tiered Storage cache warmup policy: %s", policy)
 	}
 }
 
@@ -338,23 +338,23 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	diskMaxRatio := params.QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()
 
 	if memoryLowWatermarkRatio > memoryHighWatermarkRatio {
-		return errors.New("memoryLowWatermarkRatio should not be greater than memoryHighWatermarkRatio")
+		return merr.WrapErrServiceInternalMsg("memoryLowWatermarkRatio should not be greater than memoryHighWatermarkRatio")
 	}
 	if memoryHighWatermarkRatio > memoryMaxRatio {
-		return errors.New("memoryHighWatermarkRatio should not be greater than memoryMaxRatio")
+		return merr.WrapErrServiceInternalMsg("memoryHighWatermarkRatio should not be greater than memoryMaxRatio")
 	}
 	if memoryMaxRatio >= 1 {
-		return errors.New("memoryMaxRatio should not be greater than 1")
+		return merr.WrapErrServiceInternalMsg("memoryMaxRatio should not be greater than 1")
 	}
 
 	if diskLowWatermarkRatio > diskHighWatermarkRatio {
-		return errors.New("diskLowWatermarkRatio should not be greater than diskHighWatermarkRatio")
+		return merr.WrapErrServiceInternalMsg("diskLowWatermarkRatio should not be greater than diskHighWatermarkRatio")
 	}
 	if diskHighWatermarkRatio > diskMaxRatio {
-		return errors.New("diskHighWatermarkRatio should not be greater than diskMaxRatio")
+		return merr.WrapErrServiceInternalMsg("diskHighWatermarkRatio should not be greater than diskMaxRatio")
 	}
 	if diskMaxRatio >= 1 {
-		return errors.New("diskMaxRatio should not be greater than 1")
+		return merr.WrapErrServiceInternalMsg("diskMaxRatio should not be greater than 1")
 	}
 
 	memoryLowWatermarkBytes := C.int64_t(memoryLowWatermarkRatio * float64(osMemBytes))
@@ -489,7 +489,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			coefficient, err := strconv.ParseFloat(newValue, 64)
 			if err != nil {
-				return err
+				return merr.WrapErrSerializationFailed(err, "parse MiddlePriorityThreadCoreCoefficient failed")
 			}
 			UpdateMiddlePriorityThreadCoreCoefficient(coefficient)
 			return nil
@@ -498,7 +498,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			coefficient, err := strconv.ParseFloat(newValue, 64)
 			if err != nil {
-				return err
+				return merr.WrapErrSerializationFailed(err, "parse LowPriorityThreadCoreCoefficient failed")
 			}
 			UpdateLowPriorityThreadCoreCoefficient(coefficient)
 			return nil
@@ -507,7 +507,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().CommonCfg.EnabledOptimizeExpr.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {
-				return err
+				return merr.WrapErrSerializationFailed(err, "parse EnabledOptimizeExpr failed")
 			}
 			UpdateDefaultOptimizeExprEnable(enable)
 			return nil
@@ -516,7 +516,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().CommonCfg.EnabledGrowingSegmentJSONKeyStats.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {
-				return err
+				return merr.WrapErrSerializationFailed(err, "parse EnabledGrowingSegmentJSONKeyStats failed")
 			}
 			UpdateDefaultGrowingJSONKeyStatsEnable(enable)
 			return nil
@@ -525,7 +525,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().CommonCfg.EnableConfigParamTypeCheck.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {
-				return err
+				return merr.WrapErrSerializationFailed(err, "parse EnableConfigParamTypeCheck failed")
 			}
 			UpdateDefaultConfigParamTypeCheck(enable)
 			return nil
@@ -538,7 +538,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().QueryNodeCfg.ExprEvalBatchSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			size, err := strconv.Atoi(newValue)
 			if err != nil {
-				return err
+				return merr.WrapErrSerializationFailed(err, "parse ExprEvalBatchSize failed")
 			}
 			UpdateDefaultExprEvalBatchSize(size)
 			return nil
@@ -547,7 +547,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().QueryNodeCfg.DeleteDumpBatchSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			size, err := strconv.Atoi(newValue)
 			if err != nil {
-				return err
+				return merr.WrapErrSerializationFailed(err, "parse DeleteDumpBatchSize failed")
 			}
 			UpdateDefaultDeleteDumpBatchSize(size)
 			return nil
@@ -565,7 +565,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {
-				return err
+				return merr.WrapErrSerializationFailed(err, "parse ExprResCacheEnabled failed")
 			}
 			UpdateExprResCacheEnable(enable)
 			return nil
@@ -574,7 +574,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			capacity, err := strconv.Atoi(newValue)
 			if err != nil {
-				return err
+				return merr.WrapErrSerializationFailed(err, "parse ExprResCacheCapacityBytes failed")
 			}
 			UpdateExprResCacheCapacityBytes(capacity)
 			return nil
@@ -651,7 +651,7 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	finalMsg := fmt.Sprintf("[%s] %s", errorName, errorMsg)
 	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, finalMsg)
 	log.Warn(logMsg)
-	return errors.New(finalMsg)
+	return merr.WrapErrServiceInternalMsg(finalMsg)
 }
 
 func serializeHeaders(headerstr string) string {

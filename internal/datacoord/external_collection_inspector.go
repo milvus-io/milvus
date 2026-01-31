@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -219,7 +218,7 @@ func (i *externalCollectionInspector) SubmitUpdateTask(collectionID int64) error
 	collection := i.mt.GetCollection(collectionID)
 	if collection == nil {
 		log.Warn("collection not found")
-		return fmt.Errorf("collection %d not found", collectionID)
+		return merr.WrapErrCollectionIDNotFound(collectionID, "collection %d not found")
 	}
 
 	// Allocate task ID

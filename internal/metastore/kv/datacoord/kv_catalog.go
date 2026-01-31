@@ -160,11 +160,11 @@ func (kc *Catalog) parseBinlogKey(key string) (int64, error) {
 	// ---------------------------------|collectionID      |partitionID       |segmentID         |fieldID
 	keyWordGroup := strings.Split(key, "/")
 	if len(keyWordGroup) < 3 {
-		return 0, fmt.Errorf("parse key: %s failed, key:%s", key, key)
+		return 0, merr.WrapErrServiceInternalMsg("parse key: %s failed, key:%s", key, key)
 	}
 	segmentID, err := strconv.ParseInt(keyWordGroup[len(keyWordGroup)-2], 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("parse key failed, key:%s, %w", key, err)
+		return 0, merr.WrapErrServiceInternalMsg("parse key failed, key:%s, %w", key, err)
 	}
 	return segmentID, nil
 }
@@ -184,7 +184,7 @@ func (kc *Catalog) listBinlogs(ctx context.Context, binlogType storage.BinlogTyp
 	case storage.BM25Binlog:
 		logPathPrefix = fmt.Sprintf("%s/%d", SegmentBM25logPathPrefix, collectionID)
 	default:
-		err = fmt.Errorf("invalid binlog type: %d", binlogType)
+		err = merr.WrapErrServiceInternalMsg("invalid binlog type: %d", binlogType)
 	}
 	if err != nil {
 		return nil, err
@@ -194,12 +194,12 @@ func (kc *Catalog) listBinlogs(ctx context.Context, binlogType storage.BinlogTyp
 		fieldBinlog := &datapb.FieldBinlog{}
 		err := proto.Unmarshal(value, fieldBinlog)
 		if err != nil {
-			return fmt.Errorf("failed to unmarshal datapb.FieldBinlog: %d, err:%w", fieldBinlog.FieldID, err)
+			return merr.WrapErrSerializationFailed(err, "failed to unmarshal datapb.FieldBinlog: %d", fieldBinlog.FieldID)
 		}
 
 		segmentID, err := kc.parseBinlogKey(string(key))
 		if err != nil {
-			return fmt.Errorf("prefix:%s, %w", path.Join(kc.metaRootpath, logPathPrefix), err)
+			return merr.WrapErrServiceInternalErr(err, "parseBinlogKey failed,prefix:%s", path.Join(kc.metaRootpath, logPathPrefix))
 		}
 
 		// set log size to memory size if memory size is zero for old segment before v2.4.3
@@ -400,7 +400,7 @@ func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*d
 		segmentutil.ReCalcRowCount(s, noBinlogsSegment)
 		segBytes, err := marshalSegmentInfo(noBinlogsSegment)
 		if err != nil {
-			return fmt.Errorf("failed to marshal segment: %d, err: %w", s.GetID(), err)
+			return merr.WrapErrSerializationFailed(err, "failed to marshal segment: %d", s.GetID())
 		}
 		kvs[key] = segBytes
 	}
@@ -537,7 +537,7 @@ func (kc *Catalog) getBinlogsWithPrefix(ctx context.Context, binlogType storage.
 	case storage.StatsBinlog:
 		binlogPrefix = buildFieldStatslogPathPrefix(collectionID, partitionID, segmentID)
 	default:
-		return nil, nil, fmt.Errorf("invalid binlog type: %d", binlogType)
+		return nil, nil, merr.WrapErrServiceInternalMsg("invalid binlog type: %d", binlogType)
 	}
 	keys, values, err := kc.MetaKv.LoadWithPrefix(ctx, binlogPrefix)
 	if err != nil {

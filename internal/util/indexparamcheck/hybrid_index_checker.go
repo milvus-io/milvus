@@ -1,12 +1,9 @@
 package indexparamcheck
 
 import (
-	"fmt"
-
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -16,7 +13,7 @@ type HYBRIDChecker struct {
 
 func (c *HYBRIDChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
 	if !CheckIntByRange(params, common.BitmapCardinalityLimitKey, 1, MaxBitmapCardinalityLimit) {
-		return fmt.Errorf("failed to check bitmap cardinality limit, should be larger than 0 and smaller than %d",
+		return merr.WrapErrParameterInvalidMsg("failed to check bitmap cardinality limit, should be larger than 0 and smaller than %d",
 			MaxBitmapCardinalityLimit)
 	}
 	return c.scalarIndexChecker.CheckTrain(dataType, elementType, params)
@@ -27,12 +24,12 @@ func (c *HYBRIDChecker) CheckValidDataType(indexType IndexType, field *schemapb.
 	elemType := field.GetElementType()
 	if !typeutil.IsBoolType(mainType) && !typeutil.IsIntegerType(mainType) &&
 		!typeutil.IsStringType(mainType) && !typeutil.IsArrayType(mainType) {
-		return errors.New("hybrid index are only supported on bool, int, string and array field")
+		return merr.WrapErrParameterInvalidMsg("hybrid index are only supported on bool, int, string and array field")
 	}
 	if typeutil.IsArrayType(mainType) {
 		if !typeutil.IsBoolType(elemType) && !typeutil.IsIntegerType(elemType) &&
 			!typeutil.IsStringType(elemType) {
-			return errors.New("hybrid index are only supported on bool, int, string for array field")
+			return merr.WrapErrParameterInvalidMsg("hybrid index are only supported on bool, int, string for array field")
 		}
 	}
 	return nil

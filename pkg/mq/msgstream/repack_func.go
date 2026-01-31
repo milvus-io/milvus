@@ -17,11 +17,8 @@
 package msgstream
 
 import (
-	"fmt"
-
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // InsertRepackFunc is used to repack messages after hash by primary key
@@ -29,7 +26,7 @@ func InsertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 	result := make(map[int32]*MsgPack)
 	for i, request := range tsMsgs {
 		if request.Type() != commonpb.MsgType_Insert {
-			return nil, errors.New("msg's must be Insert")
+			return nil, merr.WrapErrServiceInternalMsg("msg's must be Insert")
 		}
 		insertRequest := request.(*InsertMsg)
 		keys := hashKeys[i]
@@ -40,7 +37,7 @@ func InsertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 			return nil, err
 		}
 		if insertRequest.NRows() != uint64(keysLen) {
-			return nil, errors.New("the length of hashValue, timestamps, rowIDs, RowData are not equal")
+			return nil, merr.WrapErrServiceInternalMsg("the length of hashValue, timestamps, rowIDs, RowData are not equal")
 		}
 		for index, key := range keys {
 			_, ok := result[key]
@@ -61,7 +58,7 @@ func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 	result := make(map[int32]*MsgPack)
 	for i, request := range tsMsgs {
 		if request.Type() != commonpb.MsgType_Delete {
-			return nil, errors.New("msg's must be Delete")
+			return nil, merr.WrapErrServiceInternalMsg("msg's must be Delete")
 		}
 		deleteRequest := request.(*DeleteMsg)
 		keys := hashKeys[i]
@@ -70,7 +67,7 @@ func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 		keysLen := len(keys)
 
 		if keysLen != timestampLen || int64(keysLen) != deleteRequest.NumRows {
-			return nil, errors.New("the length of hashValue, timestamps, primaryKeys are not equal")
+			return nil, merr.WrapErrServiceInternalMsg("the length of hashValue, timestamps, primaryKeys are not equal")
 		}
 
 		key := keys[0]
@@ -86,7 +83,7 @@ func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 // DefaultRepackFunc is used to repack messages after hash by primary key
 func DefaultRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	if len(hashKeys) < len(tsMsgs) {
-		return nil, fmt.Errorf(
+		return nil, merr.WrapErrServiceInternalMsg(
 			"the length of hash keys (%d) is less than the length of messages (%d)",
 			len(hashKeys),
 			len(tsMsgs),
@@ -97,7 +94,7 @@ func DefaultRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, 
 	pack := make(map[int32]*MsgPack)
 	for idx, msg := range tsMsgs {
 		if len(hashKeys[idx]) <= 0 {
-			return nil, fmt.Errorf("no hash key for %dth message", idx)
+			return nil, merr.WrapErrServiceInternalMsg("no hash key for %dth message", idx)
 		}
 		key := hashKeys[idx][0]
 		_, ok := pack[key]

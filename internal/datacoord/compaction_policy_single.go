@@ -173,7 +173,7 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 	}
 	if collection == nil {
 		log.Warn("fail to apply triggerSegmentSortCompaction, collection not exist")
-		return nil, merr.WrapErrCollectionNotFound(collectionID)
+		return nil, merr.WrapErrCollectionIDNotFound(collectionID)
 	}
 	if collection.IsExternal() {
 		log.Info("skip triggerSegmentSortCompaction for external collection", zap.Int64("collectionID", collection.ID))

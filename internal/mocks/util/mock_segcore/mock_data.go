@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -1006,7 +1007,7 @@ func genDSLByIndexType(schema *schemapb.CollectionSchema, indexType string) (str
 	} else if indexType == IndexHNSW {
 		return genHNSWDSL(schema, ef, defaultTopK, defaultRoundDecimal)
 	}
-	return "", errors.New("Invalid indexType")
+	return "", merr.WrapErrServiceInternalMsg("Invalid indexType")
 }
 
 func genBruteForceDSL(schema *schemapb.CollectionSchema, topK int64, roundDecimal int64) (string, error) {
@@ -1097,7 +1098,7 @@ func CheckSearchResult(ctx context.Context, nq int64, plan *segcore.SearchPlan, 
 			return err
 		}
 		if len(blob) == 0 {
-			return errors.New("wrong search result data blobs when checkSearchResult")
+			return merr.WrapErrServiceInternalMsg("wrong search result data blobs when checkSearchResult")
 		}
 
 		result := &schemapb.SearchResultData{}
@@ -1107,17 +1108,17 @@ func CheckSearchResult(ctx context.Context, nq int64, plan *segcore.SearchPlan, 
 		}
 
 		if result.TopK != sliceTopKs[i] {
-			return errors.New("unexpected topK when checkSearchResult")
+			return merr.WrapErrServiceInternalMsg("unexpected topK when checkSearchResult")
 		}
 		if result.NumQueries != sInfo.SliceNQs[i] {
-			return errors.New("unexpected nq when checkSearchResult")
+			return merr.WrapErrServiceInternalMsg("unexpected nq when checkSearchResult")
 		}
 		// search empty segment, return empty result.IDs
 		if len(result.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data) <= 0 {
-			return errors.New("unexpected Ids when checkSearchResult")
+			return merr.WrapErrServiceInternalMsg("unexpected Ids when checkSearchResult")
 		}
 		if len(result.Scores) <= 0 {
-			return errors.New("unexpected Scores when checkSearchResult")
+			return merr.WrapErrServiceInternalMsg("unexpected Scores when checkSearchResult")
 		}
 	}
 

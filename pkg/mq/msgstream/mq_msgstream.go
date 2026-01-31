@@ -136,8 +136,7 @@ func (ms *mqMsgStream) AsProducer(ctx context.Context, channels []string) {
 func (ms *mqMsgStream) GetLatestMsgID(channel string) (MessageID, error) {
 	lastMsg, err := ms.consumers[channel].GetLatestMsgID()
 	if err != nil {
-		errMsg := "Failed to get latest MsgID from channel: " + channel + ", error = " + err.Error()
-		return nil, errors.New(errMsg)
+		return nil, merr.WrapErrServiceInternalErr(err, "Failed to get latest MsgID from channel:%s", channel)
 	}
 	return lastMsg, nil
 }
@@ -168,7 +167,7 @@ func (ms *mqMsgStream) AsConsumer(ctx context.Context, channels []string, subNam
 				return err
 			}
 			if pc == nil {
-				return errors.New("Consumer is nil")
+				return merr.WrapErrServiceInternalMsg("Consumer is nil")
 			}
 
 			ms.consumerLock.Lock()
@@ -253,7 +252,7 @@ func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
 		return nil
 	}
 	if len(ms.producers) <= 0 {
-		return errors.New("nil producer in msg stream")
+		return merr.WrapErrServiceInternalMsg("nil producer in msg stream")
 	}
 	tsMsgs := msgPack.Msgs
 	reBucketValues := ms.ComputeProduceChannelIndexes(msgPack.Msgs)
@@ -285,7 +284,7 @@ func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
 			producer, ok := ms.producers[channel]
 			ms.producerLock.RUnlock()
 			if !ok {
-				return errors.New("producer not found for channel: " + channel)
+				return merr.WrapErrServiceInternalMsg("producer not found for channel: " + channel)
 			}
 
 			for i := 0; i < len(v.Msgs); i++ {
@@ -321,7 +320,7 @@ func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
 func (ms *mqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) (map[string][]MessageID, error) {
 	ids := make(map[string][]MessageID)
 	if msgPack == nil || len(msgPack.Msgs) <= 0 {
-		return ids, errors.New("empty msgs")
+		return ids, merr.WrapErrServiceInternalMsg("empty msgs")
 	}
 
 	for _, v := range msgPack.Msgs {
@@ -367,7 +366,7 @@ func GetTsMsgFromConsumerMsg(unmarshalDispatcher UnmarshalDispatcher, msg common
 	}
 	tsMsg, err := unmarshalDispatcher.Unmarshal(msg.Payload(), msgType)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal tsMsg, err %s", err.Error())
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to unmarshal tsMsg")
 	}
 
 	tsMsg.SetPosition(&MsgPosition{
@@ -460,7 +459,7 @@ func (ms *mqMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, in
 	for _, mp := range msgPositions {
 		consumer, ok := ms.consumers[mp.ChannelName]
 		if !ok {
-			return fmt.Errorf("channel %s not subscribed", mp.ChannelName)
+			return merr.WrapErrServiceInternalMsg("channel %s not subscribed", mp.ChannelName)
 		}
 		messageID, err := ms.client.BytesToMsgID(mp.MsgID)
 		if err != nil {
@@ -566,7 +565,7 @@ func (ms *MqTtMsgStream) AsConsumer(ctx context.Context, channels []string, subN
 				return err
 			}
 			if pc == nil {
-				return errors.New("Consumer is nil")
+				return merr.WrapErrServiceInternalMsg("Consumer is nil")
 			}
 
 			ms.consumerLock.Lock()
@@ -858,11 +857,11 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 		var ok bool
 		consumer, ok = ms.consumers[mp.ChannelName]
 		if !ok {
-			return false, fmt.Errorf("please subcribe the channel, channel name =%s", mp.ChannelName)
+			return false, merr.WrapErrServiceInternalMsg("please subcribe the channel, channel name =%s", mp.ChannelName)
 		}
 
 		if consumer == nil {
-			return false, errors.New("consumer is nil")
+			return false, merr.WrapErrServiceInternalMsg("consumer is nil")
 		}
 
 		seekMsgID, err := ms.client.BytesToMsgID(mp.MsgID)
@@ -903,12 +902,12 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 	for idx := range msgPositions {
 		mp = msgPositions[idx]
 		if len(mp.MsgID) == 0 {
-			return errors.New("when msgID's length equal to 0, please use AsConsumer interface")
+			return merr.WrapErrServiceInternalMsg("when msgID's length equal to 0, please use AsConsumer interface")
 		}
 		err = retry.Handle(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		// err = retry.Do(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
-			return fmt.Errorf("failed to seek, error %s", err.Error())
+			return merr.WrapErrServiceInternalErr(err, "failed to seek")
 		}
 		ms.addConsumer(consumer, mp.ChannelName)
 		ms.chanMsgPos[consumer] = (proto.Clone(mp)).(*MsgPosition)
@@ -927,7 +926,7 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 				log.Info("seek loop tick", zap.Int("loopMsgCnt", loopMsgCnt), zap.String("channel", mp.ChannelName))
 			case msg, ok := <-consumer.Chan():
 				if !ok {
-					return errors.New("consumer closed")
+					return merr.WrapErrServiceInternalMsg("consumer closed")
 				}
 				loopMsgCnt++
 				consumer.Ack(msg)

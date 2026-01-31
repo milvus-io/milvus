@@ -182,14 +182,14 @@ func (s *Server) SuspendChannelBalance(ctx context.Context) error {
 	log := log.Ctx(ctx)
 	log.Info("SuspendChannelBalance request received")
 
-	errMsg := "failed to suspend channel balance for all querynode"
+	errMsg := "failed to suspend channel balance for all query nodes"
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
-		return err
+		return merr.Wrap(err, errMsg)
 	}
 	if err := paramtable.Get().Save(Params.QueryCoordCfg.AutoBalanceChannel.Key, "false"); err != nil {
 		log.Warn(err.Error(), zap.Error(err))
-		return err
+		return merr.Wrap(err, errMsg)
 	}
 	log.Info("SuspendChannelBalance request finished successfully")
 	return nil
@@ -199,15 +199,15 @@ func (s *Server) ResumeChannelBalance(ctx context.Context) error {
 	log := log.Ctx(ctx)
 	log.Info("ResumeChannelBalance request received")
 
-	errMsg := "failed to resume channel balance for all querynode"
+	errMsg := "failed to resume channel balance for all query nodes"
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
-		return err
+		return merr.Wrap(err, errMsg)
 	}
 
 	if err := paramtable.Get().Save(Params.QueryCoordCfg.AutoBalanceChannel.Key, "true"); err != nil {
 		log.Warn(err.Error(), zap.Error(err))
-		return err
+		return merr.Wrap(err, errMsg)
 	}
 	log.Info("ResumeChannelBalance request finished successfully")
 
@@ -239,7 +239,7 @@ func (s *Server) ResumeBalance(ctx context.Context, req *querypb.ResumeBalanceRe
 
 	log.Info("ResumeBalance request received")
 
-	errMsg := "failed to resume balance for all querynode"
+	errMsg := "failed to resume balance for all query nodes"
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		return merr.Status(err), nil
 	}

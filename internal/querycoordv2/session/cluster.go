@@ -18,11 +18,9 @@ package session
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -33,14 +31,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
-
-var ErrNodeNotFound = errors.New("NodeNotFound")
-
-func WrapErrNodeNotFound(nodeID int64) error {
-	return fmt.Errorf("%w(%v)", ErrNodeNotFound, nodeID)
-}
 
 type Cluster interface {
 	WatchDmChannels(ctx context.Context, nodeID int64, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error)
@@ -351,7 +344,7 @@ func (c *QueryCluster) ComputePhraseMatchSlop(ctx context.Context, nodeID int64,
 func (c *QueryCluster) send(ctx context.Context, nodeID int64, fn func(cli types.QueryNodeClient)) error {
 	node := c.nodeManager.Get(nodeID)
 	if node == nil {
-		return WrapErrNodeNotFound(nodeID)
+		return merr.WrapErrNodeNotFound(nodeID)
 	}
 
 	cli, err := c.clients.getOrCreate(ctx, node)

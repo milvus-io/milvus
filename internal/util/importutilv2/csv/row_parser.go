@@ -577,7 +577,7 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 			}
 			num, err := strconv.ParseInt(value.String(), 10, 32)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse int32: %w", err)
+				return nil, merr.WrapErrImportFailedErr(err, "failed to parse int32 for type:%s", eleType.String())
 			}
 			values[i] = int32(num)
 		}
@@ -598,7 +598,7 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 			}
 			num, err := strconv.ParseInt(value.String(), 10, 64)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse int64: %w", err)
+				return nil, merr.WrapErrImportFailedErr(err, "failed to parse int64 for type:%s", eleType.String())
 			}
 			values[i] = num
 		}
@@ -618,12 +618,12 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 			}
 			num, err := strconv.ParseFloat(value.String(), 32)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse float32: %w", err)
+				return nil, merr.WrapErrImportFailedErr(err, "failed to parse float32 for type:%s", eleType.String())
 			}
 			values[i] = float32(num)
 		}
 		if err := typeutil.VerifyFloats32(values); err != nil {
-			return nil, fmt.Errorf("float32 verification failed: %w", err)
+			return nil, merr.WrapErrImportFailedErr(err, "float32 verification failed for type:%s", eleType.String())
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_FloatData{
@@ -641,12 +641,12 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 			}
 			num, err := strconv.ParseFloat(value.String(), 64)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse float64: %w", err)
+				return nil, merr.WrapErrImportFailedErr(err, "failed to parse float64 for type:%s", eleType.String())
 			}
 			values[i] = num
 		}
 		if err := typeutil.VerifyFloats64(values); err != nil {
-			return nil, fmt.Errorf("float64 verification failed: %w", err)
+			return nil, merr.WrapErrImportFailedErr(err, "float64 verification failed for type:%s", eleType.String())
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_DoubleData{
@@ -664,7 +664,7 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 			}
 			num, err := strconv.ParseInt(value.String(), 10, 64)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse timesamptz: %w", err)
+				return nil, merr.WrapErrImportFailedErr(err, "failed to parse timesamptz for type:%s", eleType.String())
 			}
 			values[i] = num
 		}
@@ -728,7 +728,7 @@ func (r *rowParser) arrayOfVectorToFieldData(vectors []any, field *schemapb.Fiel
 				}
 				num, err := strconv.ParseFloat(value.String(), 32)
 				if err != nil {
-					return nil, fmt.Errorf("failed to parse float: %w", err)
+					return nil, merr.WrapErrImportFailedErr(err, "failed to parse float for type:%s", elementType.String())
 				}
 				vector[i] = float32(num)
 			}
@@ -750,26 +750,23 @@ func (r *rowParser) arrayOfVectorToFieldData(vectors []any, field *schemapb.Fiel
 
 	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_BinaryVector,
 		schemapb.DataType_Int8Vector, schemapb.DataType_SparseFloatVector:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("not implemented element type for CSV: %s", elementType.String()))
+		return nil, merr.WrapErrImportFailedMsg("not implemented element type for CSV: %s", elementType.String())
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported element type: %s", elementType.String()))
+		return nil, merr.WrapErrImportFailedMsg("unsupported element type: %s", elementType.String())
 	}
 }
 
 func (r *rowParser) wrapTypeError(v any, field *schemapb.FieldSchema) error {
-	return merr.WrapErrImportFailed(
-		fmt.Sprintf("expected type '%s' for field '%s', got type '%T' with value '%v'",
-			field.GetDataType().String(), field.GetName(), v, v))
+	return merr.WrapErrImportFailedMsg("expected type '%s' for field '%s', got type '%T' with value '%v'",
+		field.GetDataType().String(), field.GetName(), v, v)
 }
 
 func (r *rowParser) wrapDimError(actualDim int, field *schemapb.FieldSchema) error {
-	return merr.WrapErrImportFailed(
-		fmt.Sprintf("expected dim '%d' for field '%s' with type '%s', got dim '%d'",
-			r.name2Dim[field.GetName()], field.GetName(), field.GetDataType().String(), actualDim))
+	return merr.WrapErrImportFailedMsg("expected dim '%d' for field '%s' with type '%s', got dim '%d'",
+		r.name2Dim[field.GetName()], field.GetName(), field.GetDataType().String(), actualDim)
 }
 
 func (r *rowParser) wrapArrayValueTypeError(v any, eleType schemapb.DataType) error {
-	return merr.WrapErrImportFailed(
-		fmt.Sprintf("expected element type '%s' in array field, got type '%T' with value '%v'",
-			eleType.String(), v, v))
+	return merr.WrapErrImportFailedMsg("expected element type '%s' in array field, got type '%T' with value '%v'",
+		eleType.String(), v, v)
 }

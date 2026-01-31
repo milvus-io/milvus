@@ -20,9 +20,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type Input struct {
@@ -92,11 +91,11 @@ func NewAliDashScopeEmbeddingClient(apiKey string, url string) *AliDashScopeEmbe
 
 func (c *AliDashScopeEmbedding) Check() error {
 	if c.apiKey == "" {
-		return errors.New("api key is empty")
+		return merr.WrapErrFunctionFailedMsg("AliDashScopeEmbedding.apiKey is empty")
 	}
 
 	if c.url == "" {
-		return errors.New("url is empty")
+		return merr.WrapErrFunctionFailedMsg("AliDashScopeEmbedding.url is empty")
 	}
 	return nil
 }

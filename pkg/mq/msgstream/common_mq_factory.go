@@ -3,10 +3,9 @@ package msgstream
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 var _ Factory = &CommonFactory{}
@@ -60,6 +59,6 @@ func (f *CommonFactory) NewMsgStreamDisposer(ctx context.Context) func([]string,
 
 func wrapError(err *error, method string) {
 	if *err != nil {
-		*err = errors.Wrapf(*err, "in method: %s", method)
+		*err = merr.Wrapf(*err, "in method: %s", method)
 	}
 }

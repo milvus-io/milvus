@@ -17,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
@@ -172,14 +171,14 @@ func (kc *Catalog) ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]
 
 func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection, ts typeutil.Timestamp) error {
 	if coll.State != pb.CollectionState_CollectionCreated {
-		return fmt.Errorf("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
+		return merr.WrapErrServiceInternalMsg("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
 	}
 
 	k1 := BuildCollectionKey(coll.DBID, coll.CollectionID)
 	collInfo := model.MarshalCollectionModel(coll)
 	v1, err := proto.Marshal(collInfo)
 	if err != nil {
-		return fmt.Errorf("failed to marshal collection info: %s", err.Error())
+		return merr.WrapErrServiceInternalErr(err, "failed to marshal collection info")
 	}
 
 	// Due to the limit of etcd txn number, we must split these kvs into several batches.
@@ -252,7 +251,7 @@ func (kc *Catalog) loadCollectionFromDb(ctx context.Context, dbID int64, collect
 	collKey := BuildCollectionKey(dbID, collectionID)
 	collVal, err := kc.Snapshot.Load(ctx, collKey, ts)
 	if err != nil {
-		return nil, merr.WrapErrCollectionNotFound(collectionID, err.Error())
+		return nil, merr.WrapErrCollectionIDNotFound(collectionID, err.Error())
 	}
 
 	collMeta := &pb.CollectionInfo{}
@@ -312,11 +311,11 @@ func (kc *Catalog) CreatePartition(ctx context.Context, dbID int64, partition *m
 	}
 
 	if partitionExistByID(collMeta, partition.PartitionID) {
-		return fmt.Errorf("partition already exist: %d", partition.PartitionID)
+		return merr.WrapErrServiceInternalMsg("partition already exist: %d", partition.PartitionID)
 	}
 
 	if partitionExistByName(collMeta, partition.PartitionName) {
-		return fmt.Errorf("partition already exist: %s", partition.PartitionName)
+		return merr.WrapErrServiceInternalMsg("partition already exist: %s", partition.PartitionName)
 	}
 
 	// keep consistent with older version, otherwise it's hard to judge where to find partitions.
@@ -620,7 +619,7 @@ func (kc *Catalog) GetCredential(ctx context.Context, username string) (*model.C
 	credentialInfo := internalpb.CredentialInfo{}
 	err = json.Unmarshal([]byte(v), &credentialInfo)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal credential info err:%w", err)
+		return nil, merr.WrapErrServiceInternalMsg("unmarshal credential info err:%w", err)
 	}
 	// we don't save the username in the credential info, so we need to set it manually from path.
 	credentialInfo.Username = username
@@ -750,7 +749,7 @@ func (kc *Catalog) AlterCollection(ctx context.Context, oldColl *model.Collectio
 	case metastore.MODIFY:
 		return kc.alterModifyCollection(ctx, oldColl, newColl, ts, fieldModify)
 	default:
-		return fmt.Errorf("altering collection doesn't support %s", alterType.String())
+		return merr.WrapErrServiceInternalMsg("altering collection doesn't support %s", alterType.String())
 	}
 }
 
@@ -791,7 +790,7 @@ func (kc *Catalog) AlterPartition(ctx context.Context, dbID int64, oldPart *mode
 	if alterType == metastore.MODIFY {
 		return kc.alterModifyPartition(ctx, oldPart, newPart, ts)
 	}
-	return fmt.Errorf("altering partition doesn't support %s", alterType.String())
+	return merr.WrapErrServiceInternalMsg("altering partition doesn't support %s", alterType.String())
 }
 
 func dropPartition(collMeta *pb.CollectionInfo, partitionID typeutil.UniqueID) {
@@ -1067,7 +1066,7 @@ func (kc *Catalog) remove(ctx context.Context, k string) error {
 	}
 	if err != nil && errors.Is(err, merr.ErrIoKeyNotFound) {
 		log.Ctx(ctx).Debug("the key isn't existed", zap.String("key", k))
-		return common.NewIgnorableError(fmt.Errorf("the key[%s] isn't existed", k))
+		return nil
 	}
 	return kc.Txn.Remove(ctx, k)
 }
@@ -1112,7 +1111,7 @@ func (kc *Catalog) AlterUserRole(ctx context.Context, tenant string, userEntity 
 	case milvuspb.OperateUserRoleType_RemoveUserFromRole:
 		return kc.Txn.Remove(ctx, k)
 	}
-	return fmt.Errorf("invalid operate user role type, operate type: %d", operateType)
+	return merr.WrapErrServiceInternalMsg("invalid operate user role type, operate type: %d", operateType)
 }
 
 func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
@@ -1167,7 +1166,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 		}
 	} else {
 		if funcutil.IsEmptyString(entity.Name) {
-			return results, errors.New("role name in the role entity is empty")
+			return results, merr.WrapErrRbacMsg("role name in the role entity is empty")
 		}
 		roleKey := funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, entity.Name)
 		_, err := kc.Txn.Load(ctx, roleKey)
@@ -1242,7 +1241,7 @@ func (kc *Catalog) ListUser(ctx context.Context, tenant string, entity *milvuspb
 		}
 	} else {
 		if funcutil.IsEmptyString(entity.Name) {
-			return results, errors.New("username in the user entity is empty")
+			return results, merr.WrapErrRbacMsg("username in the user entity is empty")
 		}
 		_, err = kc.GetCredential(ctx, entity.Name)
 		if err != nil {
@@ -1282,7 +1281,8 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 			log.Ctx(ctx).Warn("fail to load grant privilege entity", zap.String("key", k), zap.Any("type", operateType), zap.Error(err))
 			if funcutil.IsRevoke(operateType) {
 				if errors.Is(err, merr.ErrIoKeyNotFound) {
-					return common.NewIgnorableError(fmt.Errorf("the grant[%s] isn't existed", k))
+					log.Ctx(ctx).Info("the grant isn't existed", zap.String("grant", k))
+					return nil
 				}
 				return err
 			}
@@ -1308,7 +1308,8 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 		}
 		log.Ctx(ctx).Debug("not found the grantee id", zap.String("key", k))
 		if funcutil.IsRevoke(operateType) {
-			return common.NewIgnorableError(fmt.Errorf("the grantee-id[%s] isn't existed", k))
+			log.Ctx(ctx).Info("the grantee-id isn't existed", zap.Any("grantee-id", k))
+			return nil
 		}
 		if funcutil.IsGrant(operateType) {
 			if err = kc.Txn.Save(ctx, k, entity.Grantor.User.Name); err != nil {
@@ -1325,7 +1326,8 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 		}
 		return err
 	}
-	return common.NewIgnorableError(fmt.Errorf("the privilege[%s] has been granted", privilegeName))
+	log.Ctx(ctx).Info("the privilege has been granted", zap.String("previlege", privilegeName))
+	return nil
 }
 
 func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
@@ -1587,7 +1589,7 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 
 	for _, group := range meta.GetPrivilegeGroups() {
 		if err := kc.SavePrivilegeGroup(ctx, group); err != nil {
-			return errors.Wrap(err, "failed to save privilege group")
+			return merr.WrapErrServiceInternalErr(err, "failed to save privilege group")
 		}
 	}
 
@@ -1599,7 +1601,7 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 			grant.Grantor.Privilege.Name = util.PrivilegeGroupNameForMetastore(privName)
 		}
 		if err := kc.AlterGrant(ctx, tenant, grant, milvuspb.OperatePrivilegeType_Grant); err != nil {
-			return errors.Wrap(err, "failed to alter grant")
+			return merr.WrapErrServiceInternalErr(err, "failed to alter grant")
 		}
 	}
 
@@ -1608,7 +1610,7 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 			Username:          user.GetUser(),
 			EncryptedPassword: user.GetPassword(),
 		}); err != nil {
-			return errors.Wrap(err, "failed to alter credential")
+			return merr.WrapErrServiceInternalErr(err, "failed to alter credential")
 		}
 
 		// restore user role mapping
@@ -1617,7 +1619,7 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 		}
 		for _, role := range user.GetRoles() {
 			if err := kc.AlterUserRole(ctx, tenant, entity, role, milvuspb.OperateUserRoleType_AddUserToRole); err != nil {
-				return errors.Wrap(err, "failed to alter user role")
+				return merr.WrapErrServiceInternalErr(err, "failed to alter user role")
 			}
 		}
 	}
@@ -1629,7 +1631,7 @@ func (kc *Catalog) GetPrivilegeGroup(ctx context.Context, groupName string) (*mi
 	val, err := kc.Txn.Load(ctx, k)
 	if err != nil {
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return nil, fmt.Errorf("privilege group [%s] does not exist", groupName)
+			return nil, merr.WrapErrServiceInternalErr(err, "privilege group [%s] does not exist", groupName)
 		}
 		log.Ctx(ctx).Error("failed to load privilege group", zap.String("group", groupName), zap.Error(err))
 		return nil, err
@@ -1662,11 +1664,11 @@ func (kc *Catalog) SavePrivilegeGroup(ctx context.Context, data *milvuspb.Privil
 	v, err := proto.Marshal(groupInfo)
 	if err != nil {
 		log.Ctx(ctx).Error("failed to marshal privilege group info", zap.Error(err))
-		return err
+		return merr.WrapErrSerializationFailed(err, "failed to marshal privilege group info")
 	}
 	if err = kc.Txn.Save(ctx, k, string(v)); err != nil {
 		log.Ctx(ctx).Warn("fail to put privilege group", zap.String("key", k), zap.Error(err))
-		return err
+		return merr.WrapErrServiceInternalErr(err, "failed to put privilege group")
 	}
 	return nil
 }
@@ -1675,7 +1677,7 @@ func (kc *Catalog) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.Privile
 	_, vals, err := kc.Txn.LoadWithPrefix(ctx, PrivilegeGroupPrefix)
 	if err != nil {
 		log.Ctx(ctx).Error("failed to list privilege groups", zap.String("prefix", PrivilegeGroupPrefix), zap.Error(err))
-		return nil, err
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to list privilege group")
 	}
 	privGroups := make([]*milvuspb.PrivilegeGroupInfo, 0, len(vals))
 	for _, val := range vals {
@@ -1683,7 +1685,7 @@ func (kc *Catalog) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.Privile
 		err = proto.Unmarshal([]byte(val), privGroupInfo)
 		if err != nil {
 			log.Ctx(ctx).Error("failed to unmarshal privilege group info", zap.Error(err))
-			return nil, err
+			return nil, merr.WrapErrSerializationFailed(err, "failed to unmarshal privilege group info")
 		}
 		privGroups = append(privGroups, privGroupInfo)
 	}

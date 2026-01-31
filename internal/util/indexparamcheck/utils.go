@@ -62,17 +62,6 @@ func CheckStrByValues(params map[string]string, key string, container []string) 
 	return funcutil.SliceContain(container, value)
 }
 
-func errOutOfRange(x interface{}, lb interface{}, ub interface{}) error {
-	return fmt.Errorf("%v out of range: [%v, %v]", x, lb, ub)
-}
-
-func setDefaultIfNotExist(params map[string]string, key string, defaultValue string) {
-	_, exist := params[key]
-	if !exist {
-		params[key] = defaultValue
-	}
-}
-
 func CheckAutoIndexHelper(key string, m map[string]string, dtype schemapb.DataType) {
 	indexType, ok := m[common.IndexTypeKey]
 	if !ok {

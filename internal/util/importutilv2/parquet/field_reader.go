@@ -234,13 +234,13 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		return data, nil, err
 	case schemapb.DataType_ArrayOfVector:
 		if c.field.GetNullable() {
-			return nil, nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
+			return nil, nil, merr.WrapErrServiceInternal("not support nullable in vector")
 		}
 		data, err := ReadVectorArrayData(c, count)
 		return data, nil, err
 	default:
-		return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for field '%s'",
-			c.field.GetDataType().String(), c.field.GetName()))
+		return nil, nil, merr.WrapErrImportSysFailedMsg("unsupported data type '%s' for field '%s'",
+			c.field.GetDataType().String(), c.field.GetName())
 	}
 }
 
@@ -320,7 +320,8 @@ func ReadNullableBoolData(pcr *FieldReader, count int64) (any, []bool, error) {
 		}
 	}
 	if len(data) != len(validData) {
-		return nil, nil, merr.WrapErrParameterInvalid(len(data), len(validData), "length of data is not equal to length of valid_data")
+		errMsg := fmt.Sprintf("length of data(%d) is not equal to length of valid_data(%d)", len(data), len(validData))
+		return nil, nil, merr.WrapErrServiceInternal(errMsg)
 	}
 	if len(data) == 0 {
 		return nil, nil, nil
@@ -439,7 +440,8 @@ func ReadNullableIntegerOrFloatData[T constraints.Integer | constraints.Float](p
 		}
 	}
 	if len(data) != len(validData) {
-		return nil, nil, merr.WrapErrParameterInvalid(len(data), len(validData), "length of data is not equal to length of valid_data")
+		errMsg := fmt.Sprintf("length of data(%d) is not equal to length of valid_data(%d)", len(data), len(validData))
+		return nil, nil, merr.WrapErrServiceInternal(errMsg)
 	}
 	if len(data) == 0 {
 		return nil, nil, nil
@@ -641,7 +643,8 @@ func readRawStringDataFromParquet(pcr *FieldReader, count int64) ([]string, []bo
 		}
 	}
 	if len(data) != len(validData) {
-		return nil, nil, merr.WrapErrParameterInvalid(len(data), len(validData), "length of data is not equal to length of valid_data")
+		errMsg := fmt.Sprintf("length of data(%d) is not equal to length of valid_data(%d)", len(data), len(validData))
+		return nil, nil, merr.WrapErrServiceInternal(errMsg)
 	}
 	if len(data) == 0 {
 		return nil, nil, nil
@@ -1208,7 +1211,7 @@ func ReadNullableSparseFloatVectorData(pcr *FieldReader, count int64) (any, []bo
 func checkVectorAlignWithDim(offsets []int32, dim int32) error {
 	for i := 1; i < len(offsets); i++ {
 		if offsets[i]-offsets[i-1] != dim {
-			return fmt.Errorf("expected %d but got %d", dim, offsets[i]-offsets[i-1])
+			return merr.WrapErrImportFailed(fmt.Sprintf("expected %d but got %d", dim, offsets[i]-offsets[i-1]))
 		}
 	}
 	return nil
@@ -1226,7 +1229,7 @@ func checkNullableVectorAlignWithDim(offsets []int32, listReader *array.List, di
 
 func checkVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) error {
 	if len(offsets) < 1 {
-		return errors.New("empty offsets")
+		return merr.WrapErrImportFailed("empty offsets")
 	}
 	switch dataType {
 	case schemapb.DataType_BinaryVector:
@@ -1241,7 +1244,7 @@ func checkVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) er
 	case schemapb.DataType_Int8Vector:
 		return checkVectorAlignWithDim(offsets, int32(dim))
 	default:
-		return fmt.Errorf("unexpected vector data type %s", dataType.String())
+		return merr.WrapErrImportSysFailed(fmt.Sprintf("unexpected vector data type %s", dataType.String()))
 	}
 }
 
@@ -1261,7 +1264,7 @@ func checkNullableVectorAligned(offsets []int32, listReader *array.List, dim int
 	case schemapb.DataType_Int8Vector:
 		return checkNullableVectorAlignWithDim(offsets, listReader, int32(dim))
 	default:
-		return fmt.Errorf("unexpected vector data type %s", dataType.String())
+		return merr.WrapErrImportSysFailed(fmt.Sprintf("unexpected vector data type %s", dataType.String()))
 	}
 }
 
@@ -1378,7 +1381,8 @@ func ReadNullableBoolArrayData(pcr *FieldReader, count int64) (any, []bool, erro
 		}
 	}
 	if len(data) != len(validData) {
-		return nil, nil, merr.WrapErrParameterInvalid(len(data), len(validData), "length of data is not equal to length of valid_data")
+		errMsg := fmt.Sprintf("length of data(%d) is not equal to length of valid_data(%d)", len(data), len(validData))
+		return nil, nil, merr.WrapErrServiceInternal(errMsg)
 	}
 	if len(data) == 0 {
 		return nil, nil, nil
@@ -1630,7 +1634,8 @@ func ReadNullableIntegerOrFloatArrayData[T constraints.Integer | constraints.Flo
 		}
 	}
 	if len(data) != len(validData) {
-		return nil, nil, merr.WrapErrParameterInvalid(len(data), len(validData), "length of data is not equal to length of valid_data")
+		errMsg := fmt.Sprintf("length of data(%d) is not equal to length of valid_data(%d)", len(data), len(validData))
+		return nil, nil, merr.WrapErrServiceInternal(errMsg)
 	}
 	if len(data) == 0 {
 		return nil, nil, nil
@@ -1964,7 +1969,7 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 		}
 		for _, elementArray := range float32Array.([][]float32) {
 			if err := typeutil.VerifyFloats32(elementArray); err != nil {
-				return nil, fmt.Errorf("float32 verification failed: %w", err)
+				return nil, merr.WrapErrImportFailedErr(err, "float32 verification failed for type:%s", elementType.String())
 			}
 			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, err
@@ -1987,7 +1992,7 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 		}
 		for _, elementArray := range float64Array.([][]float64) {
 			if err := typeutil.VerifyFloats64(elementArray); err != nil {
-				return nil, fmt.Errorf("float64 verification failed: %w", err)
+				return nil, merr.WrapErrImportFailedErr(err, "float64 verification failed for type:%s", elementType.String())
 			}
 			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, err
@@ -2041,8 +2046,8 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			})
 		}
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for array field '%s'",
-			elementType.String(), pcr.field.GetName()))
+		return nil, merr.WrapErrImportSysFailedMsg("unsupported data type '%s' for array field '%s'",
+			elementType.String(), pcr.field.GetName())
 	}
 	return data, nil
 }
@@ -2245,7 +2250,7 @@ func ReadNullableArrayData(pcr *FieldReader, count int64) (any, []bool, error) {
 		}
 		return data, validData, nil
 	default:
-		return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for array field '%s'",
+		return nil, nil, merr.WrapErrImportSysFailed(fmt.Sprintf("unsupported data type '%s' for array field '%s'",
 			elementType.String(), pcr.field.GetName()))
 	}
 }

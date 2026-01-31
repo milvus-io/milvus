@@ -1,9 +1,8 @@
 package typeutil
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type FieldDataBuilder struct {
@@ -27,7 +26,7 @@ func NewFieldDataBuilder(dt schemapb.DataType, fillZero bool, capacity int) (*Fi
 			fillZero: fillZero,
 		}, nil
 	default:
-		return nil, fmt.Errorf("not supported field type: %s", dt.String())
+		return nil, merr.WrapErrOperationNotSupportedMsg("not supported field type: %s", dt.String())
 	}
 }
 

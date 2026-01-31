@@ -17,7 +17,6 @@
 package storage
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -124,7 +123,7 @@ func NewDeltaDataWithPkType(cap int64, pkType schemapb.DataType) (*DeltaData, er
 
 func NewDeltaDataWithData(pks PrimaryKeys, tss []uint64) (*DeltaData, error) {
 	if pks.Len() != len(tss) {
-		return nil, merr.WrapErrParameterInvalidMsg("length of pks and tss not equal")
+		return nil, merr.WrapErrServiceInternal("length of pks and tss not equal")
 	}
 	dd := &DeltaData{
 		deletePks:        pks,
@@ -167,7 +166,7 @@ func (dl *DeleteLog) Parse(val string) error {
 		// compatible error info (unmarshal err invalid character ',' after top-level value)
 		splits := strings.Split(val, ",")
 		if len(splits) != 2 {
-			return fmt.Errorf("the format of delta log is incorrect, %v can not be split", val)
+			return merr.WrapErrStorageMsg("the format of delta log is incorrect, %v can not be split", val)
 		}
 		pk, err := strconv.ParseInt(splits[0], 10, 64)
 		if err != nil {

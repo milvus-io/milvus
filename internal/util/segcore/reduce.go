@@ -26,9 +26,10 @@ import "C"
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type SliceInfo struct {
@@ -77,13 +78,13 @@ func NewStreamReducer(ctx context.Context,
 	sliceTopKs []int64,
 ) (StreamSearchReducer, error) {
 	if plan.cSearchPlan == nil {
-		return nil, errors.New("nil search plan")
+		return nil, merr.WrapErrServiceInternal("nil search plan")
 	}
 	if len(sliceNQs) == 0 {
-		return nil, errors.New("empty slice nqs is not allowed")
+		return nil, merr.WrapErrServiceInternal("empty slice nqs")
 	}
 	if len(sliceNQs) != len(sliceTopKs) {
-		return nil, fmt.Errorf("unaligned sliceNQs(len=%d) and sliceTopKs(len=%d)", len(sliceNQs), len(sliceTopKs))
+		return nil, merr.WrapErrServiceInternalMsg("unaligned sliceNQs(len=%d) and sliceTopKs(len=%d)", len(sliceNQs), len(sliceTopKs))
 	}
 	cSliceNQSPtr := (*C.int64_t)(&sliceNQs[0])
 	cSliceTopKSPtr := (*C.int64_t)(&sliceTopKs[0])
@@ -124,21 +125,21 @@ func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, searc
 	numSegments int64, sliceNQs []int64, sliceTopKs []int64,
 ) (SearchResultDataBlobs, error) {
 	if plan.cSearchPlan == nil {
-		return nil, errors.New("nil search plan")
+		return nil, merr.WrapErrServiceInternal("nil search plan")
 	}
 
 	if len(sliceNQs) == 0 {
-		return nil, errors.New("empty slice nqs is not allowed")
+		return nil, merr.WrapErrServiceInternal("empty slice nqs")
 	}
 
 	if len(sliceNQs) != len(sliceTopKs) {
-		return nil, fmt.Errorf("unaligned sliceNQs(len=%d) and sliceTopKs(len=%d)", len(sliceNQs), len(sliceTopKs))
+		return nil, merr.WrapErrServiceInternalMsg("unaligned sliceNQs(len=%d) and sliceTopKs(len=%d)", len(sliceNQs), len(sliceTopKs))
 	}
 
 	cSearchResults := make([]C.CSearchResult, 0)
 	for _, res := range searchResults {
 		if res == nil {
-			return nil, errors.New("nil searchResult detected when reduceSearchResultsAndFillData")
+			return nil, merr.WrapErrServiceInternal("nil search result detected when reduceSearchResultsAndFillData")
 		}
 		cSearchResults = append(cSearchResults, res.cSearchResult)
 	}

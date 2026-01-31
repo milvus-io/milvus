@@ -23,6 +23,7 @@ import (
 	"sort"
 
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func NewBaseURL(endpoint string) (*url.URL, error) {
@@ -31,10 +32,10 @@ func NewBaseURL(endpoint string) (*url.URL, error) {
 		return nil, err
 	}
 	if base.Scheme != "http" && base.Scheme != "https" {
-		return nil, fmt.Errorf("endpoint: [%s] is not a valid http/https link", endpoint)
+		return nil, merr.WrapErrFunctionFailedMsg("endpoint: [%s] is not a valid http/https link", endpoint)
 	}
 	if base.Host == "" {
-		return nil, fmt.Errorf("endpoint: [%s] is not a valid http/https link", endpoint)
+		return nil, merr.WrapErrFunctionFailedMsg("endpoint: [%s] is not a valid http/https link", endpoint)
 	}
 	return base, nil
 }

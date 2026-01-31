@@ -21,9 +21,8 @@ import (
 	"net/url"
 	"sort"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type EmbeddingRequest struct {
@@ -99,11 +98,11 @@ type openAIBase struct {
 
 func (c *openAIBase) Check() error {
 	if c.apiKey == "" {
-		return errors.New("api key is empty")
+		return merr.WrapErrFunctionFailedMsg("api key is empty")
 	}
 
 	if c.url == "" {
-		return errors.New("url is empty")
+		return merr.WrapErrFunctionFailedMsg("url is empty")
 	}
 	return nil
 }

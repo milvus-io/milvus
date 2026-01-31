@@ -343,7 +343,7 @@ func NewSegmentTask(ctx context.Context,
 	actions ...Action,
 ) (*SegmentTask, error) {
 	if len(actions) == 0 {
-		return nil, errors.WithStack(merr.WrapErrParameterInvalid("non-empty actions", "no action"))
+		return nil, errors.WithStack(merr.WrapErrServiceInternal("empty actions"))
 	}
 
 	segmentID := int64(-1)
@@ -351,13 +351,13 @@ func NewSegmentTask(ctx context.Context,
 	for _, action := range actions {
 		action, ok := action.(*SegmentAction)
 		if !ok {
-			return nil, errors.WithStack(merr.WrapErrParameterInvalid("SegmentAction", "other action", "all actions must be with the same type"))
+			return nil, errors.WithStack(merr.WrapErrServiceInternal("action type is not SegmentAction", "all actions must be with the same type"))
 		}
 		if segmentID == -1 {
 			segmentID = action.GetSegmentID()
 			shard = action.GetShard()
 		} else if segmentID != action.GetSegmentID() {
-			return nil, errors.WithStack(merr.WrapErrParameterInvalid(segmentID, action.GetSegmentID(), "all actions must operate the same segment"))
+			return nil, errors.WithStack(merr.WrapErrServiceInternal(fmt.Sprintf("segmentID:%v is not expected as %v", segmentID, action.GetSegmentID())))
 		}
 	}
 
@@ -418,19 +418,19 @@ func NewChannelTask(ctx context.Context,
 	actions ...Action,
 ) (*ChannelTask, error) {
 	if len(actions) == 0 {
-		return nil, errors.WithStack(merr.WrapErrParameterInvalid("non-empty actions", "no action"))
+		return nil, errors.WithStack(merr.WrapErrServiceInternal("empty actions"))
 	}
 
 	channel := ""
 	for _, action := range actions {
 		channelAction, ok := action.(*ChannelAction)
 		if !ok {
-			return nil, errors.WithStack(merr.WrapErrParameterInvalid("ChannelAction", "other action", "all actions must be with the same type"))
+			return nil, errors.WithStack(merr.WrapErrServiceInternal("action type is not ChannelAction", "all actions must be with the same type"))
 		}
 		if channel == "" {
 			channel = channelAction.ChannelName()
 		} else if channel != channelAction.ChannelName() {
-			return nil, errors.WithStack(merr.WrapErrParameterInvalid(channel, channelAction.ChannelName(), "all actions must operate the same segment"))
+			return nil, errors.WithStack(merr.WrapErrServiceUnavailable(fmt.Sprintf("channel:%s, is not expected as %s", channel, channelAction.ChannelName())))
 		}
 	}
 

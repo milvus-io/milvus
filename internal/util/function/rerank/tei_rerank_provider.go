@@ -20,7 +20,6 @@ package rerank
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/tei"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type teiProvider struct {
@@ -57,13 +57,13 @@ func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 			}
 		case models.TruncateParamKey:
 			if teiTrun, err := strconv.ParseBool(param.Value); err != nil {
-				return nil, fmt.Errorf("Rerank params error, %s: %s is not bool type", models.TruncateParamKey, param.Value)
+				return nil, merr.WrapErrFunctionFailed(err, "Rerank params error, %s: %s is not bool type", models.TruncateParamKey, param.Value)
 			} else {
 				truncateParams[models.TruncateParamKey] = teiTrun
 			}
 		case models.TruncationDirectionParamKey:
 			if truncationDirection := param.Value; truncationDirection != "Left" && truncationDirection != "Right" {
-				return nil, fmt.Errorf("[%s param's value: %s] is not invalid, only supports [Left/Right]", models.TruncationDirectionParamKey, param.Value)
+				return nil, merr.WrapErrFunctionFailedMsg("[%s param's value: %s] is not invalid, only supports [Left/Right]", models.TruncationDirectionParamKey, param.Value)
 			} else {
 				truncateParams[models.TruncationDirectionParamKey] = truncationDirection
 			}

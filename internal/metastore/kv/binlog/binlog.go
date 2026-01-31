@@ -210,7 +210,7 @@ func BuildLogPathWithRootPath(chunkManagerRootPath string, binlogType storage.Bi
 		return metautil.BuildBm25LogPath(chunkManagerRootPath, collectionID, partitionID, segmentID, fieldID, logID), nil
 	}
 	// should not happen
-	return "", merr.WrapErrParameterInvalidMsg("invalid binlog type")
+	return "", merr.WrapErrServiceInternal("invalid binlog type")
 }
 
 // GetLogIDFromBingLogPath get log id from binlog path
@@ -218,7 +218,7 @@ func GetLogIDFromBingLogPath(logPath string) (int64, error) {
 	var logID int64
 	idx := strings.LastIndex(logPath, "/")
 	if idx == -1 {
-		return 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid binlog path: %s", logPath))
+		return 0, merr.WrapErrServiceInternal(fmt.Sprintf("invalid binlog path: %s", logPath))
 	}
 	var err error
 	logPathStr := logPath[(idx + 1):]

@@ -1,8 +1,6 @@
 package indexparamcheck
 
 import (
-	"fmt"
-
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -51,7 +49,7 @@ func (c *INVERTEDChecker) CheckValidDataType(indexType IndexType, field *schemap
 	dType := field.GetDataType()
 	if !typeutil.IsBoolType(dType) && !typeutil.IsArithmetic(dType) && !typeutil.IsStringType(dType) &&
 		!typeutil.IsArrayType(dType) && !typeutil.IsJSONType(dType) {
-		return fmt.Errorf("INVERTED are not supported on %s field", dType.String())
+		return merr.WrapErrParameterInvalidMsg("INVERTED are not supported on %s field", dType.String())
 	}
 	return nil
 }

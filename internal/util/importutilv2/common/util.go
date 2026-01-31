@@ -24,19 +24,21 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func CheckVarcharLength(str string, maxLength int64, field *schemapb.FieldSchema) error {
 	if (int64)(len(str)) > maxLength {
-		return fmt.Errorf("value length(%d) for field %s exceeds max_length(%d)", len(str), field.GetName(), maxLength)
+		return merr.WrapErrImportFailedMsg("value length(%d) for field %s exceeds max_length(%d)", len(str), field.GetName(), maxLength)
 	}
 	return nil
 }
 
 func CheckArrayCapacity(arrLength int, maxCapacity int64, field *schemapb.FieldSchema) error {
 	if (int64)(arrLength) > maxCapacity {
-		return fmt.Errorf("array capacity(%d) for field %s exceeds max_capacity(%d)", arrLength, field.GetName(), maxCapacity)
+		return merr.WrapErrImportFailedMsg(
+			"array capacity(%d) for field %s exceeds max_capacity(%d)", arrLength, field.GetName(), maxCapacity)
 	}
 	return nil
 }
@@ -47,7 +49,7 @@ func EstimateReadCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema
 		return 0, err
 	}
 	if sizePerRecord <= 0 || bufferSize <= 0 {
-		return 0, fmt.Errorf("invalid size, sizePerRecord=%d, bufferSize=%d", sizePerRecord, bufferSize)
+		return 0, merr.WrapErrImportFailedMsg("invalid size, sizePerRecord=%d, bufferSize=%d", sizePerRecord, bufferSize)
 	}
 	if 1000*sizePerRecord <= bufferSize {
 		return 1000, nil
@@ -93,7 +95,7 @@ func CheckValidUTF8(s string, field *schemapb.FieldSchema) error {
 	if !typeutil.IsUTF8(s) {
 		// Use safe string representation to avoid gRPC serialization errors
 		safeValue := SafeStringForErrorWithLimit(s, 100)
-		return fmt.Errorf("field '%s' contains invalid UTF-8 data, value=%s", field.GetName(), safeValue)
+		return merr.WrapErrImportFailedMsg("field '%s' contains invalid UTF-8 data, value=%s", field.GetName(), safeValue)
 	}
 	return nil
 }

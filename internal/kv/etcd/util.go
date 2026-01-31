@@ -29,7 +29,7 @@ func parsePredicates(rootPath string, preds ...predicates.Predicate) ([]clientv3
 			cmp := clientv3.Compare(clientv3.Value(path.Join(rootPath, pred.Key())), pt, pred.TargetValue())
 			result = append(result, cmp)
 		default:
-			return nil, merr.WrapErrParameterInvalid("valid predicate target", fmt.Sprintf("%d", pred.Target()))
+			return nil, merr.WrapErrAsSysError(merr.WrapErrParameterInvalid("valid predicate target", fmt.Sprintf("%d", pred.Target())))
 		}
 	}
 	return result, nil
@@ -41,7 +41,7 @@ func parsePredicateType(pt predicates.PredicateType) (string, error) {
 	case predicates.PredTypeEqual:
 		return "=", nil
 	default:
-		return "", merr.WrapErrParameterInvalid("valid predicate type", fmt.Sprintf("%d", pt))
+		return "", merr.WrapErrAsSysError(merr.WrapErrParameterInvalid("valid predicate type", fmt.Sprintf("%d", pt)))
 	}
 }
 

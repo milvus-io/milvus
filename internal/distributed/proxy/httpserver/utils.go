@@ -164,7 +164,7 @@ func convertRange(field *schemapb.FieldSchema, result gjson.Result) (string, err
 func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) (string, error) {
 	primaryField, ok := getPrimaryField(coll)
 	if !ok {
-		return "", fmt.Errorf("collection: %s has no primary field", coll.Name)
+		return "", merr.WrapErrServiceInternalMsg("collection: %s has no primary field", coll.Name)
 	}
 	resultStr, err := convertRange(primaryField, idResult)
 	if err != nil {
@@ -728,7 +728,7 @@ func convertFloatVectorToArray(vector [][]float32, dim int64) ([]float32, error)
 	floatArray := make([]float32, 0)
 	for _, arr := range vector {
 		if int64(len(arr)) != dim {
-			return nil, fmt.Errorf("[]float32 size %d doesn't equal to vector dimension %d of %s",
+			return nil, merr.WrapErrParameterInvalidMsg("[]float32 size %d doesn't equal to vector dimension %d of %s",
 				len(arr), dim, schemapb.DataType_name[int32(schemapb.DataType_FloatVector)])
 		}
 		for i := int64(0); i < dim; i++ {
@@ -751,7 +751,7 @@ func convertBinaryVectorToArray(vector [][]byte, dim int64, dataType schemapb.Da
 	binaryArray := make([]byte, 0, len(vector)*int(bytesLen))
 	for _, arr := range vector {
 		if int64(len(arr)) != bytesLen {
-			return nil, fmt.Errorf("[]byte size %d doesn't equal to vector dimension %d of %s",
+			return nil, merr.WrapErrParameterInvalidMsg("[]byte size %d doesn't equal to vector dimension %d of %s",
 				len(arr), dim, schemapb.DataType_name[int32(dataType)])
 		}
 		for i := int64(0); i < bytesLen; i++ {
@@ -765,7 +765,7 @@ func convertInt8VectorToArray(vector [][]int8, dim int64) ([]byte, error) {
 	byteArray := make([]byte, 0)
 	for _, arr := range vector {
 		if int64(len(arr)) != dim {
-			return nil, fmt.Errorf("[]int8 size %d doesn't equal to vector dimension %d of %s",
+			return nil, merr.WrapErrParameterInvalidMsg("[]int8 size %d doesn't equal to vector dimension %d of %s",
 				len(arr), dim, schemapb.DataType_name[int32(schemapb.DataType_Int8Vector)])
 		}
 		for i := int64(0); i < dim; i++ {
@@ -799,7 +799,7 @@ func reflectValueCandi(v reflect.Value) (map[string]fieldCandi, error) {
 		}
 		return result, nil
 	default:
-		return nil, fmt.Errorf("unsupport row type: %s", v.Kind().String())
+		return nil, merr.WrapErrParameterInvalidMsg("unsupport row type: %s", v.Kind().String())
 	}
 }
 
@@ -821,7 +821,7 @@ func convertToIntArray(dataType schemapb.DataType, arr interface{}) []int32 {
 func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool, sch *schemapb.CollectionSchema, inInsert bool, partialUpdate bool) ([]*schemapb.FieldData, error) {
 	rowsLen := len(rows)
 	if rowsLen == 0 {
-		return []*schemapb.FieldData{}, errors.New("no row need to be convert to columns")
+		return []*schemapb.FieldData{}, merr.WrapErrParameterInvalidMsg("no row need to be convert to columns")
 	}
 
 	isDynamic := sch.EnableDynamicField
@@ -899,7 +899,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			dim, _ := getDim(field)
 			nameDims[field.Name] = dim
 		default:
-			return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
+			return nil, merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
 		}
 		nameColumns[field.Name] = data
 		fieldData[field.Name] = &schemapb.FieldData{
@@ -910,7 +910,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 		}
 	}
 	if len(nameDims) == 0 && len(sch.Functions) == 0 && !partialUpdate {
-		return nil, fmt.Errorf("collection: %s has no vector field or functions", sch.Name)
+		return nil, merr.WrapErrParameterInvalidMsg("collection: %s has no vector field or functions", sch.Name)
 	}
 
 	dynamicCol := make([][]byte, 0, rowsLen)
@@ -941,7 +941,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			}
 			if field.GetIsFunctionOutput() {
 				if ok {
-					return nil, fmt.Errorf("row %d has data provided for function output field %s", idx, field.Name)
+					return nil, merr.WrapErrParameterInvalidMsg("row %d has data provided for function output field %s", idx, field.Name)
 				}
 				continue
 			}
@@ -949,7 +949,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				if partialUpdate {
 					continue
 				}
-				return nil, fmt.Errorf("row %d does not has field %s", idx, field.Name)
+				return nil, merr.WrapErrParameterInvalidMsg("row %d does not has field %s", idx, field.Name)
 			}
 			fieldLen[field.Name] += 1
 			switch field.DataType {
@@ -1013,7 +1013,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			case schemapb.DataType_Int8Vector:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([][]int8), candi.v.Interface().([]int8))
 			default:
-				return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
+				return nil, merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
 			}
 
 			delete(set, field.Name)
@@ -1026,7 +1026,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			}
 			bs, err := json.Marshal(m)
 			if err != nil {
-				return nil, fmt.Errorf("failed to marshal dynamic field %w", err)
+				return nil, merr.WrapErrSerializationFailed(err, "failed to marshal dynamic field")
 			}
 			dynamicCol = append(dynamicCol, bs)
 		}
@@ -1049,7 +1049,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				zap.String("fieldName", name),
 				zap.Int("fieldLen", fieldLen[name]),
 				zap.Int("rowsLen", rowsLen))
-			return nil, fmt.Errorf("column %s has length %d, expected %d", name, fieldLen[name], rowsLen)
+			return nil, merr.WrapErrParameterInvalidMsg("column %s has length %d, expected %d", name, fieldLen[name], rowsLen)
 		}
 
 		colData := fieldData[name]
@@ -1269,7 +1269,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				},
 			}
 		default:
-			return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", colData.Type, name)
+			return nil, merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", colData.Type, name)
 		}
 		colData.ValidData = validDataMap[name]
 		columns = append(columns, colData)
@@ -1504,7 +1504,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 			case schemapb.DataType_Int8Vector:
 				rowsNum = int64(len(fieldDataList[0].GetVectors().GetInt8Vector())) / fieldDataList[0].GetVectors().GetDim()
 			default:
-				return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", fieldDataList[0].GetType(), fieldDataList[0].GetFieldName())
+				return nil, merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", fieldDataList[0].GetType(), fieldDataList[0].GetFieldName())
 			}
 		} else if ids != nil {
 			switch ids.GetIdField().(type) {
@@ -1515,7 +1515,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				stringPks := ids.GetStrId().GetData()
 				rowsNum = int64(len(stringPks))
 			default:
-				return nil, errors.New("the type of primary key(id) is not supported, use other sdk please")
+				return nil, merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please")
 			}
 		}
 	}
@@ -1675,7 +1675,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				stringPks := ids.GetStrId().GetData()
 				row[pkFieldName] = stringPks[i]
 			default:
-				return nil, errors.New("the type of primary key(id) is not supported, use other sdk please")
+				return nil, merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please")
 			}
 		}
 		if scores != nil && int64(len(scores)) > i {

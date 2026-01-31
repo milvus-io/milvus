@@ -2,10 +2,8 @@ package connection
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -13,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func ZapClientInfo(info *commonpb.ClientInfo) []zap.Field {
@@ -34,15 +33,15 @@ func ZapClientInfo(info *commonpb.ClientInfo) []zap.Field {
 func GetIdentifierFromContext(ctx context.Context) (int64, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return 0, errors.New("fail to get metadata from the context")
+		return 0, merr.WrapErrServiceInternalMsg("fail to get metadata from the context")
 	}
 	identifierContent, ok := md[util.IdentifierKey]
 	if !ok || len(identifierContent) < 1 {
-		return 0, errors.New("no identifier found in metadata")
+		return 0, merr.WrapErrServiceInternalMsg("no identifier found in metadata")
 	}
 	identifier, err := strconv.ParseInt(identifierContent[0], 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse identifier: %s, error: %s", identifierContent[0], err.Error())
+		return 0, merr.WrapErrServiceInternalErr(err, "failed to parse identifier: %s", identifierContent[0])
 	}
 	return identifier, nil
 }

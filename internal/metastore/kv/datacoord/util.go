@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -147,10 +148,10 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 	checkLogID := func(fieldBinlog *datapb.FieldBinlog) error {
 		for _, binlog := range fieldBinlog.GetBinlogs() {
 			if binlog.GetLogID() == 0 {
-				return fmt.Errorf("invalid log id, binlog:%v", binlog)
+				return merr.WrapErrServiceInternalMsg("invalid log id, binlog:%v", binlog)
 			}
 			if binlog.GetLogPath() != "" {
-				return fmt.Errorf("fieldBinlog no need to store logpath, binlog:%v", binlog)
+				return merr.WrapErrServiceInternalMsg("fieldBinlog no need to store logpath, binlog:%v", binlog)
 			}
 		}
 		return nil
@@ -163,7 +164,7 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 		}
 		binlogBytes, err := proto.Marshal(binlog)
 		if err != nil {
-			return nil, fmt.Errorf("marshal binlogs failed, collectionID:%d, segmentID:%d, fieldID:%d, error:%w", collectionID, segmentID, binlog.FieldID, err)
+			return nil, merr.WrapErrSerializationFailed(err, "marshal binlogs failed, collectionID:%d, segmentID:%d, fieldID:%d", collectionID, segmentID, binlog.FieldID)
 		}
 		key := buildFieldBinlogPath(collectionID, partitionID, segmentID, binlog.FieldID)
 		kv[key] = string(binlogBytes)
@@ -176,7 +177,7 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 		}
 		binlogBytes, err := proto.Marshal(deltalog)
 		if err != nil {
-			return nil, fmt.Errorf("marshal deltalogs failed, collectionID:%d, segmentID:%d, fieldID:%d, error:%w", collectionID, segmentID, deltalog.FieldID, err)
+			return nil, merr.WrapErrSerializationFailed(err, "marshal deltalogs failed, collectionID:%d, segmentID:%d, fieldID:%d", collectionID, segmentID, deltalog.FieldID)
 		}
 		key := buildFieldDeltalogPath(collectionID, partitionID, segmentID, deltalog.FieldID)
 		kv[key] = string(binlogBytes)
@@ -189,7 +190,7 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 		}
 		binlogBytes, err := proto.Marshal(statslog)
 		if err != nil {
-			return nil, fmt.Errorf("marshal statslogs failed, collectionID:%d, segmentID:%d, fieldID:%d, error:%w", collectionID, segmentID, statslog.FieldID, err)
+			return nil, merr.WrapErrSerializationFailed(err, "marshal statslogs failed, collectionID:%d, segmentID:%d, fieldID:%d", collectionID, segmentID, statslog.FieldID)
 		}
 		key := buildFieldStatslogPath(collectionID, partitionID, segmentID, statslog.FieldID)
 		kv[key] = string(binlogBytes)
@@ -202,7 +203,7 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 		}
 		binlogBytes, err := proto.Marshal(bm25log)
 		if err != nil {
-			return nil, fmt.Errorf("marshal bm25log failed, collectionID:%d, segmentID:%d, fieldID:%d, error:%w", collectionID, segmentID, bm25log.FieldID, err)
+			return nil, merr.WrapErrSerializationFailed(err, "marshal bm25log failed, collectionID:%d, segmentID:%d, fieldID:%d", collectionID, segmentID, bm25log.FieldID)
 		}
 		key := buildFieldBM25StatslogPath(collectionID, partitionID, segmentID, bm25log.FieldID)
 		kv[key] = string(binlogBytes)
@@ -231,7 +232,7 @@ func marshalSegmentInfo(segment *datapb.SegmentInfo) (string, error) {
 
 	segBytes, err := proto.Marshal(segment)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal segment: %d, err: %w", segment.ID, err)
+		return "", merr.WrapErrSerializationFailed(err, "failed to marshal segment: %d", segment.ID)
 	}
 
 	return string(segBytes), nil
@@ -249,7 +250,7 @@ func buildSegmentKv(segment *datapb.SegmentInfo) (string, string, error) {
 func buildCompactionTaskKV(task *datapb.CompactionTask) (string, string, error) {
 	valueBytes, err := proto.Marshal(task)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal CompactionTask: %d/%d/%d, err: %w", task.TriggerID, task.PlanID, task.CollectionID, err)
+		return "", "", merr.WrapErrSerializationFailed(err, "failed to marshal CompactionTask: %d/%d/%d", task.TriggerID, task.PlanID, task.CollectionID)
 	}
 	key := buildCompactionTaskPath(task)
 	return key, string(valueBytes), nil
@@ -262,7 +263,7 @@ func buildCompactionTaskPath(task *datapb.CompactionTask) string {
 func buildPartitionStatsInfoKv(info *datapb.PartitionStatsInfo) (string, string, error) {
 	valueBytes, err := proto.Marshal(info)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal collection clustering compaction info: %d, err: %w", info.CollectionID, err)
+		return "", "", merr.WrapErrSerializationFailed(err, "failed to marshal collection clustering compaction info: %d", info.CollectionID)
 	}
 	key := buildPartitionStatsInfoPath(info)
 	return key, string(valueBytes), nil

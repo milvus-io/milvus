@@ -22,8 +22,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
+
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // Flow Graph is no longer a graph rather than a simple pipeline, this simplified our code and increase recovery speed - xiaofan.
@@ -56,12 +57,12 @@ func (fg *TimeTickedFlowGraph) SetEdges(nodeName string, out []string) error {
 	currentNode, ok := fg.nodeCtx[nodeName]
 	if !ok {
 		errMsg := "Cannot find node:" + nodeName
-		return errors.New(errMsg)
+		return merr.WrapErrServiceInternalMsg(errMsg)
 	}
 
 	if len(out) > 1 {
 		errMsg := "Flow graph now support only pipeline mode, with only one or zero output:" + nodeName
-		return errors.New(errMsg)
+		return merr.WrapErrServiceInternalMsg(errMsg)
 	}
 
 	// init current node's downstream
@@ -70,7 +71,7 @@ func (fg *TimeTickedFlowGraph) SetEdges(nodeName string, out []string) error {
 		outNode, ok := fg.nodeCtx[name]
 		if !ok {
 			errMsg := "Cannot find out node:" + name
-			return errors.New(errMsg)
+			return merr.WrapErrServiceInternalMsg(errMsg)
 		}
 		maxQueueLength := outNode.node.MaxQueueLength()
 		outNode.inputChannel = make(chan []Msg, maxQueueLength)
@@ -163,7 +164,7 @@ func (fg *TimeTickedFlowGraph) AssembleNodes(orderedNodes ...Node) error {
 			err := fg.SetEdges(node.Name(), []string{orderedNodes[i+1].Name()})
 			if err != nil {
 				errMsg := fmt.Sprintf("set edges failed for flow graph, node=%s", node.Name())
-				return errors.New(errMsg)
+				return merr.WrapErrServiceInternalMsg(errMsg)
 			}
 		}
 	}

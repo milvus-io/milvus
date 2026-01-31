@@ -20,10 +20,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"golang.org/x/oauth2/google"
 
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type Instance struct {
@@ -87,13 +87,13 @@ func NewVertexAIEmbedding(url string, jsonKey []byte, scopes string, token strin
 
 func (c *VertexAIEmbedding) Check() error {
 	if c.url == "" {
-		return errors.New("VertexAI embedding url is empty")
+		return merr.WrapErrFunctionFailedMsg("VertexAI embedding url is empty")
 	}
 	if len(c.jsonKey) == 0 {
-		return errors.New("jsonKey is empty")
+		return merr.WrapErrFunctionFailedMsg("VertexAI embedding json key is empty")
 	}
 	if c.scopes == "" {
-		return errors.New("Scopes param is empty")
+		return merr.WrapErrParameterInvalidMsg("VertexAI embedding scopes is empty")
 	}
 	return nil
 }
@@ -102,11 +102,11 @@ func (c *VertexAIEmbedding) getAccessToken() (string, error) {
 	ctx := context.Background()
 	creds, err := google.CredentialsFromJSON(ctx, c.jsonKey, c.scopes)
 	if err != nil {
-		return "", fmt.Errorf("Failed to find credentials: %v", err)
+		return "", merr.WrapErrFunctionFailed(err, "Failed to find credentials")
 	}
 	token, err := creds.TokenSource.Token()
 	if err != nil {
-		return "", fmt.Errorf("Failed to get token: %v", err)
+		return "", merr.WrapErrFunctionFailed(err, "Failed to get token")
 	}
 	return token.AccessToken, nil
 }

@@ -18,9 +18,7 @@ package rocksdbkv
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tecbot/gorocksdb"
 
@@ -50,7 +48,7 @@ const (
 func NewRocksdbKV(name string) (*RocksdbKV, error) {
 	// TODO we should use multiple column family of rocks db rather than init multiple db instance
 	if name == "" {
-		return nil, errors.New("rocksdb name is nil")
+		return nil, merr.WrapErrServiceInternalMsg("rocksdb name is nil")
 	}
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
 	bbto.SetCacheIndexAndFilterBlocks(true)
@@ -101,10 +99,10 @@ func (kv *RocksdbKV) GetName() string {
 // Load returns the value of specified key
 func (kv *RocksdbKV) Load(ctx context.Context, key string) (string, error) {
 	if kv.DB == nil {
-		return "", fmt.Errorf("rocksdb instance is nil when load %s", key)
+		return "", merr.WrapErrServiceInternalMsg("rocksdb instance is nil when load %s", key)
 	}
 	if key == "" {
-		return "", errors.New("rocksdb kv does not support load empty key")
+		return "", merr.WrapErrServiceInternalMsg("rocksdb kv does not support load empty key")
 	}
 	option := gorocksdb.NewDefaultReadOptions()
 	defer option.Destroy()
@@ -118,10 +116,10 @@ func (kv *RocksdbKV) Load(ctx context.Context, key string) (string, error) {
 
 func (kv *RocksdbKV) LoadBytes(ctx context.Context, key string) ([]byte, error) {
 	if kv.DB == nil {
-		return nil, fmt.Errorf("rocksdb instance is nil when load %s", key)
+		return nil, merr.WrapErrServiceInternalMsg("rocksdb instance is nil when load %s", key)
 	}
 	if key == "" {
-		return nil, errors.New("rocksdb kv does not support load empty key")
+		return nil, merr.WrapErrServiceInternalMsg("rocksdb kv does not support load empty key")
 	}
 
 	option := gorocksdb.NewDefaultReadOptions()
@@ -143,7 +141,7 @@ func (kv *RocksdbKV) LoadBytes(ctx context.Context, key string) ([]byte, error) 
 // if prefix is "", then load every thing from the database
 func (kv *RocksdbKV) LoadWithPrefix(ctx context.Context, prefix string) ([]string, []string, error) {
 	if kv.DB == nil {
-		return nil, nil, fmt.Errorf("rocksdb instance is nil when load %s", prefix)
+		return nil, nil, merr.WrapErrServiceInternalMsg("rocksdb instance is nil when load %s", prefix)
 	}
 	option := gorocksdb.NewDefaultReadOptions()
 	defer option.Destroy()
@@ -168,7 +166,7 @@ func (kv *RocksdbKV) LoadWithPrefix(ctx context.Context, prefix string) ([]strin
 
 func (kv *RocksdbKV) Has(ctx context.Context, key string) (bool, error) {
 	if kv.DB == nil {
-		return false, fmt.Errorf("rocksdb instance is nil when check if has %s", key)
+		return false, merr.WrapErrServiceInternalMsg("rocksdb instance is nil when check if has %s", key)
 	}
 
 	option := gorocksdb.NewDefaultReadOptions()
@@ -184,7 +182,7 @@ func (kv *RocksdbKV) Has(ctx context.Context, key string) (bool, error) {
 
 func (kv *RocksdbKV) HasPrefix(ctx context.Context, prefix string) (bool, error) {
 	if kv.DB == nil {
-		return false, fmt.Errorf("rocksdb instance is nil when check if has prefix %s", prefix)
+		return false, merr.WrapErrServiceInternalMsg("rocksdb instance is nil when check if has prefix %s", prefix)
 	}
 
 	option := gorocksdb.NewDefaultReadOptions()
@@ -198,7 +196,7 @@ func (kv *RocksdbKV) HasPrefix(ctx context.Context, prefix string) (bool, error)
 
 func (kv *RocksdbKV) LoadBytesWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
 	if kv.DB == nil {
-		return nil, nil, fmt.Errorf("rocksdb instance is nil when load %s", prefix)
+		return nil, nil, merr.WrapErrServiceInternalMsg("rocksdb instance is nil when load %s", prefix)
 	}
 
 	option := gorocksdb.NewDefaultReadOptions()
@@ -233,7 +231,7 @@ func (kv *RocksdbKV) LoadBytesWithPrefix(ctx context.Context, prefix string) ([]
 // MultiLoad load a batch of values by keys
 func (kv *RocksdbKV) MultiLoad(ctx context.Context, keys []string) ([]string, error) {
 	if kv.DB == nil {
-		return nil, errors.New("rocksdb instance is nil when do MultiLoad")
+		return nil, merr.WrapErrServiceInternalMsg("rocksdb instance is nil when do MultiLoad")
 	}
 
 	keyInBytes := make([][]byte, 0, len(keys))
@@ -257,7 +255,7 @@ func (kv *RocksdbKV) MultiLoad(ctx context.Context, keys []string) ([]string, er
 
 func (kv *RocksdbKV) MultiLoadBytes(ctx context.Context, keys []string) ([][]byte, error) {
 	if kv.DB == nil {
-		return nil, errors.New("rocksdb instance is nil when do MultiLoad")
+		return nil, merr.WrapErrServiceInternalMsg("rocksdb instance is nil when do MultiLoad")
 	}
 
 	keyInBytes := make([][]byte, 0, len(keys))
@@ -285,13 +283,13 @@ func (kv *RocksdbKV) MultiLoadBytes(ctx context.Context, keys []string) ([][]byt
 // Save a pair of key-value
 func (kv *RocksdbKV) Save(ctx context.Context, key, value string) error {
 	if kv.DB == nil {
-		return errors.New("rocksdb instance is nil when do save")
+		return merr.WrapErrServiceInternalMsg("rocksdb instance is nil when do save")
 	}
 	if key == "" {
-		return errors.New("rocksdb kv does not support empty key")
+		return merr.WrapErrServiceInternalMsg("rocksdb kv does not support empty key")
 	}
 	if value == "" {
-		return errors.New("rocksdb kv does not support empty value")
+		return merr.WrapErrServiceInternalMsg("rocksdb kv does not support empty value")
 	}
 
 	return kv.DB.Put(kv.WriteOptions, []byte(key), []byte(value))
@@ -299,13 +297,13 @@ func (kv *RocksdbKV) Save(ctx context.Context, key, value string) error {
 
 func (kv *RocksdbKV) SaveBytes(ctx context.Context, key string, value []byte) error {
 	if kv.DB == nil {
-		return errors.New("rocksdb instance is nil when do save")
+		return merr.WrapErrServiceInternalMsg("rocksdb instance is nil when do save")
 	}
 	if key == "" {
-		return errors.New("rocksdb kv does not support empty key")
+		return merr.WrapErrServiceInternalMsg("rocksdb kv does not support empty key")
 	}
 	if len(value) == 0 {
-		return errors.New("rocksdb kv does not support empty value")
+		return merr.WrapErrServiceInternalMsg("rocksdb kv does not support empty value")
 	}
 
 	return kv.DB.Put(kv.WriteOptions, []byte(key), value)
@@ -314,7 +312,7 @@ func (kv *RocksdbKV) SaveBytes(ctx context.Context, key string, value []byte) er
 // MultiSave a batch of key-values
 func (kv *RocksdbKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 	if kv.DB == nil {
-		return errors.New("rocksdb instance is nil when do MultiSave")
+		return merr.WrapErrServiceInternalMsg("rocksdb instance is nil when do MultiSave")
 	}
 
 	writeBatch := gorocksdb.NewWriteBatch()
@@ -329,7 +327,7 @@ func (kv *RocksdbKV) MultiSave(ctx context.Context, kvs map[string]string) error
 
 func (kv *RocksdbKV) MultiSaveBytes(ctx context.Context, kvs map[string][]byte) error {
 	if kv.DB == nil {
-		return errors.New("rocksdb instance is nil when do MultiSave")
+		return merr.WrapErrServiceInternalMsg("rocksdb instance is nil when do MultiSave")
 	}
 
 	writeBatch := gorocksdb.NewWriteBatch()
@@ -346,7 +344,7 @@ func (kv *RocksdbKV) MultiSaveBytes(ctx context.Context, kvs map[string][]byte) 
 // If prefix is "", then all data in the rocksdb kv will be deleted
 func (kv *RocksdbKV) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	if kv.DB == nil {
-		return errors.New("rocksdb instance is nil when do RemoveWithPrefix")
+		return merr.WrapErrServiceInternalMsg("rocksdb instance is nil when do RemoveWithPrefix")
 	}
 	if len(prefix) == 0 {
 		// better to use drop column family, but as we use default column family, we just delete ["",lastKey+1)
@@ -369,10 +367,10 @@ func (kv *RocksdbKV) RemoveWithPrefix(ctx context.Context, prefix string) error 
 // Remove is used to remove a pair of key-value
 func (kv *RocksdbKV) Remove(ctx context.Context, key string) error {
 	if kv.DB == nil {
-		return errors.New("rocksdb instance is nil when do Remove")
+		return merr.WrapErrServiceInternalMsg("rocksdb instance is nil when do Remove")
 	}
 	if key == "" {
-		return errors.New("rocksdb kv does not support empty key")
+		return merr.WrapErrServiceInternalMsg("rocksdb kv does not support empty key")
 	}
 	err := kv.DB.Delete(kv.WriteOptions, []byte(key))
 	return err
@@ -381,7 +379,7 @@ func (kv *RocksdbKV) Remove(ctx context.Context, key string) error {
 // MultiRemove is used to remove a batch of key-values
 func (kv *RocksdbKV) MultiRemove(ctx context.Context, keys []string) error {
 	if kv.DB == nil {
-		return errors.New("rocksdb instance is nil when do MultiRemove")
+		return merr.WrapErrServiceInternalMsg("rocksdb instance is nil when do MultiRemove")
 	}
 	writeBatch := gorocksdb.NewWriteBatch()
 	defer writeBatch.Destroy()
@@ -398,7 +396,7 @@ func (kv *RocksdbKV) MultiSaveAndRemove(ctx context.Context, saves map[string]st
 		return merr.WrapErrServiceUnavailable("predicates not supported")
 	}
 	if kv.DB == nil {
-		return errors.New("Rocksdb instance is nil when do MultiSaveAndRemove")
+		return merr.WrapErrServiceInternalMsg("Rocksdb instance is nil when do MultiSaveAndRemove")
 	}
 	writeBatch := gorocksdb.NewWriteBatch()
 	defer writeBatch.Destroy()
@@ -421,10 +419,10 @@ func (kv *RocksdbKV) MultiSaveAndRemove(ctx context.Context, saves map[string]st
 // DeleteRange remove a batch of key-values from startKey to endKey
 func (kv *RocksdbKV) DeleteRange(ctx context.Context, startKey, endKey string) error {
 	if kv.DB == nil {
-		return errors.New("Rocksdb instance is nil when do DeleteRange")
+		return merr.WrapErrServiceInternalMsg("Rocksdb instance is nil when do DeleteRange")
 	}
 	if startKey >= endKey {
-		return fmt.Errorf("rockskv delete range startkey must < endkey, startkey %s, endkey %s", startKey, endKey)
+		return merr.WrapErrServiceInternalMsg("rockskv delete range startkey must < endkey, startkey %s, endkey %s", startKey, endKey)
 	}
 	writeBatch := gorocksdb.NewWriteBatch()
 	defer writeBatch.Destroy()
@@ -439,7 +437,7 @@ func (kv *RocksdbKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map
 		return merr.WrapErrServiceUnavailable("predicates not supported")
 	}
 	if kv.DB == nil {
-		return errors.New("Rocksdb instance is nil when do MultiSaveAndRemove")
+		return merr.WrapErrServiceInternalMsg("Rocksdb instance is nil when do MultiSaveAndRemove")
 	}
 	writeBatch := gorocksdb.NewWriteBatch()
 	defer writeBatch.Destroy()

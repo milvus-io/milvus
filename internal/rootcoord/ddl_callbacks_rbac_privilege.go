@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivilegeRequest) error {
@@ -37,7 +38,7 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 	defer broadcaster.Close()
 
 	if err := c.operatePrivilegeCommonCheck(ctx, in); err != nil {
-		return errors.Wrap(err, "failed to operate privilege common check")
+		return merr.Wrap(err, "failed to operate privilege common check")
 	}
 	privName := in.Entity.Grantor.Privilege.Name
 	switch in.Version {
@@ -79,7 +80,7 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 			MustBuildBroadcast()
 	default:
-		return errors.New("invalid operate privilege type")
+		return merr.WrapErrParameterInvalidMsg("invalid operate privilege type")
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -126,7 +127,7 @@ func (c *Core) broadcastOperatePrivilegeGroup(ctx context.Context, in *milvuspb.
 	defer broadcaster.Close()
 
 	if err := c.meta.CheckIfPrivilegeGroupAlterable(ctx, in); err != nil {
-		return errors.Wrap(err, "failed to check if privilege group alterable")
+		return merr.Wrap(err, "failed to check if privilege group alterable")
 	}
 
 	var msg message.BroadcastMutableMessage
@@ -154,7 +155,7 @@ func (c *Core) broadcastOperatePrivilegeGroup(ctx context.Context, in *milvuspb.
 			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 			MustBuildBroadcast()
 	default:
-		return errors.New("invalid operate privilege group type")
+		return merr.WrapErrRbacMsg("invalid operate privilege group type")
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -175,7 +176,7 @@ func (c *Core) broadcastDropPrivilegeGroup(ctx context.Context, in *milvuspb.Dro
 	defer broadcaster.Close()
 
 	if err := c.meta.CheckIfPrivilegeGroupDropable(ctx, in); err != nil {
-		return errors.Wrap(err, "failed to check if privilege group dropable")
+		return merr.Wrap(err, "failed to check if privilege group dropable")
 	}
 
 	msg := message.NewDropPrivilegeGroupMessageBuilderV2().

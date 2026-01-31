@@ -21,7 +21,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 
-	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/jaeger"
@@ -35,6 +34,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -142,14 +142,14 @@ func CreateTracerExporter(params *paramtable.ComponentParam) (sdk.SpanExporter, 
 			}
 			exp, err = otlptracehttp.New(context.Background(), opts...)
 		default:
-			return nil, errors.Newf("otlp method not supported: %s", params.TraceCfg.OtlpMethod.GetValue())
+			return nil, merr.WrapErrServiceInternalMsg("otlp method not supported: %s", params.TraceCfg.OtlpMethod.GetValue())
 		}
 	case "stdout":
 		exp, err = stdout.New()
 	case "noop":
 		return nil, nil
 	default:
-		err = errors.New("Empty Trace")
+		err = merr.WrapErrServiceInternalMsg("Empty Trace")
 	}
 
 	return exp, err

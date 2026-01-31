@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -1324,7 +1323,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	}
 	if it.partitionKeyMode {
 		if len(it.req.GetPartitionName()) > 0 {
-			return errors.New("not support manually specifying the partition names if partition key mode is used")
+			return merr.WrapErrOperationNotSupportedMsg("not support manually specifying the partition names if partition key mode is used")
 		}
 	} else {
 		// set default partition name if not use partition key

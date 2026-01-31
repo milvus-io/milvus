@@ -25,7 +25,6 @@ package packed
 import "C"
 
 import (
-	"fmt"
 	"io"
 	"unsafe"
 
@@ -37,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns []string, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*FFIPackedReader, error) {
@@ -108,7 +108,7 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 
 		status = C.NewPackedFFIReaderWithManifest(cLoonManifest, cSchema, cNeededColumnArray, cNumColumns, &cPackedReader, cStorageConfig, pluginContextPtr)
 	} else {
-		return nil, fmt.Errorf("storageConfig is required")
+		return nil, merr.WrapErrStorageMsg("storageConfig is required")
 	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
@@ -119,14 +119,14 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 	status = C.GetFFIReaderStream(cPackedReader, C.int64_t(8196), (*C.struct_ArrowArrayStream)(unsafe.Pointer(&cStream)))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		C.CloseFFIReader(cPackedReader)
-		return nil, fmt.Errorf("failed to get reader stream: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to get reader stream")
 	}
 
 	// Import the stream as a RecordReader
 	recordReader, err := cdata.ImportCRecordReader(&cStream, schema)
 	if err != nil {
 		C.CloseFFIReader(cPackedReader)
-		return nil, fmt.Errorf("failed to import record reader: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to import record reader")
 	}
 
 	return &FFIPackedReader{
@@ -151,7 +151,7 @@ func (r *FFIPackedReader) ReadNext() (arrow.Record, error) {
 		if err == io.EOF {
 			return nil, io.EOF
 		}
-		return nil, fmt.Errorf("failed to read next record: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to read next record")
 	}
 
 	return rec, nil

@@ -31,8 +31,8 @@ func CheckValidData(validData []bool, schema *schemapb.FieldSchema, numRows int)
 		expectedNum = numRows
 	}
 	if len(validData) != expectedNum {
-		msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", schema.GetName())
-		return merr.WrapErrParameterInvalid(expectedNum, len(validData), msg)
+		errMsg := fmt.Sprintf("length of data(%d) is not equal to length of valid_data(%d) in field(%s)", expectedNum, len(validData), schema.GetName())
+		return merr.WrapErrServiceInternal(errMsg)
 	}
 	return nil
 }
@@ -62,7 +62,7 @@ func GetDefaultValue(field *schemapb.FieldSchema) (any, error) {
 			return common.ConvertWKTToWKB(field.GetDefaultValue().GetStringData())
 		default:
 			msg := fmt.Sprintf("type (%s) not support default_value", field.GetDataType().String())
-			return nil, merr.WrapErrParameterInvalidMsg(msg)
+			return nil, merr.WrapErrServiceInternal(msg)
 		}
 	}
 	return nil, nil

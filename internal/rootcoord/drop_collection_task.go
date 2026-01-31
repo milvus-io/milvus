@@ -42,7 +42,7 @@ type dropCollectionTask struct {
 func (t *dropCollectionTask) validate(ctx context.Context) error {
 	// Critical promise here, also see comment of startBroadcastWithCollectionLock.
 	if t.meta.IsAlias(ctx, t.Req.GetDbName(), t.Req.GetCollectionName()) {
-		return fmt.Errorf("cannot drop the collection via alias = %s", t.Req.CollectionName)
+		return merr.WrapErrOperationNotSupportedMsg("cannot drop the collection via alias = %s", t.Req.CollectionName)
 	}
 
 	// use max ts to check if latest collection exists.

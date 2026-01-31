@@ -17,9 +17,8 @@
 package indexparamcheck
 
 import (
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type baseChecker struct{}
@@ -36,7 +35,7 @@ func (c baseChecker) CheckValidDataType(indexType IndexType, field *schemapb.Fie
 func (c baseChecker) SetDefaultMetricTypeIfNotExist(dType schemapb.DataType, m map[string]string) {}
 
 func (c baseChecker) StaticCheck(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
-	return errors.New("unsupported index type")
+	return merr.WrapErrParameterInvalidMsg("unsupported index type")
 }
 
 func newBaseChecker() IndexChecker {

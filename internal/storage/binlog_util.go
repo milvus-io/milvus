@@ -1,11 +1,11 @@
 package storage
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // ParseSegmentIDByBinlog parse segment id from binlog paths
@@ -13,7 +13,7 @@ import (
 func ParseSegmentIDByBinlog(rootPath, path string) (UniqueID, error) {
 	// check path contains rootPath as prefix
 	if !strings.HasPrefix(path, rootPath) {
-		return 0, fmt.Errorf("path \"%s\" does not contains rootPath \"%s\"", path, rootPath)
+		return 0, merr.WrapErrStorageMsg("path \"%s\" does not contains rootPath \"%s\"", path, rootPath)
 	}
 	p := path[len(rootPath):]
 
@@ -30,12 +30,12 @@ func ParseSegmentIDByBinlog(rootPath, path string) (UniqueID, error) {
 		if len(keyStr) == 5 {
 			return strconv.ParseInt(keyStr[3], 10, 64)
 		}
-		return 0, fmt.Errorf("%s is not a valid delta log path", path)
+		return 0, merr.WrapErrStorageMsg("%s is not a valid delta log path", path)
 	}
 
 	// log type are binlog or statslog
 	if len(keyStr) == 6 {
 		return strconv.ParseInt(keyStr[len(keyStr)-3], 10, 64)
 	}
-	return 0, fmt.Errorf("%s is not a valid binlog path", path)
+	return 0, merr.WrapErrStorageMsg("%s is not a valid binlog path", path)
 }

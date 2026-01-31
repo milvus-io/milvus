@@ -4,12 +4,12 @@ import (
 	"encoding/binary"
 	"math"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func SparseVectorDataToPlaceholderGroupBytes(contents [][]byte) []byte {
@@ -83,7 +83,7 @@ func fieldDataToPlaceholderValue(fieldData *schemapb.FieldData) (*commonpb.Place
 		vectors := fieldData.GetVectors()
 		x, ok := vectors.GetData().(*schemapb.VectorField_FloatVector)
 		if !ok {
-			return nil, errors.New("vector data is not schemapb.VectorField_FloatVector")
+			return nil, merr.WrapErrParameterInvalidMsg("vector data is not schemapb.VectorField_FloatVector")
 		}
 
 		placeholderValue := &commonpb.PlaceholderValue{
@@ -96,7 +96,7 @@ func fieldDataToPlaceholderValue(fieldData *schemapb.FieldData) (*commonpb.Place
 		vectors := fieldData.GetVectors()
 		x, ok := vectors.GetData().(*schemapb.VectorField_BinaryVector)
 		if !ok {
-			return nil, errors.New("vector data is not schemapb.VectorField_BinaryVector")
+			return nil, merr.WrapErrParameterInvalidMsg("vector data is not schemapb.VectorField_BinaryVector")
 		}
 		placeholderValue := &commonpb.PlaceholderValue{
 			Tag:    "$0",
@@ -108,7 +108,7 @@ func fieldDataToPlaceholderValue(fieldData *schemapb.FieldData) (*commonpb.Place
 		vectors := fieldData.GetVectors()
 		x, ok := vectors.GetData().(*schemapb.VectorField_Float16Vector)
 		if !ok {
-			return nil, errors.New("vector data is not schemapb.VectorField_Float16Vector")
+			return nil, merr.WrapErrParameterInvalidMsg("vector data is not schemapb.VectorField_Float16Vector")
 		}
 		placeholderValue := &commonpb.PlaceholderValue{
 			Tag:    "$0",
@@ -120,7 +120,7 @@ func fieldDataToPlaceholderValue(fieldData *schemapb.FieldData) (*commonpb.Place
 		vectors := fieldData.GetVectors()
 		x, ok := vectors.GetData().(*schemapb.VectorField_Bfloat16Vector)
 		if !ok {
-			return nil, errors.New("vector data is not schemapb.VectorField_BFloat16Vector")
+			return nil, merr.WrapErrParameterInvalidMsg("vector data is not schemapb.VectorField_BFloat16Vector")
 		}
 		placeholderValue := &commonpb.PlaceholderValue{
 			Tag:    "$0",
@@ -131,7 +131,7 @@ func fieldDataToPlaceholderValue(fieldData *schemapb.FieldData) (*commonpb.Place
 	case schemapb.DataType_SparseFloatVector:
 		vectors, ok := fieldData.GetVectors().GetData().(*schemapb.VectorField_SparseFloatVector)
 		if !ok {
-			return nil, errors.New("vector data is not schemapb.VectorField_SparseFloatVector")
+			return nil, merr.WrapErrParameterInvalidMsg("vector data is not schemapb.VectorField_SparseFloatVector")
 		}
 		vec := vectors.SparseFloatVector
 		placeholderValue := &commonpb.PlaceholderValue{
@@ -144,7 +144,7 @@ func fieldDataToPlaceholderValue(fieldData *schemapb.FieldData) (*commonpb.Place
 		vectors := fieldData.GetVectors()
 		x, ok := vectors.GetData().(*schemapb.VectorField_Int8Vector)
 		if !ok {
-			return nil, errors.New("vector data is not schemapb.VectorField_Int8Vector")
+			return nil, merr.WrapErrParameterInvalidMsg("vector data is not schemapb.VectorField_Int8Vector")
 		}
 
 		placeholderValue := &commonpb.PlaceholderValue{
@@ -162,7 +162,7 @@ func fieldDataToPlaceholderValue(fieldData *schemapb.FieldData) (*commonpb.Place
 		}
 		return placeholderValue, nil
 	default:
-		return nil, errors.New("field is not a vector field")
+		return nil, merr.WrapErrParameterInvalidMsg("field is not a vector field")
 	}
 }
 

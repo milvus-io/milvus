@@ -220,7 +220,7 @@ func (s *cSegmentImpl) Insert(ctx context.Context, request *InsertRequest) (*Ins
 
 	insertRecordBlob, err := proto.Marshal(request.Record)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal insert record: %s", err)
+		return nil, merr.WrapErrSerializationFailed(err, "failed to marshal insert record")
 	}
 
 	numOfRow := len(request.RowIDs)
@@ -262,7 +262,7 @@ func (s *cSegmentImpl) Delete(ctx context.Context, request *DeleteRequest) (*Del
 
 	dataBlob, err := proto.Marshal(ids)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal ids: %s", err)
+		return nil, merr.WrapErrSerializationFailed(err, "failed to marshal primary keys")
 	}
 	status := C.Delete(s.ptr,
 		cSize,

@@ -25,7 +25,6 @@ package packed
 import "C"
 
 import (
-	"fmt"
 	"io"
 	"unsafe"
 
@@ -34,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedReader, error) {
@@ -140,7 +140,7 @@ func (pr *PackedReader) ReadNext() (arrow.Record, error) {
 	}()
 	recordBatch, err := cdata.ImportCRecordBatch(goCArr, goCSchema)
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert ArrowArray to Record: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to convert ArrowArray to Record")
 	}
 	pr.currentBatch = recordBatch
 

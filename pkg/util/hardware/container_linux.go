@@ -14,13 +14,14 @@ package hardware
 import (
 	"os"
 
-	"github.com/cockroachdb/errors"
 	"github.com/containerd/cgroups/v3"
 	"github.com/containerd/cgroups/v3/cgroup1"
 	statsv1 "github.com/containerd/cgroups/v3/cgroup1/stats"
 	"github.com/containerd/cgroups/v3/cgroup2"
 	statsv2 "github.com/containerd/cgroups/v3/cgroup2/stats"
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func getCgroupV1Stats() (*statsv1.Metrics, error) {
@@ -35,7 +36,7 @@ func getCgroupV1Stats() (*statsv1.Metrics, error) {
 	}
 
 	if stats.GetMemory() == nil || stats.GetMemory().GetUsage() == nil {
-		return nil, errors.New("cannot find memory usage info from cGroupsv1")
+		return nil, merr.WrapErrServiceInternalMsg("cannot find memory usage info from cGroupsv1")
 	}
 	return stats, nil
 }
@@ -52,7 +53,7 @@ func getCgroupV2Stats() (*statsv2.Metrics, error) {
 	}
 
 	if stats.GetMemory() == nil {
-		return nil, errors.New("cannot find memory usage info from cGroupsv2")
+		return nil, merr.WrapErrServiceInternalMsg("cannot find memory usage info from cGroupsv2")
 	}
 	return stats, nil
 }

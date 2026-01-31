@@ -18,11 +18,8 @@ package storage
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
 	"strconv"
-
-	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -81,7 +78,7 @@ func (data *descriptorEventData) GetNullable() (bool, error) {
 	nullable, ok := nullableStore.(bool)
 	// will not happen, has checked bool format when FinishExtra
 	if !ok {
-		return false, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("value of %v must in bool format", nullableKey))
+		return false, merr.WrapErrServiceInternalMsg("value of %v must in bool format", nullableKey)
 	}
 	return nullable, nil
 }
@@ -128,24 +125,24 @@ func (data *descriptorEventData) FinishExtra() error {
 	// keep all binlog file records the original size
 	sizeStored, ok := data.Extras[originalSizeKey]
 	if !ok {
-		return fmt.Errorf("%v not in extra", originalSizeKey)
+		return merr.WrapErrServiceInternalMsg("%v not in extra", originalSizeKey)
 	}
 	// if we store a large int directly, golang will use scientific notation, we then will get a float value.
 	// so it's better to store the original size in string format.
 	sizeStr, ok := sizeStored.(string)
 	if !ok {
-		return fmt.Errorf("value of %v must in string format", originalSizeKey)
+		return merr.WrapErrServiceInternalMsg("value of %v must in string format", originalSizeKey)
 	}
 	_, err = strconv.Atoi(sizeStr)
 	if err != nil {
-		return fmt.Errorf("value of %v must be able to be converted into int format", originalSizeKey)
+		return merr.WrapErrServiceInternalMsg("value of %v must be able to be converted into int format", originalSizeKey)
 	}
 
 	nullableStore, existed := data.Extras[nullableKey]
 	if existed {
 		_, ok := nullableStore.(bool)
 		if !ok {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("value of %v must in bool format", nullableKey))
+			return merr.WrapErrServiceInternalMsg("value of %v must in bool format", nullableKey)
 		}
 	}
 
@@ -153,14 +150,14 @@ func (data *descriptorEventData) FinishExtra() error {
 	if exist {
 		_, ok := edekStored.(string)
 		if !ok {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("value of %v must in string format", edekKey))
+			return merr.WrapErrServiceInternalMsg("value of %v must in string format", edekKey)
 		}
 	}
 	ezIDStored, exist := data.Extras[ezIDKey]
 	if exist {
 		_, ok := ezIDStored.(int64)
 		if !ok {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("value of %v must in int64 format", ezIDKey))
+			return merr.WrapErrServiceInternalMsg("value of %v must in int64 format", ezIDKey)
 		}
 	}
 
@@ -236,10 +233,10 @@ func (data *insertEventData) GetEventDataFixPartSize() int32 {
 
 func (data *insertEventData) WriteEventData(buffer io.Writer) error {
 	if data.StartTimestamp == 0 {
-		return errors.New("hasn't set start time stamp")
+		return merr.WrapErrStorageMsg("hasn't set start time stamp")
 	}
 	if data.EndTimestamp == 0 {
-		return errors.New("hasn't set end time stamp")
+		return merr.WrapErrStorageMsg("hasn't set end time stamp")
 	}
 	return binary.Write(buffer, common.Endian, data)
 }
@@ -260,10 +257,10 @@ func (data *deleteEventData) GetEventDataFixPartSize() int32 {
 
 func (data *deleteEventData) WriteEventData(buffer io.Writer) error {
 	if data.StartTimestamp == 0 {
-		return errors.New("hasn't set start time stamp")
+		return merr.WrapErrStorageMsg("hasn't set start time stamp")
 	}
 	if data.EndTimestamp == 0 {
-		return errors.New("hasn't set end time stamp")
+		return merr.WrapErrStorageMsg("hasn't set end time stamp")
 	}
 	return binary.Write(buffer, common.Endian, data)
 }
@@ -284,10 +281,10 @@ func (data *createCollectionEventData) GetEventDataFixPartSize() int32 {
 
 func (data *createCollectionEventData) WriteEventData(buffer io.Writer) error {
 	if data.StartTimestamp == 0 {
-		return errors.New("hasn't set start time stamp")
+		return merr.WrapErrStorageMsg("hasn't set start time stamp")
 	}
 	if data.EndTimestamp == 0 {
-		return errors.New("hasn't set end time stamp")
+		return merr.WrapErrStorageMsg("hasn't set end time stamp")
 	}
 	return binary.Write(buffer, common.Endian, data)
 }
@@ -308,10 +305,10 @@ func (data *dropCollectionEventData) GetEventDataFixPartSize() int32 {
 
 func (data *dropCollectionEventData) WriteEventData(buffer io.Writer) error {
 	if data.StartTimestamp == 0 {
-		return errors.New("hasn't set start time stamp")
+		return merr.WrapErrStorageMsg("hasn't set start time stamp")
 	}
 	if data.EndTimestamp == 0 {
-		return errors.New("hasn't set end time stamp")
+		return merr.WrapErrStorageMsg("hasn't set end time stamp")
 	}
 	return binary.Write(buffer, common.Endian, data)
 }
@@ -332,10 +329,10 @@ func (data *createPartitionEventData) GetEventDataFixPartSize() int32 {
 
 func (data *createPartitionEventData) WriteEventData(buffer io.Writer) error {
 	if data.StartTimestamp == 0 {
-		return errors.New("hasn't set start time stamp")
+		return merr.WrapErrStorageMsg("hasn't set start time stamp")
 	}
 	if data.EndTimestamp == 0 {
-		return errors.New("hasn't set end time stamp")
+		return merr.WrapErrStorageMsg("hasn't set end time stamp")
 	}
 	return binary.Write(buffer, common.Endian, data)
 }
@@ -356,10 +353,10 @@ func (data *dropPartitionEventData) GetEventDataFixPartSize() int32 {
 
 func (data *dropPartitionEventData) WriteEventData(buffer io.Writer) error {
 	if data.StartTimestamp == 0 {
-		return errors.New("hasn't set start time stamp")
+		return merr.WrapErrStorageMsg("hasn't set start time stamp")
 	}
 	if data.EndTimestamp == 0 {
-		return errors.New("hasn't set end time stamp")
+		return merr.WrapErrStorageMsg("hasn't set end time stamp")
 	}
 	return binary.Write(buffer, common.Endian, data)
 }
@@ -380,10 +377,10 @@ func (data *indexFileEventData) GetEventDataFixPartSize() int32 {
 
 func (data *indexFileEventData) WriteEventData(buffer io.Writer) error {
 	if data.StartTimestamp == 0 {
-		return errors.New("hasn't set start time stamp")
+		return merr.WrapErrStorageMsg("hasn't set start time stamp")
 	}
 	if data.EndTimestamp == 0 {
-		return errors.New("hasn't set end time stamp")
+		return merr.WrapErrStorageMsg("hasn't set end time stamp")
 	}
 	return binary.Write(buffer, common.Endian, data)
 }

@@ -28,12 +28,11 @@ package index
 import "C"
 
 import (
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -63,7 +62,7 @@ func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType)
 	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		return uint64(dim) * uint64(numRows) * 2, nil
 	case schemapb.DataType_SparseFloatVector:
-		return 0, errors.New("could not estimate field data size of SparseFloatVector")
+		return 0, merr.WrapErrServiceInternalMsg("could not estimate field data size of SparseFloatVector")
 	default:
 		return 0, nil
 	}

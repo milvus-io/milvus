@@ -19,9 +19,8 @@ package indexparamcheck
 import (
 	"sync"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type IndexCheckerMgr interface {
@@ -44,7 +43,7 @@ func (mgr *indexCheckerMgrImpl) GetChecker(indexType string) (IndexChecker, erro
 	if ok {
 		return adapter, nil
 	}
-	return nil, errors.New("Can not find index: " + indexType + " , please check")
+	return nil, merr.WrapErrParameterInvalidMsg("Can not find index: %s , please check", indexType)
 }
 
 func (mgr *indexCheckerMgrImpl) registerIndexChecker() {

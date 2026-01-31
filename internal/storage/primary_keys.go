@@ -52,7 +52,7 @@ func (pks *Int64PrimaryKeys) Append(values ...PrimaryKey) error {
 	for _, pk := range values {
 		iPk, ok := pk.(*Int64PrimaryKey)
 		if !ok {
-			return merr.WrapErrParameterInvalid("Int64PrimaryKey", "non-int64 pk")
+			return merr.WrapErrServiceInternalMsg("wrong data type:%T, expect *Int64PrimaryKey", pk)
 		}
 		iValues = append(iValues, iPk.Value)
 	}
@@ -120,7 +120,7 @@ func (pks *VarcharPrimaryKeys) Append(values ...PrimaryKey) error {
 	for _, pk := range values {
 		iPk, ok := pk.(*VarCharPrimaryKey)
 		if !ok {
-			return merr.WrapErrParameterInvalid("Int64PrimaryKey", "non-int64 pk")
+			return merr.WrapErrServiceInternalMsg("wrong data type:%T, expect *VarCharPrimaryKey", pk)
 		}
 		sValues = append(sValues, iPk.Value)
 	}

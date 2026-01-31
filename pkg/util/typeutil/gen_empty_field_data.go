@@ -1,9 +1,8 @@
 package typeutil
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func genEmptyBoolFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
@@ -323,6 +322,6 @@ func GenEmptyFieldData(field *schemapb.FieldSchema) (*schemapb.FieldData, error)
 	case schemapb.DataType_ArrayOfVector:
 		return genEmptyArrayOfVectorFieldData(field)
 	default:
-		return nil, fmt.Errorf("unsupported data type: %s", dataType.String())
+		return nil, merr.WrapErrOperationNotSupportedMsg("unsupported data type: %s", dataType.String())
 	}
 }

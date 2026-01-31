@@ -18,11 +18,9 @@ package storage
 
 import (
 	"bytes"
-	"fmt"
-
-	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // EventReader is used to parse the events contained in the Binlog file.
@@ -36,7 +34,7 @@ type EventReader struct {
 
 func (reader *EventReader) readHeader() error {
 	if reader.isClosed {
-		return errors.New("event reader is closed")
+		return merr.WrapErrStorageMsg("event reader is closed")
 	}
 	header, err := readEventHeader(reader.buffer)
 	if err != nil {
@@ -48,7 +46,7 @@ func (reader *EventReader) readHeader() error {
 
 func (reader *EventReader) readData() error {
 	if reader.isClosed {
-		return errors.New("event reader is closed")
+		return merr.WrapErrStorageMsg("event reader is closed")
 	}
 	var data eventData
 	var err error
@@ -68,7 +66,7 @@ func (reader *EventReader) readData() error {
 	case IndexFileEventType:
 		data, err = readIndexFileEventDataFixPart(reader.buffer)
 	default:
-		return fmt.Errorf("unknown header type code: %d", reader.TypeCode)
+		return merr.WrapErrStorageMsg("unknown header type code: %d", reader.TypeCode)
 	}
 	if err != nil {
 		return err

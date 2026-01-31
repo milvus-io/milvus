@@ -99,7 +99,7 @@ func Int64TupleMapToSlice(s map[int]common.Int64Tuple) []common.Int64Tuple {
 
 func CheckMsgType(got, expect commonpb.MsgType) error {
 	if got != expect {
-		return fmt.Errorf("invalid msg type, expect %s, but got %s", expect, got)
+		return merr.WrapErrServiceInternalMsg("invalid msg type, expect %s, but got %s", expect, got)
 	}
 	return nil
 }
@@ -350,7 +350,7 @@ func CheckTimeTickLagExceeded(ctx context.Context, mixcoord types.MixCoord, maxD
 		errStr += fmt.Sprintf("data max timetick lag:%s on channel:%s", maxLag, maxLagChannel)
 	}
 	if errStr != "" {
-		return fmt.Errorf("max timetick lag execced threhold: %s", errStr)
+		return merr.WrapErrServiceInternalMsg("max timetick lag execced threhold: %s", errStr)
 	}
 
 	return nil
@@ -533,11 +533,12 @@ func validateStructArrayFieldDataType(fieldSchemas []*schemapb.StructArrayFieldS
 		}
 		for _, subField := range field.GetFields() {
 			if subField.GetDataType() != schemapb.DataType_Array && subField.GetDataType() != schemapb.DataType_ArrayOfVector {
-				return fmt.Errorf("Fields in StructArrayField can only be array or array of vector, but field %s is %s", subField.Name, subField.DataType.String())
+				return merr.WrapErrParameterInvalidMsg(
+					"Fields in StructArrayField can only be array or array of vector, but field %s is %s", subField.Name, subField.DataType.String())
 			}
 			if subField.GetElementType() == schemapb.DataType_ArrayOfStruct || subField.GetElementType() == schemapb.DataType_ArrayOfVector ||
 				subField.GetElementType() == schemapb.DataType_Array {
-				return fmt.Errorf("Nested array is not supported %s", subField.Name)
+				return merr.WrapErrParameterInvalidMsg("Nested array is not supported %s", subField.Name)
 			}
 			if _, ok := schemapb.DataType_name[int32(subField.GetElementType())]; !ok || subField.GetElementType() == schemapb.DataType_None {
 				return merr.WrapErrParameterInvalid("Invalid field", fmt.Sprintf("field data type: %s is not supported", subField.GetElementType()))

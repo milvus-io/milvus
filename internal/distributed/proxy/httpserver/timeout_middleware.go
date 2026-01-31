@@ -25,7 +25,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 
 	mhttp "github.com/milvus-io/milvus/internal/http"
@@ -82,7 +81,7 @@ func NewWriter(w gin.ResponseWriter, buf *bytes.Buffer) *Writer {
 // Write will write data to response body
 func (w *Writer) Write(data []byte) (int, error) {
 	if w.timeout || w.body == nil {
-		return 0, errors.New("Response writer closed")
+		return 0, merr.WrapErrServiceInternalMsg("Response writer closed")
 	}
 
 	w.mu.Lock()

@@ -21,7 +21,6 @@ package rerank
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -29,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -47,10 +47,10 @@ const (
 
 func parseMaxBatch(maxBatch string) (int, error) {
 	if batch, err := strconv.Atoi(maxBatch); err != nil {
-		return -1, fmt.Errorf("[%s param's value: %s] is not a valid number", models.MaxClientBatchSizeParamKey, maxBatch)
+		return -1, merr.WrapErrFunctionFailed(err, "[%s param's value: %s] is not a valid number", models.MaxClientBatchSizeParamKey, maxBatch)
 	} else {
 		if batch <= 0 {
-			return -1, fmt.Errorf("[%s param's value: %s] must be greater than 0", models.MaxClientBatchSizeParamKey, maxBatch)
+			return -1, merr.WrapErrFunctionFailedMsg("[%s param's value: %s] must be greater than 0", models.MaxClientBatchSizeParamKey, maxBatch)
 		}
 		return batch, nil
 	}
@@ -75,7 +75,7 @@ func newProvider(params []*commonpb.KeyValuePair, extraInfo *models.ModelExtraIn
 			provider := strings.ToLower(param.Value)
 			conf := paramtable.Get().FunctionCfg.GetRerankModelProviders(provider)
 			if !models.IsEnable(conf) {
-				return nil, fmt.Errorf("Rerank provider: [%s] is disabled", provider)
+				return nil, merr.WrapErrFunctionFailedMsg("Rerank provider: [%s] is disabled", provider)
 			}
 			credentials := credentials.NewCredentials(paramtable.Get().CredentialCfg.GetCredentials())
 			switch provider {
@@ -95,11 +95,11 @@ func newProvider(params []*commonpb.KeyValuePair, extraInfo *models.ModelExtraIn
 				conf := paramtable.Get().FunctionCfg.ZillizProviders.GetValue()
 				return newZillizProvider(params, conf, extraInfo)
 			default:
-				return nil, fmt.Errorf("Unknow rerank model provider:%s", param.Value)
+				return nil, merr.WrapErrFunctionFailedMsg("Unknow rerank model provider:%s", param.Value)
 			}
 		}
 	}
-	return nil, fmt.Errorf("Lost rerank params:%s ", providerParamName)
+	return nil, merr.WrapErrFunctionFailedMsg("Lost rerank params:%s ", providerParamName)
 }
 
 type ModelFunction[T PKType] struct {
@@ -116,11 +116,11 @@ func newModelFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 	}
 
 	if len(base.GetInputFieldNames()) != 1 {
-		return nil, fmt.Errorf("Rerank model only supports single input, but gets [%s] input", base.GetInputFieldNames())
+		return nil, merr.WrapErrFunctionFailedMsg("Rerank model only supports single input, but gets [%s] input", base.GetInputFieldNames())
 	}
 
 	if base.GetInputFieldTypes()[0] != schemapb.DataType_VarChar {
-		return nil, fmt.Errorf("Rerank model only support varchar, bug got [%s]", base.GetInputFieldTypes()[0].String())
+		return nil, merr.WrapErrFunctionFailedMsg("Rerank model only support varchar, bug got [%s]", base.GetInputFieldTypes()[0].String())
 	}
 
 	provider, err := newProvider(funcSchema.Params, extraInfo)
@@ -132,12 +132,12 @@ func newModelFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 	for _, param := range funcSchema.Params {
 		if param.Key == queryKeyName {
 			if err := json.Unmarshal([]byte(param.Value), &queries); err != nil {
-				return nil, fmt.Errorf("Parse rerank params [queries] failed, err: %v", err)
+				return nil, merr.WrapErrFunctionFailedMsg("Parse rerank params [queries] failed, err: %v", err)
 			}
 		}
 	}
 	if len(queries) == 0 {
-		return nil, fmt.Errorf("Rerank function lost params queries")
+		return nil, merr.WrapErrFunctionFailedMsg("Rerank function lost params queries")
 	}
 
 	if base.pkType == schemapb.DataType_Int64 {
@@ -180,7 +180,7 @@ func (model *ModelFunction[T]) processOneSearchData(ctx context.Context, searchP
 			return nil, err
 		}
 		if len(newScores) != end-i {
-			return nil, fmt.Errorf("Call Rerank service failed, %d docs but got %d scores", end-i, len(newScores))
+			return nil, merr.WrapErrFunctionFailedMsg("Call Rerank service failed, %d docs but got %d scores", end-i, len(newScores))
 		}
 		scores = append(scores, newScores...)
 	}
@@ -197,7 +197,7 @@ func (model *ModelFunction[T]) processOneSearchData(ctx context.Context, searchP
 
 func (model *ModelFunction[T]) Process(ctx context.Context, searchParams *SearchParams, inputs *rerankInputs) (*rerankOutputs, error) {
 	if len(model.queries) != int(searchParams.nq) {
-		return nil, fmt.Errorf("nq must equal to queries size, but got nq [%d], queries size [%d], queries: [%v]", searchParams.nq, len(model.queries), model.queries)
+		return nil, merr.WrapErrFunctionFailedMsg("nq must equal to queries size, but got nq [%d], queries size [%d], queries: [%v]", searchParams.nq, len(model.queries), model.queries)
 	}
 	outputs := newRerankOutputs(inputs, searchParams)
 	for idx, cols := range inputs.data {

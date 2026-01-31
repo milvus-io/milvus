@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -38,7 +39,7 @@ func SplitBySeparator(s string) (key string, ts Timestamp, err error) {
 	}
 	convertedTs, err := strconv.Atoi(got[1])
 	if err != nil {
-		return "", 0, fmt.Errorf("%s is not of snapshot", s)
+		return "", 0, merr.WrapErrSerializationFailed(err, "%s is not of snapshot", s)
 	}
 	return got[0], Timestamp(convertedTs), nil
 }

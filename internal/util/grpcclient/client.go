@@ -355,7 +355,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 
 	cancel()
 	if err != nil {
-		return wrapErrConnect(addr, err)
+		return merr.WrapErrConnectComponent(err, "addr: %s", addr)
 	}
 
 	c.addr.Store(addr)
@@ -425,7 +425,7 @@ func (c *ClientBase[T]) checkGrpcErr(ctx context.Context, err error) (needRetry,
 	case funcutil.IsGrpcErr(err, codes.Unimplemented):
 		// for unimplemented error, reset coord connection to avoid old coord's side effect.
 		// old coord's side effect: when coord changed, the connection in coord's client won't reset automatically.
-		// so if new interface appear in new coord, will got a unimplemented error
+		// so if new interface appear in new coord, will get a unimplemented error
 		return false, true, true, merr.WrapErrServiceUnimplemented(err)
 	case IsServerIDMismatchErr(err):
 		if ok := c.checkNodeSessionExist(ctx); !ok {
@@ -486,7 +486,7 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 				return false, merr.ErrNodeNotFound
 			}
 
-			err := errors.Wrap(clientErr, "empty grpc client")
+			err := merr.Wrap(clientErr, "empty grpc client")
 			log.Warn("grpc client is nil, maybe fail to get client in the retry state", zap.Error(err))
 			resetClientFunc(false)
 			return true, err

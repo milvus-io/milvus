@@ -17,7 +17,7 @@ func ConvertToArrowSchema(schema *schemapb.CollectionSchema, useFieldID bool) (*
 	arrowFields := make([]arrow.Field, 0, fieldCount)
 	appendArrowField := func(field *schemapb.FieldSchema) error {
 		if serdeMap[field.DataType].arrowType == nil {
-			return merr.WrapErrParameterInvalidMsg("unknown field data type [%s] for field [%s]", field.DataType, field.GetName())
+			return merr.WrapErrServiceInternalMsg("unknown field data type [%s] for field [%s]", field.DataType, field.GetName())
 		}
 		var dim int
 		switch field.DataType {
@@ -26,7 +26,7 @@ func ConvertToArrowSchema(schema *schemapb.CollectionSchema, useFieldID bool) (*
 			var err error
 			dim, err = GetDimFromParams(field.TypeParams)
 			if err != nil {
-				return merr.WrapErrParameterInvalidMsg("dim not found in field [%s] params", field.GetName())
+				return merr.WrapErrServiceInternalMsg("dim not found in field [%s] params", field.GetName())
 			}
 		default:
 			dim = 0

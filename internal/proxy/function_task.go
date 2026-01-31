@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -85,11 +84,11 @@ func (t *addCollectionFunctionTask) Name() string {
 
 func (t *addCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	if t.FunctionSchema == nil {
-		return fmt.Errorf("Function Schema is empty")
+		return merr.WrapErrParameterInvalidMsg("Function Schema is empty")
 	}
 
 	if t.FunctionSchema.Type == schemapb.FunctionType_BM25 {
-		return fmt.Errorf("Currently does not support adding BM25 function")
+		return merr.WrapErrParameterInvalidMsg("Currently does not support adding BM25 function")
 	}
 	coll, err := getCollectionInfo(ctx, t.GetDbName(), t.GetCollectionName())
 	if err != nil {
@@ -172,13 +171,13 @@ func (t *alterCollectionFunctionTask) Name() string {
 
 func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	if t.FunctionSchema == nil {
-		return fmt.Errorf("Function Schema is empty")
+		return merr.WrapErrParameterInvalidMsg("Function Schema is empty")
 	}
 	if t.FunctionSchema.Type == schemapb.FunctionType_BM25 {
-		return fmt.Errorf("Currently does not support alter BM25 function")
+		return merr.WrapErrParameterInvalidMsg("Currently does not support alter BM25 function")
 	}
 	if t.FunctionName != t.FunctionSchema.Name {
-		return fmt.Errorf("Invalid function config, name not match")
+		return merr.WrapErrParameterInvalidMsg("Invalid function config, name not match")
 	}
 	coll, err := getCollectionInfo(ctx, t.GetDbName(), t.GetCollectionName())
 	if err != nil {
@@ -193,7 +192,7 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 	for _, fSchema := range coll.schema.Functions {
 		if t.FunctionName == fSchema.Name {
 			if fSchema.Type == schemapb.FunctionType_BM25 {
-				return fmt.Errorf("Currently does not support alter BM25 function")
+				return merr.WrapErrParameterInvalidMsg("Currently does not support alter BM25 function")
 			}
 			newFunctions = append(newFunctions, t.FunctionSchema)
 			funcExist = true
@@ -202,7 +201,7 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 		}
 	}
 	if !funcExist {
-		return fmt.Errorf("Function %s not found", t.FunctionName)
+		return merr.WrapErrParameterInvalidMsg("Function %s not found", t.FunctionName)
 	}
 
 	newColl := proto.Clone(coll.schema.CollectionSchema).(*schemapb.CollectionSchema)
@@ -303,7 +302,7 @@ func (t *dropCollectionFunctionTask) Execute(ctx context.Context) error {
 	}
 
 	if t.fSchema.Type == schemapb.FunctionType_BM25 {
-		return fmt.Errorf("Currently does not support droping BM25 function")
+		return merr.WrapErrParameterInvalidMsg("Currently does not support droping BM25 function")
 	}
 
 	var err error

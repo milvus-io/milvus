@@ -17,9 +17,8 @@
 package msgstream
 
 import (
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // UnmarshalFunc is an interface that has been implemented by each Msg
@@ -44,7 +43,7 @@ type ProtoUnmarshalDispatcher struct {
 func (p *ProtoUnmarshalDispatcher) Unmarshal(input interface{}, msgType commonpb.MsgType) (TsMsg, error) {
 	unmarshalFunc, ok := p.TempMap[msgType]
 	if !ok {
-		return nil, errors.New("not set unmarshalFunc for this messageType")
+		return nil, merr.WrapErrSerializationFailedMsg("not set unmarshalFunc for this messageType")
 	}
 	return unmarshalFunc(input)
 }

@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 const (
@@ -54,10 +56,10 @@ func NewRateCollector(window time.Duration, granularity time.Duration, enableSub
 // newRateCollector returns a new RateCollector with given window and granularity.
 func newRateCollector(window time.Duration, granularity time.Duration, now time.Time, enableSubLabel bool) (*RateCollector, error) {
 	if window == 0 || granularity == 0 {
-		return nil, fmt.Errorf("create RateCollector failed, window or granularity cannot be 0, window = %d, granularity = %d", window, granularity)
+		return nil, merr.WrapErrServiceInternalMsg("create RateCollector failed, window or granularity cannot be 0, window = %d, granularity = %d", window, granularity)
 	}
 	if window < granularity || window%granularity != 0 {
-		return nil, fmt.Errorf("create RateCollector failed, window has to be a multiplier of the granularity, window = %d, granularity = %d", window, granularity)
+		return nil, merr.WrapErrServiceInternalMsg("create RateCollector failed, window has to be a multiplier of the granularity, window = %d, granularity = %d", window, granularity)
 	}
 	rc := &RateCollector{
 		window:      window,
@@ -233,7 +235,7 @@ func (r *RateCollector) max(label string, now time.Time) (float64, error) {
 		}
 		return max, nil
 	}
-	return 0, fmt.Errorf("RateColletor didn't register for label %s", label)
+	return 0, merr.WrapErrServiceInternalMsg("RateColletor didn't register for label %s", label)
 }
 
 // Min is shorthand for min(label, time.Now()).
@@ -255,7 +257,7 @@ func (r *RateCollector) min(label string, now time.Time) (float64, error) {
 		}
 		return min, nil
 	}
-	return 0, fmt.Errorf("RateColletor didn't register for label %s", label)
+	return 0, merr.WrapErrServiceInternalMsg("RateColletor didn't register for label %s", label)
 }
 
 // Rate is shorthand for rate(label, duration, time.Now()).
@@ -308,7 +310,7 @@ func (r *RateCollector) rate(label string, duration time.Duration, now time.Time
 		}
 		return total / float64(size), nil
 	}
-	return 0, fmt.Errorf("RateColletor didn't register for label %s", label)
+	return 0, merr.WrapErrServiceInternalMsg("RateColletor didn't register for label %s", label)
 }
 
 // update would update position and clear old values.

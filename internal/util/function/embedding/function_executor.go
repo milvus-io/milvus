@@ -24,7 +24,6 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -72,7 +71,7 @@ func createFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSc
 	case schemapb.FunctionType_MinHash:
 		return nil, nil
 	default:
-		return nil, fmt.Errorf("unknown functionRunner type %s", schema.GetType().String())
+		return nil, merr.WrapErrFunctionFailedMsg("unknown functionRunner type %s", schema.GetType().String())
 	}
 }
 
@@ -151,7 +150,7 @@ func (executor *FunctionExecutor) processSingleFunction(ctx context.Context, run
 		}
 	}
 	if len(inputs) != len(runner.GetSchema().InputFieldIds) {
-		return nil, errors.New("Input field not found")
+		return nil, merr.WrapErrFunctionFailedMsg("Input field not found")
 	}
 
 	tr := timerecord.NewTimeRecorder("function ProcessInsert")
@@ -169,7 +168,7 @@ func (executor *FunctionExecutor) ProcessInsert(ctx context.Context, msg *msgstr
 	numRows := msg.NumRows
 	for _, runner := range executor.runners {
 		if numRows > uint64(runner.MaxBatch()) {
-			return fmt.Errorf("numRows [%d] > function [%s]'s max batch [%d]", numRows, runner.GetSchema().Name, runner.MaxBatch())
+			return merr.WrapErrFunctionFailedMsg("numRows [%d] > function [%s]'s max batch [%d]", numRows, runner.GetSchema().Name, runner.MaxBatch())
 		}
 	}
 
@@ -198,7 +197,7 @@ func (executor *FunctionExecutor) ProcessInsert(ctx context.Context, msg *msgstr
 		errs = append(errs, err)
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("%v", errs)
+		return merr.WrapErrFunctionFailed(merr.Combine(errs...), "")
 	}
 
 	for output := range outputs {
@@ -211,7 +210,7 @@ func (executor *FunctionExecutor) processSingleSearch(ctx context.Context, runne
 	pb := &commonpb.PlaceholderGroup{}
 	proto.Unmarshal(placeholderGroup, pb)
 	if len(pb.Placeholders) != 1 {
-		return nil, merr.WrapErrParameterInvalidMsg("No placeholders founded")
+		return nil, merr.WrapErrFunctionFailedMsg("No placeholders founded")
 	}
 	if pb.Placeholders[0].Type != commonpb.PlaceholderType_VarChar {
 		return placeholderGroup, nil
@@ -230,10 +229,10 @@ func (executor *FunctionExecutor) processSingleSearch(ctx context.Context, runne
 func (executor *FunctionExecutor) prcessSearch(ctx context.Context, req *internalpb.SearchRequest) error {
 	runner, exist := executor.runners[req.FieldId]
 	if !exist {
-		return fmt.Errorf("Can not found function in field %d", req.FieldId)
+		return merr.WrapErrFunctionFailedMsg("Can not found function in field %d", req.FieldId)
 	}
 	if req.Nq > int64(runner.MaxBatch()) {
-		return fmt.Errorf("Nq [%d] > function [%s]'s max batch [%d]", req.Nq, runner.GetSchema().Name, runner.MaxBatch())
+		return merr.WrapErrFunctionFailedMsg("Nq [%d] > function [%s]'s max batch [%d]", req.Nq, runner.GetSchema().Name, runner.MaxBatch())
 	}
 	if newHolder, err := executor.processSingleSearch(ctx, runner, req.GetPlaceholderGroup()); err != nil {
 		return err
@@ -250,7 +249,7 @@ func (executor *FunctionExecutor) prcessAdvanceSearch(ctx context.Context, req *
 	for idx, sub := range req.GetSubReqs() {
 		if runner, exist := executor.runners[sub.FieldId]; exist {
 			if sub.Nq > int64(runner.MaxBatch()) {
-				return fmt.Errorf("Nq [%d] > function [%s]'s max batch [%d]", sub.Nq, runner.GetSchema().Name, runner.MaxBatch())
+				return merr.WrapErrFunctionFailedMsg("Nq [%d] > function [%s]'s max batch [%d]", sub.Nq, runner.GetSchema().Name, runner.MaxBatch())
 			}
 			wg.Add(1)
 			go func(runner Runner, idx int64, placeholderGroup []byte) {
@@ -290,7 +289,7 @@ func (executor *FunctionExecutor) processSingleBulkInsert(ctx context.Context, r
 	for idx, id := range runner.GetSchema().InputFieldIds {
 		field, exist := data.Data[id]
 		if !exist {
-			return nil, fmt.Errorf("Can not find input field: [%s]", runner.GetSchema().GetInputFieldNames()[idx])
+			return nil, merr.WrapErrFunctionFailedMsg("Can not find input field: [%s]", runner.GetSchema().GetInputFieldNames()[idx])
 		}
 		inputs = append(inputs, field)
 	}

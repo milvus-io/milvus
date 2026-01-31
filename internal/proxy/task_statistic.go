@@ -318,11 +318,11 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 	// TODO: Consider to check if partition loaded from cache to save rpc.
 	info, err := globalMetaCache.GetCollectionInfo(ctx, dbName, collectionName, collectionID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("GetCollectionInfo failed, dbName = %s, collectionName = %s,collectionID = %d, err = %s", dbName, collectionName, collectionID, err)
+		return nil, nil, merr.WrapErrServiceInternalErr(err, "GetCollectionInfo failed, dbName = %s, collectionName = %s,collectionID = %d", dbName, collectionName, collectionID)
 	}
 	partitionInfos, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
 	if err != nil {
-		return nil, nil, fmt.Errorf("GetPartitions failed, dbName = %s, collectionName = %s,collectionID = %d, err = %s", dbName, collectionName, collectionID, err)
+		return nil, nil, merr.WrapErrServiceInternalErr(err, "GetPartitions failed, dbName = %s, collectionName = %s,collectionID = %d", dbName, collectionName, collectionID)
 	}
 
 	// If request to search partitions
@@ -336,10 +336,10 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 			PartitionIDs: searchPartitionIDs,
 		})
 		if err != nil {
-			return nil, nil, fmt.Errorf("showPartitions failed, collection = %d, partitionIDs = %v, err = %s", collectionID, searchPartitionIDs, err)
+			return nil, nil, merr.WrapErrServiceInternalErr(err, "showPartitions failed, collection = %d, partitionIDs = %v", collectionID, searchPartitionIDs)
 		}
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			return nil, nil, fmt.Errorf("showPartitions failed, collection = %d, partitionIDs = %v, reason = %s", collectionID, searchPartitionIDs, resp.GetStatus().GetReason())
+			return nil, nil, merr.WrapErrServiceInternalMsg("showPartitions failed, collection = %d, partitionIDs = %v, reason = %s", collectionID, searchPartitionIDs, resp.GetStatus().GetReason())
 		}
 
 		for i, percentage := range resp.GetInMemoryPercentages() {
@@ -361,10 +361,10 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 		CollectionID: info.collID,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("showPartitions failed, collection = %d, partitionIDs = %v, err = %s", collectionID, searchPartitionIDs, err)
+		return nil, nil, merr.WrapErrServiceInternalErr(err, "showPartitions failed, collection = %d, partitionIDs = %v", collectionID, searchPartitionIDs)
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return nil, nil, fmt.Errorf("showPartitions failed, collection = %d, partitionIDs = %v, reason = %s", collectionID, searchPartitionIDs, resp.GetStatus().GetReason())
+		return nil, nil, merr.WrapErrServiceInternalMsg("showPartitions failed, collection = %d, partitionIDs = %v, reason = %s", collectionID, searchPartitionIDs, resp.GetStatus().GetReason())
 	}
 
 	loadedMap := make(map[UniqueID]bool)
@@ -389,7 +389,7 @@ func decodeGetStatisticsResults(results []*internalpb.GetStatisticsResponse) ([]
 	ret := make([]map[string]string, len(results))
 	for i, result := range results {
 		if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			return nil, fmt.Errorf("fail to decode result, reason=%s", result.GetStatus().GetReason())
+			return nil, merr.WrapErrServiceInternalMsg("fail to decode result, reason=%s", result.GetStatus().GetReason())
 		}
 		ret[i] = funcutil.KeyValuePair2Map(result.GetStats())
 	}
@@ -747,7 +747,7 @@ func (g *getPartitionStatisticsTask) Execute(ctx context.Context) error {
 
 	result, _ := g.mixCoord.GetPartitionStatistics(ctx, req)
 	if result == nil {
-		return errors.New("get partition statistics resp is nil")
+		return merr.WrapErrServiceInternalMsg("get partition statistics resp is nil")
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return merr.Error(result.GetStatus())

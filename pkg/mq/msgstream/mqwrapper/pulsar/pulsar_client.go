@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/cockroachdb/errors"
 	pulsarctl "github.com/streamnative/pulsarctl/pkg/pulsar"
 	"github.com/streamnative/pulsarctl/pkg/pulsar/common"
 	"go.uber.org/zap"
@@ -32,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	mqcommon "github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
@@ -93,7 +93,7 @@ func (pc *pulsarClient) CreateProducer(ctx context.Context, options mqcommon.Pro
 	}
 	if pp == nil {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.FailLabel).Inc()
-		return nil, errors.New("pulsar is not ready, producer is nil")
+		return nil, merr.WrapErrServiceInternalMsg("pulsar is not ready, producer is nil")
 	}
 	elapsed := start.ElapseSpan()
 	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateProducerLabel).Observe(float64(elapsed.Milliseconds()))
@@ -144,7 +144,7 @@ func GetFullTopicName(tenant string, namespace string, topic string) (string, er
 			zap.String("tenant", tenant),
 			zap.String("namesapce", namespace),
 			zap.String("topic", topic))
-		return "", errors.New("build full topic name failed")
+		return "", merr.WrapErrServiceInternalMsg("build full topic name failed")
 	}
 
 	return fmt.Sprintf("%s/%s/%s", tenant, namespace, topic), nil
@@ -158,7 +158,7 @@ func NewAdminClient(address, authPlugin, authParams string) (pulsarctl.Client, e
 	}
 	admin, err := pulsarctl.New(&config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build pulsar admin client due to %s", err.Error())
+		return nil, merr.WrapErrServiceInternalMsg("failed to build pulsar admin client due to %s", err.Error())
 	}
 
 	return admin, nil

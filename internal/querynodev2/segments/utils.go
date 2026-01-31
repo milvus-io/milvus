@@ -15,12 +15,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"strconv"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -87,7 +85,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+						return nil, merr.WrapErrSerializationFailed(err, "strconv wrong on get dim")
 					}
 					offset += dim * 4
 					break
@@ -98,7 +96,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+						return nil, merr.WrapErrSerializationFailed(err, "strconv wrong on get dim")
 					}
 					offset += dim / 8
 					break
@@ -109,7 +107,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+						return nil, merr.WrapErrSerializationFailed(err, "strconv wrong on get dim")
 					}
 					offset += dim * 2
 					break
@@ -120,14 +118,14 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == common.DimKey {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+						return nil, merr.WrapErrSerializationFailed(err, "strconv wrong on get dim")
 					}
 					offset += dim * 2
 					break
 				}
 			}
 		case schemapb.DataType_SparseFloatVector:
-			return nil, errors.New("SparseFloatVector not support in row based message")
+			return nil, merr.WrapErrSerializationFailedMsg("SparseFloatVector not support in row based message")
 		}
 	}
 
@@ -143,7 +141,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 		err := binary.Read(reader, common.Endian, &int64PkValue)
 		if err != nil {
 			log.Warn("binary read blob value failed", zap.Error(err))
-			return nil, err
+			return nil, merr.WrapErrServiceInternalErr(err, "binary read blob value failed")
 		}
 		pks[i] = storage.NewInt64PrimaryKey(int64PkValue)
 	}
@@ -284,7 +282,7 @@ func getFieldSchema(schema *schemapb.CollectionSchema, fieldID int64) (*schemapb
 			}
 		}
 	}
-	return nil, fmt.Errorf("field %d not found in schema", fieldID)
+	return nil, merr.WrapErrServiceInternalMsg("field %d not found in schema", fieldID)
 }
 
 func isIndexMmapEnable(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo) bool {

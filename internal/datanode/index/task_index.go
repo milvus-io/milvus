@@ -393,7 +393,7 @@ func (it *indexBuildTask) parseFieldMetaFromBinlog(ctx context.Context) error {
 	// fill collectionID, partitionID... for requests before v2.4.0
 	toLoadDataPaths := it.req.GetDataPaths()
 	if len(toLoadDataPaths) == 0 {
-		return merr.WrapErrParameterInvalidMsg("data insert path must be not empty")
+		return merr.WrapErrServiceInternal("data insert path must be not empty")
 	}
 	data, err := it.cm.Read(ctx, toLoadDataPaths[0])
 	if err != nil {
@@ -406,7 +406,7 @@ func (it *indexBuildTask) parseFieldMetaFromBinlog(ctx context.Context) error {
 		return err
 	}
 	if len(insertData.Data) != 1 {
-		return merr.WrapErrParameterInvalidMsg("we expect only one field in deserialized insert data")
+		return merr.WrapErrServiceInternal("we expect only one field in deserialized insert data")
 	}
 
 	it.req.CollectionID = collectionID

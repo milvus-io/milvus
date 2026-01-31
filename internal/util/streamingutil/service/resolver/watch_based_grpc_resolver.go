@@ -1,11 +1,11 @@
 package resolver
 
 import (
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/resolver"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -45,7 +45,7 @@ func (r *watchBasedGRPCResolver) Close() {
 // Return error if the resolver is closed.
 func (r *watchBasedGRPCResolver) Update(state VersionedState) error {
 	if !r.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return errors.New("resolver is closed")
+		return merr.WrapErrServiceInternalMsg("resolver is closed")
 	}
 	defer r.lifetime.Done()
 

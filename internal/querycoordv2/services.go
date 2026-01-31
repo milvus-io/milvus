@@ -586,7 +586,7 @@ func (s *Server) isStoppingNode(ctx context.Context, nodeID int64) error {
 	if isStopping {
 		msg := fmt.Sprintf("failed to balance due to the source/destination node[%d] is stopping", nodeID)
 		log.Ctx(ctx).Warn(msg)
-		return errors.New(msg)
+		return merr.WrapErrServiceInternalMsg(msg)
 	}
 	return nil
 }

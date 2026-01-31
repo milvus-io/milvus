@@ -254,30 +254,30 @@ func convertNumpyType(typeStr string) (schemapb.DataType, error) {
 			// Note: JSON field and VARCHAR field are using string type numpy
 			return schemapb.DataType_VarChar, nil
 		}
-		return schemapb.DataType_None, fmt.Errorf("the numpy file dtype '%s' is not supported", typeStr)
+		return schemapb.DataType_None, merr.WrapErrImportSysFailedMsg("the numpy file dtype '%s' is not supported", typeStr)
 	}
 }
 
 func wrapElementTypeError(eleType schemapb.DataType, field *schemapb.FieldSchema) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("expected element type '%s' for field '%s', got type '%s'",
-		field.GetDataType().String(), field.GetName(), eleType.String()))
+	return merr.WrapErrImportFailedMsg("expected element type '%s' for field '%s', got type '%s'",
+		field.GetDataType().String(), field.GetName(), eleType.String())
 }
 
 func wrapDimError(actualDim int, expectDim int, field *schemapb.FieldSchema) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("expected dim '%d' for %s field '%s', got dim '%d'",
-		expectDim, field.GetDataType().String(), field.GetName(), actualDim))
+	return merr.WrapErrImportFailedMsg("expected dim '%d' for %s field '%s', got dim '%d'",
+		expectDim, field.GetDataType().String(), field.GetName(), actualDim)
 }
 
 func wrapShapeError(actualShape int, expectShape int, field *schemapb.FieldSchema) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("expected shape '%d' for %s field '%s', got shape '%d'",
-		expectShape, field.GetDataType().String(), field.GetName(), actualShape))
+	return merr.WrapErrImportFailedMsg("expected shape '%d' for %s field '%s', got shape '%d'",
+		expectShape, field.GetDataType().String(), field.GetName(), actualShape)
 }
 
 func validateHeader(npyReader *npy.Reader, field *schemapb.FieldSchema, dim int) error {
 	elementType, err := convertNumpyType(npyReader.Header.Descr.Type)
 	if err != nil {
-		return merr.WrapErrImportFailed(fmt.Sprintf("unexpected numpy header for field '%s': '%s'",
-			field.GetName(), err.Error()))
+		return merr.WrapErrImportFailedErr(err, "unexpected numpy header for field '%s'",
+			field.GetName())
 	}
 	shape := npyReader.Header.Descr.Shape
 
@@ -331,7 +331,7 @@ func validateHeader(npyReader *npy.Reader, field *schemapb.FieldSchema, dim int)
 			return wrapShapeError(len(shape), 1, field)
 		}
 	case schemapb.DataType_None, schemapb.DataType_SparseFloatVector, schemapb.DataType_Array:
-		return merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type: %s", field.GetDataType().String()))
+		return merr.WrapErrImportFailedMsg("unsupported data type: %s", field.GetDataType().String())
 
 	default:
 		if elementType != field.GetDataType() {

@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // mustAsSpecializedMutableMessage converts a MutableMessage to a specialized MutableMessage.
@@ -37,13 +38,13 @@ func asSpecializedMutableMessage[H proto.Message, B proto.Message](msg BasicMess
 	msgType := MustGetMessageTypeWithVersion[H, B]()
 	if underlying.MessageType() != msgType.MessageType {
 		// The message type do not match the specialized header.
-		return nil, errors.New("message type do not match specialized header")
+		return nil, merr.WrapErrServiceInternalMsg("message type do not match specialized header")
 	}
 
 	// Get the specialized header from the message.
 	val, ok := underlying.properties.Get(messageHeader)
 	if !ok {
-		return nil, errors.Errorf("lost specialized header, %s", msgType.String())
+		return nil, merr.WrapErrServiceInternalMsg("lost specialized header, %s", msgType.String())
 	}
 
 	// Decode the specialized header.
@@ -54,7 +55,7 @@ func asSpecializedMutableMessage[H proto.Message, B proto.Message](msg BasicMess
 
 	// must be a pointer to a proto message
 	if err := DecodeProto(val, header); err != nil {
-		return nil, errors.Wrap(err, "failed to decode specialized header")
+		return nil, merr.Wrap(err, "failed to decode specialized header")
 	}
 	return &specializedMutableMessageImpl[H, B]{
 		header:      header,
@@ -90,20 +91,20 @@ func asSpecializedImmutableMessage[H proto.Message, B proto.Message](msg Immutab
 	underlying, ok := msg.(*immutableMessageImpl)
 	if !ok {
 		// maybe a txn message.
-		return nil, errors.New("not a specialized immutable message, txn message maybe")
+		return nil, merr.WrapErrServiceInternalMsg("not a specialized immutable message, txn message maybe")
 	}
 
 	var header H
 	msgType := MustGetMessageTypeWithVersion[H, B]()
 	if underlying.MessageType() != msgType.MessageType {
 		// The message type do not match the specialized header.
-		return nil, errors.New("message type do not match specialized header")
+		return nil, merr.WrapErrServiceInternalMsg("message type do not match specialized header")
 	}
 
 	// Get the specialized header from the message.
 	val, ok := underlying.properties.Get(messageHeader)
 	if !ok {
-		return nil, errors.Errorf("lost specialized header, %s", msgType.String())
+		return nil, merr.WrapErrServiceInternalMsg("lost specialized header, %s", msgType.String())
 	}
 
 	// Decode the specialized header.
@@ -113,7 +114,7 @@ func asSpecializedImmutableMessage[H proto.Message, B proto.Message](msg Immutab
 
 	// must be a pointer to a proto message
 	if err := DecodeProto(val, header); err != nil {
-		return nil, errors.Wrap(err, "failed to decode specialized header")
+		return nil, merr.Wrap(err, "failed to decode specialized header")
 	}
 	return &specializedImmutableMessageImpl[H, B]{
 		header:               header,

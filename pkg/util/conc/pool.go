@@ -125,7 +125,7 @@ func (pool *Pool[T]) Resize(size int) error {
 		return merr.WrapErrServiceInternal("cannot resize pre-alloc pool")
 	}
 	if size <= 0 {
-		return merr.WrapErrParameterInvalid("positive size", strconv.FormatInt(int64(size), 10))
+		return merr.WrapErrServiceInternalMsg("need positive size, got %v", strconv.FormatInt(int64(size), 10))
 	}
 	pool.inner.Tune(size)
 	return nil

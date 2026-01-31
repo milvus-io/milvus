@@ -72,7 +72,7 @@ func (m *manager) Add(collectionID UniqueID, channel string) (Pipeline, error) {
 	tr := timerecord.NewTimeRecorder("add dmChannel")
 	collection := m.dataManager.Collection.Get(collectionID)
 	if collection == nil {
-		return nil, merr.WrapErrCollectionNotFound(collectionID)
+		return nil, merr.WrapErrCollectionIDNotFound(collectionID)
 	}
 
 	if pipeline, ok := m.channel2Pipeline[channel]; ok {

@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type updateExternalCollectionTask struct {
@@ -89,7 +90,7 @@ func (t *updateExternalCollectionTask) GetTaskVersion() int64 {
 func (t *updateExternalCollectionTask) validateSource() error {
 	collection := t.meta.GetCollection(t.GetCollectionID())
 	if collection == nil {
-		return fmt.Errorf("collection %d not found", t.GetCollectionID())
+		return merr.WrapErrCollectionIDNotFound(t.GetCollectionID(), "collection %d not found")
 	}
 
 	currentSource := collection.Schema.GetExternalSource()
@@ -99,7 +100,7 @@ func (t *updateExternalCollectionTask) validateSource() error {
 	taskSpec := t.GetExternalSpec()
 
 	if currentSource != taskSource || currentSpec != taskSpec {
-		return fmt.Errorf("task source mismatch: task source=%s/%s, current source=%s/%s (task has been superseded)",
+		return merr.WrapErrServiceInternalMsg("task source mismatch: task source=%s/%s, current source=%s/%s (task has been superseded)",
 			taskSource, taskSpec, currentSource, currentSpec)
 	}
 

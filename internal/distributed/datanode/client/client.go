@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -36,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -57,11 +57,11 @@ type Client struct {
 // NewClient creates a client for DataNode.
 func NewClient(ctx context.Context, addr string, serverID int64, encryption bool) (types.DataNodeClient, error) {
 	if addr == "" {
-		return nil, errors.New("address is empty")
+		return nil, merr.WrapErrServiceInternalMsg("address is empty")
 	}
 	sess := sessionutil.NewSession(context.Background())
 	if sess == nil {
-		err := errors.New("new session error, maybe can not connect to etcd")
+		err := merr.WrapErrServiceInternalMsg("new session error, maybe can not connect to etcd")
 		log.Ctx(ctx).Debug("DataNodeClient New Etcd Session failed", zap.Error(err))
 		return nil, err
 	}

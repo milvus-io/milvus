@@ -1,8 +1,6 @@
 package meta
 
 import (
-	"fmt"
-
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -12,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type FieldIndexesWithSchema struct {
@@ -222,10 +221,10 @@ func (meta *CollectionIndexesMeta210) AddIndex(collectionID UniqueID, indexID Un
 
 func (meta *CollectionIndexesMeta210) GetIndex(collectionID UniqueID, indexID UniqueID) (*pb.IndexInfo, error) {
 	if _, collExist := (*meta)[collectionID]; !collExist {
-		return nil, fmt.Errorf("collection not exist: %d", collectionID)
+		return nil, merr.WrapErrServiceInternalMsg("collection not exist: %d", collectionID)
 	}
 	if _, indexExist := (*meta)[collectionID][indexID]; !indexExist {
-		return nil, fmt.Errorf("index not exist, collection: %d, index: %d", collectionID, indexID)
+		return nil, merr.WrapErrServiceInternalMsg("index not exist, collection: %d, index: %d", collectionID, indexID)
 	}
 	return (*meta)[collectionID][indexID], nil
 }

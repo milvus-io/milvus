@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar/pulsarlog"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/registry"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -33,7 +34,7 @@ func (b *builderImpl) Name() message.WALName {
 func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 	options, tenant, err := b.getPulsarClientOptions()
 	if err != nil {
-		return nil, errors.Wrapf(err, "build pulsar client options failed")
+		return nil, merr.WrapErrServiceInternalErr(err, "build pulsar client options failed")
 	}
 	c, err := pulsar.NewClient(options)
 	if err != nil {

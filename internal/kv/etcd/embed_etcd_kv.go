@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -100,7 +99,7 @@ func NewEmbededEtcdKV(cfg *embed.Config, rootPath string, options ...Option) (*E
 			return nil
 		case <-time.After(60 * time.Second):
 			e.Server.Stop() // trigger a shutdown
-			return errors.New("Embedded etcd took too long to start")
+			return merr.WrapErrServiceInternalMsg("Embedded etcd took too long to start")
 		}
 	})
 	if err != nil {

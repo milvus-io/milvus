@@ -37,14 +37,14 @@ func InsertNotAligned(n *filterNode, c *Collection, msg *InsertMsg) error {
 
 func InsertEmpty(n *filterNode, c *Collection, msg *InsertMsg) error {
 	if len(msg.GetTimestamps()) <= 0 {
-		return merr.WrapErrParameterInvalid("has msg", "the length of timestamp field is 0")
+		return merr.WrapErrServiceInternalMsg("in Insert msg, the length of timestamp field is 0")
 	}
 	return nil
 }
 
 func InsertOutOfTarget(n *filterNode, c *Collection, msg *InsertMsg) error {
 	if msg.GetCollectionID() != c.ID() {
-		return merr.WrapErrParameterInvalid(msg.GetCollectionID(), c.ID(), "msg not target because of collection")
+		return merr.WrapErrServiceInternalMsg("in Insert msg, collectionID:%v in msg not match to %v", msg.GetCollectionID(), c.ID())
 	}
 
 	// all growing will be in-memory to support dynamic partition load/release
@@ -61,14 +61,14 @@ func DeleteNotAligned(n *filterNode, c *Collection, msg *DeleteMsg) error {
 
 func DeleteEmpty(n *filterNode, c *Collection, msg *DeleteMsg) error {
 	if len(msg.GetTimestamps()) <= 0 {
-		return merr.WrapErrParameterInvalid("has msg", "the length of timestamp field is 0")
+		return merr.WrapErrServiceInternal("in Delete msg, the length of timestamp field is 0")
 	}
 	return nil
 }
 
 func DeleteOutOfTarget(n *filterNode, c *Collection, msg *DeleteMsg) error {
 	if msg.GetCollectionID() != c.ID() {
-		return merr.WrapErrParameterInvalid(msg.GetCollectionID(), c.ID(), "msg not target because of collection")
+		return merr.WrapErrServiceInternalMsg("in Delete msg, collectionID:%v in msg not match to %v", msg.GetCollectionID(), c.ID())
 	}
 
 	// all growing will be in-memory to support dynamic partition load/release

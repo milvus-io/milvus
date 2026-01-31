@@ -19,10 +19,8 @@ package info
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"google.golang.org/grpc/metadata"
 
@@ -31,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 var ClusterPrefix atomic.String
@@ -38,20 +37,20 @@ var ClusterPrefix atomic.String
 func getCurUserFromContext(ctx context.Context) (string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return "", errors.New("fail to get md from the context")
+		return "", merr.WrapErrServiceInternalMsg("fail to get md from the context")
 	}
 	authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
 	if !ok || len(authorization) < 1 {
-		return "", fmt.Errorf("fail to get authorization from the md, authorize:[%s]", util.HeaderAuthorize)
+		return "", merr.WrapErrServiceInternalMsg("fail to get authorization from the md, authorize:[%s]", util.HeaderAuthorize)
 	}
 	token := authorization[0]
 	rawToken, err := crypto.Base64Decode(token)
 	if err != nil {
-		return "", fmt.Errorf("fail to decode the token, token: %s", token)
+		return "", merr.WrapErrServiceInternalMsg("fail to decode the token, token: %s", token)
 	}
 	secrets := strings.SplitN(rawToken, util.CredentialSeparator, 2)
 	if len(secrets) < 2 {
-		return "", fmt.Errorf("fail to get user info from the raw token, raw token: %s", rawToken)
+		return "", merr.WrapErrServiceInternalMsg("fail to get user info from the raw token, raw token: %s", rawToken)
 	}
 	username := secrets[0]
 	return username, nil

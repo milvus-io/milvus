@@ -19,15 +19,14 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"io"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // BinlogReader is an object to read binlog file. Binlog file's format can be
@@ -43,7 +42,7 @@ type BinlogReader struct {
 // NextEventReader iters all events reader to read the binlog file.
 func (reader *BinlogReader) NextEventReader() (*EventReader, error) {
 	if reader.isClose {
-		return nil, errors.New("bin log reader is closed")
+		return nil, merr.WrapErrStorageMsg("bin log reader is closed")
 	}
 	if reader.buffer.Len() <= 0 {
 		return nil, nil
@@ -69,7 +68,7 @@ func readMagicNumber(buffer io.Reader) (int32, error) {
 		return -1, err
 	}
 	if magicNumber != MagicNumber {
-		return -1, fmt.Errorf("parse magic number failed, expected: %d, actual: %d", MagicNumber, magicNumber)
+		return -1, merr.WrapErrStorageMsg("parse magic number failed, expected: %d, actual: %d", MagicNumber, magicNumber)
 	}
 
 	return magicNumber, nil

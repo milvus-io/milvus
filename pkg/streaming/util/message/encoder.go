@@ -4,8 +4,9 @@ import (
 	"encoding/base64"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 const base = 36
@@ -43,7 +44,7 @@ func EncodeProto(m proto.Message) (string, error) {
 func DecodeProto(data string, m proto.Message) error {
 	val, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
-		return errors.Wrap(err, "failed to decode base64")
+		return merr.WrapErrSerializationFailed(err, "failed to decode base64")
 	}
 	return proto.Unmarshal(val, m)
 }

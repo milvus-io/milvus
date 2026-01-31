@@ -18,10 +18,9 @@ package typeutil
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math"
 
-	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func bfloat16IsNaN(f uint16) bool {
@@ -51,7 +50,7 @@ func float16IsInf(f uint16, sign int) bool {
 func VerifyFloat(value float64) error {
 	// not allow not-a-number and infinity
 	if math.IsNaN(value) || math.IsInf(value, -1) || math.IsInf(value, 1) {
-		return fmt.Errorf("value '%f' is not a number or infinity", value)
+		return merr.WrapErrParameterInvalidMsg("value '%f' is not a number or infinity", value)
 	}
 
 	return nil
@@ -81,13 +80,13 @@ func VerifyFloats64(values []float64) error {
 
 func VerifyFloats16(value []byte) error {
 	if len(value)%2 != 0 {
-		return errors.New("The length of float16 is not aligned to 2.")
+		return merr.WrapErrParameterInvalidMsg("The length of float16 is not aligned to 2.")
 	}
 	dataSize := len(value) / 2
 	for i := 0; i < dataSize; i++ {
 		v := binary.LittleEndian.Uint16(value[i*2:])
 		if float16IsNaN(v) || float16IsInf(v, -1) || float16IsInf(v, 1) {
-			return errors.New("float16 vector contain nan or infinity value.")
+			return merr.WrapErrParameterInvalidMsg("float16 vector contain nan or infinity value.")
 		}
 	}
 	return nil
@@ -95,13 +94,13 @@ func VerifyFloats16(value []byte) error {
 
 func VerifyBFloats16(value []byte) error {
 	if len(value)%2 != 0 {
-		return errors.New("The length of bfloat16 in not aligned to 2")
+		return merr.WrapErrParameterInvalidMsg("The length of bfloat16 in not aligned to 2")
 	}
 	dataSize := len(value) / 2
 	for i := 0; i < dataSize; i++ {
 		v := binary.LittleEndian.Uint16(value[i*2:])
 		if bfloat16IsNaN(v) || bfloat16IsInf(v, -1) || bfloat16IsInf(v, 1) {
-			return errors.New("bfloat16 vector contain nan or infinity value.")
+			return merr.WrapErrParameterInvalidMsg("bfloat16 vector contain nan or infinity value.")
 		}
 	}
 	return nil

@@ -19,17 +19,16 @@
 package hookutil
 
 import (
-	"fmt"
 	"plugin"
 	"sync"
 	"sync/atomic"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -77,23 +76,23 @@ func initHook() error {
 	defer UnlockHookInit()
 	p, err := plugin.Open(path)
 	if err != nil {
-		return fmt.Errorf("fail to open the plugin, error: %s", err.Error())
+		return merr.WrapErrServiceInternalErr(err, "fail to open the plugin")
 	}
 	log.Info("plugin open")
 
 	h, err := p.Lookup("MilvusHook")
 	if err != nil {
-		return fmt.Errorf("fail to the 'MilvusHook' object in the plugin, error: %s", err.Error())
+		return merr.WrapErrServiceInternalErr(err, "fail to the 'MilvusHook' object in the plugin")
 	}
 
 	var hookVal hook.Hook
 	var ok bool
 	hookVal, ok = h.(hook.Hook)
 	if !ok {
-		return errors.New("fail to convert the `Hook` interface")
+		return merr.WrapErrServiceInternalMsg("fail to convert the `Hook` interface")
 	}
 	if err = hookVal.Init(paramtable.GetHookParams().SoConfig.GetValue()); err != nil {
-		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
+		return merr.WrapErrServiceInternalErr(err, "fail to init configs for the hook")
 	}
 	storeHook((hookVal))
 	paramtable.GetHookParams().WatchHookWithPrefix("watch_hook", "", func(event *config.Event) {
@@ -111,12 +110,12 @@ func initHook() error {
 
 	e, err := p.Lookup("MilvusExtension")
 	if err != nil {
-		return fmt.Errorf("fail to the 'MilvusExtension' object in the plugin, error: %s", err.Error())
+		return merr.WrapErrServiceInternalErr(err, "fail to the 'MilvusExtension' object in the plugin")
 	}
 	var extVal hook.Extension
 	extVal, ok = e.(hook.Extension)
 	if !ok {
-		return errors.New("fail to convert the `Extension` interface")
+		return merr.WrapErrServiceInternalMsg("fail to convert the `Extension` interface")
 	}
 	storeExtension(extVal)
 

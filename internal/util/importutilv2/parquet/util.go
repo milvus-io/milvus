@@ -320,7 +320,7 @@ func IsValidSparseVectorSchema(arrowType arrow.DataType) (bool, bool) {
 // instead of internal fixed_size_binary format
 func convertElementTypeOfVectorArrayToArrowType(field *schemapb.FieldSchema) (arrow.DataType, error) {
 	if field.GetDataType() != schemapb.DataType_ArrayOfVector {
-		return nil, merr.WrapErrParameterInvalidMsg("field is not a vector array: %v", field.GetDataType().String())
+		return nil, merr.WrapErrServiceInternalMsg("field is not a vector array: %v", field.GetDataType().String())
 	}
 
 	var elemType arrow.DataType
@@ -334,7 +334,7 @@ func convertElementTypeOfVectorArrayToArrowType(field *schemapb.FieldSchema) (ar
 	case schemapb.DataType_Int8Vector:
 		elemType = arrow.ListOf(arrow.PrimitiveTypes.Int8)
 	default:
-		return nil, merr.WrapErrParameterInvalidMsg("unsupported element type for ArrayOfVector: %v", field.GetElementType().String())
+		return nil, merr.WrapErrServiceInternalMsg("unsupported element type for ArrayOfVector: %v", field.GetElementType().String())
 	}
 	return elemType, nil
 }
@@ -411,7 +411,7 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 			Metadata: arrow.Metadata{},
 		}), nil
 	default:
-		return nil, merr.WrapErrParameterInvalidMsg("unsupported data type %v", dataType.String())
+		return nil, merr.WrapErrServiceInternalMsg("unsupported data type %v", dataType.String())
 	}
 }
 
@@ -468,7 +468,7 @@ func ConvertToArrowSchemaForUT(schema *schemapb.CollectionSchema, useNullType bo
 				}
 
 			default:
-				err = merr.WrapErrParameterInvalidMsg("unsupported data type in struct: %v", subField.DataType.String())
+				err = merr.WrapErrServiceInternalMsg("unsupported data type in struct: %v", subField.DataType.String())
 			}
 
 			if err != nil {

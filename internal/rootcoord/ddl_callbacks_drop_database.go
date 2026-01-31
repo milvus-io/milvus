@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -45,12 +46,12 @@ func (c *Core) broadcastDropDatabase(ctx context.Context, req *milvuspb.DropData
 
 	db, err := c.meta.GetDatabaseByName(ctx, req.GetDbName(), typeutil.MaxTimestamp)
 	if err != nil {
-		return errors.Wrap(err, "failed to get database name")
+		return err
 	}
 
 	// Call back cipher plugin when dropping database succeeded
 	if err := hookutil.RemoveEZByDBProperties(db.Properties); err != nil {
-		return errors.Wrap(err, "failed to remove ez by db properties")
+		return merr.WrapErrServiceInternalErr(err, "failed to remove ez by db properties")
 	}
 
 	msg := message.NewDropDatabaseMessageBuilderV2().

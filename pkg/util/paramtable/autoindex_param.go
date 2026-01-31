@@ -19,11 +19,10 @@ package paramtable
 import (
 	"strconv"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -338,7 +337,7 @@ func GetBuildParamFormatter(defaultMetricsType metric.MetricType, tag string) fu
 	return func(originValue string) string {
 		m, err := funcutil.JSONToMap(originValue)
 		if err != nil {
-			panic(errors.Wrapf(err, "failed to parse %s config value", tag))
+			panic(merr.WrapErrSerializationFailed(err, "failed to parse %s config value", tag))
 		}
 		_, ok := m[common.MetricTypeKey]
 		if ok {
@@ -347,7 +346,7 @@ func GetBuildParamFormatter(defaultMetricsType metric.MetricType, tag string) fu
 		m[common.MetricTypeKey] = defaultMetricsType
 		ret, err := funcutil.MapToJSON(m)
 		if err != nil {
-			panic(errors.Wrapf(err, "failed to convert updated %s map to json", tag))
+			panic(merr.WrapErrSerializationFailed(err, "failed to convert updated %s map to json", tag))
 		}
 		return ret
 	}

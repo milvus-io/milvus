@@ -17,7 +17,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -28,6 +27,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type FileSource struct {
@@ -135,25 +135,25 @@ func (fs *FileSource) loadFromFile() error {
 
 		ext := filepath.Ext(configFile)
 		if len(ext) == 0 || (ext[1:] != "yaml" && ext[1:] != "yml") {
-			return fmt.Errorf("Unsupported Config Type: %s", ext)
+			return merr.WrapErrServiceInternalMsg("Unsupported Config Type: %s", ext)
 		}
 
 		data, err := os.ReadFile(configFile)
 		if err != nil {
-			return errors.Wrapf(err, "Read config failed: %s", configFile)
+			return merr.WrapErrServiceInternalErr(err, "Read config failed: %s", configFile)
 		}
 
 		var config map[string]interface{}
 		err = yaml.Unmarshal(data, &config)
 		if err != nil {
-			return errors.Wrapf(err, "unmarshal yaml file %s failed", configFile)
+			return merr.WrapErrSerializationFailed(err, "unmarshal yaml file %s failed", configFile)
 		}
 
 		flattenAndMergeMap("", config, newConfig)
 	}
 	// not allow all config files missing, return error for this case
 	if notExistsNum == len(configFiles) {
-		return errors.Newf("all config files not exists, files: %v", configFiles)
+		return merr.WrapErrServiceInternalMsg("all config files not exists, files: %v", configFiles)
 	}
 
 	return fs.update(newConfig)

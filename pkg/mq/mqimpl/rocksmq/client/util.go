@@ -12,16 +12,16 @@
 package client
 
 import (
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func MarshalHeader(header *commonpb.MsgHeader) ([]byte, error) {
 	hb, err := proto.Marshal(header)
 	if err != nil {
-		return nil, err
+		return nil, merr.WrapErrSerializationFailed(err, "marshal header failed")
 	}
 	return hb, nil
 }
@@ -29,14 +29,14 @@ func MarshalHeader(header *commonpb.MsgHeader) ([]byte, error) {
 func UnmarshalHeader(headerbyte []byte) (*commonpb.MsgHeader, error) {
 	header := commonpb.MsgHeader{}
 	if headerbyte == nil {
-		return &header, errors.New("failed to unmarshal message header, payload is empty")
+		return &header, merr.WrapErrSerializationFailedMsg("failed to unmarshal message header, payload is empty")
 	}
 	err := proto.Unmarshal(headerbyte, &header)
 	if err != nil {
 		return &header, err
 	}
 	if header.Base == nil {
-		return nil, errors.New("failed to unmarshal message, header is uncomplete")
+		return nil, merr.WrapErrSerializationFailedMsg("failed to unmarshal message, header is uncomplete")
 	}
 	return &header, nil
 }
