@@ -1,0 +1,76 @@
+# Milvus Build Test - Docker Compose
+#
+# Usage:
+#   cd build-test
+#   docker compose up --build
+#
+# Or run individual platforms:
+#   docker compose up --build ubuntu2204
+#
+# Results will be saved to ./results/
+
+services:
+  ubuntu2004:
+    build:
+      context: ..
+      dockerfile: build-test/docker/Dockerfile.ubuntu2004
+    volumes:
+      - ./results:/results
+    platform: linux/amd64
+
+  ubuntu2204:
+    build:
+      context: ..
+      dockerfile: build-test/docker/Dockerfile.ubuntu2204
+    volumes:
+      - ./results:/results
+    platform: linux/amd64
+
+  ubuntu2404:
+    build:
+      context: ..
+      dockerfile: build-test/docker/Dockerfile.ubuntu2404
+    volumes:
+      - ./results:/results
+    platform: linux/amd64
+
+  rocky8:
+    build:
+      context: ..
+      dockerfile: build-test/docker/Dockerfile.rocky8
+    volumes:
+      - ./results:/results
+    platform: linux/amd64
+
+  rocky9:
+    build:
+      context: ..
+      dockerfile: build-test/docker/Dockerfile.rocky9
+    volumes:
+      - ./results:/results
+    platform: linux/amd64
+
+  amazonlinux2023:
+    build:
+      context: ..
+      dockerfile: build-test/docker/Dockerfile.amazonlinux2023
+    volumes:
+      - ./results:/results
+    platform: linux/amd64
+
+  # ARM64 variants (for Apple Silicon / AWS Graviton)
+  ubuntu2204-arm64:
+    build:
+      context: ..
+      dockerfile: build-test/docker/Dockerfile.ubuntu2204
+    volumes:
+      - ./results:/results
+    platform: linux/arm64
+
+  rocky9-arm64:
+    build:
+      context: ..
+      dockerfile: build-test/docker/Dockerfile.rocky9
+    volumes:
+      - ./results:/results
+    platform: linux/arm64

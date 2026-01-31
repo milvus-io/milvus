@@ -14,7 +14,7 @@ class MilvusConan(ConanFile):
         "snappy/1.1.9#0519333fef284acd04806243de7d3070",
         "arrow/17.0.0@milvus/dev-2.6#7af258a853e20887f9969f713110aac8",
         "openssl/3.1.2#02594c4c0a6e2b4feb3cd15119993597",
-        "aws-sdk-cpp/1.11.352@milvus/dev",
+        # aws-sdk-cpp moved to requirements() for conditional macOS handling
         "googleapis/cci.20221108#65604e1b3b9a6b363044da625b201a2a",
         "gtest/1.13.0#f9548be18a41ccc6367efcb8146e92be",
         "benchmark/1.7.0#459f3bb1a64400a886ba43047576df3c",
@@ -98,10 +98,23 @@ class MilvusConan(ConanFile):
             # By default abseil use static link but can not be compatible with macos X86
             self.options["abseil"].shared = True
             self.options["arrow"].with_jemalloc = False
+            # Disable Arrow's S3 support on macOS - the Conan aws-c-* packages
+            # (aws-c-cal, aws-c-io) use deprecated macOS Security framework APIs
+            # that were removed in macOS 15+. Instead, milvus-storage provides
+            # S3 support using Homebrew's aws-sdk-cpp (1.11.735+) which has
+            # the compatibility fixes.
+            self.options["arrow"].with_s3 = False
+            # Use OpenSSL for libcurl on macOS
+            self.options["libcurl"].with_ssl = "openssl"
 
     def requirements(self):
         if self.settings.os != "Macos":
             self.requires("libunwind/1.7.2")
+            # On Linux, use Conan's aws-sdk-cpp (Arrow and milvus-storage both use it)
+            self.requires("aws-sdk-cpp/1.11.352@milvus/dev")
+        # On macOS, S3 support is provided by milvus-storage using Homebrew's
+        # aws-sdk-cpp (brew install aws-sdk-cpp). Arrow's S3 is disabled to avoid
+        # pulling in incompatible aws-c-* packages from Conan.
 
     def imports(self):
         self.copy("*.dylib", "../lib", "lib")
