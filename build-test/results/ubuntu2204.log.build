@@ -1,0 +1,1 @@
+./scripts/test-single-docker.sh: line 90: docker: command not found

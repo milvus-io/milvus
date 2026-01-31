@@ -193,7 +193,12 @@ if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
 fi
 source ${ROOT_DIR}/scripts/setenv.sh
 
-CMAKE_GENERATOR="Unix Makefiles"
+# Use Ninja if available for faster builds, fallback to Unix Makefiles
+if command -v ninja &> /dev/null; then
+    CMAKE_GENERATOR="Ninja"
+else
+    CMAKE_GENERATOR="Unix Makefiles"
+fi
 
 # build with diskann index if OS is ubuntu or rocky or amzn
 if [ -f /etc/os-release ]; then
@@ -215,9 +220,27 @@ CPU_ARCH=$(get_cpu_arch $CPU_TARGET)
 # In case any 3rdparty (e.g. libavrocpp) requires a minimum version of CMake lower than 3.5
 export CMAKE_POLICY_VERSION_MINIMUM=3.5
 
+# On macOS, add Homebrew prefix to CMAKE_PREFIX_PATH for AWS SDK and other dependencies
+# Homebrew provides aws-sdk-cpp 1.11.735+ with aws-c-io 0.26.1+ (macOS 15+ compatible)
+unameOut="$(uname -s)"
+HOMEBREW_PREFIX_PATH=""
+if [[ "${unameOut}" == "Darwin"* ]]; then
+    # Detect Homebrew prefix (different for Intel vs Apple Silicon)
+    if [[ -d "/opt/homebrew" ]]; then
+        HOMEBREW_PREFIX="/opt/homebrew"
+    elif [[ -d "/usr/local" ]]; then
+        HOMEBREW_PREFIX="/usr/local"
+    fi
+    if [[ -n "${HOMEBREW_PREFIX}" ]]; then
+        HOMEBREW_PREFIX_PATH="-DCMAKE_PREFIX_PATH=${HOMEBREW_PREFIX}"
+        echo "Using Homebrew prefix: ${HOMEBREW_PREFIX}"
+    fi
+fi
+
 arch=$(uname -m)
 CMAKE_CMD="cmake \
 ${CMAKE_EXTRA_ARGS} \
+${HOMEBREW_PREFIX_PATH} \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
@@ -263,7 +286,11 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
   echo "clang-format check passed!"
 else
   # compile and build
-  make -j ${jobs} install || exit 1
+  if [ "$CMAKE_GENERATOR" = "Ninja" ]; then
+    ninja -j ${jobs} install || exit 1
+  else
+    make -j ${jobs} install || exit 1
+  fi
 fi
 
 if command -v ccache &> /dev/null

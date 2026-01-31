@@ -1,0 +1,23 @@
+# Ubuntu 22.04 Build Test
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+# Install Go first (required by install_deps.sh)
+RUN apt-get update && apt-get install -y wget curl && \
+    wget -q https://go.dev/dl/go1.22.0.linux-amd64.tar.gz && \
+    tar -C /usr/local -xzf go1.22.0.linux-amd64.tar.gz && \
+    rm go1.22.0.linux-amd64.tar.gz
+
+ENV PATH="/usr/local/go/bin:${PATH}"
+ENV GOPATH="/root/go"
+ENV GOBIN="/root/go/bin"
+
+WORKDIR /milvus
+
+# Copy source code
+COPY . .
+
+# Build script
+CMD ["/bin/bash", "-c", "./scripts/install_deps.sh && make 2>&1 | tee /results/ubuntu2204.log; echo $? > /results/ubuntu2204.exit"]
