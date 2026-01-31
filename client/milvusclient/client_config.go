@@ -62,6 +62,9 @@ type ClientConfig struct {
 
 	DisableConn bool
 
+	// TelemetryConfig for client telemetry settings
+	TelemetryConfig *TelemetryConfig
+
 	ServerVersion string // ServerVersion
 	parsedAddress *url.URL
 	flags         uint64 // internal flags
