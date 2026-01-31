@@ -124,6 +124,12 @@ const (
 	SiliconflowAKEnvStr string = "MILVUS_SILICONFLOW_API_KEY"
 )
 
+// ark (volcengine, e.g. doubao) embedding
+
+const (
+	ArkAKEnvStr string = "MILVUS_ARK_API_KEY"
+)
+
 // TEI and vllm
 
 const (
