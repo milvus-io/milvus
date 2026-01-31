@@ -235,8 +235,9 @@ class Array {
             }
             case DataType::STRING:
             case DataType::VARCHAR:
-            //treat Geometry as wkb string
-            case DataType::GEOMETRY: {
+            //treat Geometry and MOL as string
+            case DataType::GEOMETRY: 
+            case DataType::MOL: {
                 for (int i = 0; i < length_; ++i) {
                     if (get_data<std::string_view>(i) !=
                         arr.get_data<std::string_view>(i)) {
@@ -366,6 +367,15 @@ class Array {
                 }
                 break;
             }
+            case DataType::MOL: {
+                data_array.mutable_mol_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_data<std::string_view>(j);
+                    data_array.mutable_mol_data()->add_data(element.data(), element.size());
+                }
+                break;
+            }
             default: {
                 // empty array
             }
@@ -460,7 +470,8 @@ class Array {
             }
             case DataType::VARCHAR:
             case DataType::STRING:
-            case DataType::GEOMETRY: {
+            case DataType::GEOMETRY:
+            case DataType::MOL: {
                 for (int i = 0; i < length_; i++) {
                     auto val = get_data<std::string>(i);
                     if (val != arr2.array(i).string_val()) {
@@ -631,6 +642,15 @@ class ArrayView {
                 }
                 break;
             }
+            case DataType::MOL: {
+                data_array.mutable_mol_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_data<std::string_view>(j);
+                    data_array.mutable_mol_data()->add_data(element.data(), element.size());
+                }
+                break;
+            }
             default: {
                 // empty array
             }
@@ -733,7 +753,8 @@ class ArrayView {
             }
             case DataType::VARCHAR:
             case DataType::STRING:
-            case DataType::GEOMETRY: {
+            case DataType::GEOMETRY:
+            case DataType::MOL: {
                 for (int i = 0; i < length_; i++) {
                     auto val = get_data<std::string>(i);
                     if (val != arr2.array(i).string_val()) {
