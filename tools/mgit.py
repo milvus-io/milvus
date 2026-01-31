@@ -28,7 +28,7 @@ import argparse
 import re
 import time
 import shutil
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 from dataclasses import dataclass
 import urllib.request
 import urllib.error
@@ -1122,6 +1122,238 @@ Keep the response concise and actionable. Focus on the most important conflicts 
             return f"AI analysis failed: {e}"
 
         return "No AI provider available for conflict analysis."
+
+    def validate_design_doc(
+        self, design_doc_url: str, diff: str, files: List[str], stats: str
+    ) -> Dict[str, Any]:
+        """
+        Validate that design doc matches the code changes using AI
+
+        Args:
+            design_doc_url: URL to the design doc (GitHub blob URL)
+            diff: Code diff
+            files: List of changed files
+            stats: Diff statistics
+
+        Returns:
+            {
+                'valid': True/False,
+                'score': 0-100 (match score),
+                'summary': 'Brief summary of the validation',
+                'concerns': ['list of concerns if any'],
+                'suggestions': ['list of suggestions if any']
+            }
+        """
+        if not self.has_api_key:
+            return {
+                "valid": True,
+                "score": -1,
+                "summary": "AI not available for validation, skipping.",
+                "concerns": [],
+                "suggestions": [],
+            }
+
+        # Fetch design doc content
+        try:
+            design_doc_content = self._fetch_design_doc(design_doc_url)
+        except Exception as e:
+            return {
+                "valid": False,
+                "score": 0,
+                "summary": f"Failed to fetch design doc: {e}",
+                "concerns": ["Could not retrieve design document content"],
+                "suggestions": ["Verify the design doc URL is accessible"],
+            }
+
+        # Limit diff size
+        max_diff_lines = 5000
+        diff_lines = diff.splitlines()
+        if len(diff_lines) > max_diff_lines:
+            truncated_diff = "\n".join(diff_lines[:max_diff_lines])
+            truncated_diff += (
+                f"\n\n... (truncated {len(diff_lines) - max_diff_lines} lines)"
+            )
+        else:
+            truncated_diff = diff
+
+        # Limit design doc size
+        max_doc_chars = 15000
+        if len(design_doc_content) > max_doc_chars:
+            design_doc_content = (
+                design_doc_content[:max_doc_chars] + "\n\n... (truncated)"
+            )
+
+        files_list = "\n".join(f"  - {f}" for f in files[:50])  # Limit files
+
+        prompt = f"""You are a code reviewer for the Milvus vector database project.
+Your task is to validate whether the code changes match the design document.
+
+## Design Document:
+{design_doc_content}
+
+## Changed Files:
+{files_list}
+
+## Statistics: {stats}
+
+## Code Diff:
+{truncated_diff}
+
+## Your Task:
+Analyze whether the code changes implement what's described in the design document.
+
+Return a JSON object with this exact format:
+{{
+    "valid": true/false,
+    "score": 0-100,
+    "summary": "Brief 1-2 sentence summary of the validation result",
+    "concerns": ["list of specific concerns if the code doesn't match the design"],
+    "suggestions": ["list of suggestions for improvement"]
+}}
+
+Scoring guidelines:
+- 90-100: Code closely matches design, all major components implemented
+- 70-89: Code mostly matches design, minor discrepancies
+- 50-69: Code partially matches design, some components missing or different
+- 30-49: Code has significant differences from design
+- 0-29: Code doesn't match design or design doc is for different feature
+
+Set "valid" to true if score >= 70, false otherwise.
+Keep concerns and suggestions concise and actionable.
+"""
+
+        try:
+            result = self._call_ai_for_validation(prompt)
+            return result
+        except Exception as e:
+            return {
+                "valid": False,
+                "score": -1,
+                "summary": f"Validation failed: {e}",
+                "concerns": ["AI validation failed"],
+                "suggestions": ["Check API keys or network connectivity"],
+            }
+
+    def _fetch_design_doc(self, url: str) -> str:
+        """Fetch design doc content from GitHub URL"""
+        # Convert blob URL to raw URL
+        # https://github.com/milvus-io/milvus-design-docs/blob/main/design_docs/xxx.md
+        # -> https://raw.githubusercontent.com/milvus-io/milvus-design-docs/main/design_docs/xxx.md
+        raw_url = url.replace("github.com", "raw.githubusercontent.com").replace(
+            "/blob/", "/"
+        )
+
+        req = urllib.request.Request(
+            raw_url,
+            headers={"User-Agent": "mgit/1.0"},
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=15) as response:
+                return response.read().decode("utf-8")
+        except urllib.error.HTTPError as e:
+            raise Exception(f"HTTP {e.code}: Could not fetch design doc")
+        except Exception as e:
+            raise Exception(f"Failed to fetch: {e}")
+
+    def _call_ai_for_validation(self, prompt: str) -> Dict[str, Any]:
+        """Call AI for design doc validation"""
+        content = None
+
+        errors = []
+
+        # Try AI providers in order
+        if self.has_claude_cli:
+            try:
+                result = subprocess.run(
+                    ["claude", "-p", prompt], capture_output=True, text=True, timeout=90
+                )
+                if result.returncode == 0:
+                    content = result.stdout.strip()
+            except Exception as e:
+                errors.append(f"Claude CLI: {e}")
+
+        if content is None and self.gemini_key:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={self.gemini_key}"
+                data = {
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2048},
+                }
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(data).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(req, timeout=60) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                    content = result["candidates"][0]["content"]["parts"][0]["text"]
+            except Exception as e:
+                errors.append(f"Gemini: {e}")
+
+        if content is None and self.anthropic_key:
+            try:
+                url = "https://api.anthropic.com/v1/messages"
+                data = {
+                    "model": "claude-3-5-sonnet-20241022",
+                    "max_tokens": 2048,
+                    "messages": [{"role": "user", "content": prompt}],
+                }
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(data).encode("utf-8"),
+                    headers={
+                        "x-api-key": self.anthropic_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=60) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                    content = result["content"][0]["text"]
+            except Exception as e:
+                errors.append(f"Anthropic: {e}")
+
+        if content is None and self.openai_key:
+            try:
+                url = "https://api.openai.com/v1/chat/completions"
+                data = {
+                    "model": "gpt-4",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.3,
+                }
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(data).encode("utf-8"),
+                    headers={
+                        "Authorization": f"Bearer {self.openai_key}",
+                        "Content-Type": "application/json",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=60) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                    content = result["choices"][0]["message"]["content"]
+            except Exception as e:
+                errors.append(f"OpenAI: {e}")
+
+        if content is None:
+            error_details = "; ".join(errors) if errors else "No providers configured"
+            raise Exception(f"All AI providers failed: {error_details}")
+
+        # Parse response
+        content = self._extract_json(content)
+        try:
+            data = json.loads(content)
+            # Ensure required fields
+            return {
+                "valid": data.get("valid", False),
+                "score": data.get("score", 0),
+                "summary": data.get("summary", ""),
+                "concerns": data.get("concerns", []),
+                "suggestions": data.get("suggestions", []),
+            }
+        except json.JSONDecodeError:
+            raise Exception(f"Failed to parse validation response: {content[:200]}")
 
 
 # ============================================================================
@@ -2435,7 +2667,9 @@ def workflow_pr():
                 if label_name.startswith("kind/"):
                     issue_type = label_name.replace("kind/", "")
                     break
-            print_success(f"PR already linked to issue #{issue_number}, skipping issue creation")
+            print_success(
+                f"PR already linked to issue #{issue_number}, skipping issue creation"
+            )
 
     if not issue_number:
         print_warning("Milvus requires all PRs to reference an issue!")
@@ -2582,6 +2816,108 @@ def workflow_pr():
     if not pr_body:
         pr_body = ""
     pr_body += f"\n\nissue: #{issue_number}"
+
+    # Require design doc for feature PRs
+    if issue_type == "feature":
+        print_header("\n📄 Design Document")
+        print_warning(
+            "Feature PRs require a design document in milvus-io/milvus-design-docs"
+        )
+        print_info("Design doc repo: https://github.com/milvus-io/milvus-design-docs")
+
+        # Get diff for validation
+        upstream_master = GitOperations.get_upstream_master()
+        diff = GitOperations.get_all_changes_diff(upstream_master)
+        stats = GitOperations.get_all_changes_stat(upstream_master)
+        changed_files = GitOperations.run_command(
+            ["git", "diff", "--name-only", upstream_master]
+        ).splitlines()
+
+        ai_service = AIService()
+
+        while True:
+            design_doc_url = UserInteraction.prompt(
+                "Design doc URL (enter 'skip' to skip, or 'cancel' to abort):"
+            )
+
+            # Allow skipping or canceling
+            if design_doc_url.lower() == "cancel":
+                print_error("PR creation cancelled")
+                sys.exit(1)
+
+            if design_doc_url.lower() == "skip":
+                print_warning("Skipping design doc validation")
+                break
+
+            # Validate design doc URL
+            if not design_doc_url:
+                print_error("Design doc URL is required for feature PRs (enter 'skip' to skip)")
+                continue
+
+            if "milvus-io/milvus-design-docs" not in design_doc_url:
+                print_error(
+                    "Design doc must be in milvus-io/milvus-design-docs repository"
+                )
+                if not UserInteraction.confirm("Continue anyway?"):
+                    continue
+
+            # Validate design doc matches code changes using AI
+            if ai_service.has_api_key:
+                print_info("Validating design doc matches code changes...")
+                validation = ai_service.validate_design_doc(
+                    design_doc_url, diff, changed_files, stats
+                )
+
+                score = validation.get("score", -1)
+                if score >= 0:
+                    # Show validation result
+                    if score >= 70:
+                        print_success(
+                            f"Design doc validation passed (score: {score}/100)"
+                        )
+                    elif score >= 50:
+                        print_warning(
+                            f"Design doc validation: moderate match (score: {score}/100)"
+                        )
+                    else:
+                        print_error(
+                            f"Design doc validation: poor match (score: {score}/100)"
+                        )
+
+                    print(
+                        f"\n{Colors.BOLD}Summary:{Colors.RESET} {validation.get('summary', 'N/A')}"
+                    )
+
+                    if validation.get("concerns"):
+                        print(f"\n{Colors.YELLOW}Concerns:{Colors.RESET}")
+                        for concern in validation["concerns"]:
+                            print(f"  - {concern}")
+
+                    if validation.get("suggestions"):
+                        print(f"\n{Colors.BLUE}Suggestions:{Colors.RESET}")
+                        for suggestion in validation["suggestions"]:
+                            print(f"  - {suggestion}")
+
+                    # If score is too low, ask for confirmation
+                    if score < 50:
+                        print("")
+                        if not UserInteraction.confirm(
+                            "Design doc may not match code changes. Continue anyway?"
+                        ):
+                            continue
+                    elif score < 70:
+                        print("")
+                        if not UserInteraction.confirm(
+                            "Continue with this design doc?", default=True
+                        ):
+                            continue
+            else:
+                print_info("AI not available, skipping design doc validation")
+
+            # Add design doc to PR body
+            pr_body = f"design doc: {design_doc_url}\n{pr_body}"
+            print_success(f"Design doc linked: {design_doc_url}")
+            break
 
     print_info("Creating PR in milvus-io/milvus...")
     try:
