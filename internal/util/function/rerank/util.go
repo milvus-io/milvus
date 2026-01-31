@@ -57,6 +57,9 @@ type rerankInputs struct {
 
 	// There is only fieldId in schemapb.SearchResultData, but no fieldName
 	inputFieldIds []int64
+
+	// idxComputers for computing correct field indices for nullable vectors
+	idxComputers []*typeutil.FieldDataIdxComputer
 }
 
 func organizeFieldIdData(multipSearchResultData []*schemapb.SearchResultData, inputFieldIds []int64) ([]map[int64]*schemapb.FieldData, error) {
@@ -119,14 +122,21 @@ func newRerankInputs(multipSearchResultData []*schemapb.SearchResultData, inputF
 			start += size
 		}
 	}
+	idxComputers := make([]*typeutil.FieldDataIdxComputer, len(multipSearchResultData))
+	for i, srd := range multipSearchResultData {
+		if srd != nil {
+			idxComputers[i] = typeutil.NewFieldDataIdxComputer(srd.GetFieldsData())
+		}
+	}
+
 	if isGrouping {
 		idGroup, err := genIdGroupingMap(multipSearchResultData)
 		if err != nil {
 			return nil, err
 		}
-		return &rerankInputs{cols, idGroup, nq, multipSearchResultData, inputFieldIds}, nil
+		return &rerankInputs{cols, idGroup, nq, multipSearchResultData, inputFieldIds, idxComputers}, nil
 	}
-	return &rerankInputs{cols, nil, nq, multipSearchResultData, inputFieldIds}, nil
+	return &rerankInputs{cols, nil, nq, multipSearchResultData, inputFieldIds, idxComputers}, nil
 }
 
 func (inputs *rerankInputs) numOfQueries() int64 {
@@ -165,7 +175,13 @@ func appendResult[T PKType](inputs *rerankInputs, outputs *rerankOutputs, idScor
 	if len(inputs.fieldData) > 0 && len(outputs.searchResultData.FieldsData) > 0 {
 		for idx := range ids {
 			loc := idScores.locations[idx]
-			typeutil.AppendFieldData(outputs.searchResultData.FieldsData, inputs.fieldData[loc.batchIdx].GetFieldsData(), int64(loc.offset))
+			fieldsData := inputs.fieldData[loc.batchIdx].GetFieldsData()
+			rowIdx := int64(loc.offset)
+			var fieldIdxs []int64
+			if inputs.idxComputers[loc.batchIdx] != nil {
+				fieldIdxs = inputs.idxComputers[loc.batchIdx].Compute(rowIdx)
+			}
+			typeutil.AppendFieldData(outputs.searchResultData.FieldsData, fieldsData, rowIdx, fieldIdxs...)
 		}
 	}
 	switch any(ids).(type) {
