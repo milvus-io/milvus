@@ -5,6 +5,7 @@ package segcore
 
 #include "segcore/plan_c.h"
 #include "segcore/reduce_c.h"
+#include "segcore/segment_c.h"
 */
 import "C"
 
@@ -19,6 +20,12 @@ type SearchResult struct {
 func (r *SearchResult) Release() {
 	C.DeleteSearchResult(r.cSearchResult)
 	r.cSearchResult = nil
+}
+
+// ValidCount returns the count of rows that pass the filter (for two-stage search).
+// Returns -1 if not set (normal search mode).
+func (r *SearchResult) ValidCount() int64 {
+	return int64(C.GetSearchResultValidCount(r.cSearchResult))
 }
 
 type RetrieveResult struct {

@@ -224,9 +224,16 @@ CSearch(CSegmentInterface c_segment,
         CSearchPlan c_plan,
         CPlaceholderGroup c_placeholder_group,
         uint64_t timestamp,
-        CSearchResult* result) {
-    auto future = AsyncSearch(
-        {}, c_segment, c_plan, c_placeholder_group, timestamp, 0, 0);
+        CSearchResult* result,
+        bool filter_only = false) {
+    auto future = AsyncSearch({},
+                              c_segment,
+                              c_plan,
+                              c_placeholder_group,
+                              timestamp,
+                              0,
+                              0,
+                              filter_only);
     auto futurePtr = static_cast<milvus::futures::IFuture*>(
         static_cast<void*>(static_cast<CFuture*>(future)));
 
@@ -245,6 +252,15 @@ CSearch(CSegmentInterface c_segment,
     }
     *result = static_cast<CSearchResult>(searchResult);
     return status;
+}
+
+// Filter-only search wrapper for two-stage search testing
+CStatus
+CSearchFilterOnly(CSegmentInterface c_segment,
+                  CSearchPlan c_plan,
+                  uint64_t timestamp,
+                  CSearchResult* result) {
+    return CSearch(c_segment, c_plan, nullptr, timestamp, result, true);
 }
 
 CStatus
