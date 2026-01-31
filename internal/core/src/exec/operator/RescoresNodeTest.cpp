@@ -58,39 +58,16 @@ TEST(Rescorer, Normal) {
 
     // no result after search
     {
-        const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                        binary_range_expr: <
-                                            column_info: <
-                                                field_id: 101
-                                                data_type: Int8
-                                            >
-                                            lower_inclusive: true,
-                                            upper_inclusive: false,
-                                            lower_value: <
-                                                int64_val: 100
-                                            >
-                                            upper_value: <
-                                                int64_val: -1
-                                            >
-                                        >
-                                    >
-                                    query_info: <
-                                        topk: 10
-                                        metric_type: "L2"
-                                        search_params: "{\"ef\": 50}"
-                                    >
-                                    placeholder_tag: "$0"
-                                >
-                                scorers: <
-                                    weight: 4
-                                >)";
-
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        ScopedSchemaHandle handle(*schema);
+        ScopedSchemaHandle::ScorerParams scorer;
+        scorer.weight = 4;
+        auto plan = handle.ParseSearchWithScorers(schema,
+                                                  "int8 >= 100 and int8 < -1",
+                                                  "fakevec",
+                                                  10,
+                                                  "L2",
+                                                  R"({"ef": 50})",
+                                                  {scorer});
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -102,39 +79,16 @@ TEST(Rescorer, Normal) {
 
     // search result not empty but no boost filter
     {
-        const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                        binary_range_expr: <
-                                            column_info: <
-                                                field_id: 101
-                                                data_type: Int8
-                                            >
-                                            lower_inclusive: true,
-                                            upper_inclusive: false,
-                                            lower_value: <
-                                                int64_val: -1
-                                            >
-                                            upper_value: <
-                                                int64_val: 100
-                                            >
-                                        >
-                                    >
-                                    query_info: <
-                                        topk: 10
-                                        metric_type: "L2"
-                                        search_params: "{\"ef\": 50}"
-                                    >
-                                    placeholder_tag: "$0"
-                                >
-                                scorers: <
-                                    weight: 4
-                                >)";
-
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        ScopedSchemaHandle handle(*schema);
+        ScopedSchemaHandle::ScorerParams scorer;
+        scorer.weight = 4;
+        auto plan = handle.ParseSearchWithScorers(schema,
+                                                  "int8 >= -1 and int8 < 100",
+                                                  "fakevec",
+                                                  10,
+                                                  "L2",
+                                                  R"({"ef": 50})",
+                                                  {scorer});
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -146,41 +100,18 @@ TEST(Rescorer, Normal) {
 
     // random function with seed
     {
-        const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                        binary_range_expr: <
-                                            column_info: <
-                                                field_id: 101
-                                                data_type: Int8
-                                            >
-                                            lower_inclusive: true,
-                                            upper_inclusive: false,
-                                            lower_value: <
-                                                int64_val: -1
-                                            >
-                                            upper_value: <
-                                                int64_val: 100
-                                            >
-                                        >
-                                    >
-                                    query_info: <
-                                        topk: 10
-                                        metric_type: "L2"
-                                        search_params: "{\"ef\": 50}"
-                                    >
-                                    placeholder_tag: "$0"
-                                >
-                                scorers: <
-                                    type: 1
-                                    weight: 1
-                                    params: <key: "seed", value: "123">
-                                >)";
-
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        ScopedSchemaHandle handle(*schema);
+        ScopedSchemaHandle::ScorerParams scorer;
+        scorer.type = proto::plan::FunctionTypeRandom;
+        scorer.weight = 1;
+        scorer.params = {{"seed", "123"}};
+        auto plan = handle.ParseSearchWithScorers(schema,
+                                                  "int8 >= -1 and int8 < 100",
+                                                  "fakevec",
+                                                  10,
+                                                  "L2",
+                                                  R"({"ef": 50})",
+                                                  {scorer});
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -192,41 +123,18 @@ TEST(Rescorer, Normal) {
 
     // random function with field as random seed
     {
-        const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                        binary_range_expr: <
-                                            column_info: <
-                                                field_id: 101
-                                                data_type: Int8
-                                            >
-                                            lower_inclusive: true,
-                                            upper_inclusive: false,
-                                            lower_value: <
-                                                int64_val: -1
-                                            >
-                                            upper_value: <
-                                                int64_val: 100
-                                            >
-                                        >
-                                    >
-                                    query_info: <
-                                        topk: 10
-                                        metric_type: "L2"
-                                        search_params: "{\"ef\": 50}"
-                                    >
-                                    placeholder_tag: "$0"
-                                >
-                                scorers: <
-                                    type: 1
-                                    weight: 1
-                                    params: <key: "field", value: "int64">
-                                >)";
-
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        ScopedSchemaHandle handle(*schema);
+        ScopedSchemaHandle::ScorerParams scorer;
+        scorer.type = proto::plan::FunctionTypeRandom;
+        scorer.weight = 1;
+        scorer.params = {{"field", "int64"}};
+        auto plan = handle.ParseSearchWithScorers(schema,
+                                                  "int8 >= -1 and int8 < 100",
+                                                  "fakevec",
+                                                  10,
+                                                  "L2",
+                                                  R"({"ef": 50})",
+                                                  {scorer});
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -238,42 +146,18 @@ TEST(Rescorer, Normal) {
 
     // random function with field and seed
     {
-        const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                        binary_range_expr: <
-                                            column_info: <
-                                                field_id: 101
-                                                data_type: Int8
-                                            >
-                                            lower_inclusive: true,
-                                            upper_inclusive: false,
-                                            lower_value: <
-                                                int64_val: -1
-                                            >
-                                            upper_value: <
-                                                int64_val: 100
-                                            >
-                                        >
-                                    >
-                                    query_info: <
-                                        topk: 10
-                                        metric_type: "L2"
-                                        search_params: "{\"ef\": 50}"
-                                    >
-                                    placeholder_tag: "$0"
-                                >
-                                scorers: <
-                                    type: 1
-                                    weight: 1
-                                    params: <key: "seed", value: "123">
-                                    params: <key: "field", value: "int64">
-                                >)";
-
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        ScopedSchemaHandle handle(*schema);
+        ScopedSchemaHandle::ScorerParams scorer;
+        scorer.type = proto::plan::FunctionTypeRandom;
+        scorer.weight = 1;
+        scorer.params = {{"seed", "123"}, {"field", "int64"}};
+        auto plan = handle.ParseSearchWithScorers(schema,
+                                                  "int8 >= -1 and int8 < 100",
+                                                  "fakevec",
+                                                  10,
+                                                  "L2",
+                                                  R"({"ef": 50})",
+                                                  {scorer});
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);

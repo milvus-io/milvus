@@ -16,6 +16,7 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <cmath>
@@ -47,6 +48,7 @@
 #include "milvus-storage/common/constants.h"
 #include "milvus_plan_parser.h"
 #include "pb/plan.pb.h"
+#include "query/Plan.h"
 
 using boost::algorithm::starts_with;
 
@@ -2079,6 +2081,93 @@ class ScopedSchemaHandle {
         auto plan_bytes = milvus::planparserv2::PlanParser::ParseSearch(
             handle_, expr, vector_field_name, query_info_vec);
         return std::vector<char>(plan_bytes.begin(), plan_bytes.end());
+    }
+
+    // Parse a search iterator expression with vector search parameters.
+    // This creates a VectorANNS plan node with iterator settings for search operations.
+    // batch_size: number of results per batch in iterator
+    // token: iterator token (optional, for continuation)
+    // last_bound: last bound value (optional, for continuation)
+    std::vector<char>
+    ParseSearchIterator(const std::string& expr,
+                        const std::string& vector_field_name,
+                        int64_t topk,
+                        const std::string& metric_type,
+                        const std::string& search_params,
+                        uint32_t batch_size,
+                        const std::string& token = "",
+                        std::optional<float> last_bound = std::nullopt,
+                        int64_t round_decimal = -1) const {
+        // Build QueryInfo protobuf
+        milvus::proto::plan::QueryInfo query_info;
+        query_info.set_topk(topk);
+        query_info.set_metric_type(metric_type);
+        query_info.set_search_params(search_params);
+        query_info.set_round_decimal(round_decimal);
+
+        // Set iterator info
+        auto* iterator_info = query_info.mutable_search_iterator_v2_info();
+        iterator_info->set_batch_size(batch_size);
+        if (!token.empty()) {
+            iterator_info->set_token(token);
+        }
+        if (last_bound.has_value()) {
+            iterator_info->set_last_bound(last_bound.value());
+        }
+
+        // Serialize QueryInfo
+        std::string query_info_bytes;
+        query_info.SerializeToString(&query_info_bytes);
+        std::vector<uint8_t> query_info_vec(query_info_bytes.begin(),
+                                            query_info_bytes.end());
+
+        auto plan_bytes = milvus::planparserv2::PlanParser::ParseSearch(
+            handle_, expr, vector_field_name, query_info_vec);
+        return std::vector<char>(plan_bytes.begin(), plan_bytes.end());
+    }
+
+    // Helper struct for scorer configuration
+    struct ScorerParams {
+        milvus::proto::plan::FunctionType type =
+            milvus::proto::plan::FunctionTypeWeight;
+        float weight = 1.0f;
+        std::map<std::string, std::string> params;
+    };
+
+    // Parse a search expression with scorers for rescoring functionality.
+    // Returns the plan directly (not serialized bytes) since scorers need to be
+    // attached at the PlanNode level.
+    std::unique_ptr<milvus::query::Plan>
+    ParseSearchWithScorers(const milvus::SchemaPtr& schema,
+                           const std::string& expr,
+                           const std::string& vector_field_name,
+                           int64_t topk,
+                           const std::string& metric_type,
+                           const std::string& search_params,
+                           const std::vector<ScorerParams>& scorers) const {
+        // First parse the base search plan
+        auto plan_bytes = ParseSearch(
+            expr, vector_field_name, topk, metric_type, search_params);
+
+        // Deserialize to PlanNode proto
+        milvus::proto::plan::PlanNode plan_node;
+        milvus::query::ParsePlanNodeProto(
+            plan_node, plan_bytes.data(), plan_bytes.size());
+
+        // Add scorers to the plan node
+        for (const auto& scorer : scorers) {
+            auto* score_func = plan_node.add_scorers();
+            score_func->set_type(scorer.type);
+            score_func->set_weight(scorer.weight);
+            for (const auto& [key, value] : scorer.params) {
+                auto* param = score_func->add_params();
+                param->set_key(key);
+                param->set_value(value);
+            }
+        }
+
+        // Create and return the plan
+        return milvus::query::CreateSearchPlanFromPlanNode(schema, plan_node);
     }
 
  private:
