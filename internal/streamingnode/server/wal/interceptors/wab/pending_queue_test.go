@@ -106,14 +106,16 @@ func TestPendingQueue(t *testing.T) {
 	assert.Equal(t, snapshot[1].Message.TimeTick(), uint64(105))
 
 	// Test time based eviction
-	pq = newPendingQueue(100, 10*time.Millisecond, newImmutableTimeTickMessage(t, 99))
+	// Use 100ms keepAlive instead of 10ms to avoid flaky behavior in slow CI environments.
+	// The test could fail if more than 10ms passes between queue creation and the first Evict() call.
+	pq = newPendingQueue(100, 100*time.Millisecond, newImmutableTimeTickMessage(t, 99))
 	pq.Push([]message.ImmutableMessage{
 		newImmutableMessage(t, 100, 10),
 	})
 	pq.Evict()
 	assert.Equal(t, pq.CurrentOffset(), 1)
 	assert.Len(t, pq.buf, 2)
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(150 * time.Millisecond)
 	pq.Evict()
 	// the last message should never be evicted.
 	assert.Len(t, pq.buf, 1)
