@@ -1984,14 +1984,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 					fieldIndexInfo.GetBuildID())
 			}
 
-			needWarmup := false
-			if isVectorType {
-				needWarmup = paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.GetValue() == "sync"
-			} else {
-				needWarmup = paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.GetValue() == "sync"
-			}
-
-			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+			if !multiplyFactor.TieredEvictionEnabled {
 				indexMemorySize += estimateResult.MaxMemoryCost
 				segDiskLoadingSize += estimateResult.MaxDiskCost
 			}
@@ -2042,7 +2035,6 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		var legacyNilSchema bool
 		mmapEnabled := true
 		isVectorType := true
-		needWarmup := false
 		hasIndex := true
 
 		for _, fieldID := range fieldIDs {
@@ -2067,11 +2059,6 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 			supportInterimIndexDataType = supportInterimIndexDataType || SupportInterimIndexDataType(fieldSchema.GetDataType())
 			isVectorType = isVectorType && typeutil.IsVectorType(fieldSchema.GetDataType())
-			if isVectorType {
-				needWarmup = needWarmup || paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.GetValue() == "sync"
-			} else {
-				needWarmup = needWarmup || paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.GetValue() == "sync"
-			}
 			mmapEnabled = mmapEnabled && isDataMmapEnable(fieldSchema)
 			containsTimestampField = containsTimestampField || DoubleMemorySystemField(fieldSchema.GetFieldID())
 			doubleMomoryDataField = doubleMomoryDataField || DoubleMemoryDataType(fieldSchema.GetDataType())
@@ -2082,7 +2069,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		}
 
 		if !hasIndex {
-			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+			if !multiplyFactor.TieredEvictionEnabled {
 				interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && supportInterimIndexDataType
 				if interimIndexEnable {
 					segMemoryLoadingSize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
@@ -2093,11 +2080,11 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		if isVectorType {
 			mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
 			if mmapVectorField {
-				if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+				if !multiplyFactor.TieredEvictionEnabled {
 					segDiskLoadingSize += binlogSize
 				}
 			} else {
-				if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+				if !multiplyFactor.TieredEvictionEnabled {
 					segMemoryLoadingSize += binlogSize
 				}
 			}
@@ -2113,14 +2100,14 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		}
 
 		if !mmapEnabled {
-			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+			if !multiplyFactor.TieredEvictionEnabled {
 				segMemoryLoadingSize += binlogSize
 				if doubleMomoryDataField {
 					segMemoryLoadingSize += binlogSize
 				}
 			}
 		} else {
-			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+			if !multiplyFactor.TieredEvictionEnabled {
 				segDiskLoadingSize += uint64(getBinlogDataMemorySize(fieldBinlog))
 			}
 		}
