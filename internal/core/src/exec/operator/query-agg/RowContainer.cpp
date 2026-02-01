@@ -15,8 +15,13 @@
 // limitations under the License.
 
 #include "RowContainer.h"
+
+#include <string.h>
+#include <cstdint>
+
 #include "common/BitUtil.h"
 #include "common/Vector.h"
+#include "exec/operator/query-agg/Aggregate.h"
 
 namespace milvus {
 namespace exec {

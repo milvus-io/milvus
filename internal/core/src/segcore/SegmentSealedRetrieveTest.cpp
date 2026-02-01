@@ -9,13 +9,37 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <cstdint>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/LoadInfo.h"
+#include "common/Schema.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "expr/ITypeExpr.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/Collection.h"
+#include "segcore/SegmentInterface.h"
+#include "segcore/SegmentSealed.h"
 #include "test_utils/DataGen.h"
-#include "test_utils/storage_test_utils.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;

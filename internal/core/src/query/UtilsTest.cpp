@@ -10,11 +10,15 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-
+#include <stdint.h>
+#include <limits>
 #include <string>
 #include <string_view>
 
+#include "common/Types.h"
 #include "common/Utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
 #include "query/Utils.h"
 
 TEST(Util_Query, StringMatch) {

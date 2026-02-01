@@ -16,11 +16,16 @@
 
 #pragma once
 
+#include <stdint.h>
+#include <atomic>
 #include <memory>
+#include <optional>
 #include <vector>
 
+#include "arrow/array/builder_base.h"
+#include "arrow/type.h"
 #include "storage/PayloadStream.h"
-#include <parquet/arrow/writer.h>
+#include "storage/Types.h"
 
 namespace milvus::storage {
 class PayloadWriter {

@@ -16,26 +16,44 @@
 
 #pragma once
 
-#include <memory>
-#include <string>
-#include <vector>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <exception>
 #include <future>
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
+#include "arrow/array/builder_base.h"
+#include "arrow/scalar.h"
+#include "arrow/type.h"
+#include "common/ArrowDataWrapper.h"
 #include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
+#include "common/FieldMeta.h"
 #include "common/LoadInfo.h"
-#include "knowhere/comp/index_param.h"
+#include "common/Types.h"
+#include "common/type_c.h"
+#include "milvus-storage/common/metadata.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/properties.h"
 #include "parquet/schema.h"
-#include "storage/Event.h"
-#include "storage/MemFileManagerImpl.h"
-#include "storage/PayloadStream.h"
-#include "storage/FileManager.h"
 #include "storage/BinlogReader.h"
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
-#include "storage/Types.h"
-#include "milvus-storage/filesystem/fs.h"
+#include "storage/Event.h"
+#include "storage/MemFileManagerImpl.h"
+#include "storage/PayloadReader.h"
+#include "storage/PayloadStream.h"
 #include "storage/ThreadPools.h"
-#include "milvus-storage/common/metadata.h"
+#include "storage/Types.h"
 
 namespace milvus::storage {
 

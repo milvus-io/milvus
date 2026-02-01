@@ -11,9 +11,10 @@
 
 #pragma once
 
+#include <functional>
 #include <mutex>
 #include <optional>
-#include <functional>
+#include <stdexcept>
 #include <vector>
 
 namespace milvus::futures {

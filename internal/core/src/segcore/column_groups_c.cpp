@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <vector>
-#include <string>
 #include <memory>
+#include <utility>
+#include <vector>
 
-#include "segcore/column_groups_c.h"
 #include "monitor/scope_metric.h"
+#include "segcore/column_groups_c.h"
 
 using VecVecInt = std::vector<std::vector<int>>;
 

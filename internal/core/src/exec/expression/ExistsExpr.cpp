@@ -15,12 +15,28 @@
 // limitations under the License.
 
 #include "ExistsExpr.h"
+
+#include <set>
+
+#include "bitset/bitset.h"
+#include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/JsonCastType.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/Vector.h"
+#include "common/bson_view.h"
+#include "common/type_c.h"
+#include "exec/expression/EvalCtx.h"
+#include "folly/FBVector.h"
+#include "index/Index.h"
+#include "index/JsonFlatIndex.h"
 #include "index/JsonInvertedIndex.h"
 #include "index/json_stats/JsonKeyStats.h"
+#include "index/json_stats/utils.h"
+#include "opentelemetry/trace/span.h"
+#include "segcore/SegmentInterface.h"
+#include "segcore/SegmentSealed.h"
 
 namespace milvus {
 namespace exec {

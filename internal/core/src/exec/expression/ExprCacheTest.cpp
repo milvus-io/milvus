@@ -15,11 +15,14 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include <cstddef>
+#include <memory>
 #include <string>
-#include <vector>
 
-#include "exec/expression/ExprCache.h"
+#include "bitset/bitset.h"
 #include "common/Types.h"
+#include "exec/expression/ExprCache.h"
+#include "gtest/gtest.h"
 
 using milvus::exec::ExprResCacheManager;
 

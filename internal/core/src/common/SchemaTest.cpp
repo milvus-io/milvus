@@ -10,8 +10,16 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <stdint.h>
+#include <memory>
+#include <string>
 
 #include "common/Schema.h"
+#include "common/Types.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
 
 using namespace milvus;
 

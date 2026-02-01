@@ -15,22 +15,36 @@
 // limitations under the License.
 
 #include "storage/MemFileManagerImpl.h"
-#include <memory>
-#include <string>
-#include <unordered_map>
 
-#include <arrow/c/bridge.h>
+#include <atomic>
+#include <exception>
+#include <future>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <unordered_map>
+#include <utility>
+
 #include "common/Common.h"
 #include "common/Consts.h"
+#include "common/EasyAssert.h"
 #include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
 #include "common/Types.h"
-#include "log/Log.h"
-#include "storage/Util.h"
-#include "storage/FileManager.h"
-#include "storage/loon_ffi/ffi_reader_c.h"
+#include "glog/logging.h"
 #include "index/Utils.h"
-#include "milvus-storage/ffi_c.h"
-#include "util.h"
+#include "knowhere/binaryset.h"
+#include "log/Log.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "nlohmann/json.hpp"
+#include "pb/schema.pb.h"
+#include "storage/ChunkManager.h"
+#include "storage/DataCodec.h"
+#include "storage/FileManager.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 
 namespace milvus::storage {
 

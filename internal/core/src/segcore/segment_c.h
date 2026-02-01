@@ -15,15 +15,16 @@
 extern "C" {
 #endif
 
-#include <stdbool.h>
-#include <stdlib.h>
 #include <stdint.h>
+#include <stdbool.h>
 
+#include "common/common_type_c.h"
 #include "common/type_c.h"
-#include "futures/future_c.h"
-#include "segcore/plan_c.h"
-#include "segcore/load_index_c.h"
+#include "futures/future_c_types.h"
+#include "segcore/collection_c.h"
 #include "segcore/load_field_data_c.h"
+#include "segcore/load_index_c.h"
+#include "segcore/plan_c.h"
 
 typedef void* CSearchResult;
 typedef CProto CRetrieveResult;

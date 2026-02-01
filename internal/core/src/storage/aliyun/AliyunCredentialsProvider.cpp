@@ -14,19 +14,29 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include <aws/core/config/AWSProfileConfigLoader.h>
-#include <aws/core/platform/Environment.h>
-#include <aws/core/platform/FileSystem.h>
-#include <aws/core/utils/logging/LogMacros.h>
-#include <aws/core/utils/StringUtils.h>
-#include <aws/core/utils/FileSystemUtils.h>
 #include <aws/core/client/SpecifiedRetryableErrorsRetryStrategy.h>
+#include <aws/core/platform/Environment.h>
 #include <aws/core/utils/UUID.h>
-#include <cstdlib>
+#include <aws/core/utils/logging/LogMacros.h>
+#include <algorithm>
+#include <chrono>
 #include <fstream>
-#include <string.h>
-#include <climits>
+#include <iterator>
+#include <string>
+#include <vector>
+
 #include "AliyunCredentialsProvider.h"
+#include "aws/core/auth/AWSCredentialsProvider.h"
+#include "aws/core/client/ClientConfiguration.h"
+#include "aws/core/config/AWSProfileConfig.h"
+#include "aws/core/config/ConfigAndCredentialsCacheManager.h"
+#include "aws/core/http/Scheme.h"
+#include "aws/core/utils/DateTime.h"
+#include "aws/core/utils/memory/stl/AWSAllocator.h"
+#include "aws/core/utils/memory/stl/AWSStreamFwd.h"
+#include "aws/core/utils/memory/stl/AWSString.h"
+#include "aws/core/utils/threading/ReaderWriterLock.h"
+#include "storage/aliyun/AliyunSTSClient.h"
 
 static const char STS_ASSUME_ROLE_WEB_IDENTITY_LOG_TAG[] =
     "AliyunSTSAssumeRoleWebIdentityCredentialsProvider";  // [aliyun]

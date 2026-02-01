@@ -14,20 +14,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <cstring>
-#include <vector>
-#include <queue>
-#include <atomic>
-#include <unordered_map>
-#include <shared_mutex>
 #include <memory>
+#include <mutex>
+#include <queue>
 #include <shared_mutex>
-#include "common/EasyAssert.h"
-#include "log/Log.h"
-#include <optional>
-#include "common/type_c.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 namespace milvus::storage {
 struct MmapChunkDescriptor {
  public:

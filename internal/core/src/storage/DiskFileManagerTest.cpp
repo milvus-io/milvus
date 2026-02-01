@@ -9,40 +9,76 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <arrow/result.h>
 #include <boost/filesystem/operations.hpp>
-#include <chrono>
-#include <arrow/array/builder_binary.h>
-#include <arrow/array/builder_primitive.h>
-#include <arrow/record_batch.h>
-#include <arrow/type.h>
-#include <arrow/type_fwd.h>
+#include <boost/filesystem/path.hpp>
+#include <cxxabi.h>
+#include <fcntl.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <exception>
+#include <future>
+#include <initializer_list>
+#include <iostream>
 #include <limits>
+#include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
-#include <fstream>
+#include <thread>
+#include <unordered_map>
+#include <utility>
 #include <vector>
-#include <unistd.h>
 
-#include "common/EasyAssert.h"
-#include "common/FieldDataInterface.h"
-#include "common/Slice.h"
 #include "common/Common.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
+#include "common/TypeTraits.h"
 #include "common/Types.h"
+#include "common/VectorTrait.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "filemanager/OutputStream.h"
+#include "gtest/gtest.h"
+#include "index/Meta.h"
+#include "knowhere/binaryset.h"
+#include "knowhere/object.h"
+#include "knowhere/operands.h"
+#include "knowhere/sparse_utils.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "pb/common.pb.h"
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/FileManager.h"
 #include "storage/InsertData.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/PayloadReader.h"
 #include "storage/ThreadPool.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
-#include "storage/DiskFileManagerImpl.h"
-#include "storage/LocalChunkManagerSingleton.h"
-#include "index/Meta.h"
-
+#include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
+
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectDOUBLE_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectFLOAT_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectINT16_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectINT32_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectINT64_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectINT8_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectSTRING_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectVARCHAR_Test;
 
 using namespace std;
 using namespace milvus;

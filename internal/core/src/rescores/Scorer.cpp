@@ -15,14 +15,17 @@
 // limitations under the License.
 
 #include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <optional>
-#include <random>
-#include "common/Types.h"
-#include "expr/ITypeExpr.h"
+
 #include "Scorer.h"
 #include "Utils.h"
-#include "log/Log.h"
+#include "bitset/bitset.h"
+#include "common/Types.h"
+#include "pb/schema.pb.h"
 #include "rescores/Murmur3.h"
+#include "segcore/SegmentInterface.h"
 
 namespace milvus::rescores {
 

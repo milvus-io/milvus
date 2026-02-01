@@ -16,11 +16,8 @@
 
 #include "storage/minio/MinioChunkManager.h"
 
-#include <fstream>
 #include <aws/core/auth/AWSCredentials.h>
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
-#include <aws/core/auth/STSCredentialsProvider.h>
-#include <aws/core/utils/logging/ConsoleLogSystem.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
@@ -29,16 +26,38 @@
 #include <aws/s3/model/HeadObjectRequest.h>
 #include <aws/s3/model/ListObjectsRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
+#include <string.h>
+#include <unistd.h>
+#include <algorithm>
+#include <chrono>
+#include <exception>
+#include <functional>
+#include <sstream>
 
-#include "storage/aliyun/AliyunSTSClient.h"
-#include "storage/aliyun/AliyunCredentialsProvider.h"
-#include "storage/tencent/TencentCloudSTSClient.h"
-#include "storage/tencent/TencentCloudCredentialsProvider.h"
-#include "monitor/Monitor.h"
-#include "common/EasyAssert.h"
-#include "log/Log.h"
-#include "signal.h"
+#include "aws/core/Aws.h"
+#include "aws/core/auth/signer/AWSAuthV4Signer.h"
+#include "aws/core/http/Scheme.h"
+#include "aws/core/utils/Outcome.h"
+#include "aws/core/utils/memory/AWSMemory.h"
+#include "aws/core/utils/memory/stl/AWSStringStream.h"
+#include "aws/s3/S3Client.h"
+#include "aws/s3/model/Bucket.h"
+#include "aws/s3/model/HeadObjectResult.h"
+#include "aws/s3/model/ListBucketsResult.h"
+#include "aws/s3/model/ListObjectsResult.h"
+#include "aws/s3/model/Object.h"
 #include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "fmt/core.h"
+#include "google/cloud/storage/oauth2/compute_engine_credentials.h"
+#include "google/cloud/version.h"
+#include "log/Log.h"
+#include "monitor/Monitor.h"
+#include "prometheus/counter.h"
+#include "prometheus/histogram.h"
+#include "signal.h"
+#include "storage/Types.h"
+#include "storage/aliyun/AliyunCredentialsProvider.h"
 
 namespace milvus::storage {
 

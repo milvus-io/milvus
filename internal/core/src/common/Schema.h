@@ -16,26 +16,28 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
-#include <boost/stacktrace.hpp>
-#include "FieldMeta.h"
-#include "boost/stacktrace/frame.hpp"
-#include "boost/stacktrace/stacktrace_fwd.hpp"
-#include "common/Types.h"
-#include "pb/schema.pb.h"
-#include "log/Log.h"
 #include "Consts.h"
-
+#include "FieldMeta.h"
+#include "NamedType/named_type_impl.hpp"
+#include "NamedType/underlying_functionalities.hpp"
 #include "arrow/type.h"
+#include "common/EasyAssert.h"
+#include "common/Types.h"
+#include "knowhere/comp/index_param.h"
+#include "pb/schema.pb.h"
 
 namespace milvus {
 

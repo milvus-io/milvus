@@ -9,10 +9,40 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <nlohmann/json_fwd.hpp>
+#include <string.h>
+#include <algorithm>
+#include <cstdint>
+#include <initializer_list>
+#include <iostream>
+#include <limits>
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <variant>
+#include <vector>
 
+#include "common/Consts.h"
+#include "common/IndexMeta.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "common/VectorTrait.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
+#include "pb/common.pb.h"
 #include "pb/schema.pb.h"
+#include "query/Plan.h"
 #include "query/PlanImpl.h"
+#include "segcore/Collection.h"
+#include "segcore/SegmentGrowing.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentInterface.h"
 #include "test_utils/AssertUtils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"

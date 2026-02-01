@@ -9,24 +9,51 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <boost/filesystem/operations.hpp>
+#include <fmt/core.h>
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
-#include <functional>
-#include <boost/filesystem.hpp>
-#include <unordered_set>
+#include <nlohmann/json.hpp>
+#include <simdjson.h>
+#include <stddef.h>
+#include <cstdint>
+#include <iostream>
 #include <memory>
 #include <random>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
 
+#include "bitset/bitset.h"
+#include "cachinglayer/CacheSlot.h"
+#include "common/Consts.h"
+#include "common/FieldDataInterface.h"
+#include "common/Json.h"
 #include "common/Tracer.h"
-#include "index/BitmapIndex.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "storage/Util.h"
-#include "storage/InsertData.h"
-#include "indexbuilder/IndexFactory.h"
-#include "index/IndexFactory.h"
+#include "common/TracerBase.h"
+#include "common/Types.h"
+#include "common/bson_view.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "index/IndexInfo.h"
+#include "index/IndexStats.h"
 #include "index/Meta.h"
 #include "index/json_stats/JsonKeyStats.h"
-#include "common/Json.h"
-#include "common/Types.h"
+#include "index/json_stats/bson_inverted.h"
+#include "index/json_stats/utils.h"
+#include "indexbuilder/IndexCreatorBase.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
+#include "simdjson/padded_string.h"
+#include "storage/ChunkManager.h"
+#include "storage/FileManager.h"
+#include "storage/InsertData.h"
+#include "storage/PayloadReader.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 
 using namespace milvus::index;
 using namespace milvus::indexbuilder;

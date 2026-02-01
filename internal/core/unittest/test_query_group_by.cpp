@@ -10,13 +10,36 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include "test_utils/DataGen.h"
-#include "segcore/SegmentSealed.h"
-#include "plan/PlanNode.h"
+#include <stdint.h>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "common/EasyAssert.h"
+#include "common/OpContext.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "common/Vector.h"
+#include "common/protobuf_utils.h"
 #include "exec/QueryContext.h"
 #include "exec/Task.h"
-#include "test_utils/storage_test_utils.h"
 #include "exec/expression/function/FunctionFactory.h"
+#include "expr/ITypeExpr.h"
+#include "gtest/gtest.h"
+#include "index/NgramInvertedIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "plan/PlanNode.h"
+#include "plan/PlanNodeIdGenerator.h"
+#include "query/PlanNode.h"
+#include "segcore/Collection.h"
+#include "segcore/SegmentSealed.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;

@@ -14,7 +14,62 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <boost/format.hpp>
+#include <boost/optional/optional.hpp>
+#include <folly/FBVector.h>
+#include <stddef.h>
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <memory>
+#include <optional>
+#include <ostream>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
+
 #include "ExprTestBase.h"
+#include "NamedType/named_type_impl.hpp"
+#include "bitset/bitset.h"
+#include "common/Common.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/IndexMeta.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "common/Vector.h"
+#include "common/protobuf_utils.h"
+#include "exec/QueryContext.h"
+#include "exec/Task.h"
+#include "exec/expression/EvalCtx.h"
+#include "expr/ITypeExpr.h"
+#include "gtest/gtest.h"
+#include "index/BitmapIndex.h"
+#include "index/Index.h"
+#include "index/Meta.h"
+#include "index/StringIndex.h"
+#include "index/StringIndexMarisa.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/dataset.h"
+#include "pb/plan.pb.h"
+#include "plan/PlanNode.h"
+#include "query/ExecPlanNodeVisitor.h"
+#include "query/Plan.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/SegmentGrowing.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/Types.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
+#include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 EXPR_TEST_INSTANTIATE();
 

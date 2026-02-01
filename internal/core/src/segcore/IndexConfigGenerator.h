@@ -11,12 +11,17 @@
 
 #pragma once
 
-#include "common/Types.h"
-#include "common/IndexMeta.h"
-#include "knowhere/config.h"
+#include <stdint.h>
+#include <string>
+#include <unordered_set>
+
 #include "SegcoreConfig.h"
+#include "common/IndexMeta.h"
 #include "common/QueryInfo.h"
+#include "common/Types.h"
 #include "common/type_c.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/config.h"
 
 namespace milvus::segcore {
 

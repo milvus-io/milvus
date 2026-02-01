@@ -16,15 +16,18 @@
 
 #pragma once
 
-#include <vector>
-#include <utility>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <shared_mutex>
+#include <utility>
+#include <vector>
+
 #include "cachinglayer/Manager.h"
-#include "common/Types.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/Types.h"
+#include "folly/FBVector.h"
 
 namespace milvus {
 

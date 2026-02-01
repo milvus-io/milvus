@@ -15,12 +15,24 @@
 // limitations under the License.
 
 #include "NullExpr.h"
+
+#include <cstdint>
 #include <memory>
+#include <string_view>
 #include <utility>
+
 #include "common/Array.h"
+#include "common/EasyAssert.h"
+#include "common/Json.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
-#include "log/Log.h"
-#include "query/Utils.h"
+#include "common/type_c.h"
+#include "opentelemetry/trace/span.h"
+#include "pb/plan.pb.h"
+#include "segcore/SegmentInterface.h"
+#include "storage/MmapManager.h"
+#include "storage/Types.h"
+
 namespace milvus {
 namespace exec {
 

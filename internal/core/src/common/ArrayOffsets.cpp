@@ -15,9 +15,22 @@
 // limitations under the License.
 
 #include "ArrayOffsets.h"
-#include "segcore/SegmentInterface.h"
-#include "log/Log.h"
+
+#include <assert.h>
+#include <cstddef>
+#include <type_traits>
+
+#include "bitset/bitset.h"
+#include "cachinglayer/CacheSlot.h"
+#include "cachinglayer/Utils.h"
+#include "common/Array.h"
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/OpContext.h"
+#include "common/VectorArray.h"
+#include "glog/logging.h"
+#include "log/Log.h"
+#include "segcore/SegmentInterface.h"
 
 namespace milvus {
 

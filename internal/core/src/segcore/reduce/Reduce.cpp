@@ -11,16 +11,35 @@
 
 #include "Reduce.h"
 
-#include "log/Log.h"
+#include <math.h>
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <map>
+#include <numeric>
+#include <optional>
+#include <queue>
+#include <ratio>
+#include <type_traits>
 #include <vector>
 
+#include "NamedType/named_type_impl.hpp"
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/Schema.h"
+#include "common/Tracer.h"
+#include "common/protobuf_utils.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
+#include "log/Log.h"
 #include "monitor/Monitor.h"
+#include "pb/schema.pb.h"
+#include "prometheus/histogram.h"
+#include "query/PlanImpl.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
 #include "segcore/pkVisitor.h"
-#include "segcore/ReduceUtils.h"
 
 namespace milvus::segcore {
 

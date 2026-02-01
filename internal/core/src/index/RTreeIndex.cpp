@@ -9,14 +9,38 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <boost/filesystem.hpp>
-#include "common/Slice.h"  // for INDEX_FILE_SLICE_META and Disassemble
+#include <string.h>
+#include <algorithm>
+#include <cstdint>
+#include <exception>
+#include <list>
+#include <map>
+#include <utility>
+
+#include "boost/filesystem/directory.hpp"
+#include "boost/filesystem/operations.hpp"
+#include "boost/filesystem/path.hpp"
+#include "boost/iterator/iterator_facade.hpp"
 #include "common/EasyAssert.h"
-#include "log/Log.h"
-#include "storage/LocalChunkManagerSingleton.h"
-#include "pb/schema.pb.h"
-#include "index/Utils.h"
+#include "common/FieldDataInterface.h"
+#include "common/Geometry.h"
+#include "common/Slice.h"  // for INDEX_FILE_SLICE_META and Disassemble
+#include "common/Tracer.h"
+#include "folly/SharedMutex.h"
+#include "geos_c.h"
+#include "glog/logging.h"
 #include "index/RTreeIndex.h"
+#include "index/Utils.h"
+#include "knowhere/dataset.h"
+#include "log/Log.h"
+#include "nlohmann/json.hpp"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
+#include "storage/DataCodec.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
 
 namespace milvus::index {
 

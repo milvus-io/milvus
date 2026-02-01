@@ -9,26 +9,57 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <stddef.h>
+#include <algorithm>
+#include <cstdint>
+#include <iostream>
+#include <map>
+#include <memory>
 #include <numeric>
-
+#include <optional>
+#include <string>
 #include <thread>
+#include <tuple>
+#include <utility>
 #include <vector>
 
-#include "common/Types.h"
+#include "NamedType/named_type_impl.hpp"
+#include "bitset/bitset.h"
+#include "bitset/detail/element_vectorized.h"
+#include "cachinglayer/Utils.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
 #include "common/IndexMeta.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "common/VectorTrait.h"
+#include "common/protobuf_utils.h"
+#include "expr/ITypeExpr.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
+#include "knowhere/dataset.h"
+#include "knowhere/object.h"
+#include "knowhere/sparse_utils.h"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
+#include "plan/PlanNode.h"
+#include "query/ExecPlanNodeVisitor.h"
+#include "query/Plan.h"
+#include "query/PlanNode.h"
+#include "segcore/ConcurrentVector.h"
+#include "segcore/InsertRecord.h"
+#include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
-#include "pb/schema.pb.h"
-#include "pb/plan.pb.h"
-#include "query/Plan.h"
-#include "expr/ITypeExpr.h"
-#include "plan/PlanNode.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
-#include "test_utils/GenExprProto.h"
-#include "query/ExecPlanNodeVisitor.h"
 
 using namespace milvus::segcore;
 using namespace milvus;

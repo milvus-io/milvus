@@ -14,15 +14,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #pragma once
-#include <vector>
-#include <memory>
-#include <array>
+#include <emmintrin.h>
+#include <algorithm>
+#include <cstdint>
 #include <cstring>
+#include <iosfwd>
+#include <memory>
+#include <utility>
+#include <vector>
 
 #include "VectorHasher.h"
-#include "exec/operator/query-agg/RowContainer.h"
-#include "xsimd/xsimd.hpp"
 #include "common/BitUtil.h"
+#include "common/EasyAssert.h"
+#include "common/Types.h"
+#include "common/Vector.h"
+#include "exec/operator/query-agg/RowContainer.h"
+#include "folly/CPortability.h"
+#include "xsimd/xsimd.hpp"
 
 namespace milvus {
 namespace exec {

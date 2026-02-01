@@ -18,12 +18,11 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <type_traits>
 
 #if defined(__x86_64__)
-#include "x86/instruction_set.h"
 #include "x86/avx2.h"
 #include "x86/avx512.h"
+#include "x86/instruction_set.h"
 
 using namespace milvus::bitset::detail::x86;
 #endif

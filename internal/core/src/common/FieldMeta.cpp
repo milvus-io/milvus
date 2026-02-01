@@ -10,15 +10,23 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "common/FieldMeta.h"
-#include "common/SystemProperty.h"
-#include "common/Types.h"
-#include "common/protobuf_utils.h"
-#include "common/Common.h"
+
 #include <boost/lexical_cast.hpp>
+#include <ctype.h>
+#include <algorithm>
+#include <atomic>
+#include <istream>
 #include <optional>
 
 #include "Consts.h"
-#include "log/Log.h"
+#include "NamedType/named_type_impl.hpp"
+#include "boost/cstdint.hpp"
+#include "common/Common.h"
+#include "common/SystemProperty.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "fmt/core.h"
+#include "pb/common.pb.h"
 
 namespace milvus {
 TokenizerParams

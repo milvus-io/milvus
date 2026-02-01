@@ -14,21 +14,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <arrow/array/array_base.h>
+#include <arrow/array/array_binary.h>
+#include <arrow/array/builder_base.h>
+#include <arrow/array/builder_binary.h>
 #include <gtest/gtest.h>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <vector>
 #include <random>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "arrow/api.h"
 #include "arrow/array/array_nested.h"
 #include "arrow/array/builder_nested.h"
-#include "arrow/array/builder_primitive.h"
-
 #include "common/Chunk.h"
 #include "common/ChunkTarget.h"
 #include "common/ChunkWriter.h"
 #include "common/Types.h"
+#include "gtest/gtest.h"
 
 using milvus::DataType;
 using milvus::MemChunkTarget;

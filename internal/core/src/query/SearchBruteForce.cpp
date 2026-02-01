@@ -9,21 +9,35 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstdint>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "SearchBruteForce.h"
 #include "SubSearchResult.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/QueryInfo.h"
 #include "common/RangeSearchHelper.h"
-#include "common/Utils.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
+#include "common/Utils.h"
+#include "glog/logging.h"
 #include "knowhere/comp/brute_force.h"
 #include "knowhere/comp/index_param.h"
+#include "knowhere/config.h"
+#include "knowhere/dataset.h"
 #include "knowhere/index/index_node.h"
+#include "knowhere/sparse_utils.h"
 #include "log/Log.h"
+#include "nlohmann/json.hpp"
+#include "query/helper.h"
 
 namespace milvus::query {
 

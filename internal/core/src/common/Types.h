@@ -16,41 +16,38 @@
 
 #pragma once
 
-#include <tbb/concurrent_unordered_map.h>
-#include <tbb/concurrent_unordered_set.h>
-#include <nlohmann/json.hpp>
-#include <NamedType/named_type.hpp>
 #include <boost/align/aligned_allocator.hpp>
-#include <boost/container/vector.hpp>
-#include <boost/dynamic_bitset.hpp>
 #include <folly/FBVector.h>
-
+#include <stdint.h>
+#include <cstddef>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
-#include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
 
+#include "CustomBitset.h"
+#include "Geometry.h"
+#include "Json.h"
+#include "NamedType/named_type_impl.hpp"
+#include "NamedType/underlying_functionalities.hpp"
 #include "arrow/type.h"
-#include "arrow/type_fwd.h"
+#include "common/EasyAssert.h"
 #include "fmt/core.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
 #include "knowhere/operands.h"
-#include "simdjson.h"
+#include "nlohmann/json_fwd.hpp"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
-#include "Json.h"
 #include "type_c.h"
-#include "Geometry.h"
-
-#include "CustomBitset.h"
 
 namespace milvus {
 
@@ -551,7 +548,6 @@ namespace impl {
 // hide identifier name to make auto-completion happy
 struct FieldIdTag;
 struct FieldNameTag;
-struct FieldOffsetTag;
 struct SegOffsetTag;
 };  // namespace impl
 

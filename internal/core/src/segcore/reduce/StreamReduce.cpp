@@ -10,11 +10,21 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "StreamReduce.h"
+
+#include "NamedType/named_type_impl.hpp"
+#include "common/FieldMeta.h"
+#include "common/QueryInfo.h"
+#include "common/Schema.h"
+#include "common/protobuf_utils.h"
+#include "fmt/core.h"
+#include "pb/schema.pb.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "segcore/ReduceUtils.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
-#include "segcore/reduce/Reduce.h"
 #include "segcore/pkVisitor.h"
-#include "segcore/ReduceUtils.h"
+#include "segcore/reduce/Reduce.h"
 
 namespace milvus::segcore {
 

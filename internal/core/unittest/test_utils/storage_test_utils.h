@@ -16,20 +16,30 @@
 
 #pragma once
 
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <unordered_set>
+#include <vector>
+
+#include <boost/filesystem.hpp>
+#include <gtest/gtest.h>
+
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/LoadInfo.h"
+#include "common/QueryResult.h"
+#include "common/Types.h"
 #include "Constants.h"
 #include "DataGen.h"
-#include "common/Consts.h"
-#include "common/IndexMeta.h"
-#include "common/Types.h"
-#include "common/LoadInfo.h"
-#include "common/Schema.h"
 #include "segcore/segment_c.h"
-#include "storage/Types.h"
-#include "storage/InsertData.h"
-#include "storage/RemoteChunkManagerSingleton.h"
+#include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentSealed.h"
-#include <boost/filesystem.hpp>
-#include "common/QueryResult.h"
+#include "storage/ChunkManager.h"
+#include "storage/InsertData.h"
+#include "storage/PayloadStream.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Types.h"
 
 using milvus::DataType;
 using milvus::FieldDataPtr;

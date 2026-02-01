@@ -15,7 +15,6 @@
 
 #include "common/common_type_c.h"
 #include "segcore/token_stream_c.h"
-#include "common/type_c.h"
 
 #ifdef __cplusplus
 extern "C" {

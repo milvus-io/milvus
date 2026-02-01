@@ -1,9 +1,21 @@
 #include <gtest/gtest.h>
-#include <boost/filesystem.hpp>
+#include <nlohmann/json.hpp>
+#include <stdint.h>
+#include <cstdio>
+#include <iosfwd>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
 
+#include "bitset/bitset.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "index/Meta.h"
 #include "index/StringIndexSort.h"
-#include "index/IndexFactory.h"
 #include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
 constexpr int64_t nb = 100;

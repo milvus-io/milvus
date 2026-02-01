@@ -9,23 +9,43 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/ExceptionWrapper.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <memory>
+#include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
-#include "bitset/detail/element_wise.h"
+#include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
+#include "common/ArrayOffsets.h"
 #include "common/BitsetView.h"
+#include "common/Chunk.h"
 #include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/OffsetMapping.h"
 #include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "exec/operator/Utils.h"
+#include "index/Index.h"
+#include "index/VectorIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/dataset.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
+#include "query/SubSearchResult.h"
 #include "query/Utils.h"
 #include "query/helper.h"
-#include "exec/operator/Utils.h"
+#include "segcore/SealedIndexingRecord.h"
 
 namespace milvus::query {
 

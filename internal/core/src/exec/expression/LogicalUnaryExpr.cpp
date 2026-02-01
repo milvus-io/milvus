@@ -15,7 +15,12 @@
 // limitations under the License.
 
 #include "LogicalUnaryExpr.h"
+
+#include "common/EasyAssert.h"
+#include "common/Tracer.h"
 #include "common/ValueOp.h"
+#include "exec/expression/Utils.h"
+
 namespace milvus {
 namespace exec {
 

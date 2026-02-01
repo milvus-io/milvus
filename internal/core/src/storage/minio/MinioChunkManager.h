@@ -16,11 +16,6 @@
 
 #pragma once
 
-#include <map>
-#include <memory>
-#include <string>
-#include <vector>
-
 #include <aws/core/Aws.h>
 #include <aws/core/http/HttpClientFactory.h>
 #include <aws/core/http/HttpRequest.h>
@@ -31,20 +26,35 @@
 #include <aws/core/utils/logging/FormattedLogSystem.h>
 #include <aws/s3/S3Client.h>
 #include <fmt/core.h>
-#include <google/cloud/credentials.h>
-#include <google/cloud/internal/oauth2_credentials.h>
-#include <google/cloud/internal/oauth2_google_credentials.h>
-#include <google/cloud/storage/oauth2/compute_engine_credentials.h>
-#include <google/cloud/storage/oauth2/google_credentials.h>
 #include <google/cloud/status_or.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <atomic>
+#include <memory>
+#include <mutex>
+#include <ostream>
+#include <string>
+#include <utility>
+#include <vector>
 
+#include "aws/core/client/ClientConfiguration.h"
+#include "aws/core/http/HttpClient.h"
+#include "aws/core/utils/logging/LogLevel.h"
+#include "aws/core/utils/memory/stl/AWSAllocator.h"
+#include "aws/core/utils/memory/stl/AWSStreamFwd.h"
+#include "aws/core/utils/memory/stl/AWSString.h"
+#include "aws/s3/S3Errors.h"
 #include "common/EasyAssert.h"
-#include "common/Exception.h"
+#include "glog/logging.h"
+#include "google/cloud/internal/oauth2_compute_engine_credentials.h"
+#include "google/cloud/internal/oauth2_credentials.h"
+#include "google/cloud/internal/oauth2_google_credentials.h"
+#include "google/cloud/status.h"
+#include "log/Log.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
-#include "log/Log.h"
-#include "storage/huawei/HuaweiCloudCredentialsProvider.h"
 #include "storage/aliyun/AliyunCredentialsProvider.h"
+#include "storage/huawei/HuaweiCloudCredentialsProvider.h"
 #include "storage/tencent/TencentCloudCredentialsProvider.h"
 
 namespace milvus::storage {

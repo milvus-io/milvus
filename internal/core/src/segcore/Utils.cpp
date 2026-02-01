@@ -10,28 +10,57 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/Utils.h"
-#include <arrow/record_batch.h>
 
+#include <cxxabi.h>
+#include <folly/ExceptionWrapper.h>
+#include <algorithm>
+#include <cstdint>
+#include <exception>
 #include <future>
 #include <memory>
+#include <optional>
 #include <string>
+#include <unordered_set>
+#include <variant>
 #include <vector>
 
+#include "arrow/api.h"
+#include "arrow/io/memory.h"
 #include "cachinglayer/Manager.h"
-#include "common/type_c.h"
-#include "common/Common.h"
+#include "cachinglayer/Translator.h"
+#include "common/Channel.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
+#include "common/FieldMeta.h"
+#include "common/JsonCastType.h"
+#include "common/TypeTraits.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "folly/FBVector.h"
+#include "glog/logging.h"
+#include "google/protobuf/descriptor.h"
+#include "index/Index.h"
+#include "index/IndexInfo.h"
+#include "index/Meta.h"
 #include "index/ScalarIndex.h"
+#include "index/Utils.h"
+#include "knowhere/sparse_utils.h"
 #include "log/Log.h"
-#include "segcore/storagev1translator/SealedIndexTranslator.h"
-#include "segcore/storagev1translator/V1SealedIndexTranslator.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "nlohmann/json.hpp"
+#include "parquet/arrow/reader.h"
+#include "pb/schema.pb.h"
+#include "segcore/ConcurrentVector.h"
+#include "segcore/SegmentInterface.h"
 #include "segcore/Types.h"
+#include "segcore/storagev1translator/SealedIndexTranslator.h"
+#include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
+#include "storage/FileManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
+#include "storage/Types.h"
 #include "storage/Util.h"
 
 namespace milvus::segcore {

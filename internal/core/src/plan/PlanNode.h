@@ -16,17 +16,21 @@
 
 #pragma once
 
+#include <stdint.h>
+#include <algorithm>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
-#include "common/Types.h"
-#include "common/Vector.h"
-#include "expr/ITypeExpr.h"
 #include "common/EasyAssert.h"
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "common/protobuf_utils.h"
+#include "expr/ITypeExpr.h"
+#include "fmt/core.h"
 #include "pb/plan.pb.h"
-#include "segcore/SegmentInterface.h"
-#include "plan/PlanNodeIdGenerator.h"
 #include "rescores/Scorer.h"
 
 namespace milvus {

@@ -9,18 +9,39 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <assert.h>
 #include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
+#include <stdlib.h>
+#include <algorithm>
+#include <cstdint>
+#include <iosfwd>
+#include <memory>
+#include <string>
 #include <tuple>
+#include <utility>
+#include <vector>
 
-#include "common/VectorTrait.h"
-#include "common/type_c.h"
-#include "indexbuilder/ScalarIndexCreator.h"
-#include "indexbuilder/index_c.h"
-#include "pb/index_cgo_msg.pb.h"
-#include "test_utils/indexbuilder_test_utils.h"
 #include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/TypeTraits.h"
 #include "common/Types.h"
+#include "common/VectorTrait.h"
+#include "common/binary_set_c.h"
+#include "common/common_type_c.h"
+#include "common/protobuf_utils.h"
+#include "common/type_c.h"
+#include "gtest/gtest.h"
+#include "indexbuilder/index_c.h"
+#include "indexbuilder/type_c.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/dataset.h"
+#include "knowhere/sparse_utils.h"
+#include "pb/common.pb.h"
+#include "pb/index_cgo_msg.pb.h"
+#include "pb/schema.pb.h"
+#include "test_utils/Constants.h"
+#include "test_utils/indexbuilder_test_utils.h"
 
 constexpr int NB = 10;
 

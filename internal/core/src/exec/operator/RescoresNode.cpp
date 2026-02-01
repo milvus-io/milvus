@@ -15,14 +15,34 @@
 // limitations under the License.
 
 #include "RescoresNode.h"
-#include "common/Tracer.h"
-#include "common/EasyAssert.h"
-#include "fmt/format.h"
+
+#include <algorithm>
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <optional>
+#include <ratio>
+#include <utility>
+
+#include "common/EasyAssert.h"
+#include "common/QueryResult.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "exec/QueryContext.h"
+#include "exec/expression/EvalCtx.h"
+#include "exec/expression/Expr.h"
 #include "exec/operator/Utils.h"
-#include "log/Log.h"
+#include "expr/ITypeExpr.h"
+#include "fmt/core.h"
+#include "folly/FBVector.h"
+#include "knowhere/comp/index_param.h"
 #include "monitor/Monitor.h"
 #include "pb/plan.pb.h"
+#include "plan/PlanNode.h"
+#include "prometheus/histogram.h"
+#include "rescores/Scorer.h"
 
 namespace milvus::exec {
 

@@ -15,6 +15,8 @@
 // limitations under the License.
 #pragma once
 
+#include <memory>
+
 #include "common/Vector.h"
 
 namespace milvus::exec::expression::function {

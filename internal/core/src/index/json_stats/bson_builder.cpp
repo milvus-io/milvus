@@ -14,12 +14,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <simdjson.h>
+#include <string.h>
+#include <algorithm>
+#include <cstdint>
+#include <exception>
 #include <iostream>
-#include <vector>
-#include <string>
 #include <map>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <type_traits>
+#include <vector>
 
+#include "bsoncxx/array/value.hpp"
+#include "bsoncxx/array/view.hpp"
+#include "bsoncxx/builder/basic/array.hpp"
+#include "bsoncxx/builder/basic/document.hpp"
+#include "bsoncxx/builder/basic/kvp.hpp"
+#include "bsoncxx/document/value.hpp"
+#include "bsoncxx/types.hpp"
+#include "bsoncxx/types/bson_value/value.hpp"
+#include "common/EasyAssert.h"
+#include "common/Utils.h"
+#include "glog/logging.h"
 #include "index/json_stats/bson_builder.h"
+#include "log/Log.h"
+#include "simdjson/dom/array.h"
+#include "simdjson/dom/element.h"
+#include "simdjson/dom/object.h"
+#include "simdjson/dom/parser.h"
+#include "simdjson/error.h"
 
 namespace milvus::index {
 

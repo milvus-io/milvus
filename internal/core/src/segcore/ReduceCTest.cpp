@@ -10,7 +10,30 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/Types.h"
+#include "common/common_type_c.h"
+#include "common/protobuf_utils.h"
+#include "common/type_c.h"
+#include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
+#include "segcore/Collection.h"
+#include "segcore/collection_c.h"
+#include "segcore/plan_c.h"
+#include "segcore/reduce/Reduce.h"
+#include "segcore/reduce_c.h"
+#include "segcore/segment_c.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/PbHelper.h"
 #include "test_utils/c_api_test_utils.h"
 
 TEST(CApiTest, StreamReduce) {

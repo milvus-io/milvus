@@ -14,27 +14,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <folly/Conv.h>
+#include <arrow/api.h>
 #include <arrow/record_batch.h>
-#include <arrow/util/key_value_metadata.h>
-#include <gtest/gtest.h>
+#include <parquet/properties.h>
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
-#include "arrow/type_fwd.h"
-#include "common/Schema.h"
-#include "common/Types.h"
-#include "gtest/gtest.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "milvus-storage/packed/writer.h"
-#include "milvus-storage/format/parquet/file_reader.h"
-#include "test_utils/DataGen.h"
-#include "segcore/storagev2translator/GroupChunkTranslator.h"
-#include "segcore/Utils.h"
-#include "mmap/ChunkedColumnGroup.h"
-
+#include <filesystem>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
-#include <filesystem>
+
+#include "NamedType/underlying_functionalities.hpp"
+#include "cachinglayer/Utils.h"
+#include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/GroupChunk.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "milvus-storage/common/config.h"
+#include "milvus-storage/common/metadata.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/format/parquet/file_reader.h"
+#include "milvus-storage/packed/writer.h"
+#include "mmap/ChunkedColumnGroup.h"
+#include "mmap/Types.h"
+#include "pb/common.pb.h"
+#include "segcore/Collection.h"
+#include "segcore/Utils.h"
+#include "segcore/storagev2translator/GroupCTMeta.h"
+#include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "test_utils/DataGen.h"
 
 using namespace milvus;
 using namespace milvus::segcore;

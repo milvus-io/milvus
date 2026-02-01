@@ -9,20 +9,27 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "index/IndexFactory.h"
-#include "segcore/SegmentLoadInfo.h"
-
 #include <algorithm>
 #include <cctype>
+#include <iterator>
 #include <memory>
 
 #include "common/Consts.h"
+#include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "index/Meta.h"
+#include "common/resource_c.h"
+#include "index/IndexFactory.h"
 #include "milvus-storage/column_groups.h"
+#include "milvus-storage/manifest.h"
+#include "pb/schema.pb.h"
+#include "segcore/SegmentLoadInfo.h"
+#include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
-#include "storage/loon_ffi/property_singleton.h"
 #include "storage/MmapManager.h"
+#include "storage/Types.h"
+#include "storage/loon_ffi/property_singleton.h"
+#include "storage/loon_ffi/util.h"
 
 namespace milvus::segcore {
 

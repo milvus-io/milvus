@@ -1,7 +1,51 @@
+#include <folly/FBVector.h>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <variant>
+#include <vector>
+
+#include "NamedType/named_type_impl.hpp"
+#include "common/EasyAssert.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
+#include "common/TracerBase.h"
+#include "common/Types.h"
+#include "common/common_type_c.h"
+#include "common/protobuf_utils.h"
+#include "common/type_c.h"
+#include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
+#include "index/Index.h"
+#include "index/VectorIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
+#include "query/Plan.h"
+#include "query/Utils.h"
+#include "segcore/Collection.h"
+#include "segcore/ReduceStructure.h"
+#include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentGrowing.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentInterface.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/Types.h"
+#include "segcore/plan_c.h"
+#include "segcore/reduce_c.h"
+#include "segcore/segment_c.h"
+#include "storage/ChunkManager.h"
+#include "storage/Types.h"
+#include "test_utils/DataGen.h"
 #include "test_utils/c_api_test_utils.h"
-#include "test_utils/storage_test_utils.h"
 #include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::query;

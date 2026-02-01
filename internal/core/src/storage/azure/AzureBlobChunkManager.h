@@ -16,13 +16,14 @@
 
 #pragma once
 
-#include <iostream>
-#include <stdlib.h>
+#include <azure/core/diagnostics/logger.hpp>
+#include <stdint.h>
+#include <functional>
+#include <memory>
 #include <string>
 #include <vector>
-#include <azure/core/diagnostics/logger.hpp>
-#include <azure/storage/blobs.hpp>
-#include <azure/storage/common/storage_exception.hpp>
+
+#include "azure/storage/blobs/blob_service_client.hpp"
 
 namespace azure {
 /**

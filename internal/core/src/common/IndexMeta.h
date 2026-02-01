@@ -16,13 +16,15 @@
 
 #pragma once
 
+#include <stdint.h>
+#include <map>
 #include <memory>
-#include <unordered_map>
+#include <string>
 
-#include "pb/common.pb.h"
-#include "pb/segcore.pb.h"
-#include "knowhere/utils.h"
 #include "Types.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/utils.h"
+#include "pb/segcore.pb.h"
 
 namespace milvus {
 class FieldIndexMeta {

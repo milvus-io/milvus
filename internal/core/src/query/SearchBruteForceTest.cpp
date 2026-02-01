@@ -9,14 +9,32 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <gtest/gtest.h>
-#include <random>
+#include <folly/FBVector.h>
+#include <stdint.h>
+#include <algorithm>
+#include <map>
+#include <memory>
+#include <string>
+#include <tuple>
+#include <vector>
 
+#include "bitset/bitset.h"
+#include "bitset/common.h"
+#include "common/BitsetView.h"
+#include "common/EasyAssert.h"
+#include "common/QueryInfo.h"
+#include "common/Schema.h"
+#include "common/Types.h"
 #include "common/Utils.h"
-
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
 #include "query/SearchBruteForce.h"
-#include "test_utils/Distance.h"
+#include "query/SubSearchResult.h"
+#include "query/helper.h"
+#include "segcore/Collection.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/Distance.h"
 
 using namespace milvus;
 using namespace milvus::segcore;

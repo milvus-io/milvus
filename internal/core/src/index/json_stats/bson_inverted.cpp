@@ -14,17 +14,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <iostream>
+#include <chrono>
 #include <string>
+#include <type_traits>
 #include <vector>
-#include <unordered_map>
-#include <tuple>
-#include <boost/filesystem.hpp>
 
-#include "common/ScopedTimer.h"
-#include "monitor/Monitor.h"
+#include "boost/filesystem/directory.hpp"
+#include "boost/filesystem/path.hpp"
+#include "boost/iterator/iterator_facade.hpp"
+#include "common/EasyAssert.h"
+#include "glog/logging.h"
+#include "index/Utils.h"
 #include "index/json_stats/bson_inverted.h"
+#include "log/Log.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "storage/Types.h"
+
 namespace milvus::index {
 
 BsonInvertedIndex::BsonInvertedIndex(const std::string& path,

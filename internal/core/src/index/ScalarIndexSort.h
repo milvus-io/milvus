@@ -16,21 +16,28 @@
 
 #pragma once
 
-#include <algorithm>
+#include <assert.h>
+#include <stdint.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#include <chrono>
+#include <cstddef>
+#include <iterator>
 #include <memory>
-#include <utility>
-#include <vector>
+#include <optional>
 #include <string>
-#include <map>
+#include <vector>
 
-#include <boost/container/vector.hpp>
-
+#include "common/FieldData.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "index/IndexStats.h"
 #include "index/IndexStructure.h"
 #include "index/ScalarIndex.h"
-#include "storage/MemFileManagerImpl.h"
 #include "storage/DiskFileManagerImpl.h"
-#include "storage/FileWriter.h"
-#include "common/File.h"
+#include "storage/FileManager.h"
+#include "storage/MemFileManagerImpl.h"
 
 #if defined(__clang__) || defined(__GNUC__)
 #define ALWAYS_INLINE inline __attribute__((always_inline))

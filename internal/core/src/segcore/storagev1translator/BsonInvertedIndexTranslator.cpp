@@ -16,15 +16,18 @@
 
 #include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
 
+#include <algorithm>
+#include <functional>
+#include <string_view>
 #include <utility>
 
-#include "cachinglayer/CacheSlot.h"
-#include "segcore/Utils.h"
-#include "segcore/Utils.h"
-#include "monitor/Monitor.h"
 #include "common/ScopedTimer.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
+#include "index/json_stats/bson_inverted.h"
 #include "log/Log.h"
-#include "fmt/format.h"
+#include "pb/common.pb.h"
+#include "segcore/Utils.h"
 
 namespace milvus::segcore::storagev1translator {
 

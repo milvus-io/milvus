@@ -14,32 +14,45 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <boost/uuid/uuid_generators.hpp>
+#include <fcntl.h>
+#include <stdio.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <algorithm>
+#include <cstdint>
 #include <cstring>
+#include <exception>
+#include <iosfwd>
 #include <memory>
 #include <optional>
-#include <stdlib.h>
-#include <stdio.h>
-#include <fcntl.h>
-#include <sys/errno.h>
-#include <sys/mman.h>
-#include <unistd.h>
+#include <type_traits>
 
-#include "common/File.h"
-#include "common/Types.h"
+#include "bitset/bitset.h"
+#include "boost/uuid/random_generator.hpp"
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
-#include "common/Exception.h"
-#include "common/Utils.h"
+#include "common/FieldDataInterface.h"
+#include "common/File.h"
 #include "common/Slice.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "fmt/core.h"
+#include "index/Meta.h"
 #include "index/StringIndexMarisa.h"
 #include "index/Utils.h"
-#include "index/Index.h"
+#include "knowhere/binaryset.h"
+#include "marisa/agent.h"
 #include "marisa/base.h"
+#include "marisa/key.h"
+#include "marisa/keyset.h"
+#include "nlohmann/json.hpp"
+#include "pb/common.pb.h"
+#include "storage/FileWriter.h"
+#include "storage/MemFileManagerImpl.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
-#include "storage/FileWriter.h"
 
 namespace milvus::index {
 

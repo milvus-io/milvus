@@ -9,21 +9,47 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <string.h>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <optional>
+#include <shared_mutex>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "SearchOnGrowing.h"
+#include "cachinglayer/CacheSlot.h"
 #include "common/BitsetView.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/IndexMeta.h"
+#include "common/OffsetMapping.h"
 #include "common/QueryInfo.h"
-#include "common/Tracer.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
 #include "common/Types.h"
 #include "common/Utils.h"
-#include "SearchOnGrowing.h"
-#include <cstddef>
+#include "common/VectorArray.h"
+#include "common/protobuf_utils.h"
+#include "exec/operator/Utils.h"
+#include "index/Index.h"
+#include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
-#include "knowhere/config.h"
-#include "log/Log.h"
 #include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnIndex.h"
+#include "query/SubSearchResult.h"
 #include "query/Utils.h"
-#include "exec/operator/Utils.h"
+#include "query/helper.h"
+#include "segcore/ConcurrentVector.h"
+#include "segcore/FieldIndexing.h"
+#include "segcore/InsertRecord.h"
+#include "segcore/SegmentGrowingImpl.h"
 
 namespace milvus::query {
 

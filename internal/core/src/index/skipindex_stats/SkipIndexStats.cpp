@@ -15,7 +15,11 @@
 // limitations under the License.
 
 #include "index/skipindex_stats/SkipIndexStats.h"
-#include <cstring>
+
+#include <cstdint>
+
+#include "arrow/array/array_primitive.h"
+#include "common/Span.h"
 #include "parquet/types.h"
 
 namespace milvus::index {

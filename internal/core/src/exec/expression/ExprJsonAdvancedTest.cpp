@@ -14,7 +14,50 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <folly/FBVector.h>
+#include <simdjson.h>
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <ratio>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <tuple>
+#include <unordered_set>
+#include <variant>
+#include <vector>
+
 #include "ExprTestBase.h"
+#include "bitset/bitset.h"
+#include "common/Consts.h"
+#include "common/IndexMeta.h"
+#include "common/Json.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "common/Vector.h"
+#include "common/protobuf_utils.h"
+#include "exec/expression/EvalCtx.h"
+#include "expr/ITypeExpr.h"
+#include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
+#include "pb/plan.pb.h"
+#include "plan/PlanNode.h"
+#include "query/ExecPlanNodeVisitor.h"
+#include "query/Plan.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "segcore/SegmentGrowing.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "simdjson/dom/array.h"
+#include "simdjson/dom/element.h"
+#include "simdjson/error.h"
+#include "simdjson/padded_string.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
+#include "test_utils/storage_test_utils.h"
 
 EXPR_TEST_INSTANTIATE();
 

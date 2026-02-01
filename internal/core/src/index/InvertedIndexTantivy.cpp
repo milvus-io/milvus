@@ -9,26 +9,47 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "tantivy-binding.h"
-#include "common/Slice.h"
-#include "common/RegexQuery.h"
-#include "common/Tracer.h"
-#include "storage/LocalChunkManagerSingleton.h"
-#include "index/InvertedIndexTantivy.h"
-#include "index/InvertedIndexUtil.h"
-#include "log/Log.h"
-#include "index/Utils.h"
-#include "storage/Util.h"
-
-#include <algorithm>
-#include <boost/filesystem.hpp>
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <string.h>
+#include <algorithm>
 #include <cstddef>
-#include <shared_mutex>
+#include <cstdint>
+#include <exception>
+#include <list>
+#include <map>
 #include <type_traits>
+#include <utility>
 #include <vector>
+
 #include "InvertedIndexTantivy.h"
+#include "boost/container/vector.hpp"
+#include "boost/filesystem/directory.hpp"
+#include "boost/filesystem/operations.hpp"
+#include "boost/filesystem/path.hpp"
+#include "boost/iterator/iterator_facade.hpp"
+#include "common/Array.h"
+#include "common/FieldDataInterface.h"
+#include "common/Slice.h"
+#include "common/Tracer.h"
+#include "folly/SharedMutex.h"
+#include "glog/logging.h"
+#include "index/InvertedIndexTantivy.h"
+#include "index/InvertedIndexUtil.h"
+#include "index/Utils.h"
+#include "knowhere/dataset.h"
+#include "log/Log.h"
+#include "nlohmann/detail/iterators/iter_impl.hpp"
+#include "nlohmann/json.hpp"
+#include "pb/common.pb.h"
+#include "storage/DataCodec.h"
+#include "storage/FileManager.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "tantivy-binding.h"
 
 namespace milvus::index {
 inline TantivyDataType

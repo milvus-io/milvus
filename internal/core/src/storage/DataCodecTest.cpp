@@ -14,18 +14,44 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include <simdjson.h>
+#include <string.h>
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <initializer_list>
+#include <memory>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
+#include "common/Array.h"
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
 #include "common/Geometry.h"
-#include "storage/DataCodec.h"
-#include "storage/InsertData.h"
-#include "storage/IndexData.h"
-#include "storage/Util.h"
-#include "common/Consts.h"
 #include "common/Json.h"
-#include <cstddef>
+#include "common/TypeTraits.h"
+#include "common/Types.h"
+#include "common/VectorTrait.h"
+#include "common/protobuf_utils.h"
+#include "geos_c.h"
+#include "gtest/gtest.h"
+#include "knowhere/object.h"
+#include "knowhere/operands.h"
+#include "knowhere/sparse_utils.h"
+#include "pb/schema.pb.h"
+#include "simdjson/padded_string.h"
+#include "storage/DataCodec.h"
+#include "storage/IndexData.h"
+#include "storage/InsertData.h"
+#include "storage/PayloadReader.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 
