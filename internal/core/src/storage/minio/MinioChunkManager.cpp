@@ -238,7 +238,7 @@ MinioChunkManager::PreCheck(const StorageConfig& config) {
             "configuration:{}",
             e.what(),
             config.ToString());
-        LOG_ERROR(err_message);
+        LOG_ERROR("{}", err_message);
         throw SegcoreError(S3Error, err_message);
     } catch (std::exception& e) {
         throw e;

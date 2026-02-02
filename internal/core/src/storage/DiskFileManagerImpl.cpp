@@ -352,7 +352,7 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
         } catch (const std::logic_error& e) {
             auto err_message = fmt::format(
                 "invalided index file path:{}, error:{}", file_path, e.what());
-            LOG_ERROR(err_message);
+            LOG_ERROR("{}", err_message);
             throw std::logic_error(err_message);
         }
     }
