@@ -31,7 +31,6 @@ import (
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -1484,8 +1483,6 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 	return act.result, nil
 }
 
-var taskid = atomic.NewUint32(0)
-
 // CreatePartition create a partition in specific collection.
 func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -1508,7 +1505,6 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		CreatePartitionRequest: request,
 		mixCoord:               node.mixCoord,
 		result:                 nil,
-		id:                     taskid.Inc(),
 	}
 
 	log := log.Ctx(ctx).With(
