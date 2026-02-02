@@ -19,17 +19,13 @@ package rootcoord
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
@@ -37,17 +33,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-var taskid = atomic.NewUint32(0)
-
 func (c *Core) broadcastCreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (int64, error) {
-	tid := taskid.Add(1)
-	t1 := time.Now()
 	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, in.GetDbName(), in.GetCollectionName())
 	if err != nil {
 		return 0, err
 	}
-	t2 := time.Now()
-	log.Info("broadcastCreatePartition getBroadcaster time", zap.Duration("time", t2.Sub(t1)), zap.Uint32("tid", tid))
 	defer broadcaster.Close()
 
 	collMeta, err := c.meta.GetCollectionByName(ctx, in.GetDbName(), in.GetCollectionName(), typeutil.MaxTimestamp, true)
@@ -61,8 +51,6 @@ func (c *Core) broadcastCreatePartition(ctx context.Context, in *milvuspb.Create
 	if partitionID, exists := c.meta.GetPartitionIDByName(collMeta.CollectionID, in.GetPartitionName()); exists {
 		return partitionID, errIgnoerdCreatePartition
 	}
-	t3 := time.Now()
-	log.Info("broadcastCreatePartition getCollectionByName time", zap.Duration("time", t3.Sub(t2)), zap.Uint32("tid", tid))
 	cfgMaxPartitionNum := Params.RootCoordCfg.MaxPartitionNum.GetAsInt()
 	if len(collMeta.Partitions) >= cfgMaxPartitionNum {
 		return 0, fmt.Errorf("partition number (%d) exceeds max configuration (%d), collection: %s",
@@ -96,8 +84,6 @@ func (c *Core) broadcastCreatePartition(ctx context.Context, in *milvuspb.Create
 		WithBroadcast(channels).
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
-	t4 := time.Now()
-	log.Info("broadcastCreatePartition broadcast time", zap.Duration("time", t4.Sub(t3)), zap.Uint32("tid", tid))
 	return partID, err
 }
 
