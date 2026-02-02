@@ -175,7 +175,11 @@ func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) 
 }
 
 // convertIDsToSchemapbIDs converts a slice of interface{} (JSON ids) to schemapb.IDs
-// based on the primary key field type
+// based on the primary key field type.
+//
+// Note: When using json.Decoder with UseNumber(), numeric values are decoded as json.Number
+// (a string type) which preserves full int64 precision. This avoids float64 precision loss
+// for large integers (> 2^53) that would otherwise occur with standard JSON decoding.
 func convertIDsToSchemapbIDs(ids []interface{}, pkField *schemapb.FieldSchema) (*schemapb.IDs, error) {
 	if len(ids) == 0 {
 		return nil, errors.New("ids array cannot be empty")
@@ -191,8 +195,16 @@ func convertIDsToSchemapbIDs(ids []interface{}, pkField *schemapb.FieldSchema) (
 				int64ID = v
 			case int:
 				int64ID = int64(v)
+			case json.Number:
+				// json.Number preserves full precision for large integers
+				// This is the preferred path when using UseNumber() decoder
+				parsed, err := v.Int64()
+				if err != nil {
+					return nil, fmt.Errorf("invalid int64 id at index %d: %v, error: %v", i, id, err)
+				}
+				int64ID = parsed
 			case float64:
-				// JSON numbers are decoded as float64
+				// JSON numbers are decoded as float64 when not using UseNumber()
 				// Check if the float has a fractional part
 				if v != math.Trunc(v) {
 					return nil, fmt.Errorf("invalid int64 id at index %d: %v has fractional part", i, v)
@@ -225,6 +237,9 @@ func convertIDsToSchemapbIDs(ids []interface{}, pkField *schemapb.FieldSchema) (
 			switch v := id.(type) {
 			case string:
 				stringID = v
+			case json.Number:
+				// json.Number is a string type, use directly
+				stringID = v.String()
 			case int64, int, float64:
 				// Convert number to string
 				stringID = fmt.Sprintf("%v", v)
