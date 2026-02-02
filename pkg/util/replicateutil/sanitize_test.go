@@ -86,3 +86,75 @@ func TestSanitizeReplicateConfiguration_NilConnectionParam(t *testing.T) {
 	sanitized := SanitizeReplicateConfiguration(config)
 	assert.Nil(t, sanitized.Clusters[0].ConnectionParam)
 }
+
+func TestSanitizeReplicateConfiguration_EmptyClusters(t *testing.T) {
+	config := &commonpb.ReplicateConfiguration{
+		Clusters:             []*commonpb.MilvusCluster{},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{},
+	}
+
+	sanitized := SanitizeReplicateConfiguration(config)
+	assert.NotNil(t, sanitized)
+	assert.Empty(t, sanitized.Clusters)
+	assert.Empty(t, sanitized.CrossClusterTopology)
+}
+
+func TestSanitizeReplicateConfiguration_EmptyToken(t *testing.T) {
+	config := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{
+				ClusterId: "cluster1",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "http://cluster1:19530",
+					Token: "",
+				},
+				Pchannels: []string{"channel1"},
+			},
+		},
+	}
+
+	sanitized := SanitizeReplicateConfiguration(config)
+	assert.Empty(t, sanitized.Clusters[0].ConnectionParam.Token)
+	assert.Equal(t, "http://cluster1:19530", sanitized.Clusters[0].ConnectionParam.Uri)
+}
+
+func TestSanitizeReplicateConfiguration_PreservesClusterIDs(t *testing.T) {
+	config := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{
+				ClusterId: "cluster-a",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "http://a:19530",
+					Token: "token-a",
+				},
+				Pchannels: []string{"a-ch1", "a-ch2"},
+			},
+			{
+				ClusterId: "cluster-b",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "http://b:19530",
+					Token: "token-b",
+				},
+				Pchannels: []string{"b-ch1"},
+			},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
+			{SourceClusterId: "cluster-a", TargetClusterId: "cluster-b"},
+		},
+	}
+
+	sanitized := SanitizeReplicateConfiguration(config)
+	assert.Len(t, sanitized.Clusters, 2)
+	assert.Equal(t, "cluster-a", sanitized.Clusters[0].ClusterId)
+	assert.Equal(t, "cluster-b", sanitized.Clusters[1].ClusterId)
+	assert.Equal(t, []string{"a-ch1", "a-ch2"}, sanitized.Clusters[0].Pchannels)
+	assert.Equal(t, []string{"b-ch1"}, sanitized.Clusters[1].Pchannels)
+
+	// Tokens are cleared
+	assert.Empty(t, sanitized.Clusters[0].ConnectionParam.Token)
+	assert.Empty(t, sanitized.Clusters[1].ConnectionParam.Token)
+
+	// Original tokens unchanged
+	assert.Equal(t, "token-a", config.Clusters[0].ConnectionParam.Token)
+	assert.Equal(t, "token-b", config.Clusters[1].ConnectionParam.Token)
+}
