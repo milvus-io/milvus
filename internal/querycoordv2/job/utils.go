@@ -22,7 +22,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -96,29 +95,19 @@ func WaitCollectionReleased(ctx context.Context, dist *meta.DistributionManager,
 	return nil
 }
 
-var taskid = atomic.NewUint32(0)
-
 func WaitCurrentTargetUpdated(ctx context.Context, targetObserver *observers.TargetObserver, collection int64) error {
-	tid := taskid.Add(1)
-	t1 := time.Now()
 	// manual trigger update next target
 	ready, err := targetObserver.UpdateNextTarget(collection)
 	if err != nil {
 		return errors.Wrapf(err, "failed to update next target, collection=%d", collection)
 	}
-	t2 := time.Now()
-	log.Ctx(ctx).Info("WaitCurrentTargetUpdated update next target", zap.Uint32("tid", tid), zap.Duration("duration", t2.Sub(t1)))
 
 	// accelerate check
 	targetObserver.TriggerUpdateCurrentTarget(collection)
 
-	t3 := time.Now()
-	log.Ctx(ctx).Info("WaitCurrentTargetUpdated trigger update current target", zap.Uint32("tid", tid), zap.Duration("duration", t3.Sub(t2)))
 	// wait current target ready
 	select {
 	case <-ready:
-		t4 := time.Now()
-		log.Ctx(ctx).Info("WaitCurrentTargetUpdated ready", zap.Uint32("tid", tid), zap.Duration("duration", t4.Sub(t3)))
 		return nil
 	case <-ctx.Done():
 		return errors.Wrapf(ctx.Err(), "context error while waiting for current target updated, collection=%d", collection)
@@ -128,8 +117,6 @@ func WaitCurrentTargetUpdated(ctx context.Context, targetObserver *observers.Tar
 }
 
 func WaitUpdatePartition(ctx context.Context, targetObserver *observers.TargetObserver, collection int64, partition int64) error {
-	tid := taskid.Add(1)
-	t1 := time.Now()
 	// manual trigger update next target
 	ready, err := targetObserver.UpdatePartition(collection, partition)
 	if err != nil {
@@ -140,19 +127,13 @@ func WaitUpdatePartition(ctx context.Context, targetObserver *observers.TargetOb
 		return nil
 	default:
 	}
-	t2 := time.Now()
-	log.Ctx(ctx).Info("WaitCurrentTargetUpdated update next target", zap.Uint32("tid", tid), zap.Duration("duration", t2.Sub(t1)))
 
 	// accelerate check
 	targetObserver.TriggerUpdateCurrentTarget(collection)
 
-	t3 := time.Now()
-	log.Ctx(ctx).Info("WaitCurrentTargetUpdated trigger update current target", zap.Uint32("tid", tid), zap.Duration("duration", t3.Sub(t2)))
 	// wait current target ready
 	select {
 	case <-ready:
-		t4 := time.Now()
-		log.Ctx(ctx).Info("WaitCurrentTargetUpdated ready", zap.Uint32("tid", tid), zap.Duration("duration", t4.Sub(t3)))
 		return nil
 	case <-ctx.Done():
 		return errors.Wrapf(ctx.Err(), "context error while waiting for current target updated, collection=%d", collection)

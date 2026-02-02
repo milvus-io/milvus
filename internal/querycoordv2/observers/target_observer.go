@@ -249,7 +249,6 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 				ob.keylocks.RUnlock(req.CollectionID)
 
 				if exists {
-					log.Info("CreatePartition cache hit (fast path)", zap.Int64("collectionID", req.CollectionID), zap.Int64("partitionID", req.PartitionIDs[0]))
 					close(req.ReadyNotifier)
 					req.Notifier <- nil
 				} else {
@@ -257,11 +256,9 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 					ob.keylocks.Lock(req.CollectionID)
 					// Double check after acquiring write lock
 					if ob.targetMgr.IsCurrentTargetExist(ctx, req.CollectionID, req.PartitionIDs[0]) {
-						log.Info("CreatePartition cache hit (slow path)", zap.Int64("collectionID", req.CollectionID), zap.Int64("partitionID", req.PartitionIDs[0]))
 						close(req.ReadyNotifier)
 						req.Notifier <- nil
 					} else {
-						log.Info("CreatePartition cache miss, updating next target", zap.Int64("collectionID", req.CollectionID), zap.Int64("partitionID", req.PartitionIDs[0]))
 						err := ob.updateNextTarget(ctx, req.CollectionID)
 						if err != nil {
 							log.Warn("failed to manually update next target",
