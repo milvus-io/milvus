@@ -20,7 +20,6 @@ package rerank
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/voyageai"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type voyageaiProvider struct {
@@ -63,7 +63,7 @@ func newVoyageaiProvider(params []*commonpb.KeyValuePair, conf map[string]string
 			}
 		case models.TruncationParamKey:
 			if truncate, err := strconv.ParseBool(param.Value); err != nil {
-				return nil, fmt.Errorf("[%s param's value: %s] is invalid, only supports: [true/false]", models.TruncationParamKey, param.Value)
+				return nil, merr.WrapErrFunctionFailed(err, "[%s param's value: %s] is invalid, only supports: [true/false]", models.TruncationParamKey, param.Value)
 			} else {
 				modelParams[models.TruncationParamKey] = truncate
 			}
@@ -71,7 +71,7 @@ func newVoyageaiProvider(params []*commonpb.KeyValuePair, conf map[string]string
 		}
 	}
 	if modelName == "" {
-		return nil, fmt.Errorf("voyageai rerank model name is required")
+		return nil, merr.WrapErrFunctionFailedMsg("voyageai rerank model name is required")
 	}
 	provider := voyageaiProvider{
 		baseProvider:   baseProvider{batchSize: maxBatch},

@@ -943,7 +943,7 @@ func (q *QuotaCenter) calculateWriteRates() error {
 		}
 		collectionLimiter := q.rateLimiter.GetCollectionLimiters(dbID, collection)
 		if collectionLimiter == nil {
-			return fmt.Errorf("collection limiter not found: %d", collection)
+			return merr.WrapErrServiceInternalMsg("collection limiter not found: %d", collection)
 		}
 
 		limiter := collectionLimiter.GetLimiters()
@@ -1439,7 +1439,7 @@ func (q *QuotaCenter) getCollectionMaxLimit(rt internalpb.RateType, collectionID
 	case internalpb.RateType_DQLQuery:
 		return Limit(getCollectionRateLimitConfig(collectionProps, common.CollectionQueryRateMaxKey)), nil
 	default:
-		return 0, fmt.Errorf("unsupportd rate type:%s", rt.String())
+		return 0, merr.WrapErrServiceInternalMsg("unsupported rate type:%s", rt.String())
 	}
 }
 

@@ -4,11 +4,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -74,7 +74,7 @@ func (mRWLock *MetricsRWMutex) maybeLogUnlockDuration(source string, lockType st
 		} else {
 			log.Error("there's no lock history for the source, there may be some defects in codes",
 				zap.String("source", source))
-			return errors.New("unknown source")
+			return merr.WrapErrServiceInternalMsg("unknown source for maybeLogUnlockDuration")
 		}
 	}
 	return nil

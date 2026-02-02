@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 const (
@@ -185,10 +186,10 @@ func (c *client) consume(consumer *consumer) {
 func (c *client) blockUntilInitDone(consumer *consumer) error {
 	select {
 	case <-c.closeCh:
-		return errors.New("client is closed")
+		return merr.WrapErrServiceInternalMsg("client is closed")
 	case _, ok := <-consumer.initCh:
 		if !ok {
-			return errors.New("consumer init failure")
+			return merr.WrapErrServiceInternalMsg("consumer init failure")
 		}
 		return nil
 	}

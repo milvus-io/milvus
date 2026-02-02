@@ -22,7 +22,6 @@ import (
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -37,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -388,7 +388,7 @@ func (w *SegmentWriter) WriteRecord(r storage.Record) error {
 		for fieldID, stats := range w.bm25Stats {
 			field, ok := r.Column(fieldID).(*array.Binary)
 			if !ok {
-				return errors.New("bm25 field value not found")
+				return merr.WrapErrServiceInternalMsg("bm25 field value not found")
 			}
 			stats.AppendBytes(field.Value(i))
 		}
@@ -411,12 +411,12 @@ func (w *SegmentWriter) Write(v *storage.Value) error {
 	for fieldID, stats := range w.bm25Stats {
 		data, ok := v.Value.(map[storage.FieldID]interface{})[fieldID]
 		if !ok {
-			return errors.New("bm25 field value not found")
+			return merr.WrapErrServiceInternalMsg("bm25 field value not found")
 		}
 
 		bytes, ok := data.([]byte)
 		if !ok {
-			return errors.New("bm25 field value not sparse bytes")
+			return merr.WrapErrServiceInternalMsg("bm25 field value not sparse bytes")
 		}
 		stats.AppendBytes(bytes)
 	}

@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -311,7 +310,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	partName := dr.req.GetPartitionName()
 	if dr.schema.IsPartitionKeyCollection() {
 		if len(partName) > 0 {
-			return errors.New("not support manually specifying the partition names if partition key mode is used")
+			return merr.WrapErrOperationNotSupportedMsg("not support manually specifying the partition names if partition key mode is used")
 		}
 		expr, err := exprutil.ParseExprFromPlan(dr.plan)
 		if err != nil {
@@ -640,7 +639,7 @@ func getPrimaryKeysFromUnaryRangeExpr(schema *schemapb.CollectionSchema, unaryRa
 			},
 		}
 	default:
-		return pks, errors.New("invalid field data type specifyed in simple delete expr")
+		return pks, merr.WrapErrParameterMissingMsg("invalid field data type specifyed in simple delete expr")
 	}
 
 	return pks, nil
@@ -671,7 +670,7 @@ func getPrimaryKeysFromTermExpr(schema *schemapb.CollectionSchema, termExpr *pla
 			},
 		}
 	default:
-		return pks, 0, errors.New("invalid field data type specifyed in simple delete expr")
+		return pks, 0, merr.WrapErrParameterInvalidMsg("invalid field data type specifyed in simple delete expr")
 	}
 
 	return pks, pkCount, nil

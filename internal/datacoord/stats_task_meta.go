@@ -182,7 +182,7 @@ func (stm *statsTaskMeta) UpdateVersion(taskID, nodeID int64) error {
 
 	t, ok := stm.tasks.Get(taskID)
 	if !ok {
-		return fmt.Errorf("task %d not found", taskID)
+		return merr.WrapErrServiceInternalMsg("task %d not found", taskID)
 	}
 
 	cloneT := proto.Clone(t).(*indexpb.StatsTask)
@@ -212,7 +212,7 @@ func (stm *statsTaskMeta) UpdateTaskState(taskID int64, state indexpb.JobState, 
 
 	t, ok := stm.tasks.Get(taskID)
 	if !ok {
-		return fmt.Errorf("task %d not found", taskID)
+		return merr.WrapErrServiceInternalMsg("task %d not found", taskID)
 	}
 
 	cloneT := proto.Clone(t).(*indexpb.StatsTask)
@@ -239,7 +239,7 @@ func (stm *statsTaskMeta) UpdateBuildingTask(taskID int64) error {
 
 	t, ok := stm.tasks.Get(taskID)
 	if !ok {
-		return fmt.Errorf("task %d not found", taskID)
+		return merr.WrapErrServiceInternalMsg("task %d not found", taskID)
 	}
 
 	cloneT := proto.Clone(t).(*indexpb.StatsTask)
@@ -267,7 +267,7 @@ func (stm *statsTaskMeta) FinishTask(taskID int64, result *workerpb.StatsResult)
 
 	t, ok := stm.tasks.Get(taskID)
 	if !ok {
-		return fmt.Errorf("task %d not found", taskID)
+		return merr.WrapErrServiceInternalMsg("task %d not found", taskID)
 	}
 
 	cloneT := proto.Clone(t).(*indexpb.StatsTask)
@@ -358,7 +358,7 @@ func (stm *statsTaskMeta) MarkTaskCanRecycle(taskID int64) error {
 
 	t, ok := stm.tasks.Get(taskID)
 	if !ok {
-		return fmt.Errorf("task %d not found", taskID)
+		return merr.WrapErrServiceInternalMsg("task %d not found", taskID)
 	}
 
 	cloneT := proto.Clone(t).(*indexpb.StatsTask)

@@ -29,7 +29,6 @@ import (
 	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -158,13 +157,11 @@ func TransferColumnBasedInsertDataToRowBased(data *InsertData) (
 	err error,
 ) {
 	if !checkTsField(data) {
-		return nil, nil, nil,
-			errors.New("cannot get timestamps from insert data")
+		return nil, nil, nil, merr.WrapErrStorageMsg("cannot get timestamps from insert data")
 	}
 
 	if !checkRowIDField(data) {
-		return nil, nil, nil,
-			errors.New("cannot get row ids from insert data")
+		return nil, nil, nil, merr.WrapErrStorageMsg("cannot get rowIDs from insert data")
 	}
 
 	tss := data.Data[common.TimeStampField].(*Int64FieldData)
@@ -184,8 +181,7 @@ func TransferColumnBasedInsertDataToRowBased(data *InsertData) (
 	all := []FieldData{tss, rowIDs}
 	all = append(all, ls.datas...)
 	if !checkNumRows(all...) {
-		return nil, nil, nil,
-			errors.New("columns of insert data have different length")
+		return nil, nil, nil, merr.WrapErrStorageMsg("columns of insert data have different length")
 	}
 
 	sortFieldDataList(ls)
@@ -200,8 +196,7 @@ func TransferColumnBasedInsertDataToRowBased(data *InsertData) (
 			d := ls.datas[j].GetRow(i)
 			err := binary.Write(&buffer, common.Endian, d)
 			if err != nil {
-				return nil, nil, nil,
-					fmt.Errorf("failed to get binary row, err: %v", err)
+				return nil, nil, nil, merr.WrapErrStorage(err, "failed to get binary row")
 			}
 		}
 
@@ -234,7 +229,7 @@ func GetDimFromParams(params []*commonpb.KeyValuePair) (int, error) {
 			return dim, nil
 		}
 	}
-	return -1, errors.New("dim not found in params")
+	return -1, merr.WrapErrStorageMsg("dim not found in params")
 }
 
 // ReadBinary read data in bytes and write it into receiver.
@@ -395,7 +390,7 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 	}
 
 	if len(collSchema.StructArrayFields) > 0 {
-		return nil, errors.New("struct fields are not implemented in row based insert data")
+		return nil, merr.WrapErrStorageMsg("struct fields are not implemented in row based insert data")
 	}
 
 	for _, field := range collSchema.Fields {
@@ -457,7 +452,7 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 				Dim:  dim,
 			}
 		case schemapb.DataType_SparseFloatVector:
-			return nil, errors.New("Sparse Float Vector is not supported in row based data")
+			return nil, merr.WrapErrStorageMsg("Sparse Float Vector is not supported in row based data")
 
 		case schemapb.DataType_Int8Vector:
 			dim, err := GetDimFromParams(field.TypeParams)
@@ -1213,7 +1208,7 @@ func GetPkFromInsertData(collSchema *schemapb.CollectionSchema, data *InsertData
 	pfData, ok := data.Data[pf.FieldID]
 	if !ok {
 		log.Warn("no primary field found in insert msg", zap.Int64("fieldID", pf.FieldID))
-		return nil, errors.New("no primary field found in insert msg")
+		return nil, merr.WrapErrStorageMsg("no primary field found in insert msg")
 	}
 
 	var realPfData FieldData
@@ -1227,7 +1222,7 @@ func GetPkFromInsertData(collSchema *schemapb.CollectionSchema, data *InsertData
 	}
 	if !ok {
 		log.Warn("primary field not in Int64 or VarChar format", zap.Int64("fieldID", pf.FieldID))
-		return nil, errors.New("primary field not in Int64 or VarChar format")
+		return nil, merr.WrapErrStorageMsg("primary field not in Int64 or VarChar format")
 	}
 
 	return realPfData, nil
@@ -1236,16 +1231,16 @@ func GetPkFromInsertData(collSchema *schemapb.CollectionSchema, data *InsertData
 // GetTimestampFromInsertData returns the Int64FieldData for timestamp field.
 func GetTimestampFromInsertData(data *InsertData) (*Int64FieldData, error) {
 	if data == nil {
-		return nil, errors.New("try to get timestamp from nil insert data")
+		return nil, merr.WrapErrStorageMsg("try to get timestamp from nil insert data")
 	}
 	fieldData, ok := data.Data[common.TimeStampField]
 	if !ok {
-		return nil, errors.New("no timestamp field in insert data")
+		return nil, merr.WrapErrStorageMsg("no timestamp field in insert data")
 	}
 
 	ifd, ok := fieldData.(*Int64FieldData)
 	if !ok {
-		return nil, errors.New("timestamp field is not Int64")
+		return nil, merr.WrapErrStorageMsg("timestamp field is not Int64")
 	}
 
 	return ifd, nil
@@ -1577,7 +1572,7 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 				},
 			}
 		default:
-			return insertRecord, errors.New("unsupported data type when transter storage.InsertData to internalpb.InsertRecord")
+			return insertRecord, merr.WrapErrStorageMsg("unsupported data type when transter storage.InsertData to internalpb.InsertRecord")
 		}
 
 		insertRecord.FieldsData = append(insertRecord.FieldsData, fieldData)
@@ -1764,7 +1759,7 @@ func VectorArrayToArrowType(elementType schemapb.DataType, dim int) (arrow.DataT
 	case schemapb.DataType_Int8Vector:
 		return &arrow.FixedSizeBinaryType{ByteWidth: dim}, nil
 	default:
-		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("unsupported element type in VectorArray: %s", elementType.String()))
+		return nil, merr.WrapErrServiceInternalMsg("unsupported element type in VectorArray: %s", elementType.String())
 	}
 }
 

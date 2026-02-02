@@ -3,8 +3,7 @@ package recovery
 import (
 	"time"
 
-	"github.com/cockroachdb/errors"
-
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -34,13 +33,13 @@ type config struct {
 
 func (cfg *config) validate() error {
 	if cfg.persistInterval <= 0 {
-		return errors.New("persist interval must be greater than 0")
+		return merr.WrapErrServiceInternalMsg("persist interval must be greater than 0")
 	}
 	if cfg.maxDirtyMessages <= 0 {
-		return errors.New("max dirty messages must be greater than 0")
+		return merr.WrapErrServiceInternalMsg("max dirty messages must be greater than 0")
 	}
 	if cfg.gracefulTimeout <= 0 {
-		return errors.New("graceful timeout must be greater than 0")
+		return merr.WrapErrServiceInternalMsg("graceful timeout must be greater than 0")
 	}
 	return nil
 }

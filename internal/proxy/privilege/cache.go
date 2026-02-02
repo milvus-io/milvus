@@ -18,11 +18,9 @@ package privilege
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"sync/atomic"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -198,7 +196,7 @@ func (m *privilegeCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		if op.OpKey == "" {
-			return errors.New("empty op key")
+			return merr.WrapErrRbacMsg("empty op key")
 		}
 	}
 
@@ -216,7 +214,7 @@ func (m *privilegeCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 	case typeutil.CacheAddUserToRole:
 		user, role, err := funcutil.DecodeUserRoleCache(op.OpKey)
 		if err != nil {
-			return fmt.Errorf("invalid opKey, fail to decode, op_type: %d, op_key: %s", int(op.OpType), op.OpKey)
+			return merr.WrapErrRbacMsg("invalid opKey, fail to decode, op_type: %d, op_key: %s", int(op.OpType), op.OpKey)
 		}
 		if m.userToRoles[user] == nil {
 			m.userToRoles[user] = make(map[string]struct{})
@@ -225,7 +223,7 @@ func (m *privilegeCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 	case typeutil.CacheRemoveUserFromRole:
 		user, role, err := funcutil.DecodeUserRoleCache(op.OpKey)
 		if err != nil {
-			return fmt.Errorf("invalid opKey, fail to decode, op_type: %d, op_key: %s", int(op.OpType), op.OpKey)
+			return merr.WrapErrRbacMsg("invalid opKey, fail to decode, op_type: %d, op_key: %s", int(op.OpType), op.OpKey)
 		}
 		if m.userToRoles[user] != nil {
 			delete(m.userToRoles[user], role)
@@ -262,7 +260,7 @@ func (m *privilegeCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 		m.privilegeInfos = make(map[string]struct{})
 		m.unsafeInitPolicyInfo(resp.PolicyInfos, resp.UserRoles)
 	default:
-		return fmt.Errorf("invalid opType, op_type: %d, op_key: %s", int(op.OpType), op.OpKey)
+		return merr.WrapErrRbacMsg("invalid opType, op_type: %d, op_key: %s", int(op.OpType), op.OpKey)
 	}
 	return nil
 }

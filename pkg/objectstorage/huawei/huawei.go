@@ -32,6 +32,8 @@ import (
 	iamRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/iam/v3/region"
 	"github.com/minio/minio-go/v7"
 	minioCred "github.com/minio/minio-go/v7/pkg/credentials"
+
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func NewMinioClient(address string, opts *minio.Options) (*minio.Client, error) {
@@ -121,7 +123,7 @@ func (p *HuaweiCredentialProvider) Retrieve() (minioCred.Value, error) {
 	}
 
 	if response.Credential == nil {
-		return minioCred.Value{}, errors.New("no credential returned from Huawei Cloud")
+		return minioCred.Value{}, merr.WrapErrServiceInternalMsg("no credential returned from Huawei Cloud")
 	}
 
 	expiration, err := time.Parse("2006-01-02T15:04:05Z", response.Credential.ExpiresAt)

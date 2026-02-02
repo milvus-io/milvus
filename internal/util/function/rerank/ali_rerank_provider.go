@@ -20,13 +20,13 @@ package rerank
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/ali"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type aliProvider struct {
@@ -61,7 +61,7 @@ func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 		}
 	}
 	if modelName == "" {
-		return nil, fmt.Errorf("ali rerank model name is required")
+		return nil, merr.WrapErrFunctionFailedMsg("ali rerank model name is required")
 	}
 	provider := aliProvider{
 		baseProvider: baseProvider{batchSize: maxBatch},

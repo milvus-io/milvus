@@ -21,9 +21,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func TestWrapHandler(t *testing.T) {
@@ -33,9 +34,9 @@ func TestWrapHandler(t *testing.T) {
 		case "0":
 			return gin.H{"status": "ok"}, nil
 		case "1":
-			return nil, errBadRequest
+			return nil, merr.ErrHTTPBadRequest
 		case "2":
-			return nil, errors.New("internal err")
+			return nil, merr.ErrServiceInternal
 		}
 		panic("shall not reach")
 	}

@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -50,7 +51,7 @@ type Client struct {
 // NewClient creates a new client instance
 func NewClient(ctx context.Context, addr string, nodeID int64) (types.ProxyClient, error) {
 	if addr == "" {
-		return nil, errors.New("address is empty")
+		return nil, merr.WrapErrServiceInternalMsg("address is empty")
 	}
 	sess := sessionutil.NewSession(context.Background())
 	if sess == nil {

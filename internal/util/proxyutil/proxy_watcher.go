@@ -18,7 +18,6 @@ package proxyutil
 
 import (
 	"context"
-	"fmt"
 	"path"
 	"sync"
 	"time"
@@ -33,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -202,7 +202,7 @@ func (p *ProxyWatcher) getSessionsOnEtcd(ctx context.Context) ([]*sessionutil.Se
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
 	)
 	if err != nil {
-		return nil, 0, fmt.Errorf("proxy manager failed to watch proxy with error %w", err)
+		return nil, 0, merr.WrapErrServiceInternalErr(err, "proxy manager failed to watch proxy")
 	}
 
 	var sessions []*sessionutil.Session
@@ -210,7 +210,7 @@ func (p *ProxyWatcher) getSessionsOnEtcd(ctx context.Context) ([]*sessionutil.Se
 		session, err := p.parseSession(v.Value)
 		if err != nil {
 			log.Warn("failed to unmarshal session", zap.Error(err))
-			return nil, 0, err
+			return nil, 0, merr.WrapErrSerializationFailed(err, "failed to unmarshal session")
 		}
 		sessions = append(sessions, session)
 	}

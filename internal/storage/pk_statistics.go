@@ -17,15 +17,14 @@
 package storage
 
 import (
-	"fmt"
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // pkStatistics contains pk field statistic information
@@ -38,7 +37,7 @@ type PkStatistics struct {
 // update set pk min/max value if input value is beyond former range.
 func (st *PkStatistics) UpdateMinMax(pk PrimaryKey) error {
 	if st == nil {
-		return errors.New("nil pk statistics")
+		return merr.WrapErrStorageMsg("nil pk statistics")
 	}
 	if st.MinPK == nil {
 		st.MinPK = pk
@@ -78,7 +77,7 @@ func (st *PkStatistics) UpdatePKRange(ids FieldData) error {
 			st.PkFilter.AddString(pk)
 		}
 	default:
-		return fmt.Errorf("invalid data type for primary key: %T", ids)
+		return merr.WrapErrStorageMsg("invalid data type for primary key: %T", ids)
 	}
 	return nil
 }

@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -141,7 +139,7 @@ func (ip *Int64PrimaryKey) UnmarshalJSON(data []byte) error {
 func (ip *Int64PrimaryKey) SetValue(data interface{}) error {
 	value, ok := data.(int64)
 	if !ok {
-		return errors.New("wrong type value when setValue for Int64PrimaryKey")
+		return merr.WrapErrStorageMsg("wrong type value when setValue for Int64PrimaryKey")
 	}
 
 	ip.Value = value
@@ -241,7 +239,7 @@ func (vcp *VarCharPrimaryKey) UnmarshalJSON(data []byte) error {
 func (vcp *VarCharPrimaryKey) SetValue(data interface{}) error {
 	value, ok := data.(string)
 	if !ok {
-		return errors.New("wrong type value when setValue for VarCharPrimaryKey")
+		return merr.WrapErrStorageMsg("wrong type value when setValue for VarCharPrimaryKey")
 	}
 
 	vcp.Value = value
@@ -272,7 +270,7 @@ func GenPrimaryKeyByRawData(data interface{}, pkType schemapb.DataType) (Primary
 			Value: data.(string),
 		}
 	default:
-		return nil, errors.New("not supported primary data type")
+		return nil, merr.WrapErrStorageMsg("not supported primary data type")
 	}
 
 	return result, nil
@@ -305,11 +303,11 @@ func GenVarcharPrimaryKeys(data ...string) ([]PrimaryKey, error) {
 func ParseFieldData2PrimaryKeys(data *schemapb.FieldData) ([]PrimaryKey, error) {
 	ret := make([]PrimaryKey, 0)
 	if data == nil {
-		return ret, errors.New("failed to parse pks from nil field data")
+		return ret, merr.WrapErrStorageMsg("failed to parse pks from nil field data")
 	}
 	scalarData := data.GetScalars()
 	if scalarData == nil {
-		return ret, errors.New("failed to parse pks from nil scalar data")
+		return ret, merr.WrapErrStorageMsg("failed to parse pks from nil scalar data")
 	}
 
 	switch data.Type {
@@ -324,7 +322,7 @@ func ParseFieldData2PrimaryKeys(data *schemapb.FieldData) ([]PrimaryKey, error) 
 			ret = append(ret, pk)
 		}
 	default:
-		return ret, errors.New("not supported primary data type")
+		return ret, merr.WrapErrStorageMsg("not supported primary data type")
 	}
 
 	return ret, nil

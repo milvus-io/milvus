@@ -94,7 +94,7 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 
 	if len(placeholderGrp) == 0 {
 		plan.delete()
-		return nil, errors.New("empty search request")
+		return nil, merr.WrapErrParameterInvalidMsg("placeholderGroup is empty")
 	}
 
 	blobPtr := unsafe.Pointer(&placeholderGrp[0])
@@ -167,7 +167,7 @@ type RetrievePlan struct {
 
 func NewRetrievePlan(col *CCollection, expr []byte, timestamp typeutil.Timestamp, msgID int64, consistencylevel commonpb.ConsistencyLevel, collectionTTL typeutil.Timestamp) (*RetrievePlan, error) {
 	if col.rawPointer() == nil {
-		return nil, errors.New("collection is released")
+		return nil, merr.WrapErrServiceInternal("collection is released")
 	}
 	var cPlan C.CRetrievePlan
 	status := C.CreateRetrievePlanByExpr(col.rawPointer(), unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)

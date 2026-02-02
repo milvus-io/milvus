@@ -21,10 +21,9 @@ import (
 	"encoding/binary"
 	"io"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // EventTypeCode represents event type by code
@@ -266,7 +265,7 @@ func newDeleteEventWriter(dataType schemapb.DataType, opts ...PayloadWriterOptio
 
 func newCreateCollectionEventWriter(dataType schemapb.DataType) (*createCollectionEventWriter, error) {
 	if dataType != schemapb.DataType_String && dataType != schemapb.DataType_Int64 {
-		return nil, errors.New("incorrect data type")
+		return nil, merr.WrapErrStorageMsg("incorrect data type")
 	}
 
 	payloadWriter, err := NewPayloadWriter(dataType)
@@ -292,7 +291,7 @@ func newCreateCollectionEventWriter(dataType schemapb.DataType) (*createCollecti
 
 func newDropCollectionEventWriter(dataType schemapb.DataType) (*dropCollectionEventWriter, error) {
 	if dataType != schemapb.DataType_String && dataType != schemapb.DataType_Int64 {
-		return nil, errors.New("incorrect data type")
+		return nil, merr.WrapErrStorageMsg("incorrect data type")
 	}
 
 	payloadWriter, err := NewPayloadWriter(dataType)
@@ -318,7 +317,7 @@ func newDropCollectionEventWriter(dataType schemapb.DataType) (*dropCollectionEv
 
 func newCreatePartitionEventWriter(dataType schemapb.DataType) (*createPartitionEventWriter, error) {
 	if dataType != schemapb.DataType_String && dataType != schemapb.DataType_Int64 {
-		return nil, errors.New("incorrect data type")
+		return nil, merr.WrapErrStorageMsg("incorrect data type")
 	}
 
 	payloadWriter, err := NewPayloadWriter(dataType)
@@ -344,7 +343,7 @@ func newCreatePartitionEventWriter(dataType schemapb.DataType) (*createPartition
 
 func newDropPartitionEventWriter(dataType schemapb.DataType) (*dropPartitionEventWriter, error) {
 	if dataType != schemapb.DataType_String && dataType != schemapb.DataType_Int64 {
-		return nil, errors.New("incorrect data type")
+		return nil, merr.WrapErrStorageMsg("incorrect data type")
 	}
 
 	payloadWriter, err := NewPayloadWriter(dataType)

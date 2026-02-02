@@ -71,7 +71,7 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 			msg.schemaVersion = taskMsg.BeginTs()
 		}
 	default:
-		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
+		return merr.WrapErrServiceInternal("msgType is neither Insert nor Delete")
 	}
 	return nil
 }

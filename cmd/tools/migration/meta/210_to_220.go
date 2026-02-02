@@ -18,6 +18,7 @@ import (
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -222,7 +223,7 @@ func getOrFillBuildMeta(record *pb.SegmentIndexInfo, indexBuildMeta IndexBuildMe
 	}
 	buildMeta, ok := indexBuildMeta[record.GetBuildID()]
 	if !ok {
-		return nil, fmt.Errorf("index build meta not found, segment id: %d, index id: %d, index build id: %d",
+		return nil, merr.WrapErrServiceInternalMsg("index build meta not found, segment id: %d, index id: %d, index build id: %d",
 			record.GetSegmentID(), record.GetIndexID(), record.GetBuildID())
 	}
 	return buildMeta, nil
@@ -244,7 +245,7 @@ func combineToSegmentIndexesMeta220(segmentIndexes SegmentIndexesMeta210, indexB
 			for i, filePath := range buildMeta.GetIndexFilePaths() {
 				parts := strings.Split(filePath, "/")
 				if len(parts) == 0 {
-					return nil, fmt.Errorf("invaild index file path: %s", filePath)
+					return nil, merr.WrapErrServiceInternalMsg("invaild index file path: %s", filePath)
 				}
 
 				fileKeys[i] = parts[len(parts)-1]
@@ -310,7 +311,7 @@ func combineToLoadInfo220(collectionLoadInfo CollectionLoadInfo220, partitionLoa
 
 func From210To220(metas *Meta) (*Meta, error) {
 	if !metas.Version.EQ(versions.Version210) {
-		return nil, fmt.Errorf("version mismatch: %s", metas.Version.String())
+		return nil, merr.WrapErrServiceInternalMsg("version mismatch: %s", metas.Version.String())
 	}
 	ttAliases, err := metas.Meta210.TtAliases.to220()
 	if err != nil {

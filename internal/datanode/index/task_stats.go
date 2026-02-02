@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	_ "github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -465,7 +466,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
 		if !ok && !enableNull {
-			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
+			return nil, merr.WrapErrServiceInternalMsg("field binlog not found for field %d", fieldID)
 		}
 		result := make([]string, 0, len(binlogs))
 		for _, binlog := range binlogs {
@@ -613,7 +614,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
 		if !ok {
-			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
+			return nil, merr.WrapErrServiceInternalMsg("field binlog not found for field %d", fieldID)
 		}
 		result := make([]string, 0, len(binlogs))
 		for _, binlog := range binlogs {

@@ -18,7 +18,6 @@ package typeutil
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math"
 	"reflect"
 
@@ -26,6 +25,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // Generic Clone for proto message
@@ -52,7 +52,7 @@ func BytesToFloat32(bytes []byte) float32 {
 // BytesToInt64 converts a byte slice to uint64.
 func BytesToInt64(b []byte) (int64, error) {
 	if len(b) != 8 {
-		return 0, fmt.Errorf("failed to convert []byte to int64: invalid data, must 8 bytes, but %d", len(b))
+		return 0, merr.WrapErrSerializationFailedMsg("failed to convert []byte to int64: invalid data, must 8 bytes, but %d", len(b))
 	}
 
 	return int64(common.Endian.Uint64(b)), nil
@@ -68,7 +68,7 @@ func Int64ToBytes(v int64) []byte {
 // BigEndianBytesToUint64 converts a byte slice (big endian) to uint64.
 func BigEndianBytesToUint64(b []byte) (uint64, error) {
 	if len(b) != 8 {
-		return 0, fmt.Errorf("failed to convert []byte to uint64: invalid data, must 8 bytes, but %d", len(b))
+		return 0, merr.WrapErrSerializationFailedMsg("failed to convert []byte to uint64: invalid data, must 8 bytes, but %d", len(b))
 	}
 
 	// do not use little or common endian for compatibility issues(the msgid used in rocksmq is using this)
@@ -85,7 +85,7 @@ func Uint64ToBytesBigEndian(v uint64) []byte {
 // BytesToUint64 converts a byte slice to uint64.
 func BytesToUint64(b []byte) (uint64, error) {
 	if len(b) != 8 {
-		return 0, fmt.Errorf("Failed to convert []byte to uint64: invalid data, must 8 bytes, but %d", len(b))
+		return 0, merr.WrapErrSerializationFailedMsg("Failed to convert []byte to uint64: invalid data, must 8 bytes, but %d", len(b))
 	}
 	return common.Endian.Uint64(b), nil
 }

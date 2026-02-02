@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -26,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -437,7 +437,7 @@ func emptyInt64() []int64 {
 }
 
 func errReturn(taskID int64, pbName string, err error) (string, []int64, []int64, error) {
-	return "", emptyInt64(), emptyInt64(), fmt.Errorf("task id: %d, failed to unmarshal %s, err %s ", taskID, pbName, err.Error())
+	return "", emptyInt64(), emptyInt64(), merr.WrapErrServiceInternalErr(err, "task id: %d, failed to unmarshal %s", taskID, pbName)
 }
 
 func int64Map(ids []int64) map[int64]interface{} {
@@ -643,7 +643,7 @@ func (c *mck) unmarshalTask(taskID int64, t string) (string, []int64, []int64, e
 		log.Info("HandoffSegments", zap.String("detail", fmt.Sprintf("+%v", handoffReq)))
 		return "HandoffSegments", pids, sids, nil
 	default:
-		err = errors.New("inValid msg type when unMarshal task")
+		err = merr.WrapErrServiceInternalMsg("inValid msg type when unMarshal task")
 		log.Error("invalid message task", zap.Int("type", int(header.Base.MsgType)), zap.Error(err))
 		return "", emptyInt64(), emptyInt64(), err
 	}

@@ -2,7 +2,6 @@ package idalloc
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -11,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
@@ -87,18 +87,18 @@ func (ta *tsoAllocator) batchAllocate(ctx context.Context, count uint32) (uint64
 
 	mixc, err := ta.mix.GetWithContext(ctx)
 	if err != nil {
-		return 0, 0, fmt.Errorf("get root coordinator client timeout: %w", err)
+		return 0, 0, merr.WrapErrServiceInternalErr(err, "get root coordinator client timeout")
 	}
 
 	resp, err := mixc.AllocTimestamp(ctx, req)
 	if err != nil {
-		return 0, 0, fmt.Errorf("syncTimestamp Failed:%w", err)
+		return 0, 0, merr.WrapErrServiceInternalErr(err, "syncTimestamp Failed")
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return 0, 0, fmt.Errorf("syncTimeStamp Failed:%s", resp.GetStatus().GetReason())
+		return 0, 0, merr.WrapErrServiceInternalMsg("syncTimeStamp Failed:%s", resp.GetStatus().GetReason())
 	}
 	if resp == nil {
-		return 0, 0, errors.New("empty AllocTimestampResponse")
+		return 0, 0, merr.WrapErrServiceInternalMsg("empty AllocTimestampResponse")
 	}
 	return resp.GetTimestamp(), int(resp.GetCount()), nil
 }
@@ -132,18 +132,18 @@ func (ta *idAllocator) batchAllocate(ctx context.Context, count uint32) (uint64,
 
 	mix, err := ta.mix.GetWithContext(ctx)
 	if err != nil {
-		return 0, 0, fmt.Errorf("get root coordinator client timeout: %w", err)
+		return 0, 0, merr.WrapErrServiceInternalErr(err, "get root coordinator client timeout")
 	}
 
 	resp, err := mix.AllocID(ctx, req)
 	if err != nil {
-		return 0, 0, fmt.Errorf("AllocID Failed:%w", err)
+		return 0, 0, merr.WrapErrServiceInternalErr(err, "AllocID Failed")
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return 0, 0, fmt.Errorf("AllocID Failed:%s", resp.GetStatus().GetReason())
+		return 0, 0, merr.WrapErrServiceInternalMsg("AllocID Failed:%s", resp.GetStatus().GetReason())
 	}
 	if resp == nil {
-		return 0, 0, errors.New("empty AllocID")
+		return 0, 0, merr.WrapErrServiceInternalMsg("empty AllocID")
 	}
 	if resp.GetID() < 0 {
 		panic("get unexpected negative id")

@@ -25,9 +25,8 @@ import (
 	"github.com/gin-gonic/gin/binding"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
-
-var errBadRequest = errors.New("bad request")
 
 // handlerFunc handles http request with gin context
 type handlerFunc func(c *gin.Context) (interface{}, error)
@@ -48,7 +47,7 @@ func wrapHandler(handle handlerFunc) gin.HandlerFunc {
 		}
 		if err != nil {
 			switch {
-			case errors.Is(err, errBadRequest):
+			case errors.Is(err, merr.ErrHTTPBadRequest):
 				bodyFormatNegotiate.Data = ErrResponse{
 					ErrorCode: commonpb.ErrorCode_IllegalArgument,
 					Reason:    err.Error(),

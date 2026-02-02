@@ -35,7 +35,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.BooleanBuilder:
 		ba, ok := a.(*array.Boolean)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrStorageMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ba.IsNull(idx) {
 			if defaultValue != nil {
@@ -51,7 +51,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.Int8Builder:
 		ia, ok := a.(*array.Int8)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrStorageMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ia.IsNull(idx) {
 			if defaultValue != nil {
@@ -67,7 +67,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.Int16Builder:
 		ia, ok := a.(*array.Int16)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrStorageMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ia.IsNull(idx) {
 			if defaultValue != nil {
@@ -83,7 +83,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.Int32Builder:
 		ia, ok := a.(*array.Int32)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrStorageMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ia.IsNull(idx) {
 			if defaultValue != nil {
@@ -99,7 +99,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.Int64Builder:
 		ia, ok := a.(*array.Int64)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrStorageMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ia.IsNull(idx) {
 			if defaultValue != nil {
@@ -115,7 +115,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.Float32Builder:
 		fa, ok := a.(*array.Float32)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrStorageMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if fa.IsNull(idx) {
 			if defaultValue != nil {
@@ -140,7 +140,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 		}
 		fa, ok := a.(*array.Float64)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrStorageMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if fa.IsNull(idx) {
 			b.AppendNull()
@@ -152,7 +152,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.StringBuilder:
 		sa, ok := a.(*array.String)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrStorageMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if sa.IsNull(idx) {
 			if defaultValue != nil {
@@ -170,7 +170,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.BinaryBuilder:
 		ba, ok := a.(*array.Binary)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrStorageMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ba.IsNull(idx) {
 			// could be internal $meta json
@@ -189,7 +189,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	case *array.FixedSizeBinaryBuilder:
 		ba, ok := a.(*array.FixedSizeBinary)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrStorageMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ba.IsNull(idx) {
 			b.AppendNull()
@@ -203,7 +203,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 		// Handle ListBuilder for ArrayOfVector type
 		la, ok := a.(*array.List)
 		if !ok {
-			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, merr.WrapErrStorageMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if la.IsNull(idx) {
 			b.AppendNull()
@@ -220,7 +220,7 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 		case *array.FixedSizeBinaryBuilder:
 			fixedArray, ok := valuesArray.(*array.FixedSizeBinary)
 			if !ok {
-				return 0, fmt.Errorf("invalid value type %T, expect %T", valuesArray.DataType(), vb.Type())
+				return 0, merr.WrapErrStorageMsg("invalid value type %T, expect %T", valuesArray.DataType(), vb.Type())
 			}
 			for i := start; i < end; i++ {
 				val := fixedArray.Value(int(i))
@@ -228,12 +228,12 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 				totalSize += uint64(len(val))
 			}
 		default:
-			return 0, fmt.Errorf("unsupported value builder type in ListBuilder: %T", valueBuilder)
+			return 0, merr.WrapErrStorageMsg("unsupported value builder type in ListBuilder: %T", valueBuilder)
 		}
 
 		return totalSize, nil
 	default:
-		return 0, fmt.Errorf("unsupported builder type: %T", builder)
+		return 0, merr.WrapErrStorageMsg("unsupported builder type: %T", builder)
 	}
 }
 
@@ -336,7 +336,7 @@ func (b *RecordBuilder) Append(rec Record, start, end int) error {
 			col := rec.Column(f.FieldID)
 			size, err := appendValueAt(builder, col, offset, f.GetDefaultValue())
 			if err != nil {
-				return fmt.Errorf("failed to append value at offset %d for field %s: %w", offset, f.GetName(), err)
+				return merr.WrapErrStorage(err, "failed to append value at offset %d for field %s", offset, f.GetName())
 			}
 			b.size += size
 		}

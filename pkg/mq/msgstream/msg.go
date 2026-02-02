@@ -18,10 +18,8 @@ package msgstream
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -29,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -134,7 +133,7 @@ func convertToByteArray(input interface{}) ([]byte, error) {
 	case []byte:
 		return output, nil
 	default:
-		return nil, errors.New("Cannot convert interface{} to []byte")
+		return nil, merr.WrapErrServiceInternalMsg("Cannot convert interface{} to []byte")
 	}
 }
 
@@ -234,7 +233,7 @@ func (it *InsertMsg) NRows() uint64 {
 
 func (it *InsertMsg) CheckAligned() error {
 	numRowsOfFieldDataMismatch := func(fieldName string, fieldNumRows, passedNumRows uint64) error {
-		return fmt.Errorf("the num_rows(%d) of %sth field is not equal to passed NumRows(%d)", fieldNumRows, fieldName, passedNumRows)
+		return merr.WrapErrServiceInternalMsg("the num_rows(%d) of %sth field is not equal to passed NumRows(%d)", fieldNumRows, fieldName, passedNumRows)
 	}
 	rowNums := it.NRows()
 	if it.IsColumnBased() {
@@ -250,11 +249,11 @@ func (it *InsertMsg) CheckAligned() error {
 	}
 
 	if len(it.GetRowIDs()) != len(it.GetTimestamps()) {
-		return fmt.Errorf("the num_rows(%d) of rowIDs  is not equal to the num_rows(%d) of timestamps", len(it.GetRowIDs()), len(it.GetTimestamps()))
+		return merr.WrapErrServiceInternalMsg("the num_rows(%d) of rowIDs  is not equal to the num_rows(%d) of timestamps", len(it.GetRowIDs()), len(it.GetTimestamps()))
 	}
 
 	if uint64(len(it.GetRowIDs())) != it.NRows() {
-		return fmt.Errorf("the num_rows(%d) of rowIDs  is not equal to passed NumRows(%d)", len(it.GetRowIDs()), it.NRows())
+		return merr.WrapErrServiceInternalMsg("the num_rows(%d) of rowIDs  is not equal to passed NumRows(%d)", len(it.GetRowIDs()), it.NRows())
 	}
 
 	return nil
@@ -431,12 +430,12 @@ func (dt *DeleteMsg) CheckAligned() error {
 	numRows := dt.GetNumRows()
 
 	if numRows != int64(len(dt.GetTimestamps())) {
-		return fmt.Errorf("the num_rows(%d) of pks  is not equal to the num_rows(%d) of timestamps", numRows, len(dt.GetTimestamps()))
+		return merr.WrapErrServiceInternalMsg("the num_rows(%d) of pks  is not equal to the num_rows(%d) of timestamps", numRows, len(dt.GetTimestamps()))
 	}
 
 	numPks := int64(typeutil.GetSizeOfIDs(dt.PrimaryKeys))
 	if numRows != numPks {
-		return fmt.Errorf("the num_rows(%d) of pks is not equal to passed NumRows(%d)", numPks, numRows)
+		return merr.WrapErrServiceInternalMsg("the num_rows(%d) of pks is not equal to passed NumRows(%d)", numPks, numRows)
 	}
 
 	return nil

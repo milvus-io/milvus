@@ -313,7 +313,7 @@ func (ss *SuffixSnapshot) Load(ctx context.Context, key string, ts typeutil.Time
 	if ts == 0 || ts == typeutil.MaxTimestamp {
 		value, err := ss.MetaKv.Load(ctx, key)
 		if ss.isTombstone(value) {
-			return "", errors.New("no value found")
+			return "", merr.WrapErrServiceInternalMsg("no value found")
 		}
 		return value, err
 	}
@@ -331,7 +331,7 @@ func (ss *SuffixSnapshot) Load(ctx context.Context, key string, ts typeutil.Time
 	if after {
 		value, err := ss.MetaKv.Load(ctx, key)
 		if ss.isTombstone(value) {
-			return "", errors.New("no value found")
+			return "", merr.WrapErrServiceInternalMsg("no value found")
 		}
 		return value, err
 	}
@@ -358,7 +358,7 @@ func (ss *SuffixSnapshot) Load(ctx context.Context, key string, ts typeutil.Time
 	}
 
 	if len(records) == 0 {
-		return "", errors.New("not value found")
+		return "", merr.WrapErrServiceInternalMsg("not value found")
 	}
 
 	// 3. find i which ts[i] <= ts && ts[i+1] > ts
@@ -367,12 +367,12 @@ func (ss *SuffixSnapshot) Load(ctx context.Context, key string, ts typeutil.Time
 	value, found := binarySearchRecords(records, ts)
 	if !found {
 		log.Warn("not found")
-		return "", errors.New("no value found")
+		return "", merr.WrapErrServiceInternalMsg("no value found")
 	}
 	// check whether value is tombstone
 	if ss.isTombstone(value) {
 		log.Warn("tombstone", zap.String("value", value))
-		return "", errors.New("not value found")
+		return "", merr.WrapErrServiceInternalMsg("not value found")
 	}
 	return value, nil
 }
@@ -633,12 +633,12 @@ func (ss *SuffixSnapshot) startBackgroundGC(ctx context.Context) {
 
 func (ss *SuffixSnapshot) getOriginalKey(snapshotKey string) (string, error) {
 	if !strings.HasPrefix(snapshotKey, ss.snapshotPrefix) {
-		return "", fmt.Errorf("get original key failed, invaild snapshot key:%s", snapshotKey)
+		return "", merr.WrapErrServiceInternalMsg("get original key failed, invaild snapshot key:%s", snapshotKey)
 	}
 	// collect keys that parent node is snapshot node if the corresponding the latest ts is expired.
 	idx := strings.LastIndex(snapshotKey, ss.separator)
 	if idx == -1 {
-		return "", fmt.Errorf("get original key failed, snapshot key:%s", snapshotKey)
+		return "", merr.WrapErrServiceInternalMsg("get original key failed, snapshot key:%s", snapshotKey)
 	}
 	prefix := snapshotKey[:idx]
 	return prefix[ss.snapshotLen:], nil

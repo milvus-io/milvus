@@ -18,7 +18,6 @@ package segments
 
 import (
 	"context"
-	"fmt"
 	"math"
 
 	"github.com/samber/lo"
@@ -359,7 +358,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 
 		// limit retrieve result to avoid oom
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, merr.WrapErrServiceInternalMsg("query results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 
 		cursors[sel]++
@@ -521,7 +520,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 
 			// limit retrieve result to avoid oom
 			if retSize > maxOutputSize {
-				return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+				return nil, merr.WrapErrServiceInternalMsg("query results exceed the maxOutputSize Limit %d", maxOutputSize)
 			}
 		}
 	} else {
@@ -582,7 +581,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			segmentResOffset[selection.batchIndex]++
 			// limit retrieve result to avoid oom
 			if retSize > maxOutputSize {
-				return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+				return nil, merr.WrapErrServiceInternalMsg("query results exceed the maxOutputSize Limit %d", maxOutputSize)
 			}
 		}
 	}
@@ -601,7 +600,7 @@ func mergeInternalRetrieveResultsAndFillIfEmpty(
 	}
 
 	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewInternalResult(mergedResult), param.outputFieldsId, param.schema); err != nil {
-		return nil, fmt.Errorf("failed to fill internal retrieve results: %s", err.Error())
+		return nil, merr.WrapErrServiceInternalMsg("failed to fill internal retrieve results: %s", err.Error())
 	}
 
 	return mergedResult, nil
@@ -621,7 +620,7 @@ func mergeSegcoreRetrieveResultsAndFillIfEmpty(
 	}
 
 	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewSegcoreResults(mergedResult), param.outputFieldsId, param.schema); err != nil {
-		return nil, fmt.Errorf("failed to fill segcore retrieve results: %s", err.Error())
+		return nil, merr.WrapErrServiceInternalMsg("failed to fill segcore retrieve results: %s", err.Error())
 	}
 
 	return mergedResult, nil

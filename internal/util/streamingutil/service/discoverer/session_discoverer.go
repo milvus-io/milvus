@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -92,7 +93,7 @@ func (sw *sessionDiscoverer) Discover(ctx context.Context, cb func(VersionedStat
 	}
 
 	// Always send the current state first.
-	// Outside logic may lost the last state before retry Discover function.
+	// Outside logic may lose the last state before retry Discover function.
 	if err := cb(sw.parseState()); err != nil {
 		return err
 	}
@@ -120,7 +121,7 @@ func (sw *sessionDiscoverer) watch(ctx context.Context, cb func(VersionedState) 
 		case event, ok := <-eventCh:
 			// Break the loop if the watch is failed.
 			if !ok {
-				return errors.New("etcd watch channel closed unexpectedly")
+				return merr.WrapErrServiceInternal("etcd watch channel closed unexpectedly")
 			}
 			if err := sw.handleETCDEvent(event); err != nil {
 				return err

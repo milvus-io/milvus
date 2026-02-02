@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/protobuf/proto"
 
@@ -23,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -48,7 +48,7 @@ func (b etcd210) loadTtAliases() (meta.TtAliasesMeta210, error) {
 		return nil, err
 	}
 	if len(keys) != len(values) {
-		return nil, errors.New("length mismatch")
+		return nil, merr.WrapErrServiceInternalMsg("length mismatch")
 	}
 	l := len(keys)
 	for i := 0; i < l; i++ {
@@ -60,12 +60,12 @@ func (b etcd210) loadTtAliases() (meta.TtAliasesMeta210, error) {
 			aliasInfo = nil
 		} else {
 			if err := proto.Unmarshal([]byte(tsValue), aliasInfo); err != nil {
-				return nil, err
+				return nil, merr.WrapErrSerializationFailed(err, "failed to deserialize aliasInfo")
 			}
 		}
 		key, ts, err := utils.SplitBySeparator(tsKey)
 		if err != nil {
-			return nil, err
+			return nil, merr.WrapErrServiceInternalErr(err, "failed to split %s by separator", tsKey)
 		}
 		ttAliases.AddAlias(utils.GetFileName(key), aliasInfo, ts)
 	}
@@ -80,7 +80,7 @@ func (b etcd210) loadAliases() (meta.AliasesMeta210, error) {
 		return nil, err
 	}
 	if len(keys) != len(values) {
-		return nil, errors.New("length mismatch")
+		return nil, merr.WrapErrServiceInternalMsg("length mismatch")
 	}
 	l := len(keys)
 	for i := 0; i < l; i++ {
@@ -92,7 +92,7 @@ func (b etcd210) loadAliases() (meta.AliasesMeta210, error) {
 			aliasInfo = nil
 		} else {
 			if err := proto.Unmarshal([]byte(value), aliasInfo); err != nil {
-				return nil, err
+				return nil, merr.WrapErrSerializationFailed(err, "failed to deserialize aliasInfo")
 			}
 		}
 		aliases.AddAlias(utils.GetFileName(key), aliasInfo)
@@ -108,7 +108,7 @@ func (b etcd210) loadTtCollections() (meta.TtCollectionsMeta210, error) {
 		return nil, err
 	}
 	if len(keys) != len(values) {
-		return nil, errors.New("length mismatch")
+		return nil, merr.WrapErrServiceInternalMsg("length mismatch")
 	}
 	l := len(keys)
 	for i := 0; i < l; i++ {
@@ -126,16 +126,16 @@ func (b etcd210) loadTtCollections() (meta.TtCollectionsMeta210, error) {
 			coll = nil
 		} else {
 			if err := proto.Unmarshal([]byte(tsValue), coll); err != nil {
-				return nil, err
+				return nil, merr.WrapErrSerializationFailed(err, "failed to deserialize collectionInfo")
 			}
 		}
 		key, ts, err := utils.SplitBySeparator(tsKey)
 		if err != nil {
-			return nil, err
+			return nil, merr.WrapErrServiceInternalErr(err, "failed to split %s by separator", tsKey)
 		}
 		collectionID, err := strconv.Atoi(utils.GetFileName(key))
 		if err != nil {
-			return nil, err
+			return nil, merr.WrapErrSerializationFailed(err, "failed to deserialize collectionID")
 		}
 		ttCollections.AddCollection(typeutil.UniqueID(collectionID), coll, ts)
 	}
@@ -150,7 +150,7 @@ func (b etcd210) loadCollections() (meta.CollectionsMeta210, error) {
 		return nil, err
 	}
 	if len(keys) != len(values) {
-		return nil, errors.New("length mismatch")
+		return nil, merr.WrapErrServiceInternalMsg("length mismatch")
 	}
 	l := len(keys)
 	for i := 0; i < l; i++ {
@@ -168,12 +168,12 @@ func (b etcd210) loadCollections() (meta.CollectionsMeta210, error) {
 			coll = nil
 		} else {
 			if err := proto.Unmarshal([]byte(value), coll); err != nil {
-				return nil, err
+				return nil, merr.WrapErrSerializationFailed(err, "failed to deserialize collectionInfo")
 			}
 		}
 		collectionID, err := strconv.Atoi(utils.GetFileName(key))
 		if err != nil {
-			return nil, err
+			return nil, merr.WrapErrSerializationFailed(err, "failed to deserialize collectionID")
 		}
 		collections.AddCollection(typeutil.UniqueID(collectionID), coll)
 	}
@@ -184,15 +184,15 @@ func parseCollectionIndexKey(key string) (collectionID, indexID typeutil.UniqueI
 	ss := strings.Split(key, "/")
 	l := len(ss)
 	if l < 2 {
-		return 0, 0, fmt.Errorf("failed to parse collection index key: %s", key)
+		return 0, 0, merr.WrapErrServiceInternalMsg("failed to parse collection index key: %s", key)
 	}
 	index, err := strconv.Atoi(ss[l-1])
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, merr.WrapErrSerializationFailed(err, "failed to deserialize index")
 	}
 	collection, err := strconv.Atoi(ss[l-2])
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, merr.WrapErrSerializationFailed(err, "failed to deserialize collectionID")
 	}
 	return typeutil.UniqueID(collection), typeutil.UniqueID(index), nil
 }
@@ -205,7 +205,7 @@ func (b etcd210) loadCollectionIndexes() (meta.CollectionIndexesMeta210, error) 
 		return nil, err
 	}
 	if len(keys) != len(values) {
-		return nil, errors.New("length mismatch")
+		return nil, merr.WrapErrServiceInternalMsg("length mismatch")
 	}
 	l := len(keys)
 	for i := 0; i < l; i++ {
@@ -214,7 +214,7 @@ func (b etcd210) loadCollectionIndexes() (meta.CollectionIndexesMeta210, error) 
 
 		index := &pb.IndexInfo{}
 		if err := proto.Unmarshal([]byte(value), index); err != nil {
-			return nil, err
+			return nil, merr.WrapErrSerializationFailed(err, "failed to deserialize IndexInfo")
 		}
 		collectionID, indexID, err := parseCollectionIndexKey(key)
 		if err != nil {
@@ -233,7 +233,7 @@ func (b etcd210) loadSegmentIndexes() (meta.SegmentIndexesMeta210, error) {
 		return nil, err
 	}
 	if len(keys) != len(values) {
-		return nil, errors.New("length mismatch")
+		return nil, merr.WrapErrServiceInternalMsg("length mismatch")
 	}
 	l := len(keys)
 	for i := 0; i < l; i++ {
@@ -241,7 +241,7 @@ func (b etcd210) loadSegmentIndexes() (meta.SegmentIndexesMeta210, error) {
 
 		index := &pb.SegmentIndexInfo{}
 		if err := proto.Unmarshal([]byte(value), index); err != nil {
-			return nil, err
+			return nil, merr.WrapErrSerializationFailed(err, "failed to deserialize SegmentIndexInfo")
 		}
 		segmentIndexes.AddIndex(index.GetSegmentID(), index.GetIndexID(), index)
 	}
@@ -256,7 +256,7 @@ func (b etcd210) loadIndexBuildMeta() (meta.IndexBuildMeta210, error) {
 		return nil, err
 	}
 	if len(keys) != len(values) {
-		return nil, errors.New("length mismatch")
+		return nil, merr.WrapErrServiceInternalMsg("length mismatch")
 	}
 	l := len(keys)
 	for i := 0; i < l; i++ {
@@ -264,7 +264,7 @@ func (b etcd210) loadIndexBuildMeta() (meta.IndexBuildMeta210, error) {
 
 		record := &legacypb.IndexMeta{}
 		if err := proto.Unmarshal([]byte(value), record); err != nil {
-			return nil, err
+			return nil, merr.WrapErrSerializationFailed(err, "failed to deserialize IndexMeta")
 		}
 		indexBuildMeta.AddRecord(record.GetIndexBuildID(), record)
 	}
@@ -285,7 +285,7 @@ func (b etcd210) loadLastDDLRecords() (meta.LastDDLRecords, error) {
 			return nil, err
 		}
 		if len(keys) != len(values) {
-			return nil, errors.New("length mismatch")
+			return nil, merr.WrapErrServiceInternalMsg("length mismatch")
 		}
 		for i, k := range keys {
 			records.AddRecord(k, values[i])

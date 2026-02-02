@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/openai"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -46,7 +47,7 @@ type OpenAIEmbeddingProvider struct {
 
 func createOpenAIEmbeddingClient(apiKey string, url string) (*openai.OpenAIEmbeddingClient, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", models.OpenaiAKEnvStr)
+		return nil, merr.WrapErrFunctionFailedMsg("Missing credentials config or configure the %s environment variable in the Milvus service.", models.OpenaiAKEnvStr)
 	}
 
 	if url == "" {
@@ -59,7 +60,7 @@ func createOpenAIEmbeddingClient(apiKey string, url string) (*openai.OpenAIEmbed
 
 func createAzureOpenAIEmbeddingClient(apiKey string, url string, resourceName string) (*openai.AzureOpenAIEmbeddingClient, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service", models.AzureOpenaiAKEnvStr)
+		return nil, merr.WrapErrFunctionFailedMsg("Missing credentials config or configure the %s environment variable in the Milvus service", models.AzureOpenaiAKEnvStr)
 	}
 
 	if url == "" {
@@ -71,7 +72,7 @@ func createAzureOpenAIEmbeddingClient(apiKey string, url string, resourceName st
 		}
 	}
 	if url == "" {
-		return nil, fmt.Errorf("Must configure the %s environment variable in the Milvus service", models.AzureOpenaiResourceName)
+		return nil, merr.WrapErrFunctionFailedMsg("Must configure the %s environment variable in the Milvus service", models.AzureOpenaiResourceName)
 	}
 	c := openai.NewAzureOpenAIEmbeddingClient(apiKey, url)
 	return c, nil
@@ -164,11 +165,11 @@ func (provider *OpenAIEmbeddingProvider) CallEmbedding(ctx context.Context, text
 			return nil, err
 		}
 		if end-i != len(resp.Data) {
-			return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
+			return nil, merr.WrapErrFunctionFailedMsg("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
 		}
 		for _, item := range resp.Data {
 			if len(item.Embedding) != int(provider.fieldDim) {
-				return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+				return nil, merr.WrapErrFunctionFailedMsg("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 					provider.fieldDim, len(item.Embedding))
 			}
 			data = append(data, item.Embedding)

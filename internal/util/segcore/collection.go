@@ -12,7 +12,6 @@ import "C"
 import (
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -35,13 +34,13 @@ type CreateCCollectionRequest struct {
 func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 	schemaBlob, err := proto.Marshal(req.Schema)
 	if err != nil {
-		return nil, errors.New("marshal schema failed")
+		return nil, merr.WrapErrServiceInternal("marshal schema failed")
 	}
 	var indexMetaBlob []byte
 	if req.IndexMeta != nil {
 		indexMetaBlob, err = proto.Marshal(req.IndexMeta)
 		if err != nil {
-			return nil, errors.New("marshal index meta failed")
+			return nil, merr.WrapErrServiceInternal("marshal index meta failed")
 		}
 	}
 	var ptr C.CCollection

@@ -20,7 +20,6 @@ package rerank
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/siliconflow"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type siliconflowProvider struct {
@@ -67,20 +67,20 @@ func newSiliconflowProvider(params []*commonpb.KeyValuePair, conf map[string]str
 		case models.MaxChunksPerDocParamKey:
 			maxChunksPerDoc, err := strconv.Atoi(param.Value)
 			if err != nil {
-				return nil, fmt.Errorf("[%s param's value: %s] is not a valid number", models.MaxChunksPerDocParamKey, param.Value)
+				return nil, merr.WrapErrFunctionFailed(err, "[%s param's value: %s] is not a valid number", models.MaxChunksPerDocParamKey, param.Value)
 			}
 			rankParams[models.MaxChunksPerDocParamKey] = maxChunksPerDoc
 		case models.OverlapTokensParamKey:
 			overlapTokens, err := strconv.Atoi(param.Value)
 			if err != nil {
-				return nil, fmt.Errorf("[%s param's value: %s] is not a valid number", models.OverlapTokensParamKey, param.Value)
+				return nil, merr.WrapErrFunctionFailed(err, "[%s param's value: %s] is not a valid number", models.OverlapTokensParamKey, param.Value)
 			}
 			rankParams[models.OverlapTokensParamKey] = overlapTokens
 		default:
 		}
 	}
 	if modelName == "" {
-		return nil, fmt.Errorf("siliconflow rerank model name is required")
+		return nil, merr.WrapErrFunctionFailedMsg("siliconflow rerank model name is required")
 	}
 
 	provider := siliconflowProvider{

@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/cockroachdb/errors"
 	"golang.org/x/exp/mmap"
 	"google.golang.org/protobuf/proto"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
@@ -89,7 +89,7 @@ func printBinlogFile(filename string) error {
 	fmt.Printf("\tEndTimestamp: %v\n", physical)
 	dataTypeName, ok := schemapb.DataType_name[int32(r.descriptorEvent.descriptorEventData.PayloadDataType)]
 	if !ok {
-		return fmt.Errorf("undefine data type %d", r.descriptorEvent.descriptorEventData.PayloadDataType)
+		return merr.WrapErrStorageMsg("undefine data type %d", r.descriptorEvent.descriptorEventData.PayloadDataType)
 	}
 	fmt.Printf("\tPayloadDataType: %v\n", dataTypeName)
 	fmt.Printf("\tPostHeaderLengths: %v\n", r.descriptorEvent.descriptorEventData.PostHeaderLengths)
@@ -112,7 +112,7 @@ func printBinlogFile(filename string) error {
 		case InsertEventType:
 			evd, ok := event.eventData.(*insertEventData)
 			if !ok {
-				return errors.New("incorrect event data type")
+				return merr.WrapErrStorageMsg("incorrect event data type")
 			}
 			fmt.Printf("event %d insert event:\n", eventNum)
 			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
@@ -125,7 +125,7 @@ func printBinlogFile(filename string) error {
 		case DeleteEventType:
 			evd, ok := event.eventData.(*deleteEventData)
 			if !ok {
-				return errors.New("incorrect event data type")
+				return merr.WrapErrStorageMsg("incorrect event data type")
 			}
 			fmt.Printf("event %d delete event:\n", eventNum)
 			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
@@ -138,7 +138,7 @@ func printBinlogFile(filename string) error {
 		case CreateCollectionEventType:
 			evd, ok := event.eventData.(*createCollectionEventData)
 			if !ok {
-				return errors.New("incorrect event data type")
+				return merr.WrapErrStorageMsg("incorrect event data type")
 			}
 			fmt.Printf("event %d create collection event:\n", eventNum)
 			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
@@ -151,7 +151,7 @@ func printBinlogFile(filename string) error {
 		case DropCollectionEventType:
 			evd, ok := event.eventData.(*dropCollectionEventData)
 			if !ok {
-				return errors.New("incorrect event data type")
+				return merr.WrapErrStorageMsg("incorrect event data type")
 			}
 			fmt.Printf("event %d drop collection event:\n", eventNum)
 			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
@@ -164,7 +164,7 @@ func printBinlogFile(filename string) error {
 		case CreatePartitionEventType:
 			evd, ok := event.eventData.(*createPartitionEventData)
 			if !ok {
-				return errors.New("incorrect event data type")
+				return merr.WrapErrStorageMsg("incorrect event data type")
 			}
 			fmt.Printf("event %d create partition event:\n", eventNum)
 			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
@@ -177,7 +177,7 @@ func printBinlogFile(filename string) error {
 		case DropPartitionEventType:
 			evd, ok := event.eventData.(*dropPartitionEventData)
 			if !ok {
-				return errors.New("incorrect event data type")
+				return merr.WrapErrStorageMsg("incorrect event data type")
 			}
 			fmt.Printf("event %d drop partition event:\n", eventNum)
 			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
@@ -193,14 +193,14 @@ func printBinlogFile(filename string) error {
 			extra := make(map[string]interface{})
 			err = json.Unmarshal(extraBytes, &extra)
 			if err != nil {
-				return fmt.Errorf("failed to unmarshal extra: %s", err.Error())
+				return merr.WrapErrStorage(err, "failed to unmarshal extra")
 			}
 			fmt.Printf("indexBuildID: %v\n", extra["indexBuildID"])
 			fmt.Printf("indexName: %v\n", extra["indexName"])
 			fmt.Printf("indexID: %v\n", extra["indexID"])
 			evd, ok := event.eventData.(*indexFileEventData)
 			if !ok {
-				return errors.New("incorrect event data type")
+				return merr.WrapErrStorageMsg("incorrect event data type")
 			}
 			fmt.Printf("index file event num: %d\n", eventNum)
 			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
@@ -212,7 +212,7 @@ func printBinlogFile(filename string) error {
 				return err
 			}
 		default:
-			return fmt.Errorf("undefined event typd %d", event.eventHeader.TypeCode)
+			return merr.WrapErrStorageMsg("undefined event typd %d", event.eventHeader.TypeCode)
 		}
 		eventNum++
 	}
@@ -421,7 +421,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 		}
 		fmt.Println("===== SparseFloatVectorFieldData end =====")
 	default:
-		return errors.New("undefined data type")
+		return merr.WrapErrStorageMsg("undefined data type")
 	}
 	return nil
 }
@@ -477,11 +477,11 @@ func printDDLPayloadValues(eventType EventTypeCode, colType schemapb.DataType, r
 				}
 				fmt.Printf("\t\t%d : drop partition: %v\n", i, req)
 			default:
-				return fmt.Errorf("undefined ddl event type %d", eventType)
+				return merr.WrapErrStorageMsg("undefined ddl event type %d", eventType)
 			}
 		}
 	default:
-		return errors.New("undefined data type")
+		return merr.WrapErrStorageMsg("undefined data type")
 	}
 	return nil
 }

@@ -34,6 +34,11 @@ const (
 	RetryLabel    = "retry"
 	RejectedLabel = "rejected"
 
+	// Composite Status Labels for refined error tracking
+	FailInputLabel      = "fail_input"      // Failure caused by client/user InputError
+	FailSystemLabel     = "fail_system"     // Failure caused by SystemError (hard failures)
+	RejectedSystemLabel = "rejected_system" // Rejection based on system resource/rate limit (Transient SystemError)
+
 	HybridSearchLabel = "hybrid_search"
 
 	InsertLabel    = "insert"

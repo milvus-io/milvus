@@ -127,7 +127,7 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 
 	collection, ok := m.collections[collectionID]
 	if !ok {
-		return merr.WrapErrCollectionNotFound(collectionID, "collection not found in querynode collection manager")
+		return merr.WrapErrCollectionIDNotFound(collectionID, "collection not found in querynode collection manager")
 	}
 
 	if err := collection.ccollection.UpdateSchema(schema, version); err != nil {

@@ -18,7 +18,6 @@ package shardclient
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -349,7 +348,7 @@ func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload Collecti
 			Exec:           workload.Exec,
 		})
 	}
-	return fmt.Errorf("no acitvate sheard leader exist for collection: %s", workload.CollectionName)
+	return merr.WrapErrServiceInternalMsg("no acitvate sheard leader exist for collection: %s", workload.CollectionName)
 }
 
 func (lb *LBPolicyImpl) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {

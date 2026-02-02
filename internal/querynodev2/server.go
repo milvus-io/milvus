@@ -37,7 +37,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -75,6 +74,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -168,7 +168,7 @@ func (node *QueryNode) initSession() error {
 		sessionutil.WithScalarIndexEngineVersion(common.MinimalScalarIndexEngineVersion, common.CurrentScalarIndexEngineVersion),
 		sessionutil.WithIndexNonEncoding())
 	if node.session == nil {
-		return errors.New("session is nil, the etcd client connection may have failed")
+		return merr.WrapErrServiceInternalMsg("session is nil, the etcd client connection may have failed")
 	}
 	node.session.Init(typeutil.QueryNodeRole, node.address, false, true)
 	sessionutil.SaveServerInfo(typeutil.QueryNodeRole, node.session.ServerID)
@@ -522,7 +522,7 @@ func (node *QueryNode) initHook() error {
 	log := log.Ctx(node.ctx)
 	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
 	if path == "" {
-		return errors.New("fail to set the plugin path")
+		return merr.WrapErrServiceInternalMsg("fail to set the plugin path")
 	}
 	log.Info("start to load plugin", zap.String("path", path))
 
@@ -530,24 +530,24 @@ func (node *QueryNode) initHook() error {
 	defer hookutil.UnlockHookInit()
 	p, err := plugin.Open(path)
 	if err != nil {
-		return fmt.Errorf("fail to open the plugin, error: %s", err.Error())
+		return merr.WrapErrServiceInternalErr(err, "fail to open the plugin")
 	}
 	log.Info("plugin open")
 
 	h, err := p.Lookup("QueryNodePlugin")
 	if err != nil {
-		return fmt.Errorf("fail to find the 'QueryNodePlugin' object in the plugin, error: %s", err.Error())
+		return merr.WrapErrServiceInternalErr(err, "fail to find the 'QueryNodePlugin' object in the plugin")
 	}
 
 	hoo, ok := h.(optimizers.QueryHook)
 	if !ok {
-		return errors.New("fail to convert the `Hook` interface")
+		return merr.WrapErrServiceInternalMsg("fail to convert the `Hook` interface")
 	}
 	if err = hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
-		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
+		return merr.WrapErrServiceInternalErr(err, "fail to init configs for the hook")
 	}
 	if err = hoo.InitTuningConfig(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.GetValue()); err != nil {
-		return fmt.Errorf("fail to init tuning configs for the hook, error: %s", err.Error())
+		return merr.WrapErrServiceInternalErr(err, "fail to init tuning configs for the hook")
 	}
 
 	node.queryHook = hoo

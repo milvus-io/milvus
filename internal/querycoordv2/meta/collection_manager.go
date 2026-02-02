@@ -525,7 +525,7 @@ func (m *CollectionManager) UpdatePartitionLoadPercent(ctx context.Context, part
 
 	oldPartition, ok := m.partitions[partitionID]
 	if !ok {
-		return merr.WrapErrPartitionNotFound(partitionID)
+		return merr.WrapErrPartitionIDNotFound(partitionID)
 	}
 
 	// update partition load percentage
@@ -551,7 +551,7 @@ func (m *CollectionManager) UpdateCollectionLoadPercent(ctx context.Context, col
 	// update collection load percentage
 	oldCollection, ok := m.collections[collectionID]
 	if !ok {
-		return 0, merr.WrapErrCollectionNotFound(collectionID)
+		return 0, merr.WrapErrCollectionIDNotFound(collectionID)
 	}
 	collectionPercent := m.calculateLoadPercentage(oldCollection.CollectionID)
 	newCollection := oldCollection.Clone()
@@ -647,7 +647,7 @@ func (m *CollectionManager) UpdateReplicaNumber(ctx context.Context, collectionI
 
 	collection, ok := m.collections[collectionID]
 	if !ok {
-		return merr.WrapErrCollectionNotFound(collectionID)
+		return merr.WrapErrCollectionIDNotFound(collectionID)
 	}
 	newCollection := collection.Clone()
 	newCollection.ReplicaNumber = replicaNumber

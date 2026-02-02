@@ -11,7 +11,6 @@ import "C"
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"runtime"
 	"unsafe"
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type Blob = storage.Blob
@@ -203,7 +203,7 @@ func CreateJSONKeyStats(ctx context.Context, buildIndexInfo *indexcgopb.BuildInd
 func (index *CgoIndex) Build(dataset *Dataset) error {
 	switch dataset.DType {
 	case schemapb.DataType_None:
-		return fmt.Errorf("build index on supported data type: %s", dataset.DType.String())
+		return merr.WrapErrServiceInternalMsg("build index on unknown data type: %s", dataset.DType.String())
 	case schemapb.DataType_FloatVector:
 		return index.buildFloatVecIndex(dataset)
 	case schemapb.DataType_Float16Vector:
@@ -233,7 +233,7 @@ func (index *CgoIndex) Build(dataset *Dataset) error {
 	case schemapb.DataType_VarChar:
 		return index.buildStringIndex(dataset)
 	default:
-		return fmt.Errorf("build index on unsupported data type: %s", dataset.DType.String())
+		return merr.WrapErrServiceInternalMsg("build index on unsupported data type: %s", dataset.DType.String())
 	}
 }
 

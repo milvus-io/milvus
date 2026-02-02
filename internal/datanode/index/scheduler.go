@@ -79,7 +79,7 @@ func (queue *IndexTaskQueue) addUnissuedTask(t Task) error {
 	defer queue.utLock.Unlock()
 
 	if queue.utFull() {
-		return errors.New("index task queue is full")
+		return merr.WrapErrServiceInternalMsg("index task queue is full")
 	}
 	queue.unissuedTasks.PushBack(t)
 	select {

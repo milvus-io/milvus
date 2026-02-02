@@ -30,11 +30,11 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
-	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedWriter, error) {
@@ -59,7 +59,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 	for _, group := range columnGroups {
 		cGroup := C.malloc(C.size_t(len(group.Columns)) * C.size_t(unsafe.Sizeof(C.int(0))))
 		if cGroup == nil {
-			return nil, errors.New("failed to allocate memory for column groups")
+			return nil, merr.WrapErrStorageMsg("failed to allocate memory for column groups")
 		}
 		cGroupSlice := (*[1 << 30]C.int)(cGroup)[:len(group.Columns):len(group.Columns)]
 		for i, val := range group.Columns {

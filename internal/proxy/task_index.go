@@ -178,7 +178,7 @@ func (cit *createIndexTask) parseFunctionParamsToIndex(indexParamsMap map[string
 
 	switch cit.functionSchema.GetType() {
 	case schemapb.FunctionType_Unknown:
-		return errors.New("unknown function type encountered")
+		return merr.WrapErrParameterInvalidMsg("unknown function type encountered")
 
 	case schemapb.FunctionType_BM25:
 		// set default BM25 params if not provided in index params
@@ -197,7 +197,7 @@ func (cit *createIndexTask) parseFunctionParamsToIndex(indexParamsMap map[string
 		if metricType, ok := indexParamsMap["metric_type"]; !ok {
 			indexParamsMap["metric_type"] = metric.BM25
 		} else if metricType != metric.BM25 {
-			return fmt.Errorf("index metric type of BM25 function output field must be BM25, got %s", metricType)
+			return merr.WrapErrParameterInvalidMsg("index metric type of BM25 function output field must be BM25, got %s", metricType)
 		}
 
 	default:
@@ -294,7 +294,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				} else if typeutil.IsGeometryType(dataType) {
 					return Params.AutoIndexConfig.ScalarGeometryIndexType.GetValue(), nil
 				}
-				return "", fmt.Errorf("create auto index on type:%s is not supported", dataType.String())
+				return "", merr.WrapErrParameterInvalidMsg("create auto index on type:%s is not supported", dataType.String())
 			}()
 			if err != nil {
 				return merr.WrapErrParameterInvalid("supported field", err.Error())
@@ -374,12 +374,12 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				}
 
 				if len(indexParamsMap) > numberParams+1 {
-					return errors.New("only metric type can be passed when use AutoIndex")
+					return merr.WrapErrParameterInvalidMsg("only metric type can be passed when use AutoIndex")
 				}
 
 				if len(indexParamsMap) == numberParams+1 {
 					if !metricTypeExist {
-						return errors.New("only metric type can be passed when use AutoIndex")
+						return merr.WrapErrParameterInvalidMsg("only metric type can be passed when use AutoIndex")
 					}
 
 					// only metric type is passed.
@@ -437,7 +437,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 
 		indexType, exist := indexParamsMap[common.IndexTypeKey]
 		if !exist {
-			return errors.New("IndexType not specified")
+			return merr.WrapErrParameterInvalidMsg("IndexType not specified")
 		}
 		//  index parameters defined in the YAML file are merged with the user-provided parameters during create stage
 		if Params.KnowhereConfig.Enable.GetAsBool() {
@@ -538,20 +538,20 @@ func (cit *createIndexTask) getIndexedFieldAndFunction(ctx context.Context) erro
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, cit.req.GetDbName(), cit.req.GetCollectionName())
 	if err != nil {
 		log.Ctx(ctx).Error("failed to get collection schema", zap.Error(err))
-		return fmt.Errorf("failed to get collection schema: %s", err)
+		return merr.WrapErrServiceInternalErr(err, "failed to get collection schema")
 	}
 
 	field, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(cit.req.GetFieldName())
 	if err != nil {
 		log.Ctx(ctx).Error("create index on non-exist field", zap.Error(err))
-		return fmt.Errorf("cannot create index on non-exist field: %s", cit.req.GetFieldName())
+		return merr.WrapErrParameterInvalidMsg("cannot create index on non-exist field: %s", cit.req.GetFieldName())
 	}
 
 	if field.IsFunctionOutput {
 		function, err := schema.schemaHelper.GetFunctionByOutputField(field)
 		if err != nil {
 			log.Ctx(ctx).Error("create index failed, cannot find function of function output field", zap.Error(err))
-			return fmt.Errorf("create index failed, cannot find function of function output field: %s", cit.req.GetFieldName())
+			return merr.WrapErrParameterInvalidMsg("create index failed, cannot find function of function output field: %s", cit.req.GetFieldName())
 		}
 		cit.functionSchema = function
 	}
@@ -568,12 +568,12 @@ func fillDimension(field *schemapb.FieldSchema, indexParams map[string]string) e
 	params = append(params, field.GetIndexParams()...)
 	dimensionInSchema, err := funcutil.GetAttrByKeyFromRepeatedKV(DimKey, params)
 	if err != nil {
-		return errors.New("dimension not found in schema")
+		return merr.WrapErrServiceInternalMsg("dimension not found in schema")
 	}
 	dimension, exist := indexParams[DimKey]
 	if exist {
 		if dimensionInSchema != dimension {
-			return fmt.Errorf("dimension mismatch, dimension in schema: %s, dimension: %s", dimensionInSchema, dimension)
+			return merr.WrapErrParameterInvalidMsg("dimension mismatch, dimension in schema: %s, dimension: %s", dimensionInSchema, dimension)
 		}
 	} else {
 		indexParams[DimKey] = dimensionInSchema
@@ -594,13 +594,13 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
 	if err != nil {
 		log.Ctx(ctx).Warn("Failed to get index checker", zap.String(common.IndexTypeKey, indexType))
-		return fmt.Errorf("invalid index type: %s", indexType)
+		return merr.WrapErrParameterInvalidMsg("invalid index type: %s", indexType)
 	}
 
 	if typeutil.IsVectorType(field.DataType) && indexType != indexparamcheck.AutoIndex {
 		exist := CheckVecIndexWithDataTypeExist(indexType, field.DataType, field.ElementType)
 		if !exist {
-			return fmt.Errorf("data type %s can't build with this index %s", schemapb.DataType_name[int32(field.GetDataType())], indexType)
+			return merr.WrapErrParameterInvalidMsg("data type %s can't build with this index %s", schemapb.DataType_name[int32(field.GetDataType())], indexType)
 		}
 	}
 
@@ -882,7 +882,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, dit.GetDbName(), dit.GetCollectionName())
 	if err != nil {
 		log.Ctx(ctx).Error("failed to get collection schema", zap.Error(err))
-		return fmt.Errorf("failed to get collection schema: %s", err)
+		return merr.WrapErrServiceInternalErr(err, "failed to get collection schema")
 	}
 
 	resp, err := dit.mixCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{CollectionID: dit.collectionID, IndexName: dit.IndexName, Timestamp: dit.Timestamp})
@@ -904,7 +904,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 		field, err := schema.schemaHelper.GetFieldFromID(indexInfo.FieldID)
 		if err != nil {
 			log.Ctx(ctx).Error("failed to get collection field", zap.Error(err))
-			return fmt.Errorf("failed to get collection field: %d", indexInfo.FieldID)
+			return merr.WrapErrServiceInternalErr(err, "failed to get collection field: %d", indexInfo.FieldID)
 		}
 		params := indexInfo.GetUserIndexParams()
 		if params == nil {
@@ -1022,7 +1022,7 @@ func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, dit.GetDbName(), dit.GetCollectionName())
 	if err != nil {
 		log.Ctx(ctx).Error("failed to get collection schema", zap.String("collection_name", dit.GetCollectionName()), zap.Error(err))
-		return fmt.Errorf("failed to get collection schema: %s", dit.GetCollectionName())
+		return merr.WrapErrServiceInternalErr(err, "failed to get collection schema: %s", dit.GetCollectionName())
 	}
 	schemaHelper := schema.schemaHelper
 
@@ -1038,7 +1038,7 @@ func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 		field, err := schemaHelper.GetFieldFromID(indexInfo.FieldID)
 		if err != nil {
 			log.Ctx(ctx).Error("failed to get collection field", zap.Int64("field_id", indexInfo.FieldID), zap.Error(err))
-			return fmt.Errorf("failed to get collection field: %d", indexInfo.FieldID)
+			return merr.WrapErrServiceInternalErr(err, "failed to get collection field: %d", indexInfo.FieldID)
 		}
 		params := indexInfo.GetUserIndexParams()
 		if params == nil {

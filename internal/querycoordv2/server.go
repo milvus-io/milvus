@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
@@ -60,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -161,7 +161,7 @@ func (s *Server) Register() error {
 func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 	s.session = session
 	if s.session == nil {
-		return errors.New("session is nil, the etcd client connection may have failed")
+		return merr.WrapErrServiceInternalMsg("session is nil, the etcd client connection may have failed")
 	}
 	return nil
 }
@@ -280,7 +280,7 @@ func (s *Server) initQueryCoord() error {
 			etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 		idAllocatorKV = tsoutil.NewTSOKVBase(s.etcdCli, Params.EtcdCfg.KvRootPath.GetValue(), "querycoord-id-allocator")
 	} else {
-		return fmt.Errorf("not supported meta store: %s", metaType)
+		return merr.WrapErrServiceInternalMsg("not supported meta store: %s", metaType)
 	}
 	log.Info(fmt.Sprintf("query coordinator successfully connected to %s.", metaType))
 

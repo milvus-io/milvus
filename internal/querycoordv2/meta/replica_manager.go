@@ -119,7 +119,7 @@ func NewReplicaManager(idAllocator func() (int64, error), catalog metastore.Quer
 func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error {
 	replicas, err := m.catalog.GetReplicas(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to recover replicas, err=%w", err)
+		return merr.WrapErrServiceInternalErr(err, "failed to recover replicas")
 	}
 
 	collectionSet := typeutil.NewUniqueSet(collections...)
@@ -576,7 +576,7 @@ func (m *ReplicaManager) validateResourceGroups(rgs map[string]typeutil.UniqueSe
 	for _, rg := range rgs {
 		for id := range rg {
 			if node.Contain(id) {
-				return errors.New("node in resource group is not mutual exclusive")
+				return merr.WrapErrServiceInternalMsg("node in resource group is not mutual exclusive")
 			}
 			node.Insert(id)
 		}

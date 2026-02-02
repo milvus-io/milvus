@@ -351,7 +351,7 @@ func NewSegment(ctx context.Context,
 	case SegmentTypeGrowing:
 		locker = state.NewLoadStateLock(state.LoadStateDataLoaded)
 	default:
-		return nil, fmt.Errorf("illegal segment type %d when create segment %d", segmentType, loadInfo.GetSegmentID())
+		return nil, merr.WrapErrServiceInternalMsg("illegal segment type %d when create segment %d", segmentType, loadInfo.GetSegmentID())
 	}
 
 	logger := log.With(
@@ -726,7 +726,7 @@ func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *segcore.Retr
 
 func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error {
 	if s.Type() != SegmentTypeGrowing {
-		return fmt.Errorf("unexpected segmentType when segmentInsert, segmentType = %s", s.segmentType.String())
+		return merr.WrapErrServiceInternalMsg("unexpected segmentType when segmentInsert, segmentType = %s", s.segmentType.String())
 	}
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
@@ -1132,7 +1132,7 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 			}
 			if s.Type() != SegmentTypeSealed {
 				errMsg := fmt.Sprintln("updateSegmentIndex failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
-				return errors.New(errMsg)
+				return merr.WrapErrServiceInternalMsg(errMsg)
 			}
 			appendLoadIndexInfoSpan := tr.RecordSpan()
 

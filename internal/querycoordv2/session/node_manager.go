@@ -18,7 +18,6 @@ package session
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -78,7 +78,7 @@ func (m *NodeManager) IsStoppingNode(nodeID int64) (bool, error) {
 
 	node := m.nodes[nodeID]
 	if node == nil {
-		return false, fmt.Errorf("nodeID[%d] isn't existed", nodeID)
+		return false, merr.WrapErrServiceInternalMsg("nodeID[%d] isn't existed", nodeID)
 	}
 	return node.IsStoppingState(), nil
 }

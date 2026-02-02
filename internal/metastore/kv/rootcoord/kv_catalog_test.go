@@ -1817,11 +1817,10 @@ func TestRBAC_Role(t *testing.T) {
 			key     string
 
 			expectedError error
-			ignorable     bool
 		}{
-			{"error key not exists, ignorable", false, notExistKey, nil, true},
-			{"error other error", false, errorKey, otherError, false},
-			{"no error", true, "key1", nil, false},
+			{"error key not exists, ignorable", false, notExistKey, nil},
+			{"error other error", false, errorKey, otherError},
+			{"no error", true, "key1", nil},
 		}
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
@@ -1830,11 +1829,6 @@ func TestRBAC_Role(t *testing.T) {
 					assert.NoError(t, err)
 				} else {
 					assert.Error(t, err)
-				}
-
-				if test.ignorable {
-					_, ok := err.(*common.IgnorableError)
-					assert.True(t, ok)
 				}
 			})
 		}
@@ -2359,22 +2353,18 @@ func TestRBAC_Grant(t *testing.T) {
 				roleName      string
 				privilegeName string
 
-				ignorable   bool
 				description string
 			}{
 				// exist role
-				{false, validUser, validRole, invalidPrivilege, false, "grant exist Role with error Privilege"},
-				{false, validUser, validRole, validPrivilege, true, "grant exist Role with exist Privilege, ignorable"},
-				{false, invalidUser, validRole, keyNotExistPrivilege, false, "grant exist Role with not exist Privilege with invalid user"},
-				{true, validUser, validRole, keyNotExistPrivilege, true, "grant exist Role with not exist Privilege with valid user"},
+				{false, validUser, validRole, invalidPrivilege, "grant exist Role with error Privilege"},
+				{false, invalidUser, validRole, keyNotExistPrivilege, "grant exist Role with not exist Privilege with invalid user"},
 				// error role
-				{false, validUser, invalidRole, invalidPrivilege, false, "grant invalid role with invalid privilege"},
-				{false, validUser, invalidRole, validPrivilege, false, "grant invalid role with valid privilege"},
-				{false, validUser, invalidRole, keyNotExistPrivilege, false, "grant invalid role with not exist privilege"},
-				{false, validUser, errorSaveRole, keyNotExistPrivilege, false, "grant error role with not exist privilege"},
+				{false, validUser, invalidRole, invalidPrivilege, "grant invalid role with invalid privilege"},
+				{false, validUser, invalidRole, validPrivilege, "grant invalid role with valid privilege"},
+				{false, validUser, invalidRole, keyNotExistPrivilege, "grant invalid role with not exist privilege"},
+				{false, validUser, errorSaveRole, keyNotExistPrivilege, "grant error role with not exist privilege"},
 				// not exist role
-				{false, validUser, keyNotExistRole, validPrivilege, true, "grant not exist role with exist privilege"},
-				{true, validUser, keyNotExistRole, keyNotExistPrivilege2, false, "grant not exist role with not exist privilege"},
+				{true, validUser, keyNotExistRole, keyNotExistPrivilege2, "grant not exist role with not exist privilege"},
 			}
 
 			for _, test := range tests {
@@ -2394,12 +2384,6 @@ func TestRBAC_Grant(t *testing.T) {
 						assert.NoError(t, err)
 					} else {
 						assert.Error(t, err)
-						_, ok := err.(*common.IgnorableError)
-						if test.ignorable {
-							assert.True(t, ok)
-						} else {
-							assert.False(t, ok)
-						}
 					}
 				})
 			}
@@ -2419,20 +2403,18 @@ func TestRBAC_Grant(t *testing.T) {
 				roleName      string
 				privilegeName string
 
-				ignorable   bool
 				description string
 			}{
 				// invalid role
-				{false, validUser, invalidRole, validPrivilege, false, "invalid role"},
-				{false, validUser, invalidRole, invalidPrivilege, false, "invalid role, invalid privilege"},
-				{false, validUser, invalidRole, keyNotExistPrivilege, false, "invalid role, not exist privilege"},
-				// not exist role
-				{false, validUser, keyNotExistRole, validPrivilege, true, "not exist role with exist privilege"},
+				{false, validUser, invalidRole, validPrivilege, "invalid role"},
+				{false, validUser, invalidRole, invalidPrivilege, "invalid role, invalid privilege"},
+				{false, validUser, invalidRole, keyNotExistPrivilege, "invalid role, not exist privilege"},
+
 				// exist role
-				{false, validUser, validRole, invalidPrivilege, false, "exist role with invalid privilege"},
-				{false, validUser, validRole, keyNotExistPrivilege, true, "exist role with not exist privilege"},
-				{true, validUser, validRole, validPrivilege, false, "exist role with exist privilege success to remove"},
-				{false, validUser, validRole, invalidPrivilegeRemove, false, "exist role with exist privilege fail to remove"},
+				{false, validUser, validRole, invalidPrivilege, "exist role with invalid privilege"},
+				{false, validUser, validRole, keyNotExistPrivilege, "exist role with not exist privilege"},
+				{true, validUser, validRole, validPrivilege, "exist role with exist privilege success to remove"},
+				{false, validUser, validRole, invalidPrivilegeRemove, "exist role with exist privilege fail to remove"},
 			}
 
 			for _, test := range tests {
@@ -2452,12 +2434,6 @@ func TestRBAC_Grant(t *testing.T) {
 						assert.NoError(t, err)
 					} else {
 						assert.Error(t, err)
-						_, ok := err.(*common.IgnorableError)
-						if test.ignorable {
-							assert.True(t, ok)
-						} else {
-							assert.False(t, ok)
-						}
 					}
 				})
 			}

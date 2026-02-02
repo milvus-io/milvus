@@ -35,6 +35,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type getVariableFieldLengthPolicy int
@@ -58,7 +59,7 @@ func getVarFieldLength(fieldSchema *schemapb.FieldSchema, policy getVariableFiel
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		maxLengthPerRowValue, ok := paramsMap[common.MaxLengthKey]
 		if !ok {
-			return 0, fmt.Errorf("the max_length was not specified, field type is %s", fieldSchema.DataType.String())
+			return 0, merr.WrapErrParameterMissingMsg("the max_length was not specified, field type is %s", fieldSchema.DataType.String())
 		}
 		maxLength, err = strconv.Atoi(maxLengthPerRowValue)
 		if err != nil {
@@ -79,13 +80,13 @@ func getVarFieldLength(fieldSchema *schemapb.FieldSchema, policy getVariableFiel
 			}
 			return maxLength, nil
 		default:
-			return 0, fmt.Errorf("unrecognized getVariableFieldLengthPolicy %v", policy)
+			return 0, merr.WrapErrParameterInvalidMsg("unrecognized getVariableFieldLengthPolicy %v", policy)
 		}
 		// geometry field max length now consider the same as json field, which is 512 bytes
 	case schemapb.DataType_Array, schemapb.DataType_JSON, schemapb.DataType_Geometry:
 		return GetDynamicFieldEstimateLength(), nil
 	default:
-		return 0, fmt.Errorf("field %s is not a variable-length type", fieldSchema.DataType.String())
+		return 0, merr.WrapErrParameterInvalidMsg("field %s is not a variable-length type", fieldSchema.DataType.String())
 	}
 }
 
@@ -194,7 +195,7 @@ func estimateSizeBy(schema *schemapb.CollectionSchema, policy getVariableFieldLe
 			case schemapb.DataType_Int8Vector:
 				res += assumedArrayLen * dim
 			default:
-				return 0, fmt.Errorf("unsupported element type in VectorArray: %s", fs.ElementType.String())
+				return 0, merr.WrapErrParameterInvalidMsg("unsupported element type in VectorArray: %s", fs.ElementType.String())
 			}
 		}
 	}
@@ -286,12 +287,12 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 			res += 8
 		case schemapb.DataType_VarChar, schemapb.DataType_Text:
 			if rowOffset >= len(fs.GetScalars().GetStringData().GetData()) {
-				return 0, errors.New("offset out range of field datas")
+				return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
 			}
 			res += len(fs.GetScalars().GetStringData().Data[rowOffset])
 		case schemapb.DataType_Array:
 			if rowOffset >= len(fs.GetScalars().GetArrayData().GetData()) {
-				return 0, errors.New("offset out range of field datas")
+				return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
 			}
 			array := fs.GetScalars().GetArrayData().GetData()[rowOffset]
 			res += CalcScalarSize(&schemapb.FieldData{
@@ -300,12 +301,12 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 			})
 		case schemapb.DataType_JSON:
 			if rowOffset >= len(fs.GetScalars().GetJsonData().GetData()) {
-				return 0, errors.New("offset out range of field datas")
+				return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
 			}
 			res += len(fs.GetScalars().GetJsonData().GetData()[rowOffset])
 		case schemapb.DataType_Geometry:
 			if rowOffset >= len(fs.GetScalars().GetGeometryData().GetData()) {
-				return 0, fmt.Errorf("offset out range of field datas")
+				return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
 			}
 			res += len(fs.GetScalars().GetGeometryData().GetData()[rowOffset])
 		case schemapb.DataType_BinaryVector,
@@ -366,7 +367,7 @@ type SchemaHelper struct {
 // CreateSchemaHelper returns a new SchemaHelper object
 func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error) {
 	if schema == nil {
-		return nil, errors.New("schema is nil")
+		return nil, merr.WrapErrServiceInternalMsg("schema is nil")
 	}
 
 	allFields := GetAllFieldSchemas(schema)
@@ -383,37 +384,37 @@ func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error
 	}
 	for offset, field := range allFields {
 		if _, ok := schemaHelper.nameOffset[field.Name]; ok {
-			return nil, fmt.Errorf("duplicated fieldName: %s", field.Name)
+			return nil, merr.WrapErrServiceInternalMsg("duplicated fieldName: %s", field.Name)
 		}
 		if _, ok := schemaHelper.idOffset[field.FieldID]; ok {
-			return nil, fmt.Errorf("duplicated fieldID: %d", field.FieldID)
+			return nil, merr.WrapErrServiceInternalMsg("duplicated fieldID: %d", field.FieldID)
 		}
 		schemaHelper.nameOffset[field.Name] = offset
 		schemaHelper.idOffset[field.FieldID] = offset
 		if field.IsPrimaryKey {
 			if schemaHelper.primaryKeyOffset != -1 {
-				return nil, errors.New("primary key is not unique")
+				return nil, merr.WrapErrServiceInternalMsg("primary key is not unique")
 			}
 			schemaHelper.primaryKeyOffset = offset
 		}
 
 		if field.IsPartitionKey {
 			if schemaHelper.partitionKeyOffset != -1 {
-				return nil, errors.New("partition key is not unique")
+				return nil, merr.WrapErrServiceInternalMsg("partition key is not unique")
 			}
 			schemaHelper.partitionKeyOffset = offset
 		}
 
 		if field.IsClusteringKey {
 			if schemaHelper.clusteringKeyOffset != -1 {
-				return nil, errors.New("clustering key is not unique")
+				return nil, merr.WrapErrServiceInternalMsg("clustering key is not unique")
 			}
 			schemaHelper.clusteringKeyOffset = offset
 		}
 
 		if field.IsDynamic {
 			if schemaHelper.dynamicFieldOffset != -1 {
-				return nil, errors.New("dynamic field is not unique")
+				return nil, merr.WrapErrServiceInternalMsg("dynamic field is not unique")
 			}
 			schemaHelper.dynamicFieldOffset = offset
 		}
@@ -441,7 +442,7 @@ func (helper *SchemaHelper) GetTimezone() string {
 // GetPrimaryKeyField returns the schema of the primary key
 func (helper *SchemaHelper) GetPrimaryKeyField() (*schemapb.FieldSchema, error) {
 	if helper.primaryKeyOffset == -1 {
-		return nil, errors.New("failed to get primary key field: no primary in schema")
+		return nil, merr.WrapErrServiceInternalMsg("failed to get primary key field: no primary in schema")
 	}
 	return helper.allFields[helper.primaryKeyOffset], nil
 }
@@ -449,7 +450,7 @@ func (helper *SchemaHelper) GetPrimaryKeyField() (*schemapb.FieldSchema, error) 
 // GetPartitionKeyField returns the schema of the partition key
 func (helper *SchemaHelper) GetPartitionKeyField() (*schemapb.FieldSchema, error) {
 	if helper.partitionKeyOffset == -1 {
-		return nil, errors.New("failed to get partition key field: no partition key in schema")
+		return nil, merr.WrapErrServiceInternalMsg("failed to get partition key field: no partition key in schema")
 	}
 	return helper.allFields[helper.partitionKeyOffset], nil
 }
@@ -458,7 +459,7 @@ func (helper *SchemaHelper) GetPartitionKeyField() (*schemapb.FieldSchema, error
 // If not found, an error shall be returned.
 func (helper *SchemaHelper) GetClusteringKeyField() (*schemapb.FieldSchema, error) {
 	if helper.clusteringKeyOffset == -1 {
-		return nil, errors.New("failed to get clustering key field: not clustering key in schema")
+		return nil, merr.WrapErrServiceInternalMsg("failed to get clustering key field: not clustering key in schema")
 	}
 	return helper.allFields[helper.clusteringKeyOffset], nil
 }
@@ -467,7 +468,7 @@ func (helper *SchemaHelper) GetClusteringKeyField() (*schemapb.FieldSchema, erro
 // if there is no dynamic field defined in schema, error will be returned.
 func (helper *SchemaHelper) GetDynamicField() (*schemapb.FieldSchema, error) {
 	if helper.dynamicFieldOffset == -1 {
-		return nil, errors.New("failed to get dynamic field: no dynamic field in schema")
+		return nil, merr.WrapErrServiceInternalMsg("failed to get dynamic field: no dynamic field in schema")
 	}
 	return helper.allFields[helper.dynamicFieldOffset], nil
 }
@@ -476,7 +477,7 @@ func (helper *SchemaHelper) GetDynamicField() (*schemapb.FieldSchema, error) {
 func (helper *SchemaHelper) GetFieldFromName(fieldName string) (*schemapb.FieldSchema, error) {
 	offset, ok := helper.nameOffset[fieldName]
 	if !ok {
-		return nil, fmt.Errorf("failed to get field schema by name: fieldName(%s) not found", fieldName)
+		return nil, merr.WrapErrServiceInternalMsg("failed to get field schema by name: fieldName(%s) not found", fieldName)
 	}
 	return helper.allFields[offset], nil
 }
@@ -515,14 +516,14 @@ func (helper *SchemaHelper) getDefaultJSONField(fieldName string) (*schemapb.Fie
 		}
 	}
 	errMsg := fmt.Sprintf("field %s not exist", fieldName)
-	return nil, fmt.Errorf("%s", errMsg)
+	return nil, merr.WrapErrParameterInvalidMsg(errMsg)
 }
 
 // GetFieldFromID returns the schema of specified field
 func (helper *SchemaHelper) GetFieldFromID(fieldID int64) (*schemapb.FieldSchema, error) {
 	offset, ok := helper.idOffset[fieldID]
 	if !ok {
-		return nil, fmt.Errorf("fieldID(%d) not found", fieldID)
+		return nil, merr.WrapErrServiceInternalMsg("fieldID(%d) not found", fieldID)
 	}
 	return helper.allFields[offset], nil
 }
@@ -534,18 +535,18 @@ func (helper *SchemaHelper) GetVectorDimFromID(fieldID int64) (int, error) {
 		return 0, err
 	}
 	if !IsVectorType(sch.DataType) {
-		return 0, fmt.Errorf("field type = %s not has dim", schemapb.DataType_name[int32(sch.DataType)])
+		return 0, merr.WrapErrServiceInternalMsg("field type = %s not has dim", schemapb.DataType_name[int32(sch.DataType)])
 	}
 	for _, kv := range sch.TypeParams {
 		if kv.Key == common.DimKey {
 			dim, err := strconv.Atoi(kv.Value)
 			if err != nil {
-				return 0, err
+				return 0, merr.WrapErrServiceInternalErr(err, "get %s failed", common.DimKey)
 			}
 			return dim, nil
 		}
 	}
-	return 0, fmt.Errorf("fieldID(%d) not has dim", fieldID)
+	return 0, merr.WrapErrServiceInternalMsg("fieldID(%d) not has dim", fieldID)
 }
 
 func (helper *SchemaHelper) GetFunctionByOutputField(field *schemapb.FieldSchema) (*schemapb.FunctionSchema, error) {
@@ -556,7 +557,7 @@ func (helper *SchemaHelper) GetFunctionByOutputField(field *schemapb.FieldSchema
 			}
 		}
 	}
-	return nil, errors.New("function not exist")
+	return nil, merr.WrapErrServiceInternalMsg("function not exist")
 }
 
 // As of now, only BM25 function output field is not supported to retrieve raw field data
