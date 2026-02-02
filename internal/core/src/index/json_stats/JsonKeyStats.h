@@ -577,7 +577,8 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     }
 
     void
-    LoadShreddingData(const std::vector<std::string>& index_files);
+    LoadShreddingData(const std::vector<std::string>& index_files,
+                      const std::string& warmup_policy = "");
 
     void
     ApplyValidData(const bool* valid_data,
@@ -615,7 +616,8 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
     void
     LoadColumnGroup(int64_t column_group_id,
-                    const std::vector<int64_t>& file_ids);
+                    const std::vector<int64_t>& file_ids,
+                    const std::string& warmup_policy = "");
 
     void
     LoadShreddingMeta(

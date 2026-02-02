@@ -44,12 +44,12 @@ type LoadFieldDataRequest struct {
 	RowCount       int64
 	StorageVersion int64
 	LoadPriority   commonpb.LoadPriority
-	WarmupPolicy   string
 }
 
 type LoadFieldDataInfo struct {
-	Field      *datapb.FieldBinlog
-	EnableMMap bool
+	Field        *datapb.FieldBinlog
+	EnableMMap   bool
+	WarmupPolicy string // Per-field warmup policy: "disable", "sync", or empty for default
 }
 
 func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldDataRequest, err error) {
@@ -92,15 +92,18 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 		}
 
 		C.EnableMmap(cLoadFieldDataInfo, cFieldID, C.bool(field.EnableMMap))
+
+		// Set per-field warmup policy if specified
+		if len(field.WarmupPolicy) > 0 {
+			fieldWarmupPolicy, err := initcore.ConvertCacheWarmupPolicy(field.WarmupPolicy)
+			if err != nil {
+				return nil, errors.Wrapf(err, "ConvertCacheWarmupPolicy failed at field %d", field.Field.GetFieldID())
+			}
+			C.SetFieldWarmupPolicy(cLoadFieldDataInfo, cFieldID, C.CacheWarmupPolicy(fieldWarmupPolicy))
+		}
 	}
 	C.SetLoadPriority(cLoadFieldDataInfo, C.int32_t(req.LoadPriority))
-	if len(req.WarmupPolicy) > 0 {
-		warmupPolicy, err := initcore.ConvertCacheWarmupPolicy(req.WarmupPolicy)
-		if err != nil {
-			return nil, errors.Wrapf(err, "ConvertCacheWarmupPolicy failed at warmupPolicy, %s", req.WarmupPolicy)
-		}
-		C.AppendWarmupPolicy(cLoadFieldDataInfo, C.CacheWarmupPolicy(warmupPolicy))
-	}
+
 	return &cLoadFieldDataRequest{
 		cLoadFieldDataInfo: cLoadFieldDataInfo,
 	}, nil

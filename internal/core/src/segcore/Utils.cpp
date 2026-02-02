@@ -1179,14 +1179,32 @@ upper_bound(const ConcurrentVector<Timestamp>& timestamps,
     return first;
 }
 
-// Get the globally configured cache warmup policy for the given content type.
+// Get the cache warmup policy for the given content type.
+// If warmup_policy is not empty, parse it and return the corresponding policy.
+// If warmup_policy is empty, fall back to the global config.
 CacheWarmupPolicy
-getCacheWarmupPolicy(bool is_vector, bool is_index, bool in_load_list) {
-    auto& manager = milvus::cachinglayer::Manager::GetInstance();
+getCacheWarmupPolicy(const std::string& warmup_policy,
+                     bool is_vector,
+                     bool is_index,
+                     bool in_load_list) {
     // if field not in load list(hint), disable warmup
     if (!in_load_list) {
         return CacheWarmupPolicy::CacheWarmupPolicy_Disable;
     }
+
+    // If user specified a warmup policy, use it
+    if (!warmup_policy.empty()) {
+        if (warmup_policy == "disable") {
+            return CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+        } else if (warmup_policy == "sync") {
+            return CacheWarmupPolicy::CacheWarmupPolicy_Sync;
+        }
+        // Unknown policy string, should not happen, been checked by milvus proxy side
+        AssertInfo(false, "Unknown warmup policy '{}'", warmup_policy);
+    }
+
+    // Fall back to global config
+    auto& manager = milvus::cachinglayer::Manager::GetInstance();
     if (is_index) {
         return is_vector ? manager.getVectorIndexCacheWarmupPolicy()
                          : manager.getScalarIndexCacheWarmupPolicy();

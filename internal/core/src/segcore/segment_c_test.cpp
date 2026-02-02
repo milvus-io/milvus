@@ -1570,6 +1570,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data_Lack_Binlog_Rows) {
                         std::vector<int64_t>{int64_t(0)},
                         std::vector<int64_t>{0},
                         false,
+                        "",
                         std::vector<std::string>{}});
 
     load_info.field_infos.emplace(
@@ -1579,6 +1580,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data_Lack_Binlog_Rows) {
                         std::vector<int64_t>{int64_t(0)},
                         std::vector<int64_t>{0},
                         false,
+                        "",
                         std::vector<std::string>{}});
 
     auto status = LoadFieldData(segment, &load_info);
@@ -1642,6 +1644,7 @@ TEST(CApiTest, DISABLED_SealedSegment_Load_Field_Data_Lack_Binlog_Rows) {
                         std::vector<int64_t>{int64_t(0)},
                         std::vector<int64_t>{0},
                         false,
+                        "",
                         std::vector<std::string>{}});
 
     load_info.field_infos.emplace(
@@ -1651,6 +1654,7 @@ TEST(CApiTest, DISABLED_SealedSegment_Load_Field_Data_Lack_Binlog_Rows) {
                         std::vector<int64_t>{int64_t(0)},
                         std::vector<int64_t>{0},
                         false,
+                        "",
                         std::vector<std::string>{}});
 
     auto status = LoadFieldData(segment, &load_info);

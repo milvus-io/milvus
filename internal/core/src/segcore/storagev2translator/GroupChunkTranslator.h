@@ -44,7 +44,8 @@ class GroupChunkTranslator
         bool use_mmap,
         bool mmap_populate,
         int64_t num_fields,
-        milvus::proto::common::LoadPriority load_priority);
+        milvus::proto::common::LoadPriority load_priority,
+        const std::string& warmup_policy);
 
     ~GroupChunkTranslator() override;
 
