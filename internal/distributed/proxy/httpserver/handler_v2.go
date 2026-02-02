@@ -1557,8 +1557,9 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			return nil, merr.ErrParameterInvalid
 		}
 
-		// Convert ids to schemapb.IDs
-		ids, err := convertIDsToSchemapbIDs(httpReq.Ids, primaryField)
+		// Convert ids to schemapb.IDs from raw JSON to preserve int64 precision
+		body, _ := c.Get(gin.BodyBytesKey)
+		ids, err := convertIDsFromRawJSON(string(body.([]byte)), primaryField)
 		if err != nil {
 			log.Ctx(ctx).Warn("high level restful api, convert ids to schemapb.IDs failed", zap.Error(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{

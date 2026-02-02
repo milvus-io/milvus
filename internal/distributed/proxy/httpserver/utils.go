@@ -174,6 +174,71 @@ func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) 
 	return filter, nil
 }
 
+// convertIDsFromRawJSON extracts the "ids" field from raw JSON and converts to schemapb.IDs.
+// This function uses gjson to parse the raw JSON string directly, which preserves full int64
+// precision for large integers that would otherwise lose precision when decoded as float64.
+func convertIDsFromRawJSON(rawJSON string, pkField *schemapb.FieldSchema) (*schemapb.IDs, error) {
+	idsResult := gjson.Get(rawJSON, "ids")
+	if !idsResult.Exists() || !idsResult.IsArray() {
+		return nil, errors.New("ids field not found or not an array")
+	}
+
+	idsArray := idsResult.Array()
+	if len(idsArray) == 0 {
+		return nil, errors.New("ids array cannot be empty")
+	}
+
+	switch pkField.DataType {
+	case schemapb.DataType_Int64:
+		int64IDs := make([]int64, 0, len(idsArray))
+		for i, idResult := range idsArray {
+			var int64ID int64
+			switch idResult.Type {
+			case gjson.Number:
+				// gjson.Number preserves the raw string, parse as int64
+				int64ID = idResult.Int()
+			case gjson.String:
+				// String value, try to parse as int64
+				parsed, err := strconv.ParseInt(idResult.String(), 10, 64)
+				if err != nil {
+					return nil, fmt.Errorf("invalid int64 id at index %d: %v, error: %v", i, idResult.String(), err)
+				}
+				int64ID = parsed
+			default:
+				return nil, fmt.Errorf("invalid id type at index %d: expected number or string, got %v", i, idResult.Type)
+			}
+			int64IDs = append(int64IDs, int64ID)
+		}
+		return &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: int64IDs,
+				},
+			},
+		}, nil
+
+	case schemapb.DataType_VarChar:
+		stringIDs := make([]string, 0, len(idsArray))
+		for i, idResult := range idsArray {
+			stringID := idResult.String()
+			if stringID == "" {
+				return nil, fmt.Errorf("empty string id at index %d", i)
+			}
+			stringIDs = append(stringIDs, stringID)
+		}
+		return &schemapb.IDs{
+			IdField: &schemapb.IDs_StrId{
+				StrId: &schemapb.StringArray{
+					Data: stringIDs,
+				},
+			},
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("unsupported primary key type: %s", pkField.DataType.String())
+	}
+}
+
 // convertIDsToSchemapbIDs converts a slice of interface{} (JSON ids) to schemapb.IDs
 // based on the primary key field type.
 //
