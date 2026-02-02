@@ -2021,7 +2021,8 @@ func (suite *TaskSuite) TestExecutor_MoveSegmentTask() {
 	suite.Equal(int64(-1), moveTask.ShardLeaderID()) // Initial value
 
 	// Set up task executor
-	executor := NewExecutor(suite.meta,
+	executor := NewExecutor(targetNode,
+		suite.meta,
 		suite.dist,
 		suite.broker,
 		suite.target,
