@@ -3195,7 +3195,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.QueryNodeTaskParallelismFactor = ParamItem{
 		Key:          "queryCoord.queryNodeTaskParallelismFactor",
 		Version:      "2.5.14",
-		DefaultValue: "1",
+		DefaultValue: "20",
 		Doc:          "the parallelism factor for query node task, which permit query node execute cpuNum * parallelismFactor tasks in parallel",
 		Export:       false,
 	}
