@@ -509,11 +509,14 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			}
 
 			mu.Lock()
+			totalSize := lo.SumBy(lo.Values(uploaded), func(fileSize int64) int64 { return fileSize })
 			textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
-				FieldID: field.GetFieldID(),
-				Version: version,
-				BuildID: taskID,
-				Files:   lo.Keys(uploaded),
+				FieldID:    field.GetFieldID(),
+				Version:    version,
+				BuildID:    taskID,
+				Files:      lo.Keys(uploaded),
+				LogSize:    totalSize,
+				MemorySize: totalSize,
 			}
 			mu.Unlock()
 
