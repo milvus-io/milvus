@@ -71,7 +71,8 @@ type Executor struct {
 	executedFlag     chan struct{}
 }
 
-func NewExecutor(meta *meta.Meta,
+func NewExecutor(nodeID int64,
+	meta *meta.Meta,
 	dist *meta.DistributionManager,
 	broker meta.Broker,
 	targetMgr meta.TargetManagerInterface,
@@ -79,6 +80,7 @@ func NewExecutor(meta *meta.Meta,
 	nodeMgr *session.NodeManager,
 ) *Executor {
 	return &Executor{
+		nodeID:    nodeID,
 		doneCh:    make(chan struct{}),
 		meta:      meta,
 		dist:      dist,
