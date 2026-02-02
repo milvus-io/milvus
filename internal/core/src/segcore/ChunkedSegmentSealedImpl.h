@@ -672,7 +672,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
         auto get_val_view = [&](int chunk_id,
                                 int in_chunk_offset) -> PKViewType {
-            auto pw = all_chunk_pins[chunk_id];
+            auto& pw = all_chunk_pins[chunk_id];
             if constexpr (std::is_same_v<PK, int64_t>) {
                 auto src =
                     reinterpret_cast<const int64_t*>(pw.get()->RawData());
