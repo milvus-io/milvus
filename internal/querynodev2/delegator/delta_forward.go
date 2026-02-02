@@ -194,7 +194,8 @@ func (sd *shardDelegator) forwardStreamingByBF(ctx context.Context, deleteData [
 	sealed, growing, version := sd.distribution.PinOnlineSegments()
 
 	start := time.Now()
-	retMap := sd.applyBFInParallel(deleteData, segments.GetBFApplyPool())
+	// Pass pinned segments to ensure consistency between BF check and delete application
+	retMap := sd.applyBFInParallel(deleteData, segments.GetBFApplyPool(), sealed, growing)
 	// segment => delete data
 	delRecords := make(map[int64]DeleteData)
 	retMap.Range(func(key int, value *BatchApplyRet) bool {

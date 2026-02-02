@@ -231,10 +231,11 @@ type BatchApplyRet = struct {
 	Segment2Hits  map[int64][]bool
 }
 
-// applyBFInParallel applies bloom filter check in parallel using distribution's BatchGet.
-// IMPORTANT: Caller must ensure segments are protected (e.g., via Pin) during this call,
-// otherwise candidates may be released concurrently leading to use-after-free.
-func (sd *shardDelegator) applyBFInParallel(deleteDatas []*DeleteData, pool *conc.Pool[any]) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
+// applyBFInParallel applies bloom filter check in parallel on the provided pinned segments.
+// Using pinned segments ensures consistency between BF check and delete application,
+// preventing race conditions where new segments could be added between PinOnlineSegments
+// and this call.
+func (sd *shardDelegator) applyBFInParallel(deleteDatas []*DeleteData, pool *conc.Pool[any], sealed []SnapshotItem, growing []SegmentEntry) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
 	retIdx := 0
 	retMap := typeutil.NewConcurrentMap[int, *BatchApplyRet]()
 	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
@@ -254,7 +255,7 @@ func (sd *shardDelegator) applyBFInParallel(deleteDatas []*DeleteData, pool *con
 			deleteDataId := didx
 			partitionID := data.PartitionID
 			future := pool.Submit(func() (any, error) {
-				ret := sd.distribution.BatchGet(pks[startIdx:endIdx], partitionID)
+				ret := BatchGetFromSegments(pks[startIdx:endIdx], partitionID, sealed, growing)
 				retMap.Insert(tmpRetIndex, &BatchApplyRet{
 					DeleteDataIdx: deleteDataId,
 					StartIdx:      startIdx,
