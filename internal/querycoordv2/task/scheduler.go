@@ -379,7 +379,8 @@ func (scheduler *taskScheduler) Stop() {
 }
 
 func (scheduler *taskScheduler) AddExecutor(nodeID int64) {
-	executor := NewExecutor(scheduler.meta,
+	executor := NewExecutor(nodeID,
+		scheduler.meta,
 		scheduler.distMgr,
 		scheduler.broker,
 		scheduler.targetMgr,
