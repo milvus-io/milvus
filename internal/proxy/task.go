@@ -1801,7 +1801,6 @@ type createPartitionTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
-	id       uint32
 }
 
 func (t *createPartitionTask) TraceCtx() context.Context {
