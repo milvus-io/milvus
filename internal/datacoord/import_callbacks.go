@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -148,7 +147,6 @@ func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.Impor
 // broadcastImport broadcasts the import message to all vchannels.
 // This method is called from the new ImportV2 flow where proxy calls DataCoord directly.
 func (s *Server) broadcastImport(ctx context.Context,
-	dbName string,
 	collectionName string,
 	collectionID int64,
 	partitionIDs []int64,
@@ -171,26 +169,18 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return errors.Wrap(err, "failed to validate import request")
 	}
 
-	// Acquire resource lock with dbname and collection name (not deprecated JobID)
-	// Use shared DB lock and shared collection lock for import
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(dbName),
-		message.NewSharedCollectionNameResourceKey(dbName, collectionName),
-	)
+	// Get database name from collection metadata via broker
+	// This is safer than extracting from schema which may be stale
+	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
 	if err != nil {
-		return errors.Wrap(err, "failed to start broadcast with resource lock")
+		return errors.Wrap(err, "failed to start broadcast with collection id")
 	}
 	defer broadcaster.Close()
 
-	// Re-check collection existence after acquiring lock
-	exists, err := s.broker.HasCollection(ctx, collectionID)
-	if err != nil {
-		return errors.Wrap(err, "failed to check collection existence after acquiring lock")
+	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	if err := merr.CheckRPCCall(coll.Status, err); err != nil {
+		return err
 	}
-	if !exists {
-		return merr.WrapErrCollectionNotFound(collectionID)
-	}
-
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
@@ -199,13 +189,13 @@ func (s *Server) broadcastImport(ctx context.Context,
 				MsgType:   commonpb.MsgType_Import,
 				Timestamp: 0,
 			},
-			DbName:         dbName,
+			DbName:         coll.DbName,
 			CollectionName: collectionName,
 			CollectionID:   collectionID,
 			PartitionIDs:   partitionIDs,
 			Options:        funcutil.KeyValuePair2Map(options),
 			Files:          msgFiles,
-			Schema:         schema,
+			Schema:         schema, // TODO: should we use the schema from the collection?
 			JobID:          jobID,
 		}).
 		WithBroadcast(vchannels).

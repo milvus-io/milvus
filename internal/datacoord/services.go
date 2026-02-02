@@ -48,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -1845,16 +1844,10 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		return resp, nil
 	}
 
-	// Extract database name from schema, use default if empty
-	dbName := in.GetSchema().GetDbName()
-	if dbName == "" {
-		dbName = util.DefaultDBName
-	}
-
 	// Broadcast the import message
+	// dbName is retrieved inside broadcastImport via broker.DescribeCollectionInternal
 	err = s.broadcastImport(
 		ctx,
-		dbName,
 		in.GetCollectionName(),
 		in.GetCollectionID(),
 		in.GetPartitionIDs(),
