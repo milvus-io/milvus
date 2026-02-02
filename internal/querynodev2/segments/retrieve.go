@@ -173,7 +173,6 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 	var err error
 	var SegType commonpb.SegmentState
 	var retrieveSegments []Segment
-	var segFilters []SegmentFilter = make([]SegmentFilter, 0)
 
 	segIDs := req.GetSegmentIDs()
 	collID := req.Req.GetCollectionID()
@@ -182,18 +181,10 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 
 	if req.GetScope() == querypb.DataScope_Historical {
 		SegType = SegmentTypeSealed
-		segFilters = append(segFilters, WithType(SegmentTypeSealed))
-		if paramtable.Get().QueryNodeCfg.EnableSparseFilterInQuery.GetAsBool() {
-			segFilters = append(segFilters, WithSparseFilter(queryPlan))
-		}
-		retrieveSegments, err = validate(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs, segFilters...)
+		retrieveSegments, err = validateOnHistorical(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs, queryPlan)
 	} else {
 		SegType = SegmentTypeGrowing
-		segFilters = append(segFilters, WithType(SegmentTypeGrowing))
-		if paramtable.Get().QueryNodeCfg.EnableSparseFilterInQuery.GetAsBool() {
-			segFilters = append(segFilters, WithSparseFilter(queryPlan))
-		}
-		retrieveSegments, err = validate(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs, segFilters...)
+		retrieveSegments, err = validateOnStream(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs, queryPlan)
 	}
 
 	if err != nil {
@@ -205,7 +196,7 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 }
 
 // retrieveStreaming will retrieve all the validate target segments  and  return by stream
-func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) ([]Segment, error) {
+func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest, queryPlan *planpb.PlanNode, srv streamrpc.QueryStreamServer) ([]Segment, error) {
 	var err error
 	var SegType commonpb.SegmentState
 	var retrieveSegments []Segment
@@ -216,10 +207,10 @@ func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, r
 
 	if req.GetScope() == querypb.DataScope_Historical {
 		SegType = SegmentTypeSealed
-		retrieveSegments, err = validateOnHistorical(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
+		retrieveSegments, err = validateOnHistorical(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs, queryPlan)
 	} else {
 		SegType = SegmentTypeGrowing
-		retrieveSegments, err = validateOnStream(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
+		retrieveSegments, err = validateOnStream(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs, queryPlan)
 	}
 
 	if err != nil {
