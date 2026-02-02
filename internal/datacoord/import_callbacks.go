@@ -57,50 +57,42 @@ func (s *Server) importV1AckCallback(ctx context.Context, result message.Broadca
 
 	// Process each vchannel with its own TimeTick (not deprecated MsgBase)
 	// Each vchannel gets its own import job with the corresponding TimeTick
-	for vchannel, appendResult := range result.Results {
+	vchannels := make([]string, 0, len(result.Results))
+	for vchannel := range result.Results {
 		if funcutil.IsControlChannel(vchannel) {
 			continue
 		}
-
-		// Call createImportJobFromAck directly instead of ImportV2
-		// ImportV2 is only for proxy broadcast, not for ack callback
-		importResp, err := s.createImportJobFromAck(ctx, &internalpb.ImportRequestInternal{
-			DbID:           0, // already deprecated.
-			CollectionID:   body.GetCollectionID(),
-			CollectionName: body.GetCollectionName(),
-			PartitionIDs:   body.GetPartitionIDs(),
-			ChannelNames:   []string{vchannel}, // Single vchannel per import job
-			Schema:         body.GetSchema(),
-			Files: lo.Map(body.GetFiles(), func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
-				return &internalpb.ImportFile{
-					Id:    file.GetId(),
-					Paths: file.GetPaths(),
-				}
-			}),
-			Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
-			DataTimestamp: appendResult.TimeTick, // Use per-vchannel TimeTick
-			JobID:         body.GetJobID(),
-		})
-
-		err = merr.CheckRPCCall(importResp, err)
-		if errors.Is(err, merr.ErrCollectionNotFound) {
-			log.Ctx(ctx).Warn("import job creation failed because of collection not found, skip it",
-				zap.String("vchannel", vchannel),
-				zap.String("job_id", importResp.GetJobID()), zap.Error(err))
-			continue
-		}
-		if err != nil {
-			log.Ctx(ctx).Warn("import job creation failed",
-				zap.String("vchannel", vchannel),
-				zap.String("job_id", importResp.GetJobID()), zap.Error(err))
-			return err
-		}
-		log.Ctx(ctx).Info("import job created for vchannel",
-			zap.String("vchannel", vchannel),
-			zap.Uint64("timeTick", appendResult.TimeTick),
-			zap.String("job_id", importResp.GetJobID()))
+		vchannels = append(vchannels, vchannel)
 	}
-	return nil
+
+	// Call createImportJobFromAck directly instead of ImportV2
+	// ImportV2 is only for proxy broadcast, not for ack callback
+	importResp, err := s.createImportJobFromAck(ctx, &internalpb.ImportRequestInternal{
+		DbID:           0, // already deprecated.
+		CollectionID:   body.GetCollectionID(),
+		CollectionName: body.GetCollectionName(),
+		PartitionIDs:   body.GetPartitionIDs(),
+		ChannelNames:   vchannels,
+		Schema:         body.GetSchema(),
+		Files: lo.Map(body.GetFiles(), func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
+			return &internalpb.ImportFile{
+				Id:    file.GetId(),
+				Paths: file.GetPaths(),
+			}
+		}),
+		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
+		DataTimestamp: result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
+		JobID:         body.GetJobID(),
+	})
+
+	err = merr.CheckRPCCall(importResp, err)
+	if errors.Is(err, merr.ErrCollectionNotFound) {
+		log.Ctx(ctx).Warn("import job creation failed because of collection not found, skip it",
+			zap.Strings("vchannels", vchannels),
+			zap.String("job_id", importResp.GetJobID()), zap.Error(err))
+		return nil
+	}
+	return err
 }
 
 // validateImportRequest validates the import request before broadcasting.
