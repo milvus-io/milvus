@@ -50,7 +50,7 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         nb = 1000
         collection_name = cf.gen_collection_name_by_testcase_name()
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=dim)
         schema.add_field("embeddings_2", DataType.FLOAT_VECTOR, dim=dim)
         schema.add_field("visible", DataType.BOOL, nullable=True)
@@ -70,13 +70,13 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         # insert data
         insert_times = 2
         for i in range(insert_times):
-            vectors = cf.gen_vectors(nb, dim=dim)
+            vectors = cf.gen_vectors(nb, dim=default_dim)
             vectors_2 = cf.gen_vectors(nb, dim=dim)
             rows = []
             start_id = i * nb
             for j in range(nb):
                 row = {
-                    "id": start_id + j,
+                    default_primary_key_field_name: start_id + j,
                     "embeddings": list(vectors[j]),
                     "embeddings_2": list(vectors_2[j]),
                     "visible": False
@@ -139,13 +139,13 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
 
         # insert more data
         for i in range(insert_times):
-            vectors = cf.gen_vectors(nb, dim=dim)
+            vectors = cf.gen_vectors(nb, dim=default_dim)
             vectors_2 = cf.gen_vectors(nb, dim=dim)
             rows = []
             start_id = (insert_times + i) * nb
             for j in range(nb):
                 row = {
-                    "id": start_id + j,
+                    default_primary_key_field_name: start_id + j,
                     "embeddings": list(vectors[j]),
                     "embeddings_2": list(vectors_2[j]),
                     "visible": True
