@@ -259,6 +259,12 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 		}
 	}
 
+	// Validate warmup policy if specified
+	if err := indexparamcheck.ValidateWarmupIndexParams(indexParamsMap); err != nil {
+		log.Ctx(ctx).Warn("Invalid warmup params", zap.Error(err))
+		return merr.WrapErrParameterInvalidMsg("invalid warmup params: %s", err.Error())
+	}
+
 	if !isVecIndex {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
 		autoIndexEnable := Params.AutoIndexConfig.ScalarAutoIndexEnable.GetAsBool()
@@ -738,6 +744,11 @@ func (t *alterIndexTask) PreExecute(ctx context.Context) error {
 			if !indexparams.IsConfigableIndexParam(param.GetKey()) {
 				return merr.WrapErrParameterInvalidMsg("%s is not a configable index property", param.GetKey())
 			}
+		}
+		// Validate warmup policy if specified
+		indexParamsMap := funcutil.KeyValuePair2Map(t.req.GetExtraParams())
+		if err := indexparamcheck.ValidateWarmupIndexParams(indexParamsMap); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid warmup params: %s", err.Error())
 		}
 	} else if len(t.req.GetDeleteKeys()) > 0 {
 		for _, param := range t.req.GetDeleteKeys() {

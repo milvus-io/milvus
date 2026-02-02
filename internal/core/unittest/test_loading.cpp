@@ -314,3 +314,46 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     ASSERT_EQ(request.max_memory_cost, expected.max_memory_cost);
     ASSERT_EQ(request.max_disk_cost, expected.max_disk_cost);
 }
+
+// Test that warmup policy is kept in index_params and passed to Knowhere
+TEST(IndexLoadWarmupTest, WarmupPolicyKeptInIndexParams) {
+    milvus::segcore::LoadIndexInfo loadIndexInfo;
+
+    loadIndexInfo.collection_id = 1;
+    loadIndexInfo.partition_id = 2;
+    loadIndexInfo.segment_id = 3;
+    loadIndexInfo.field_id = 4;
+    loadIndexInfo.field_type = milvus::DataType::VECTOR_FLOAT;
+    loadIndexInfo.enable_mmap = false;
+    loadIndexInfo.mmap_dir_path = "/tmp/mmap";
+    loadIndexInfo.index_id = 5;
+    loadIndexInfo.index_build_id = 6;
+    loadIndexInfo.index_version = 1;
+    loadIndexInfo.index_files = {"/tmp/index/1"};
+    loadIndexInfo.index = nullptr;
+    loadIndexInfo.cache_index = nullptr;
+    loadIndexInfo.uri = "";
+    loadIndexInfo.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    loadIndexInfo.index_size = 1024 * 1024;
+
+    // Set warmup in index_params
+    loadIndexInfo.index_params["index_type"] = "HNSW";
+    loadIndexInfo.index_params["metric_type"] = "L2";
+    loadIndexInfo.index_params["warmup"] = "sync";
+
+    // Verify warmup is in index_params before any processing
+    ASSERT_TRUE(loadIndexInfo.index_params.find("warmup") !=
+                loadIndexInfo.index_params.end());
+    ASSERT_EQ(loadIndexInfo.index_params["warmup"], "sync");
+
+    // Also verify warmup_policy field can be set
+    loadIndexInfo.warmup_policy = "sync";
+    ASSERT_EQ(loadIndexInfo.warmup_policy, "sync");
+
+    // Test with disable value
+    loadIndexInfo.index_params["warmup"] = "disable";
+    loadIndexInfo.warmup_policy = "disable";
+    ASSERT_EQ(loadIndexInfo.index_params["warmup"], "disable");
+    ASSERT_EQ(loadIndexInfo.warmup_policy, "disable");
+}

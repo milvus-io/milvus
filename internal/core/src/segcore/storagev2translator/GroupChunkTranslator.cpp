@@ -55,7 +55,8 @@ GroupChunkTranslator::GroupChunkTranslator(
     bool use_mmap,
     bool mmap_populate,
     int64_t num_fields,
-    milvus::proto::common::LoadPriority load_priority)
+    milvus::proto::common::LoadPriority load_priority,
+    const std::string& warmup_policy)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       key_([&]() {
@@ -95,7 +96,9 @@ GroupChunkTranslator::GroupChunkTranslator(
                     return false;
                 }(),
                 /* is_index */ false),
+            // Use getCacheWarmupPolicy to resolve: user setting > global config
             milvus::segcore::getCacheWarmupPolicy(
+                warmup_policy,
                 /* is_vector */
                 [&]() {
                     for (const auto& [fid, field_meta] : field_metas_) {

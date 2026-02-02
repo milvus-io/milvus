@@ -68,7 +68,8 @@ class ManifestGroupTranslator
         const std::string& mmap_dir_path,
         int64_t num_fields,
         milvus::proto::common::LoadPriority load_priority,
-        bool eager_load);
+        bool eager_load,
+        const std::string& warmup_policy);
     ~ManifestGroupTranslator() = default;
 
     /**

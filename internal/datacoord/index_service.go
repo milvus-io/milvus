@@ -258,6 +258,8 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 
 	// exclude the mmap.enable param, because it will be conflicted with the index's mmap.enable param
 	typeParams := DeleteParams(req.GetTypeParams(), []string{common.MmapEnabledKey})
+	// exclude the warmup policy param also, similar to mmap.enable param
+	typeParams = DeleteParams(typeParams, []string{common.WarmupKey})
 	index := &model.Index{
 		CollectionID:    req.GetCollectionID(),
 		FieldID:         req.GetFieldID(),

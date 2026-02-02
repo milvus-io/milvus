@@ -1984,12 +1984,9 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 					fieldIndexInfo.GetBuildID())
 			}
 
-			needWarmup := false
-			if isVectorType {
-				needWarmup = paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.GetValue() == "sync"
-			} else {
-				needWarmup = paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.GetValue() == "sync"
-			}
+			// Use per-field index warmup policy instead of global config
+			warmupPolicy := getIndexWarmupPolicy(fieldSchema, fieldIndexInfo)
+			needWarmup := warmupPolicy == common.WarmupSync
 
 			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
 				indexMemorySize += estimateResult.MaxMemoryCost
@@ -2067,11 +2064,9 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 			supportInterimIndexDataType = supportInterimIndexDataType || SupportInterimIndexDataType(fieldSchema.GetDataType())
 			isVectorType = isVectorType && typeutil.IsVectorType(fieldSchema.GetDataType())
-			if isVectorType {
-				needWarmup = needWarmup || paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.GetValue() == "sync"
-			} else {
-				needWarmup = needWarmup || paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.GetValue() == "sync"
-			}
+			// Use per-field warmup policy instead of global config
+			warmupPolicy := getFieldWarmupPolicy(fieldSchema)
+			needWarmup = needWarmup || warmupPolicy == common.WarmupSync
 			mmapEnabled = mmapEnabled && isDataMmapEnable(fieldSchema)
 			containsTimestampField = containsTimestampField || DoubleMemorySystemField(fieldSchema.GetFieldID())
 			doubleMomoryDataField = doubleMomoryDataField || DoubleMemoryDataType(fieldSchema.GetDataType())

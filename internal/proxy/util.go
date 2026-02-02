@@ -630,6 +630,14 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
 		return err
 	}
+
+	// Validate warmup policy if specified in field TypeParams
+	if warmupPolicy, exist := common.GetWarmupPolicy(field.GetTypeParams()...); exist {
+		if err = common.ValidateWarmupPolicy(warmupPolicy); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid warmup policy for field %s: %s", field.Name, err.Error())
+		}
+	}
+
 	return nil
 }
 
@@ -678,12 +686,27 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	if field.GetNullable() {
 		return fmt.Errorf("nullable is not supported for fields in struct array now, fieldName = %s", field.Name)
 	}
+
+	// Validate warmup policy if specified in field TypeParams
+	if warmupPolicy, exist := common.GetWarmupPolicy(field.GetTypeParams()...); exist {
+		if err = common.ValidateWarmupPolicy(warmupPolicy); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid warmup policy for field %s: %s", field.Name, err.Error())
+		}
+	}
+
 	return nil
 }
 
 func ValidateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema, schema *schemapb.CollectionSchema) error {
 	if len(structArrayField.Fields) == 0 {
 		return fmt.Errorf("struct array field %s has no sub-fields", structArrayField.Name)
+	}
+
+	// Validate warmup policy if specified in struct field TypeParams
+	if warmupPolicy, exist := common.GetWarmupPolicy(structArrayField.GetTypeParams()...); exist {
+		if err := common.ValidateWarmupPolicy(warmupPolicy); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid warmup policy for struct field %s: %s", structArrayField.Name, err.Error())
+		}
 	}
 
 	for _, subField := range structArrayField.Fields {
