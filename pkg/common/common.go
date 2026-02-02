@@ -191,6 +191,9 @@ const (
 	CollectionDescription       = "collection.description"
 	MaxTTLSeconds               = 3155760000 // 100 years
 
+	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
+	CollectionOnTruncatingKey = "collection.on.truncating" // when collection is on truncating, forbid the compaction of current collection.
+
 	// Note:
 	// Function output fields cannot be included in inserted data.
 	// In particular, the `bm25` function output field is always disallowed

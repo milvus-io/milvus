@@ -76,6 +76,16 @@
         },
         {
             "MessageSpecializedType": {
+                "HeaderType": "messagespb.TruncateCollectionMessageHeader",
+                "BodyType": "messagespb.TruncateCollectionMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeTruncateCollection",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
                 "HeaderType": "messagespb.CreatePartitionMessageHeader",
                 "BodyType": "msgpb.CreatePartitionRequest"
             },

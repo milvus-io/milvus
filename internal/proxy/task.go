@@ -85,6 +85,7 @@ const (
 	InsertTaskName                = "InsertTask"
 	CreateCollectionTaskName      = "CreateCollectionTask"
 	DropCollectionTaskName        = "DropCollectionTask"
+	TruncateCollectionTaskName    = "TruncateCollectionTask"
 	HasCollectionTaskName         = "HasCollectionTask"
 	DescribeCollectionTaskName    = "DescribeCollectionTask"
 	ShowCollectionTaskName        = "ShowCollectionTask"
@@ -709,6 +710,71 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 }
 
 func (t *dropCollectionTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type truncateCollectionTask struct {
+	baseTask
+	Condition
+	*milvuspb.TruncateCollectionRequest
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *milvuspb.TruncateCollectionResponse
+	chMgr    channelsMgr
+}
+
+func (t *truncateCollectionTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *truncateCollectionTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *truncateCollectionTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *truncateCollectionTask) Name() string {
+	return TruncateCollectionTaskName
+}
+
+func (t *truncateCollectionTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *truncateCollectionTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *truncateCollectionTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *truncateCollectionTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *truncateCollectionTask) OnEnqueue() error {
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	t.Base.MsgType = commonpb.MsgType_TruncateCollection
+	t.Base.SourceID = paramtable.GetNodeID()
+	return nil
+}
+
+func (t *truncateCollectionTask) PreExecute(ctx context.Context) error {
+	return validateCollectionName(t.CollectionName)
+}
+
+func (t *truncateCollectionTask) Execute(ctx context.Context) error {
+	var err error
+	t.result, err = t.mixCoord.TruncateCollection(ctx, t.TruncateCollectionRequest)
+	return merr.CheckRPCCall(t.result, err)
+}
+
+func (t *truncateCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 

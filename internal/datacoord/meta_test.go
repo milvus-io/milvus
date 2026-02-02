@@ -1659,6 +1659,102 @@ func TestChannelCP(t *testing.T) {
 		err = meta.DropChannelCheckpoint(mockVChannel)
 		assert.NoError(t, err)
 	})
+
+	t.Run("WatchChannelCheckpoint", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		err = meta.UpdateChannelCheckpoint(context.TODO(), mockVChannel, pos)
+		assert.NoError(t, err)
+		err = meta.WatchChannelCheckpoint(context.TODO(), mockVChannel, pos.Timestamp-1)
+		assert.NoError(t, err)
+	})
+
+	t.Run("TruncateChannelByTime", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		flushTs := uint64(2000)
+		channelName := mockVChannel
+
+		// Test case 1: No segments to drop
+		err = meta.TruncateChannelByTime(context.TODO(), channelName, flushTs)
+		assert.NoError(t, err)
+
+		// Test case 2: Add segments that should be dropped (timestamp <= flushTs)
+		seg1 := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            1,
+				CollectionID:  1,
+				PartitionID:   1,
+				InsertChannel: channelName,
+				State:         commonpb.SegmentState_Flushed,
+				DmlPosition: &msgpb.MsgPosition{
+					ChannelName: channelName,
+					Timestamp:   flushTs - 100, // less than flushTs
+				},
+			},
+		}
+		err = meta.AddSegment(context.TODO(), seg1)
+		assert.NoError(t, err)
+
+		// Test case 3: Add segment that should NOT be dropped (timestamp > flushTs)
+		seg2 := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            2,
+				CollectionID:  1,
+				PartitionID:   1,
+				InsertChannel: channelName,
+				State:         commonpb.SegmentState_Flushed,
+				DmlPosition: &msgpb.MsgPosition{
+					ChannelName: channelName,
+					Timestamp:   flushTs + 100, // greater than flushTs
+				},
+			},
+		}
+		err = meta.AddSegment(context.TODO(), seg2)
+		assert.NoError(t, err)
+
+		// Test case 4: Add segment that is already dropped (should be skipped)
+		seg3 := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            3,
+				CollectionID:  1,
+				PartitionID:   1,
+				InsertChannel: channelName,
+				State:         commonpb.SegmentState_Dropped,
+				DmlPosition: &msgpb.MsgPosition{
+					ChannelName: channelName,
+					Timestamp:   flushTs - 100, // less than flushTs but already dropped
+				},
+			},
+		}
+		err = meta.AddSegment(context.TODO(), seg3)
+		assert.NoError(t, err)
+
+		// Test case 5: TruncateChannelByTime should drop seg1 but not seg2 or seg3
+		err = meta.TruncateChannelByTime(context.TODO(), channelName, flushTs)
+		assert.NoError(t, err)
+
+		// Verify seg1 is dropped
+		seg1After := meta.GetSegment(context.TODO(), seg1.ID)
+		assert.NotNil(t, seg1After)
+		assert.Equal(t, commonpb.SegmentState_Dropped, seg1After.GetState())
+
+		// Verify seg2 is not dropped
+		seg2After := meta.GetSegment(context.TODO(), seg2.ID)
+		assert.NotNil(t, seg2After)
+		assert.NotEqual(t, commonpb.SegmentState_Dropped, seg2After.GetState())
+
+		// Verify seg3 remains dropped
+		seg3After := meta.GetSegment(context.TODO(), seg3.ID)
+		assert.NotNil(t, seg3After)
+		assert.Equal(t, commonpb.SegmentState_Dropped, seg3After.GetState())
+
+		// Test case 6: Call again with same flushTs, should return nil (no segments to drop)
+		err = meta.TruncateChannelByTime(context.TODO(), channelName, flushTs)
+		assert.NoError(t, err)
+	})
 }
 
 func Test_meta_GcConfirm(t *testing.T) {

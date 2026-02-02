@@ -28,6 +28,7 @@ const (
 	RootCoord_GetStatisticsChannel_FullMethodName          = "/milvus.proto.rootcoord.RootCoord/GetStatisticsChannel"
 	RootCoord_CreateCollection_FullMethodName              = "/milvus.proto.rootcoord.RootCoord/CreateCollection"
 	RootCoord_DropCollection_FullMethodName                = "/milvus.proto.rootcoord.RootCoord/DropCollection"
+	RootCoord_TruncateCollection_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/TruncateCollection"
 	RootCoord_AddCollectionField_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/AddCollectionField"
 	RootCoord_HasCollection_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/HasCollection"
 	RootCoord_DescribeCollection_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/DescribeCollection"
@@ -108,6 +109,13 @@ type RootCoordClient interface {
 	//
 	// @return Status
 	DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// *
+	// @brief This method is used to clear a collection.
+	//
+	// @param TruncateCollectionRequest, collection name is going to be cleared.
+	//
+	// @return Status
+	TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error)
 	// *
 	// @brief This method is used to add collection field.
 	//
@@ -258,6 +266,15 @@ func (c *rootCoordClient) CreateCollection(ctx context.Context, in *milvuspb.Cre
 func (c *rootCoordClient) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, RootCoord_DropCollection_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error) {
+	out := new(milvuspb.TruncateCollectionResponse)
+	err := c.cc.Invoke(ctx, RootCoord_TruncateCollection_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -799,6 +816,13 @@ type RootCoordServer interface {
 	// @return Status
 	DropCollection(context.Context, *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
 	// *
+	// @brief This method is used to clear a collection.
+	//
+	// @param TruncateCollectionRequest, collection name is going to be cleared.
+	//
+	// @return Status
+	TruncateCollection(context.Context, *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error)
+	// *
 	// @brief This method is used to add collection field.
 	//
 	// @param AddCollectionFieldRequest, field schema is going to be added.
@@ -919,6 +943,9 @@ func (UnimplementedRootCoordServer) CreateCollection(context.Context, *milvuspb.
 }
 func (UnimplementedRootCoordServer) DropCollection(context.Context, *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropCollection not implemented")
+}
+func (UnimplementedRootCoordServer) TruncateCollection(context.Context, *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TruncateCollection not implemented")
 }
 func (UnimplementedRootCoordServer) AddCollectionField(context.Context, *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AddCollectionField not implemented")
@@ -1189,6 +1216,24 @@ func _RootCoord_DropCollection_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RootCoordServer).DropCollection(ctx, req.(*milvuspb.DropCollectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_TruncateCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.TruncateCollectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).TruncateCollection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_TruncateCollection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).TruncateCollection(ctx, req.(*milvuspb.TruncateCollectionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2245,6 +2290,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DropCollection",
 			Handler:    _RootCoord_DropCollection_Handler,
+		},
+		{
+			MethodName: "TruncateCollection",
+			Handler:    _RootCoord_TruncateCollection_Handler,
 		},
 		{
 			MethodName: "AddCollectionField",

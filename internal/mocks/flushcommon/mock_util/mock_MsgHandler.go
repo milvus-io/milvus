@@ -302,13 +302,58 @@ func (_c *MockMsgHandler_HandleSchemaChange_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// HandleTruncateCollection provides a mock function with given fields: truncateCollectionMsg
+func (_m *MockMsgHandler) HandleTruncateCollection(truncateCollectionMsg message.ImmutableTruncateCollectionMessageV2) error {
+	ret := _m.Called(truncateCollectionMsg)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HandleTruncateCollection")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(message.ImmutableTruncateCollectionMessageV2) error); ok {
+		r0 = rf(truncateCollectionMsg)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockMsgHandler_HandleTruncateCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HandleTruncateCollection'
+type MockMsgHandler_HandleTruncateCollection_Call struct {
+	*mock.Call
+}
+
+// HandleTruncateCollection is a helper method to define mock.On call
+//   - truncateCollectionMsg message.ImmutableTruncateCollectionMessageV2
+func (_e *MockMsgHandler_Expecter) HandleTruncateCollection(truncateCollectionMsg interface{}) *MockMsgHandler_HandleTruncateCollection_Call {
+	return &MockMsgHandler_HandleTruncateCollection_Call{Call: _e.mock.On("HandleTruncateCollection", truncateCollectionMsg)}
+}
+
+func (_c *MockMsgHandler_HandleTruncateCollection_Call) Run(run func(truncateCollectionMsg message.ImmutableTruncateCollectionMessageV2)) *MockMsgHandler_HandleTruncateCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(message.ImmutableTruncateCollectionMessageV2))
+	})
+	return _c
+}
+
+func (_c *MockMsgHandler_HandleTruncateCollection_Call) Return(_a0 error) *MockMsgHandler_HandleTruncateCollection_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMsgHandler_HandleTruncateCollection_Call) RunAndReturn(run func(message.ImmutableTruncateCollectionMessageV2) error) *MockMsgHandler_HandleTruncateCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockMsgHandler creates a new instance of MockMsgHandler. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockMsgHandler(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockMsgHandler {
+}) *MockMsgHandler {
 	mock := &MockMsgHandler{}
 	mock.Mock.Test(t)
 
