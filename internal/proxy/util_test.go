@@ -5044,4 +5044,282 @@ func TestMinHashFunction(t *testing.T) {
 		err := validateFunction(schema1, "", false)
 		assert.Error(t, err)
 	})
+
+	t.Run("invalid num_hashes string value", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4096"},
+				}},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_to_minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"minhash_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "num_hashes", Value: "abc"},
+					},
+				},
+			},
+		}
+		err := validateFunction(schema, "", false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "num_hashes")
+		assert.Contains(t, err.Error(), "not a number")
+	})
+
+	t.Run("invalid num_hashes negative value", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4096"},
+				}},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_to_minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"minhash_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "num_hashes", Value: "-1"},
+					},
+				},
+			},
+		}
+		err := validateFunction(schema, "", false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "num_hashes")
+		assert.Contains(t, err.Error(), "positive")
+	})
+
+	t.Run("invalid shingle_size string value", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4096"},
+				}},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_to_minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"minhash_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "shingle_size", Value: "abc"},
+					},
+				},
+			},
+		}
+		err := validateFunction(schema, "", false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "shingle_size")
+		assert.Contains(t, err.Error(), "not a number")
+	})
+
+	t.Run("invalid shingle_size zero value", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4096"},
+				}},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_to_minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"minhash_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "shingle_size", Value: "0"},
+					},
+				},
+			},
+		}
+		err := validateFunction(schema, "", false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "shingle_size")
+		assert.Contains(t, err.Error(), "positive")
+	})
+
+	t.Run("invalid hash_function value", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4096"},
+				}},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_to_minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"minhash_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "hash_function", Value: "md5"},
+					},
+				},
+			},
+		}
+		err := validateFunction(schema, "", false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "Unknown hash function")
+	})
+
+	t.Run("invalid hash_function empty value", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4096"},
+				}},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_to_minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"minhash_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "hash_function", Value: ""},
+					},
+				},
+			},
+		}
+		err := validateFunction(schema, "", false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "Unknown hash function")
+	})
+
+	t.Run("invalid token_level value", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4096"},
+				}},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_to_minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"minhash_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "token_level", Value: "sentence"},
+					},
+				},
+			},
+		}
+		err := validateFunction(schema, "", false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "Unknown token_level")
+	})
+
+	t.Run("invalid token_level empty value", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4096"},
+				}},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_to_minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"minhash_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "token_level", Value: ""},
+					},
+				},
+			},
+		}
+		err := validateFunction(schema, "", false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "Unknown token_level")
+	})
+
+	t.Run("invalid seed string value", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4096"},
+				}},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_to_minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"minhash_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "seed", Value: "abc"},
+					},
+				},
+			},
+		}
+		err := validateFunction(schema, "", false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "seed")
+		assert.Contains(t, err.Error(), "not a number")
+	})
+
+	t.Run("valid token_level char", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4096"},
+				}},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_to_minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"minhash_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "token_level", Value: "char"},
+					},
+				},
+			},
+		}
+		err := validateFunction(schema, "", false)
+		assert.NoError(t, err)
+	})
+
+	t.Run("valid hash_function sha1", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4096"},
+				}},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_to_minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"minhash_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "hash_function", Value: "sha1"},
+					},
+				},
+			},
+		}
+		err := validateFunction(schema, "", false)
+		assert.NoError(t, err)
+	})
 }
