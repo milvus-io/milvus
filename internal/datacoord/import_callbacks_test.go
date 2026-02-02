@@ -24,9 +24,11 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -235,7 +237,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError()
 
 	err := server.broadcastImport(
 		ctx,
-		"test_db",
 		"test_collection",
 		100,
 		[]int64{1},
@@ -248,6 +249,54 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError()
 
 	s.Error(err)
 	s.Contains(err.Error(), "failed to validate import request")
+}
+
+func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturnsError() {
+	ctx := context.Background()
+
+	// Setup validation to pass
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 1
+	}).Build()
+	defer mockCount.UnPatch()
+
+	mockBalancer := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancer, nil
+	}).Build()
+	defer mockBalance.UnPatch()
+
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{
+				ReplicateConfiguration: nil,
+			}, nil
+		}).Build()
+	defer mockAssignment.UnPatch()
+
+	// Mock broker.DescribeCollectionInternal to fail (called in startBroadcastWithCollectionID)
+	mockBroker := broker.NewMockBroker(s.T())
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(nil, errors.New("collection not found"))
+
+	server := &Server{
+		importMeta: &importMeta{},
+		broker:     mockBroker,
+	}
+
+	err := server.broadcastImport(
+		ctx,
+		"test_collection",
+		100,
+		[]int64{1},
+		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
+		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		&schemapb.CollectionSchema{Name: "test_collection"},
+		1000,
+		[]string{"v1"},
+	)
+
+	s.Error(err)
+	s.Contains(err.Error(), "failed to start broadcast with collection id")
 }
 
 func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsError() {
@@ -273,6 +322,13 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		}).Build()
 	defer mockAssignment.UnPatch()
 
+	// Mock broker.DescribeCollectionInternal to return dbName (called in startBroadcastWithCollectionID)
+	mockBroker := broker.NewMockBroker(s.T())
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	}, nil)
+
 	// Mock StartBroadcastWithResourceKeys to fail
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
@@ -282,11 +338,11 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 
 	server := &Server{
 		importMeta: &importMeta{},
+		broker:     mockBroker,
 	}
 
 	err := server.broadcastImport(
 		ctx,
-		"test_db",
 		"test_collection",
 		100,
 		[]int64{1},
@@ -298,10 +354,10 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 	)
 
 	s.Error(err)
-	s.Contains(err.Error(), "failed to start broadcast with resource lock")
+	s.Contains(err.Error(), "failed to start broadcast with collection id")
 }
 
-func (s *ImportCallbacksSuite) TestBroadcastImport_CollectionNotExistsReturnsError() {
+func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFailsReturnsError() {
 	ctx := context.Background()
 
 	// Setup validation to pass
@@ -332,9 +388,16 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_CollectionNotExistsReturnsErr
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker.HasCollection to return false (collection not exists)
+	// Mock broker: first DescribeCollectionInternal succeeds (in startBroadcastWithCollectionID),
+	// second call returns error status (in broadcastImport after getting broadcaster)
 	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().HasCollection(ctx, int64(100)).Return(false, nil)
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	}, nil).Once()
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		Status: merr.Status(merr.ErrCollectionNotFound),
+	}, nil).Once()
 
 	server := &Server{
 		importMeta: &importMeta{},
@@ -343,7 +406,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_CollectionNotExistsReturnsErr
 
 	err := server.broadcastImport(
 		ctx,
-		"test_db",
 		"test_collection",
 		100,
 		[]int64{1},
@@ -390,9 +452,13 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker.HasCollection to return true
+	// Mock broker: DescribeCollectionInternal is called twice
+	// First call in startBroadcastWithCollectionID, second call in broadcastImport
 	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().HasCollection(ctx, int64(100)).Return(true, nil)
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	}, nil).Times(2)
 
 	server := &Server{
 		importMeta: &importMeta{},
@@ -401,7 +467,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 
 	err := server.broadcastImport(
 		ctx,
-		"test_db",
 		"test_collection",
 		100,
 		[]int64{1},
@@ -447,9 +512,13 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker.HasCollection to return true
+	// Mock broker: DescribeCollectionInternal is called twice
+	// First call in startBroadcastWithCollectionID, second call in broadcastImport
 	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().HasCollection(ctx, int64(100)).Return(true, nil)
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	}, nil).Times(2)
 
 	server := &Server{
 		importMeta: &importMeta{},
@@ -458,7 +527,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 
 	err := server.broadcastImport(
 		ctx,
-		"test_db",
 		"test_collection",
 		100,
 		[]int64{1},
