@@ -538,8 +538,10 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	s.True(s.delegator.distribution.Serviceable())
 
 	s.delegator.Close()
-	// After Close(), distribution candidates are cleared, so ProcessDelete becomes a no-op.
+	// After Close(), ProcessDelete becomes a no-op because sd.Stopped() returns true.
 	// This is expected behavior - the delegator is being decommissioned.
+	// Note: Serviceable() state is not changed by ProcessDelete when delegator is stopped,
+	// since ProcessDelete returns early without processing any deletes.
 	s.delegator.ProcessDelete([]*DeleteData{
 		{
 			PartitionID: 500,
@@ -549,7 +551,8 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		},
 	}, 10)
 	s.Require().NoError(err)
-	s.False(s.delegator.distribution.Serviceable())
+	// Serviceable state remains unchanged since ProcessDelete is a no-op after Close()
+	s.True(s.delegator.distribution.Serviceable())
 }
 
 func (s *DelegatorDataSuite) TestLoadGrowingWithBM25() {
