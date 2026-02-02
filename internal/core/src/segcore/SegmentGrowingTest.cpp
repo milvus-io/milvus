@@ -574,60 +574,37 @@ TEST_P(GrowingNullableTest, SearchAndQueryNullableVectors) {
     int64_t num_queries = use_iterator ? 1 : 2;
     Timestamp timestamp = 10000000;
 
-    // Prepare search plan
-    std::string search_params_fmt;
+    // Prepare search plan using ScopedSchemaHandle
+    milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
+    std::vector<char> plan_str;
     if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
-        search_params_fmt = R"(
-            vector_anns:<
-                field_id: {}
-                query_info:<
-                    topk: {}
-                    round_decimal: 3
-                    metric_type: "{}"
-                    search_params: "{{\"drop_ratio_search\": 0.1}}"
-                >
-                placeholder_tag: "$0"
-            >
-        )";
+        plan_str = schema_handle.ParseSearch(
+            "",                               // expression (no filter)
+            "embeddings",                     // vector field name
+            topk,                             // topk
+            metric_type,                      // metric_type
+            R"({"drop_ratio_search": 0.1})",  // search_params
+            3);                               // round_decimal
     } else if (use_iterator) {
-        search_params_fmt = R"(
-            vector_anns:<
-                field_id: {}
-                query_info:<
-                    topk: {}
-                    round_decimal: 3
-                    metric_type: "{}"
-                    search_params: "{{\"nprobe\": 10}}"
-                    search_iterator_v2_info: <
-                        batch_size: {}
-                    >
-                >
-                placeholder_tag: "$0"
-            >
-        )";
+        plan_str = schema_handle.ParseSearchIterator(
+            "",                           // expression (no filter)
+            "embeddings",                 // vector field name
+            topk,                         // topk
+            metric_type,                  // metric_type
+            R"({"nprobe": 10})",          // search_params
+            static_cast<uint32_t>(topk),  // batch_size
+            "",                           // token (empty)
+            std::nullopt,                 // last_bound (none)
+            3);                           // round_decimal
     } else {
-        search_params_fmt = R"(
-            vector_anns:<
-                field_id: {}
-                query_info:<
-                    topk: {}
-                    round_decimal: 3
-                    metric_type: "{}"
-                    search_params: "{{\"nprobe\": 10}}"
-                >
-                placeholder_tag: "$0"
-            >
-        )";
+        plan_str =
+            schema_handle.ParseSearch("",            // expression (no filter)
+                                      "embeddings",  // vector field name
+                                      topk,          // topk
+                                      metric_type,   // metric_type
+                                      R"({"nprobe": 10})",  // search_params
+                                      3);                   // round_decimal
     }
-
-    std::string raw_plan;
-    if (use_iterator) {
-        raw_plan =
-            fmt::format(search_params_fmt, vec.get(), topk, metric_type, topk);
-    } else {
-        raw_plan = fmt::format(search_params_fmt, vec.get(), topk, metric_type);
-    }
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
 
@@ -986,19 +963,15 @@ TEST(GrowingTest, SearchVectorArray) {
     query_vec_offsets.push_back(3);
     query_vec_offsets.push_back(10);  // Second query has 7 vectors
 
-    // Create search plan
-    const char* raw_plan = R"(vector_anns: <
-                                  field_id: 101
-                                  query_info: <
-                                    topk: 5
-                                    round_decimal: 3
-                                    metric_type: "MAX_SIM"
-                                    search_params: "{\"nprobe\": 10}"
-                                  >
-                                  placeholder_tag: "$0"
-      >)";
-
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    // Create search plan using ScopedSchemaHandle
+    milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str =
+        schema_handle.ParseSearch("",           // expression (no filter)
+                                  "array_vec",  // vector field name
+                                  5,            // topk
+                                  "MAX_SIM",    // metric_type
+                                  R"({"nprobe": 10})",  // search_params
+                                  3);                   // round_decimal
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
 

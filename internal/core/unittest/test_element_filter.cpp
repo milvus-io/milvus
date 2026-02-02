@@ -1291,86 +1291,31 @@ TEST_P(ElementFilterNestedIndex, ExecutionMode) {
     // Step 6: Build query plan with appropriate selectivity
     // For offset_mode: use very low selectivity (id == 500 -> 0.1% for N=1000)
     // For full_mode: use high selectivity (id % 2 == 0 -> 50%)
-    std::string predicate_expr;
+    // Expression: element_filter(structA, 2000 > $[price_array] > 100) && predicate
+    // binary_range with lower_inclusive=false, upper_inclusive=false means: 100 < x < 2000
+    ScopedSchemaHandle handle(*schema);
+    std::string search_params = R"({"ef": 50})";
+    std::string expr;
     if (offset_mode) {
         // Very low selectivity: only 1 doc matches (0.1% for N=1000)
         // doc 500's elements are [1501, 1502, 1503] which are in range (100, 2000)
-        predicate_expr = R"(
-            term_expr: <
-              column_info: <
-                field_id: %3%
-                data_type: Int64
-              >
-              values: <
-                int64_val: 500
-              >
-            >
-        )";
+        expr =
+            "id == 500 && element_filter(structA, 2000 > $[price_array] > 100)";
     } else {
         // High selectivity: ~50% docs match
-        predicate_expr = R"(
-            binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: %3%
-                data_type: Int64
-              >
-              arith_op: Mod
-              right_operand: <
-                int64_val: 2
-              >
-              op: Equal
-              value: <
-                int64_val: 0
-              >
-            >
-        )";
+        expr =
+            "id % 2 == 0 && element_filter(structA, 2000 > $[price_array] > "
+            "100)";
     }
 
-    std::string raw_plan =
-        boost::str(boost::format(R"(vector_anns: <
-                                    field_id: %1%
-                                    predicates: <
-                                      element_filter_expr: <
-                                        element_expr: <
-                                          binary_range_expr: <
-                                            column_info: <
-                                              field_id: %2%
-                                              data_type: Int32
-                                              element_type: Int32
-                                              is_element_level: true
-                                            >
-                                            lower_inclusive: false
-                                            upper_inclusive: false
-                                            lower_value: <
-                                              int64_val: 100
-                                            >
-                                            upper_value: <
-                                              int64_val: 2000
-                                            >
-                                          >
-                                        >
-                                        predicate: <
-                                          )" +
-                                 predicate_expr + R"(
-                                        >
-                                        struct_name: "structA"
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"ef\": 50}"
-                                    >
-                                    placeholder_tag: "$0">)") %
-                   vec_fid.get() % int_array_fid.get() % int64_fid.get());
-
-    proto::plan::PlanNode plan_node;
-    auto ok =
-        google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-    ASSERT_TRUE(ok) << "Failed to parse element-level filter plan";
-
-    auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+    auto plan_bytes = handle.ParseSearch(expr,
+                                         "structA[array_float_vec]",
+                                         topK,
+                                         knowhere::metric::L2,
+                                         search_params,
+                                         3);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_bytes.data(), plan_bytes.size());
     ASSERT_NE(plan, nullptr);
 
     auto num_queries = 1;

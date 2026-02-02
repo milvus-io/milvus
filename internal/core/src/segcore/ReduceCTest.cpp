@@ -56,21 +56,15 @@ TEST(CApiTest, StreamReduce) {
     ASSERT_EQ(ins_res_2.error_code, Success);
 
     //3. search two segments
-    auto fmt = boost::format(R"(vector_anns: <
-                                            field_id: 100
-                                            query_info: <
-                                                topk: %1%
-                                                metric_type: "L2"
-                                                search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0">
-                                            output_field_ids: 100)") %
-               topK;
-    auto serialized_expr_plan = fmt.str();
+    milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
+    auto binary_plan =
+        schema_handle.ParseSearch("",  // expression (empty for no filter)
+                                  "fakevec",             // vector field name
+                                  topK,                  // topK
+                                  "L2",                  // metric_type
+                                  R"({"nprobe": 10})");  // search_params
     auto blob = generate_query_data(num_queries);
     void* plan = nullptr;
-    auto binary_plan =
-        translate_text_plan_to_binary_plan(serialized_expr_plan.data());
     status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -227,22 +221,17 @@ TEST(CApiTest, StreamReduceGroupBY) {
     ASSERT_EQ(ins_res.error_code, Success);
 
     //3. search
-    auto fmt = boost::format(R"(vector_anns: <
-                                            field_id: 105
-                                            query_info: <
-                                                topk: %1%
-                                                metric_type: "L2"
-                                                search_params: "{\"nprobe\": 10}"
-                                                group_by_field_id: 101
-                                            >
-                                            placeholder_tag: "$0">
-                                            output_field_ids: 100)") %
-               topK;
-    auto serialized_expr_plan = fmt.str();
+    milvus::segcore::ScopedSchemaHandle schema_handle(*c_schema);
+    auto binary_plan = schema_handle.ParseGroupBySearch(
+        "",                   // expression (empty for no filter)
+        "fake_vec",           // vector field name
+        topK,                 // topK
+        "L2",                 // metric_type
+        R"({"nprobe": 10})",  // search_params
+        101,                  // group_by_field_id (int8_field)
+        1);                   // group_size
     auto blob = generate_query_data(num_queries);
     void* plan = nullptr;
-    auto binary_plan =
-        translate_text_plan_to_binary_plan(serialized_expr_plan.data());
     status = CreateSearchPlanByExpr(
         c_collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -348,21 +337,15 @@ TEST(CApiTest, ReduceSearchResultsAndFillDataCost) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    auto fmt = boost::format(R"(vector_anns: <
-                                            field_id: 100
-                                            query_info: <
-                                                topk: %1%
-                                                metric_type: "L2"
-                                                search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0">
-                                            output_field_ids: 100)") %
-               topK;
-    auto serialized_expr_plan = fmt.str();
+    milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
+    auto binary_plan =
+        schema_handle.ParseSearch("",  // expression (empty for no filter)
+                                  "fakevec",             // vector field name
+                                  topK,                  // topK
+                                  "L2",                  // metric_type
+                                  R"({"nprobe": 10})");  // search_params
     auto blob = generate_query_data(num_queries);
     void* plan = nullptr;
-    auto binary_plan =
-        translate_text_plan_to_binary_plan(serialized_expr_plan.data());
     status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
