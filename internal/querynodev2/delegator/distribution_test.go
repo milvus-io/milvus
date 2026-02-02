@@ -1754,7 +1754,7 @@ func TestBatchGetFromSegments(t *testing.T) {
 				NodeID: 1,
 				Segments: []SegmentEntry{
 					{SegmentID: 1, PartitionID: 1, Candidate: candidate1, Offline: true}, // offline
-					{SegmentID: 2, PartitionID: 1, Candidate: nil},                        // nil candidate
+					{SegmentID: 2, PartitionID: 1, Candidate: nil},                       // nil candidate
 				},
 			},
 		}
