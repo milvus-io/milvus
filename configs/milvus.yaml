@@ -170,7 +170,7 @@ minio:
 mq:
   # Default value: "default"
   # Valid values: [default, pulsar, kafka, rocksmq, woodpecker]
-  type: default
+  type: pulsar
   enablePursuitMode: true # Default value: "true"
   pursuitLag: 10 # time tick lag threshold to enter pursuit mode, in seconds
   pursuitBufferSize: 8388608 # pursuit mode buffer size in bytes
@@ -292,13 +292,13 @@ rootCoord:
   # The maximum number of partitions in each collection.
   # New partitions cannot be created if this parameter is set as 0 or 1.
   # Range: [0, INT64MAX]
-  maxPartitionNum: 120000
+  maxPartitionNum: 1024
   # The minimum row count of a segment required for creating index.
   # Segments with smaller size than this parameter will not be indexed, and will be searched with brute force.
   minSegmentSizeToEnableIndex: 1024
   enableActiveStandby: false
   maxDatabaseNum: 64 # Maximum number of database
-  maxGeneralCapacity: 120000 # upper limit for the sum of of product of partitionNumber and shardNumber
+  maxGeneralCapacity: 65536 # upper limit for the sum of of product of partitionNumber and shardNumber
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   ip:  # TCP/IP address of rootCoord. If not specified, use the first unicastable address
   port: 22125 # TCP port of rootCoord
@@ -364,6 +364,7 @@ proxy:
   slowQuerySpanInSeconds: 1 # threshold for slow query detection in seconds. For Search/HybridSearch requests, the time is divided by nq for more accurate per-query measurement. Triggers slow log, WebUI display, and metrics.
   queryNodePooling:
     size: 10 # the size for shardleader(querynode) client pool
+  metaCacheGCTimeInterval: 300 # the time interval for meta cache GC, in seconds
   partialResultRequiredDataRatio: 1 # partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result
   http:
     enabled: true # Whether to enable the http server
