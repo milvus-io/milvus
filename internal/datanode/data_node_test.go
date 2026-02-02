@@ -37,9 +37,10 @@ import (
 
 func TestMain(t *testing.M) {
 	rand.Seed(time.Now().Unix())
-	path := "/tmp/milvus_ut/rdb_data"
+	baseDir := os.TempDir() + "/milvus_ut_" + strconv.Itoa(rand.Int())
+	path := baseDir + "/rdb_data"
 	os.Setenv("ROCKSMQ_PATH", path)
-	defer os.RemoveAll(path)
+	defer os.RemoveAll(baseDir)
 
 	paramtable.Init()
 	// change to specific channel for test

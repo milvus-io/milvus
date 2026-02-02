@@ -27,10 +27,9 @@ var Params = paramtable.Get()
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
+	dir, _ := os.MkdirTemp("", "milvus_test_chunkmanager_*")
+	localPath = dir + "/"
 	exitCode := m.Run()
-	err := os.RemoveAll(localPath)
-	if err != nil {
-		return
-	}
+	os.RemoveAll(localPath)
 	os.Exit(exitCode)
 }

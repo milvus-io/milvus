@@ -41,8 +41,9 @@ func TestMain(m *testing.M) {
 		pt.Save(pt.ServiceParam.MQCfg.EnablePursuitMode.Key, "false")
 
 		rand.Seed(time.Now().UnixNano())
-		path := "/tmp/milvus/rdb_data"
-		defer os.RemoveAll(path)
+		dir, _ := os.MkdirTemp("", "milvus_rmq_test_*")
+		path := dir + "/rdb_data"
+		defer os.RemoveAll(dir)
 		paramtable.Get().Save("rocksmq.compressionTypes", "0,0,0,0,0")
 		_ = server2.InitRocksMQ(path)
 		defer server2.CloseRocksMQ()
