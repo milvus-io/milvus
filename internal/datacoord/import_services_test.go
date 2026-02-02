@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -153,6 +154,13 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 		}).Build()
 	defer mockAssignment.UnPatch()
 
+	// Mock broker.DescribeCollectionInternal (called once in startBroadcastWithCollectionID, which will fail at StartBroadcastWithResourceKeys)
+	mockBroker := broker.NewMockBroker(s.T())
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	}, nil)
+
 	// Mock StartBroadcastWithResourceKeys to fail
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
@@ -162,6 +170,7 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 
 	server := &Server{
 		importMeta: &importMeta{},
+		broker:     mockBroker,
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -225,9 +234,13 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker.HasCollection to return true
+	// Mock broker: DescribeCollectionInternal is called twice
+	// First call in startBroadcastWithCollectionID, second call in broadcastImport
 	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().HasCollection(ctx, int64(100)).Return(true, nil)
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	}, nil).Times(2)
 
 	server := &Server{
 		importMeta: &importMeta{},
@@ -301,8 +314,16 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
+	// Mock broker.DescribeCollectionInternal to return empty dbName (called in startBroadcastWithCollectionID)
+	mockBroker := broker.NewMockBroker(s.T())
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "", // Empty - should use default
+		CollectionName: "test_collection",
+	}, nil)
+
 	server := &Server{
 		importMeta: &importMeta{},
+		broker:     mockBroker,
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -310,7 +331,7 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1001), nil)
 	server.allocator = mockAllocator
 
-	// Request with empty DbName in schema
+	// Request with empty DbName in schema (not used anymore, broker is the source of truth)
 	req := &internalpb.ImportRequestInternal{
 		CollectionID:   100,
 		CollectionName: "test_collection",
@@ -318,7 +339,7 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 		ChannelNames:   []string{"v1"},
 		Schema: &schemapb.CollectionSchema{
 			Name:   "test_collection",
-			DbName: "", // Empty - should use default
+			DbName: "", // Empty - not used anymore
 		},
 		Files: []*internalpb.ImportFile{
 			{Id: 1, Paths: []string{"/test/file.json"}},
