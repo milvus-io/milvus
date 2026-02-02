@@ -650,29 +650,39 @@ func (d *distribution) GrowingSegmentExists(segmentID int64) bool {
 	return ok
 }
 
-// BatchGet performs batch PK existence check across all candidates in distribution.
-// Returns map[segmentID][]bool indicating which PKs exist in each segment.
-// Caller should Pin before calling and Unpin after to ensure candidates are protected.
-func (d *distribution) BatchGet(pks []storage.PrimaryKey, partitionID int64) map[int64][]bool {
-	d.mut.RLock()
-	defer d.mut.RUnlock()
-
+// BatchGetFromSegments performs batch PK existence check on the provided pinned segments.
+// This ensures consistency between BF check and delete application by using the same
+// segment snapshot. This function operates on explicitly provided segments rather than
+// live distribution data, preventing race conditions where new segments could be added
+// between PinOnlineSegments and this call.
+//
+// Parameters:
+//   - pks: Primary keys to check
+//   - partitionID: Partition filter (use common.AllPartitionsID for all)
+//   - sealed: Pinned sealed segments from PinOnlineSegments()
+//   - growing: Pinned growing segments from PinOnlineSegments()
+//
+// Returns:
+//   - map[segmentID][]bool: For each segment, a bool slice indicating PK existence
+func BatchGetFromSegments(pks []storage.PrimaryKey, partitionID int64, sealed []SnapshotItem, growing []SegmentEntry) map[int64][]bool {
 	result := make(map[int64][]bool)
 	lc := storage.NewBatchLocationsCache(pks)
 
-	// Check sealed segments
-	for _, entry := range d.sealedSegments {
-		if entry.Offline || entry.Candidate == nil {
-			continue
+	// Check sealed segments from pinned snapshot
+	for _, item := range sealed {
+		for _, entry := range item.Segments {
+			if entry.Offline || entry.Candidate == nil {
+				continue
+			}
+			if partitionID != common.AllPartitionsID && entry.Candidate.Partition() != partitionID {
+				continue
+			}
+			result[entry.SegmentID] = entry.Candidate.BatchPkExist(lc)
 		}
-		if partitionID != common.AllPartitionsID && entry.Candidate.Partition() != partitionID {
-			continue
-		}
-		result[entry.SegmentID] = entry.Candidate.BatchPkExist(lc)
 	}
 
-	// Check growing segments
-	for _, entry := range d.growingSegments {
+	// Check growing segments from pinned snapshot
+	for _, entry := range growing {
 		if entry.Candidate == nil {
 			continue
 		}

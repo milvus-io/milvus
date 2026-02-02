@@ -1693,20 +1693,21 @@ func (m *mockCandidate) Type() commonpb.SegmentState {
 	return commonpb.SegmentState_Sealed
 }
 
-func TestDistribution_BatchGet(t *testing.T) {
-	paramtable.Init()
-
-	t.Run("basic_batch_get", func(t *testing.T) {
-		dist := NewDistribution("test-channel", NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion))
-
-		// Add sealed segments with candidates
+func TestBatchGetFromSegments(t *testing.T) {
+	t.Run("basic_sealed_segments", func(t *testing.T) {
 		candidate1 := &mockCandidate{id: 1, partition: 1, hits: []bool{true, false, true}}
 		candidate2 := &mockCandidate{id: 2, partition: 1, hits: []bool{false, true, false}}
 
-		dist.AddDistributions(
-			SegmentEntry{NodeID: 1, SegmentID: 1, PartitionID: 1, Version: 1, Candidate: candidate1},
-			SegmentEntry{NodeID: 1, SegmentID: 2, PartitionID: 1, Version: 1, Candidate: candidate2},
-		)
+		sealed := []SnapshotItem{
+			{
+				NodeID: 1,
+				Segments: []SegmentEntry{
+					{SegmentID: 1, PartitionID: 1, Candidate: candidate1},
+					{SegmentID: 2, PartitionID: 1, Candidate: candidate2},
+				},
+			},
+		}
+		growing := []SegmentEntry{}
 
 		pks := []storage.PrimaryKey{
 			storage.NewInt64PrimaryKey(100),
@@ -1714,7 +1715,7 @@ func TestDistribution_BatchGet(t *testing.T) {
 			storage.NewInt64PrimaryKey(300),
 		}
 
-		result := dist.BatchGet(pks, common.AllPartitionsID)
+		result := BatchGetFromSegments(pks, common.AllPartitionsID, sealed, growing)
 
 		assert.Len(t, result, 2)
 		assert.Equal(t, []bool{true, false, true}, result[1])
@@ -1722,102 +1723,138 @@ func TestDistribution_BatchGet(t *testing.T) {
 	})
 
 	t.Run("filter_by_partition", func(t *testing.T) {
-		dist := NewDistribution("test-channel", NewChannelQueryView(nil, nil, []int64{1, 2}, initialTargetVersion))
-
 		candidate1 := &mockCandidate{id: 1, partition: 1, hits: []bool{true}}
 		candidate2 := &mockCandidate{id: 2, partition: 2, hits: []bool{false}}
 
-		dist.AddDistributions(
-			SegmentEntry{NodeID: 1, SegmentID: 1, PartitionID: 1, Version: 1, Candidate: candidate1},
-			SegmentEntry{NodeID: 1, SegmentID: 2, PartitionID: 2, Version: 1, Candidate: candidate2},
-		)
+		sealed := []SnapshotItem{
+			{
+				NodeID: 1,
+				Segments: []SegmentEntry{
+					{SegmentID: 1, PartitionID: 1, Candidate: candidate1},
+					{SegmentID: 2, PartitionID: 2, Candidate: candidate2},
+				},
+			},
+		}
+		growing := []SegmentEntry{}
 
 		pks := []storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}
 
 		// Filter by partition 1
-		result := dist.BatchGet(pks, 1)
+		result := BatchGetFromSegments(pks, 1, sealed, growing)
 		assert.Len(t, result, 1)
 		assert.Contains(t, result, int64(1))
 		assert.NotContains(t, result, int64(2))
 	})
 
-	t.Run("skip_offline_segments", func(t *testing.T) {
-		dist := NewDistribution("test-channel", NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion))
-
+	t.Run("skip_offline_and_nil_candidates", func(t *testing.T) {
 		candidate1 := &mockCandidate{id: 1, partition: 1, hits: []bool{true}}
 
-		dist.AddDistributions(
-			SegmentEntry{NodeID: 1, SegmentID: 1, PartitionID: 1, Version: 1, Candidate: candidate1},
-		)
-
-		// Mark segment offline
-		dist.MarkOfflineSegments(1)
-
-		pks := []storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}
-		result := dist.BatchGet(pks, common.AllPartitionsID)
-
-		// Offline segment should be skipped
-		assert.Empty(t, result)
-	})
-
-	t.Run("skip_nil_candidates", func(t *testing.T) {
-		dist := NewDistribution("test-channel", NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion))
-
-		// Add segment without candidate
-		dist.AddDistributions(
-			SegmentEntry{NodeID: 1, SegmentID: 1, PartitionID: 1, Version: 1, Candidate: nil},
-		)
+		sealed := []SnapshotItem{
+			{
+				NodeID: 1,
+				Segments: []SegmentEntry{
+					{SegmentID: 1, PartitionID: 1, Candidate: candidate1, Offline: true}, // offline
+					{SegmentID: 2, PartitionID: 1, Candidate: nil},                        // nil candidate
+				},
+			},
+		}
+		growing := []SegmentEntry{
+			{SegmentID: 10, PartitionID: 1, Candidate: nil}, // nil candidate in growing
+		}
 
 		pks := []storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}
-		result := dist.BatchGet(pks, common.AllPartitionsID)
 
-		// Segment without candidate should be skipped
+		result := BatchGetFromSegments(pks, common.AllPartitionsID, sealed, growing)
+
+		// All should be skipped
 		assert.Empty(t, result)
 	})
 
 	t.Run("growing_segments", func(t *testing.T) {
-		dist := NewDistribution("test-channel", NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion))
-
 		growingCandidate := &mockCandidate{id: 10, partition: 1, hits: []bool{true, true}}
 
-		dist.AddGrowing(
-			SegmentEntry{NodeID: 1, SegmentID: 10, PartitionID: 1, Version: 1, Candidate: growingCandidate},
-		)
+		sealed := []SnapshotItem{}
+		growing := []SegmentEntry{
+			{SegmentID: 10, PartitionID: 1, Candidate: growingCandidate},
+		}
 
 		pks := []storage.PrimaryKey{
 			storage.NewInt64PrimaryKey(100),
 			storage.NewInt64PrimaryKey(200),
 		}
 
-		result := dist.BatchGet(pks, common.AllPartitionsID)
+		result := BatchGetFromSegments(pks, common.AllPartitionsID, sealed, growing)
 
 		assert.Len(t, result, 1)
 		assert.Equal(t, []bool{true, true}, result[10])
 	})
 
 	t.Run("mixed_sealed_and_growing", func(t *testing.T) {
-		dist := NewDistribution("test-channel", NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion))
-
 		sealedCandidate := &mockCandidate{id: 1, partition: 1, hits: []bool{true, false}}
 		growingCandidate := &mockCandidate{id: 10, partition: 1, hits: []bool{false, true}}
 
-		dist.AddDistributions(
-			SegmentEntry{NodeID: 1, SegmentID: 1, PartitionID: 1, Version: 1, Candidate: sealedCandidate},
-		)
-		dist.AddGrowing(
-			SegmentEntry{NodeID: 1, SegmentID: 10, PartitionID: 1, Version: 1, Candidate: growingCandidate},
-		)
+		sealed := []SnapshotItem{
+			{
+				NodeID: 1,
+				Segments: []SegmentEntry{
+					{SegmentID: 1, PartitionID: 1, Candidate: sealedCandidate},
+				},
+			},
+		}
+		growing := []SegmentEntry{
+			{SegmentID: 10, PartitionID: 1, Candidate: growingCandidate},
+		}
 
 		pks := []storage.PrimaryKey{
 			storage.NewInt64PrimaryKey(100),
 			storage.NewInt64PrimaryKey(200),
 		}
 
-		result := dist.BatchGet(pks, common.AllPartitionsID)
+		result := BatchGetFromSegments(pks, common.AllPartitionsID, sealed, growing)
 
 		assert.Len(t, result, 2)
 		assert.Equal(t, []bool{true, false}, result[1])
 		assert.Equal(t, []bool{false, true}, result[10])
+	})
+
+	t.Run("empty_segments", func(t *testing.T) {
+		sealed := []SnapshotItem{}
+		growing := []SegmentEntry{}
+
+		pks := []storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}
+
+		result := BatchGetFromSegments(pks, common.AllPartitionsID, sealed, growing)
+
+		assert.Empty(t, result)
+	})
+
+	t.Run("multiple_nodes", func(t *testing.T) {
+		candidate1 := &mockCandidate{id: 1, partition: 1, hits: []bool{true}}
+		candidate2 := &mockCandidate{id: 2, partition: 1, hits: []bool{false}}
+
+		sealed := []SnapshotItem{
+			{
+				NodeID: 1,
+				Segments: []SegmentEntry{
+					{SegmentID: 1, PartitionID: 1, Candidate: candidate1},
+				},
+			},
+			{
+				NodeID: 2,
+				Segments: []SegmentEntry{
+					{SegmentID: 2, PartitionID: 1, Candidate: candidate2},
+				},
+			},
+		}
+		growing := []SegmentEntry{}
+
+		pks := []storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}
+
+		result := BatchGetFromSegments(pks, common.AllPartitionsID, sealed, growing)
+
+		assert.Len(t, result, 2)
+		assert.Equal(t, []bool{true}, result[1])
+		assert.Equal(t, []bool{false}, result[2])
 	})
 }
 
