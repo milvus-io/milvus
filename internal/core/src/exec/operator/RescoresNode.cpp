@@ -16,6 +16,7 @@
 
 #include "RescoresNode.h"
 #include "common/Tracer.h"
+#include "common/EasyAssert.h"
 #include "fmt/format.h"
 #include <cstddef>
 #include "exec/operator/Utils.h"
@@ -128,7 +129,17 @@ PhyRescoresNode::GetOutput() {
             expr_set->Eval(0, 1, true, eval_ctx, results);
 
             // filter result for offsets[i] was resut bitset[i]
+            AssertInfo(!results.empty() && results[0] != nullptr,
+                       "PhyRescoresNode: filter expr returned null result, "
+                       "offsets size: {}, filter: {}",
+                       offsets.size(),
+                       filter->ToString());
             auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+            AssertInfo(
+                col_vec != nullptr,
+                "PhyRescoresNode: failed to cast result to ColumnVector, "
+                "filter: {}",
+                filter->ToString());
             auto col_vec_size = col_vec->size();
             TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
             scorer->batch_score(op_context,
@@ -142,8 +153,17 @@ PhyRescoresNode::GetOutput() {
             expr_set->Eval(0, 1, true, eval_ctx, results);
 
             // filter result for offsets[i] was bitset[offset[i]]
-            TargetBitmap bitset;
+            AssertInfo(!results.empty() && results[0] != nullptr,
+                       "PhyRescoresNode: filter expr returned null result, "
+                       "filter: {}",
+                       filter->ToString());
             auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+            AssertInfo(
+                col_vec != nullptr,
+                "PhyRescoresNode: failed to cast result to ColumnVector, "
+                "filter: {}",
+                filter->ToString());
+            TargetBitmap bitset;
             auto col_vec_size = col_vec->size();
             TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
             bitset.append(view);

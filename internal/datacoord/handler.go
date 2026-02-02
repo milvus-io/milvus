@@ -857,18 +857,19 @@ func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*
 			indexParams = append(indexParams, h.s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
 
 			indexesFiles = append(indexesFiles, &indexpb.IndexFilePathInfo{
-				SegmentID:           segID,
-				FieldID:             fieldID,
-				IndexID:             segIdx.IndexID,
-				BuildID:             segIdx.BuildID,
-				IndexName:           indexName,
-				IndexParams:         indexParams,
-				IndexFilePaths:      indexFilePaths,
-				SerializedSize:      segIdx.IndexSerializedSize,
-				MemSize:             segIdx.IndexMemSize,
-				IndexVersion:        segIdx.IndexVersion,
-				NumRows:             segIdx.NumRows,
-				CurrentIndexVersion: segIdx.CurrentIndexVersion,
+				SegmentID:                 segID,
+				FieldID:                   fieldID,
+				IndexID:                   segIdx.IndexID,
+				BuildID:                   segIdx.BuildID,
+				IndexName:                 indexName,
+				IndexParams:               indexParams,
+				IndexFilePaths:            indexFilePaths,
+				SerializedSize:            segIdx.IndexSerializedSize,
+				MemSize:                   segIdx.IndexMemSize,
+				IndexVersion:              segIdx.IndexVersion,
+				NumRows:                   segIdx.NumRows,
+				CurrentIndexVersion:       segIdx.CurrentIndexVersion,
+				CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
 			})
 		}
 	}

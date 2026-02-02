@@ -21,7 +21,7 @@ class ThreeValuedLogicOp {
     // apply not operation to the left column vector
     // and store the result in the left column vector
     static void
-    Not(ColumnVectorPtr left) {
+    Not(const ColumnVectorPtr& left) {
         TargetBitmapView data(left->GetRawData(), left->size());
         TargetBitmapView valid_data(left->GetValidRawData(), left->size());
 
@@ -52,7 +52,7 @@ class ThreeValuedLogicOp {
     // result_valid = left_valid & (right_valid | ~left_data) |
     //                right_valid & ~right_data
     static void
-    And(ColumnVectorPtr left, ColumnVectorPtr right) {
+    And(const ColumnVectorPtr& left, const ColumnVectorPtr& right) {
         const size_t size = left->size();
         TargetBitmapView left_data(left->GetRawData(), size);
         TargetBitmapView left_valid(left->GetValidRawData(), size);
@@ -102,7 +102,7 @@ class ThreeValuedLogicOp {
     // result_valid = left_valid & (right_valid | left_data) |
     //                right_valid & right_data
     static void
-    Or(ColumnVectorPtr left, ColumnVectorPtr right) {
+    Or(const ColumnVectorPtr& left, const ColumnVectorPtr& right) {
         const size_t size = left->size();
         TargetBitmapView left_data(left->GetRawData(), size);
         TargetBitmapView left_valid(left->GetValidRawData(), size);
@@ -127,15 +127,6 @@ class ThreeValuedLogicOp {
 
         // left_data = left_data | right_data
         left_data.inplace_or(right_data, size);
-    }
-
-    static size_t
-    TrueCount(ColumnVectorPtr res) {
-        TargetBitmapView data(res->GetRawData(), res->size());
-        TargetBitmapView valid_data(res->GetValidRawData(), res->size());
-        TargetBitmap tmp(data);
-        tmp.inplace_and(valid_data, res->size());
-        return tmp.count();
     }
 };
 }  // namespace common

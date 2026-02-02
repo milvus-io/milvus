@@ -217,6 +217,7 @@ class TestVectorArrayStorageV2 : public testing::Test {
                 std::vector<int64_t>(chunk_num_ * test_data_count_),
                 std::vector<int64_t>(chunk_num_ * test_data_count_ * 4),
                 false,
+                "",
                 std::vector<std::string>({paths[0]})});
         load_info.field_infos.emplace(
             int64_t(101),
@@ -226,6 +227,7 @@ class TestVectorArrayStorageV2 : public testing::Test {
                             std::vector<int64_t>(chunk_num_ * test_data_count_ *
                                                  10 * 4 * DIM),
                             false,
+                            "",
                             std::vector<std::string>({paths[1]})});
 
         load_info.storage_version = 2;
@@ -244,7 +246,6 @@ class TestVectorArrayStorageV2 : public testing::Test {
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
         fs->DeleteDir("/tmp/test_vector_array_for_storage_v2");
-
         milvus_storage::ArrowFileSystemSingleton::GetInstance().Release();
     }
 

@@ -37,17 +37,14 @@ const auto schema = []() {
 }();
 
 const auto search_plan = [] {
-    const char* raw_plan = R"(vector_anns: <
-                                field_id: 100
-                                query_info: <
-                                  topk: 5
-                                  round_decimal: -1
-                                  metric_type: "L2"
-                                  search_params: "{\"nprobe\": 10}"
-                                >
-                                placeholder_tag: "$0"
-        >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str = handle.ParseSearch("",         // no filter expression
+                                       "fakevec",  // vector field name
+                                       5,          // topk
+                                       "L2",       // metric type
+                                       "{\"nprobe\": 10}",  // search params
+                                       -1                   // round_decimal
+    );
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     return plan;

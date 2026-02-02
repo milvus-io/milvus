@@ -74,6 +74,7 @@ constexpr const char* BITMAP_INDEX_CARDINALITY_LIMIT =
 // index config key
 constexpr const char* MMAP_FILE_PATH = "mmap_filepath";
 constexpr const char* ENABLE_MMAP = "enable_mmap";
+constexpr const char* WARMUP = "warmup";
 constexpr const char* INDEX_FILES = "index_files";
 constexpr const char* INDEX_SIZE = "index_size";
 constexpr const char* ENABLE_OFFSET_CACHE = "indexoffsetcache.enabled";

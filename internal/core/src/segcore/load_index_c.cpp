@@ -326,6 +326,13 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
             load_index_info->uri = info_proto->uri();
             load_index_info->index_engine_version =
                 info_proto->index_engine_version();
+            // Inject scalar index version into index_params for scalar indexes
+            auto scalar_version = info_proto->current_scalar_index_version();
+            if (scalar_version > 0) {
+                load_index_info
+                    ->index_params[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
+                    std::to_string(scalar_version);
+            }
             load_index_info->schema = info_proto->field();
             load_index_info->index_size = info_proto->index_file_size();
             load_index_info->num_rows = info_proto->num_rows();
@@ -337,6 +344,17 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
                              ? field_schema.get_dim()
                              : 1;
             load_index_info->dim = dim;
+            // Extract warmup_policy from index_params (keep it for Knowhere)
+            auto warmup_it = load_index_info->index_params.find("warmup");
+            if (warmup_it != load_index_info->index_params.end()) {
+                load_index_info->warmup_policy = warmup_it->second;
+                LOG_INFO("Index warmup_policy extracted from index_params: {}",
+                         load_index_info->warmup_policy);
+            } else {
+                LOG_INFO(
+                    "No warmup key in index_params, warmup_policy will be "
+                    "empty");
+            }
 
             auto remote_chunk_manager =
                 milvus::storage::RemoteChunkManagerSingleton::GetInstance()

@@ -23,7 +23,7 @@ func GetIndexParam() ParamItem {
 	return ParamItem{
 		Key:          "autoIndex.params.build",
 		Version:      "2.2.0",
-		DefaultValue: `{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "COSINE"}`,
+		DefaultValue: `{"M": 18 ,"efConstruction": 240,"index_type": "HNSW_SQ", "sq_type": "SQ4U", "refine": true, "refine_type": "FP16", "metric_type": "COSINE"}`,
 		Formatter:    GetBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.build"),
 		Export:       true,
 	}

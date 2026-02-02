@@ -139,6 +139,17 @@ class IndexFactory {
                           storage::FileManagerContext());
 
     IndexBasePtr
+    CreateNestedIndexInverted(
+        int32_t tantivy_index_version,
+        const storage::FileManagerContext& file_manager_context =
+            storage::FileManagerContext());
+
+    IndexBasePtr
+    CreateNestedIndexScalarIndexSort(
+        const storage::FileManagerContext& file_manager_context =
+            storage::FileManagerContext());
+
+    IndexBasePtr
     CreateScalarIndex(const CreateIndexInfo& create_index_info,
                       const storage::FileManagerContext& file_manager_context =
                           storage::FileManagerContext());

@@ -15,6 +15,7 @@ include_directories(${CMAKE_HOME_DIRECTORY}/unittest)
 set(bench_srcs
     bench_naive.cpp
     bench_search.cpp
+    bench_prepared_geometry.cpp
 )
 
 set(indexbuilder_bench_srcs
@@ -25,6 +26,7 @@ add_executable(all_bench ${bench_srcs})
 target_link_libraries(all_bench
         milvus_core
         knowhere
+        milvus-planparser-cpp
         pthread
         )
 

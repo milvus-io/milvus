@@ -60,7 +60,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     const std::string& mmap_dir_path,
     int64_t num_fields,
     milvus::proto::common::LoadPriority load_priority,
-    bool eager_load)
+    bool eager_load,
+    const std::string& warmup_policy)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -83,7 +84,9 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                     return false;
                 }(),
                 /* is_index */ false),
+            // Use getCacheWarmupPolicy to resolve: user setting > global config
             milvus::segcore::getCacheWarmupPolicy(
+                warmup_policy,
                 /* is_vector */
                 [&]() {
                     for (const auto& [fid, field_meta] : field_metas_) {

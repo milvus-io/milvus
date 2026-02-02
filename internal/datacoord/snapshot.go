@@ -244,6 +244,8 @@ type AvroIndexFilePathInfo struct {
 	NumRows int64 `avro:"num_rows"`
 	// CurrentIndexVersion is the current index algorithm version.
 	CurrentIndexVersion int32 `avro:"current_index_version"`
+	// CurrentScalarIndexVersion is the current scalar index version.
+	CurrentScalarIndexVersion int32 `avro:"current_scalar_index_version"`
 	// MemSize is the estimated memory consumption when loaded.
 	MemSize int64 `avro:"mem_size"`
 }
@@ -1066,18 +1068,19 @@ func convertFieldBinlogToAvro(fb *datapb.FieldBinlog) AvroFieldBinlog {
 // Handles size field conversion from uint64 (proto) to int64 (Avro).
 func convertIndexFilePathInfoToAvro(info *indexpb.IndexFilePathInfo) AvroIndexFilePathInfo {
 	avroInfo := AvroIndexFilePathInfo{
-		SegmentID:           info.GetSegmentID(),
-		FieldID:             info.GetFieldID(),
-		IndexID:             info.GetIndexID(),
-		BuildID:             info.GetBuildID(),
-		IndexName:           info.GetIndexName(),
-		IndexFilePaths:      info.GetIndexFilePaths(),
-		SerializedSize:      int64(info.GetSerializedSize()), // uint64 -> int64
-		IndexVersion:        info.GetIndexVersion(),
-		NumRows:             info.GetNumRows(),
-		CurrentIndexVersion: info.GetCurrentIndexVersion(),
-		MemSize:             int64(info.GetMemSize()), // uint64 -> int64
-		IndexParams:         make([]AvroKeyValuePair, len(info.GetIndexParams())),
+		SegmentID:                 info.GetSegmentID(),
+		FieldID:                   info.GetFieldID(),
+		IndexID:                   info.GetIndexID(),
+		BuildID:                   info.GetBuildID(),
+		IndexName:                 info.GetIndexName(),
+		IndexFilePaths:            info.GetIndexFilePaths(),
+		SerializedSize:            int64(info.GetSerializedSize()), // uint64 -> int64
+		IndexVersion:              info.GetIndexVersion(),
+		NumRows:                   info.GetNumRows(),
+		CurrentIndexVersion:       info.GetCurrentIndexVersion(),
+		CurrentScalarIndexVersion: info.GetCurrentScalarIndexVersion(),
+		MemSize:                   int64(info.GetMemSize()), // uint64 -> int64
+		IndexParams:               make([]AvroKeyValuePair, len(info.GetIndexParams())),
 	}
 
 	// Convert key-value parameters
@@ -1120,17 +1123,18 @@ func convertAvroToFieldBinlog(avroFB AvroFieldBinlog) *datapb.FieldBinlog {
 // Handles size field conversion from int64 (Avro) to uint64 (proto).
 func convertAvroToIndexFilePathInfo(avroInfo AvroIndexFilePathInfo) *indexpb.IndexFilePathInfo {
 	info := &indexpb.IndexFilePathInfo{
-		SegmentID:           avroInfo.SegmentID,
-		FieldID:             avroInfo.FieldID,
-		IndexID:             avroInfo.IndexID,
-		BuildID:             avroInfo.BuildID,
-		IndexName:           avroInfo.IndexName,
-		IndexFilePaths:      avroInfo.IndexFilePaths,
-		SerializedSize:      uint64(avroInfo.SerializedSize), // int64 -> uint64
-		IndexVersion:        avroInfo.IndexVersion,
-		NumRows:             avroInfo.NumRows,
-		CurrentIndexVersion: avroInfo.CurrentIndexVersion,
-		MemSize:             uint64(avroInfo.MemSize), // int64 -> uint64
+		SegmentID:                 avroInfo.SegmentID,
+		FieldID:                   avroInfo.FieldID,
+		IndexID:                   avroInfo.IndexID,
+		BuildID:                   avroInfo.BuildID,
+		IndexName:                 avroInfo.IndexName,
+		IndexFilePaths:            avroInfo.IndexFilePaths,
+		SerializedSize:            uint64(avroInfo.SerializedSize), // int64 -> uint64
+		IndexVersion:              avroInfo.IndexVersion,
+		NumRows:                   avroInfo.NumRows,
+		CurrentIndexVersion:       avroInfo.CurrentIndexVersion,
+		CurrentScalarIndexVersion: avroInfo.CurrentScalarIndexVersion,
+		MemSize:                   uint64(avroInfo.MemSize), // int64 -> uint64
 	}
 
 	// Convert key-value parameters

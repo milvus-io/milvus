@@ -50,8 +50,19 @@ class Schema {
                   bool nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
-        this->AddField(
-            FieldName(name), field_id, data_type, nullable, std::nullopt);
+        if (IsStringDataType(data_type)) {
+            // String types require max_length to be set for proper serialization
+            constexpr int64_t kDefaultMaxLength = 65535;
+            this->AddField(FieldName(name),
+                           field_id,
+                           data_type,
+                           kDefaultMaxLength,
+                           nullable,
+                           std::nullopt);
+        } else {
+            this->AddField(
+                FieldName(name), field_id, data_type, nullable, std::nullopt);
+        }
         return field_id;
     }
 
@@ -62,8 +73,22 @@ class Schema {
                                   bool nullable = true) {
         auto field_id = FieldId(debug_id);
         debug_id++;
-        this->AddField(
-            FieldName(name), field_id, data_type, nullable, std::move(value));
+        if (IsStringDataType(data_type)) {
+            // String types require max_length to be set for proper serialization
+            constexpr int64_t kDefaultMaxLength = 65535;
+            this->AddField(FieldName(name),
+                           field_id,
+                           data_type,
+                           kDefaultMaxLength,
+                           nullable,
+                           std::move(value));
+        } else {
+            this->AddField(FieldName(name),
+                           field_id,
+                           data_type,
+                           nullable,
+                           std::move(value));
+        }
         return field_id;
     }
 
@@ -444,6 +469,28 @@ class Schema {
         return meta.get_name().get();
     }
 
+    /**
+     * @brief Get the warmup policy for a specific field.
+     *
+     * This function checks warmup policy at the field level first. If no field-level
+     * setting is found, it falls back to the appropriate collection-level warmup
+     * configuration based on whether the field is vector/scalar and index/field.
+     *
+     * @param field The field ID to check warmup policy for.
+     * @param is_vector Whether the field is a vector field.
+     * @param is_index Whether this is for index loading (vs raw field data).
+     *
+     * @return A pair where:
+     *         - first:  Whether a warmup policy exists (at field or collection level).
+     *         - second: The warmup policy string ("disable", "sync", etc.).
+     *                   Only meaningful when first is true.
+     *
+     * @note If no warmup policy exists at any level, first will be false and second
+     *       should be ignored (use global config fallback).
+     */
+    std::pair<bool, std::string>
+    WarmupPolicy(const FieldId& field, bool is_vector, bool is_index) const;
+
  private:
     int64_t debug_id = START_USER_FIELDID;
     std::vector<FieldId> field_ids_;
@@ -474,6 +521,16 @@ class Schema {
 
     // Cache for struct_name -> first array field mapping (built during AddField)
     std::unordered_map<std::string, FieldId> struct_array_field_cache_;
+
+    // warmup policy settings
+    // Valid values: "disable", "sync" (empty string means no setting)
+    // Collection-level warmup policies for different data types
+    std::optional<std::string> warmup_vector_index_ = std::nullopt;
+    std::optional<std::string> warmup_scalar_index_ = std::nullopt;
+    std::optional<std::string> warmup_scalar_field_ = std::nullopt;
+    std::optional<std::string> warmup_vector_field_ = std::nullopt;
+    // Per-field warmup policy (key: "warmup" in field type_params)
+    std::unordered_map<FieldId, std::string> warmup_fields_;
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;

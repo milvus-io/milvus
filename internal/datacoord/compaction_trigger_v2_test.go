@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -32,12 +33,13 @@ func TestCompactionTriggerManagerSuite(t *testing.T) {
 type CompactionTriggerManagerSuite struct {
 	suite.Suite
 
-	mockAlloc  *allocator.MockAllocator
-	handler    Handler
-	inspector  *MockCompactionInspector
-	testLabel  *CompactionGroupLabel
-	meta       *meta
-	importMeta ImportMeta
+	mockAlloc      *allocator.MockAllocator
+	handler        Handler
+	inspector      *MockCompactionInspector
+	testLabel      *CompactionGroupLabel
+	meta           *meta
+	importMeta     ImportMeta
+	versionManager *MockVersionManager
 
 	triggerManager *CompactionTriggerManager
 }
@@ -71,7 +73,10 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 	importMeta, err := NewImportMeta(context.TODO(), catalog, s.mockAlloc, s.meta)
 	s.Require().NoError(err)
 	s.importMeta = importMeta
-	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.inspector, s.meta, s.importMeta)
+	versionManager := NewMockVersionManager(s.T())
+	versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0")).Maybe()
+	s.versionManager = versionManager
+	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.inspector, s.meta, s.importMeta, s.versionManager)
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
@@ -404,7 +409,10 @@ func TestCompactionAndImport(t *testing.T) {
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 	importMeta, err := NewImportMeta(context.TODO(), catalog, mockAlloc, meta)
 	assert.NoError(t, err)
-	triggerManager := NewCompactionTriggerManager(mockAlloc, handler, inspector, meta, importMeta)
+
+	versionManager := NewMockVersionManager(t)
+	versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0")).Maybe()
+	triggerManager := NewCompactionTriggerManager(mockAlloc, handler, inspector, meta, importMeta, versionManager)
 
 	Params.Save(Params.DataCoordCfg.L0CompactionTriggerInterval.Key, "1")
 	defer Params.Reset(Params.DataCoordCfg.L0CompactionTriggerInterval.Key)

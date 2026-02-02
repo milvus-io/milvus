@@ -368,7 +368,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 info.enable_mmap,
                 mmap_config.GetMmapPopulate(),
                 milvus_field_ids.size(),
-                load_info.load_priority);
+                load_info.load_priority,
+                info.warmup_policy);
 
         auto file_metas = translator->parquet_file_metas();
         auto field_id_mapping = translator->field_id_mapping();
@@ -475,12 +476,9 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                 DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
             field_data_info.arrow_reader_channel->set_capacity(parallel_degree *
                                                                2);
-            auto& pool =
-                ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-            pool.Submit(LoadArrowReaderFromRemote,
-                        insert_files,
-                        field_data_info.arrow_reader_channel,
-                        load_info.load_priority);
+            LoadArrowReaderFromRemote(insert_files,
+                                      field_data_info.arrow_reader_channel,
+                                      load_info.load_priority);
 
             LOG_INFO("segment {} submits load field {} task to thread pool",
                      this->get_segment_id(),
@@ -513,7 +511,8 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                     std::move(file_infos),
                     info.enable_mmap,
                     mmap_config.GetMmapPopulate(),
-                    load_info.load_priority);
+                    load_info.load_priority,
+                    info.warmup_policy);
 
             auto data_type = field_meta.get_data_type();
             auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
@@ -1925,6 +1924,9 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
     config[milvus::index::INDEX_FILES] = files;
     config[milvus::LOAD_PRIORITY] = info_proto->load_priority();
     config[milvus::index::ENABLE_MMAP] = info_proto->enable_mmap();
+    if (info_proto->warmup_policy() != "") {
+        config[milvus::index::WARMUP] = info_proto->warmup_policy();
+    }
     milvus::storage::FileManagerContext file_ctx(
         field_data_meta, index_meta, remote_chunk_manager, fs);
 
@@ -1935,7 +1937,8 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
         this->get_segment_id(),
         info_proto->fieldid(),
         field_meta.get_analyzer_params(),
-        info_proto->index_size()};
+        info_proto->index_size(),
+        info_proto->warmup_policy()};
 
     std::unique_ptr<
         milvus::cachinglayer::Translator<milvus::index::TextMatchIndex>>
@@ -2951,13 +2954,18 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
     int64_t size = num_rows_.value();
     AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
     auto field_data_info = FieldDataInfo(field_id.get(), size, mmap_dir_path);
+
+    auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
+        field_id, IsVectorDataType(data_type), /*is_index=*/false);
+    std::string warmup_policy = field_has_warmup ? field_warmup_policy : "";
     std::unique_ptr<Translator<milvus::Chunk>> translator =
         std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
             get_segment_id(),
             field_meta,
             field_data_info,
             use_mmap,
-            mmap_config.GetMmapPopulate());
+            mmap_config.GetMmapPopulate(),
+            warmup_policy);
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
         std::move(translator), nullptr);
     auto column = MakeChunkedColumnBase(data_type, std::move(slot), field_meta);
@@ -3043,7 +3051,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
     bool eager_load,
     milvus::OpContext* op_ctx) {
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<void>> load_group_futures;
     for (const auto& pair : cg_field_ids) {
         auto cg_index = pair.first;
@@ -3070,25 +3078,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         load_group_futures.emplace_back(std::move(future));
     }
 
-    std::vector<std::exception_ptr> load_exceptions;
-    for (auto& future : load_group_futures) {
-        try {
-            future.get();
-        } catch (...) {
-            load_exceptions.push_back(std::current_exception());
-        }
-    }
-
-    // If any exceptions occurred during index loading, handle them
-    if (!load_exceptions.empty()) {
-        LOG_ERROR("Failed to load {} out of {} indexes for segment {}",
-                  load_exceptions.size(),
-                  load_group_futures.size(),
-                  id_);
-
-        // Rethrow the first exception
-        std::rethrow_exception(load_exceptions[0]);
-    }
+    storage::WaitAllFutures(load_group_futures);
 }
 
 void
@@ -3109,6 +3099,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     bool is_vector = false;
     bool has_mmap_setting = false;
     bool mmap_enabled = false;
+    bool has_warmup_setting = false;
+    bool warmup_sync = false;
     for (auto& [field_id, field_meta] : field_metas) {
         if (IsVectorDataType(field_meta.get_data_type())) {
             is_vector = true;
@@ -3123,6 +3115,18 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             schema_->MmapEnabled(field_id);
         has_mmap_setting = has_mmap_setting || field_has_setting;
         mmap_enabled = mmap_enabled || field_mmap_enabled;
+
+        // if field has warmup setting, use it
+        // - warmup setting at collection level, uses appropriate key based on field type
+        // - warmup setting at field level, use the most aggressive policy (sync > disable)
+        // Note: this is for field data loading, not index (is_index = false)
+        bool field_is_vector = IsVectorDataType(field_meta.get_data_type());
+        auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
+            field_id, field_is_vector, /*is_index=*/false);
+        if (field_has_warmup) {
+            has_warmup_setting = true;
+            warmup_sync = warmup_sync || (field_warmup_policy == "sync");
+        }
     }
 
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
@@ -3146,6 +3150,11 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             .GetChunkManager()
             ->GetRootPath();
 
+    // Determine warmup policy: use per-field settings if any,
+    // otherwise pass empty string to fall back to global config
+    std::string warmup_policy =
+        has_warmup_setting ? (warmup_sync ? "sync" : "disable") : "";
+
     auto translator =
         std::make_unique<storagev2translator::ManifestGroupTranslator>(
             get_segment_id(),
@@ -3158,7 +3167,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             mmap_dir_path,
             column_group->columns.size(),
             segment_load_info_.GetPriority(),
-            eager_load);
+            eager_load,
+            warmup_policy);
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -3213,18 +3223,25 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 void
 ChunkedSegmentSealedImpl::ReloadColumns(const std::vector<FieldId>& field_ids,
                                         milvus::OpContext* op_ctx) {
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+    std::vector<std::future<void>> reload_futures;
     for (auto& field_id : field_ids) {
-        auto column = get_column(field_id);
-        AssertInfo(column != nullptr,
-                   "cannot reload non-existing field column {}",
-                   field_id.get());
-        auto num_chunks = column->num_chunks();
-        std::vector<int64_t> chunk_ids(num_chunks);
-        for (int64_t chunk_id = 0; chunk_id < num_chunks; chunk_id++) {
-            chunk_ids[chunk_id] = chunk_id;
-        }
-        column->PrefetchChunks(op_ctx, chunk_ids);
+        auto future = pool.Submit([this, field_id, op_ctx]() {
+            auto column = get_column(field_id);
+            AssertInfo(column != nullptr,
+                       "cannot reload non-existing field column {}",
+                       field_id.get());
+            auto num_chunks = column->num_chunks();
+            std::vector<int64_t> chunk_ids(num_chunks);
+            for (int64_t chunk_id = 0; chunk_id < num_chunks; chunk_id++) {
+                chunk_ids[chunk_id] = chunk_id;
+            }
+            column->PrefetchChunks(op_ctx, chunk_ids);
+        });
+        reload_futures.push_back(std::move(future));
     }
+
+    storage::WaitAllFutures(reload_futures);
 }
 
 void
@@ -3234,7 +3251,7 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
         field_id_to_index_info,
     milvus::OpContext* op_ctx) {
     auto num_rows = segment_load_info_.GetNumOfRows();
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<void>> load_index_futures;
     load_index_futures.reserve(field_id_to_index_info.size());
 
@@ -3268,27 +3285,7 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
         }
     }
 
-    // Wait for all index loading to complete and collect exceptions
-    std::vector<std::exception_ptr> index_exceptions;
-    index_exceptions.reserve(load_index_futures.size());
-    for (auto& future : load_index_futures) {
-        try {
-            future.get();
-        } catch (...) {
-            index_exceptions.push_back(std::current_exception());
-        }
-    }
-
-    // If any exceptions occurred during index loading, handle them
-    if (!index_exceptions.empty()) {
-        LOG_ERROR("Failed to load {} out of {} indexes for segment {}",
-                  index_exceptions.size(),
-                  load_index_futures.size(),
-                  id_);
-
-        // Rethrow the first exception
-        std::rethrow_exception(index_exceptions[0]);
-    }
+    storage::WaitAllFutures(load_index_futures);
 }
 
 void
@@ -3306,8 +3303,6 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         LoadFieldDataInfo load_field_data_info;
         load_field_data_info.storage_version =
             segment_load_info_.GetStorageVersion();
-        // const auto& field_binlog = segment_load_info_.GetBinlogPath(i);
-        // std::vector<FieldId> field_ids;
         // when child fields specified, field id is group id, child field ids are actual id values here
         if (field_binlog.child_fields_size() > 0) {
             field_ids.reserve(field_binlog.child_fields_size());
@@ -3322,6 +3317,9 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         bool has_mmap_setting = false;
         bool mmap_enabled = false;
         bool is_vector = false;
+
+        bool has_warmup_setting = false;
+        bool warmup_sync = false;
         for (const auto& child_field_id : field_ids) {
             auto& field_meta = schema_->operator[](child_field_id);
             if (IsVectorDataType(field_meta.get_data_type())) {
@@ -3341,6 +3339,16 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
                 index_has_raw_data = index_has_raw_data && iter->second;
             } else {
                 index_has_raw_data = false;
+            }
+
+            auto [field_has_warmup, field_warmup_policy] =
+                schema_->WarmupPolicy(
+                    child_field_id,
+                    IsVectorDataType(field_meta.get_data_type()),
+                    /*is_index=*/false);
+            if (field_has_warmup) {
+                has_warmup_setting = true;
+                warmup_sync = warmup_sync || (field_warmup_policy == "sync");
             }
         }
 
@@ -3381,13 +3389,18 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         field_binlog_info.enable_mmap =
             has_mmap_setting ? mmap_enabled : global_use_mmap;
 
+        // Determine group warmup policy: use per-field settings if any,
+        // otherwise fall back to global warmup policy
+        field_binlog_info.warmup_policy =
+            has_warmup_setting ? (warmup_sync ? "sync" : "disable") : "";
+
         // Store in map
         load_field_data_info.field_infos[group_id] = field_binlog_info;
 
         field_data_to_load[FieldId(group_id)] = load_field_data_info;
     }
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<void>> load_field_futures;
     load_field_futures.reserve(field_data_to_load.size());
 
@@ -3408,27 +3421,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         load_field_futures.push_back(std::move(future));
     }
 
-    // Wait for all field data loading to complete and collect exceptions
-    std::vector<std::exception_ptr> field_exceptions;
-    field_exceptions.reserve(load_field_futures.size());
-    for (auto& future : load_field_futures) {
-        try {
-            future.get();
-        } catch (...) {
-            field_exceptions.push_back(std::current_exception());
-        }
-    }
-
-    // If any exceptions occurred during field data loading, handle them
-    if (!field_exceptions.empty()) {
-        LOG_ERROR("Failed to load {} out of {} field data for segment {}",
-                  field_exceptions.size(),
-                  load_field_futures.size(),
-                  id_);
-
-        // Rethrow the first exception
-        std::rethrow_exception(field_exceptions[0]);
-    }
+    storage::WaitAllFutures(load_field_futures);
 }
 
 void

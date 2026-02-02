@@ -53,7 +53,50 @@ const (
 	AutoIndexName = common.AutoIndexName
 	DimKey        = common.DimKey
 	IsSparseKey   = common.IsSparseKey
+
+	RefineTypeKey = "refine_type"
 )
+
+// adjustAutoIndexParamsByDataType adjusts autoindex params based on vector data type
+// If data_type is bf16 and refine_type is fp16/fp32, adjust to BF16
+// If data_type is fp16 and refine_type is bf16/fp32, adjust to FP16
+// Other refine_type values (e.g., sq8) are not modified
+func adjustAutoIndexParamsByDataType(config map[string]string, dataType schemapb.DataType) map[string]string {
+	if config == nil {
+		return config
+	}
+	refineType, hasRefine := config[RefineTypeKey]
+	if !hasRefine {
+		return config
+	}
+
+	refineTypeLower := strings.ToLower(refineType)
+	var requiredRefineType string
+
+	switch dataType {
+	case schemapb.DataType_Float16Vector:
+		// fp16 data requires fp16 refine, adjust if refine_type is bf16/fp32
+		if refineTypeLower == "bf16" || refineTypeLower == "fp32" {
+			requiredRefineType = "FP16"
+		}
+	case schemapb.DataType_BFloat16Vector:
+		// bf16 data requires bf16 refine, adjust if refine_type is fp16/fp32
+		if refineTypeLower == "fp16" || refineTypeLower == "fp32" {
+			requiredRefineType = "BF16"
+		}
+	}
+
+	if requiredRefineType == "" {
+		return config
+	}
+
+	adjusted := make(map[string]string, len(config))
+	for k, v := range config {
+		adjusted[k] = v
+	}
+	adjusted[RefineTypeKey] = requiredRefineType
+	return adjusted
+}
 
 type createIndexTask struct {
 	baseTask
@@ -216,6 +259,12 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 		}
 	}
 
+	// Validate warmup policy if specified
+	if err := indexparamcheck.ValidateWarmupIndexParams(indexParamsMap); err != nil {
+		log.Ctx(ctx).Warn("Invalid warmup params", zap.Error(err))
+		return merr.WrapErrParameterInvalidMsg("invalid warmup params: %s", err.Error())
+	}
+
 	if !isVecIndex {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
 		autoIndexEnable := Params.AutoIndexConfig.ScalarAutoIndexEnable.GetAsBool()
@@ -265,7 +314,9 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 
 			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) {
 				// override float vector index params by autoindex
-				for k, v := range Params.AutoIndexConfig.IndexParams.GetAsJSONMap() {
+				// filter incompatible refine_type for fp16/bf16 vectors
+				autoIndexParams := adjustAutoIndexParamsByDataType(Params.AutoIndexConfig.IndexParams.GetAsJSONMap(), cit.fieldSchema.DataType)
+				for k, v := range autoIndexParams {
 					indexParamsMap[k] = v
 				}
 			} else if typeutil.IsSparseFloatVectorType(cit.fieldSchema.DataType) {
@@ -346,7 +397,12 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsDenseFloatVectorType(cit.fieldSchema.ElementType)) {
 				// override float vector index params by autoindex
-				config = Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
+				// filter incompatible refine_type for fp16/bf16 vectors
+				dataType := cit.fieldSchema.DataType
+				if typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) {
+					dataType = cit.fieldSchema.ElementType
+				}
+				config = adjustAutoIndexParamsByDataType(Params.AutoIndexConfig.IndexParams.GetAsJSONMap(), dataType)
 			} else if typeutil.IsSparseFloatVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsSparseFloatVectorType(cit.fieldSchema.ElementType)) {
 				// override sparse float vector index params by autoindex
@@ -688,6 +744,11 @@ func (t *alterIndexTask) PreExecute(ctx context.Context) error {
 			if !indexparams.IsConfigableIndexParam(param.GetKey()) {
 				return merr.WrapErrParameterInvalidMsg("%s is not a configable index property", param.GetKey())
 			}
+		}
+		// Validate warmup policy if specified
+		indexParamsMap := funcutil.KeyValuePair2Map(t.req.GetExtraParams())
+		if err := indexparamcheck.ValidateWarmupIndexParams(indexParamsMap); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid warmup params: %s", err.Error())
 		}
 	} else if len(t.req.GetDeleteKeys()) > 0 {
 		for _, param := range t.req.GetDeleteKeys() {

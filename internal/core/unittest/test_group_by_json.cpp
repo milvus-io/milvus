@@ -9,27 +9,6 @@ using namespace milvus::segcore;
 using namespace milvus::storage;
 using namespace milvus::tracer;
 
-static std::unique_ptr<SearchResult>
-run_group_by_search(const std::string& raw_plan,
-                    const SchemaPtr& schema,
-                    SegmentInternalInterface* segment,
-                    int dim,
-                    int topK,
-                    int num_queries = 1) {
-    proto::plan::PlanNode plan_node;
-    auto ok =
-        google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-    auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
-    auto seed = 1024;
-    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
-    auto ph_group =
-        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    auto search_result =
-        segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
-    CheckGroupBySearchResult(*search_result, topK, num_queries, false);
-    return search_result;
-}
-
 template <typename T>
 void
 validate_group_by_search_result(
@@ -91,25 +70,41 @@ TEST(GroupBYJSON, SealedData) {
 
     int topK = 10;
     int group_size = 2;
+    auto seed = 1024;
+    int num_queries = 1;
+
+    ScopedSchemaHandle handle(*schema);
+
+    // Helper lambda to run group-by search
+    auto run_group_by_search = [&](const std::string& json_path,
+                                   milvus::proto::schema::DataType json_type)
+        -> std::unique_ptr<SearchResult> {
+        auto plan_str =
+            handle.ParseGroupBySearch("",              // no filter expression
+                                      "fakevec",       // vector field name
+                                      topK,            // topk
+                                      "L2",            // metric type
+                                      "{\"ef\": 10}",  // search params
+                                      json_fid.get(),  // group_by_field_id
+                                      group_size,      // group_size
+                                      json_path,       // json_path
+                                      json_type,       // json_type
+                                      true);           // strict_group_size
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+        auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto search_result =
+            segment_ptr->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
+        CheckGroupBySearchResult(*search_result, topK, num_queries, false);
+        return search_result;
+    };
 
     // 3. search group by json_field.int8
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 101
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 102
-                                          group_size: 2
-                                          json_path: "/int8"
-                                          json_type: Int8
-                                          strict_group_size: true,
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
         auto search_result =
-            run_group_by_search(raw_plan, schema, segment_ptr, dim, topK);
+            run_group_by_search("/int8", milvus::proto::schema::DataType::Int8);
         auto& group_by_values = search_result->group_by_values_.value();
         ASSERT_EQ(topK * group_size, group_by_values.size());
         validate_group_by_search_result<int8_t>(
@@ -118,22 +113,8 @@ TEST(GroupBYJSON, SealedData) {
 
     // 4. search group by json_field.int16
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 101
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 102
-                                          group_size: 2
-                                          json_path: "/int16"
-                                          json_type: Int16
-                                          strict_group_size: true,
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-        auto search_result =
-            run_group_by_search(raw_plan, schema, segment_ptr, dim, topK);
+        auto search_result = run_group_by_search(
+            "/int16", milvus::proto::schema::DataType::Int16);
         auto& group_by_values = search_result->group_by_values_.value();
         ASSERT_EQ(topK * group_size, group_by_values.size());
         validate_group_by_search_result<int16_t>(
@@ -142,22 +123,8 @@ TEST(GroupBYJSON, SealedData) {
 
     // 5. search group by json_field.int32
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 101
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 102
-                                          group_size: 2
-                                          json_path: "/int32"
-                                          json_type: Int32
-                                          strict_group_size: true,
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-        auto search_result =
-            run_group_by_search(raw_plan, schema, segment_ptr, dim, topK);
+        auto search_result = run_group_by_search(
+            "/int32", milvus::proto::schema::DataType::Int32);
         auto& group_by_values = search_result->group_by_values_.value();
         ASSERT_EQ(topK * group_size, group_by_values.size());
         validate_group_by_search_result<int32_t>(
@@ -166,22 +133,8 @@ TEST(GroupBYJSON, SealedData) {
 
     // 6. search group by json_field.int64
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 101
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 102
-                                          group_size: 2
-                                          json_path: "/int64"
-                                          json_type: Int64
-                                          strict_group_size: true,
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-        auto search_result =
-            run_group_by_search(raw_plan, schema, segment_ptr, dim, topK);
+        auto search_result = run_group_by_search(
+            "/int64", milvus::proto::schema::DataType::Int64);
         auto& group_by_values = search_result->group_by_values_.value();
         ASSERT_EQ(topK * group_size, group_by_values.size());
         validate_group_by_search_result<int64_t>(
@@ -190,22 +143,8 @@ TEST(GroupBYJSON, SealedData) {
 
     // 7. search group by json_field.bool
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 101
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 102
-                                          group_size: 2
-                                          json_path: "/bool"
-                                          json_type: Bool
-                                          strict_group_size: true,
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
         auto search_result =
-            run_group_by_search(raw_plan, schema, segment_ptr, dim, topK);
+            run_group_by_search("/bool", milvus::proto::schema::DataType::Bool);
         auto& group_by_values = search_result->group_by_values_.value();
         ASSERT_EQ(2 * group_size, group_by_values.size());
         validate_group_by_search_result<bool>(
@@ -214,22 +153,8 @@ TEST(GroupBYJSON, SealedData) {
 
     // 8. search group by json_field.string
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 101
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 102
-                                          group_size: 2
-                                          json_path: "/string"
-                                          json_type: VarChar
-                                          strict_group_size: true,
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-        auto search_result =
-            run_group_by_search(raw_plan, schema, segment_ptr, dim, topK);
+        auto search_result = run_group_by_search(
+            "/string", milvus::proto::schema::DataType::VarChar);
         auto& group_by_values = search_result->group_by_values_.value();
         ASSERT_EQ(topK * group_size, group_by_values.size());
         validate_group_by_search_result<std::string>(
@@ -238,21 +163,8 @@ TEST(GroupBYJSON, SealedData) {
 
     // 9. search group by json_field.string without json_type
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 101
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 102
-                                          group_size: 2
-                                          json_path: "/string"
-                                          strict_group_size: true,
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-        auto search_result =
-            run_group_by_search(raw_plan, schema, segment_ptr, dim, topK);
+        auto search_result = run_group_by_search(
+            "/string", milvus::proto::schema::DataType::None);
         auto& group_by_values = search_result->group_by_values_.value();
         ASSERT_EQ(topK * group_size, group_by_values.size());
         validate_group_by_search_result<std::string>(
@@ -290,52 +202,58 @@ TEST(GroupBYJSON, GrowingRawData) {
                                  data_set.timestamps_.data(),
                                  data_set.raw_);
 
-    // 2. Search group by json_field.int8
+    // 2. Search group by json_field
     auto num_queries = 10;
     auto topK = 10;
     int group_size = 2;
-    const char* raw_plan = R"(vector_anns: <
-                                        field_id: 102
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 101
-                                          group_size: 2
-                                          json_path: "/int8"
-                                          json_type: Int8,
-                                          strict_group_size: true,
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-    auto search_result = run_group_by_search(
-        raw_plan, schema, segment_growing_impl, dim, topK, num_queries);
-    auto& group_by_values = search_result->group_by_values_.value();
-    ASSERT_EQ(group_by_values.size(), num_queries * topK * group_size);
-    validate_group_by_search_result<int8_t>(group_by_values,
-                                            search_result->distances_,
-                                            group_size,
-                                            topK,
-                                            num_queries);
+
+    ScopedSchemaHandle handle(*schema);
+
+    // Helper lambda to run group-by search on growing segment
+    auto run_group_by_search = [&](const std::string& json_path,
+                                   milvus::proto::schema::DataType json_type,
+                                   bool strict_cast =
+                                       false) -> std::unique_ptr<SearchResult> {
+        auto plan_str =
+            handle.ParseGroupBySearch("",              // no filter expression
+                                      "embeddings",    // vector field name
+                                      topK,            // topk
+                                      "L2",            // metric type
+                                      "{\"ef\": 10}",  // search params
+                                      json_fid.get(),  // group_by_field_id
+                                      group_size,      // group_size
+                                      json_path,       // json_path
+                                      json_type,       // json_type
+                                      true,            // strict_group_size
+                                      strict_cast);    // strict_cast
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+        auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto search_result = segment_growing_impl->Search(
+            plan.get(), ph_group.get(), MAX_TIMESTAMP);
+        CheckGroupBySearchResult(*search_result, topK, num_queries, false);
+        return search_result;
+    };
+
+    // Search group by json_field.int8
+    {
+        auto search_result =
+            run_group_by_search("/int8", milvus::proto::schema::DataType::Int8);
+        auto& group_by_values = search_result->group_by_values_.value();
+        ASSERT_EQ(group_by_values.size(), num_queries * topK * group_size);
+        validate_group_by_search_result<int8_t>(group_by_values,
+                                                search_result->distances_,
+                                                group_size,
+                                                topK,
+                                                num_queries);
+    }
 
     // 3. Search group by json_field.int16
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 102
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 101
-                                          group_size: 2
-                                          json_path: "/int16"
-                                          json_type: Int16,
-                                          strict_group_size: true,
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
         auto search_result = run_group_by_search(
-            raw_plan, schema, segment_growing_impl, dim, topK, num_queries);
+            "/int16", milvus::proto::schema::DataType::Int16);
         auto& group_by_values = search_result->group_by_values_.value();
         ASSERT_EQ(group_by_values.size(), num_queries * topK * group_size);
         validate_group_by_search_result<int16_t>(group_by_values,
@@ -347,22 +265,8 @@ TEST(GroupBYJSON, GrowingRawData) {
 
     // 4. Search group by json_field.int32
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 102
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 101
-                                          group_size: 2
-                                          json_path: "/int32"
-                                          json_type: Int32,
-                                          strict_group_size: true,
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
         auto search_result = run_group_by_search(
-            raw_plan, schema, segment_growing_impl, dim, topK, num_queries);
+            "/int32", milvus::proto::schema::DataType::Int32);
         auto& group_by_values = search_result->group_by_values_.value();
         ASSERT_EQ(group_by_values.size(), num_queries * topK * group_size);
         validate_group_by_search_result<int32_t>(group_by_values,
@@ -374,22 +278,8 @@ TEST(GroupBYJSON, GrowingRawData) {
 
     // 5. Search group by json_field.int64
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 102
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 101
-                                          group_size: 2
-                                          json_path: "/int64"
-                                          json_type: Int64,
-                                          strict_group_size: true,
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
         auto search_result = run_group_by_search(
-            raw_plan, schema, segment_growing_impl, dim, topK, num_queries);
+            "/int64", milvus::proto::schema::DataType::Int64);
         auto& group_by_values = search_result->group_by_values_.value();
         ASSERT_EQ(group_by_values.size(), num_queries * topK * group_size);
         validate_group_by_search_result<int64_t>(group_by_values,
@@ -401,22 +291,8 @@ TEST(GroupBYJSON, GrowingRawData) {
 
     // 6. Search group by json_field.bool
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 102
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 101
-                                          group_size: 2
-                                          json_path: "/bool"
-                                          json_type: Bool,
-                                          strict_group_size: true,
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-        auto search_result = run_group_by_search(
-            raw_plan, schema, segment_growing_impl, dim, topK, num_queries);
+        auto search_result =
+            run_group_by_search("/bool", milvus::proto::schema::DataType::Bool);
         auto& group_by_values = search_result->group_by_values_.value();
         ASSERT_EQ(group_by_values.size(), num_queries * 2 * group_size);
         validate_group_by_search_result<bool>(group_by_values,
@@ -428,22 +304,8 @@ TEST(GroupBYJSON, GrowingRawData) {
 
     // 7. Search group by json_field.string
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 102
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 101
-                                          group_size: 2
-                                          json_path: "/string"
-                                          json_type: VarChar,
-                                          strict_group_size: true,
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
         auto search_result = run_group_by_search(
-            raw_plan, schema, segment_growing_impl, dim, topK, num_queries);
+            "/string", milvus::proto::schema::DataType::VarChar);
         auto& group_by_values = search_result->group_by_values_.value();
         ASSERT_EQ(group_by_values.size(), num_queries * topK * group_size);
         validate_group_by_search_result<std::string>(group_by_values,
@@ -455,21 +317,8 @@ TEST(GroupBYJSON, GrowingRawData) {
 
     // 8. Search group by json_field.string without json_type
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 102
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 101
-                                          group_size: 2
-                                          json_path: "/string"
-                                          strict_group_size: true,
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
         auto search_result = run_group_by_search(
-            raw_plan, schema, segment_growing_impl, dim, topK, num_queries);
+            "/string", milvus::proto::schema::DataType::None);
         auto& group_by_values = search_result->group_by_values_.value();
         ASSERT_EQ(group_by_values.size(), num_queries * topK * group_size);
         validate_group_by_search_result<std::string>(group_by_values,
@@ -481,22 +330,25 @@ TEST(GroupBYJSON, GrowingRawData) {
 
     // 9. Search group by entire JSON object (json_path="")
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 102
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 101
-                                          group_size: 1
-                                          json_path: ""
-                                          strict_group_size: true,
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-
-        auto search_result = run_group_by_search(
-            raw_plan, schema, segment_growing_impl, dim, topK, num_queries);
+        auto plan_str = handle.ParseGroupBySearch(
+            "",              // no filter expression
+            "embeddings",    // vector field name
+            topK,            // topk
+            "L2",            // metric type
+            "{\"ef\": 10}",  // search params
+            json_fid.get(),  // group_by_field_id
+            1,               // group_size = 1 for entire JSON
+            "",              // json_path (empty for entire object)
+            milvus::proto::schema::DataType::None,  // json_type
+            true);                                  // strict_group_size
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+        auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto search_result = segment_growing_impl->Search(
+            plan.get(), ph_group.get(), MAX_TIMESTAMP);
+        CheckGroupBySearchResult(*search_result, topK, num_queries, false);
         auto& group_by_values = search_result->group_by_values_.value();
         ASSERT_EQ(group_by_values.size(), num_queries * topK);
         validate_group_by_search_result<std::string>(
@@ -505,23 +357,25 @@ TEST(GroupBYJSON, GrowingRawData) {
 
     // 10. Search group by with wrong type and strict_cast=true
     {
-        const char* raw_plan = R"(vector_anns: <
-                                        field_id: 102
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 101
-                                          group_size: 2
-                                          json_path: "/bool"
-                                          json_type: VarChar,
-                                          strict_group_size: true,
-                                          strict_cast: true,
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-        ASSERT_ANY_THROW(run_group_by_search(
-            raw_plan, schema, segment_growing_impl, dim, topK, num_queries));
+        auto plan_str = handle.ParseGroupBySearch(
+            "",                                        // no filter expression
+            "embeddings",                              // vector field name
+            topK,                                      // topk
+            "L2",                                      // metric type
+            "{\"ef\": 10}",                            // search params
+            json_fid.get(),                            // group_by_field_id
+            group_size,                                // group_size
+            "/bool",                                   // json_path
+            milvus::proto::schema::DataType::VarChar,  // wrong json_type
+            true,                                      // strict_group_size
+            true);                                     // strict_cast = true
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+        auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        ASSERT_ANY_THROW(segment_growing_impl->Search(
+            plan.get(), ph_group.get(), MAX_TIMESTAMP));
     }
 }
 
@@ -585,9 +439,22 @@ TEST(GroupBYJSON, Reduce) {
     auto slice_nqs = std::vector<int64_t>{num_queries / 2, num_queries / 2};
     auto slice_topKs = std::vector<int64_t>{topK / 2, topK};
 
-    // Lambda function to execute search and reduce with given raw plan for JSON
-    auto executeJSONGroupBySearchAndReduce = [&](const char* raw_plan) {
-        auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+
+    // Lambda function to execute search and reduce with given parameters for JSON
+    auto executeJSONGroupBySearchAndReduce = [&](const std::string& json_path,
+                                                 milvus::proto::schema::DataType
+                                                     json_type) {
+        auto plan_str =
+            handle.ParseGroupBySearch("",              // no filter expression
+                                      "fakevec",       // vector field name
+                                      topK,            // topk
+                                      "L2",            // metric type
+                                      "{\"ef\": 10}",  // search params
+                                      json_fid.get(),  // group_by_field_id
+                                      group_size,      // group_size
+                                      json_path,       // json_path
+                                      json_type);      // json_type
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -627,115 +494,32 @@ TEST(GroupBYJSON, Reduce) {
     };
 
     // Test Case: Group by JSON field int8
-    const char* raw_plan_json_int8 = R"(vector_anns: <
-                                        field_id: 101
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 102
-                                          group_size: 3
-                                          json_path: "/int8"
-                                          json_type: Int8
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-    executeJSONGroupBySearchAndReduce(raw_plan_json_int8);
+    executeJSONGroupBySearchAndReduce("/int8",
+                                      milvus::proto::schema::DataType::Int8);
 
     // Test Case: Group by JSON field int16
-    const char* raw_plan_json_int16 = R"(vector_anns: <
-                                        field_id: 101
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 102
-                                          group_size: 3
-                                          json_path: "/int16"
-                                          json_type: Int16
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-    executeJSONGroupBySearchAndReduce(raw_plan_json_int16);
+    executeJSONGroupBySearchAndReduce("/int16",
+                                      milvus::proto::schema::DataType::Int16);
 
     // Test Case: Group by JSON field int32
-    const char* raw_plan_json_int32 = R"(vector_anns: <
-                                        field_id: 101
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 102
-                                          group_size: 3
-                                          json_path: "/int32"
-                                          json_type: Int32
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-    executeJSONGroupBySearchAndReduce(raw_plan_json_int32);
+    executeJSONGroupBySearchAndReduce("/int32",
+                                      milvus::proto::schema::DataType::Int32);
 
     // Test Case: Group by JSON field int64
-    const char* raw_plan_json_int64 = R"(vector_anns: <
-                                        field_id: 101
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 102
-                                          group_size: 3
-                                          json_path: "/int64"
-                                          json_type: Int64
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-    executeJSONGroupBySearchAndReduce(raw_plan_json_int64);
+    executeJSONGroupBySearchAndReduce("/int64",
+                                      milvus::proto::schema::DataType::Int64);
 
     // Test Case: Group by JSON field bool
-    const char* raw_plan_json_bool = R"(vector_anns: <
-                                        field_id: 101
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 102
-                                          group_size: 3
-                                          json_path: "/bool"
-                                          json_type: Bool
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-    executeJSONGroupBySearchAndReduce(raw_plan_json_bool);
+    executeJSONGroupBySearchAndReduce("/bool",
+                                      milvus::proto::schema::DataType::Bool);
 
     // Test Case: Group by JSON field string
-    const char* raw_plan_json_string = R"(vector_anns: <
-                                        field_id: 101
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 102
-                                          group_size: 3
-                                          json_path: "/string"
-                                          json_type: VarChar
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-    executeJSONGroupBySearchAndReduce(raw_plan_json_string);
+    executeJSONGroupBySearchAndReduce("/string",
+                                      milvus::proto::schema::DataType::VarChar);
 
     // Test Case: Group by JSON field string without json_type
-    const char* raw_plan_json_string_no_cast = R"(vector_anns: <
-                                        field_id: 101
-                                        query_info: <
-                                          topk: 10
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 10}"
-                                          group_by_field_id: 102
-                                          group_size: 3
-                                          json_path: "/string"
-                                        >
-                                        placeholder_tag: "$0"
-         >)";
-    executeJSONGroupBySearchAndReduce(raw_plan_json_string_no_cast);
+    executeJSONGroupBySearchAndReduce("/string",
+                                      milvus::proto::schema::DataType::None);
 
     DeleteSegment(c_segment_1);
     DeleteSegment(c_segment_2);

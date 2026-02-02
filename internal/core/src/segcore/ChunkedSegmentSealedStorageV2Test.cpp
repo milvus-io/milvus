@@ -175,6 +175,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                 std::vector<int64_t>(chunk_num * test_data_count),
                 std::vector<int64_t>(chunk_num * test_data_count * 4),
                 false,
+                "",
                 std::vector<std::string>({paths[0]})});
         load_info.field_infos.emplace(
             int64_t(102),
@@ -184,6 +185,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                 std::vector<int64_t>(chunk_num * test_data_count),
                 std::vector<int64_t>(chunk_num * test_data_count * 4),
                 false,
+                "",
                 std::vector<std::string>({paths[1]})});
         load_info.field_infos.emplace(
             int64_t(103),
@@ -193,6 +195,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                 std::vector<int64_t>(chunk_num * test_data_count),
                 std::vector<int64_t>(chunk_num * test_data_count * 4),
                 false,
+                "",
                 std::vector<std::string>({paths[2]})});
         load_info.storage_version = 2;
         segment->AddFieldDataInfoForSealed(load_info);

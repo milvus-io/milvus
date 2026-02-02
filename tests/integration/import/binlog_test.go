@@ -19,6 +19,7 @@ package importv2
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -56,6 +57,12 @@ type SourceCollectionInfo struct {
 	SegmentIDs     []int64
 	insertedIDs    *schemapb.IDs
 	storageVersion int
+	// Timestamp ranges extracted from source segments' binlogs,
+	// there's only one L1 segment and one L0 segment after import so we can record the min and max timestamps directly.
+	l1MinTs uint64 // min timestamp from L1 segments' insert binlogs
+	l1MaxTs uint64 // max timestamp from L1 segments' insert binlogs
+	l0MinTs uint64 // min timestamp from L0 segments' delta binlogs
+	l0MaxTs uint64 // max timestamp from L0 segments' delta binlogs
 }
 
 func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *SourceCollectionInfo {
@@ -201,6 +208,37 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 		s.True(len(l0Segments) > 0)
 	}
 
+	// Extract timestamp ranges from source segments' binlogs
+	var l1MinTs uint64 = math.MaxUint64
+	var l1MaxTs uint64 = 0
+	for _, segment := range segments {
+		for _, fieldBinlog := range segment.GetBinlogs() {
+			for _, binlog := range fieldBinlog.GetBinlogs() {
+				if binlog.GetTimestampFrom() < l1MinTs {
+					l1MinTs = binlog.GetTimestampFrom()
+				}
+				if binlog.GetTimestampTo() > l1MaxTs {
+					l1MaxTs = binlog.GetTimestampTo()
+				}
+			}
+		}
+	}
+
+	var l0MinTs uint64 = math.MaxUint64
+	var l0MaxTs uint64 = 0
+	for _, segment := range l0Segments {
+		for _, fieldBinlog := range segment.GetDeltalogs() {
+			for _, binlog := range fieldBinlog.GetBinlogs() {
+				if binlog.GetTimestampFrom() < l0MinTs {
+					l0MinTs = binlog.GetTimestampFrom()
+				}
+				if binlog.GetTimestampTo() > l0MaxTs {
+					l0MaxTs = binlog.GetTimestampTo()
+				}
+			}
+		}
+	}
+
 	// search
 	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
 	nq := 10
@@ -264,6 +302,10 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 		}),
 		insertedIDs:    totalInsertedIDs,
 		storageVersion: int(storage.StorageV2),
+		l1MinTs:        l1MinTs,
+		l1MaxTs:        l1MaxTs,
+		l0MinTs:        l0MinTs,
+		l0MaxTs:        l0MaxTs,
 	}
 }
 
@@ -366,6 +408,13 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	s.True(len(segment.GetStatslogs()) > 0)
 	s.NoError(CheckLogID(segment.GetStatslogs()))
 
+	// Verify L1 segment positions match actual timestamps from source collection
+	s.Equal(sourceCollectionInfo.l1MinTs, segment.GetStartPosition().GetTimestamp(),
+		"L1 segment StartPosition should match actual min timestamp from source binlogs")
+	s.Equal(sourceCollectionInfo.l1MaxTs, segment.GetDmlPosition().GetTimestamp(),
+		"L1 segment DmlPosition should match actual max timestamp from source binlogs")
+	log.Info("L1 segment position verification passed")
+
 	// l0 import
 	if totalDeleteRowNum > 0 {
 		files = make([]*internalpb.ImportFile, 0)
@@ -403,6 +452,13 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 		s.True(len(segment.GetDeltalogs()) > 0)
 		s.NoError(CheckLogID(segment.GetDeltalogs()))
 		s.True(len(segment.GetStatslogs()) == 0)
+
+		// Verify L0 segment positions match actual timestamps from source collection
+		s.Equal(sourceCollectionInfo.l0MinTs, segment.GetStartPosition().GetTimestamp(),
+			"L0 segment StartPosition should match actual min timestamp from source deltalogs")
+		s.Equal(sourceCollectionInfo.l0MaxTs, segment.GetDmlPosition().GetTimestamp(),
+			"L0 segment DmlPosition should match actual max timestamp from source deltalogs")
+		log.Info("L0 segment position verification passed")
 	}
 
 	// load

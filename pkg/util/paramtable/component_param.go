@@ -3372,6 +3372,9 @@ type queryNodeConfig struct {
 	// delete snapshot dump batch size
 	DeleteDumpBatchSize ParamItem `refreshable:"false"`
 
+	// delete snapshot optimization
+	EnableLatestDeleteSnapshotOptimization ParamItem `refreshable:"true"`
+
 	// expr cache
 	ExprResCacheEnabled       ParamItem `refreshable:"false"`
 	ExprResCacheCapacityBytes ParamItem `refreshable:"false"`
@@ -4484,6 +4487,15 @@ user-task-polling:
 	}
 	p.DeleteDumpBatchSize.Init(base.mgr)
 
+	p.EnableLatestDeleteSnapshotOptimization = ParamItem{
+		Key:          "queryNode.segcore.enableLatestDeleteSnapshotOptimization",
+		Version:      "2.6.11",
+		DefaultValue: "true",
+		Doc:          "Enable latest delete snapshot optimization for fast path query when query_timestamp >= max_delete_timestamp.",
+		Export:       false,
+	}
+	p.EnableLatestDeleteSnapshotOptimization.Init(base.mgr)
+
 	// expr cache
 	p.ExprResCacheEnabled = ParamItem{
 		Key:          "queryNode.exprCache.enabled",
@@ -4672,9 +4684,10 @@ type dataCoordConfig struct {
 	SingleCompactionExpiredLogMaxSize ParamItem `refreshable:"true"`
 	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
 
-	StorageVersionCompactionEnabled           ParamItem `refreshable:"true"`
-	StorageVersionCompactionRateLimitTokens   ParamItem `refreshable:"true"`
-	StorageVersionCompactionRateLimitInterval ParamItem `refreshable:"true"`
+	StorageVersionCompactionEnabled                   ParamItem `refreshable:"true"`
+	StorageVersionCompactionRateLimitTokens           ParamItem `refreshable:"true"`
+	StorageVersionCompactionRateLimitInterval         ParamItem `refreshable:"true"`
+	StorageVersionCompactionSessionVersionRequirement ParamItem `refreshable:"true"`
 
 	ChannelCheckpointMaxLag ParamItem `refreshable:"true"`
 	SyncSegmentsInterval    ParamItem `refreshable:"false"`
@@ -5196,7 +5209,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.StorageVersionCompactionEnabled = ParamItem{
 		Key:          "dataCoord.compaction.storageVersion.enabled",
-		Version:      "2.6.9",
+		Version:      "2.6.10",
 		DefaultValue: "true",
 		Doc:          "Enable storage version compaction",
 		Export:       false,
@@ -5205,7 +5218,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.StorageVersionCompactionRateLimitTokens = ParamItem{
 		Key:          "dataCoord.compaction.storageVersion.rateLimitTokens",
-		Version:      "2.6.9",
+		Version:      "2.6.10",
 		DefaultValue: "3",
 		Doc:          "The storage version compaction tokens per period, applying rate limit",
 		Export:       false,
@@ -5214,12 +5227,21 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.StorageVersionCompactionRateLimitInterval = ParamItem{
 		Key:          "dataCoord.compaction.storageVersion.rateLimitInterval",
-		Version:      "2.6.9",
+		Version:      "2.6.10",
 		DefaultValue: "120",
 		Doc:          "The storage version compaction rate limit interval, in seconds",
 		Export:       false,
 	}
 	p.StorageVersionCompactionRateLimitInterval.Init(base.mgr)
+
+	p.StorageVersionCompactionSessionVersionRequirement = ParamItem{
+		Key:          "dataCoord.compaction.storageVersion.sessionVersionRequirement",
+		Version:      "2.6.10",
+		DefaultValue: "2.6.9",
+		Doc:          "The minimal session version requirements for triggering storage version upgrade compaction",
+		Export:       false,
+	}
+	p.StorageVersionCompactionSessionVersionRequirement.Init(base.mgr)
 
 	p.GlobalCompactionInterval = ParamItem{
 		Key:          "dataCoord.compaction.global.interval",

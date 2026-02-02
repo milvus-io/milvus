@@ -42,6 +42,7 @@
 #include "cachinglayer/Utils.h"
 #include "common/ChunkWriter.h"
 #include "segcore/Utils.h"
+#include "storage/Util.h"
 
 namespace milvus::segcore::storagev2translator {
 
@@ -54,7 +55,8 @@ GroupChunkTranslator::GroupChunkTranslator(
     bool use_mmap,
     bool mmap_populate,
     int64_t num_fields,
-    milvus::proto::common::LoadPriority load_priority)
+    milvus::proto::common::LoadPriority load_priority,
+    const std::string& warmup_policy)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       key_([&]() {
@@ -94,7 +96,9 @@ GroupChunkTranslator::GroupChunkTranslator(
                     return false;
                 }(),
                 /* is_index */ false),
+            // Use getCacheWarmupPolicy to resolve: user setting > global config
             milvus::segcore::getCacheWarmupPolicy(
+                warmup_policy,
                 /* is_vector */
                 [&]() {
                     for (const auto& [fid, field_meta] : field_metas_) {
@@ -323,24 +327,19 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
     auto strategy =
         std::make_unique<ParallelDegreeSplitStrategy>(parallel_degree);
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     auto channel = std::make_shared<ArrowReaderChannel>();
     auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                   .GetArrowFileSystem();
 
-    auto load_future = pool.Submit([&, ctx]() {
-        // Early exit if cancelled while queued
-        CheckCancellation(
-            ctx, segment_id_, "GroupChunkTranslator::get_cells()");
-        return LoadWithStrategy(insert_files_,
-                                channel,
-                                DEFAULT_FIELD_MAX_MEMORY_LIMIT,
-                                std::move(strategy),
-                                row_group_lists,
-                                fs,
-                                nullptr,
-                                load_priority_);
-    });
+    auto load_futures = LoadWithStrategyAsync(ctx,
+                                              insert_files_,
+                                              channel,
+                                              DEFAULT_FIELD_MAX_MEMORY_LIMIT,
+                                              std::move(strategy),
+                                              row_group_lists,
+                                              fs,
+                                              nullptr,
+                                              load_priority_);
     LOG_INFO(
         "[StorageV2] translator {} submits load column group {} task to thread "
         "pool",
@@ -367,7 +366,7 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
     }
 
     // access underlying feature to get exception if any
-    load_future.get();
+    storage::WaitAllFutures(load_futures);
 
     // Build cells from collected tables
     for (auto cid : cids) {
