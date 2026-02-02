@@ -824,20 +824,6 @@ CreateTextIndex(CSegmentInterface c_segment,
 }
 
 CStatus
-FinishLoad(CSegmentInterface c_segment) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto segment_interface =
-            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        segment_interface->FinishLoad();
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
-    }
-}
-
-CStatus
 ExprResCacheEraseSegment(int64_t segment_id) {
     SCOPE_CGO_CALL_METRIC();
 

@@ -114,9 +114,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     LazyCheckSchema(SchemaPtr sch) override;
 
     void
-    FinishLoad() override;
-
-    void
     Load(milvus::tracer::TraceContext& trace_ctx,
          milvus::OpContext* op_ctx = nullptr) override;
 

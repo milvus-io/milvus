@@ -232,11 +232,6 @@ class SegmentInterface {
     virtual void
     Reopen(const milvus::proto::segcore::SegmentLoadInfo& new_load_info) = 0;
 
-    // FinishLoad notifies the segment that all load operation are done
-    // currently it's used to sync field data list with updated schema.
-    virtual void
-    FinishLoad() = 0;
-
     virtual void
     SetLoadInfo(const milvus::proto::segcore::SegmentLoadInfo& load_info) = 0;
 

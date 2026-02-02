@@ -1419,6 +1419,7 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       scalar_indexings_(std::unordered_map<FieldId, index::CacheIndexBasePtr>(
           schema->size())),
       insert_record_(*schema, MAX_ROW_COUNT),
+      segment_load_info_(milvus::proto::segcore::SegmentLoadInfo(), schema),
       schema_(schema),
       id_(segment_id),
       col_index_meta_(index_meta),
@@ -2833,12 +2834,10 @@ ChunkedSegmentSealedImpl::Reopen(
     const milvus::proto::segcore::SegmentLoadInfo& new_load_info) {
     SegmentLoadInfo new_seg_load_info(new_load_info, schema_);
 
-    SegmentLoadInfo current;
-    {
-        std::unique_lock lck(mutex_);
-        current = segment_load_info_;
-        segment_load_info_ = new_seg_load_info;
-    }
+    std::unique_lock lck(mutex_);
+    SegmentLoadInfo current(segment_load_info_);
+    segment_load_info_ = new_seg_load_info;
+    lck.unlock();
 
     // compute load diff
     auto diff = current.ComputeDiff(new_seg_load_info);
@@ -2901,32 +2900,16 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
         LoadBatchFieldData(trace_ctx, diff.binlogs_to_load, op_ctx);
     }
 
+    // fill default values for fields without data sources (schema evolution)
+    if (!diff.fields_to_fill_default.empty()) {
+        FillDefaultValueFields(diff.fields_to_fill_default);
+    }
+
     // drop field
     if (!diff.field_data_to_drop.empty()) {
         for (auto field_id : diff.field_data_to_drop) {
             DropFieldData(field_id);
         }
-    }
-}
-
-void
-ChunkedSegmentSealedImpl::FinishLoad() {
-    std::unique_lock lck(mutex_);
-    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
-        if (field_id.get() < START_USER_FIELDID) {
-            // no filling system fields
-            continue;
-        }
-        if (get_bit(field_data_ready_bitset_, field_id)) {
-            // no filling fields that data already loaded
-            continue;
-        }
-        if (get_bit(index_ready_bitset_, field_id) &&
-            (index_has_raw_data_[field_id])) {
-            // no filling fields that index already loaded and has raw data
-            continue;
-        }
-        fill_empty_field(field_meta);
     }
 }
 
@@ -2982,6 +2965,25 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
         field_meta.get_data_type(),
         field_id.get(),
         id_);
+}
+
+void
+ChunkedSegmentSealedImpl::FillDefaultValueFields(
+    const std::vector<FieldId>& field_ids) {
+    std::unique_lock lck(mutex_);
+    for (const auto& field_id : field_ids) {
+        // Skip if field data already loaded
+        if (get_bit(field_data_ready_bitset_, field_id)) {
+            continue;
+        }
+        // Skip if index has raw data
+        if (get_bit(index_ready_bitset_, field_id) &&
+            index_has_raw_data_[field_id]) {
+            continue;
+        }
+        const auto& field_meta = schema_->operator[](field_id);
+        fill_empty_field(field_meta);
+    }
 }
 
 void
