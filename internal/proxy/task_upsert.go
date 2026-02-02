@@ -382,7 +382,11 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		for i, upsertIdx := range updateIdxInUpsert {
 			typeutil.AppendIDs(it.deletePKs, upsertIDs, upsertIdx)
 			oldPK := typeutil.GetPK(upsertIDs, int64(upsertIdx))
-			existIndices[i] = int64(existPKToIndex[oldPK])
+			idx, ok := existPKToIndex[oldPK]
+			if !ok {
+				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("upsert pk %v not found in query result", oldPK))
+			}
+			existIndices[i] = int64(idx)
 		}
 
 		for fieldIdx, existField := range existFieldData {
