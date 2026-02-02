@@ -68,6 +68,7 @@ type basicSegmentMethodSet interface {
 	HasFieldData(fieldID int64) bool
 
 	// Search requests a search on the segment.
+	// If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)
 
 	// Retrieve retrieves entities from the segment.

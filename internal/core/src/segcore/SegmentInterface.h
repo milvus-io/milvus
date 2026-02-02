@@ -80,7 +80,8 @@ class SegmentInterface {
            Timestamp timestamp,
            const folly::CancellationToken& cancel_token,
            int32_t consistency_level,
-           Timestamp collection_ttl) const = 0;
+           Timestamp collection_ttl,
+           bool filter_only = false) const = 0;
 
     // Only used for test
     std::unique_ptr<SearchResult>
@@ -92,7 +93,8 @@ class SegmentInterface {
                       timestamp,
                       folly::CancellationToken(),
                       0,
-                      0);
+                      0,
+                      false);
     }
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
@@ -359,7 +361,8 @@ class SegmentInternalInterface : public SegmentInterface {
            Timestamp timestamp,
            const folly::CancellationToken& cancel_token,
            int32_t consistency_level,
-           Timestamp collection_ttl) const override;
+           Timestamp collection_ttl,
+           bool filter_only = false) const override;
 
     void
     FillPrimaryKeys(const query::Plan* plan,

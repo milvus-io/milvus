@@ -82,6 +82,7 @@ type SearchRequest struct {
 	mvccTimestamp     typeutil.Timestamp
 	consistencyLevel  commonpb.ConsistencyLevel
 	collectionTTL     typeutil.Timestamp
+	filterOnly        bool // If true, only execute filter and return valid count (for two-stage search Stage 1)
 }
 
 func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
@@ -127,6 +128,7 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 		mvccTimestamp:     req.GetReq().GetMvccTimestamp(),
 		consistencyLevel:  req.GetReq().GetConsistencyLevel(),
 		collectionTTL:     req.GetReq().GetCollectionTtlTimestamps(),
+		filterOnly:        req.GetFilterOnly(),
 	}, nil
 }
 
@@ -145,6 +147,10 @@ func (req *SearchRequest) Plan() *SearchPlan {
 
 func (req *SearchRequest) SearchFieldID() int64 {
 	return req.searchFieldID
+}
+
+func (req *SearchRequest) FilterOnly() bool {
+	return req.filterOnly
 }
 
 func (req *SearchRequest) Delete() {
