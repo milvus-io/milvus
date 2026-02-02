@@ -186,6 +186,12 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 // delegator puts deleteData into buffer first,
 // then dispatch data to segments according to the result of bloom filter check.
 func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
+	// Early return if delegator is stopped - ProcessDelete becomes a no-op
+	// This prevents unnecessary processing and side effects during shutdown
+	if sd.Stopped() {
+		return
+	}
+
 	method := "ProcessDelete"
 	tr := timerecord.NewTimeRecorder(method)
 	// block load segment handle delete buffer
