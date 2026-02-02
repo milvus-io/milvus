@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -73,6 +74,7 @@ func TestCreateSnapshotTask_OnEnqueue_BaseAlreadyExists(t *testing.T) {
 func TestCreateSnapshotTask_PreExecute_Success(t *testing.T) {
 	task := &createSnapshotTask{
 		req: &milvuspb.CreateSnapshotRequest{
+			Name:           "test_snapshot",
 			DbName:         "default",
 			CollectionName: "test_collection",
 		},
@@ -92,6 +94,7 @@ func TestCreateSnapshotTask_PreExecute_Success(t *testing.T) {
 func TestCreateSnapshotTask_PreExecute_CollectionNotFound(t *testing.T) {
 	task := &createSnapshotTask{
 		req: &milvuspb.CreateSnapshotRequest{
+			Name:           "test_snapshot",
 			DbName:         "default",
 			CollectionName: "nonexistent_collection",
 		},
@@ -625,6 +628,7 @@ func TestCreateSnapshotTask_FullLifecycle(t *testing.T) {
 func TestCreateSnapshotTask_EmptyPartitionNames(t *testing.T) {
 	task := &createSnapshotTask{
 		req: &milvuspb.CreateSnapshotRequest{
+			Name:           "test_snapshot",
 			DbName:         "default",
 			CollectionName: "test_collection",
 		},
@@ -639,4 +643,255 @@ func TestCreateSnapshotTask_EmptyPartitionNames(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, int64(100), task.collectionID)
+}
+
+// =========================== Validation Tests for Issue #47068 ===========================
+
+func TestSnapshotTasks_PreExecute_InvalidNames(t *testing.T) {
+	// Common invalid snapshot name test cases
+	invalidSnapshotNames := []struct {
+		name           string
+		snapshotName   string
+		expectedErrMsg string
+	}{
+		// Empty/whitespace cases
+		{"empty string", "", "snapshot name should be not empty"},
+		{"single space", " ", "snapshot name should be not empty"},
+		{"multiple spaces", "   ", "snapshot name should be not empty"},
+		{"tab character", "\t", "snapshot name should be not empty"},
+		// Invalid first character
+		{"starts with number", "123snapshot", "the first character of snapshot name must be an underscore or letter"},
+		{"starts with special char", "$snapshot", "the first character of snapshot name must be an underscore or letter"},
+		{"starts with hyphen", "-snapshot", "the first character of snapshot name must be an underscore or letter"},
+		// Invalid characters in name
+		{"contains space", "snap shot", "snapshot name can only contain"},
+		{"contains special char", "snap@shot", "snapshot name can only contain"},
+		{"contains chinese", "快照test", "the first character of snapshot name must be an underscore or letter"},
+		// Too long name (exceeds 255 characters)
+		{"too long name", strings.Repeat("a", 256), "the length of snapshot name must be not greater than limit"},
+	}
+
+	// Test CreateSnapshotTask
+	t.Run("CreateSnapshotTask", func(t *testing.T) {
+		for _, tc := range invalidSnapshotNames {
+			t.Run(tc.name, func(t *testing.T) {
+				task := &createSnapshotTask{
+					req: &milvuspb.CreateSnapshotRequest{
+						Name:           tc.snapshotName,
+						DbName:         "default",
+						CollectionName: "test_collection",
+					},
+				}
+
+				err := task.PreExecute(context.Background())
+
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedErrMsg)
+			})
+		}
+	})
+
+	// Test DropSnapshotTask
+	t.Run("DropSnapshotTask", func(t *testing.T) {
+		for _, tc := range invalidSnapshotNames {
+			t.Run(tc.name, func(t *testing.T) {
+				task := &dropSnapshotTask{
+					req: &milvuspb.DropSnapshotRequest{
+						Name: tc.snapshotName,
+					},
+				}
+
+				err := task.PreExecute(context.Background())
+
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedErrMsg)
+			})
+		}
+	})
+
+	// Test DescribeSnapshotTask
+	t.Run("DescribeSnapshotTask", func(t *testing.T) {
+		for _, tc := range invalidSnapshotNames {
+			t.Run(tc.name, func(t *testing.T) {
+				task := &describeSnapshotTask{
+					req: &milvuspb.DescribeSnapshotRequest{
+						Name: tc.snapshotName,
+					},
+				}
+
+				err := task.PreExecute(context.Background())
+
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedErrMsg)
+			})
+		}
+	})
+
+	// Test RestoreSnapshotTask - snapshot name validation
+	t.Run("RestoreSnapshotTask/SnapshotName", func(t *testing.T) {
+		for _, tc := range invalidSnapshotNames {
+			t.Run(tc.name, func(t *testing.T) {
+				task := &restoreSnapshotTask{
+					req: &milvuspb.RestoreSnapshotRequest{
+						Name:           tc.snapshotName,
+						CollectionName: "valid_collection",
+					},
+				}
+
+				err := task.PreExecute(context.Background())
+
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedErrMsg)
+			})
+		}
+	})
+
+	// Test RestoreSnapshotTask - collection name validation
+	t.Run("RestoreSnapshotTask/CollectionName", func(t *testing.T) {
+		invalidCollectionNames := []struct {
+			name           string
+			collectionName string
+			expectedErrMsg string
+		}{
+			{"starts with number", "123collection", "the first character of collection name must be an underscore or letter"},
+			{"starts with special char", "$collection", "the first character of collection name must be an underscore or letter"},
+			{"contains space", "coll ection", "collection name can only contain"},
+			{"contains special char", "coll@ection", "collection name can only contain"},
+			{"too long name", strings.Repeat("a", 256), "the length of collection name must be not greater than limit"},
+		}
+
+		for _, tc := range invalidCollectionNames {
+			t.Run(tc.name, func(t *testing.T) {
+				task := &restoreSnapshotTask{
+					req: &milvuspb.RestoreSnapshotRequest{
+						Name:           "valid_snapshot",
+						CollectionName: tc.collectionName,
+					},
+				}
+
+				err := task.PreExecute(context.Background())
+
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedErrMsg)
+			})
+		}
+	})
+}
+
+func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
+	// Common valid snapshot name test cases
+	validSnapshotNames := []struct {
+		name         string
+		snapshotName string
+	}{
+		{"simple name", "snapshot"},
+		{"with underscore prefix", "_snapshot"},
+		{"with numbers", "snapshot123"},
+		{"mixed", "_snap_shot_123"},
+		{"uppercase", "Snapshot"},
+		{"with dollar sign", "snapshot$test"}, // $ is allowed by default config
+	}
+
+	// Test CreateSnapshotTask
+	t.Run("CreateSnapshotTask", func(t *testing.T) {
+		for _, tc := range validSnapshotNames {
+			t.Run(tc.name, func(t *testing.T) {
+				task := &createSnapshotTask{
+					req: &milvuspb.CreateSnapshotRequest{
+						Name:           tc.snapshotName,
+						DbName:         "default",
+						CollectionName: "test_collection",
+					},
+				}
+
+				// Mock globalMetaCache
+				globalMetaCache = &MetaCache{}
+				mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
+				defer mockGetCollectionID.UnPatch()
+
+				err := task.PreExecute(context.Background())
+
+				assert.NoError(t, err)
+			})
+		}
+	})
+
+	// Test DropSnapshotTask
+	t.Run("DropSnapshotTask", func(t *testing.T) {
+		for _, tc := range validSnapshotNames {
+			t.Run(tc.name, func(t *testing.T) {
+				task := &dropSnapshotTask{
+					req: &milvuspb.DropSnapshotRequest{
+						Name: tc.snapshotName,
+					},
+				}
+
+				err := task.PreExecute(context.Background())
+
+				assert.NoError(t, err)
+			})
+		}
+	})
+
+	// Test DescribeSnapshotTask
+	t.Run("DescribeSnapshotTask", func(t *testing.T) {
+		for _, tc := range validSnapshotNames {
+			t.Run(tc.name, func(t *testing.T) {
+				task := &describeSnapshotTask{
+					req: &milvuspb.DescribeSnapshotRequest{
+						Name: tc.snapshotName,
+					},
+				}
+
+				err := task.PreExecute(context.Background())
+
+				assert.NoError(t, err)
+			})
+		}
+	})
+
+	// Test RestoreSnapshotTask
+	t.Run("RestoreSnapshotTask", func(t *testing.T) {
+		testCases := []struct {
+			name           string
+			snapshotName   string
+			collectionName string
+		}{
+			{"both valid", "snapshot_1", "collection_1"},
+			{"empty collection name", "snapshot_1", ""}, // Empty collection name is allowed
+			{"with underscores", "_snapshot", "_collection"},
+			{"mixed", "Snap_123", "Coll_456"},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				task := &restoreSnapshotTask{
+					req: &milvuspb.RestoreSnapshotRequest{
+						Name:           tc.snapshotName,
+						CollectionName: tc.collectionName,
+					},
+				}
+
+				err := task.PreExecute(context.Background())
+
+				assert.NoError(t, err)
+			})
+		}
+	})
+}
+
+// =========================== Test for Issue #47066 ===========================
+
+func TestListSnapshotsTask_PreExecute_EmptyCollectionName(t *testing.T) {
+	task := &listSnapshotsTask{
+		req: &milvuspb.ListSnapshotsRequest{
+			DbName:         "default",
+			CollectionName: "", // Empty collection name should list all snapshots
+		},
+	}
+
+	err := task.PreExecute(context.Background())
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), task.collectionID) // collectionID should be 0 for listing all
 }
