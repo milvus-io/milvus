@@ -48,8 +48,7 @@ find_binsert_position(const std::vector<float>& distances,
 
 [[maybe_unused]] static bool
 UseVectorIterator(const SearchInfo& search_info) {
-    return search_info.group_by_field_id_.has_value() ||
-           search_info.iterative_filter_execution;
+    return search_info.has_group_by() || search_info.iterative_filter_execution;
 }
 
 [[maybe_unused]] static bool
@@ -80,7 +79,7 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                     larger_is_closer);
             } else {
                 std::string operator_type = "";
-                if (search_info.group_by_field_id_.has_value()) {
+                if (search_info.has_group_by()) {
                     operator_type = "group_by";
                 } else {
                     operator_type = "iterative filter";
@@ -101,7 +100,7 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
             search_result.unity_topK_ = search_info.topk_;
         } catch (const std::runtime_error& e) {
             std::string operator_type = "";
-            if (search_info.group_by_field_id_.has_value()) {
+            if (search_info.has_group_by()) {
                 operator_type = "group_by";
             } else {
                 operator_type = "iterative filter";

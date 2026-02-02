@@ -57,7 +57,7 @@ ReduceSearchResultsAndFillData(CTraceContext c_trace,
         }
 
         std::shared_ptr<milvus::segcore::ReduceHelper> reduce_helper;
-        if (plan->plan_node_->search_info_.group_by_field_id_.has_value()) {
+        if (plan->plan_node_->search_info_.has_group_by()) {
             reduce_helper =
                 std::make_shared<milvus::segcore::GroupReduceHelper>(
                     search_results,

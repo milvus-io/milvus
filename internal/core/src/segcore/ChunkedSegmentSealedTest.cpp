@@ -181,7 +181,7 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     }
 
     // test with group by
-    search_info.group_by_field_id_ = fakevec_id;
+    search_info.group_by_field_ids_ = {fakevec_id};
     std::fill(bitset_data, bitset_data + bitset_size, 0);
     query::SearchOnSealedColumn(*schema,
                                 column.get(),

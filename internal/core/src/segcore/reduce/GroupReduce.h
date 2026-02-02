@@ -11,8 +11,6 @@
 #pragma once
 #include <stdint.h>
 #include <memory>
-#include <optional>
-#include <unordered_set>
 #include <vector>
 
 #include "Reduce.h"
@@ -65,7 +63,6 @@ class GroupReduceHelper : public ReduceHelper {
                       search_res_data) override;
 
  private:
-    std::unordered_set<milvus::GroupByValueType> group_by_val_set_{};
 };
 
 }  // namespace milvus::segcore

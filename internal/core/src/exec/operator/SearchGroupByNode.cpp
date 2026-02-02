@@ -91,22 +91,24 @@ PhySearchGroupByNode::GetOutput() {
                        search_result.total_nq_,
                    "Vector Iterators' count must be equal to total_nq_, Check "
                    "your code");
-        std::vector<GroupByValueType> group_by_values;
+
+        std::vector<CompositeGroupKey> composite_group_by_values;
         milvus::exec::SearchGroupBy(op_context,
                                     search_result.vector_iterators_.value(),
                                     search_info_,
-                                    group_by_values,
+                                    composite_group_by_values,
                                     *segment_,
                                     search_result.seg_offsets_,
                                     search_result.distances_,
                                     search_result.topk_per_nq_prefix_sum_);
-        search_result.group_by_values_ = std::move(group_by_values);
+        search_result.composite_group_by_values_ =
+            std::move(composite_group_by_values);
         search_result.group_size_ = search_info_.group_size_;
         AssertInfo(search_result.seg_offsets_.size() ==
-                       search_result.group_by_values_.value().size(),
-                   "Wrong state! search_result group_by_values_ size:{} is not "
-                   "equal to search_result.seg_offsets.size:{}",
-                   search_result.group_by_values_.value().size(),
+                       search_result.composite_group_by_values_.value().size(),
+                   "Wrong state! search_result composite_group_by_values_ "
+                   "size:{} is not equal to search_result.seg_offsets.size:{}",
+                   search_result.composite_group_by_values_.value().size(),
                    search_result.seg_offsets_.size());
     }
     tracer::AddEvent(

@@ -88,6 +88,8 @@ message QueryInfo {
   bool strict_cast = 16;
   float search_topk_ratio = 17;
   float refine_topk_ratio = 18;
+  // Multi-field group by: list of field IDs for composite grouping
+  repeated int64 group_by_field_ids = 19;
 }
 
 message ColumnInfo {
