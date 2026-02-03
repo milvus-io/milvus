@@ -871,21 +871,14 @@ TEST(CApiTest, SearchTestWithExpr) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* serialized_expr_plan = R"(vector_anns: <
-                                            field_id: 100
-                                            query_info: <
-                                                topk: 10
-                                                metric_type: "L2"
-                                                search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0"
-                                         >)";
-
     int num_queries = 10;
     auto blob = generate_query_data<milvus::FloatVector>(num_queries);
 
+    ScopedSchemaHandle schema_handle(*col->get_schema());
+    auto binary_plan =
+        schema_handle.ParseSearch("", "fakevec", 10, "L2", R"({"nprobe": 10})");
+
     void* plan = nullptr;
-    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
     status = CreateSearchPlanByExpr(
         c_collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -1122,52 +1115,19 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto vec_col = dataset.get_col<float>(FieldId(100));
     auto query_ptr = vec_col.data() + BIAS * DIM;
 
-    const char* raw_plan = R"(vector_anns: <
-                                field_id: 100
-                                predicates: <
-                                  binary_expr: <
-                                    op: LogicalAnd
-                                    left: <
-                                      unary_range_expr: <
-                                        column_info: <
-                                          field_id: 101
-                                          data_type: Int64
-                                        >
-                                        op: GreaterEqual
-                                        value: <
-                                          int64_val: 4200
-                                        >
-                                      >
-                                    >
-                                    right: <
-                                      unary_range_expr: <
-                                        column_info: <
-                                          field_id: 101
-                                          data_type: Int64
-                                        >
-                                        op: LessThan
-                                        value: <
-                                          int64_val: 4210
-                                        >
-                                      >
-                                    >
-                                  >
-                                >
-                                query_info: <
-                                  topk: 5
-                                  round_decimal: -1
-                                  metric_type: "L2"
-                                  search_params: "{\"nprobe\": 10}"
-                                >
-                                placeholder_tag: "$0"
-        >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-
     // create place_holder_group
     int num_queries = 10;
     auto raw_group =
         CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
+
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str =
+        schema_handle.ParseSearch("counter >= 4200 and counter < 4210",
+                                  "fakevec",
+                                  TOPK,
+                                  "L2",
+                                  R"({"nprobe": 10})");
 
     // search on segment's small index
     void* plan = nullptr;
@@ -1275,17 +1235,9 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     uint64_t ts_offset = 1000;
     auto dataset = DataGen(schema, ROW_COUNT, ts_offset);
 
-    const char* raw_plan = R"(vector_anns: <
-                                field_id: 100
-                                query_info: <
-                                  topk: 5
-                                  round_decimal: -1
-                                  metric_type: "L2"
-                                  search_params: "{\"nprobe\": 10}"
-                                >
-                                placeholder_tag: "$0"
-        >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str =
+        schema_handle.ParseSearch("", "fakevec", 5, "L2", R"({"nprobe": 10})");
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();
@@ -1353,55 +1305,22 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
 
     auto counter_col = dataset.get_col<int64_t>(FieldId(101));
 
-    const char* serialized_expr_plan = R"(vector_anns: <
-                                            field_id: 100
-                                            predicates: <
-                                              binary_expr: <
-                                                op: LogicalAnd
-                                                left: <
-                                                  unary_range_expr: <
-                                                    column_info: <
-                                                      field_id: 101
-                                                      data_type: Int64
-                                                    >
-                                                    op: GreaterEqual
-                                                    value: <
-                                                      int64_val: 4200
-                                                    >
-                                                  >
-                                                >
-                                                right: <
-                                                  unary_range_expr: <
-                                                    column_info: <
-                                                      field_id: 101
-                                                      data_type: Int64
-                                                    >
-                                                    op: LessThan
-                                                    value: <
-                                                      int64_val: 4210
-                                                    >
-                                                  >
-                                                >
-                                              >
-                                            >
-                                            query_info: <
-                                              topk: 5
-                                              round_decimal: -1
-                                              metric_type: "L2"
-                                              search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0"
-                                        >)";
-
     // create place_holder_group
     int num_queries = 10;
     auto raw_group =
         CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
+    ScopedSchemaHandle schema_handle(*schema);
+    auto binary_plan =
+        schema_handle.ParseSearch("counter >= 4200 and counter < 4210",
+                                  "fakevec",
+                                  TOPK,
+                                  "L2",
+                                  R"({"nprobe": 10})");
+
     // search on segment's small index
     void* plan = nullptr;
-    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
     auto status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -1863,20 +1782,17 @@ Test_Range_Search_With_Radius_And_Range_Filter() {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* raw_plan = R"(vector_anns: <
-                                             field_id: 100
-                                             query_info: <
-                                               topk: 10
-                                               round_decimal: 3
-                                               metric_type: "L2"
-                                               search_params: "{\"nprobe\": 10,\"radius\": 20, \"range_filter\": 10}"
-                                             >
-                                             placeholder_tag: "$0"
-     >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-
     int num_queries = 10;
     auto blob = generate_query_data<TraitType>(num_queries);
+
+    ScopedSchemaHandle schema_handle(*col->get_schema());
+    auto plan_str = schema_handle.ParseSearch(
+        "",
+        "fakevec",
+        10,
+        "L2",
+        R"({"nprobe": 10,"radius": 20, "range_filter": 10})",
+        3);
 
     void* plan = nullptr;
     status = CreateSearchPlanByExpr(
