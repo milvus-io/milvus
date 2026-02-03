@@ -6,12 +6,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var (
-	DefaultResourceGroupName           = "__default_resource_group"
+	DefaultResourceGroupName           = common.DefaultResourceGroupName
 	defaultResourceGroupCapacity int32 = 1000000
 )
 

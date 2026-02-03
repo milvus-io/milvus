@@ -142,6 +142,14 @@ func (s *SessionRaw) GetServerLabel() map[string]string {
 	return s.ServerLabels
 }
 
+// GetResourceGroupName returns the resource group name of the session.
+func (s *SessionRaw) GetResourceGroupName() string {
+	if s.ServerLabels == nil {
+		return ""
+	}
+	return s.ServerLabels[LabelResourceGroup]
+}
+
 func (s *SessionRaw) IsTriggerKill() bool {
 	return s.TriggerKill
 }

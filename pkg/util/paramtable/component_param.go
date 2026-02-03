@@ -6659,6 +6659,12 @@ if this parameter <= 0, will set it as 10`,
 }
 
 type streamingConfig struct {
+	// primary resource group
+	PrimaryResourceGroup ParamItem `refreshable:"true"`
+
+	// strict resource group isolation mode for streaming query node assignment
+	StrictResourceGroupIsolationEnabled ParamItem `refreshable:"true"`
+
 	// scanner
 	WALScannerPauseConsumption ParamItem `refreshable:"true"`
 
@@ -6722,6 +6728,34 @@ type streamingConfig struct {
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
+	// primary resource group
+	p.PrimaryResourceGroup = ParamItem{
+		Key:     "streaming.primaryResourceGroup",
+		Version: "2.6.10",
+		Doc: `The resource group name that WAL should be loaded on.
+When this is set, only streaming nodes with the matching resource group label will be used for WAL operations.
+The resource group label is set via environment variable MILVUS_SERVER_LABEL_RESOURCE_GROUP.
+If empty, streaming nodes from all resource groups can be used.`,
+		DefaultValue: "",
+		Export:       false,
+	}
+	p.PrimaryResourceGroup.Init(base.mgr)
+
+	// strict resource group isolation mode for streaming query node assignment
+	p.StrictResourceGroupIsolationEnabled = ParamItem{
+		Key:     "streaming.strictResourceGroupIsolation.enabled",
+		Version: "2.6.10",
+		Doc: `Enable strict resource group isolation mode for streaming query node assignment.
+When enabled, streaming query nodes will only be assigned to replicas within their own resource group.
+If streaming node resource groups do not cover all replica resource groups, replicas without matching
+streaming nodes will not receive any streaming query node assignment.
+When disabled (default), if resource group isolation cannot be satisfied, all streaming nodes will be
+pooled together and assigned fairly across all replicas regardless of resource group boundaries.`,
+		DefaultValue: "false",
+		Export:       false,
+	}
+	p.StrictResourceGroupIsolationEnabled.Init(base.mgr)
+
 	// scanner
 	p.WALScannerPauseConsumption = ParamItem{
 		Key:     "streaming.walScanner.pauseConsumption",

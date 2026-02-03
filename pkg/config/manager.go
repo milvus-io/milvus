@@ -581,19 +581,44 @@ func (m *Manager) SaveConfigToEtcd(etcdSource *EtcdSource, key, value string) er
 // UpdateConfigInEtcd updates a configuration value in etcd.
 // Unlike SaveConfigToEtcd, this function will update the config even if it already exists.
 func (m *Manager) UpdateConfigInEtcd(etcdSource *EtcdSource, key, value string) error {
+	return m.UpdateConfigsInEtcd(etcdSource, map[string]string{key: value})
+}
+
+// UpdateConfigsInEtcd atomically updates multiple configuration values in etcd.
+// This function uses etcd transaction to ensure all configs are updated atomically.
+func (m *Manager) UpdateConfigsInEtcd(etcdSource *EtcdSource, configs map[string]string) error {
 	if etcdSource == nil || etcdSource.etcdCli == nil {
 		return errors.New("etcd client is not available")
 	}
-	fmtKey := formatKey(key)
-	etcdKey := fmt.Sprintf("%s/config/%s", etcdSource.keyPrefix, fmtKey)
+
+	if len(configs) == 0 {
+		return errors.New("no configs to update")
+	}
+
+	// Build transaction operations
+	ops := make([]clientv3.Op, 0, len(configs))
+
+	for key, value := range configs {
+		fmtKey := formatKey(key)
+		etcdKey := fmt.Sprintf("%s/config/%s", etcdSource.keyPrefix, fmtKey)
+		ops = append(ops, clientv3.OpPut(etcdKey, value))
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err := etcdSource.etcdCli.Put(ctx, etcdKey, value)
-	if err != nil {
-		return fmt.Errorf("failed to update config in etcd: %w", err)
-	}
-	log.Info("config updated in etcd",
-		zap.String("etcdKey", etcdKey), zap.String("configKey", fmtKey), zap.String("value", value))
 
+	// Execute all operations in a single transaction for atomicity
+	resp, err := etcdSource.etcdCli.Txn(ctx).
+		Then(ops...).
+		Commit()
+	if err != nil {
+		return fmt.Errorf("failed to atomically update configs in etcd: %w", err)
+	}
+
+	if !resp.Succeeded {
+		return errors.New("transaction failed to update configs in etcd")
+	}
+
+	log.Info("configs atomically updated in etcd", zap.Int("count", len(configs)), zap.Any("configs", configs))
 	return nil
 }
