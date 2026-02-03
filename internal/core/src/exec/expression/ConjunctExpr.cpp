@@ -15,10 +15,6 @@
 // limitations under the License.
 
 #include "ConjunctExpr.h"
-#include "UnaryExpr.h"
-#include "LikeConjunctExpr.h"
-
-#include <algorithm>
 #include "common/ValueOp.h"
 
 namespace milvus {
