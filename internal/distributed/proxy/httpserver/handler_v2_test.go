@@ -3026,3 +3026,78 @@ func TestTruncateCollection(t *testing.T) {
 		sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
 	}
 }
+
+func TestSearchByPK(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	outputFields := []string{FieldBookID, FieldWordCount}
+	mp := mocks.NewMockProxy(t)
+
+	// Mock for successful search by PK with int64 IDs
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Times(5)
+
+	mp.EXPECT().Search(mock.Anything, mock.MatchedBy(func(req *milvuspb.SearchRequest) bool {
+		// Verify the SearchInput is set with IDs
+		return req.GetIds() != nil
+	})).Return(&milvuspb.SearchResults{
+		Status: commonSuccessStatus,
+		Results: &schemapb.SearchResultData{
+			TopK:         int64(3),
+			OutputFields: outputFields,
+			FieldsData:   generateFieldData(),
+			Ids:          generateIDs(schemapb.DataType_Int64, 3),
+			Scores:       DefaultScores,
+		},
+	}, nil).Times(2)
+
+	testEngine := initHTTPServerV2(mp, false)
+
+	queryTestCases := []requestBodyTestCase{}
+
+	// Test case 1: Search by PK with int64 IDs (JSON numbers decoded as float64)
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "ids": [1, 2, 3], "limit": 10, "outputFields": ["word_count"]}`),
+	})
+
+	// Test case 2: Search by PK with string IDs for int64 PK
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "ids": ["1", "2", "3"], "limit": 10, "outputFields": ["word_count"]}`),
+	})
+
+	// Test case 3: Search by PK with fractional float64 should fail
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "ids": [1.5, 2.9], "limit": 10, "outputFields": ["word_count"]}`),
+		errMsg:      "has fractional part",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	// Test case 4: Search by PK with empty ids array should fail
+	// Empty array is treated as "no ids provided" at request validation level
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "ids": [], "limit": 10, "outputFields": ["word_count"]}`),
+		errMsg:      "either 'ids' (for primary key search) or 'data' (for vector search) must be provided",
+		errCode:     1802, // ErrIncorrectParameterFormat
+	})
+
+	// Test case 5: Search by PK with invalid string value should fail
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "ids": ["not_a_number"], "limit": 10, "outputFields": ["word_count"]}`),
+		errMsg:      "invalid int64 id",
+		errCode:     1100, // ErrParameterInvalid
+	})
+
+	validateTestCases(t, testEngine, queryTestCases, false)
+}
