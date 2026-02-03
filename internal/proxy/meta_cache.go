@@ -682,7 +682,7 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionNa
 	key := buildPartitionSfKey(database, collectionName, partitionName)
 	entry, ok, release := m.partitionCache.Lookup(key)
 	defer release(entry)
-	if ok && entry.value != nil {
+	if ok && entry.state == EntryStateActive && entry.value != nil {
 		return entry.value, nil
 	}
 
@@ -719,7 +719,7 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionNa
 
 	entry, ok, release = m.partitionCache.Lookup(key)
 	defer release(entry)
-	if ok && entry.value != nil {
+	if ok && entry.state == EntryStateActive && entry.value != nil {
 		return entry.value, nil
 	}
 	return nil, merr.WrapErrPartitionNotFound(partitionName)
@@ -743,7 +743,7 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 	key := buildSfKeyByName(database, collectionName)
 	entry, ok, release := m.collLevelPartitionCache.Lookup(key)
 	defer release(entry)
-	if ok && entry.value != nil {
+	if ok && entry.state == EntryStateActive && entry.value != nil {
 		return entry.value, nil
 	}
 	partitionsInfo, err, _ := m.sfCollLevelPartitionCache.Do(collectionName, func() (*partitionInfos, error) {
@@ -906,6 +906,7 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionNa
 			}
 		}
 	}
+
 	log.Ctx(ctx).Debug("remove collection", zap.String("db", database), zap.String("collection", collectionName))
 }
 
@@ -923,10 +924,20 @@ func (m *MetaCache) removeCollectionByID(ctx context.Context, collectionID Uniqu
 		for k, v := range db {
 			if v.collID == collectionID {
 				if version == 0 || curVersion <= version {
+
 					delete(m.collInfo[database], k)
 					collNames = append(collNames, k)
-					m.sfGlobal.Forget(buildSfKeyByName(database, k))
+					collectionKey := buildSfKeyByName(database, k)
+					m.sfGlobal.Forget(collectionKey)
 					m.sfGlobal.Forget(buildSfKeyById(database, v.collID))
+					m.sfCollLevelPartitionCache.Forget(collectionKey)
+					m.collLevelPartitionCache.Stale(collectionKey, version)
+
+					partitionPrefix := database + "-" + k + "-"
+					m.sfPartitionCache.Forget(collectionKey)
+					m.partitionCache.StaleIf(func(key string) bool {
+						return strings.HasPrefix(key, partitionPrefix)
+					}, version)
 				}
 			}
 		}
@@ -946,8 +957,27 @@ func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 	log.Ctx(ctx).Debug("remove database", zap.String("name", database))
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Forget singleflight keys for all collections in this database
+	if db, ok := m.collInfo[database]; ok {
+		for collectionName := range db {
+			collectionKey := buildSfKeyByName(database, collectionName)
+			m.sfCollLevelPartitionCache.Forget(collectionKey)
+			m.sfPartitionCache.Forget(collectionKey)
+		}
+	}
+
 	delete(m.collInfo, database)
 	delete(m.dbInfo, database)
+
+	// Clean up partition cache
+	prefix := database + "-"
+	m.collLevelPartitionCache.StaleIf(func(key string) bool {
+		return strings.HasPrefix(key, prefix)
+	}, 0)
+	m.partitionCache.StaleIf(func(key string) bool {
+		return strings.HasPrefix(key, prefix)
+	}, 0)
 }
 
 func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {
@@ -1021,21 +1051,13 @@ func (m *MetaCache) RemovePartition(ctx context.Context, database, collectionNam
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	partitionKey := buildPartitionSfKey(database, collectionName, partitionName)
-	m.sfPartitionCache.Forget(partitionKey)
-	erased := m.partitionCache.TryErase(partitionKey)
-	if !erased {
-		entry, release := m.partitionCache.Insert(partitionKey, nil, version)
-		defer release(entry)
-	}
-
 	collectionKey := buildSfKeyByName(database, collectionName)
+	m.sfPartitionCache.Forget(collectionKey)
+	m.partitionCache.Stale(buildPartitionSfKey(database, collectionName, partitionName), version)
+
 	m.sfCollLevelPartitionCache.Forget(collectionKey)
-	erased = m.collLevelPartitionCache.TryErase(collectionKey)
-	if !erased {
-		entry, release := m.collLevelPartitionCache.Insert(collectionKey, nil, version)
-		defer release(entry)
-	}
+	m.collLevelPartitionCache.Stale(collectionKey, version)
+
 	log.Ctx(ctx).Debug("remove partition", zap.String("db", database), zap.String("collection", collectionName), zap.String("partition", partitionName), zap.Uint64("version", version))
 }
 

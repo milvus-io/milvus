@@ -2090,55 +2090,82 @@ func TestVersionCache(t *testing.T) {
 		release2(entry2)
 	})
 
-	t.Run("TryErase_Success", func(t *testing.T) {
+	t.Run("Stale_Erase_When_No_Refs", func(t *testing.T) {
 		cache := NewVersionCache[string, *int]()
 		value := 100
 		entry, release := cache.Insert("key1", &value, 1000)
 		release(entry)
 
-		erased := cache.TryErase("key1")
-		assert.True(t, erased)
+		cache.Stale("key1", 2000)
 
 		_, ok, release2 := cache.Lookup("key1")
 		assert.False(t, ok)
 		release2(nil)
 	})
 
-	t.Run("TryErase_Fails_With_Active_Refs", func(t *testing.T) {
+	t.Run("Stale_Marks_Entry_With_Active_Refs", func(t *testing.T) {
 		cache := NewVersionCache[string, *int]()
 		value := 100
 		entry, release := cache.Insert("key1", &value, 1000)
+		assert.Equal(t, EntryStateActive, entry.state)
 
-		erased := cache.TryErase("key1")
-		assert.False(t, erased)
+		cache.Stale("key1", 2000)
+
+		// Entry should be marked as stale
+		entry2, ok, release2 := cache.Lookup("key1")
+		assert.True(t, ok)
+		assert.Equal(t, EntryStateStale, entry2.state)
+		release2(entry2)
 
 		release(entry)
 
-		erased = cache.TryErase("key1")
-		assert.True(t, erased)
+		// After release, Stale should erase
+		cache.Stale("key1", 3000)
+		_, ok, release3 := cache.Lookup("key1")
+		assert.False(t, ok)
+		release3(nil)
 	})
 
-	t.Run("Prune", func(t *testing.T) {
+	t.Run("Prune_Only_Stale_Entries", func(t *testing.T) {
 		cache := NewVersionCache[string, *int]()
+
+		// key1: Active, ref=0 - should NOT be pruned
 		value1 := 100
 		entry1, release1 := cache.Insert("key1", &value1, 1000)
 		release1(entry1)
 
+		// key2: Stale, ref=0 - should be pruned
 		value2 := 200
-		entry2, _ := cache.Insert("key2", &value2, 2000)
+		entry2, release2 := cache.Insert("key2", &value2, 2000)
+		release2(entry2)
+		cache.Stale("key2", 2500)
+
+		// key3: Stale, ref=1 - should NOT be pruned
+		value3 := 300
+		entry3, _ := cache.Insert("key3", &value3, 3000)
+		cache.Stale("key3", 3500)
 
 		cache.Prune()
 
-		_, ok1, release3 := cache.Lookup("key1")
-		assert.False(t, ok1)
-		release3(nil)
+		// key1 should still exist (Active, ref=0)
+		entry1Found, ok1, release1Found := cache.Lookup("key1")
+		assert.True(t, ok1)
+		assert.Equal(t, 100, *entry1Found.value)
+		release1Found(entry1Found)
 
-		entry4, ok2, release4 := cache.Lookup("key2")
-		assert.True(t, ok2)
-		assert.Equal(t, 200, *entry4.value)
-		release4(entry4)
+		// key2 should be gone (Stale, ref=0)
+		_, ok2, release2Found := cache.Lookup("key2")
+		assert.False(t, ok2)
+		release2Found(nil)
 
-		release1(entry2)
+		// key3 should still exist (Stale, ref=1)
+		entry3Found, ok3, release3Found := cache.Lookup("key3")
+		assert.True(t, ok3)
+		assert.Equal(t, EntryStateStale, entry3Found.state)
+		release3Found(entry3Found)
+
+		// Release the ref on entry3
+		release1(entry3)
 	})
 }
 
