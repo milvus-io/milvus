@@ -21,6 +21,7 @@
 
 #include "Array.h"
 #include "Types.h"
+#include "Utils.h"
 #include "VectorArray.h"
 #include "knowhere/operands.h"
 

@@ -16,13 +16,14 @@
 #pragma once
 
 #include "common/Utils.h"
-#include "common/Span.h"
 #include "mmap/ChunkData.h"
+#include "common/ChunkDataView.h"
 #include "storage/MmapManager.h"
 #include "segcore/SegcoreConfig.h"
 #include "common/TypeTraits.h"
 
 namespace milvus {
+
 template <typename Type>
 class ChunkVectorBase {
  public:
@@ -51,8 +52,8 @@ class ChunkVectorBase {
     }
     virtual void
     clear() = 0;
-    virtual SpanBase
-    get_span(int64_t chunk_id) = 0;
+    virtual AnyDataView
+    get_data_view(int64_t chunk_id) = 0;
 
     virtual bool
     is_mmap() const = 0;
@@ -193,17 +194,30 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
         return offset;
     }
 
-    SpanBase
-    get_span(int64_t chunk_id) override {
+    AnyDataView
+    get_data_view(int64_t chunk_id) override {
         std::shared_lock<std::shared_mutex> lck(mutex_);
-        if constexpr (IsMmap && std::is_same_v<std::string, Type>) {
-            return SpanBase(get_chunk_data(chunk_id),
-                            get_chunk_size(chunk_id),
-                            sizeof(ChunkViewType<Type>));
+        if constexpr (IsMmap && std::is_same_v<Type, std::string>) {
+            // mmap string: underlying data is already string_view*
+            return AnyDataView(
+                std::make_shared<ContiguousDataView<ChunkViewType<Type>>>(
+                    static_cast<ChunkViewType<Type>*>(get_chunk_data(chunk_id)),
+                    get_chunk_size(chunk_id),
+                    sizeof(ChunkViewType<Type>)));
+        } else if constexpr (std::is_same_v<Type, std::string> ||
+                             std::is_same_v<Type, Array> ||
+                             std::is_same_v<Type, VectorArray>) {
+            // string/Array/VectorArray: data is Type*, construct view type
+            return AnyDataView(
+                std::make_shared<ContiguousDataView<ChunkViewType<Type>>>(
+                    static_cast<Type*>(get_chunk_data(chunk_id)),
+                    get_chunk_size(chunk_id),
+                    sizeof(Type)));
         } else {
-            return SpanBase(get_chunk_data(chunk_id),
-                            get_chunk_size(chunk_id),
-                            sizeof(Type));
+            return AnyDataView(std::make_shared<ContiguousDataView<Type>>(
+                static_cast<Type*>(get_chunk_data(chunk_id)),
+                get_chunk_size(chunk_id),
+                sizeof(Type)));
         }
     }
 

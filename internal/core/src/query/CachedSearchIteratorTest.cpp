@@ -27,6 +27,7 @@
 #include "query/helper.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
+#include "common/VectorTrait.h"
 #include "mmap/ChunkedColumn.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
@@ -254,13 +255,14 @@ class CachedSearchIteratorTest
             auto chunk_mmap_guard =
                 std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
             chunks.emplace_back(
-                std::make_unique<FixedWidthChunk>(rows,
-                                                  dim_,
-                                                  chunk_data.data(),
-                                                  buf_size,
-                                                  sizeof(float),
-                                                  false,
-                                                  chunk_mmap_guard));
+                std::make_unique<FixedWidthChunk<milvus::FloatVector>>(
+                    rows,
+                    dim_,
+                    chunk_data.data(),
+                    buf_size,
+                    sizeof(float),
+                    false,
+                    chunk_mmap_guard));
             offset += rows;
         }
         auto translator = std::make_unique<TestChunkTranslator>(
@@ -811,13 +813,14 @@ TEST(CachedSearchIteratorNullableTest, ChunkedColumnWithPartialNulls) {
         auto chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
         chunks.emplace_back(
-            std::make_unique<FixedWidthChunk>(chunk_rows,
-                                              dim,
-                                              buf,
-                                              buf_size,
-                                              sizeof(float),
-                                              true,
-                                              chunk_mmap_guard));
+            std::make_unique<FixedWidthChunk<milvus::FloatVector>>(
+                chunk_rows,
+                dim,
+                buf,
+                buf_size,
+                sizeof(float),
+                true,
+                chunk_mmap_guard));
     }
 
     auto translator = std::make_unique<TestChunkTranslator>(

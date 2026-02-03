@@ -19,7 +19,6 @@
 #include <cstdint>
 
 #include "arrow/array/array_primitive.h"
-#include "common/Span.h"
 #include "parquet/types.h"
 
 namespace milvus::index {
@@ -157,50 +156,57 @@ SkipIndexStatsBuilder::Build(DataType data_type, const Chunk* chunk) const {
         metricsInfo<std::string> info = ProcessStringFieldMetrics(string_chunk);
         return LoadMetrics<std::string>(info);
     }
-    auto fixed_chunk = static_cast<const FixedWidthChunk*>(chunk);
-    auto span = fixed_chunk->Span();
+    auto any_view = chunk->GetAnyDataView();
 
-    const void* chunk_data = span.data();
-    const bool* valid_data = span.valid_data();
-    int64_t count = span.row_count();
+    // const void* chunk_data = data_view.data();
+    // const bool* valid_data = span.valid_data();
+    int64_t count = any_view.RowCount();
+    const bool* valid_data = any_view.ValidData();
     switch (data_type) {
         case DataType::BOOL: {
-            const bool* typedData = static_cast<const bool*>(chunk_data);
+            auto data_view = any_view.as<bool>();
+            const bool* typedData = data_view->Data();
             auto info = ProcessFieldMetrics<bool>(typedData, valid_data, count);
             return LoadMetrics<bool>(info);
         }
         case DataType::INT8: {
-            const int8_t* typedData = static_cast<const int8_t*>(chunk_data);
+            auto data_view = any_view.as<int8_t>();
+            const int8_t* typedData = data_view->Data();
             auto info =
                 ProcessFieldMetrics<int8_t>(typedData, valid_data, count);
             return LoadMetrics<int8_t>(info);
         }
         case DataType::INT16: {
-            const int16_t* typedData = static_cast<const int16_t*>(chunk_data);
+            auto data_view = any_view.as<int16_t>();
+            const int16_t* typedData = data_view->Data();
             auto info =
                 ProcessFieldMetrics<int16_t>(typedData, valid_data, count);
             return LoadMetrics<int16_t>(info);
         }
         case DataType::INT32: {
-            const int32_t* typedData = static_cast<const int32_t*>(chunk_data);
+            auto data_view = any_view.as<int32_t>();
+            const int32_t* typedData = data_view->Data();
             auto info =
                 ProcessFieldMetrics<int32_t>(typedData, valid_data, count);
             return LoadMetrics<int32_t>(info);
         }
         case DataType::INT64: {
-            const int64_t* typedData = static_cast<const int64_t*>(chunk_data);
+            auto data_view = any_view.as<int64_t>();
+            const int64_t* typedData = data_view->Data();
             auto info =
                 ProcessFieldMetrics<int64_t>(typedData, valid_data, count);
             return LoadMetrics<int64_t>(info);
         }
         case DataType::FLOAT: {
-            const float* typedData = static_cast<const float*>(chunk_data);
+            auto data_view = any_view.as<float>();
+            const float* typedData = data_view->Data();
             auto info =
                 ProcessFieldMetrics<float>(typedData, valid_data, count);
             return LoadMetrics<float>(info);
         }
         case DataType::DOUBLE: {
-            const double* typedData = static_cast<const double*>(chunk_data);
+            auto data_view = any_view.as<double>();
+            const double* typedData = data_view->Data();
             auto info =
                 ProcessFieldMetrics<double>(typedData, valid_data, count);
             return LoadMetrics<double>(info);

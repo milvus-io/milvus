@@ -230,117 +230,45 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
     valid_res.set();
 
     if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_STIsValid) {
-        if (segment_->type() == SegmentType::Growing &&
-            !storage::MmapManager::GetInstance()
-                 .GetMmapConfig()
-                 .growing_enable_mmap) {
-            GEOMETRY_EXECUTE_SUB_BATCH_UNARY(std::string, is_valid);
-        } else {
-            GEOMETRY_EXECUTE_SUB_BATCH_UNARY(std::string_view, is_valid);
-        }
+        GEOMETRY_EXECUTE_SUB_BATCH_UNARY(std::string_view, is_valid);
         return res_vec;
     }
 
     auto right_source =
         Geometry(GetThreadLocalGEOSContext(), expr_->geometry_wkt_.c_str());
 
-    // Choose underlying data type according to segment type to avoid element
-    // size mismatch: Sealed segments and growing segments with mmap use std::string_view;
-    // Growing segments without mmap use std::string.
     switch (expr_->op_) {
         case proto::plan::GISFunctionFilterExpr_GISOp_Equals: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string, equals);
-            } else {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
-                                                           equals);
-            }
+            GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
+                                                       equals);
         }
         case proto::plan::GISFunctionFilterExpr_GISOp_Touches: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string,
-                                                           touches);
-            } else {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
-                                                           touches);
-            }
+            GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
+                                                       touches);
         }
         case proto::plan::GISFunctionFilterExpr_GISOp_Overlaps: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string,
-                                                           overlaps);
-            } else {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
-                                                           overlaps);
-            }
+            GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
+                                                       overlaps);
         }
         case proto::plan::GISFunctionFilterExpr_GISOp_Crosses: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string,
-                                                           crosses);
-            } else {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
-                                                           crosses);
-            }
+            GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
+                                                       crosses);
         }
         case proto::plan::GISFunctionFilterExpr_GISOp_Contains: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string,
-                                                           contains);
-            } else {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
-                                                           contains);
-            }
+            GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
+                                                       contains);
         }
         case proto::plan::GISFunctionFilterExpr_GISOp_Intersects: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string,
-                                                           intersects);
-            } else {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
-                                                           intersects);
-            }
+            GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
+                                                       intersects);
         }
         case proto::plan::GISFunctionFilterExpr_GISOp_Within: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string, within);
-            } else {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
-                                                           within);
-            }
+            GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
+                                                       within);
         }
         case proto::plan::GISFunctionFilterExpr_GISOp_DWithin: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON_DISTANCE(std::string,
-                                                                    dwithin);
-            } else {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON_DISTANCE(
-                    std::string_view, dwithin);
-            }
+            GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON_DISTANCE(
+                std::string_view, dwithin);
         }
         default: {
             ThrowInfo(NotImplemented,
