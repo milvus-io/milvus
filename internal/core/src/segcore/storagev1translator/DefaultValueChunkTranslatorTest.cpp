@@ -26,9 +26,9 @@
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
 #include "common/Chunk.h"
+#include "common/ChunkDataView.h"
 #include "common/FieldMeta.h"
 #include "common/Json.h"
-#include "common/Span.h"
 #include "common/Types.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
@@ -114,15 +114,13 @@ TEST_P(DefaultValueChunkTranslatorTest, TestInt64WithDefaultValue) {
     EXPECT_EQ(cid, 0);
     ASSERT_NE(chunk, nullptr);
 
-    // Verify the chunk contains default values
-    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
-    auto span = fixed_chunk->Span();
-    EXPECT_GT(span.row_count(), 0);
+    // Verify the chunk contains default values using DataView interface
+    auto data_view = chunk->GetDataView<int64_t>();
+    EXPECT_GT(data_view->RowCount(), 0);
+    auto view_data = data_view->Data();
 
-    for (size_t i = 0; i < span.row_count(); ++i) {
-        auto value = *reinterpret_cast<int64_t*>((char*)span.data() +
-                                                 i * span.element_sizeof());
-        EXPECT_EQ(value, default_value);
+    for (int64_t i = 0; i < data_view->RowCount(); ++i) {
+        EXPECT_EQ(view_data[i], default_value);
     }
 }
 
@@ -149,13 +147,13 @@ TEST_P(DefaultValueChunkTranslatorTest, TestInt64WithoutDefaultValue) {
     EXPECT_EQ(cells.size(), 1);
 
     auto& [cid, chunk] = cells[0];
-    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
-    auto span = fixed_chunk->Span();
-    EXPECT_GT(span.row_count(), 0);
+    auto data_view = chunk->GetDataView<int64_t>();
+    EXPECT_GT(data_view->RowCount(), 0);
+    auto valid_data = data_view->ValidData();
 
     // All values should be marked as invalid (null)
-    for (size_t i = 0; i < span.row_count(); ++i) {
-        EXPECT_FALSE(fixed_chunk->isValid(i));
+    for (int64_t i = 0; i < data_view->RowCount(); ++i) {
+        EXPECT_FALSE(valid_data[i]);
     }
 }
 
@@ -262,11 +260,11 @@ TEST_P(DefaultValueChunkTranslatorTest, TestStringWithDefaultValue) {
 
     auto& [cid, chunk] = cells[0];
     auto string_chunk = static_cast<StringChunk*>(chunk.get());
-    auto [views, valid] = string_chunk->StringViews(std::nullopt);
+    auto data_view = string_chunk->GetDataView<std::string_view>();
 
-    EXPECT_GT(views.size(), 0);
-    for (const auto& view : views) {
-        EXPECT_EQ(view, default_string);
+    EXPECT_GT(data_view->RowCount(), 0);
+    for (int64_t i = 0; i < data_view->RowCount(); ++i) {
+        EXPECT_EQ((*data_view)[i], default_string);
     }
 }
 
@@ -294,12 +292,13 @@ TEST_P(DefaultValueChunkTranslatorTest, TestStringWithoutDefaultValue) {
 
     auto& [cid, chunk] = cells[0];
     auto string_chunk = static_cast<StringChunk*>(chunk.get());
-    auto [views, valid] = string_chunk->StringViews(std::nullopt);
+    auto data_view = string_chunk->GetDataView<std::string_view>();
 
-    EXPECT_GT(views.size(), 0);
+    EXPECT_GT(data_view->RowCount(), 0);
     // All should be marked as invalid (null)
-    for (const auto& v : valid) {
-        EXPECT_FALSE(v);
+    auto valid = data_view->ValidData();
+    for (int64_t i = 0; i < data_view->RowCount(); ++i) {
+        EXPECT_FALSE(valid[i]);
     }
 }
 
@@ -337,15 +336,13 @@ TEST_P(DefaultValueChunkTranslatorTest, TestMultipleCells) {
 
     int64_t total_rows = 0;
     for (const auto& [cid, chunk] : cells) {
-        auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
-        auto span = fixed_chunk->Span();
-        total_rows += span.row_count();
+        auto data_view = chunk->GetDataView<int64_t>();
+        total_rows += data_view->RowCount();
+        auto view_data = data_view->Data();
 
         // Verify all values are the default
-        for (size_t i = 0; i < span.row_count(); ++i) {
-            auto value =
-                *(int64_t*)((char*)span.data() + i * span.element_sizeof());
-            EXPECT_EQ(value, 999);
+        for (int64_t i = 0; i < data_view->RowCount(); ++i) {
+            EXPECT_EQ(view_data[i], 999);
         }
     }
 
@@ -378,9 +375,8 @@ TEST_P(DefaultValueChunkTranslatorTest, TestSmallRowCount) {
     EXPECT_EQ(cells.size(), 1);
 
     auto& [cid, chunk] = cells[0];
-    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
-    auto span = fixed_chunk->Span();
-    EXPECT_EQ(span.row_count(), row_count);
+    auto data_view = chunk->GetDataView<int32_t>();
+    EXPECT_EQ(data_view->RowCount(), row_count);
 }
 
 // Test cells_storage_bytes
@@ -438,19 +434,15 @@ TEST_P(DefaultValueChunkTranslatorTest, TestGetMultipleCells) {
         for (size_t i = 0; i < cells.size(); ++i) {
             EXPECT_EQ(cells[i].first, cids[i]);
             ASSERT_NE(cells[i].second, nullptr);
-            auto fixed_chunk =
-                static_cast<FixedWidthChunk*>(cells[i].second.get());
-            auto span = fixed_chunk->Span();
-            EXPECT_GT(span.row_count(), 0);
-            for (size_t j = 0; j < span.row_count(); ++j) {
-                auto value = *reinterpret_cast<float*>(
-                    (char*)span.data() + j * span.element_sizeof());
-                EXPECT_EQ(value, 1.5f);
+            auto data_view = cells[i].second->GetDataView<float>();
+            EXPECT_GT(data_view->RowCount(), 0);
+            auto view_data = data_view->Data();
+            for (int64_t j = 0; j < data_view->RowCount(); ++j) {
+                EXPECT_EQ(view_data[j], 1.5f);
             }
             if (i > 0) {
-                EXPECT_EQ(
-                    cells[i].second->RawData() == cells[0].second->RawData(),
-                    true);
+                EXPECT_EQ(cells[i].second->Data() == cells[0].second->Data(),
+                          true);
             }
         }
     }
@@ -523,14 +515,12 @@ TEST_P(DefaultValueChunkTranslatorTest, TestTimestamptzType) {
     EXPECT_EQ(cells.size(), 1);
 
     auto& [cid, chunk] = cells[0];
-    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
-    auto span = fixed_chunk->Span();
-    EXPECT_GT(span.row_count(), 0);
+    auto data_view = chunk->GetDataView<int64_t>();
+    EXPECT_GT(data_view->RowCount(), 0);
+    auto view_data = data_view->Data();
 
-    for (size_t i = 0; i < span.row_count(); ++i) {
-        auto value = *reinterpret_cast<int64_t*>((char*)span.data() +
-                                                 i * span.element_sizeof());
-        EXPECT_EQ(value, 1234567890);
+    for (int64_t i = 0; i < data_view->RowCount(); ++i) {
+        EXPECT_EQ(view_data[i], 1234567890);
     }
 }
 
@@ -652,14 +642,12 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapCreatesFile) {
 
     // Verify the chunk data is correct
     auto& [cid, chunk] = cells[0];
-    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
-    auto span = fixed_chunk->Span();
-    EXPECT_GT(span.row_count(), 0);
+    auto data_view = chunk->GetDataView<int64_t>();
+    EXPECT_GT(data_view->RowCount(), 0);
+    auto view_data = data_view->Data();
 
-    for (size_t i = 0; i < span.row_count(); ++i) {
-        auto value =
-            *(int64_t*)((char*)span.data() + i * span.element_sizeof());
-        EXPECT_EQ(value, default_value);
+    for (int64_t i = 0; i < data_view->RowCount(); ++i) {
+        EXPECT_EQ(view_data[i], default_value);
     }
 }
 
@@ -697,14 +685,12 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestNoMmapNoFile) {
 
     // Verify the chunk data is still correct
     auto& [cid, chunk] = cells[0];
-    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
-    auto span = fixed_chunk->Span();
-    EXPECT_GT(span.row_count(), 0);
+    auto data_view = chunk->GetDataView<int64_t>();
+    EXPECT_GT(data_view->RowCount(), 0);
+    auto view_data = data_view->Data();
 
-    for (size_t i = 0; i < span.row_count(); ++i) {
-        auto value =
-            *(int64_t*)((char*)span.data() + i * span.element_sizeof());
-        EXPECT_EQ(value, default_value);
+    for (int64_t i = 0; i < data_view->RowCount(); ++i) {
+        EXPECT_EQ(view_data[i], default_value);
     }
 }
 
@@ -740,11 +726,11 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapWithString) {
     // Verify string data
     auto& [cid, chunk] = cells[0];
     auto string_chunk = static_cast<StringChunk*>(chunk.get());
-    auto [views, valid] = string_chunk->StringViews(std::nullopt);
+    auto data_view = string_chunk->GetDataView<std::string_view>();
 
-    EXPECT_GT(views.size(), 0);
-    for (size_t i = 0; i < views.size(); ++i) {
-        EXPECT_EQ(views[i], default_string);
+    EXPECT_GT(data_view->RowCount(), 0);
+    for (int64_t i = 0; i < data_view->RowCount(); ++i) {
+        EXPECT_EQ((*data_view)[i], default_string);
     }
 }
 
@@ -776,12 +762,12 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapWithNullableField) {
 
     // Verify all values are null
     auto& [cid, chunk] = cells[0];
-    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
-    auto span = fixed_chunk->Span();
-    EXPECT_GT(span.row_count(), 0);
+    auto data_view = chunk->GetDataView<int64_t>();
+    EXPECT_GT(data_view->RowCount(), 0);
+    auto valid_data = data_view->ValidData();
 
-    for (size_t i = 0; i < span.row_count(); ++i) {
-        EXPECT_FALSE(fixed_chunk->isValid(i));
+    for (int64_t i = 0; i < data_view->RowCount(); ++i) {
+        EXPECT_FALSE(valid_data[i]);
     }
 }
 
@@ -824,14 +810,12 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapMultipleCells) {
 
     // Verify data in all cells
     for (const auto& [cid, chunk] : cells) {
-        auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
-        auto span = fixed_chunk->Span();
-        EXPECT_GT(span.row_count(), 0);
+        auto data_view = chunk->GetDataView<int64_t>();
+        EXPECT_GT(data_view->RowCount(), 0);
+        auto view_data = data_view->Data();
 
-        for (size_t i = 0; i < span.row_count(); ++i) {
-            auto value =
-                *(int64_t*)((char*)span.data() + i * span.element_sizeof());
-            EXPECT_EQ(value, default_value);
+        for (int64_t i = 0; i < data_view->RowCount(); ++i) {
+            EXPECT_EQ(view_data[i], default_value);
         }
     }
 }
@@ -916,16 +900,16 @@ TEST_P(DefaultValueChunkTranslatorTest, TestStringMultipleCellsWithTailBuffer) {
     for (size_t idx = 0; idx < cells.size(); ++idx) {
         auto& [cid, chunk] = cells[idx];
         auto string_chunk = static_cast<StringChunk*>(chunk.get());
-        auto [views, valid] = string_chunk->StringViews(std::nullopt);
+        auto data_view = string_chunk->GetDataView<std::string_view>();
 
-        total_rows += views.size();
+        total_rows += data_view->RowCount();
 
         // Verify all strings in this cell have the correct default value
-        for (size_t i = 0; i < views.size(); ++i) {
-            EXPECT_EQ(views[i], default_string)
+        for (int64_t i = 0; i < data_view->RowCount(); ++i) {
+            EXPECT_EQ((*data_view)[i], default_string)
                 << "String mismatch at cell " << cid << " row " << i
-                << ": expected '" << default_string << "' but got '" << views[i]
-                << "'";
+                << ": expected '" << default_string << "' but got '"
+                << (*data_view)[i] << "'";
         }
     }
 
@@ -971,12 +955,13 @@ TEST_P(DefaultValueChunkTranslatorTest,
     int64_t total_rows = 0;
     for (auto& [cid, chunk] : cells) {
         auto string_chunk = static_cast<StringChunk*>(chunk.get());
-        auto [views, valid] = string_chunk->StringViews(std::nullopt);
+        auto data_view = string_chunk->GetDataView<std::string_view>();
 
-        total_rows += views.size();
+        total_rows += data_view->RowCount();
 
         // All values should be null (invalid)
-        for (size_t i = 0; i < valid.size(); ++i) {
+        auto valid = data_view->ValidData();
+        for (int64_t i = 0; i < data_view->RowCount(); ++i) {
             EXPECT_FALSE(valid[i])
                 << "Expected null at cell " << cid << " row " << i;
         }
@@ -1024,15 +1009,12 @@ TEST_P(DefaultValueChunkTranslatorTest, TestFixedWidthMultipleCellsWithTail) {
 
     int64_t total_rows = 0;
     for (auto& [cid, chunk] : cells) {
-        auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
-        auto span = fixed_chunk->Span();
-        total_rows += span.row_count();
+        auto data_view = chunk->GetDataView<int64_t>();
+        total_rows += data_view->RowCount();
 
         // Verify all values are correct
-        for (size_t i = 0; i < span.row_count(); ++i) {
-            auto value =
-                *(int64_t*)((char*)span.data() + i * span.element_sizeof());
-            EXPECT_EQ(value, default_value)
+        for (int64_t i = 0; i < data_view->RowCount(); ++i) {
+            EXPECT_EQ((*data_view)[i], default_value)
                 << "Value mismatch at cell " << cid << " row " << i;
         }
     }
@@ -1076,13 +1058,11 @@ TEST_P(DefaultValueChunkTranslatorTest, TestNullableVectorFloat) {
 
     int64_t total_rows = 0;
     for (auto& [cid, chunk] : cells) {
-        auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
-        auto span = fixed_chunk->Span();
-        total_rows += span.row_count();
+        total_rows += chunk->RowNums();
 
         // Every row should be null
-        for (size_t i = 0; i < span.row_count(); ++i) {
-            EXPECT_FALSE(chunk->isValid(i))
+        for (int64_t i = 0; i < chunk->RowNums(); ++i) {
+            EXPECT_FALSE(chunk->IsValid(i))
                 << "Expected null at cell " << cid << " row " << i;
         }
     }
@@ -1128,7 +1108,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestNullableSparseVector) {
 
         // Every row should be null
         for (int64_t i = 0; i < chunk->RowNums(); ++i) {
-            EXPECT_FALSE(chunk->isValid(i))
+            EXPECT_FALSE(chunk->IsValid(i))
                 << "Expected null at cell " << cid << " row " << i;
         }
     }

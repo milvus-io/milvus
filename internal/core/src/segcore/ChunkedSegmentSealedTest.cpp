@@ -47,9 +47,9 @@
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
-#include "common/Span.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "common/VectorTrait.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
@@ -124,8 +124,15 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
 
         auto chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
-        chunks.emplace_back(std::make_unique<FixedWidthChunk>(
-            chunk_size, dim, buf, buf_size, 4, false, chunk_mmap_guard));
+        chunks.emplace_back(
+            std::make_unique<FixedWidthChunk<milvus::FloatVector>>(
+                chunk_size,
+                dim,
+                buf,
+                buf_size,
+                sizeof(float),
+                false,
+                chunk_mmap_guard));
     }
 
     auto translator = std::make_unique<TestChunkTranslator>(
@@ -255,13 +262,14 @@ TEST(test_chunk_segment, TestSearchOnSealedWithAllNullVectors) {
         auto chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
         chunks.emplace_back(
-            std::make_unique<FixedWidthChunk>(chunk_size,
-                                              dim,
-                                              buf,
-                                              buf_size,
-                                              sizeof(float),
-                                              true,
-                                              chunk_mmap_guard));
+            std::make_unique<FixedWidthChunk<milvus::FloatVector>>(
+                chunk_size,
+                dim,
+                buf,
+                buf_size,
+                sizeof(float),
+                true,
+                chunk_mmap_guard));
     }
 
     auto translator = std::make_unique<TestChunkTranslator>(
@@ -361,13 +369,14 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithAllNullVectors) {
         auto chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
         chunks.emplace_back(
-            std::make_unique<FixedWidthChunk>(chunk_size,
-                                              dim,
-                                              buf,
-                                              buf_size,
-                                              sizeof(float),
-                                              true,
-                                              chunk_mmap_guard));
+            std::make_unique<FixedWidthChunk<milvus::FloatVector>>(
+                chunk_size,
+                dim,
+                buf,
+                buf_size,
+                sizeof(float),
+                true,
+                chunk_mmap_guard));
     }
 
     auto translator = std::make_unique<TestChunkTranslator>(
@@ -492,13 +501,14 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithPartialNullVectors) {
         auto chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
         chunks.emplace_back(
-            std::make_unique<FixedWidthChunk>(chunk_rows,
-                                              dim,
-                                              buf,
-                                              buf_size,
-                                              sizeof(float),
-                                              true,
-                                              chunk_mmap_guard));
+            std::make_unique<FixedWidthChunk<milvus::FloatVector>>(
+                chunk_rows,
+                dim,
+                buf,
+                buf_size,
+                sizeof(float),
+                true,
+                chunk_mmap_guard));
     }
 
     auto translator = std::make_unique<TestChunkTranslator>(
@@ -831,10 +841,10 @@ TEST_P(TestChunkSegment, TestCompareExpr) {
         create_index_info, file_manager_ctx);
     std::vector<int64_t> data(test_data_count * chunk_num);
     for (int i = 0; i < chunk_num; i++) {
-        auto pw = segment->chunk_data<int64_t>(nullptr, fid, i);
+        auto pw = segment->chunk_view<int64_t>(nullptr, fid, i);
         auto d = pw.get();
-        std::copy(d.data(),
-                  d.data() + test_data_count,
+        std::copy(d->Data(),
+                  d->Data() + test_data_count,
                   data.begin() + i * test_data_count);
     }
 

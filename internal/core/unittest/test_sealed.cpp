@@ -43,7 +43,6 @@
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
-#include "common/Span.h"
 #include "common/Types.h"
 #include "common/VectorArray.h"
 #include "common/VectorTrait.h"
@@ -564,21 +563,21 @@ TEST(Sealed, LoadFieldData) {
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
     ASSERT_EQ(segment->PinIndex(nullptr, double_id).size(), 0);
     ASSERT_EQ(segment->PinIndex(nullptr, str_id).size(), 0);
-    auto chunk_span1 = segment->chunk_data<int64_t>(nullptr, counter_id, 0);
-    auto chunk_span2 = segment->chunk_data<double>(nullptr, double_id, 0);
-    auto chunk_span3 =
-        segment->get_batch_views<std::string_view>(nullptr, str_id, 0, 0, N);
-    auto chunk_span4 =
-        segment->chunk_data<int8_t>(nullptr, int8_nullable_id, 0);
-    auto chunk_span5 =
-        segment->chunk_data<int16_t>(nullptr, int16_nullable_id, 0);
-    auto chunk_span6 =
-        segment->chunk_data<int32_t>(nullptr, int32_nullable_id, 0);
-    auto chunk_span7 =
-        segment->chunk_data<int64_t>(nullptr, int64_nullable_id, 0);
-    auto chunk_span8 =
-        segment->chunk_data<double>(nullptr, double_nullable_id, 0);
-    auto chunk_span9 = segment->get_batch_views<std::string_view>(
+    auto chunk_view1 = segment->chunk_view<int64_t>(nullptr, counter_id, 0);
+    auto chunk_view2 = segment->chunk_view<double>(nullptr, double_id, 0);
+    auto chunk_view3 =
+        segment->chunk_view<std::string_view>(nullptr, str_id, 0, 0, N);
+    auto chunk_view4 =
+        segment->chunk_view<int8_t>(nullptr, int8_nullable_id, 0);
+    auto chunk_view5 =
+        segment->chunk_view<int16_t>(nullptr, int16_nullable_id, 0);
+    auto chunk_view6 =
+        segment->chunk_view<int32_t>(nullptr, int32_nullable_id, 0);
+    auto chunk_view7 =
+        segment->chunk_view<int64_t>(nullptr, int64_nullable_id, 0);
+    auto chunk_view8 =
+        segment->chunk_view<double>(nullptr, double_nullable_id, 0);
+    auto chunk_view9 = segment->chunk_view<std::string_view>(
         nullptr, str_nullable_id, 0, 0, N);
 
     auto ref1 = dataset.get_col<int64_t>(counter_id);
@@ -597,52 +596,52 @@ TEST(Sealed, LoadFieldData) {
     auto valid7 = dataset.get_col_valid(int64_nullable_id);
     auto valid8 = dataset.get_col_valid(double_nullable_id);
     auto valid9 = dataset.get_col_valid(str_nullable_id);
-    ASSERT_EQ(chunk_span1.get().valid_data(), nullptr);
-    ASSERT_EQ(chunk_span2.get().valid_data(), nullptr);
-    ASSERT_EQ(chunk_span3.get().second.size(), 0);
+    ASSERT_EQ(chunk_view1.get()->ValidData(), nullptr);
+    ASSERT_EQ(chunk_view2.get()->ValidData(), nullptr);
+    ASSERT_EQ(chunk_view3.get()->ValidData(), nullptr);
     for (int i = 0; i < N; ++i) {
-        if (chunk_span1.get().valid_data() == nullptr ||
-            chunk_span1.get().valid_data()[i]) {
-            ASSERT_EQ(chunk_span1.get().data()[i], ref1[i]);
+        if (chunk_view1.get()->ValidData() == nullptr ||
+            chunk_view1.get()->ValidData()[i]) {
+            ASSERT_EQ(chunk_view1.get()->Data()[i], ref1[i]);
         }
-        if (chunk_span2.get().valid_data() == nullptr ||
-            chunk_span2.get().valid_data()[i]) {
-            ASSERT_EQ(chunk_span2.get().data()[i], ref2[i]);
+        if (chunk_view2.get()->ValidData() == nullptr ||
+            chunk_view2.get()->ValidData()[i]) {
+            ASSERT_EQ(chunk_view2.get()->Data()[i], ref2[i]);
         }
-        if (chunk_span3.get().second.size() == 0 ||
-            chunk_span3.get().second[i]) {
-            ASSERT_EQ(chunk_span3.get().first[i], ref3[i]);
+        if (chunk_view3.get()->ValidData() == nullptr ||
+            chunk_view3.get()->ValidData()[i]) {
+            ASSERT_EQ((*chunk_view3.get())[i], ref3[i]);
         }
-        if (chunk_span4.get().valid_data() == nullptr ||
-            chunk_span4.get().valid_data()[i]) {
-            ASSERT_EQ(chunk_span4.get().data()[i], ref4[i]);
+        if (chunk_view4.get()->ValidData() == nullptr ||
+            chunk_view4.get()->ValidData()[i]) {
+            ASSERT_EQ(chunk_view4.get()->Data()[i], ref4[i]);
         }
-        if (chunk_span5.get().valid_data() == nullptr ||
-            chunk_span5.get().valid_data()[i]) {
-            ASSERT_EQ(chunk_span5.get().data()[i], ref5[i]);
+        if (chunk_view5.get()->ValidData() == nullptr ||
+            chunk_view5.get()->ValidData()[i]) {
+            ASSERT_EQ(chunk_view5.get()->Data()[i], ref5[i]);
         }
-        if (chunk_span6.get().valid_data() == nullptr ||
-            chunk_span6.get().valid_data()[i]) {
-            ASSERT_EQ(chunk_span6.get().data()[i], ref6[i]);
+        if (chunk_view6.get()->ValidData() == nullptr ||
+            chunk_view6.get()->ValidData()[i]) {
+            ASSERT_EQ(chunk_view6.get()->Data()[i], ref6[i]);
         }
-        if (chunk_span7.get().valid_data() == nullptr ||
-            chunk_span7.get().valid_data()[i]) {
-            ASSERT_EQ(chunk_span7.get().data()[i], ref7[i]);
+        if (chunk_view7.get()->ValidData() == nullptr ||
+            chunk_view7.get()->ValidData()[i]) {
+            ASSERT_EQ(chunk_view7.get()->Data()[i], ref7[i]);
         }
-        if (chunk_span8.get().valid_data() == nullptr ||
-            chunk_span8.get().valid_data()[i]) {
-            ASSERT_EQ(chunk_span8.get().data()[i], ref8[i]);
+        if (chunk_view8.get()->ValidData() == nullptr ||
+            chunk_view8.get()->ValidData()[i]) {
+            ASSERT_EQ(chunk_view8.get()->Data()[i], ref8[i]);
         }
-        if (chunk_span9.get().second.size() == 0 ||
-            chunk_span9.get().second[i]) {
-            ASSERT_EQ(chunk_span9.get().first[i], ref9[i]);
+        if (chunk_view9.get()->ValidData() == nullptr ||
+            chunk_view9.get()->ValidData()[i]) {
+            ASSERT_EQ((*chunk_view9.get())[i], ref9[i]);
         }
-        ASSERT_EQ(chunk_span4.get().valid_data()[i], valid4[i]);
-        ASSERT_EQ(chunk_span5.get().valid_data()[i], valid5[i]);
-        ASSERT_EQ(chunk_span6.get().valid_data()[i], valid6[i]);
-        ASSERT_EQ(chunk_span7.get().valid_data()[i], valid7[i]);
-        ASSERT_EQ(chunk_span8.get().valid_data()[i], valid8[i]);
-        ASSERT_EQ(chunk_span9.get().second[i], valid9[i]);
+        ASSERT_EQ(chunk_view4.get()->ValidData()[i], valid4[i]);
+        ASSERT_EQ(chunk_view5.get()->ValidData()[i], valid5[i]);
+        ASSERT_EQ(chunk_view6.get()->ValidData()[i], valid6[i]);
+        ASSERT_EQ(chunk_view7.get()->ValidData()[i], valid7[i]);
+        ASSERT_EQ(chunk_view8.get()->ValidData()[i], valid8[i]);
+        ASSERT_EQ(chunk_view9.get()->ValidData()[i], valid9[i]);
     }
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
@@ -715,18 +714,18 @@ TEST(Sealed, ClearData) {
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
     ASSERT_EQ(segment->PinIndex(nullptr, double_id).size(), 0);
     ASSERT_EQ(segment->PinIndex(nullptr, str_id).size(), 0);
-    auto chunk_span1 = segment->chunk_data<int64_t>(nullptr, counter_id, 0);
-    auto chunk_span2 = segment->chunk_data<double>(nullptr, double_id, 0);
-    auto chunk_span3 =
-        segment->get_batch_views<std::string_view>(nullptr, str_id, 0, 0, N);
+    auto chunk_view1 = segment->chunk_view<int64_t>(nullptr, counter_id, 0);
+    auto chunk_view2 = segment->chunk_view<double>(nullptr, double_id, 0);
+    auto chunk_view3 =
+        segment->chunk_view<std::string_view>(nullptr, str_id, 0, 0, N);
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
-    ASSERT_EQ(chunk_span3.get().second.size(), 0);
+    ASSERT_EQ(chunk_view3.get()->ValidData(), nullptr);
     for (int i = 0; i < N; ++i) {
-        ASSERT_EQ(chunk_span1.get()[i], ref1[i]);
-        ASSERT_EQ(chunk_span2.get()[i], ref2[i]);
-        ASSERT_EQ(chunk_span3.get().first[i], ref3[i]);
+        ASSERT_EQ(chunk_view1.get()->Data()[i], ref1[i]);
+        ASSERT_EQ(chunk_view2.get()->Data()[i], ref2[i]);
+        ASSERT_EQ((*chunk_view3.get())[i], ref3[i]);
     }
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
@@ -802,18 +801,18 @@ TEST(Sealed, LoadFieldDataMmap) {
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
     ASSERT_EQ(segment->PinIndex(nullptr, double_id).size(), 0);
     ASSERT_EQ(segment->PinIndex(nullptr, str_id).size(), 0);
-    auto chunk_span1 = segment->chunk_data<int64_t>(nullptr, counter_id, 0);
-    auto chunk_span2 = segment->chunk_data<double>(nullptr, double_id, 0);
-    auto chunk_span3 =
-        segment->get_batch_views<std::string_view>(nullptr, str_id, 0, 0, N);
+    auto chunk_view1 = segment->chunk_view<int64_t>(nullptr, counter_id, 0);
+    auto chunk_view2 = segment->chunk_view<double>(nullptr, double_id, 0);
+    auto chunk_view3 =
+        segment->chunk_view<std::string_view>(nullptr, str_id, 0, 0, N);
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
-    ASSERT_EQ(chunk_span3.get().second.size(), 0);
+    ASSERT_EQ(chunk_view3.get()->ValidData(), nullptr);
     for (int i = 0; i < N; ++i) {
-        ASSERT_EQ(chunk_span1.get()[i], ref1[i]);
-        ASSERT_EQ(chunk_span2.get()[i], ref2[i]);
-        ASSERT_EQ(chunk_span3.get().first[i], ref3[i]);
+        ASSERT_EQ(chunk_view1.get()->Data()[i], ref1[i]);
+        ASSERT_EQ(chunk_view2.get()->Data()[i], ref2[i]);
+        ASSERT_EQ((*chunk_view3.get())[i], ref3[i]);
     }
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
