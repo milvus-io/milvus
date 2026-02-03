@@ -728,6 +728,87 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("with_raw_data", [True, False])
+    def test_minhash_search_with_raw_data_param(self, with_raw_data):
+        """
+        target: test MinHash search behavior with different with_raw_data settings
+        method:
+            1. Create index with with_raw_data=True/False
+            2. Search with mh_search_with_jaccard=True
+            3. Verify search returns correct Jaccard similarity
+        expected: mh_search_with_jaccard works correctly regardless of with_raw_data setting
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # Use larger num_hashes for better similarity estimation
+        num_hashes = 128
+        dim = num_hashes * 32
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
+
+        schema.add_function(Function(
+            name="text_to_minhash",
+            function_type=FunctionType.MINHASH,
+            input_field_names=[default_text_field_name],
+            output_field_names=[default_minhash_field_name],
+            params={"num_hashes": num_hashes, "shingle_size": 3, "token_level": "char"},
+        ))
+
+        # Use high mh_lsh_band to ensure all candidates pass LSH filter
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name=default_minhash_field_name,
+            index_type="MINHASH_LSH",
+            metric_type="MHJACCARD",
+            params={"mh_lsh_band": 128, "with_raw_data": with_raw_data},
+        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        # Insert test data with known similarity
+        test_texts = [
+            "the quick brown fox jumps over the lazy dog",
+            "the quick brown fox jumps over the lazy cat",  # very similar
+            "completely different text about something else",  # very different
+        ]
+        rows = [{default_primary_key_field_name: i, default_text_field_name: t}
+                for i, t in enumerate(test_texts)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        # Search with mh_search_with_jaccard=True
+        results = self.search(client, collection_name, [test_texts[0]],
+                              anns_field=default_minhash_field_name,
+                              search_params={
+                                  "metric_type": "MHJACCARD",
+                                  "params": {"mh_search_with_jaccard": True},
+                              },
+                              limit=3,
+                              output_fields=[default_primary_key_field_name])[0]
+
+        # Verify at least 2 results (self + similar text)
+        # Note: LSH may filter out very different texts even with high band count
+        assert len(results[0]) >= 2, f"Expected at least 2 results, got {len(results[0])}"
+
+        # First result should be exact match (similarity = 1.0)
+        assert results[0][0]["entity"][default_primary_key_field_name] == 0
+        assert results[0][0]["distance"] == 1.0
+
+        # Second result should be similar text (similarity > 0.5)
+        assert results[0][1]["entity"][default_primary_key_field_name] == 1
+        assert results[0][1]["distance"] > 0.5, f"Expected high similarity, got {results[0][1]['distance']}"
+
+        log.info(f"with_raw_data={with_raw_data}: search returned {len(results[0])} results")
+        for i, hit in enumerate(results[0]):
+            log.info(f"  [{i}] id={hit['entity'][default_primary_key_field_name]}, similarity={hit['distance']:.4f}")
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_minhash_upsert(self):
         """
         target: test upsert operation with MinHash collection
