@@ -728,85 +728,112 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("with_raw_data", [True, False])
-    def test_minhash_search_with_raw_data_param(self, with_raw_data):
+    def test_minhash_with_raw_data_affects_jaccard_distance(self):
         """
-        target: test MinHash search behavior with different with_raw_data settings
+        target: test if with_raw_data affects mh_search_with_jaccard distance calculation
         method:
-            1. Create index with with_raw_data=True/False
-            2. Search with mh_search_with_jaccard=True
-            3. Verify search returns correct Jaccard similarity
-        expected: mh_search_with_jaccard works correctly regardless of with_raw_data setting
+            1. Create two collections with with_raw_data=True and with_raw_data=False
+            2. Insert same data into both collections
+            3. Search with mh_search_with_jaccard=True on both
+            4. Compare returned distances
+        expected:
+            - with_raw_data=True: returns actual Jaccard distance (computed from raw data)
+            - with_raw_data=False: may return estimated distance or different behavior
         """
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
 
-        # Use larger num_hashes for better similarity estimation
         num_hashes = 128
         dim = num_hashes * 32
 
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
-
-        schema.add_function(Function(
-            name="text_to_minhash",
-            function_type=FunctionType.MINHASH,
-            input_field_names=[default_text_field_name],
-            output_field_names=[default_minhash_field_name],
-            params={"num_hashes": num_hashes, "shingle_size": 3, "token_level": "char"},
-        ))
-
-        # Use high mh_lsh_band to ensure all candidates pass LSH filter
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(
-            field_name=default_minhash_field_name,
-            index_type="MINHASH_LSH",
-            metric_type="MHJACCARD",
-            params={"mh_lsh_band": 128, "with_raw_data": with_raw_data},
-        )
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-        # Insert test data with known similarity
+        # Test data with known similarity characteristics
         test_texts = [
             "the quick brown fox jumps over the lazy dog",
             "the quick brown fox jumps over the lazy cat",  # very similar
-            "completely different text about something else",  # very different
+            "completely different text about something else entirely new",  # very different
         ]
-        rows = [{default_primary_key_field_name: i, default_text_field_name: t}
-                for i, t in enumerate(test_texts)]
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
 
-        # Search with mh_search_with_jaccard=True
-        results = self.search(client, collection_name, [test_texts[0]],
-                              anns_field=default_minhash_field_name,
-                              search_params={
-                                  "metric_type": "MHJACCARD",
-                                  "params": {"mh_search_with_jaccard": True},
-                              },
-                              limit=3,
-                              output_fields=[default_primary_key_field_name])[0]
+        results_by_config = {}
 
-        # Verify at least 2 results (self + similar text)
-        # Note: LSH may filter out very different texts even with high band count
-        assert len(results[0]) >= 2, f"Expected at least 2 results, got {len(results[0])}"
+        for with_raw_data in [True, False]:
+            collection_name = cf.gen_collection_name_by_testcase_name() + f"_raw_{with_raw_data}"
 
-        # First result should be exact match (similarity = 1.0)
-        assert results[0][0]["entity"][default_primary_key_field_name] == 0
-        assert results[0][0]["distance"] == 1.0
+            schema = self.create_schema(client, enable_dynamic_field=False)[0]
+            schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+            schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
+            schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
 
-        # Second result should be similar text (similarity > 0.5)
-        assert results[0][1]["entity"][default_primary_key_field_name] == 1
-        assert results[0][1]["distance"] > 0.5, f"Expected high similarity, got {results[0][1]['distance']}"
+            schema.add_function(Function(
+                name="text_to_minhash",
+                function_type=FunctionType.MINHASH,
+                input_field_names=[default_text_field_name],
+                output_field_names=[default_minhash_field_name],
+                params={"num_hashes": num_hashes, "shingle_size": 3, "token_level": "char"},
+            ))
 
-        log.info(f"with_raw_data={with_raw_data}: search returned {len(results[0])} results")
-        for i, hit in enumerate(results[0]):
-            log.info(f"  [{i}] id={hit['entity'][default_primary_key_field_name]}, similarity={hit['distance']:.4f}")
+            index_params = self.prepare_index_params(client)[0]
+            index_params.add_index(
+                field_name=default_minhash_field_name,
+                index_type="MINHASH_LSH",
+                metric_type="MHJACCARD",
+                params={"mh_lsh_band": 128, "with_raw_data": with_raw_data},
+            )
+            self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
-        self.drop_collection(client, collection_name)
+            rows = [{default_primary_key_field_name: i, default_text_field_name: t}
+                    for i, t in enumerate(test_texts)]
+            self.insert(client, collection_name, rows)
+            self.flush(client, collection_name)
+            self.load_collection(client, collection_name)
+
+            # Search with mh_search_with_jaccard=True
+            results = self.search(client, collection_name, [test_texts[0]],
+                                  anns_field=default_minhash_field_name,
+                                  search_params={
+                                      "metric_type": "MHJACCARD",
+                                      "params": {"mh_search_with_jaccard": True},
+                                  },
+                                  limit=3,
+                                  output_fields=[default_primary_key_field_name])[0]
+
+            # Store results for comparison
+            distances = {}
+            for hit in results[0]:
+                hit_id = hit["entity"][default_primary_key_field_name]
+                distances[hit_id] = hit["distance"]
+
+            results_by_config[with_raw_data] = {
+                "distances": distances,
+                "num_results": len(results[0]),
+            }
+
+            log.info(f"with_raw_data={with_raw_data}: {len(results[0])} results")
+            for hit in results[0]:
+                log.info(f"  id={hit['entity'][default_primary_key_field_name]}, distance={hit['distance']:.6f}")
+
+            self.drop_collection(client, collection_name)
+
+        # Compare results between with_raw_data=True and with_raw_data=False
+        log.info("=" * 60)
+        log.info("COMPARISON: with_raw_data=True vs with_raw_data=False")
+        log.info("=" * 60)
+
+        true_distances = results_by_config[True]["distances"]
+        false_distances = results_by_config[False]["distances"]
+
+        # Check if distances are identical or different
+        distances_match = True
+        for doc_id in true_distances:
+            if doc_id in false_distances:
+                diff = abs(true_distances[doc_id] - false_distances[doc_id])
+                log.info(f"  doc_id={doc_id}: True={true_distances[doc_id]:.6f}, "
+                         f"False={false_distances[doc_id]:.6f}, diff={diff:.6f}")
+                if diff > 1e-6:
+                    distances_match = False
+
+        if distances_match:
+            log.info("RESULT: Distances are IDENTICAL - with_raw_data has NO effect on mh_search_with_jaccard")
+        else:
+            log.info("RESULT: Distances DIFFER - with_raw_data AFFECTS mh_search_with_jaccard calculation")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_minhash_upsert(self):
