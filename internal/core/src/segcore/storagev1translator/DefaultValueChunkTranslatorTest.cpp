@@ -854,3 +854,269 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapFileSize) {
         << "Mmap file size should be at least " << row_count * sizeof(int64_t)
         << " bytes";
 }
+
+// Test multiple cells with variable-length types (String) to verify tail buffer fix.
+// This test specifically verifies that the tail cell (which may have different row count)
+// is handled correctly for variable-length types where buffer layout depends on row count.
+TEST_P(DefaultValueChunkTranslatorTest, TestStringMultipleCellsWithTailBuffer) {
+    bool use_mmap = GetParam();
+    std::string default_string = "test_default_string";
+
+    // Calculate row count to ensure multiple cells with a tail cell having different rows.
+    // For string type, value_size = string length + 1 = 20 bytes
+    // Target cell size is 64KB, so rows_per_cell ~ 64*1024/20 = 3276
+    // Use a row count that is NOT a multiple of rows_per_cell to ensure tail cell exists
+    int64_t rows_per_cell = DefaultValueChunkTranslator::kTargetCellBytes /
+                            (default_string.size() + 1);
+    int64_t row_count =
+        rows_per_cell * 3 + rows_per_cell / 2;  // 3.5 cells worth of rows
+
+    DefaultValueType value_field;
+    value_field.set_string_data(default_string);
+    FieldMeta field_meta(FieldName("test_string_multi_cell"),
+                         FieldId(1201),
+                         DataType::STRING,
+                         false,
+                         value_field);
+
+    FieldDataInfo field_data_info(1201, row_count, getMmapDirPath());
+
+    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+        segment_id_, field_meta, field_data_info, use_mmap, true);
+
+    // Should have at least 2 cells (primary cells + tail cell)
+    size_t num_cells = translator->num_cells();
+    ASSERT_GT(num_cells, 1) << "Expected multiple cells for this row count";
+
+    // Get ALL cells including the tail cell
+    std::vector<cachinglayer::cid_t> cids;
+    for (size_t i = 0; i < num_cells; ++i) {
+        cids.push_back(i);
+    }
+
+    auto cells = translator->get_cells(nullptr, cids);
+    EXPECT_EQ(cells.size(), num_cells);
+
+    int64_t total_rows = 0;
+    for (size_t idx = 0; idx < cells.size(); ++idx) {
+        auto& [cid, chunk] = cells[idx];
+        auto string_chunk = static_cast<StringChunk*>(chunk.get());
+        auto [views, valid] = string_chunk->StringViews(std::nullopt);
+
+        total_rows += views.size();
+
+        // Verify all strings in this cell have the correct default value
+        for (size_t i = 0; i < views.size(); ++i) {
+            EXPECT_EQ(views[i], default_string)
+                << "String mismatch at cell " << cid << " row " << i
+                << ": expected '" << default_string << "' but got '" << views[i]
+                << "'";
+        }
+    }
+
+    // Verify total row count matches
+    EXPECT_EQ(total_rows, row_count)
+        << "Total rows across all cells should match row_count";
+}
+
+// Test nullable String with multiple cells (null default value)
+TEST_P(DefaultValueChunkTranslatorTest,
+       TestNullableStringMultipleCellsWithTailBuffer) {
+    bool use_mmap = GetParam();
+
+    // For nullable string without default value, value_size = 1
+    // rows_per_cell ~ 64*1024/1 = 65536
+    // Use a row count that creates multiple cells with a tail
+    int64_t rows_per_cell = DefaultValueChunkTranslator::kTargetCellBytes / 1;
+    int64_t row_count = rows_per_cell * 2 + rows_per_cell / 3;
+
+    FieldMeta field_meta(FieldName("test_nullable_string_multi"),
+                         FieldId(1202),
+                         DataType::VARCHAR,
+                         true,  // nullable
+                         std::nullopt);
+
+    FieldDataInfo field_data_info(1202, row_count, getMmapDirPath());
+
+    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+        segment_id_, field_meta, field_data_info, use_mmap, true);
+
+    size_t num_cells = translator->num_cells();
+    ASSERT_GT(num_cells, 1) << "Expected multiple cells";
+
+    // Get all cells
+    std::vector<cachinglayer::cid_t> cids;
+    for (size_t i = 0; i < num_cells; ++i) {
+        cids.push_back(i);
+    }
+
+    auto cells = translator->get_cells(nullptr, cids);
+    EXPECT_EQ(cells.size(), num_cells);
+
+    int64_t total_rows = 0;
+    for (auto& [cid, chunk] : cells) {
+        auto string_chunk = static_cast<StringChunk*>(chunk.get());
+        auto [views, valid] = string_chunk->StringViews(std::nullopt);
+
+        total_rows += views.size();
+
+        // All values should be null (invalid)
+        for (size_t i = 0; i < valid.size(); ++i) {
+            EXPECT_FALSE(valid[i])
+                << "Expected null at cell " << cid << " row " << i;
+        }
+    }
+
+    EXPECT_EQ(total_rows, row_count);
+}
+
+// Test that fixed-width types still work correctly with multiple cells
+// (verifying buffer sharing with row_nums_override still works)
+TEST_P(DefaultValueChunkTranslatorTest, TestFixedWidthMultipleCellsWithTail) {
+    bool use_mmap = GetParam();
+    int64_t default_value = 12345;
+
+    // For INT64, value_size = 8 bytes
+    // rows_per_cell ~ 64*1024/8 = 8192
+    int64_t rows_per_cell = DefaultValueChunkTranslator::kTargetCellBytes / 8;
+    int64_t row_count =
+        rows_per_cell * 2 + rows_per_cell / 4;  // 2.25 cells worth
+
+    DefaultValueType value_field;
+    value_field.set_long_data(default_value);
+    FieldMeta field_meta(FieldName("test_int64_multi_tail"),
+                         FieldId(1203),
+                         DataType::INT64,
+                         false,
+                         value_field);
+
+    FieldDataInfo field_data_info(1203, row_count, getMmapDirPath());
+
+    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+        segment_id_, field_meta, field_data_info, use_mmap, true);
+
+    size_t num_cells = translator->num_cells();
+    ASSERT_GT(num_cells, 1) << "Expected multiple cells";
+
+    // Get all cells including tail
+    std::vector<cachinglayer::cid_t> cids;
+    for (size_t i = 0; i < num_cells; ++i) {
+        cids.push_back(i);
+    }
+
+    auto cells = translator->get_cells(nullptr, cids);
+    EXPECT_EQ(cells.size(), num_cells);
+
+    int64_t total_rows = 0;
+    for (auto& [cid, chunk] : cells) {
+        auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
+        auto span = fixed_chunk->Span();
+        total_rows += span.row_count();
+
+        // Verify all values are correct
+        for (size_t i = 0; i < span.row_count(); ++i) {
+            auto value =
+                *(int64_t*)((char*)span.data() + i * span.element_sizeof());
+            EXPECT_EQ(value, default_value)
+                << "Value mismatch at cell " << cid << " row " << i;
+        }
+    }
+
+    EXPECT_EQ(total_rows, row_count);
+}
+
+// Test nullable VECTOR_FLOAT with all-null default values
+TEST_P(DefaultValueChunkTranslatorTest, TestNullableVectorFloat) {
+    bool use_mmap = GetParam();
+
+    int64_t dim = 4;
+    // For nullable vectors, value_size() returns 0, so the translator falls
+    // back to a single cell.  Verify single-cell all-null correctness here.
+    int64_t row_count = 100;
+
+    FieldMeta field_meta(FieldName("test_vector_float_nullable"),
+                         FieldId(1300),
+                         DataType::VECTOR_FLOAT,
+                         dim,
+                         std::nullopt,   // metric_type
+                         true,           // nullable
+                         std::nullopt);  // no default value
+
+    FieldDataInfo field_data_info(1300, row_count, getMmapDirPath());
+
+    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+        segment_id_, field_meta, field_data_info, use_mmap, true);
+
+    size_t num_cells = translator->num_cells();
+    ASSERT_GE(num_cells, 1);
+
+    // Get all cells
+    std::vector<cachinglayer::cid_t> cids;
+    for (size_t i = 0; i < num_cells; ++i) {
+        cids.push_back(i);
+    }
+
+    auto cells = translator->get_cells(nullptr, cids);
+    EXPECT_EQ(cells.size(), num_cells);
+
+    int64_t total_rows = 0;
+    for (auto& [cid, chunk] : cells) {
+        auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
+        auto span = fixed_chunk->Span();
+        total_rows += span.row_count();
+
+        // Every row should be null
+        for (size_t i = 0; i < span.row_count(); ++i) {
+            EXPECT_FALSE(chunk->isValid(i))
+                << "Expected null at cell " << cid << " row " << i;
+        }
+    }
+
+    EXPECT_EQ(total_rows, row_count);
+}
+
+// Test nullable VECTOR_SPARSE_U32_F32 with all-null default values
+TEST_P(DefaultValueChunkTranslatorTest, TestNullableSparseVector) {
+    bool use_mmap = GetParam();
+
+    // Sparse vectors: value_size()==0 → single cell, all rows null.
+    int64_t row_count = 50;
+
+    // Sparse vector FieldMeta: dim can be any value (unused for sparse).
+    FieldMeta field_meta(FieldName("test_sparse_nullable"),
+                         FieldId(1301),
+                         DataType::VECTOR_SPARSE_U32_F32,
+                         /*dim=*/0,
+                         std::nullopt,   // metric_type
+                         true,           // nullable
+                         std::nullopt);  // no default value
+
+    FieldDataInfo field_data_info(1301, row_count, getMmapDirPath());
+
+    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+        segment_id_, field_meta, field_data_info, use_mmap, true);
+
+    size_t num_cells = translator->num_cells();
+    ASSERT_GE(num_cells, 1);
+
+    std::vector<cachinglayer::cid_t> cids;
+    for (size_t i = 0; i < num_cells; ++i) {
+        cids.push_back(i);
+    }
+
+    auto cells = translator->get_cells(nullptr, cids);
+    EXPECT_EQ(cells.size(), num_cells);
+
+    int64_t total_rows = 0;
+    for (auto& [cid, chunk] : cells) {
+        total_rows += chunk->RowNums();
+
+        // Every row should be null
+        for (int64_t i = 0; i < chunk->RowNums(); ++i) {
+            EXPECT_FALSE(chunk->isValid(i))
+                << "Expected null at cell " << cid << " row " << i;
+        }
+    }
+
+    EXPECT_EQ(total_rows, row_count);
+}
