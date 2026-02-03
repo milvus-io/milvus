@@ -336,25 +336,24 @@ func (s *Server) initGRPCServer() {
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
 
-	serverIDGetter := func() int64 {
-		return s.session.ServerID
-	}
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(cfg.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(cfg.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+			interceptor.NewMilvusContextUnaryServerInterceptor(),
+			interceptor.NewMetricsServerUnaryInterceptor(),
+			interceptor.NewLogUnaryServerInterceptor(),
 			logutil.UnaryTraceLoggerInterceptor,
 			streamingserviceinterceptor.NewStreamingServiceUnaryServerInterceptor(),
-			interceptor.ClusterValidationUnaryServerInterceptor(),
-			interceptor.ServerIDValidationUnaryServerInterceptor(serverIDGetter),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+			interceptor.NewMilvusContextStreamServerInterceptor(),
+			interceptor.NewMetricsStreamServerInterceptor(),
+			interceptor.NewLogStreamServerInterceptor(),
 			logutil.StreamTraceLoggerInterceptor,
 			streamingserviceinterceptor.NewStreamingServiceStreamServerInterceptor(),
-			interceptor.ClusterValidationStreamServerInterceptor(),
-			interceptor.ServerIDValidationStreamServerInterceptor(serverIDGetter),
 		)),
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
 		utils.EnableInternalTLS("StreamingNode"),

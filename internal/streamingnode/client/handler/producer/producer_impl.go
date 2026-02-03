@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -254,8 +255,13 @@ func (p *producerImpl) sendLoop() (err error) {
 			requestID := p.idAllocator.Allocate()
 			// Store the request to pending request map.
 			p.pendingRequests.Store(requestID, req)
-			// Send the produce message to server.
-			if err := p.grpcStreamClient.SendProduceMessage(requestID, req.msg); err != nil {
+			// Extract traceID from context.
+			traceID := ""
+			if spanCtx := trace.SpanContextFromContext(req.ctx); spanCtx.IsValid() {
+				traceID = spanCtx.TraceID().String()
+			}
+			// Send the produce message to server with traceID.
+			if err := p.grpcStreamClient.SendProduceMessage(requestID, req.msg, traceID); err != nil {
 				// If send failed, remove the request from pending request map and return error to client.
 				p.notifyRequest(requestID, produceResponse{
 					err: err,

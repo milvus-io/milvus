@@ -1,6 +1,7 @@
 package metricsutil
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -130,10 +131,10 @@ func (m *AppendMetrics) RangeOverInterceptors(f func(name string, ims []*Interce
 }
 
 // Done push the metrics.
-func (m *AppendMetrics) Done(result *types.AppendResult, err error) {
+func (m *AppendMetrics) Done(ctx context.Context, result *types.AppendResult, err error) {
 	m.err = err
 	m.result = result
-	m.wm.done(m)
+	m.wm.done(ctx, m)
 }
 
 // InterceptorCollectGuard is used to collect the metrics of interceptor.

@@ -11,12 +11,13 @@ type produceGrpcClient struct {
 }
 
 // SendProduceMessage sends the produce message to server.
-func (p *produceGrpcClient) SendProduceMessage(requestID int64, msg message.MutableMessage) error {
+func (p *produceGrpcClient) SendProduceMessage(requestID int64, msg message.MutableMessage, traceID string) error {
 	return p.Send(&streamingpb.ProduceRequest{
 		Request: &streamingpb.ProduceRequest_Produce{
 			Produce: &streamingpb.ProduceMessageRequest{
 				RequestId: requestID,
 				Message:   msg.IntoMessageProto(),
+				TraceId:   traceID,
 			},
 		},
 	})

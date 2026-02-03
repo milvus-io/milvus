@@ -4,6 +4,7 @@
 #   cmake-build-debug/
 #   proxy/cmake-build-debug/
 #   a/b/c/cmake-build-debug/
+cmake_build
 **/cmake-build-debug/*
 **/cmake-build-debug-coverage/*
 **/cmake-build-release/*
@@ -15,6 +16,7 @@ CMakeCache.txt
 .cache
 coverage_report/
 
+internal/core/output
 internal/core/output/*
 internal/core/build/*
 **/.idea/*
@@ -136,5 +138,5 @@ docs/plans/
 .ripgreprc
 .zprofile
 .zshrc
-
-
+CLAUDE.md
+.claude

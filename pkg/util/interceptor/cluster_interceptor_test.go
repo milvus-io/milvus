@@ -25,6 +25,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v2/util/mcontext"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -39,14 +40,14 @@ func TestClusterInterceptor(t *testing.T) {
 			incomingContext = ctx
 			return nil
 		}
-		interceptor := ClusterInjectionUnaryClientInterceptor()
+		interceptor := NewMilvusContextUnaryClientInterceptor(0)
 		ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(make(map[string]string)))
 		err := interceptor(ctx, method, req, nil, nil, invoker)
 		assert.NoError(t, err)
 
 		md, ok := metadata.FromOutgoingContext(incomingContext)
 		assert.True(t, ok)
-		assert.Equal(t, paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), md.Get(ClusterKey)[0])
+		assert.Equal(t, paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), md.Get(mcontext.DestinationClusterKey)[0])
 	})
 
 	t.Run("test ClusterInjectionStreamClientInterceptor", func(t *testing.T) {
@@ -57,14 +58,14 @@ func TestClusterInterceptor(t *testing.T) {
 			incomingContext = ctx
 			return nil, nil
 		}
-		interceptor := ClusterInjectionStreamClientInterceptor()
+		interceptor := NewMilvusContextStreamClientInterceptor(0)
 		ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(make(map[string]string)))
 		_, err := interceptor(ctx, nil, nil, method, streamer)
 		assert.NoError(t, err)
 
 		md, ok := metadata.FromOutgoingContext(incomingContext)
 		assert.True(t, ok)
-		assert.Equal(t, paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), md.Get(ClusterKey)[0])
+		assert.Equal(t, paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), md.Get(mcontext.DestinationClusterKey)[0])
 	})
 
 	t.Run("test ClusterValidationUnaryServerInterceptor", func(t *testing.T) {
@@ -75,7 +76,7 @@ func TestClusterInterceptor(t *testing.T) {
 			return nil, nil
 		}
 		serverInfo := &grpc.UnaryServerInfo{FullMethod: method}
-		interceptor := ClusterValidationUnaryServerInterceptor()
+		interceptor := NewMilvusContextUnaryServerInterceptor()
 
 		// no md in context
 		_, err := interceptor(context.Background(), req, serverInfo, handler)
@@ -87,13 +88,13 @@ func TestClusterInterceptor(t *testing.T) {
 		assert.NoError(t, err)
 
 		// with cross-cluster
-		md := metadata.Pairs(ClusterKey, "ins-1")
+		md := metadata.Pairs(mcontext.DestinationClusterKey, "ins-1")
 		ctx = metadata.NewIncomingContext(context.Background(), md)
 		_, err = interceptor(ctx, req, serverInfo, handler)
 		assert.ErrorIs(t, err, merr.ErrServiceCrossClusterRouting)
 
 		// with same cluster
-		md = metadata.Pairs(ClusterKey, paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+		md = metadata.Pairs(mcontext.DestinationClusterKey, paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 		ctx = metadata.NewIncomingContext(context.Background(), md)
 		_, err = interceptor(ctx, req, serverInfo, handler)
 		assert.NoError(t, err)
@@ -103,7 +104,7 @@ func TestClusterInterceptor(t *testing.T) {
 		handler := func(srv interface{}, stream grpc.ServerStream) error {
 			return nil
 		}
-		interceptor := ClusterValidationStreamServerInterceptor()
+		interceptor := NewMilvusContextStreamServerInterceptor()
 
 		// no md in context
 		err := interceptor(nil, newMockSS(context.Background()), nil, handler)
@@ -115,13 +116,13 @@ func TestClusterInterceptor(t *testing.T) {
 		assert.NoError(t, err)
 
 		// with cross-cluster
-		md := metadata.Pairs(ClusterKey, "ins-1")
+		md := metadata.Pairs(mcontext.DestinationClusterKey, "ins-1")
 		ctx = metadata.NewIncomingContext(context.Background(), md)
 		err = interceptor(nil, newMockSS(ctx), nil, handler)
 		assert.ErrorIs(t, err, merr.ErrServiceCrossClusterRouting)
 
 		// with same cluster
-		md = metadata.Pairs(ClusterKey, paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+		md = metadata.Pairs(mcontext.DestinationClusterKey, paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 		ctx = metadata.NewIncomingContext(context.Background(), md)
 		err = interceptor(nil, newMockSS(ctx), nil, handler)
 		assert.NoError(t, err)
