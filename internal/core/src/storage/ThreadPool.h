@@ -72,13 +72,6 @@ class ThreadPool {
         max_threads_size_.store(std::max(
             1,
             static_cast<int>(std::round(CPU_NUM * thread_core_coefficient))));
-
-        // only IO pool will set large limit, but the CPU helps nothing to IO operations,
-        // we need to limit the max thread num, each thread will download 16~64 MiB data,
-        // according to our benchmark, 16 threads is enough to saturate the network bandwidth.
-        if (max_threads_size_.load() > 16) {
-            max_threads_size_.store(16);
-        }
         LOG_INFO("Init thread pool:{}", name_)
             << " with min worker num:" << min_threads_size_
             << " and max worker num:" << max_threads_size_.load();
@@ -151,9 +144,6 @@ class ThreadPool {
         //no need to hold mutex here as we don't require
         //max_threads_size to take effect instantly, just guaranteed atomic
         new_size = std::max(1, new_size);
-        if (new_size > 16) {
-            new_size = 16;
-        }
         max_threads_size_.store(new_size);
     }
 
