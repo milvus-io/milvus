@@ -4520,3 +4520,670 @@ class TestVectorWithAuth(TestBase):
         client.api_key = "invalid_api_key"
         rsp = client.vector_delete(payload)
         assert rsp['code'] == 1800
+
+
+@pytest.mark.L0
+class TestSearchByPK(TestBase):
+    """
+    Test cases for search by primary key functionality (PR #47260)
+
+    Note: search_by_pk uses the vectors of specified IDs as query vectors to perform ANN search.
+    Each ID's vector returns `limit` results, so total results = len(ids) * limit (capped by collection size).
+    The first result for each query should be itself with distance ~0 (for L2/COSINE metrics).
+    """
+
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/47495 - JSON float64 precision loss for large int64 IDs")
+    def test_search_by_pk_with_int64_ids_as_numbers(self):
+        """
+        Search by primary key with int64 ids provided as numbers.
+        Verifies that vectors are retrieved and used as query vectors for ANN search.
+
+        Note: When using autoId=True, Milvus generates int64 IDs that may exceed
+        JavaScript's MAX_SAFE_INTEGER (2^53-1). Due to JSON float64 precision loss,
+        large int64 IDs lose precision when decoded as float64, causing "duplicate IDs" error.
+
+        This test is expected to fail until the issue is fixed.
+        Related issue: https://github.com/milvus-io/milvus/issues/47495
+        """
+        name = gen_collection_name()
+        self.name = name
+        dim = 128
+        nb = 100
+        limit = 10
+        schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
+
+        # Use numeric IDs directly - this will trigger precision loss for large int64 IDs
+        # autoId generates IDs > 2^53 which lose precision when parsed as JSON float64
+        test_ids = [int(i) for i in insert_ids[:3]]
+
+        payload = {
+            "collectionName": name,
+            "ids": test_ids,
+            "outputFields": ["*"],
+            "limit": limit
+        }
+        rsp = self.vector_client.vector_search(payload)
+
+        assert rsp['code'] == 0
+        # Each query ID returns up to `limit` results
+        assert len(rsp['data']) == len(test_ids) * limit
+        # The queried IDs should appear in results (as they match themselves with distance ~0)
+        returned_ids = [item['id'] for item in rsp['data']]
+        for rid in test_ids:
+            assert rid in returned_ids
+
+    def test_search_by_pk_with_int64_ids_as_strings(self):
+        """
+        Search by primary key with int64 ids provided as strings.
+        Verifies string IDs are correctly parsed and used for search.
+        """
+        name = gen_collection_name()
+        self.name = name
+        dim = 128
+        nb = 100
+        limit = 10
+        schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
+
+        # Convert insert_ids to strings
+        test_ids = [str(i) for i in insert_ids[:3]]
+
+        payload = {
+            "collectionName": name,
+            "ids": test_ids,
+            "outputFields": ["*"],
+            "limit": limit
+        }
+        rsp = self.vector_client.vector_search(payload)
+
+        assert rsp['code'] == 0
+        assert len(rsp['data']) == len(test_ids) * limit
+        returned_ids = [item['id'] for item in rsp['data']]
+        for rid in test_ids:
+            assert int(rid) in returned_ids
+
+    def test_search_by_pk_with_varchar_ids(self):
+        """
+        Search by primary key with varchar ids.
+        """
+        name = gen_collection_name()
+        self.name = name
+        dim = 128
+        limit = 10
+
+        # Create varchar primary key collection
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": True,
+                "fields": [
+                    {"fieldName": "pk", "dataType": "VarChar", "isPrimary": True,
+                     "elementTypeParams": {"max_length": "128"}},
+                    {"fieldName": "uid", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "vector", "dataType": "FloatVector",
+                     "elementTypeParams": {"dim": str(dim)}},
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "vector", "indexName": "vector", "metricType": "L2"}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_collection_load_completed(name)
+
+        # Insert data
+        nb = 100
+        data = []
+        insert_pks = []
+        for i in range(nb):
+            pk = f"pk_{i:06d}"
+            insert_pks.append(pk)
+            data.append({
+                "pk": pk,
+                "uid": i,
+                "vector": gen_vector(datatype="FloatVector", dim=dim),
+            })
+
+        insert_payload = {"collectionName": name, "data": data}
+        rsp = self.vector_client.vector_insert(insert_payload)
+        assert rsp['code'] == 0
+
+        # Search by pk
+        test_pks = insert_pks[:3]
+        search_payload = {
+            "collectionName": name,
+            "ids": test_pks,
+            "outputFields": ["*"],
+            "limit": limit
+        }
+        rsp = self.vector_client.vector_search(search_payload)
+
+        assert rsp['code'] == 0
+        assert len(rsp['data']) == len(test_pks) * limit
+        returned_pks = [item['pk'] for item in rsp['data']]
+        for pk in test_pks:
+            assert pk in returned_pks
+
+    def test_search_by_pk_with_filter(self):
+        """
+        Search by primary key with additional filter.
+        Filter applies to the search results.
+        """
+        name = gen_collection_name()
+        self.name = name
+        dim = 128
+        nb = 100
+        schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
+
+        # Use string IDs to avoid float64 precision loss
+        test_ids = [str(i) for i in insert_ids[:5]]
+
+        # Apply filter that matches only some results
+        payload = {
+            "collectionName": name,
+            "ids": test_ids,
+            "filter": "uid >= 5",
+            "outputFields": ["*"],
+            "limit": 100
+        }
+        rsp = self.vector_client.vector_search(payload)
+
+        assert rsp['code'] == 0
+        # All returned items should have uid >= 5
+        for item in rsp['data']:
+            assert item['uid'] >= 5
+
+    def test_search_by_pk_with_output_fields(self):
+        """
+        Search by primary key with specific output fields.
+        """
+        name = gen_collection_name()
+        self.name = name
+        dim = 128
+        nb = 100
+        limit = 10
+        schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
+
+        # Use string IDs to avoid float64 precision loss
+        test_ids = [str(i) for i in insert_ids[:3]]
+
+        payload = {
+            "collectionName": name,
+            "ids": test_ids,
+            "outputFields": ["uid", "id"],
+            "limit": limit
+        }
+        rsp = self.vector_client.vector_search(payload)
+
+        assert rsp['code'] == 0
+        assert len(rsp['data']) == len(test_ids) * limit
+        for item in rsp['data']:
+            assert 'uid' in item
+            assert 'id' in item
+
+    def test_search_by_pk_with_limit(self):
+        """
+        Search by primary key with limit parameter.
+        Total results = len(ids) * limit.
+        """
+        name = gen_collection_name()
+        self.name = name
+        dim = 128
+        nb = 100
+        schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
+
+        # Use string IDs to avoid float64 precision loss
+        test_ids = [str(i) for i in insert_ids[:5]]
+        limit = 10
+
+        payload = {
+            "collectionName": name,
+            "ids": test_ids,
+            "outputFields": ["*"],
+            "limit": limit
+        }
+        rsp = self.vector_client.vector_search(payload)
+
+        assert rsp['code'] == 0
+        # Result count should be len(test_ids) * limit
+        assert len(rsp['data']) == len(test_ids) * limit
+
+    def test_search_by_pk_with_nonexistent_ids(self):
+        """
+        Search by primary key with non-existent IDs returns error.
+        When IDs don't exist, the API returns error code 1100.
+        """
+        name = gen_collection_name()
+        self.name = name
+        dim = 128
+        nb = 100
+        limit = 10
+        schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
+
+        # Use only non-existent IDs
+        nonexistent_ids = [999999999, 888888888]
+
+        payload = {
+            "collectionName": name,
+            "ids": nonexistent_ids,
+            "outputFields": ["*"],
+            "limit": limit
+        }
+        rsp = self.vector_client.vector_search(payload)
+
+        # Non-existent IDs should return error
+        assert rsp['code'] == 1100
+
+    def test_search_by_pk_result_verification(self):
+        """
+        Verify that search by pk returns results where queried entities appear first (distance ~0).
+        """
+        name = gen_collection_name()
+        self.name = name
+        dim = 128
+        nb = 100
+        limit = 5
+        schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
+
+        # Use string IDs to avoid float64 precision loss
+        test_ids = [str(i) for i in insert_ids[:3]]
+
+        payload = {
+            "collectionName": name,
+            "ids": test_ids,
+            "outputFields": ["*"],
+            "limit": limit
+        }
+        rsp = self.vector_client.vector_search(payload)
+
+        assert rsp['code'] == 0
+        assert len(rsp['data']) == len(test_ids) * limit
+
+        # Group results by query (each limit results belong to one query)
+        # The first result in each group should have distance ~0 (matching itself)
+        for i in range(len(test_ids)):
+            first_result = rsp['data'][i * limit]
+            # First result should be the query entity itself with very small distance
+            assert first_result['distance'] < 0.001 or first_result['id'] == int(test_ids[i])
+
+    def test_search_by_pk_with_bm25_function_schema(self):
+        """
+        Search by primary key with BM25 function schema (full text search enabled).
+        Uses sparse_vector field generated by BM25 function for search.
+
+        Note: Uses string IDs to avoid float64 precision loss for large autoId values.
+        """
+        name = gen_collection_name()
+        self.name = name
+        limit = 10
+
+        # Create collection with BM25 function
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": True,
+                "enableDynamicField": True,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "user_id", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "document_content", "dataType": "VarChar",
+                     "elementTypeParams": {"max_length": "1000", "enable_analyzer": True,
+                                           "analyzer_params": {"tokenizer": "standard"},
+                                           "enable_match": True}},
+                    {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
+                ],
+                "functions": [
+                    {
+                        "name": "bm25_fn",
+                        "type": "BM25",
+                        "inputFieldNames": ["document_content"],
+                        "outputFieldNames": ["sparse_vector"],
+                        "params": {}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "sparse_vector", "indexName": "sparse_vector", "metricType": "BM25",
+                 "params": {"index_type": "SPARSE_INVERTED_INDEX"}}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_collection_load_completed(name)
+
+        # Insert data
+        nb = 100
+        data = []
+        for i in range(nb):
+            data.append({
+                "user_id": i % 10,
+                "word_count": i,
+                "book_describe": f"book_{i}",
+                "document_content": fake_en.text().lower(),
+            })
+        insert_payload = {"collectionName": name, "data": data}
+        rsp = self.vector_client.vector_insert(insert_payload)
+        assert rsp['code'] == 0
+
+        # Use string IDs to avoid float64 precision loss for large autoId values
+        test_ids = [str(i) for i in rsp['data']['insertIds'][:3]]
+
+        # Search by pk - must specify annsField for BM25 sparse vector
+        search_payload = {
+            "collectionName": name,
+            "ids": test_ids,
+            "annsField": "sparse_vector",
+            "outputFields": ["book_id", "user_id"],
+            "limit": limit
+        }
+        rsp = self.vector_client.vector_search(search_payload)
+
+        assert rsp['code'] == 0
+        assert len(rsp['data']) == len(test_ids) * limit
+        returned_ids = [item['book_id'] for item in rsp['data']]
+        for rid in test_ids:
+            assert int(rid) in returned_ids
+
+    def test_search_by_pk_with_sparse_vector_schema(self):
+        """
+        Search by primary key with sparse vector schema.
+        Must specify annsField when multiple vector fields exist.
+        """
+        name = gen_collection_name()
+        self.name = name
+        dim = 128
+        limit = 10
+
+        # Create collection with sparse vector
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": True,
+                "fields": [
+                    {"fieldName": "pk", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "uid", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector",
+                     "elementTypeParams": {"dim": str(dim)}},
+                    {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "dense_vector", "indexName": "dense_vector", "metricType": "L2"},
+                {"fieldName": "sparse_vector", "indexName": "sparse_vector", "metricType": "IP",
+                 "params": {"index_type": "SPARSE_INVERTED_INDEX"}}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_collection_load_completed(name)
+
+        # Insert data
+        nb = 100
+        data = []
+        insert_pks = []
+        for i in range(nb):
+            insert_pks.append(i)
+            data.append({
+                "pk": i,
+                "uid": i % 10,
+                "dense_vector": gen_vector(datatype="FloatVector", dim=dim),
+                "sparse_vector": gen_vector(datatype="SparseFloatVector", dim=1000),
+            })
+        insert_payload = {"collectionName": name, "data": data}
+        rsp = self.vector_client.vector_insert(insert_payload)
+        assert rsp['code'] == 0
+
+        # Search by pk - specify annsField for dense_vector
+        test_pks = insert_pks[:3]
+        search_payload = {
+            "collectionName": name,
+            "ids": test_pks,
+            "annsField": "dense_vector",
+            "outputFields": ["pk", "uid"],
+            "limit": limit
+        }
+        rsp = self.vector_client.vector_search(search_payload)
+
+        assert rsp['code'] == 0
+        assert len(rsp['data']) == len(test_pks) * limit
+        returned_pks = [item['pk'] for item in rsp['data']]
+        for pk in test_pks:
+            assert pk in returned_pks
+
+    def test_search_by_pk_with_multiple_vector_fields(self):
+        """
+        Search by primary key with multiple vector fields schema.
+        Must specify annsField when multiple vector fields exist.
+        """
+        name = gen_collection_name()
+        self.name = name
+        dim = 128
+        limit = 10
+
+        # Create collection with multiple vector fields
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": True,
+                "fields": [
+                    {"fieldName": "pk", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "uid", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "float_vector", "dataType": "FloatVector",
+                     "elementTypeParams": {"dim": str(dim)}},
+                    {"fieldName": "float16_vector", "dataType": "Float16Vector",
+                     "elementTypeParams": {"dim": str(dim)}},
+                    {"fieldName": "binary_vector", "dataType": "BinaryVector",
+                     "elementTypeParams": {"dim": str(dim)}},
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "float_vector", "indexName": "float_vector", "metricType": "L2"},
+                {"fieldName": "float16_vector", "indexName": "float16_vector", "metricType": "L2"},
+                {"fieldName": "binary_vector", "indexName": "binary_vector", "metricType": "HAMMING",
+                 "params": {"index_type": "BIN_IVF_FLAT", "nlist": "512"}}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_collection_load_completed(name)
+
+        # Insert data
+        nb = 100
+        data = []
+        insert_pks = []
+        for i in range(nb):
+            insert_pks.append(i)
+            data.append({
+                "pk": i,
+                "uid": i % 10,
+                "float_vector": gen_vector(datatype="FloatVector", dim=dim),
+                "float16_vector": gen_vector(datatype="FloatVector", dim=dim),
+                "binary_vector": gen_vector(datatype="BinaryVector", dim=dim),
+            })
+        insert_payload = {"collectionName": name, "data": data}
+        rsp = self.vector_client.vector_insert(insert_payload)
+        assert rsp['code'] == 0
+
+        # Search by pk - specify annsField for float_vector
+        test_pks = insert_pks[:3]
+        search_payload = {
+            "collectionName": name,
+            "ids": test_pks,
+            "annsField": "float_vector",
+            "outputFields": ["pk", "uid"],
+            "limit": limit
+        }
+        rsp = self.vector_client.vector_search(search_payload)
+
+        assert rsp['code'] == 0
+        assert len(rsp['data']) == len(test_pks) * limit
+        returned_pks = [item['pk'] for item in rsp['data']]
+        for pk in test_pks:
+            assert pk in returned_pks
+
+
+@pytest.mark.L0
+class TestSearchByPKNegative(TestBase):
+    """Negative test cases for search by primary key functionality"""
+
+    def test_search_by_pk_with_both_ids_and_data(self):
+        """
+        Search with both ids and data should fail - they are mutually exclusive
+        """
+        name = gen_collection_name()
+        self.name = name
+        dim = 128
+        nb = 100
+        schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
+
+        # Use string IDs to avoid float64 precision loss
+        test_ids = [str(i) for i in insert_ids[:3]]
+        vector = preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[0].tolist()
+
+        payload = {
+            "collectionName": name,
+            "ids": test_ids,
+            "data": [vector],
+            "outputFields": ["*"],
+            "limit": 10
+        }
+        rsp = self.vector_client.vector_search(payload)
+
+        assert rsp['code'] == 1100
+        assert "mutually exclusive" in rsp['message'].lower() or "exclusive" in rsp['message'].lower()
+
+    def test_search_by_pk_with_empty_ids_array(self):
+        """
+        Search with empty ids array should fail
+        """
+        name = gen_collection_name()
+        self.name = name
+        dim = 128
+        nb = 100
+        self.init_collection(name, dim=dim, nb=nb)
+
+        payload = {
+            "collectionName": name,
+            "ids": [],
+            "outputFields": ["*"],
+            "limit": 10
+        }
+        rsp = self.vector_client.vector_search(payload)
+
+        assert rsp['code'] == 1802
+
+    def test_search_by_pk_with_fractional_float_ids(self):
+        """
+        Search with fractional float ids should fail for int64 pk
+        """
+        name = gen_collection_name()
+        self.name = name
+        dim = 128
+        nb = 100
+        self.init_collection(name, dim=dim, nb=nb)
+
+        payload = {
+            "collectionName": name,
+            "ids": [1.5, 2.7, 3.9],
+            "outputFields": ["*"],
+            "limit": 10
+        }
+        rsp = self.vector_client.vector_search(payload)
+
+        assert rsp['code'] == 1100
+
+    def test_search_by_pk_with_invalid_id_type(self):
+        """
+        Search with invalid id type (boolean) should fail
+        """
+        name = gen_collection_name()
+        self.name = name
+        dim = 128
+        nb = 100
+        self.init_collection(name, dim=dim, nb=nb)
+
+        payload = {
+            "collectionName": name,
+            "ids": [True, False],
+            "outputFields": ["*"],
+            "limit": 10
+        }
+        rsp = self.vector_client.vector_search(payload)
+
+        assert rsp['code'] == 1100
+
+    def test_search_by_pk_with_unparseable_string_ids(self):
+        """
+        Search with string ids that cannot be parsed to int64 should fail
+        """
+        name = gen_collection_name()
+        self.name = name
+        dim = 128
+        nb = 100
+        self.init_collection(name, dim=dim, nb=nb)
+
+        payload = {
+            "collectionName": name,
+            "ids": ["abc", "def", "ghi"],
+            "outputFields": ["*"],
+            "limit": 10
+        }
+        rsp = self.vector_client.vector_search(payload)
+
+        assert rsp['code'] == 1100
+
+    def test_search_by_pk_varchar_with_empty_string(self):
+        """
+        Search varchar pk with empty string should fail
+        """
+        name = gen_collection_name()
+        self.name = name
+        dim = 128
+
+        # Create varchar primary key collection
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": True,
+                "fields": [
+                    {"fieldName": "pk", "dataType": "VarChar", "isPrimary": True,
+                     "elementTypeParams": {"max_length": "128"}},
+                    {"fieldName": "uid", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "vector", "dataType": "FloatVector",
+                     "elementTypeParams": {"dim": str(dim)}},
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "vector", "indexName": "vector", "metricType": "L2"}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_collection_load_completed(name)
+
+        # Insert some data
+        data = [{
+            "pk": "valid_pk",
+            "uid": 1,
+            "vector": gen_vector(datatype="FloatVector", dim=dim),
+        }]
+        insert_payload = {"collectionName": name, "data": data}
+        rsp = self.vector_client.vector_insert(insert_payload)
+        assert rsp['code'] == 0
+
+        # Search with empty string
+        search_payload = {
+            "collectionName": name,
+            "ids": [""],
+            "outputFields": ["*"],
+            "limit": 10
+        }
+        rsp = self.vector_client.vector_search(search_payload)
+
+        assert rsp['code'] == 1100
