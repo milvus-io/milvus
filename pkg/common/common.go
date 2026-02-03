@@ -766,3 +766,8 @@ func ConvertWKBToWKT(wkbData []byte) (string, error) {
 	}
 	return wkt.Marshal(geomT)
 }
+
+func ConvertSMILESToPickle(molData string) ([]byte, error) {
+	// TODO: implement this function
+	return []byte(molData), nil
+}
