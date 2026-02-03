@@ -23,16 +23,22 @@
 #include <utility>
 #include <vector>
 
-#include "cachinglayer/Utils.h"
-#include "common/Array.h"
-#include "common/EasyAssert.h"
-#include "common/Span.h"
-#include "common/TypeTraits.h"
+#include "arrow/array/array_base.h"
+#include "arrow/record_batch.h"
+#include "common/VectorTrait.h"
 #include "common/Types.h"
+#include "common/Array.h"
+#include "common/File.h"
 #include "common/VectorArray.h"
-#include "folly/FBVector.h"
+#include "common/ChunkDataView.h"
+#include "common/EasyAssert.h"
+#include "common/FieldDataInterface.h"
+#include "common/Json.h"
 #include "knowhere/sparse_utils.h"
+#include "simdjson/common_defs.h"
 #include "sys/mman.h"
+#include "cachinglayer/Utils.h"
+#include "folly/FBVector.h"
 
 namespace milvus {
 constexpr uint64_t MMAP_STRING_PADDING = 1;
@@ -73,12 +79,94 @@ class ChunkMmapGuard {
 
 class Chunk {
  public:
-    Chunk() = default;
-    Chunk(int64_t row_nums,
-          char* data,
-          uint64_t size,
-          bool nullable,
-          std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard)
+    virtual ~Chunk() = default;
+
+    virtual int64_t
+    RowNums() const = 0;
+
+    virtual cachinglayer::ResourceUsage
+    CellByteSize() const = 0;
+
+    virtual uint64_t
+    Size() const = 0;
+
+    // === DataView interface (only exposed interface for data access) ===
+    // Get full chunk data view
+    template <typename T>
+    std::shared_ptr<ChunkDataView<T>>
+    GetDataView() const {
+        if (GetTypeInfo() != typeid(T)) {
+            ThrowInfo(ErrorCode::DataTypeInvalid, "Type mismatch");
+        }
+        return GetAnyDataView().as<T>();
+    }
+
+    // Get data view with range filter (offset + length)
+    template <typename T>
+    std::shared_ptr<ChunkDataView<T>>
+    GetDataView(int64_t offset, int64_t length) const {
+        if (GetTypeInfo() != typeid(T)) {
+            ThrowInfo(ErrorCode::DataTypeInvalid, "Type mismatch");
+        }
+        return GetAnyDataView(offset, length).as<T>();
+    }
+
+    // Get data view with offsets filter
+    template <typename T>
+    std::shared_ptr<ChunkDataView<T>>
+    GetDataView(const FixedVector<int32_t>& offsets) const {
+        if (GetTypeInfo() != typeid(T)) {
+            ThrowInfo(ErrorCode::DataTypeInvalid, "Type mismatch");
+        }
+        return GetAnyDataView(offsets).as<T>();
+    }
+
+    // AnyDataView versions (type-erased)
+    virtual AnyDataView
+    GetAnyDataView() const {
+        throw std::runtime_error("GetAnyDataView not implemented");
+    }
+
+    virtual AnyDataView
+    GetAnyDataView(int64_t offset, int64_t length) const {
+        ThrowInfo(NotImplemented,
+                  "GetAnyDataView with range filter not implemented");
+    }
+
+    virtual AnyDataView
+    GetAnyDataView(const FixedVector<int32_t>& offsets) const {
+        ThrowInfo(NotImplemented,
+                  "GetAnyDataView with offsets filter not implemented");
+    }
+
+    virtual const char*
+    ValueAt(int64_t idx) const = 0;
+
+    virtual const char*
+    Data() const = 0;
+
+    virtual const size_t*
+    ArrayOffsets() const {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "ArrayOffsets only supported for VectorArray");
+    };
+
+    virtual bool
+    IsValid(int offset) const = 0;
+
+ private:
+    virtual const std::type_info&
+    GetTypeInfo() const = 0;
+};
+
+class RowChunk : public Chunk {
+ public:
+    RowChunk() = default;
+    RowChunk(int64_t row_nums,
+             char* data,
+             uint64_t size,
+             bool nullable,
+             std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard)
         : data_(data),
           row_nums_(row_nums),
           size_(size),
@@ -91,17 +179,18 @@ class Chunk {
             }
         }
     }
-    virtual ~Chunk() {
+
+    virtual ~RowChunk() {
         // The ChunkMmapGuard will handle the unmapping and unlinking of the file if it is file backed
     }
 
     uint64_t
-    Size() const {
+    Size() const override {
         return size_;
     }
 
     cachinglayer::ResourceUsage
-    CellByteSize() const {
+    CellByteSize() const override {
         if (chunk_mmap_guard_ && chunk_mmap_guard_->is_file_backed()) {
             return cachinglayer::ResourceUsage(0, static_cast<int64_t>(size_));
         }
@@ -109,20 +198,12 @@ class Chunk {
     }
 
     int64_t
-    RowNums() const {
+    RowNums() const override {
         return row_nums_;
     }
 
     virtual const char*
-    ValueAt(int64_t idx) const = 0;
-
-    virtual const char*
-    Data() const {
-        return data_;
-    }
-
-    const char*
-    RawData() const {
+    Data() const override {
         return data_;
     }
 
@@ -132,7 +213,7 @@ class Chunk {
     }
 
     virtual bool
-    isValid(int offset) const {
+    IsValid(int offset) const override {
         if (nullable_) {
             return valid_[offset];
         }
@@ -150,30 +231,79 @@ class Chunk {
     std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard_{nullptr};
 };
 
-// for fixed size data, includes fixed size array
-class FixedWidthChunk : public Chunk {
+// Primary template for fixed size scalar data (default implementation)
+template <typename T, typename Enable = void>
+class FixedWidthChunk : public RowChunk {
  public:
+    using ValueType = T;
     FixedWidthChunk(int32_t row_nums,
-                    int32_t dim,
                     char* data,
                     uint64_t size,
-                    uint64_t element_size,
+                    int element_size,
                     bool nullable,
                     std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard)
-        : Chunk(row_nums, data, size, nullable, chunk_mmap_guard),
-          dim_(dim),
+        : RowChunk(row_nums, data, size, nullable, chunk_mmap_guard),
           element_size_(element_size) {
         auto null_bitmap_bytes_num = nullable_ ? (row_nums_ + 7) / 8 : 0;
         data_start_ = data_ + null_bitmap_bytes_num;
     };
 
-    milvus::SpanBase
-    Span() const {
-        return milvus::SpanBase(data_start_,
-                                nullable_ ? valid_.data() : nullptr,
-                                row_nums_,
-                                element_size_ * dim_);
+    const char*
+    ValueAt(int64_t idx) const override {
+        return data_start_ + idx * element_size_;
     }
+
+    const char*
+    Data() const override {
+        return data_start_;
+    }
+
+ private:
+    int element_size_;
+    const char* data_start_;
+
+    AnyDataView
+    GetAnyDataView() const override {
+        auto data = reinterpret_cast<const T*>(data_start_);
+        return AnyDataView(std::make_shared<ContiguousDataView<T>>(
+            data,
+            nullable_ ? valid_.data() : nullptr,
+            row_nums_,
+            element_size_));
+    }
+
+    const std::type_info&
+    GetTypeInfo() const override {
+        return typeid(T);
+    }
+};
+
+// Partial specialization for VectorTrait types (FloatVector, BinaryVector, etc.)
+template <typename VectorType>
+class FixedWidthChunk<
+    VectorType,
+    std::enable_if_t<std::is_base_of_v<VectorTrait, VectorType>>>
+    : public RowChunk {
+ public:
+    using ValueType = typename VectorType::embedded_type;
+    FixedWidthChunk(int32_t row_nums,
+                    int32_t dim,
+                    char* data,
+                    uint64_t size,
+                    int element_size,
+                    bool nullable,
+                    std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard)
+        : RowChunk(row_nums, data, size, nullable, chunk_mmap_guard),
+          dim_(dim),
+          element_size_(element_size) {
+        auto null_bitmap_bytes_num = nullable_ ? (row_nums_ + 7) / 8 : 0;
+        data_start_ = data + null_bitmap_bytes_num;
+    };
+
+ private:
+    int dim_;
+    int element_size_;
+    const char* data_start_;
 
     const char*
     ValueAt(int64_t idx) const override {
@@ -185,11 +315,23 @@ class FixedWidthChunk : public Chunk {
         return data_start_;
     }
 
- private:
-    int dim_;
-    int element_size_;
-    const char* data_start_;
+    AnyDataView
+    GetAnyDataView() const override {
+        auto data = reinterpret_cast<const ValueType*>(data_start_);
+        return AnyDataView(std::make_shared<ContiguousDataView<VectorType>>(
+            data,
+            nullable_ ? valid_.data() : nullptr,
+            row_nums_,
+            dim_,
+            element_size_));
+    }
+
+    const std::type_info&
+    GetTypeInfo() const override {
+        return typeid(VectorType);
+    }
 };
+
 // A StringChunk is a class that represents a collection of strings stored in a contiguous memory block.
 // It is initialized with the number of rows, a pointer to the data, the size of the data, and a boolean
 // indicating whether the data can contain null values. The data is accessed using offsets, which are
@@ -212,7 +354,7 @@ class FixedWidthChunk : public Chunk {
 // In this example, 'exampleChunk' is a StringChunk with 3 rows, a pointer to the data stored in 'dataPointer',
 // a total data size of 'dataSize', and it does not support nullability.
 
-class StringChunk : public Chunk {
+class StringChunk : public RowChunk {
  public:
     StringChunk() = default;
     StringChunk(int32_t row_nums,
@@ -220,7 +362,7 @@ class StringChunk : public Chunk {
                 uint64_t size,
                 bool nullable,
                 std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard)
-        : Chunk(row_nums, data, size, nullable, chunk_mmap_guard) {
+        : RowChunk(row_nums, data, size, nullable, chunk_mmap_guard) {
         auto null_bitmap_bytes_num = nullable_ ? (row_nums_ + 7) / 8 : 0;
         offsets_ = reinterpret_cast<uint32_t*>(data + null_bitmap_bytes_num);
     }
@@ -236,9 +378,6 @@ class StringChunk : public Chunk {
 
         return {data_ + offsets_[i], offsets_[i + 1] - offsets_[i]};
     }
-
-    std::pair<std::vector<std::string_view>, FixedVector<bool>>
-    StringViews(std::optional<std::pair<int64_t, int64_t>> offset_len);
 
     int
     binary_search_string(std::string_view target) {
@@ -300,9 +439,6 @@ class StringChunk : public Chunk {
         return left;
     }
 
-    std::pair<std::vector<std::string_view>, FixedVector<bool>>
-    ViewsByOffsets(const FixedVector<int32_t>& offsets);
-
     const char*
     ValueAt(int64_t idx) const override {
         return (*this)[idx].data();
@@ -313,11 +449,55 @@ class StringChunk : public Chunk {
         return offsets_;
     }
 
+    // === DataView interface ===
+    AnyDataView
+    GetAnyDataView() const override;
+
+    AnyDataView
+    GetAnyDataView(int64_t offset, int64_t length) const override;
+
+    AnyDataView
+    GetAnyDataView(const FixedVector<int32_t>& offsets) const override;
+
  protected:
     uint32_t* offsets_;
+
+ private:
+    const std::type_info&
+    GetTypeInfo() const override {
+        return typeid(std::string_view);
+    }
 };
 
-using JSONChunk = StringChunk;
+// JsonChunk stores JSON data as strings but returns Json views
+class JSONChunk : public StringChunk {
+ public:
+    JSONChunk() = default;
+    JSONChunk(int32_t row_nums,
+              char* data,
+              uint64_t size,
+              bool nullable,
+              std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard)
+        : StringChunk(row_nums, data, size, nullable, chunk_mmap_guard) {
+    }
+
+    // === DataView interface - returns Json instead of string_view ===
+    AnyDataView
+    GetAnyDataView() const override;
+
+    AnyDataView
+    GetAnyDataView(int64_t offset, int64_t length) const override;
+
+    AnyDataView
+    GetAnyDataView(const FixedVector<int32_t>& offsets) const override;
+
+ private:
+    const std::type_info&
+    GetTypeInfo() const override {
+        return typeid(Json);
+    }
+};
+
 using GeometryChunk = StringChunk;
 
 // An ArrayChunk is a class that represents a collection of arrays stored in a contiguous memory block.
@@ -345,7 +525,7 @@ using GeometryChunk = StringChunk;
 // In this example, 'exampleChunk' is an ArrayChunk with 3 rows, a pointer to the data stored in 'dataPointer',
 // a total data size of 'dataSize', element type INT32, and it does not support nullability.
 
-class ArrayChunk : public Chunk {
+class ArrayChunk : public RowChunk {
  public:
     ArrayChunk(int32_t row_nums,
                char* data,
@@ -353,7 +533,7 @@ class ArrayChunk : public Chunk {
                milvus::DataType element_type,
                bool nullable,
                std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard)
-        : Chunk(row_nums, data, size, nullable, chunk_mmap_guard),
+        : RowChunk(row_nums, data, size, nullable, chunk_mmap_guard),
           element_type_(element_type) {
         auto null_bitmap_bytes_num = 0;
         if (nullable) {
@@ -384,67 +564,30 @@ class ArrayChunk : public Chunk {
                          offsets_ptr);
     }
 
-    std::pair<std::vector<ArrayView>, FixedVector<bool>>
-    ViewsByOffsets(const FixedVector<int32_t>& offsets) {
-        std::vector<ArrayView> views;
-        FixedVector<bool> valid_res;
-        size_t size = offsets.size();
-        views.reserve(size);
-        valid_res.reserve(size);
-        for (auto i = 0; i < size; ++i) {
-            views.emplace_back(View(offsets[i]));
-            valid_res.emplace_back(isValid(offsets[i]));
-        }
-        return {std::move(views), std::move(valid_res)};
-    }
-
-    std::pair<std::vector<ArrayView>, FixedVector<bool>>
-    Views(std::optional<std::pair<int64_t, int64_t>> offset_len =
-              std::nullopt) const {
-        auto start_offset = 0;
-        auto len = row_nums_;
-        if (offset_len.has_value()) {
-            start_offset = offset_len->first;
-            len = offset_len->second;
-            AssertInfo(start_offset >= 0 && start_offset < row_nums_,
-                       "Retrieve array views with out-of-bound offset:{}, "
-                       "len:{}, wrong",
-                       start_offset,
-                       len);
-            AssertInfo(len > 0 && len <= row_nums_,
-                       "Retrieve array views with out-of-bound offset:{}, "
-                       "len:{}, wrong",
-                       start_offset,
-                       len);
-            AssertInfo(start_offset + len <= row_nums_,
-                       "Retrieve array views with out-of-bound offset:{}, "
-                       "len:{}, wrong",
-                       start_offset,
-                       len);
-        }
-        std::vector<ArrayView> views;
-        views.reserve(len);
-        auto end_offset = start_offset + len;
-        for (auto i = start_offset; i < end_offset; i++) {
-            views.emplace_back(View(i));
-        }
-        if (nullable_) {
-            FixedVector<bool> res_valid(valid_.begin() + start_offset,
-                                        valid_.begin() + end_offset);
-            return {std::move(views), std::move(res_valid)};
-        }
-        return {std::move(views), {}};
-    }
-
     const char*
     ValueAt(int64_t idx) const override {
         ThrowInfo(ErrorCode::Unsupported,
                   "ArrayChunk::ValueAt is not supported");
     }
 
+    // === DataView interface ===
+    AnyDataView
+    GetAnyDataView() const override;
+
+    AnyDataView
+    GetAnyDataView(int64_t offset, int64_t length) const override;
+
+    AnyDataView
+    GetAnyDataView(const FixedVector<int32_t>& offsets) const override;
+
  private:
     milvus::DataType element_type_;
     uint32_t* offsets_lens_;
+
+    const std::type_info&
+    GetTypeInfo() const override {
+        return typeid(ArrayView);
+    }
 };
 
 // A VectorArrayChunk is similar to an ArrayChunk but is specialized for storing arrays of vectors.
@@ -462,7 +605,7 @@ class ArrayChunk : public Chunk {
 //
 // [offsets_lens][all_vector_data_concatenated]
 // [28, 3, 36, 1, 76, 2, 100] [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
-class VectorArrayChunk : public Chunk {
+class VectorArrayChunk : public RowChunk {
  public:
     VectorArrayChunk(int64_t dim,
                      int32_t row_nums,
@@ -470,7 +613,7 @@ class VectorArrayChunk : public Chunk {
                      uint64_t size,
                      milvus::DataType element_type,
                      std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard)
-        : Chunk(row_nums, data, size, false, chunk_mmap_guard),
+        : RowChunk(row_nums, data, size, false, chunk_mmap_guard),
           dim_(dim),
           element_type_(element_type) {
         offsets_lens_ = reinterpret_cast<uint32_t*>(data);
@@ -495,44 +638,6 @@ class VectorArrayChunk : public Chunk {
             data_ptr, dim_, len, next_offset - offset, element_type_);
     }
 
-    std::pair<std::vector<VectorArrayView>, FixedVector<bool>>
-    Views(std::optional<std::pair<int64_t, int64_t>> offset_len =
-              std::nullopt) const {
-        auto start_offset = 0;
-        auto len = row_nums_;
-        if (offset_len.has_value()) {
-            start_offset = offset_len->first;
-            len = offset_len->second;
-            AssertInfo(
-                start_offset >= 0 && start_offset < row_nums_,
-                "Retrieve vector array views with out-of-bound offset:{}, "
-                "len:{}, wrong",
-                start_offset,
-                len);
-            AssertInfo(
-                len > 0 && len <= row_nums_,
-                "Retrieve vector array views with out-of-bound offset:{}, "
-                "len:{}, wrong",
-                start_offset,
-                len);
-            AssertInfo(
-                start_offset + len <= row_nums_,
-                "Retrieve vector array views with out-of-bound offset:{}, "
-                "len:{}, wrong",
-                start_offset,
-                len);
-        }
-
-        std::vector<VectorArrayView> views;
-        views.reserve(len);
-        auto end_offset = start_offset + len;
-        for (int64_t i = start_offset; i < end_offset; i++) {
-            views.emplace_back(View(i));
-        }
-        // vector array does not support null, so just return {}.
-        return {std::move(views), {}};
-    }
-
     const char*
     ValueAt(int64_t idx) const override {
         ThrowInfo(ErrorCode::Unsupported,
@@ -545,32 +650,44 @@ class VectorArrayChunk : public Chunk {
     }
 
     const size_t*
-    Offsets() const {
+    ArrayOffsets() const override {
         return offsets_.data();
     }
+
+    // === DataView interface ===
+    AnyDataView
+    GetAnyDataView() const override;
+
+    AnyDataView
+    GetAnyDataView(int64_t offset, int64_t length) const override;
 
  private:
     int64_t dim_;
     uint32_t* offsets_lens_;
     milvus::DataType element_type_;
     std::vector<size_t> offsets_;
+
+    const std::type_info&
+    GetTypeInfo() const override {
+        return typeid(VectorArrayView);
+    }
 };
 
-class SparseFloatVectorChunk : public Chunk {
+class SparseFloatVectorChunk : public RowChunk {
  public:
     SparseFloatVectorChunk(int32_t row_nums,
                            char* data,
                            uint64_t size,
                            bool nullable,
                            std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard)
-        : Chunk(row_nums, data, size, nullable, chunk_mmap_guard) {
+        : RowChunk(row_nums, data, size, nullable, chunk_mmap_guard) {
         auto null_bitmap_bytes_num = nullable ? (row_nums + 7) / 8 : 0;
         auto offsets_ptr =
             reinterpret_cast<uint64_t*>(data + null_bitmap_bytes_num);
 
         if (nullable_) {
             for (int i = 0; i < row_nums; i++) {
-                if (isValid(i)) {
+                if (IsValid(i)) {
                     vec_.emplace_back(
                         (offsets_ptr[i + 1] - offsets_ptr[i]) /
                             knowhere::sparse::SparseRow<
@@ -618,5 +735,10 @@ class SparseFloatVectorChunk : public Chunk {
  private:
     int64_t dim_ = 0;
     std::vector<knowhere::sparse::SparseRow<SparseValueType>> vec_;
+
+    const std::type_info&
+    GetTypeInfo() const override {
+        return typeid(knowhere::sparse::SparseRow<SparseValueType>);
+    }
 };
 }  // namespace milvus

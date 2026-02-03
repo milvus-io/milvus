@@ -70,13 +70,13 @@ TEST(StringChunkWriterTest, NoNullsMultiBatches) {
 
     for (int64_t i = 0; i < static_cast<int64_t>(b1.size()); ++i) {
         auto sv = (*chunk)[static_cast<int>(i)];
-        ASSERT_TRUE(chunk->isValid(static_cast<int>(i)));
+        ASSERT_TRUE(chunk->IsValid(static_cast<int>(i)));
         EXPECT_EQ(sv, b1[static_cast<size_t>(i)].value());
     }
     for (int64_t i = 0; i < static_cast<int64_t>(b2.size()); ++i) {
         auto idx = static_cast<int>(b1.size() + i);
         auto sv = (*chunk)[idx];
-        ASSERT_TRUE(chunk->isValid(idx));
+        ASSERT_TRUE(chunk->IsValid(idx));
         EXPECT_EQ(sv, b2[static_cast<size_t>(i)].value());
     }
 }
@@ -117,7 +117,7 @@ TEST(StringChunkWriterTest, WithNullsMergedBitmap) {
 
     for (int i = 0; i < static_cast<int>(all.size()); ++i) {
         bool expect_valid = all[static_cast<size_t>(i)].has_value();
-        EXPECT_EQ(chunk->isValid(i), expect_valid);
+        EXPECT_EQ(chunk->IsValid(i), expect_valid);
         if (expect_valid) {
             EXPECT_EQ((*chunk)[i], all[static_cast<size_t>(i)].value());
         }

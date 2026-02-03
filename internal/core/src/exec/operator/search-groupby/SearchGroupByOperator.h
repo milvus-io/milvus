@@ -29,6 +29,7 @@
 
 #include "cachinglayer/CacheSlot.h"
 #include "common/EasyAssert.h"
+#include "common/ChunkDataView.h"
 #include "common/Json.h"
 #include "common/JsonUtils.h"
 #include "common/OpContext.h"
@@ -44,6 +45,7 @@
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentInterface.h"
+#include "query/Utils.h"
 #include "segcore/SegmentSealed.h"
 #include "simdjson/error.h"
 
@@ -193,14 +195,15 @@ class SealedDataGetter : public DataGetter<OutputType> {
 
     mutable std::unordered_map<
         int64_t,
-        PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>>
+        PinWrapper<std::shared_ptr<ChunkDataView<std::string_view>>>>
         str_pw_map;
 
     PinWrapper<const index::IndexBase*> index_ptr_;
     // Getting str_view from segment is cpu-costly, this map is to cache this view for performance
+    // JSON fields use string_view storage, Json objects constructed on access
     mutable std::unordered_map<
         int64_t,
-        PinWrapper<std::pair<std::vector<milvus::Json>, FixedVector<bool>>>>
+        PinWrapper<std::shared_ptr<ChunkDataView<std::string_view>>>>
         json_pw_map;
 
  public:
@@ -243,24 +246,30 @@ class SealedDataGetter : public DataGetter<OutputType> {
                     str_pw_map[chunk_id] = std::move(pw);
                 }
                 auto& pw = str_pw_map[chunk_id];
-                auto& [str_chunk_view, valid_data] = pw.get();
-                if (!valid_data.empty() && !valid_data[inner_offset]) {
+                auto data_view = pw.get();
+                auto valid_data = data_view->ValidData();
+                if (valid_data && !valid_data[inner_offset]) {
                     return std::nullopt;
                 }
-                std::string_view str_val_view = str_chunk_view[inner_offset];
+                std::string_view str_val_view = (*data_view)[inner_offset];
                 return std::string(str_val_view.data(), str_val_view.length());
             } else if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
                 if (json_pw_map.find(chunk_id) == json_pw_map.end()) {
-                    auto pw = segment_.chunk_view<milvus::Json>(
+                    // JSON fields use string_view storage
+                    auto pw = segment_.chunk_view<std::string_view>(
                         op_ctx_, field_id_, chunk_id);
                     json_pw_map[chunk_id] = std::move(pw);
                 }
                 auto& pw = json_pw_map[chunk_id];
-                auto& [json_chunk_view, valid_data] = pw.get();
-                if (!valid_data.empty() && !valid_data[inner_offset]) {
+                auto data_view = pw.get();
+                auto valid_data = data_view->ValidData();
+                if (valid_data && !valid_data[inner_offset]) {
                     return std::nullopt;
                 }
-                auto& json_val = json_chunk_view[inner_offset];
+                // Construct Json from string_view
+                std::string_view json_str_view = (*data_view)[inner_offset];
+                milvus::Json json_val(json_str_view.data(),
+                                      json_str_view.size());
                 JSON_TYPE_CASES(OutputType)
                 JSON_STRING_CASE(OutputType)
                 return std::nullopt;
@@ -269,13 +278,14 @@ class SealedDataGetter : public DataGetter<OutputType> {
                     std::is_same_v<OutputType, InnerRawType>,
                     "OutputType and InnerRawType must be the same for "
                     "non-json/string field group by");
-                auto pw = segment_.chunk_data<InnerRawType>(
+                auto pw = segment_.chunk_view<InnerRawType>(
                     op_ctx_, field_id_, chunk_id);
-                auto& span = pw.get();
-                if (span.valid_data() && !span.valid_data()[inner_offset]) {
+                auto& data_view = pw.get();
+                if (data_view->ValidData() &&
+                    !data_view->ValidData()[inner_offset]) {
                     return std::nullopt;
                 }
-                auto raw = span.operator[](inner_offset);
+                auto raw = data_view->operator[](inner_offset);
                 return raw;
             }
         } else {
