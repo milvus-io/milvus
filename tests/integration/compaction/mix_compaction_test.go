@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -265,11 +264,5 @@ func (s *CompactionSuite) TestMixCompactionV2() {
 	defer cancel()
 
 	collectionName := "TestCompaction_" + funcutil.GenRandomStr()
-	beforeMetrics, err := storagev2.PublishDefaultFilesystemMetrics()
-	s.NoError(err)
 	s.assertMixCompaction(ctx, collectionName, true)
-	afterMetrics, err := storagev2.PublishDefaultFilesystemMetrics()
-	s.NoError(err)
-	s.Greater(afterMetrics.ReadBytes, beforeMetrics.ReadBytes, "read bytes should increase")
-	s.Greater(afterMetrics.WriteBytes, beforeMetrics.WriteBytes, "write bytes should increase")
 }

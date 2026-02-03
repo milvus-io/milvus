@@ -28,7 +28,6 @@ import "C"
 
 import (
 	"fmt"
-	"strconv"
 	"unsafe"
 
 	"go.uber.org/zap"
@@ -51,123 +50,33 @@ type FilesystemMetrics struct {
 	MultiPartUploadFinished int64
 }
 
-// GetFilesystemMetricsWithConfig retrieves metrics from a filesystem using storage config properties.
-// This is the preferred method when you have a StorageConfig, as it will find the exact
-// filesystem instance in the cache (with proper metrics tracking).
-func GetFilesystemMetricsWithConfig(storageConfig *indexpb.StorageConfig) (*FilesystemMetrics, error) {
-	if storageConfig == nil {
-		return GetFilesystemMetrics("")
-	}
-
-	// Debug logging for cache key verification
-	fsKey := GetFilesystemKeyFromStorageConfig(storageConfig)
-	log.Info("GetFilesystemMetricsWithConfig: looking up filesystem",
-		zap.String("fsKey", fsKey),
-		zap.String("address", storageConfig.GetAddress()),
-		zap.String("bucketName", storageConfig.GetBucketName()),
-		zap.String("rootPath", storageConfig.GetRootPath()),
-		zap.String("storageType", storageConfig.GetStorageType()))
-
-	// Build properties from storage config
-	keys := []string{
-		C.GoString(C.loon_properties_fs_address),
-		C.GoString(C.loon_properties_fs_bucket_name),
-		C.GoString(C.loon_properties_fs_access_key_id),
-		C.GoString(C.loon_properties_fs_access_key_value),
-		C.GoString(C.loon_properties_fs_root_path),
-		C.GoString(C.loon_properties_fs_storage_type),
-		C.GoString(C.loon_properties_fs_cloud_provider),
-		C.GoString(C.loon_properties_fs_iam_endpoint),
-		C.GoString(C.loon_properties_fs_log_level),
-		C.GoString(C.loon_properties_fs_region),
-		C.GoString(C.loon_properties_fs_use_ssl),
-		C.GoString(C.loon_properties_fs_ssl_ca_cert),
-		C.GoString(C.loon_properties_fs_use_iam),
-		C.GoString(C.loon_properties_fs_use_virtual_host),
-		C.GoString(C.loon_properties_fs_request_timeout_ms),
-		C.GoString(C.loon_properties_fs_gcp_credential_json),
-		C.GoString(C.loon_properties_fs_use_custom_part_upload),
-		C.GoString(C.loon_properties_fs_max_connections),
-	}
-	values := []string{
-		storageConfig.GetAddress(),
-		storageConfig.GetBucketName(),
-		storageConfig.GetAccessKeyID(),
-		storageConfig.GetSecretAccessKey(),
-		storageConfig.GetRootPath(),
-		storageConfig.GetStorageType(),
-		storageConfig.GetCloudProvider(),
-		storageConfig.GetIAMEndpoint(),
-		"warn",
-		storageConfig.GetRegion(),
-		strconv.FormatBool(storageConfig.GetUseSSL()),
-		storageConfig.GetSslCACert(),
-		strconv.FormatBool(storageConfig.GetUseIAM()),
-		strconv.FormatBool(storageConfig.GetUseVirtualHost()),
-		strconv.FormatInt(storageConfig.GetRequestTimeoutMs(), 10),
-		storageConfig.GetGcpCredentialJSON(),
-		"true",
-		strconv.FormatUint(uint64(storageConfig.GetMaxConnections()), 10),
-	}
-
-	// Convert to C arrays
-	cKeys := make([]*C.char, len(keys))
-	cValues := make([]*C.char, len(values))
-	for i := range keys {
-		cKeys[i] = C.CString(keys[i])
-		cValues[i] = C.CString(values[i])
-	}
-	defer func() {
-		for i := range cKeys {
-			C.free(unsafe.Pointer(cKeys[i]))
-			C.free(unsafe.Pointer(cValues[i]))
-		}
-	}()
-
-	// Create LoonProperties
-	var properties C.LoonProperties
-	result := C.loon_properties_create(&cKeys[0], &cValues[0], C.size_t(len(keys)), &properties)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("failed to create properties: %w", err)
-	}
-	defer C.loon_properties_free(&properties)
-
-	// Get filesystem using properties
-	var cFilesystem C.FileSystemHandle
-	result = C.loon_filesystem_get(&properties, nil, 0, &cFilesystem)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("failed to get filesystem: %w", err)
-	}
-
-	return getMetricsFromHandle(cFilesystem)
-}
-
-// GetFilesystemMetrics retrieves metrics from a filesystem
-// If path is empty, returns metrics from the singleton filesystem (initialized by InitLocalArrowFileSystem or InitRemoteArrowFileSystem)
-// If path is provided (format: "address/bucketName" or root_path for local), returns metrics from that specific filesystem in the cache
-// Note: When using StorageConfig, prefer GetFilesystemMetricsWithConfig for accurate cache lookup.
-func GetFilesystemMetrics(path string) (*FilesystemMetrics, error) {
+// GetCachedFilesystemMetrics retrieves metrics from a cached filesystem.
+// If key is empty, returns metrics from the singleton filesystem.
+// If key is provided, looks up the filesystem in the cache by that key.
+// The key format must match what's used by the C++ cache (from ArrowFileSystemConfig::GetCacheKey):
+// - Local storage (type="local"): root_path
+// - Object storage (type="minio", "s3", "aws", "gcp", etc.): address/bucket_name
+func GetCachedFilesystemMetrics(key string) (*FilesystemMetrics, error) {
 	var cFilesystem C.FileSystemHandle
 
-	// If path is empty, try to use singleton filesystem first, otherwise get filesystem from cache by path
-	if path == "" {
+	if key == "" {
 		result := C.loon_get_filesystem_singleton_handle(&cFilesystem)
 		if err := HandleLoonFFIResult(result); err != nil {
 			return nil, fmt.Errorf("failed to get filesystem singleton: %w", err)
 		}
 	} else {
-		cPath := C.CString(path)
-		defer C.free(unsafe.Pointer(cPath))
-		pathLen := C.uint32_t(len(path))
+		cKey := C.CString(key)
+		defer C.free(unsafe.Pointer(cKey))
+		keyLen := C.uint32_t(len(key))
 
-		// Create an empty properties struct (required by loon_filesystem_get)
+		// Create an empty properties struct - this is a cache lookup only
 		var properties C.LoonProperties
 		properties.properties = nil
 		properties.count = 0
 
-		result := C.loon_filesystem_get(&properties, cPath, pathLen, &cFilesystem)
+		result := C.loon_filesystem_get(&properties, cKey, keyLen, &cFilesystem)
 		if err := HandleLoonFFIResult(result); err != nil {
-			return nil, fmt.Errorf("failed to get filesystem for path %q: %w", path, err)
+			return nil, fmt.Errorf("failed to get cached filesystem for key %q: %w", key, err)
 		}
 	}
 
@@ -217,22 +126,27 @@ func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 	return nil
 }
 
-// GetFilesystemKeyFromStorageConfig extracts filesystem key from StorageConfig
-// Format: "address/bucketName" (e.g., "localhost:9000/a-bucket")
-// Returns empty string if address/bucketName not available
+// GetFilesystemKeyFromStorageConfig extracts filesystem cache key from StorageConfig.
+// Must match the key format used by C++ ArrowFileSystemConfig::GetCacheKey():
+// - Local storage (type="local"): root_path
+// - Object storage (type="minio", "s3", "aws", "gcp", etc.): address/bucket_name
 func GetFilesystemKeyFromStorageConfig(storageConfig *indexpb.StorageConfig) string {
 	if storageConfig == nil {
 		return ""
 	}
 
+	storageType := storageConfig.GetStorageType()
+	if storageType == "local" {
+		return storageConfig.GetRootPath()
+	}
+
+	// Object storage (minio, s3, aws, gcp, etc.)
 	address := storageConfig.GetAddress()
 	bucketName := storageConfig.GetBucketName()
-
 	if address == "" || bucketName == "" {
 		return ""
 	}
-
-	return fmt.Sprintf("%s/%s", address, bucketName)
+	return address + "/" + bucketName
 }
 
 // PublishDefaultFilesystemMetrics retrieves and publishes metrics from the default filesystem.
@@ -273,41 +187,20 @@ func PublishDefaultFilesystemMetrics() (*FilesystemMetrics, error) {
 }
 
 // PublishFilesystemMetricsWithConfig retrieves and publishes filesystem metrics using storage config.
-// This is the preferred method when you have a StorageConfig.
 func PublishFilesystemMetricsWithConfig(storageConfig *indexpb.StorageConfig) (*FilesystemMetrics, error) {
-	metricSnapshot, err := GetFilesystemMetricsWithConfig(storageConfig)
-	if err != nil {
-		log.Warn("failed to get filesystem metrics", zap.Error(err))
-		return nil, err
-	}
-	fsKey := GetFilesystemKeyFromStorageConfig(storageConfig)
-	metrics.PublishFilesystemMetrics(
-		fsKey,
-		metricSnapshot.ReadCount,
-		metricSnapshot.WriteCount,
-		metricSnapshot.ReadBytes,
-		metricSnapshot.WriteBytes,
-		metricSnapshot.GetFileInfoCount,
-		metricSnapshot.FailedCount,
-		metricSnapshot.MultiPartUploadCreated,
-		metricSnapshot.MultiPartUploadFinished,
-	)
-
-	return metricSnapshot, nil
+	key := GetFilesystemKeyFromStorageConfig(storageConfig)
+	return PublishCachedFilesystemMetrics(key)
 }
 
-// PublishFilesystemMetrics retrieves default filesystem metrics and filesystem key
-// If path is provided (format: "address/bucketName"), uses that filesystem; otherwise uses default
-// Returns metrics, filesystem key, and error
-// The caller should use the metrics package to publish these metrics with the fs key
-func PublishFilesystemMetrics(path string) (*FilesystemMetrics, error) {
-	metricSnapshot, err := GetFilesystemMetrics(path)
+// PublishCachedFilesystemMetrics retrieves and publishes metrics from a cached filesystem.
+func PublishCachedFilesystemMetrics(key string) (*FilesystemMetrics, error) {
+	metricSnapshot, err := GetCachedFilesystemMetrics(key)
 	if err != nil {
-		log.Warn("failed to get filesystem metrics", zap.Error(err))
+		log.Warn("failed to get cached filesystem metrics", zap.String("key", key), zap.Error(err))
 		return nil, err
 	}
 
-	fsKey := path
+	fsKey := key
 	if fsKey == "" {
 		fsKey = "default"
 	}

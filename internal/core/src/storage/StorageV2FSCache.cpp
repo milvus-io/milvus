@@ -50,11 +50,15 @@ StorageV2FSCache::Get(const Key& key) {
     props[PROPERTY_FS_USE_CUSTOM_PART_UPLOAD] = key.use_custom_part_upload;
     props[PROPERTY_FS_MAX_CONNECTIONS] = key.max_connections;
 
-    LOG_INFO("StorageV2FSCache::Get: address={}, bucket={}, root_path={}, storage_type={}",
-             key.address, key.bucket_name, key.root_path, key.storage_type);
+    LOG_INFO(
+        "StorageV2FSCache::Get: address={}, bucket={}, root_path={}, "
+        "storage_type={}",
+        key.address,
+        key.bucket_name,
+        key.root_path,
+        key.storage_type);
 
-    auto result =
-        milvus_storage::FilesystemCache::getInstance().get(props, "");
+    auto result = milvus_storage::FilesystemCache::getInstance().get(props, "");
 
     if (!result.ok()) {
         LOG_WARN("create arrow file system failed, error: {}",

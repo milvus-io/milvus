@@ -257,13 +257,13 @@ func (sched *TaskScheduler) processTask(t Task) {
 	// Publish filesystem metrics after index task completion
 	// Only publish for index build tasks (not stats or analyze tasks)
 	if indexTask, ok := t.(*indexBuildTask); ok {
-		// Extract storage config from task to get the filesystem path
-		var fsPath string
+		// Extract storage config from task to get the filesystem key
+		var fsKey string
 		if indexTask.req != nil && indexTask.req.GetStorageConfig() != nil {
-			fsPath = storagev2.GetFilesystemKeyFromStorageConfig(indexTask.req.GetStorageConfig())
+			fsKey = storagev2.GetFilesystemKeyFromStorageConfig(indexTask.req.GetStorageConfig())
 		}
-		// If no storage config or empty path, use default filesystem (empty path)
-		storagev2.PublishFilesystemMetrics(fsPath)
+		// If no storage config or empty key, use default filesystem (empty key)
+		storagev2.PublishCachedFilesystemMetrics(fsKey)
 	}
 }
 

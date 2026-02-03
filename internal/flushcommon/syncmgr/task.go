@@ -205,9 +205,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel, t.level.String()).Inc()
 
 	// Publish filesystem metrics after sync task completion
-	// Use default filesystem (empty path) for sync tasks
-	fs := fmt.Sprintf("%s/%s", t.storageConfig.GetAddress(), t.storageConfig.GetBucketName())
-	storagev2.PublishFilesystemMetrics(fs)
+	storagev2.PublishFilesystemMetricsWithConfig(t.storageConfig)
 
 	return nil
 }

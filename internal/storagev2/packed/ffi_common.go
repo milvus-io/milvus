@@ -95,9 +95,8 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		keys = append(keys, PropertyFSIAMEndpoint)
 		values = append(values, storageConfig.GetIAMEndpoint())
 	}
-	// Always add log level if any string field is set (matching C++ behavior)
 	keys = append(keys, PropertyFSLogLevel)
-	values = append(values, "Warn")
+	values = append(values, "warn")
 
 	if storageConfig.GetRegion() != "" {
 		keys = append(keys, PropertyFSRegion)
