@@ -13,6 +13,9 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
+
+#include "common/common_type_c.h"
 #include "common/type_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/segment_c.h"

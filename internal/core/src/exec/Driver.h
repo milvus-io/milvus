@@ -16,14 +16,17 @@
 
 #pragma once
 
+#include <folly/futures/Future.h>
+#include <stdint.h>
 #include <atomic>
+#include <cstddef>
 #include <functional>
 #include <memory>
-#include <string>
+#include <utility>
 #include <vector>
 
-#include "common/Types.h"
 #include "common/Promise.h"
+#include "common/Vector.h"
 #include "exec/QueryContext.h"
 #include "plan/PlanNode.h"
 
@@ -73,6 +76,7 @@ enum class BlockingReason {
 class Driver;
 class Operator;
 class Task;
+
 class BlockingState {
  public:
     BlockingState(std::shared_ptr<Driver> driver,

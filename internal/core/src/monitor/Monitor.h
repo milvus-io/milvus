@@ -11,18 +11,6 @@
 
 #pragma once
 
-#include <prometheus/collectable.h>
-#include <prometheus/counter.h>
-#include <prometheus/gauge.h>
-#include <prometheus/histogram.h>
-#include <prometheus/registry.h>
-#include <prometheus/summary.h>
-#include <prometheus/text_serializer.h>
-
-#include <memory>
-#include <sstream>
-#include <string>
-
 #include "common/PrometheusClient.h"
 
 namespace milvus::monitor {

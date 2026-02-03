@@ -14,7 +14,53 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <assert.h>
+#include <folly/CancellationToken.h>
+#include <folly/FBVector.h>
+#include <folly/futures/Future.h>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "ExprTestBase.h"
+#include "NamedType/named_type_impl.hpp"
+#include "bitset/bitset.h"
+#include "common/Consts.h"
+#include "common/Exception.h"
+#include "common/Geometry.h"
+#include "common/IndexMeta.h"
+#include "common/OpContext.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
+#include "common/TracerBase.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "exec/QueryContext.h"
+#include "expr/ITypeExpr.h"
+#include "geos_c.h"
+#include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
+#include "pb/common.pb.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "plan/PlanNode.h"
+#include "query/ExecPlanNodeVisitor.h"
+#include "query/Plan.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentGrowing.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentInterface.h"
+#include "segcore/SegmentSealed.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/storage_test_utils.h"
 
 EXPR_TEST_INSTANTIATE();
 

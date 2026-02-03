@@ -11,12 +11,18 @@
 
 #include <gtest/gtest.h>
 #include <cmath>
-#include <thread>
-#include <vector>
-#include <set>
+#include <cstddef>
 #include <mutex>
+#include <set>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
+
 #include "common/Geometry.h"
 #include "common/PreparedGeometry.h"
+#include "geos_c.h"
+#include "gtest/gtest.h"
 
 namespace milvus {
 namespace {

@@ -9,16 +9,60 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <algorithm>
+#include <cstdint>
+#include <iterator>
+#include <map>
+#include <memory>
+#include <random>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
+#include "common/EasyAssert.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Types.h"
+#include "common/VectorTrait.h"
+#include "common/common_type_c.h"
+#include "common/protobuf_utils.h"
+#include "common/type_c.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
+#include "index/VectorIndex.h"
+#include "index/VectorMemIndex.h"
+#include "knowhere/binaryset.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/config.h"
+#include "knowhere/dataset.h"
+#include "knowhere/expected.h"
+#include "knowhere/index/index.h"
+#include "knowhere/index/index_factory.h"
+#include "knowhere/version.h"
+#include "pb/common.pb.h"
+#include "pb/plan.pb.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "segcore/Collection.h"
+#include "segcore/ReduceStructure.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/Types.h"
 #include "segcore/collection_c.h"
-#include "segcore/segment_c.h"
+#include "segcore/plan_c.h"
 #include "segcore/reduce_c.h"
-
-#include "test_utils/c_api_test_utils.h"
-#include "test_utils/storage_test_utils.h"
-#include "test_utils/cachinglayer_test_utils.h"
+#include "segcore/segment_c.h"
+#include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/PbHelper.h"
+#include "test_utils/c_api_test_utils.h"
+#include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/indexbuilder_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;

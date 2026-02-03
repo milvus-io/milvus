@@ -15,7 +15,16 @@
 // limitations under the License.
 
 #include "ValueExpr.h"
+
+#include <cstdint>
+
+#include "common/Tracer.h"
+#include "common/Types.h"
 #include "common/Vector.h"
+#include "exec/expression/EvalCtx.h"
+#include "folly/FBVector.h"
+#include "opentelemetry/trace/span.h"
+#include "pb/plan.pb.h"
 
 namespace milvus {
 namespace exec {

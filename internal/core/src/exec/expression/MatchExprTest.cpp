@@ -12,24 +12,49 @@
 // License for the specific language governing permissions and limitations under
 // the License
 
-#include <gtest/gtest.h>
 #include <boost/container/vector.hpp>
+#include <boost/cstdint.hpp>
+#include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <stddef.h>
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <functional>
 #include <iostream>
+#include <map>
+#include <memory>
+#include <optional>
 #include <random>
 #include <set>
-#include <unordered_set>
+#include <string>
+#include <utility>
+#include <vector>
 
-#include "cachinglayer/Manager.h"
 #include "common/Common.h"
+#include "common/Consts.h"
+#include "common/IndexMeta.h"
+#include "common/PrometheusClient.h"
+#include "common/QueryResult.h"
 #include "common/Schema.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
 #include "index/InvertedIndexTantivy.h"
-#include "query/ExecPlanNodeVisitor.h"
+#include "knowhere/comp/index_param.h"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
 #include "query/Plan.h"
-#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
-#include "test_utils/cachinglayer_test_utils.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/Types.h"
+#include "segcore/Utils.h"
 #include "test_utils/DataGen.h"
-#include "test_utils/GenExprProto.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;

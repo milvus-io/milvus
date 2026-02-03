@@ -14,11 +14,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <memory>
+#include <assert.h>
+#include <math.h>
+#include <stdlib.h>
+#include <ostream>
+#include <utility>
 
 #include "IndexMeta.h"
+#include "NamedType/named_type_impl.hpp"
+#include "common/Types.h"
+#include "pb/segcore.pb.h"
 #include "protobuf_utils.h"
-#include "log/Log.h"
 
 namespace milvus {
 

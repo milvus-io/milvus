@@ -9,25 +9,46 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <arrow/api.h>
+#include <arrow/array/array_base.h>
+#include <arrow/array/builder_binary.h>
+#include <arrow/array/builder_primitive.h>
 #include <arrow/type.h>
-#include <arrow/type_fwd.h>
-#include <gtest/gtest.h>
+#include <folly/FBVector.h>
+#include <algorithm>
+#include <cstdint>
+#include <iostream>
+#include <memory>
+#include <random>
+#include <string>
+#include <typeindex>
+#include <typeinfo>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
-#include "gtest/gtest-typed-test.h"
-#include "index/IndexFactory.h"
-#include "index/BitmapIndex.h"
-#include "index/InvertedIndexTantivy.h"
-#include "index/ScalarIndex.h"
+#include "bitset/bitset.h"
 #include "common/CDataType.h"
 #include "common/Types.h"
-#include "knowhere/comp/index_param.h"
-#include "test_utils/indexbuilder_test_utils.h"
+#include "common/protobuf_utils.h"
+#include "common/type_c.h"
+#include "gtest/gtest.h"
+#include "index/BitmapIndex.h"
+#include "index/Index.h"
+#include "index/IndexFactory.h"
+#include "index/IndexInfo.h"
+#include "index/ScalarIndex.h"
+#include "index/ScalarIndexSort.h"
+#include "index/StringIndexMarisa.h"
+#include "pb/index_cgo_msg.pb.h"
+#include "pb/schema.pb.h"
+#include "storage/FileManager.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 #include "test_utils/AssertUtils.h"
 #include "test_utils/DataGen.h"
-#include <boost/filesystem.hpp>
+#include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
-#include "test_utils/TmpPath.h"
-#include "storage/Util.h"
 
 constexpr int64_t nb = 100;
 namespace indexcgo = milvus::proto::indexcgo;

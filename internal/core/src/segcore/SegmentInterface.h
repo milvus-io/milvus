@@ -14,41 +14,58 @@
 #ifndef MILVUS_SEGCORE_SEGMENT_INTERFACE_H_
 #define MILVUS_SEGCORE_SEGMENT_INTERFACE_H_
 
+#include <simdjson.h>
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <string>
-#include <type_traits>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
-#include <index/ScalarIndex.h>
 
+#include "NamedType/underlying_functionalities.hpp"
+#include "boost/container/detail/std_fwd.hpp"
 #include "cachinglayer/CacheSlot.h"
+#include "cachinglayer/Utils.h"
+#include "common/Array.h"
 #include "common/ArrayOffsets.h"
+#include "common/BitsetView.h"
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
 #include "common/Json.h"
+#include "common/LoadInfo.h"
 #include "common/OpContext.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/SystemProperty.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
-#include "common/LoadInfo.h"
-#include "common/BitsetView.h"
-#include "common/QueryResult.h"
-#include "common/QueryInfo.h"
-#include "folly/SharedMutex.h"
+#include "common/VectorArray.h"
+#include "common/protobuf_utils.h"
 #include "common/type_c.h"
-#include "mmap/ChunkedColumnInterface.h"
+#include "folly/CancellationToken.h"
+#include "folly/FBVector.h"
+#include "geos_c.h"
 #include "index/Index.h"
-#include "index/JsonFlatIndex.h"
-#include "query/Plan.h"
-#include "pb/segcore.pb.h"
+#include "index/NgramInvertedIndex.h"
 #include "index/SkipIndex.h"
 #include "index/TextMatchIndex.h"
+#include "index/json_stats/JsonKeyStats.h"
+#include "mmap/ChunkedColumnInterface.h"
+#include "parquet/statistics.h"
+#include "pb/plan.pb.h"
+#include "pb/segcore.pb.h"
+#include "query/PlanImpl.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
-#include "index/NgramInvertedIndex.h"
-#include "index/json_stats/JsonKeyStats.h"
 
 namespace milvus::segcore {
 
@@ -231,11 +248,6 @@ class SegmentInterface {
 
     virtual void
     Reopen(const milvus::proto::segcore::SegmentLoadInfo& new_load_info) = 0;
-
-    // FinishLoad notifies the segment that all load operation are done
-    // currently it's used to sync field data list with updated schema.
-    virtual void
-    FinishLoad() = 0;
 
     virtual void
     SetLoadInfo(const milvus::proto::segcore::SegmentLoadInfo& load_info) = 0;

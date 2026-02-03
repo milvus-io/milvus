@@ -11,16 +11,30 @@
 
 #pragma once
 
-#include <cstddef>
-#include <vector>
 #include <folly/SharedMutex.h>
-#include "storage/FileManager.h"
-#include "storage/DiskFileManagerImpl.h"
-#include "storage/MemFileManagerImpl.h"
+#include <stdint.h>
+#include <cstddef>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "common/Geometry.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "index/IndexStats.h"
+#include "index/Meta.h"
 #include "index/RTreeIndexWrapper.h"
 #include "index/ScalarIndex.h"
-#include "index/Meta.h"
 #include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/FileManager.h"
+#include "storage/MemFileManagerImpl.h"
 
 namespace milvus::index {
 

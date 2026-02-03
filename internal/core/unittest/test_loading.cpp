@@ -9,19 +9,19 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <arrow/record_batch.h>
 #include <gtest/gtest.h>
-
-#include <iostream>
-#include <memory>
-#include <random>
-#include <string>
-#include <vector>
 #include <map>
+#include <string>
+#include <utility>
+#include <vector>
 
-#include "segcore/Types.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "common/resource_c.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
 #include "knowhere/version.h"
-#include "knowhere/comp/index_param.h"
+#include "segcore/Types.h"
 #include "segcore/load_index_c.h"
 
 using Param =

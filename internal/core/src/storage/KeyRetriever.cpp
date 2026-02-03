@@ -1,5 +1,10 @@
 #include "storage/KeyRetriever.h"
+
+#include <exception>
+
+#include "PluginInterface.h"
 #include "common/EasyAssert.h"
+#include "glog/logging.h"
 #include "log/Log.h"
 #include "parquet/properties.h"
 #include "storage/PluginLoader.h"

@@ -11,8 +11,8 @@
 
 #pragma once
 
-#include <immintrin.h>
-#include "fusion_compute_native.h"
+#include <stddef.h>
+#include <stdint.h>
 
 namespace milvus {
 namespace minhash {

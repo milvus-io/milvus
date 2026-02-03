@@ -28,9 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 )
 
-const (
-	localPath = "/tmp/milvus_test/chunkmanager/"
-)
+var localPath string
 
 func TestLocalCM(t *testing.T) {
 	ctx := context.Background()

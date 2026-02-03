@@ -10,20 +10,56 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <nlohmann/detail/iterators/iteration_proxy.hpp>
+#include <nlohmann/json.hpp>
+#include <nlohmann/json_fwd.hpp>
+#include <stdint.h>
+#include <chrono>
+#include <initializer_list>
+#include <iostream>
+#include <limits>
+#include <map>
+#include <memory>
 #include <optional>
+#include <ratio>
 #include <string>
+#include <thread>
+#include <utility>
+#include <vector>
 
+#include "bitset/bitset.h"
+#include "bitset/detail/element_vectorized.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/IndexMeta.h"
 #include "common/Schema.h"
+#include "common/Types.h"
+#include "common/common_type_c.h"
+#include "common/protobuf_utils.h"
+#include "exec/expression/ExprCache.h"
+#include "exec/expression/function/FunctionFactory.h"
+#include "expr/ITypeExpr.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "index/TextMatchIndex.h"
+#include "index/Utils.h"
+#include "knowhere/comp/index_param.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "plan/PlanNode.h"
+#include "query/ExecPlanNodeVisitor.h"
+#include "query/PlanNode.h"
+#include "query/PlanProto.h"
+#include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/segment_c.h"
+#include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
-#include "query/PlanProto.h"
-#include "query/ExecPlanNodeVisitor.h"
-#include "expr/ITypeExpr.h"
-#include "segcore/segment_c.h"
 #include "test_utils/storage_test_utils.h"
-#include "exec/expression/ExprCache.h"
 
 using namespace milvus;
 using namespace milvus::query;

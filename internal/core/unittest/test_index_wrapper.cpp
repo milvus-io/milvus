@@ -9,16 +9,46 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <assert.h>
+#include <folly/FBVector.h>
 #include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <algorithm>
+#include <cstdint>
 #include <map>
+#include <memory>
+#include <string>
 #include <tuple>
+#include <utility>
+#include <vector>
 
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/TypeTraits.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "index/Meta.h"
+#include "indexbuilder/IndexCreatorBase.h"
 #include "indexbuilder/IndexFactory.h"
 #include "indexbuilder/VecIndexCreator.h"
-#include "common/QueryResult.h"
+#include "knowhere/binaryset.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/config.h"
+#include "knowhere/dataset.h"
+#include "knowhere/sparse_utils.h"
+#include "knowhere/version.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "pb/common.pb.h"
+#include "pb/index_cgo_msg.pb.h"
+#include "segcore/Collection.h"
+#include "storage/FileManager.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 

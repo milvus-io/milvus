@@ -151,9 +151,8 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 				continue
 			}
 
-			if !sd.pkOracle.Exists(growing, paramtable.GetNodeID()) {
+			if !sd.distribution.GrowingSegmentExists(segmentID) {
 				// register created growing segment after insert, avoid to add empty growing to delegator
-				sd.pkOracle.Register(growing, paramtable.GetNodeID())
 				if sd.idfOracle != nil {
 					sd.idfOracle.RegisterGrowing(segmentID, insertData.BM25Stats)
 				}
@@ -164,6 +163,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					PartitionID:   insertData.PartitionID,
 					Version:       0,
 					TargetVersion: initialTargetVersion,
+					Candidate:     growing, // growing segment itself is the Candidate
 				})
 			}
 
@@ -184,8 +184,14 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 
 // ProcessDelete handles delete data in delegator.
 // delegator puts deleteData into buffer first,
-// then dispatch data to segments acoording to the result of pkOracle.
+// then dispatch data to segments according to the result of bloom filter check.
 func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
+	// Early return if delegator is stopped - ProcessDelete becomes a no-op
+	// This prevents unnecessary processing and side effects during shutdown
+	if sd.Stopped() {
+		return
+	}
+
 	method := "ProcessDelete"
 	tr := timerecord.NewTimeRecorder(method)
 	// block load segment handle delete buffer
@@ -225,7 +231,11 @@ type BatchApplyRet = struct {
 	Segment2Hits  map[int64][]bool
 }
 
-func (sd *shardDelegator) applyBFInParallel(deleteDatas []*DeleteData, pool *conc.Pool[any]) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
+// applyBFInParallel applies bloom filter check in parallel on the provided pinned segments.
+// Using pinned segments ensures consistency between BF check and delete application,
+// preventing race conditions where new segments could be added between PinOnlineSegments
+// and this call.
+func (sd *shardDelegator) applyBFInParallel(deleteDatas []*DeleteData, pool *conc.Pool[any], sealed []SnapshotItem, growing []SegmentEntry) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
 	retIdx := 0
 	retMap := typeutil.NewConcurrentMap[int, *BatchApplyRet]()
 	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
@@ -245,7 +255,7 @@ func (sd *shardDelegator) applyBFInParallel(deleteDatas []*DeleteData, pool *con
 			deleteDataId := didx
 			partitionID := data.PartitionID
 			future := pool.Submit(func() (any, error) {
-				ret := sd.pkOracle.BatchGet(pks[startIdx:endIdx], pkoracle.WithPartitionID(partitionID))
+				ret := BatchGetFromSegments(pks[startIdx:endIdx], partitionID, sealed, growing)
 				retMap.Insert(tmpRetIndex, &BatchApplyRet{
 					DeleteDataIdx: deleteDataId,
 					StartIdx:      startIdx,
@@ -377,7 +387,6 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 	log.Info("load growing segments done", zap.Int64s("segmentIDs", segmentIDs))
 
 	for _, segment := range loaded {
-		sd.pkOracle.Register(segment, paramtable.GetNodeID())
 		if sd.idfOracle != nil {
 			sd.idfOracle.RegisterGrowing(segment.ID(), segment.GetBM25Stats())
 		}
@@ -389,6 +398,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 			PartitionID:   segment.Partition(),
 			Version:       version,
 			TargetVersion: sd.distribution.getTargetVersion(),
+			Candidate:     segment, // growing segment itself is the Candidate
 		}
 	})...)
 	return nil
@@ -521,18 +531,8 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return nil
 	}
 
-	entries := lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) SegmentEntry {
-		return SegmentEntry{
-			SegmentID:   info.GetSegmentID(),
-			PartitionID: info.GetPartitionID(),
-			NodeID:      req.GetDstNodeID(),
-			Version:     req.GetVersion(),
-			Level:       info.GetLevel(),
-		}
-	})
-
 	infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
-		return !sd.pkOracle.Exists(pkoracle.NewCandidateKey(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed), targetNodeID)
+		return !sd.distribution.SealedSegmentExistsOnNode(info.GetSegmentID(), targetNodeID)
 	})
 
 	candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), infos...)
@@ -554,12 +554,28 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return err
 	}
 
-	// add candidate after load success
+	// Build a map from segmentID to BloomFilterSet
+	bfMap := make(map[int64]pkoracle.Candidate)
 	for _, candidate := range candidates {
-		log.Info("register sealed segment bfs into pko candidates",
+		log.Info("loaded bloom filter set for sealed segment",
 			zap.Int64("segmentID", candidate.ID()),
 		)
-		sd.pkOracle.Register(candidate, targetNodeID)
+		bfMap[candidate.ID()] = candidate
+	}
+
+	// Build entries with Candidate - use filtered infos instead of req.GetInfos()
+	// This ensures we only add entries for segments that were actually loaded (not skipped as duplicates)
+	entries := make([]SegmentEntry, 0, len(infos))
+	for _, info := range infos {
+		entry := SegmentEntry{
+			SegmentID:   info.GetSegmentID(),
+			PartitionID: info.GetPartitionID(),
+			NodeID:      req.GetDstNodeID(),
+			Version:     req.GetVersion(),
+			Level:       info.GetLevel(),
+			Candidate:   bfMap[info.GetSegmentID()],
+		}
+		entries = append(entries, entry)
 	}
 
 	return sd.addDistributionIfVersionOK(req.GetLoadMeta().GetSchemaVersion(), entries...)
@@ -862,22 +878,9 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	})
 	sd.AddExcludedSegments(droppedInfos)
 
-	if len(sealed) > 0 {
-		removed := sd.pkOracle.Remove(
-			pkoracle.WithSegmentIDs(lo.Map(sealed, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })...),
-			pkoracle.WithSegmentType(commonpb.SegmentState_Sealed),
-			pkoracle.WithWorkerID(targetNodeID),
-		)
-		// Refund resources for removed sealed segment candidates
-		sd.pkOracle.RefundRemoved(removed)
-	}
-	if len(growing) > 0 {
-		sd.pkOracle.Remove(
-			pkoracle.WithSegmentIDs(lo.Map(growing, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })...),
-			pkoracle.WithSegmentType(commonpb.SegmentState_Growing),
-		)
-		// leave the bloom filter sets in growing segment be closed by Release()
-	}
+	// Note: Candidate cleanup is handled by RemoveDistributions above
+	// - Sealed segment candidates (BloomFilterSet) are refunded in RemoveDistributions
+	// - Growing segment candidates (LocalSegment) are managed by segmentManager.Release()
 
 	var releaseErr error
 	if !force {

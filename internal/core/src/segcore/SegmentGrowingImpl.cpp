@@ -9,49 +9,76 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <boost/iterator/counting_iterator.hpp>
+#include <cxxabi.h>
 #include <algorithm>
 #include <cstring>
+#include <exception>
+#include <future>
+#include <iosfwd>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <numeric>
 #include <optional>
-#include <queue>
 #include <string>
-#include <thread>
-#include <boost/iterator/counting_iterator.hpp>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <variant>
 
+#include "NamedType/named_type_impl.hpp"
+#include "arrow/api.h"
+#include "bitset/bitset.h"
+#include "boost/iterator/iterator_facade.hpp"
 #include "cachinglayer/CacheSlot.h"
+#include "common/Array.h"
+#include "common/ArrayOffsets.h"
+#include "common/ArrowDataWrapper.h"
+#include "common/Channel.h"
+#include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
-#include "common/Schema.h"
+#include "common/FieldDataInterface.h"
 #include "common/Json.h"
+#include "common/LoadInfo.h"
+#include "common/Schema.h"
+#include "common/Span.h"
 #include "common/Types.h"
-#include "common/Common.h"
-#include "fmt/format.h"
+#include "common/VectorArray.h"
+#include "glog/logging.h"
+#include "index/Index.h"
+#include "index/TextMatchIndex.h"
+#include "index/Utils.h"
+#include "index/VectorIndex.h"
+#include "knowhere/comp/index_param.h"
 #include "log/Log.h"
-#include "nlohmann/json.hpp"
-#include "query/PlanNode.h"
-#include "query/SearchOnSealed.h"
-#include "segcore/Utils.h"
+#include "milvus-storage/common/config.h"
+#include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/metadata.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/format/parquet/file_reader.h"
+#include "milvus-storage/manifest.h"
+#include "mmap/Types.h"
+#include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
+#include "query/SearchOnGrowing.h"
+#include "segcore/AckResponder.h"
+#include "segcore/ConcurrentVector.h"
+#include "segcore/DeletedRecord.h"
+#include "segcore/FieldIndexing.h"
+#include "segcore/InsertRecord.h"
 #include "segcore/SegmentGrowingImpl.h"
-#include "segcore/SegmentGrowing.h"
+#include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
-#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/KeyRetriever.h"
+#include "storage/ThreadPool.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
-#include "storage/Util.h"
-#include "storage/ThreadPools.h"
-#include "storage/KeyRetriever.h"
-#include "common/TypeTraits.h"
-#include "knowhere/comp/index_param.h"
-
-#include "milvus-storage/format/parquet/file_reader.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "milvus-storage/common/constants.h"
 
 namespace milvus::segcore {
 
@@ -1952,10 +1979,7 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     if (!field_data_info.field_infos.empty()) {
         LoadFieldData(field_data_info);
     }
-}
 
-void
-SegmentGrowingImpl::FinishLoad() {
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;

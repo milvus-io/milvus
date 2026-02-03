@@ -16,15 +16,21 @@
 
 #pragma once
 
-#include <map>
+#include <stdint.h>
+#include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
+#include "common/FieldData.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "index/IndexStats.h"
 #include "index/ScalarIndex.h"
-#include "index/BitmapIndex.h"
-#include "index/ScalarIndexSort.h"
-#include "index/StringIndexMarisa.h"
-#include "index/InvertedIndexTantivy.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
 #include "storage/FileManager.h"
 #include "storage/MemFileManagerImpl.h"
 

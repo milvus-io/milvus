@@ -11,41 +11,65 @@
 
 #include "segcore/segment_c.h"
 
-#include <memory>
+#include <folly/CancellationToken.h>
+#include <folly/ExceptionWrapper.h>
+#include <folly/Try.h>
+#include <folly/futures/Promise.h>
+#include <exception>
+#include <functional>
 #include <limits>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 #include "common/EasyAssert.h"
-#include "common/common_type_c.h"
-#include "pb/cgo_msg.pb.h"
-#include "pb/index_cgo_msg.pb.h"
-
-#include "common/FieldData.h"
 #include "common/LoadInfo.h"
 #include "common/OpContext.h"
-#include "common/Types.h"
-#include "common/Tracer.h"
-#include "common/type_c.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
 #include "common/ScopedTimer.h"
-#include "google/protobuf/text_format.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "common/common_type_c.h"
+#include "common/protobuf_utils.h"
+#include "common/type_c.h"
+#include "exec/expression/ExprCache.h"
+#include "fmt/core.h"
+#include "folly/CancellationToken.h"
+#include "folly/executors/CPUThreadPoolExecutor.h"
+#include "folly/futures/Future.h"
+#include "futures/Executor.h"
+#include "futures/Future.h"
+#include "glog/logging.h"
+#include "index/Meta.h"
+#include "index/json_stats/JsonKeyStats.h"
 #include "log/Log.h"
-#include "mmap/Types.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "monitor/Monitor.h"
 #include "monitor/scope_metric.h"
+#include "nlohmann/json.hpp"
+#include "opentelemetry/trace/span.h"
+#include "pb/index_cgo_msg.pb.h"
+#include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
+#include "prometheus/histogram.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/Collection.h"
 #include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
-#include "segcore/Utils.h"
-#include "storage/Event.h"
-#include "storage/Util.h"
-#include "futures/Future.h"
-#include "futures/Executor.h"
+#include "segcore/SegmentInterface.h"
 #include "segcore/SegmentSealed.h"
-#include "segcore/ChunkedSegmentSealedImpl.h"
-#include "mmap/Types.h"
+#include "segcore/Types.h"
+#include "storage/FileManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
-#include "exec/expression/ExprCache.h"
-#include "monitor/Monitor.h"
-#include "common/GeometryCache.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 
@@ -817,20 +841,6 @@ CreateTextIndex(CSegmentInterface c_segment,
             segment_interface->CreateTextIndex(milvus::FieldId(field_id),
                                                nullptr);
         }
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
-    }
-}
-
-CStatus
-FinishLoad(CSegmentInterface c_segment) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto segment_interface =
-            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        segment_interface->FinishLoad();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());

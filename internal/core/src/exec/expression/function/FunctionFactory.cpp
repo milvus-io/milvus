@@ -15,12 +15,18 @@
 // limitations under the License.
 
 #include "exec/expression/function/FunctionFactory.h"
+
+#include <ostream>
+#include <utility>
+
+#include "common/protobuf_utils.h"
 #include "exec/expression/function/impl/StringFunctions.h"
-#include "log/Log.h"
 #include "exec/operator/query-agg/CountAggregateBase.h"
-#include "exec/operator/query-agg/MinAggregateBase.h"
 #include "exec/operator/query-agg/MaxAggregateBase.h"
+#include "exec/operator/query-agg/MinAggregateBase.h"
 #include "exec/operator/query-agg/SumAggregateBase.h"
+#include "glog/logging.h"
+#include "log/Log.h"
 
 namespace milvus {
 namespace exec {

@@ -9,18 +9,51 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <boost/format.hpp>
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <cstdint>
+#include <functional>
+#include <map>
 #include <memory>
-#include <regex>
+#include <string>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <variant>
+#include <vector>
 
-#include "common/Tracer.h"
+#include "bitset/bitset.h"
+#include "common/Consts.h"
+#include "common/FieldMeta.h"
+#include "common/IndexMeta.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
+#include "common/TracerBase.h"
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "common/Vector.h"
+#include "common/protobuf_utils.h"
+#include "exec/expression/EvalCtx.h"
+#include "expr/ITypeExpr.h"
+#include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
+#include "pb/common.pb.h"
 #include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
+#include "plan/PlanNode.h"
+#include "query/ExecPlanNodeVisitor.h"
+#include "query/Plan.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
 #include "query/PlanProto.h"
 #include "query/SearchBruteForce.h"
-#include "query/Utils.h"
-#include "query/PlanNodeVisitor.h"
-#include "query/ExecPlanNodeVisitor.h"
+#include "query/SubSearchResult.h"
+#include "query/helper.h"
+#include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"

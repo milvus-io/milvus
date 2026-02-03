@@ -10,7 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "MinHashHook.h"
+
 #include "fusion_compute/fusion_compute_native.h"
+#include "glog/logging.h"
 #include "log/Log.h"
 
 #if defined(__x86_64__) || defined(_M_X64)
@@ -29,8 +31,8 @@
 #ifdef _MSC_VER
 #include <processthreadsapi.h>
 #else
-#include <sys/auxv.h>
 #include <asm/hwcap.h>
+#include <sys/auxv.h>
 #endif
 #endif
 

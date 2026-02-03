@@ -14,12 +14,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "arrow/io/api.h"
-#include "arrow/status.h"
+#include <string>
+#include <utility>
+
+#include "arrow/api.h"
+#include "arrow/io/memory.h"
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "parquet/arrow/reader.h"
-#include "parquet/column_reader.h"
+#include "parquet/file_reader.h"
+#include "parquet/metadata.h"
+#include "parquet/properties.h"
+#include "parquet/schema.h"
 #include "storage/PayloadReader.h"
 #include "storage/Util.h"
 

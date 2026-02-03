@@ -15,8 +15,19 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include <cstddef>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "bitset/bitset.h"
+#include "bitset/detail/element_vectorized.h"
+#include "common/Types.h"
 #include "common/ValueOp.h"
 #include "common/Vector.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
 
 using namespace milvus;
 using namespace milvus::common;

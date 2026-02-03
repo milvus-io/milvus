@@ -14,26 +14,44 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <string.h>
 #include <algorithm>
+#include <cstdint>
+#include <exception>
+#include <filesystem>
+#include <map>
 #include <memory>
 #include <optional>
-#include <utility>
-#include <pb/schema.pb.h>
-#include <vector>
 #include <string>
-#include "common/CDataType.h"
-#include "index/ScalarIndex.h"
-#include "knowhere/log.h"
+#include <vector>
+
 #include "Meta.h"
-#include "common/Utils.h"
-#include "common/Slice.h"
-#include "common/Types.h"
-#include "index/Utils.h"
-#include "index/ScalarIndexSort.h"
-#include "pb/common.pb.h"
-#include "storage/ThreadPools.h"
-#include "storage/Util.h"
+#include "bitset/bitset.h"
 #include "common/Array.h"
+#include "common/EasyAssert.h"
+#include "common/FieldDataInterface.h"
+#include "common/File.h"
+#include "common/Slice.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
+#include "index/ScalarIndex.h"
+#include "index/ScalarIndexSort.h"
+#include "index/Utils.h"
+#include "knowhere/binaryset.h"
+#include "log/Log.h"
+#include "nlohmann/json.hpp"
+#include "pb/common.pb.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/FileWriter.h"
+#include "storage/MemFileManagerImpl.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 
 namespace milvus::index {
 

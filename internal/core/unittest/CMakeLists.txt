@@ -131,7 +131,6 @@ set_target_properties(all_tests PROPERTIES
 
 install(TARGETS all_tests DESTINATION unittest)
 
-add_subdirectory(bench)
 add_subdirectory(test_json_stats)
 
 # bitset unit test

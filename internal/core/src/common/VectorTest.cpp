@@ -15,7 +15,19 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include <cstddef>
+#include <initializer_list>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "common/EasyAssert.h"
+#include "common/Types.h"
 #include "common/Vector.h"
+#include "gtest/gtest.h"
 
 using namespace milvus;
 

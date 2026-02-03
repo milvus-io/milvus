@@ -961,9 +961,6 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 			return struct{}{}, errors.Wrap(err, "At Load")
 		}
 
-		if err = segment.FinishLoad(); err != nil {
-			return struct{}{}, errors.Wrap(err, "At FinishLoad")
-		}
 		return struct{}{}, nil
 	}).Await()
 	if err != nil {
@@ -1060,10 +1057,11 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		if err := segment.Load(ctx); err != nil {
 			return err
 		}
-		if err := segment.FinishLoad(); err != nil {
-			return errors.Wrap(err, "At FinishLoad")
-		}
 	}
+
+	binlogSize := calculateSegmentMemorySize(segment.LoadInfo())
+	segment.manager.AddLoadedBinlogSize(binlogSize)
+	segment.binlogSize.Store(binlogSize)
 
 	// load statslog if it's growing segment
 	if segment.segmentType == SegmentTypeGrowing {
@@ -1984,11 +1982,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 					fieldIndexInfo.GetBuildID())
 			}
 
-			// Use per-field index warmup policy instead of global config
-			warmupPolicy := getIndexWarmupPolicy(fieldSchema, fieldIndexInfo)
-			needWarmup := warmupPolicy == common.WarmupSync
-
-			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+			if !multiplyFactor.TieredEvictionEnabled {
 				indexMemorySize += estimateResult.MaxMemoryCost
 				segDiskLoadingSize += estimateResult.MaxDiskCost
 			}
@@ -2039,7 +2033,6 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		var legacyNilSchema bool
 		mmapEnabled := true
 		isVectorType := true
-		needWarmup := false
 		hasIndex := true
 
 		for _, fieldID := range fieldIDs {
@@ -2064,9 +2057,6 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 			supportInterimIndexDataType = supportInterimIndexDataType || SupportInterimIndexDataType(fieldSchema.GetDataType())
 			isVectorType = isVectorType && typeutil.IsVectorType(fieldSchema.GetDataType())
-			// Use per-field warmup policy instead of global config
-			warmupPolicy := getFieldWarmupPolicy(fieldSchema)
-			needWarmup = needWarmup || warmupPolicy == common.WarmupSync
 			mmapEnabled = mmapEnabled && isDataMmapEnable(fieldSchema)
 			containsTimestampField = containsTimestampField || DoubleMemorySystemField(fieldSchema.GetFieldID())
 			doubleMomoryDataField = doubleMomoryDataField || DoubleMemoryDataType(fieldSchema.GetDataType())
@@ -2077,7 +2067,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		}
 
 		if !hasIndex {
-			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+			if !multiplyFactor.TieredEvictionEnabled {
 				interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && supportInterimIndexDataType
 				if interimIndexEnable {
 					segMemoryLoadingSize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
@@ -2088,11 +2078,11 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		if isVectorType {
 			mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
 			if mmapVectorField {
-				if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+				if !multiplyFactor.TieredEvictionEnabled {
 					segDiskLoadingSize += binlogSize
 				}
 			} else {
-				if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+				if !multiplyFactor.TieredEvictionEnabled {
 					segMemoryLoadingSize += binlogSize
 				}
 			}
@@ -2108,14 +2098,14 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		}
 
 		if !mmapEnabled {
-			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+			if !multiplyFactor.TieredEvictionEnabled {
 				segMemoryLoadingSize += binlogSize
 				if doubleMomoryDataField {
 					segMemoryLoadingSize += binlogSize
 				}
 			}
 		} else {
-			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+			if !multiplyFactor.TieredEvictionEnabled {
 				segDiskLoadingSize += uint64(getBinlogDataMemorySize(fieldBinlog))
 			}
 		}
@@ -2148,14 +2138,13 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 	// PART 5: calculate size of json key stats data
 	jsonStatsMmapEnable := paramtable.Get().QueryNodeCfg.MmapJSONStats.GetAsBool()
-	needWarmup := paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.GetValue() == "sync"
 	for _, jsonKeyStats := range loadInfo.GetJsonKeyStatsLogs() {
 		if jsonStatsMmapEnable {
-			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+			if !multiplyFactor.TieredEvictionEnabled {
 				segDiskLoadingSize += uint64(float64(jsonKeyStats.GetMemorySize()) * multiplyFactor.jsonKeyStatsExpansionFactor)
 			}
 		} else {
-			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+			if !multiplyFactor.TieredEvictionEnabled {
 				segMemoryLoadingSize += uint64(float64(jsonKeyStats.GetMemorySize()) * multiplyFactor.jsonKeyStatsExpansionFactor)
 			}
 		}

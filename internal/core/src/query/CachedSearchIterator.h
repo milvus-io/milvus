@@ -11,16 +11,28 @@
 
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <optional>
+#include <queue>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "cachinglayer/CacheSlot.h"
 #include "common/BitsetView.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "index/VectorIndex.h"
+#include "knowhere/dataset.h"
+#include "knowhere/index/index_node.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "query/helper.h"
 #include "segcore/ConcurrentVector.h"
-#include "index/VectorIndex.h"
-#include "mmap/ChunkedColumnInterface.h"
 
 namespace milvus::query {
 

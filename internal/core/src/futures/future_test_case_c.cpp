@@ -9,8 +9,24 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "Future.h"
+#include <folly/CancellationToken.h>
+#include <folly/ExceptionWrapper.h>
+#include <folly/Try.h>
+#include <folly/futures/Promise.h>
+#include <chrono>
+#include <exception>
+#include <memory>
+#include <stdexcept>
+#include <thread>
+#include <utility>
+#include <vector>
+
 #include "Executor.h"
+#include "Future.h"
+#include "common/EasyAssert.h"
+#include "folly/executors/CPUThreadPoolExecutor.h"
+#include "folly/futures/Future.h"
+#include "futures/future_c_types.h"
 
 extern "C" CFuture*
 future_create_test_case(int interval, int loop_cnt, int case_no) {

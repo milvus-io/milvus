@@ -15,18 +15,54 @@
 // limitations under the License.
 
 #include "UnaryExpr.h"
+
+#include <simdjson.h>
+#include <algorithm>
+#include <cstdint>
+#include <functional>
+#include <iterator>
+#include <limits>
 #include <optional>
-#include <boost/regex.hpp>
+#include <set>
+#include <unordered_set>
+#include <variant>
+
+#include "boost/container/vector.hpp"
+#include "boost/cstdint.hpp"
+#include "boost/regex/v5/basic_regex.hpp"
+#include "boost/regex/v5/perl_matcher_common.hpp"
+#include "boost/regex/v5/perl_matcher_non_recursive.hpp"
+#include "boost/regex/v5/regex.hpp"
+#include "boost/regex/v5/regex_fwd.hpp"
+#include "boost/regex/v5/regex_search.hpp"
+#include "bsoncxx/array/view.hpp"
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
+#include "common/ScopedTimer.h"
+#include "common/Span.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
-#include "exec/expression/ExprCache.h"
 #include "common/type_c.h"
+#include "exec/expression/ExprCache.h"
+#include "fmt/core.h"
+#include "folly/FBVector.h"
+#include "glog/logging.h"
+#include "index/NgramInvertedIndex.h"
+#include "index/TextMatchIndex.h"
+#include "index/json_stats/JsonKeyStats.h"
+#include "index/json_stats/utils.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
-#include "common/ScopedTimer.h"
+#include "opentelemetry/trace/span.h"
+#include "prometheus/histogram.h"
+#include "segcore/SegmentSealed.h"
+#include "storage/MmapManager.h"
+#include "storage/Types.h"
 
 namespace milvus {
+class SkipIndex;
+
 namespace exec {
 template <typename T>
 bool

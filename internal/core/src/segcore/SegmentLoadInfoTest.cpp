@@ -10,12 +10,28 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <stdint.h>
+#include <iostream>
+#include <memory>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
+#include "NamedType/underlying_functionalities.hpp"
 #include "common/Schema.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
 #include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
-#include "knowhere/index/index_factory.h"
+#include "pb/common.pb.h"
+#include "pb/segcore.pb.h"
 #include "segcore/SegmentLoadInfo.h"
+#include "segcore/Types.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -134,8 +150,9 @@ class SegmentLoadInfoTest : public ::testing::Test {
     proto::segcore::SegmentLoadInfo proto_;
 };
 
-TEST_F(SegmentLoadInfoTest, DefaultConstructor) {
-    SegmentLoadInfo info;
+TEST_F(SegmentLoadInfoTest, EmptyProtoConstructor) {
+    proto::segcore::SegmentLoadInfo empty_proto;
+    SegmentLoadInfo info(empty_proto, schema_);
     EXPECT_TRUE(info.IsEmpty());
     EXPECT_EQ(info.GetSegmentID(), 0);
     EXPECT_EQ(info.GetNumOfRows(), 0);
@@ -170,7 +187,8 @@ TEST_F(SegmentLoadInfoTest, MoveConstructor) {
 
 TEST_F(SegmentLoadInfoTest, CopyAssignment) {
     SegmentLoadInfo info1(proto_, schema_);
-    SegmentLoadInfo info2;
+    proto::segcore::SegmentLoadInfo empty_proto;
+    SegmentLoadInfo info2(empty_proto, schema_);
     info2 = info1;
 
     EXPECT_EQ(info2.GetSegmentID(), 12345);
@@ -178,7 +196,8 @@ TEST_F(SegmentLoadInfoTest, CopyAssignment) {
 }
 
 TEST_F(SegmentLoadInfoTest, SetMethod) {
-    SegmentLoadInfo info;
+    proto::segcore::SegmentLoadInfo empty_proto;
+    SegmentLoadInfo info(empty_proto, schema_);
     info.Set(proto_, schema_);
 
     EXPECT_EQ(info.GetSegmentID(), 12345);
@@ -351,20 +370,6 @@ TEST_F(SegmentLoadInfoTest, IndexWithoutFiles) {
 }
 
 // ==================== GetLoadDiff Tests ====================
-
-TEST_F(SegmentLoadInfoTest, GetLoadDiffWithEmptyInfo) {
-    // Empty SegmentLoadInfo should return empty diff
-    SegmentLoadInfo empty_info;
-    auto diff = empty_info.GetLoadDiff();
-
-    EXPECT_FALSE(diff.HasChanges());
-    EXPECT_TRUE(diff.indexes_to_load.empty());
-    EXPECT_TRUE(diff.binlogs_to_load.empty());
-    EXPECT_TRUE(diff.column_groups_to_load.empty());
-    EXPECT_TRUE(diff.indexes_to_drop.empty());
-    EXPECT_TRUE(diff.field_data_to_drop.empty());
-    EXPECT_FALSE(diff.manifest_updated);
-}
 
 TEST_F(SegmentLoadInfoTest, GetLoadDiffWithIndexesOnly) {
     // Create info with only indexes (no binlogs, no manifest)
@@ -812,10 +817,239 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffNoChangesLegacyFormat) {
     log->set_entries_num(500);
 
     SegmentLoadInfo current_info(proto, schema_);
+    // calculate first diff to set default value fields
+    auto diff = current_info.GetLoadDiff();
     SegmentLoadInfo new_info(proto, schema_);
-    auto diff = current_info.ComputeDiff(new_info);
+    diff = current_info.ComputeDiff(new_info);
 
     EXPECT_FALSE(diff.HasChanges());
     EXPECT_TRUE(diff.binlogs_to_load.empty());
     EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+// ==================== Default Value Filling Tests ====================
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFieldsBasic) {
+    // Test that fields without data sources are added to fields_to_fill_default
+    // Schema has fields 100-110, but we only provide binlog for field 100 (pk)
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    // Only add binlog for pk field (100)
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(100);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/pk_binlog");
+    log->set_entries_num(1000);
+
+    SegmentLoadInfo empty_info(milvus::proto::segcore::SegmentLoadInfo(),
+                               schema_);
+    SegmentLoadInfo new_info(proto, schema_);
+
+    auto diff = empty_info.ComputeDiff(new_info);
+
+    // Fields 101-110 should be in fields_to_fill_default (no data source)
+    // Field 100 has binlog, so it should NOT be in fields_to_fill_default
+    EXPECT_TRUE(diff.HasChanges());
+    EXPECT_FALSE(diff.fields_to_fill_default.empty());
+
+    // Check that field 100 is NOT in fields_to_fill_default
+    for (const auto& field_id : diff.fields_to_fill_default) {
+        EXPECT_NE(field_id.get(), 100);
+    }
+
+    // Fields 101-110 should be in fields_to_fill_default
+    std::set<int64_t> expected_fields = {
+        101, 102, 103, 104, 105, 106, 107, 108, 109, 110};
+    std::set<int64_t> actual_fields;
+    for (const auto& field_id : diff.fields_to_fill_default) {
+        actual_fields.insert(field_id.get());
+    }
+    EXPECT_EQ(actual_fields, expected_fields);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFieldsSkipAlreadyFilled) {
+    // Test that fields already filled with default values are skipped
+    // on subsequent ComputeDiff calls
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    // Only add binlog for pk field (100)
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(100);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/pk_binlog");
+    log->set_entries_num(1000);
+
+    // First diff: empty -> proto (simulates initial load)
+    SegmentLoadInfo empty_info(milvus::proto::segcore::SegmentLoadInfo(),
+                               schema_);
+    SegmentLoadInfo first_new_info(proto, schema_);
+    auto first_diff = empty_info.ComputeDiff(first_new_info);
+
+    // Verify fields were added to fields_to_fill_default
+    EXPECT_FALSE(first_diff.fields_to_fill_default.empty());
+    size_t first_count = first_diff.fields_to_fill_default.size();
+
+    // Second diff: first_new_info -> same proto (simulates reopen)
+    // first_new_info should now have fields_filled_with_default_ populated
+    SegmentLoadInfo second_new_info(proto, schema_);
+    auto second_diff = first_new_info.ComputeDiff(second_new_info);
+
+    // All previously filled fields should be skipped
+    EXPECT_TRUE(second_diff.fields_to_fill_default.empty());
+
+    // Verify that second_new_info inherited the filled status
+    // by doing a third diff
+    SegmentLoadInfo third_new_info(proto, schema_);
+    auto third_diff = second_new_info.ComputeDiff(third_new_info);
+    EXPECT_TRUE(third_diff.fields_to_fill_default.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFieldsWithIndex) {
+    // Test that fields with index (that has raw data) are NOT added
+    // to fields_to_fill_default
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    // Add binlog for pk field (100)
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(100);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/pk_binlog");
+    log->set_entries_num(1000);
+
+    // Add index for field 101 (vec field) - FLAT index has raw data
+    auto* index_info = proto.add_index_infos();
+    index_info->set_fieldid(101);
+    index_info->set_indexid(1001);
+    index_info->add_index_file_paths("/path/to/index");
+    auto* index_param = index_info->add_index_params();
+    index_param->set_key("index_type");
+    index_param->set_value(knowhere::IndexEnum::INDEX_FAISS_IDMAP);
+
+    SegmentLoadInfo empty_info(milvus::proto::segcore::SegmentLoadInfo(),
+                               schema_);
+    SegmentLoadInfo new_info(proto, schema_);
+    auto diff = empty_info.ComputeDiff(new_info);
+
+    // Field 101 should NOT be in fields_to_fill_default (has index with raw
+    // data)
+    for (const auto& field_id : diff.fields_to_fill_default) {
+        EXPECT_NE(field_id.get(), 101);
+    }
+
+    // Field 101 should be in indexes_to_load
+    EXPECT_TRUE(diff.indexes_to_load.find(FieldId(101)) !=
+                diff.indexes_to_load.end());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFieldsNotInBinlogsToLoad) {
+    // Test that fields being loaded via binlogs_to_load are NOT added
+    // to fields_to_fill_default
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    // Current has only pk field
+    auto* binlog1 = current_proto.add_binlog_paths();
+    binlog1->set_fieldid(100);
+    auto* log1 = binlog1->add_binlogs();
+    log1->set_log_path("/path/to/pk_binlog");
+    log1->set_entries_num(1000);
+
+    // New has pk + field 101
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+
+    auto* new_binlog1 = new_proto.add_binlog_paths();
+    new_binlog1->set_fieldid(100);
+    auto* new_log1 = new_binlog1->add_binlogs();
+    new_log1->set_log_path("/path/to/pk_binlog");
+    new_log1->set_entries_num(1000);
+
+    auto* new_binlog2 = new_proto.add_binlog_paths();
+    new_binlog2->set_fieldid(101);
+    auto* new_log2 = new_binlog2->add_binlogs();
+    new_log2->set_log_path("/path/to/field101_binlog");
+    new_log2->set_entries_num(1000);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // Field 101 should be in binlogs_to_load, NOT in fields_to_fill_default
+    bool found_in_binlogs = false;
+    for (const auto& [field_ids, binlog_ptr] : diff.binlogs_to_load) {
+        for (const auto& fid : field_ids) {
+            if (fid.get() == 101) {
+                found_in_binlogs = true;
+                break;
+            }
+        }
+    }
+    EXPECT_TRUE(found_in_binlogs);
+
+    // Field 101 should NOT be in fields_to_fill_default
+    for (const auto& field_id : diff.fields_to_fill_default) {
+        EXPECT_NE(field_id.get(), 101);
+    }
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffDefaultFields) {
+    // Test GetLoadDiff includes fields_to_fill_default for initial load
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    // Only add binlog for pk field (100) and vec field (101)
+    auto* binlog1 = proto.add_binlog_paths();
+    binlog1->set_fieldid(100);
+    auto* log1 = binlog1->add_binlogs();
+    log1->set_log_path("/path/to/pk_binlog");
+    log1->set_entries_num(1000);
+
+    auto* binlog2 = proto.add_binlog_paths();
+    binlog2->set_fieldid(101);
+    auto* log2 = binlog2->add_binlogs();
+    log2->set_log_path("/path/to/vec_binlog");
+    log2->set_entries_num(1000);
+
+    SegmentLoadInfo info(proto, schema_);
+    auto diff = info.GetLoadDiff();
+
+    // Fields 102-110 should be in fields_to_fill_default
+    std::set<int64_t> expected_fields = {
+        102, 103, 104, 105, 106, 107, 108, 109, 110};
+    std::set<int64_t> actual_fields;
+    for (const auto& field_id : diff.fields_to_fill_default) {
+        actual_fields.insert(field_id.get());
+    }
+    EXPECT_EQ(actual_fields, expected_fields);
+}
+
+TEST_F(SegmentLoadInfoTest, LoadDiffToStringIncludesDefaultFields) {
+    // Test that LoadDiff::ToString includes fields_to_fill_default
+    LoadDiff diff;
+    diff.fields_to_fill_default.push_back(FieldId(102));
+    diff.fields_to_fill_default.push_back(FieldId(103));
+
+    std::string str = diff.ToString();
+    EXPECT_TRUE(str.find("fields_to_fill_default") != std::string::npos);
+    EXPECT_TRUE(str.find("102") != std::string::npos);
+    EXPECT_TRUE(str.find("103") != std::string::npos);
+}
+
+TEST_F(SegmentLoadInfoTest, LoadDiffHasChangesWithDefaultFields) {
+    // Test that HasChanges returns true when only fields_to_fill_default
+    // is non-empty
+    LoadDiff diff;
+    EXPECT_FALSE(diff.HasChanges());
+
+    diff.fields_to_fill_default.push_back(FieldId(102));
+    EXPECT_TRUE(diff.HasChanges());
 }

@@ -15,27 +15,43 @@
 // limitations under the License.
 
 #include "index/StringIndexSort.h"
+
+#include <assert.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
 #include <algorithm>
+#include <cstdint>
+#include <exception>
+#include <filesystem>
+#include <iterator>
+#include <limits>
 #include <memory>
 #include <utility>
-#include <fcntl.h>
-#include <unistd.h>
-#include <unordered_map>
-#include <sys/stat.h>
-#include <filesystem>
-#include "storage/FileWriter.h"
-#include "common/CDataType.h"
-#include "common/RegexQuery.h"
-#include "knowhere/log.h"
-#include "index/Meta.h"
-#include "common/Utils.h"
-#include "common/Slice.h"
-#include "common/Types.h"
-#include "index/Utils.h"
-#include "storage/ThreadPools.h"
-#include "storage/Util.h"
+
+#include "bitset/bitset.h"
+#include "bitset/detail/element_vectorized.h"
 #include "common/Array.h"
-#include "pb/schema.pb.h"
+#include "common/EasyAssert.h"
+#include "common/FieldDataInterface.h"
+#include "common/RegexQuery.h"
+#include "common/Slice.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "fmt/core.h"
+#include "folly/small_vector.h"
+#include "glog/logging.h"
+#include "index/Meta.h"
+#include "index/Utils.h"
+#include "knowhere/binaryset.h"
+#include "log/Log.h"
+#include "nlohmann/json.hpp"
+#include "pb/common.pb.h"
+#include "storage/FileWriter.h"
+#include "storage/MemFileManagerImpl.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 
 namespace milvus::index {
 

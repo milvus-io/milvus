@@ -15,16 +15,25 @@
 // limitations under the License.
 
 #include "storage/DataCodec.h"
+
+#include <string.h>
+#include <any>
 #include <memory>
-#include "storage/Event.h"
-#include "log/Log.h"
-#include "storage/Util.h"
-#include "storage/InsertData.h"
-#include "storage/IndexData.h"
-#include "storage/BinlogReader.h"
-#include "storage/PluginLoader.h"
-#include "common/EasyAssert.h"
+#include <string>
+#include <unordered_map>
+
+#include "PluginInterface.h"
 #include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
+#include "log/Log.h"
+#include "storage/BinlogReader.h"
+#include "storage/Event.h"
+#include "storage/IndexData.h"
+#include "storage/InsertData.h"
+#include "storage/PluginLoader.h"
+#include "storage/Util.h"
 
 namespace milvus::storage {
 

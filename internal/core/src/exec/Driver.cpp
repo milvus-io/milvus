@@ -15,28 +15,40 @@
 // limitations under the License.
 
 #include "Driver.h"
-#include "common/Tracer.h"
-#include "fmt/format.h"
 
-#include <cassert>
-#include <memory>
+#include <folly/ExceptionWrapper.h>
+#include <folly/Try.h>
+#include <algorithm>
 #include <atomic>
+#include <cassert>
+#include <exception>
+#include <memory>
+#include <string>
 
 #include "common/EasyAssert.h"
+#include "common/Exception.h"
+#include "common/Tracer.h"
+#include "common/protobuf_utils.h"
+#include "exec/QueryContext.h"
+#include "exec/Task.h"
+#include "exec/operator/AggregationNode.h"
 #include "exec/operator/CallbackSink.h"
+#include "exec/operator/ElementFilterBitsNode.h"
+#include "exec/operator/ElementFilterNode.h"
 #include "exec/operator/FilterBitsNode.h"
 #include "exec/operator/IterativeFilterNode.h"
 #include "exec/operator/MvccNode.h"
 #include "exec/operator/Operator.h"
-#include "exec/operator/RescoresNode.h"
-#include "exec/operator/VectorSearchNode.h"
-#include "exec/operator/RandomSampleNode.h"
-#include "exec/operator/ElementFilterNode.h"
-#include "exec/operator/ElementFilterBitsNode.h"
-#include "exec/operator/SearchGroupByNode.h"
-#include "exec/operator/AggregationNode.h"
 #include "exec/operator/ProjectNode.h"
-#include "exec/Task.h"
+#include "exec/operator/RandomSampleNode.h"
+#include "exec/operator/RescoresNode.h"
+#include "exec/operator/SearchGroupByNode.h"
+#include "exec/operator/VectorSearchNode.h"
+#include "fmt/core.h"
+#include "folly/Executor.h"
+#include "folly/Unit.h"
+#include "glog/logging.h"
+#include "log/Log.h"
 #include "plan/PlanNode.h"
 
 namespace milvus {
@@ -254,7 +266,7 @@ Driver::Next(std::shared_ptr<BlockingState>& blocking_state) {
             operator->get_plannode_id(),                           \
             e.what(),                                              \
             stack_trace);                                          \
-        LOG_ERROR(err_msg);                                        \
+        LOG_ERROR("{}", err_msg);                                  \
         throw ExecOperatorException(err_msg);                      \
     }
 

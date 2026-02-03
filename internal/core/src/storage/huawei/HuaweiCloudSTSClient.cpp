@@ -10,18 +10,32 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "HuaweiCloudSTSClient.h"
+
 #include <aws/core/http/HttpClient.h>
 #include <aws/core/http/HttpClientFactory.h>
-#include <aws/core/http/HttpResponse.h>
-#include <aws/core/utils/json/JsonSerializer.h>
 #include <aws/core/http/HttpRequest.h>
+#include <aws/core/http/HttpResponse.h>
 #include <aws/core/utils/DateTime.h>
-#include <iostream>
+#include <aws/core/utils/json/JsonSerializer.h>
+#include <stddef.h>
+#include <map>
+#include <sstream>
+#include <string>
+#include <utility>
+
+#include "aws/core/AmazonWebServiceResult.h"
+#include "aws/core/client/AWSErrorMarshaller.h"
+#include "aws/core/http/HttpTypes.h"
+#include "aws/core/utils/StringUtils.h"
+#include "aws/core/utils/logging/LogMacros.h"
+#include "aws/core/utils/memory/AWSMemory.h"
+#include "aws/core/utils/memory/stl/AWSAllocator.h"
+#include "aws/core/utils/memory/stl/AWSStreamFwd.h"
+#include "aws/core/utils/memory/stl/AWSStringStream.h"
+#include "aws/core/utils/stream/ResponseStream.h"
 
 namespace Aws {
 namespace Http {
-class HttpClient;
-class HttpRequest;
 enum class HttpResponseCode;
 }  // namespace Http
 

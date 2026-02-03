@@ -11,9 +11,24 @@
 
 #include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
 
+#include <assert.h>
+#include <algorithm>
+#include <cstdint>
+#include <filesystem>
+
+#include "arrow/api.h"
+#include "arrow/array/builder_base.h"
+#include "arrow/array/builder_binary.h"
+#include "common/Array.h"
+#include "common/Chunk.h"
 #include "common/ChunkWriter.h"
+#include "common/EasyAssert.h"
+#include "common/Json.h"
 #include "common/Types.h"
-#include "segcore/Utils.h"
+#include "common/protobuf_utils.h"
+#include "fmt/core.h"
+#include "mmap/Types.h"
+#include "pb/schema.pb.h"
 #include "segcore/Utils.h"
 #include "storage/Util.h"
 
@@ -79,52 +94,32 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
                          meta_.virt_chunk_order_,
                          meta_.vcid_to_cid_arr_);
 
-    // Pre-build shared buffer for default-value cells: all cells, including
-    // the tail one, will share this buffer. Tail cells will use a smaller
-    // logical row count while reusing the same underlying memory.
-    auto build_buffer_for_rows = [&](int64_t num_rows) -> milvus::ChunkBuffer {
-        auto data_type = field_meta_.get_data_type();
-        std::shared_ptr<arrow::ArrayBuilder> builder;
-        if (IsVectorDataType(data_type)) {
-            AssertInfo(field_meta_.is_nullable(),
-                       "only nullable vector fields can be dynamically added");
-            builder = std::make_shared<arrow::BinaryBuilder>();
-        } else {
-            builder = milvus::storage::CreateArrowBuilder(data_type);
-        }
-        arrow::Status ast;
-        if (field_meta_.default_value().has_value()) {
-            ast = builder->Reserve(num_rows);
-            AssertInfo(
-                ast.ok(), "reserve arrow builder failed: {}", ast.ToString());
-            auto default_scalar =
-                storage::CreateArrowScalarFromDefaultValue(field_meta_);
-            ast = builder->AppendScalar(*default_scalar, num_rows);
-        } else {
-            ast = builder->AppendNulls(num_rows);
-        }
-        AssertInfo(ast.ok(),
-                   "append null/default values to arrow builder failed: {}",
-                   ast.ToString());
-        arrow::ArrayVector array_vec;
-        array_vec.emplace_back(builder->Finish().ValueOrDie());
-        if (!use_mmap_ || mmap_dir_path_.empty()) {
-            return milvus::create_chunk_buffer(
-                field_meta_, array_vec, mmap_populate_);
-        } else {
-            auto filepath =
-                std::filesystem::path(mmap_dir_path_) /
-                fmt::format(
-                    "seg_{}_f_{}_def", segment_id_, field_data_info.field_id);
-            std::filesystem::create_directories(filepath.parent_path());
-            // just use default load priority: proto::common::LoadPriority::HIGH
-            return milvus::create_chunk_buffer(
-                field_meta_, array_vec, mmap_populate_, filepath.string());
-        }
-    };
+    field_id_ = field_data_info.field_id;
 
+    // Buffer sharing is only safe for non-nullable fixed-width types, where
+    // there is no null bitmap and data_start_ == data_ regardless of row count.
+    // For nullable types, the null bitmap size (ceil(row_nums/8)) affects
+    // data_start_ offset in FixedWidthChunk, so sharing a buffer built for N
+    // rows with a chunk claiming M rows would cause data_start_ to be wrong.
+    // For variable-length types, buffer layout (offsets position) also depends
+    // on exact row count.
+    can_share_buffer_ = !IsVariableDataType(field_meta_.get_data_type()) &&
+                        !field_meta_.is_nullable();
+
+    // Pre-build primary buffer for all primary cells
     if (primary_cell_rows_ > 0) {
-        primary_buffer_ = build_buffer_for_rows(primary_cell_rows_);
+        primary_buffer_ = build_buffer_for_rows(primary_cell_rows_, "");
+    }
+
+    // For variable-length types, check if tail cell has different row count
+    if (!can_share_buffer_ && num_cells() > 1) {
+        auto last_cid = num_cells() - 1;
+        auto tail_rows = meta_.num_rows_until_chunk_[last_cid + 1] -
+                         meta_.num_rows_until_chunk_[last_cid];
+        if (tail_rows != primary_cell_rows_) {
+            tail_buffer_ = build_buffer_for_rows(tail_rows, "_tail");
+            tail_cell_rows_ = tail_rows;
+        }
     }
 }
 
@@ -229,14 +224,56 @@ DefaultValueChunkTranslator::key() const {
     return key_;
 }
 
+milvus::ChunkBuffer
+DefaultValueChunkTranslator::build_buffer_for_rows(
+    int64_t num_rows, const std::string& suffix) const {
+    auto data_type = field_meta_.get_data_type();
+    std::shared_ptr<arrow::ArrayBuilder> builder;
+
+    if (IsVectorDataType(data_type)) {
+        AssertInfo(field_meta_.is_nullable(),
+                   "only nullable vector fields can be dynamically added");
+        builder = std::make_shared<arrow::BinaryBuilder>();
+    } else {
+        builder = milvus::storage::CreateArrowBuilder(data_type);
+    }
+
+    arrow::Status ast;
+    if (field_meta_.default_value().has_value()) {
+        ast = builder->Reserve(num_rows);
+        AssertInfo(
+            ast.ok(), "reserve arrow builder failed: {}", ast.ToString());
+        auto default_scalar =
+            storage::CreateArrowScalarFromDefaultValue(field_meta_);
+        ast = builder->AppendScalar(*default_scalar, num_rows);
+    } else {
+        ast = builder->AppendNulls(num_rows);
+    }
+    AssertInfo(ast.ok(),
+               "append null/default values to arrow builder failed: {}",
+               ast.ToString());
+
+    arrow::ArrayVector array_vec;
+    array_vec.emplace_back(builder->Finish().ValueOrDie());
+
+    if (!use_mmap_ || mmap_dir_path_.empty()) {
+        return milvus::create_chunk_buffer(
+            field_meta_, array_vec, mmap_populate_);
+    } else {
+        auto filepath =
+            std::filesystem::path(mmap_dir_path_) /
+            fmt::format("seg_{}_f_{}_def{}", segment_id_, field_id_, suffix);
+        std::filesystem::create_directories(filepath.parent_path());
+        return milvus::create_chunk_buffer(
+            field_meta_, array_vec, mmap_populate_, filepath.string());
+    }
+}
+
 std::vector<
     std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
 DefaultValueChunkTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
-    AssertInfo(primary_buffer_.has_value(),
-               "primary buffer is not initialized");
-
     std::vector<
         std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
         res;
@@ -249,10 +286,27 @@ DefaultValueChunkTranslator::get_cells(
         auto rows_end = meta_.num_rows_until_chunk_[cid + 1];
         auto num_rows = rows_end - rows_begin;
 
-        const milvus::ChunkBuffer& buffer = primary_buffer_.value();
-
-        auto chunk =
-            milvus::make_chunk_from_buffer(field_meta_, buffer, num_rows);
+        std::unique_ptr<milvus::Chunk> chunk;
+        if (can_share_buffer_) {
+            // Fixed-width types: share the pre-built buffer, override row count
+            AssertInfo(primary_buffer_.has_value(),
+                       "primary buffer is not initialized");
+            chunk = milvus::make_chunk_from_buffer(
+                field_meta_, primary_buffer_.value(), num_rows);
+        } else {
+            // Variable-length types: use matching buffer (primary or tail)
+            // because buffer layout (null bitmap, offsets) must match row count.
+            // row_nums_override=0: use the buffer's own row_nums.
+            if (tail_buffer_.has_value() && num_rows == tail_cell_rows_) {
+                chunk = milvus::make_chunk_from_buffer(
+                    field_meta_, tail_buffer_.value(), 0);
+            } else {
+                AssertInfo(primary_buffer_.has_value(),
+                           "primary buffer is not initialized");
+                chunk = milvus::make_chunk_from_buffer(
+                    field_meta_, primary_buffer_.value(), 0);
+            }
+        }
         res.emplace_back(cid, std::move(chunk));
     }
 

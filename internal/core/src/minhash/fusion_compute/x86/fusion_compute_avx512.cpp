@@ -14,6 +14,11 @@
 
 #include "fusion_compute_avx512.h"
 
+#include <immintrin.h>
+#include <xmmintrin.h>
+
+#include "fusion_compute_native.h"
+
 namespace milvus {
 namespace minhash {
 

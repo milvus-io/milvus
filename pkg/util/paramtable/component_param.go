@@ -7061,9 +7061,9 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 	p.DelegatorEmptyTimeTickMaxFilterInterval = ParamItem{
 		Key:     "streaming.delegator.emptyTimeTick.maxFilterInterval",
 		Version: "2.6.9",
-		Doc: `The max filter interval for empty time tick of delegator, 1m by default.
+		Doc: `The max filter interval for empty time tick of delegator, 2s by default.
 If the interval since last timetick is less than this config, the empty time tick will be filtered.`,
-		DefaultValue: "1m",
+		DefaultValue: "2s",
 		Export:       false,
 	}
 	p.DelegatorEmptyTimeTickMaxFilterInterval.Init(base.mgr)

@@ -16,18 +16,17 @@
 
 #pragma once
 
-#include <arrow/record_batch.h>
 #include <cstdint>
-#include <utility>
-#include <vector>
 #include <memory>
 #include <utility>
+#include <vector>
 
+#include "common/ArrowDataWrapper.h"
+#include "common/EasyAssert.h"
 #include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
 #include "storage/PayloadReader.h"
 #include "storage/Types.h"
-#include "storage/PayloadStream.h"
-#include "storage/BinlogReader.h"
 
 namespace milvus::storage {
 

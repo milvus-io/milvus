@@ -1,12 +1,23 @@
 #include "segcore/storagev1translator/V1SealedIndexTranslator.h"
 
+#include <exception>
+#include <optional>
+#include <stdexcept>
 #include <utility>
 
+#include "common/EasyAssert.h"
+#include "fmt/core.h"
 #include "index/IndexFactory.h"
+#include "index/IndexInfo.h"
+#include "index/Meta.h"
+#include "index/Utils.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "nlohmann/json.hpp"
+#include "segcore/Types.h"
 #include "segcore/Utils.h"
-#include "segcore/load_index_c.h"
-#include "segcore/Utils.h"
+#include "storage/FileManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Types.h"
 
 namespace milvus::segcore::storagev1translator {
 

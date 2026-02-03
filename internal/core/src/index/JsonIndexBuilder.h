@@ -10,11 +10,18 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
+#include <stdint.h>
 #include <functional>
-#include "common/JsonCastType.h"
-#include "common/JsonCastFunction.h"
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "common/FieldDataInterface.h"
 #include "common/Json.h"
-#include "folly/FBVector.h"
+#include "common/JsonCastFunction.h"
+#include "common/JsonCastType.h"
+#include "pb/schema.pb.h"
+#include "simdjson/error.h"
 
 namespace milvus::index {
 

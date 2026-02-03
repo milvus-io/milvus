@@ -81,6 +81,7 @@ const (
 	SearchIterLastBoundKey = "search_iter_last_bound"
 	SearchIterIdKey        = "search_iter_id"
 	QueryGroupByFieldsKey  = "group_by_fields"
+	OrderByFieldsKey       = "order_by_fields"
 
 	InsertTaskName                = "InsertTask"
 	CreateCollectionTaskName      = "CreateCollectionTask"

@@ -10,14 +10,27 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "common/Json.h"
-#include "query/PlanImpl.h"
-#include "segcore/SegmentGrowing.h"
-#include <utility>
+#include <assert.h>
+#include <folly/CancellationToken.h>
+#include <stdint.h>
+#include <iostream>
+#include <memory>
+#include <optional>
+#include <type_traits>
+#include <vector>
+
 #include "PlanNodeVisitor.h"
-#include "plan/PlanNode.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/OpContext.h"
+#include "common/QueryResult.h"
+#include "common/Types.h"
+#include "common/Vector.h"
 #include "exec/QueryContext.h"
-#include "futures/Future.h"
+#include "plan/PlanNode.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "segcore/SegmentInterface.h"
 
 namespace milvus::query {
 

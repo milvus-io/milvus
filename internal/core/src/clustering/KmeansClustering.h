@@ -16,15 +16,23 @@
 
 #pragma once
 
+#include <stdint.h>
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "boost/filesystem/path.hpp"
-#include "storage/MemFileManagerImpl.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "knowhere/cluster/cluster.h"
+#include "knowhere/cluster/cluster_node.h"
 #include "pb/clustering.pb.h"
-#include "knowhere/cluster/cluster_factory.h"
+#include "storage/ChunkManager.h"
+#include "storage/FileManager.h"
+#include "storage/MemFileManagerImpl.h"
+#include "storage/Types.h"
 
 namespace milvus::clustering {
 

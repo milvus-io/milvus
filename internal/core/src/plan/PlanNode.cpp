@@ -15,6 +15,8 @@
 // limitations under the License.
 #include "PlanNode.h"
 
+#include <cstddef>
+
 namespace milvus {
 namespace plan {
 

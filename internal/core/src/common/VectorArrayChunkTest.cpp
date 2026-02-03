@@ -9,21 +9,37 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <gtest/gtest.h>
-#include <arrow/array.h>
-#include <arrow/builder.h>
+#include <arrow/array/array_base.h>
+#include <arrow/array/array_nested.h>
+#include <arrow/array/builder_binary.h>
+#include <arrow/array/builder_nested.h>
+#include <arrow/status.h>
 #include <arrow/type.h>
-#include <random>
-#include <vector>
+#include <assert.h>
+#include <gtest/gtest.h>
+#include <string.h>
+#include <algorithm>
 #include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <iosfwd>
+#include <memory>
+#include <optional>
+#include <random>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
-#include "common/ChunkWriter.h"
+#include "bitset/detail/proxy.h"
 #include "common/Chunk.h"
-#include "common/VectorArray.h"
-#include "common/Types.h"
+#include "common/ChunkWriter.h"
 #include "common/FieldMeta.h"
+#include "common/Types.h"
+#include "common/VectorArray.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
 #include "pb/schema.pb.h"
-#include "test_utils/DataGen.h"
 
 using namespace milvus;
 

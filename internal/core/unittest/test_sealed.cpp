@@ -9,23 +9,78 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <optional>
-#include <gtest/gtest.h>
+#include <fmt/core.h>
+#include <folly/CancellationToken.h>
+#include <folly/FBVector.h>
+#include <nlohmann/json.hpp>
+#include <stdlib.h>
+#include <time.h>
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstdint>
+#include <exception>
+#include <iostream>
+#include <limits>
+#include <map>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
+#include <vector>
 
-#include "cachinglayer/Utils.h"
+#include "NamedType/named_type_impl.hpp"
+#include "cachinglayer/CacheSlot.h"
 #include "common/Common.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
+#include "common/IndexMeta.h"
+#include "common/LoadInfo.h"
+#include "common/PrometheusClient.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
+#include "common/Span.h"
 #include "common/Types.h"
-#include "index/IndexFactory.h"
-#include "knowhere/version.h"
-#include "knowhere/comp/index_param.h"
-#include "storage/RemoteChunkManagerSingleton.h"
-#include "storage/Util.h"
 #include "common/VectorArray.h"
-
-#include "test_utils/cachinglayer_test_utils.h"
-#include "test_utils/DataGen.h"
-#include "test_utils/storage_test_utils.h"
+#include "common/VectorTrait.h"
+#include "common/protobuf_utils.h"
 #include "exec/expression/function/FunctionFactory.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
+#include "index/IndexFactory.h"
+#include "index/IndexInfo.h"
+#include "index/Meta.h"
+#include "index/SkipIndex.h"
+#include "index/VectorIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/config.h"
+#include "knowhere/dataset.h"
+#include "knowhere/version.h"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
+#include "query/Plan.h"
+#include "query/PlanImpl.h"
+#include "query/Utils.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/InsertRecord.h"
+#include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentGrowing.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/Types.h"
+#include "storage/FileManager.h"
+#include "storage/InsertData.h"
+#include "storage/PayloadReader.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::query;

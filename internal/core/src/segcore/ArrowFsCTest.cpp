@@ -15,6 +15,10 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include <memory>
+
+#include "common/common_type_c.h"
+#include "gtest/gtest.h"
 #include "segcore/arrow_fs_c.h"
 
 TEST(ArrowFileSystemSingleton, LocalArrowFileSystemSingleton) {

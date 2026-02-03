@@ -14,7 +14,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <folly/FBVector.h>
+#include <stdint.h>
+#include <algorithm>
+#include <functional>
+#include <map>
+#include <memory>
+#include <string>
+#include <tuple>
+#include <vector>
+
 #include "ExprTestBase.h"
+#include "NamedType/named_type_impl.hpp"
+#include "NamedType/underlying_functionalities.hpp"
+#include "bitset/bitset.h"
+#include "common/EasyAssert.h"
+#include "common/IndexMeta.h"
+#include "common/QueryInfo.h"
+#include "common/Schema.h"
+#include "common/TracerBase.h"
+#include "common/Types.h"
+#include "common/Vector.h"
+#include "common/protobuf_utils.h"
+#include "exec/expression/EvalCtx.h"
+#include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
+#include "plan/PlanNode.h"
+#include "query/ExecPlanNodeVisitor.h"
+#include "query/Plan.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentGrowing.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
+#include "test_utils/storage_test_utils.h"
 
 EXPR_TEST_INSTANTIATE();
 

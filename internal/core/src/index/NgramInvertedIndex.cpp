@@ -11,10 +11,41 @@
 
 #include "index/NgramInvertedIndex.h"
 
+#include <simdjson.h>
+#include <string.h>
+#include <algorithm>
 #include <chrono>
+#include <cstdint>
+#include <exception>
+#include <map>
+#include <string_view>
+#include <utility>
 
+#include "bitset/bitset.h"
+#include "boost/filesystem/operations.hpp"
+#include "common/EasyAssert.h"
+#include "common/FieldDataInterface.h"
+#include "common/Json.h"
+#include "common/JsonCastFunction.h"
+#include "common/JsonCastType.h"
+#include "common/RegexQuery.h"
 #include "exec/expression/Expr.h"
+#include "glog/logging.h"
 #include "index/JsonIndexBuilder.h"
+#include "index/Meta.h"
+#include "index/Utils.h"
+#include "knowhere/binaryset.h"
+#include "log/Log.h"
+#include "nlohmann/json.hpp"
+#include "opentelemetry/trace/span.h"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
+#include "simdjson/error.h"
+#include "storage/DataCodec.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/MemFileManagerImpl.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
 
 namespace milvus::index {
 

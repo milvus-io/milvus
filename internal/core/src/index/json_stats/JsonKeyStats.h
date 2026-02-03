@@ -16,24 +16,60 @@
 
 #pragma once
 
+#include <folly/ExceptionWrapper.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <algorithm>
+#include <any>
+#include <functional>
+#include <istream>
+#include <limits>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <set>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "bitset/bitset.h"
+#include "cachinglayer/CacheSlot.h"
+#include "cachinglayer/Utils.h"
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "common/OpContext.h"
+#include "common/Span.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "common/bson_view.h"
+#include "common/jsmn.h"
+#include "common/protobuf_utils.h"
+#include "folly/FBVector.h"
+#include "glog/logging.h"
+#include "index/IndexStats.h"
+#include "index/Meta.h"
+#include "index/ScalarIndex.h"
+#include "index/SkipIndex.h"
+#include "index/json_stats/bson_inverted.h"
+#include "index/json_stats/parquet_writer.h"
+#include "index/json_stats/utils.h"
+#include "log/Log.h"
+#include "mmap/ChunkedColumnInterface.h"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
+#include "storage/ChunkManager.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/FileManager.h"
+#include "storage/MemFileManagerImpl.h"
+
+class CollectSingleJsonStatsInfoAccessor;
 // Forward declaration of test accessor in global namespace for friend declaration
 class TraverseJsonForBuildStatsAccessor;
-class CollectSingleJsonStatsInfoAccessor;
-
-#include <string>
-#include <boost/filesystem.hpp>
-
-#include "index/InvertedIndexTantivy.h"
-#include "common/jsmn.h"
-#include "mmap/ChunkedColumnInterface.h"
-#include "arrow/api.h"
-#include "index/json_stats/utils.h"
-#include "index/json_stats/bson_inverted.h"
-#include "cachinglayer/CacheSlot.h"
-#include "index/json_stats/parquet_writer.h"
-#include "index/json_stats/bson_builder.h"
-#include "common/bson_view.h"
-#include "index/SkipIndex.h"
 
 namespace milvus::index {
 class JsonKeyStats : public ScalarIndex<std::string> {

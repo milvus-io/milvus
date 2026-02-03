@@ -102,6 +102,10 @@ type ReplicateService interface {
 	// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
 	UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error
 
+	// GetReplicateConfiguration returns the current replication configuration
+	// with sensitive fields (tokens) sanitized.
+	GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error)
+
 	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
 	// from the correct position, ensuring no duplicate or missing messages.
 	GetReplicateCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error)

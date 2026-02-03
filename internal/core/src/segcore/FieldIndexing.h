@@ -11,28 +11,38 @@
 
 #pragma once
 
-#include <cstddef>
-#include <cstdint>
-#include <optional>
-#include <map>
-#include <memory>
-
-#include <tbb/concurrent_vector.h>
+#include <assert.h>
 #include <index/Index.h>
 #include <index/ScalarIndex.h>
+#include <atomic>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <string>
+#include <type_traits>
+#include <unordered_map>
 
-#include "InsertRecord.h"
-#include "cachinglayer/CacheSlot.h"
-#include "common/FieldMeta.h"
-#include "common/Schema.h"
-#include "common/IndexMeta.h"
 #include "IndexConfigGenerator.h"
+#include "cachinglayer/CacheSlot.h"
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "common/FieldMeta.h"
+#include "common/IndexMeta.h"
+#include "common/QueryInfo.h"
+#include "common/Schema.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "glog/logging.h"
+#include "index/VectorIndex.h"
 #include "knowhere/config.h"
 #include "log/Log.h"
-#include "segcore/SegcoreConfig.h"
+#include "oneapi/tbb/concurrent_vector.h"
+#include "segcore/AckResponder.h"
+#include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
-#include "index/VectorIndex.h"
+#include "segcore/SegcoreConfig.h"
+#include "storage/MmapManager.h"
+#include "storage/Types.h"
 
 namespace milvus::segcore {
 

@@ -9,12 +9,29 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <gtest/gtest.h>
-#include "futures/Future.h"
+#include <folly/CancellationToken.h>
 #include <folly/executors/CPUThreadPoolExecutor.h>
+#include <folly/futures/Future.h>
+#include <gtest/gtest.h>
 #include <stdlib.h>
-#include <mutex>
+#include <chrono>
 #include <exception>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+#include "common/EasyAssert.h"
+#include "common/common_type_c.h"
+#include "futures/Future.h"
+#include "futures/LeakyResult.h"
+#include "futures/Ready.h"
+#include "futures/future_c_types.h"
+#include "gtest/gtest.h"
 
 using namespace milvus::futures;
 

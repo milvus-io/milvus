@@ -15,7 +15,12 @@
 // limitations under the License.
 
 #include "common/Common.h"
+
+#include <string.h>
+
+#include "common/Consts.h"
 #include "gflags/gflags.h"
+#include "glog/logging.h"
 #include "log/Log.h"
 
 namespace milvus {

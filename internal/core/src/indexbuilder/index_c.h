@@ -16,9 +16,12 @@ extern "C" {
 #endif
 
 #include <stdint.h>
-#include "common/type_c.h"
-#include "common/protobuf_utils_c.h"
+#include <stdbool.h>
+
 #include "common/binary_set_c.h"
+#include "common/common_type_c.h"
+#include "common/protobuf_utils_c.h"
+#include "common/type_c.h"
 #include "indexbuilder/type_c.h"
 
 CStatus

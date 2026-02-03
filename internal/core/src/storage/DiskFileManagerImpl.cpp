@@ -14,42 +14,59 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <sys/fcntl.h>
+#include <cxxabi.h>
+#include <string.h>
 #include <algorithm>
-#include <boost/filesystem.hpp>
+#include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <exception>
+#include <filesystem>
+#include <future>
+#include <iosfwd>
 #include <memory>
-#include <mutex>
 #include <optional>
-#include <type_traits>
+#include <stdexcept>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "arrow/api.h"
+#include "arrow/filesystem/filesystem.h"
+#include "boost/filesystem/path.hpp"
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
-#include "common/File.h"
-#include "common/Slice.h"
+#include "common/TypeTraits.h"
 #include "common/Types.h"
-#include "index/Utils.h"
+#include "common/VectorArray.h"
+#include "common/VectorTrait.h"
+#include "filemanager/FileManager.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
 #include "index/Meta.h"
+#include "index/Utils.h"
+#include "knowhere/sparse_utils.h"
 #include "log/Log.h"
-
+#include "milvus-storage/filesystem/fs.h"
+#include "nlohmann/json.hpp"
+#include "storage/ChunkManager.h"
+#include "storage/DataCodec.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
-#include "storage/IndexData.h"
+#include "storage/FileWriter.h"
+#include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "storage/RemoteInputStream.h"
+#include "storage/RemoteOutputStream.h"
+#include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
-#include "storage/FileWriter.h"
-
-#include "storage/RemoteOutputStream.h"
-#include "storage/RemoteInputStream.h"
 
 namespace milvus::storage {
 DiskFileManagerImpl::DiskFileManagerImpl(
@@ -352,7 +369,7 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
         } catch (const std::logic_error& e) {
             auto err_message = fmt::format(
                 "invalided index file path:{}, error:{}", file_path, e.what());
-            LOG_ERROR(err_message);
+            LOG_ERROR("{}", err_message);
             throw std::logic_error(err_message);
         }
     }

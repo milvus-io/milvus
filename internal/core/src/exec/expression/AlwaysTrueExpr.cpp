@@ -16,6 +16,9 @@
 
 #include "AlwaysTrueExpr.h"
 
+#include "exec/expression/EvalCtx.h"
+#include "folly/FBVector.h"
+
 namespace milvus {
 namespace exec {
 

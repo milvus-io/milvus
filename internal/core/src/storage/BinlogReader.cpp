@@ -15,6 +15,9 @@
 // limitations under the License.
 
 #include "storage/BinlogReader.h"
+
+#include <string.h>
+
 #include "common/EasyAssert.h"
 
 namespace milvus::storage {

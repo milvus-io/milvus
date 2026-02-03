@@ -10,10 +10,24 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <memory>
+#include <string>
+#include <type_traits>
+#include <unordered_map>
 
+#include "common/EasyAssert.h"
+#include "common/Schema.h"
+#include "common/VectorTrait.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
+#include "pb/plan.pb.h"
+#include "segcore/Collection.h"
 #include "segcore/plan_c.h"
+#include "test_utils/DataGen.h"
 #include "test_utils/c_api_test_utils.h"
+#include "test_utils/indexbuilder_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;

@@ -50,6 +50,20 @@ func (s replicateService) UpdateReplicateConfiguration(ctx context.Context, conf
 	return s.streamingCoordClient.Assignment().UpdateReplicateConfiguration(ctx, config)
 }
 
+func (s replicateService) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
+	if !s.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrWALAccesserClosed
+	}
+	defer s.lifetime.Done()
+
+	configHelper, err := s.streamingCoordClient.Assignment().GetReplicateConfiguration(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return replicateutil.SanitizeReplicateConfiguration(configHelper.GetReplicateConfiguration()), nil
+}
+
 func (s replicateService) GetReplicateCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error) {
 	if !s.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, ErrWALAccesserClosed

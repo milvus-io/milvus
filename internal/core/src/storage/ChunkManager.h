@@ -16,11 +16,11 @@
 
 #pragma once
 
-#include <iostream>
+#include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
-#include <map>
 
 namespace milvus::storage {
 

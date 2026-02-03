@@ -9,20 +9,48 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include <stddef.h>
+#include <cstdint>
+#include <iostream>
+#include <map>
 #include <memory>
+#include <optional>
+#include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
-#include <boost/format.hpp>
 
-#include "index/ScalarIndexSort.h"
-#include "index/StringIndexSort.h"
-#include "index/Meta.h"
-#include "common/Schema.h"
+#include "NamedType/named_type_impl.hpp"
 #include "common/ArrayOffsets.h"
+#include "common/IndexMeta.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
+#include "common/TracerBase.h"
+#include "common/Types.h"
+#include "common/VectorTrait.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
+#include "index/Meta.h"
+#include "index/ScalarIndexSort.h"
+#include "index/VectorIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/operands.h"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
 #include "query/Plan.h"
+#include "query/PlanNode.h"
+#include "segcore/Collection.h"
+#include "segcore/SegmentGrowing.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/Types.h"
+#include "storage/FileManager.h"
 #include "test_utils/DataGen.h"
-#include "test_utils/storage_test_utils.h"
 #include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::query;

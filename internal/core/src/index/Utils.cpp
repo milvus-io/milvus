@@ -14,29 +14,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <google/protobuf/text_format.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <algorithm>
-#include <cerrno>
+#include <cstdint>
 #include <cstring>
-#include <filesystem>
+#include <initializer_list>
+#include <iostream>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
-#include <functional>
-#include <iostream>
-#include <unistd.h>
-#include <google/protobuf/text_format.h>
 
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
-#include "common/Exception.h"
-#include "common/File.h"
 #include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
+#include "common/QueryInfo.h"
+#include "common/RangeSearchHelper.h"
 #include "common/Slice.h"
-#include "index/Utils.h"
+#include "common/Utils.h"
+#include "fmt/core.h"
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
-#include "storage/Util.h"
+#include "index/Utils.h"
 #include "knowhere/comp/index_param.h"
+#include "storage/Util.h"
 
 namespace milvus::index {
 
@@ -135,7 +142,7 @@ GetDimFromConfig(const Config& config) {
     } catch (const std::logic_error& e) {
         auto err_message = fmt::format(
             "invalided dimension:{}, error:{}", dimension.value(), e.what());
-        LOG_ERROR(err_message);
+        LOG_ERROR("{}", err_message);
         throw std::logic_error(err_message);
     }
 }
@@ -167,7 +174,7 @@ GetIndexEngineVersionFromConfig(const Config& config) {
             fmt::format("invalided index engine version:{}, error:{}",
                         index_engine_version.value(),
                         e.what());
-        LOG_ERROR(err_message);
+        LOG_ERROR("{}", err_message);
         throw std::logic_error(err_message);
     }
 }
@@ -184,7 +191,7 @@ GetBitmapCardinalityLimitFromConfig(const Config& config) {
         auto err_message = fmt::format("invalided bitmap limit:{}, error:{}",
                                        bitmap_limit.value(),
                                        e.what());
-        LOG_ERROR(err_message);
+        LOG_ERROR("{}", err_message);
         throw std::logic_error(err_message);
     }
 }

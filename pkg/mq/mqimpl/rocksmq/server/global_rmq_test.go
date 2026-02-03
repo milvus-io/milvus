@@ -20,8 +20,7 @@ import (
 )
 
 func Test_InitRocksMQ(t *testing.T) {
-	rmqPath := "/tmp/milvus/rdb_data_global"
-	defer os.RemoveAll("/tmp/milvus")
+	rmqPath := t.TempDir() + "/rdb_data_global"
 	err := InitRocksMQ(rmqPath)
 	defer Rmq.stopRetention()
 	assert.NoError(t, err)
@@ -45,14 +44,11 @@ func Test_InitRocksMQ(t *testing.T) {
 
 func Test_InitRocksMQError(t *testing.T) {
 	once = sync.Once{}
-	dir := "/tmp/milvus/"
+	dir := t.TempDir() + "/"
 	dummyPath := dir + "dummy"
-	err := os.MkdirAll(dir, os.ModePerm)
-	assert.NoError(t, err)
 	f, err := os.Create(dummyPath)
 	defer f.Close()
 	assert.NoError(t, err)
-	defer os.RemoveAll(dir)
 	err = InitRocksMQ(dummyPath)
 	assert.Error(t, err)
 }

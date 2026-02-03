@@ -10,10 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/ConcurrentVector.h"
+
+#include <cstdint>
+
 #include "common/Types.h"
 #include "common/Utils.h"
-#include "nlohmann/json.hpp"
-#include "simdjson.h"
+#include "fmt/core.h"
+#include "pb/schema.pb.h"
+#include "simdjson/padded_string.h"
 
 namespace milvus::segcore {
 

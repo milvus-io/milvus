@@ -11,10 +11,15 @@
 
 #include <gtest/gtest.h>
 #include <memory>
-#include <regex>
-#include <vector>
-#include <chrono>
+#include <string>
 
+#include "common/PrometheusClient.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
+#include "pb/plan.pb.h"
+#include "query/PlanNode.h"
 #include "query/PlanProto.h"
 
 TEST(PlanProto, NotSetUnsupported) {

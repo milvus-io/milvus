@@ -14,13 +14,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <cstdlib>
-#include <cstring>
-#include <iostream>
-#include <sstream>
 #include <azure/identity/managed_identity_credential.hpp>
 #include <azure/identity/workload_identity_credential.hpp>
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+
 #include "AzureBlobChunkManager.h"
+#include "azure/core/context.hpp"
+#include "azure/core/diagnostics/logger.hpp"
+#include "azure/core/http/http.hpp"
+#include "azure/core/http/http_status_code.hpp"
+#include "azure/core/io/body_stream.hpp"
+#include "azure/core/nullable.hpp"
+#include "azure/core/response.hpp"
+#include "azure/storage/blobs/blob_container_client.hpp"
+#include "azure/storage/blobs/blob_options.hpp"
+#include "azure/storage/blobs/blob_responses.hpp"
+#include "azure/storage/blobs/blob_service_client.hpp"
+#include "azure/storage/blobs/block_blob_client.hpp"
+#include "azure/storage/blobs/rest_client.hpp"
+#include "azure/storage/common/storage_exception.hpp"
 
 namespace azure {
 

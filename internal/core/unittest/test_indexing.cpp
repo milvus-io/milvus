@@ -9,35 +9,66 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <arrow/record_batch.h>
-#include <arrow/type_fwd.h>
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
-
-#include <boost/filesystem/operations.hpp>
+#include <nlohmann/json_fwd.hpp>
+#include <string.h>
+#include <algorithm>
+#include <cstdint>
+#include <initializer_list>
 #include <iostream>
+#include <iterator>
+#include <map>
 #include <memory>
 #include <random>
+#include <stdexcept>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
-#include "arrow/type.h"
+#include "bitset/bitset.h"
+#include "common/BitsetView.h"
 #include "common/EasyAssert.h"
-#include "common/Tracer.h"
-#include "common/Types.h"
-#include "index/Index.h"
-#include "knowhere/comp/index_param.h"
-#include "nlohmann/json.hpp"
-#include "query/SearchBruteForce.h"
-#include "segcore/reduce/Reduce.h"
-#include "index/IndexFactory.h"
+#include "common/QueryInfo.h"
 #include "common/QueryResult.h"
-#include "segcore/Types.h"
+#include "common/Schema.h"
+#include "common/Tracer.h"
+#include "common/TypeTraits.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
+#include "index/IndexFactory.h"
+#include "index/IndexInfo.h"
+#include "index/IndexStats.h"
+#include "index/Meta.h"
+#include "index/VectorIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/config.h"
+#include "knowhere/dataset.h"
+#include "knowhere/expected.h"
+#include "knowhere/index/index_node.h"
+#include "knowhere/object.h"
+#include "knowhere/operands.h"
+#include "knowhere/sparse_utils.h"
+#include "knowhere/version.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "nlohmann/json.hpp"
+#include "pb/common.pb.h"
+#include "query/SearchBruteForce.h"
+#include "query/SubSearchResult.h"
+#include "query/helper.h"
+#include "segcore/ReduceStructure.h"
+#include "segcore/reduce/Reduce.h"
+#include "storage/FileManager.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
-#include "test_utils/DataGen.h"
-#include "test_utils/Timer.h"
-#include "storage/Util.h"
-#include <boost/filesystem.hpp>
 
 using namespace milvus;
 using namespace milvus::segcore;

@@ -1,22 +1,37 @@
 // Copyright (C) 2019-2020 Zilliz. All rights reserved.
 // Licensed under the Apache License, Version 2.0
+#include <fmt/core.h>
+#include <folly/CancellationToken.h>
 #include <gtest/gtest.h>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
 #include <thread>
-#include <folly/CancellationToken.h>
-#include "cachinglayer/Manager.h"
+#include <utility>
+#include <vector>
+
 #include "cachinglayer/Translator.h"
+#include "cachinglayer/Utils.h"
 #include "common/Chunk.h"
+#include "common/EasyAssert.h"
 #include "common/OpContext.h"
+#include "common/PrometheusClient.h"
 #include "common/Schema.h"
+#include "common/Types.h"
+#include "common/common_type_c.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentSealed.h"
 #include "segcore/Utils.h"
 #include "segcore/segment_c.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
-#include "test_utils/DataGen.h"
 
 using namespace milvus;
 using namespace milvus::segcore;

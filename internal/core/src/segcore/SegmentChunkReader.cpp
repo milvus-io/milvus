@@ -15,6 +15,21 @@
 // limitations under the License.
 #include "segcore/SegmentChunkReader.h"
 
+#include <cstdint>
+#include <memory>
+#include <string_view>
+#include <utility>
+
+#include "cachinglayer/CacheSlot.h"
+#include "common/EasyAssert.h"
+#include "common/Span.h"
+#include "common/type_c.h"
+#include "folly/FBVector.h"
+#include "index/Index.h"
+#include "index/ScalarIndex.h"
+#include "storage/MmapManager.h"
+#include "storage/Types.h"
+
 namespace milvus::segcore {
 template <typename T>
 MultipleChunkDataAccessor

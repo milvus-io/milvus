@@ -11,8 +11,14 @@
 
 #include <gtest/gtest.h>
 #include <cstdint>
+#include <map>
+#include <string>
+#include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/common_type_c.h"
+#include "gtest/gtest.h"
+#include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "segcore/token_stream_c.h"
 #include "segcore/tokenizer_c.h"
