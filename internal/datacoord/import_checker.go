@@ -418,21 +418,10 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 		}
 		return segment.GetIsImporting()
 	})
-	channels, err := c.meta.GetSegmentsChannels(isImportingSegments)
-	if err != nil {
-		log.Warn("get segments channels failed", zap.Error(err))
-		return
-	}
+
 	for _, segmentID := range isImportingSegments {
-		channelCP := c.meta.GetChannelCheckpoint(channels[segmentID])
-		if channelCP == nil {
-			log.Warn("nil channel checkpoint")
-			return
-		}
-		op1 := UpdateStartPosition([]*datapb.SegmentStartPosition{{StartPosition: channelCP, SegmentID: segmentID}})
-		op2 := UpdateDmlPosition(segmentID, channelCP)
-		op3 := UpdateIsImporting(segmentID, false)
-		err = c.meta.UpdateSegmentsInfo(c.ctx, op1, op2, op3)
+		op := UpdateIsImporting(segmentID, false)
+		err := c.meta.UpdateSegmentsInfo(c.ctx, op)
 		if err != nil {
 			log.Warn("update import segment failed", zap.Error(err))
 			return
@@ -441,7 +430,7 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 
 	// all finished, update import job state to `Completed`.
 	completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
-	err = c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed), UpdateJobCompleteTime(completeTime))
+	err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed), UpdateJobCompleteTime(completeTime))
 	if err != nil {
 		log.Warn("failed to update job state to Completed", zap.Error(err))
 		return
