@@ -687,7 +687,10 @@ func (m *ReplicaManager) GetReplicasJSON(ctx context.Context, meta *Meta) string
 // 1. Move the rw nodes to ro nodes if current replica use too much sqn.
 // 2. Add new incoming nodes into the replica if they are not ro node of other replicas in same collection.
 // 3. replicas will shared the nodes in resource group fairly.
-func (m *ReplicaManager) RecoverSQNodesInCollection(ctx context.Context, collectionID int64, sqnNodeIDs typeutil.UniqueSet) error {
+// When sqnNodesByRG covers all resource groups of replicas in the collection, streaming nodes will be assigned
+// by resource group isolation (each replica only gets streaming nodes from its own resource group).
+// Otherwise, all streaming nodes will be pooled together and assigned fairly across all replicas (fallback mode).
+func (m *ReplicaManager) RecoverSQNodesInCollection(ctx context.Context, collectionID int64, sqnNodesByRG map[string]typeutil.UniqueSet) error {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
@@ -696,39 +699,83 @@ func (m *ReplicaManager) RecoverSQNodesInCollection(ctx context.Context, collect
 		return errors.Errorf("collection %d not loaded", collectionID)
 	}
 
-	helper := newReplicaSQNAssignmentHelper(collReplicas.replicas, sqnNodeIDs)
-	helper.updateExpectedNodeCountForReplicas(len(sqnNodeIDs))
+	// Build helpers based on whether we can use resource group isolation.
+	helpers := m.buildSQNodeAssignmentHelpers(collReplicas.replicas, sqnNodesByRG)
 
 	modifiedReplicas := make([]*Replica, 0)
-	// recover node by given sqn node list.
-	helper.RangeOverReplicas(func(assignment *replicaAssignmentInfo) {
-		roNodes := assignment.GetNewRONodes()
-		recoverableNodes, incomingNodeCount := assignment.GetRecoverNodesAndIncomingNodeCount()
-		// There may be not enough incoming nodes for current replica,
-		// Even we filtering the nodes that are used by other replica of same collection in other resource group,
-		// current replica's expected node may be still used by other replica of same collection in same resource group.
-		incomingNode := helper.AllocateIncomingNodes(incomingNodeCount)
-		if len(roNodes) == 0 && len(recoverableNodes) == 0 && len(incomingNode) == 0 {
-			// nothing to do.
-			return
-		}
-		mutableReplica := m.replicas[assignment.GetReplicaID()].CopyForWrite()
-		mutableReplica.AddROSQNode(roNodes...)          // rw -> ro
-		mutableReplica.AddRWSQNode(recoverableNodes...) // ro -> rw
-		mutableReplica.AddRWSQNode(incomingNode...)     // unused -> rw
-		log.Info(
-			"new replica recovery streaming query node found",
-			zap.Int64("collectionID", collectionID),
-			zap.Int64("replicaID", assignment.GetReplicaID()),
-			zap.Int64s("newRONodes", roNodes),
-			zap.Int64s("roToRWNodes", recoverableNodes),
-			zap.Int64s("newIncomingNodes", incomingNode),
-			zap.Int64s("rwNodes", mutableReplica.GetRWNodes()),
-			zap.Int64s("roNodes", mutableReplica.GetRONodes()),
-			zap.Int64s("rwSQNodes", mutableReplica.GetRWSQNodes()),
-			zap.Int64s("roSQNodes", mutableReplica.GetROSQNodes()),
-		)
-		modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
-	})
+	for rgName, helper := range helpers {
+		helper.RangeOverReplicas(func(assignment *replicaAssignmentInfo) {
+			roNodes := assignment.GetNewRONodes()
+			recoverableNodes, incomingNodeCount := assignment.GetRecoverNodesAndIncomingNodeCount()
+			incomingNode := helper.AllocateIncomingNodes(incomingNodeCount)
+			if len(roNodes) == 0 && len(recoverableNodes) == 0 && len(incomingNode) == 0 {
+				return
+			}
+			mutableReplica := m.replicas[assignment.GetReplicaID()].CopyForWrite()
+			mutableReplica.AddROSQNode(roNodes...)
+			mutableReplica.AddRWSQNode(recoverableNodes...)
+			mutableReplica.AddRWSQNode(incomingNode...)
+			log.Info(
+				"new replica recovery streaming query node found",
+				zap.Int64("collectionID", collectionID),
+				zap.Int64("replicaID", assignment.GetReplicaID()),
+				zap.String("resourceGroup", rgName),
+				zap.Int64s("newRONodes", roNodes),
+				zap.Int64s("roToRWNodes", recoverableNodes),
+				zap.Int64s("newIncomingNodes", incomingNode),
+				zap.Int64s("rwSQNodes", mutableReplica.GetRWSQNodes()),
+				zap.Int64s("roSQNodes", mutableReplica.GetROSQNodes()),
+			)
+			modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
+		})
+	}
 	return m.put(ctx, modifiedReplicas...)
+}
+
+// buildSQNodeAssignmentHelpers builds assignment helpers for streaming query node recovery.
+// If streaming node resource groups cover all replica resource groups, creates one helper per RG (isolation mode).
+// Otherwise, behavior depends on streaming.strictResourceGroupIsolation.enabled config:
+//   - If enabled (strict isolation mode): skip replicas without matching streaming node resource groups.
+//   - If disabled (default): pool all nodes together into a single helper (flat allocation mode).
+func (m *ReplicaManager) buildSQNodeAssignmentHelpers(
+	replicas []*Replica,
+	sqnNodesByRG map[string]typeutil.UniqueSet,
+) map[string]*replicasInSameRGAssignmentHelper {
+	// Group replicas by resource group and check coverage.
+	rgToReplicas := make(map[string][]*Replica)
+	hasUncoveredReplicas := false
+	for _, replica := range replicas {
+		rgName := replica.GetResourceGroup()
+		if _, ok := sqnNodesByRG[rgName]; ok {
+			rgToReplicas[rgName] = append(rgToReplicas[rgName], replica)
+		} else {
+			hasUncoveredReplicas = true
+		}
+	}
+
+	helpers := make(map[string]*replicasInSameRGAssignmentHelper)
+
+	// Check if we should use fallback mode (flat allocation).
+	// Fallback mode is used when there are uncovered replicas and isolation is disabled.
+	useFallbackMode := hasUncoveredReplicas && !paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.GetAsBool()
+
+	if useFallbackMode {
+		// Fallback: pool all nodes together for ALL replicas.
+		// When fallback is triggered, we must use flat allocation for all replicas,
+		// not just the uncovered ones, to avoid assigning the same nodes twice.
+		allSQNodes := typeutil.NewUniqueSet()
+		for _, nodes := range sqnNodesByRG {
+			for nodeID := range nodes {
+				allSQNodes.Insert(nodeID)
+			}
+		}
+		helpers[DefaultResourceGroupName] = newReplicaSQNAssignmentHelper("", replicas, allSQNodes)
+	} else {
+		// Isolation mode: each replica gets nodes only from its own resource group.
+		// Uncovered replicas (if any and isolation is enabled) simply don't get any streaming query nodes.
+		for rgName, rgReplicas := range rgToReplicas {
+			helpers[rgName] = newReplicaSQNAssignmentHelper(rgName, rgReplicas, sqnNodesByRG[rgName])
+		}
+	}
+	return helpers
 }
