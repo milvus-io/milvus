@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
-	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
@@ -134,7 +133,6 @@ type shardDelegator struct {
 	idfOracle    IDFOracle
 
 	segmentManager segments.SegmentManager
-	pkOracle       pkoracle.PkOracle
 	// stream delete buffer
 	deleteMut    sync.RWMutex
 	deleteBuffer deletebuffer.DeleteBuffer[*deletebuffer.Item]
@@ -149,7 +147,7 @@ type shardDelegator struct {
 	chunkManager   storage.ChunkManager
 
 	excludedSegments *ExcludedSegments
-	// cause growing segment meta has been stored in segmentManager/distribution/pkOracle/excludeSegments
+	// cause growing segment meta has been stored in segmentManager/distribution/excludeSegments
 	// in order to make add/remove growing be atomic, need lock before modify these meta info
 	growingSegmentLock sync.RWMutex
 	partitionStatsMut  sync.RWMutex
@@ -1141,6 +1139,9 @@ func (sd *shardDelegator) Close() {
 	sd.tsCond.Broadcast()
 	sd.lifetime.Wait()
 
+	// Refund all sealed segment candidates in distribution
+	sd.distribution.RefundAllCandidates()
+
 	// clean idf oracle
 	if sd.idfOracle != nil {
 		sd.idfOracle.Close()
@@ -1245,7 +1246,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		distribution:   NewDistribution(channel, queryView),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{fmt.Sprint(paramtable.GetNodeID()), channel}),
-		pkOracle:                   pkoracle.NewPkOracle(),
 		latestTsafe:                atomic.NewUint64(startTs),
 		loader:                     loader,
 		queryHook:                  queryHook,
