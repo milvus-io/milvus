@@ -320,3 +320,144 @@ func (e ErrSource) SetEventHandler(eh EventHandler) {
 
 func (e ErrSource) UpdateOptions(opt Options) {
 }
+
+func TestAlterConfigsInEtcd(t *testing.T) {
+	cfg, _ := embed.ConfigFromFile("../../configs/advanced/etcd.yaml")
+	cfg.Dir = "/tmp/milvus/test_alter_configs"
+	e, err := embed.StartEtcd(cfg)
+	assert.NoError(t, err)
+	defer e.Close()
+	defer os.RemoveAll(cfg.Dir)
+
+	mgr, _ := Init(WithEtcdSource(&EtcdInfo{
+		Endpoints:       []string{cfg.AdvertiseClientUrls[0].Host},
+		KeyPrefix:       "test",
+		RefreshInterval: 10 * time.Millisecond,
+	}))
+
+	etcdSource, ok := mgr.GetEtcdSource()
+	assert.True(t, ok, "should get etcd source")
+
+	t.Run("update multiple configs atomically", func(t *testing.T) {
+		configs := map[string]string{
+			"config.key1": "value1",
+			"config.key2": "value2",
+			"config.key3": "value3",
+		}
+
+		err := mgr.AlterConfigsInEtcd(etcdSource, configs, nil)
+		assert.NoError(t, err)
+
+		assert.Eventually(t, func() bool {
+			for key, expectedValue := range configs {
+				_, actualValue, err := mgr.GetConfig(key)
+				if err != nil || actualValue != expectedValue {
+					return false
+				}
+			}
+			return true
+		}, time.Second*5, 100*time.Millisecond)
+	})
+
+	t.Run("update single config via helper", func(t *testing.T) {
+		err := mgr.UpdateConfigInEtcd(etcdSource, "single.key", "single.value")
+		assert.NoError(t, err)
+
+		assert.Eventually(t, func() bool {
+			_, value, err := mgr.GetConfig("single.key")
+			return err == nil && value == "single.value"
+		}, time.Second*5, 100*time.Millisecond)
+	})
+
+	t.Run("empty updates and deletes should fail", func(t *testing.T) {
+		err := mgr.AlterConfigsInEtcd(etcdSource, nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no configs to alter")
+	})
+
+	t.Run("nil etcd source should fail", func(t *testing.T) {
+		err := mgr.AlterConfigsInEtcd(nil, map[string]string{"key": "value"}, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "etcd client is not available")
+	})
+
+	t.Run("overwrite existing config", func(t *testing.T) {
+		err := mgr.UpdateConfigInEtcd(etcdSource, "overwrite.key", "initial.value")
+		assert.NoError(t, err)
+
+		assert.Eventually(t, func() bool {
+			_, value, err := mgr.GetConfig("overwrite.key")
+			return err == nil && value == "initial.value"
+		}, time.Second*5, 100*time.Millisecond)
+
+		err = mgr.UpdateConfigInEtcd(etcdSource, "overwrite.key", "updated.value")
+		assert.NoError(t, err)
+
+		assert.Eventually(t, func() bool {
+			_, value, err := mgr.GetConfig("overwrite.key")
+			return err == nil && value == "updated.value"
+		}, time.Second*5, 100*time.Millisecond)
+	})
+
+	t.Run("batch update with key normalization", func(t *testing.T) {
+		configs := map[string]string{
+			"config/key/with/slashes": "value1",
+			"config.key.with.dots":    "value2",
+		}
+
+		err := mgr.AlterConfigsInEtcd(etcdSource, configs, nil)
+		assert.NoError(t, err)
+
+		assert.Eventually(t, func() bool {
+			_, value1, err1 := mgr.GetConfig("config.key.with.slashes")
+			_, value2, err2 := mgr.GetConfig("config.key.with.dots")
+			return err1 == nil && value1 == "value1" && err2 == nil && value2 == "value2"
+		}, time.Second*5, 100*time.Millisecond)
+	})
+
+	t.Run("delete configs from etcd", func(t *testing.T) {
+		// First write some configs
+		err := mgr.AlterConfigsInEtcd(etcdSource, map[string]string{
+			"delete.key1": "value1",
+			"delete.key2": "value2",
+		}, nil)
+		assert.NoError(t, err)
+
+		assert.Eventually(t, func() bool {
+			_, v1, err1 := mgr.GetConfig("delete.key1")
+			_, v2, err2 := mgr.GetConfig("delete.key2")
+			return err1 == nil && v1 == "value1" && err2 == nil && v2 == "value2"
+		}, time.Second*5, 100*time.Millisecond)
+
+		// Delete them
+		err = mgr.AlterConfigsInEtcd(etcdSource, nil, []string{"delete.key1", "delete.key2"})
+		assert.NoError(t, err)
+	})
+
+	t.Run("mixed update and delete in one transaction", func(t *testing.T) {
+		// Setup: write two configs
+		err := mgr.AlterConfigsInEtcd(etcdSource, map[string]string{
+			"mixed.keep":   "old_value",
+			"mixed.remove": "to_be_deleted",
+		}, nil)
+		assert.NoError(t, err)
+
+		assert.Eventually(t, func() bool {
+			_, v1, err1 := mgr.GetConfig("mixed.keep")
+			_, v2, err2 := mgr.GetConfig("mixed.remove")
+			return err1 == nil && v1 == "old_value" && err2 == nil && v2 == "to_be_deleted"
+		}, time.Second*5, 100*time.Millisecond)
+
+		// Atomically: update one, delete the other
+		err = mgr.AlterConfigsInEtcd(etcdSource,
+			map[string]string{"mixed.keep": "new_value"},
+			[]string{"mixed.remove"},
+		)
+		assert.NoError(t, err)
+
+		assert.Eventually(t, func() bool {
+			_, v, err := mgr.GetConfig("mixed.keep")
+			return err == nil && v == "new_value"
+		}, time.Second*5, 100*time.Millisecond)
+	})
+}
