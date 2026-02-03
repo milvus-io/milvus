@@ -2131,3 +2131,571 @@ class TestMilvusClientMinHashAccuracy(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name_1)
         self.drop_collection(client, collection_name_2)
+
+
+# ============================================================================
+# MinHash Function Correctness Test Helpers
+# ============================================================================
+# These helper functions reproduce Milvus's MinHash algorithm in Python
+# to verify the correctness of the generated signatures.
+
+# Constants matching Milvus implementation
+MINHASH_MERSENNE_PRIME = (1 << 61) - 1  # 2^61 - 1
+MINHASH_MAX_HASH_MASK = (1 << 32) - 1    # 2^32 - 1
+
+
+def init_permutations_like_milvus(num_hashes: int, seed: int):
+    """
+    Reproduce Milvus C++ InitPermutations function.
+
+    Milvus uses std::mt19937_64 which is compatible with numpy's MT19937
+    when using the Generator interface.
+
+    Args:
+        num_hashes: Number of hash functions
+        seed: Random seed
+
+    Returns:
+        tuple: (perm_a, perm_b) arrays of uint64
+    """
+    # numpy.random.Generator with MT19937 is compatible with C++ std::mt19937_64
+    rng = np.random.Generator(np.random.MT19937(seed))
+
+    perm_a = np.zeros(num_hashes, dtype=np.uint64)
+    perm_b = np.zeros(num_hashes, dtype=np.uint64)
+
+    for i in range(num_hashes):
+        raw_a = rng.integers(0, 2**64, dtype=np.uint64)
+        raw_b = rng.integers(0, 2**64, dtype=np.uint64)
+        perm_a[i] = (int(raw_a) % (MINHASH_MERSENNE_PRIME - 1)) + 1
+        perm_b[i] = int(raw_b) % MINHASH_MERSENNE_PRIME
+
+    return perm_a, perm_b
+
+
+def hash_shingles_xxhash(text: str, shingle_size: int) -> list:
+    """
+    Compute character-level shingle hashes using xxhash.
+
+    This reproduces Milvus's shingle hashing for char-level shingles.
+
+    Args:
+        text: Input text
+        shingle_size: Size of character n-grams
+
+    Returns:
+        List of 32-bit hash values
+    """
+    import xxhash
+
+    if len(text) < shingle_size:
+        # For short texts, hash the entire text
+        return [xxhash.xxh3_64(text.encode('utf-8')).intdigest() & 0xFFFFFFFF]
+
+    hashes = []
+    for i in range(len(text) - shingle_size + 1):
+        shingle = text[i:i + shingle_size]
+        h = xxhash.xxh3_64(shingle.encode('utf-8')).intdigest() & 0xFFFFFFFF
+        hashes.append(h)
+    return hashes
+
+
+def compute_minhash_signature(base_hashes: list, perm_a: np.ndarray, perm_b: np.ndarray) -> list:
+    """
+    Compute MinHash signature from base hashes.
+
+    This reproduces Milvus's linear_and_find_min_native function.
+
+    Args:
+        base_hashes: List of base hash values (from shingles)
+        perm_a: Permutation parameters a
+        perm_b: Permutation parameters b
+
+    Returns:
+        List of uint32 signature values
+    """
+    num_hashes = len(perm_a)
+    signature = [0xFFFFFFFF] * num_hashes
+
+    for h in base_hashes:
+        for i in range(num_hashes):
+            # Match Milvus: temp = perm_a * base + perm_b
+            temp = int(perm_a[i]) * h + int(perm_b[i])
+            # Fast Mersenne modulo
+            low = temp & MINHASH_MERSENNE_PRIME
+            high = temp >> 61
+            temp = low + high
+            if temp >= MINHASH_MERSENNE_PRIME:
+                temp -= MINHASH_MERSENNE_PRIME
+            permuted = temp & MINHASH_MAX_HASH_MASK
+            if permuted < signature[i]:
+                signature[i] = permuted
+
+    return signature
+
+
+def signature_to_binary_vector(signature: list) -> bytes:
+    """
+    Convert MinHash signature to binary vector (little-endian).
+
+    Args:
+        signature: List of uint32 signature values
+
+    Returns:
+        bytes: Binary vector
+    """
+    import struct
+    return b''.join(struct.pack('<I', s) for s in signature)
+
+
+def binary_vector_to_signature(binary_vector: bytes) -> list:
+    """
+    Convert binary vector back to signature (little-endian).
+
+    Args:
+        binary_vector: Binary vector bytes
+
+    Returns:
+        List of uint32 signature values
+    """
+    import struct
+    num_hashes = len(binary_vector) // 4
+    return list(struct.unpack(f'<{num_hashes}I', binary_vector))
+
+
+# ============================================================================
+# MinHash Function Correctness Test Cases
+# ============================================================================
+class TestMinHashFunctionCorrectness(TestMilvusClientV2Base):
+    """
+    Test cases to verify the correctness of MinHash function output.
+
+    These tests directly compare Milvus MinHash signatures against
+    Python-computed expected values using the same algorithm.
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_minhash_signature_matches_expected(self):
+        """
+        target: verify MinHash signature matches Python-computed expected value
+        method: compute expected signature in Python, compare with Milvus output
+        expected: signatures should match exactly
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # Fixed parameters for reproducibility
+        seed = 42
+        num_hashes = 16
+        shingle_size = 3
+        dim = num_hashes * 32
+
+        # Create collection with MinHash function
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
+
+        schema.add_function(Function(
+            name="text_to_minhash",
+            function_type=FunctionType.MINHASH,
+            input_field_names=[default_text_field_name],
+            output_field_names=[default_minhash_field_name],
+            params={
+                "num_hashes": num_hashes,
+                "shingle_size": shingle_size,
+                "seed": seed,
+            },
+        ))
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name=default_minhash_field_name,
+            index_type="MINHASH_LSH",
+            metric_type="MHJACCARD",
+            params={"mh_lsh_band": 8},
+        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        # Test texts
+        test_texts = [
+            "hello world",
+            "The quick brown fox",
+            "abcdefghij",
+        ]
+
+        # Compute expected signatures in Python
+        perm_a, perm_b = init_permutations_like_milvus(num_hashes, seed)
+        expected_signatures = []
+        for text in test_texts:
+            base_hashes = hash_shingles_xxhash(text, shingle_size)
+            sig = compute_minhash_signature(base_hashes, perm_a, perm_b)
+            expected_signatures.append(sig)
+
+        # Insert data into Milvus
+        rows = [{default_primary_key_field_name: i, default_text_field_name: test_texts[i]}
+                for i in range(len(test_texts))]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        # Query to retrieve actual signatures
+        results = self.query(client, collection_name,
+                             filter=f"{default_primary_key_field_name} >= 0",
+                             output_fields=[default_primary_key_field_name,
+                                            default_text_field_name,
+                                            default_minhash_field_name])[0]
+
+        # Sort by ID for consistent comparison
+        results.sort(key=lambda x: x[default_primary_key_field_name])
+
+        # Compare signatures
+        for i, result in enumerate(results):
+            actual_binary = result[default_minhash_field_name]
+            actual_sig = binary_vector_to_signature(actual_binary)
+            expected_sig = expected_signatures[i]
+
+            # Log for debugging if mismatch
+            if actual_sig != expected_sig:
+                print(f"Text: {test_texts[i]}")
+                print(f"Expected signature: {expected_sig}")
+                print(f"Actual signature: {actual_sig}")
+
+            assert actual_sig == expected_sig, \
+                f"Signature mismatch for text '{test_texts[i]}': expected {expected_sig}, got {actual_sig}"
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_minhash_permutation_generation_consistency(self):
+        """
+        target: verify permutation generation consistency across multiple seeds
+        method: create collections with different seeds, verify signatures differ
+        expected: different seeds produce different signatures for same text
+        """
+        client = self._client()
+        num_hashes = 16
+        shingle_size = 3
+        dim = num_hashes * 32
+        test_text = "consistent test text for permutation verification"
+
+        signatures_by_seed = {}
+
+        for seed in [1234, 42, 0, 999999]:
+            collection_name = cf.gen_collection_name_by_testcase_name() + f"_seed{seed}"
+
+            schema = self.create_schema(client, enable_dynamic_field=False)[0]
+            schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+            schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
+            schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
+
+            schema.add_function(Function(
+                name="text_to_minhash",
+                function_type=FunctionType.MINHASH,
+                input_field_names=[default_text_field_name],
+                output_field_names=[default_minhash_field_name],
+                params={"num_hashes": num_hashes, "shingle_size": shingle_size, "seed": seed},
+            ))
+
+            index_params = self.prepare_index_params(client)[0]
+            index_params.add_index(
+                field_name=default_minhash_field_name,
+                index_type="MINHASH_LSH",
+                metric_type="MHJACCARD",
+                params={"mh_lsh_band": 8},
+            )
+            self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+            # Insert same text
+            rows = [{default_primary_key_field_name: 1, default_text_field_name: test_text}]
+            self.insert(client, collection_name, rows)
+            self.flush(client, collection_name)
+            self.load_collection(client, collection_name)
+
+            # Query signature
+            results = self.query(client, collection_name,
+                                 filter=f"{default_primary_key_field_name} == 1",
+                                 output_fields=[default_minhash_field_name])[0]
+
+            actual_binary = results[0][default_minhash_field_name]
+            actual_sig = tuple(binary_vector_to_signature(actual_binary))
+            signatures_by_seed[seed] = actual_sig
+
+            # Verify against Python computation
+            perm_a, perm_b = init_permutations_like_milvus(num_hashes, seed)
+            base_hashes = hash_shingles_xxhash(test_text, shingle_size)
+            expected_sig = tuple(compute_minhash_signature(base_hashes, perm_a, perm_b))
+
+            assert actual_sig == expected_sig, \
+                f"Signature mismatch for seed {seed}: expected {expected_sig}, got {actual_sig}"
+
+            self.drop_collection(client, collection_name)
+
+        # Verify different seeds produce different signatures
+        unique_signatures = set(signatures_by_seed.values())
+        assert len(unique_signatures) == len(signatures_by_seed), \
+            "Different seeds should produce different signatures"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_minhash_shingle_hash_correctness(self):
+        """
+        target: verify shingle generation and hash computation
+        method: test with known inputs and verify expected shingle count
+        expected: shingle count matches expected value based on text length
+        """
+        # Test character-level shingle generation
+        test_cases = [
+            # (text, shingle_size, expected_shingle_count)
+            ("abc", 3, 1),           # "abc" -> 1 shingle
+            ("abcd", 3, 2),          # "abc", "bcd" -> 2 shingles
+            ("abcde", 3, 3),         # "abc", "bcd", "cde" -> 3 shingles
+            ("ab", 3, 1),            # short text -> 1 shingle (whole text)
+            ("hello world", 3, 9),   # 11 chars -> 9 shingles
+        ]
+
+        for text, shingle_size, expected_count in test_cases:
+            hashes = hash_shingles_xxhash(text, shingle_size)
+            assert len(hashes) == expected_count, \
+                f"Expected {expected_count} shingles for '{text}' with size {shingle_size}, got {len(hashes)}"
+
+            # All hashes should be 32-bit
+            for h in hashes:
+                assert 0 <= h <= 0xFFFFFFFF, f"Hash {h} is not a valid 32-bit value"
+
+        # Verify hash determinism
+        text = "deterministic test"
+        h1 = hash_shingles_xxhash(text, 3)
+        h2 = hash_shingles_xxhash(text, 3)
+        assert h1 == h2, "Same text should produce same hashes"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_minhash_binary_vector_format(self):
+        """
+        target: verify binary vector format (little-endian encoding)
+        method: convert signature to binary and back, verify roundtrip
+        expected: signature survives roundtrip conversion
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        seed = 12345
+        num_hashes = 8  # Smaller for easier verification
+        shingle_size = 3
+        dim = num_hashes * 32
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
+
+        schema.add_function(Function(
+            name="text_to_minhash",
+            function_type=FunctionType.MINHASH,
+            input_field_names=[default_text_field_name],
+            output_field_names=[default_minhash_field_name],
+            params={"num_hashes": num_hashes, "shingle_size": shingle_size, "seed": seed},
+        ))
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name=default_minhash_field_name,
+            index_type="MINHASH_LSH",
+            metric_type="MHJACCARD",
+            params={"mh_lsh_band": 4},
+        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        test_text = "binary vector format test"
+        rows = [{default_primary_key_field_name: 1, default_text_field_name: test_text}]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        # Get actual binary vector from Milvus
+        results = self.query(client, collection_name,
+                             filter=f"{default_primary_key_field_name} == 1",
+                             output_fields=[default_minhash_field_name])[0]
+
+        actual_binary = results[0][default_minhash_field_name]
+
+        # Verify binary vector size: num_hashes * 4 bytes (32 bits each)
+        expected_byte_size = num_hashes * 4
+        assert len(actual_binary) == expected_byte_size, \
+            f"Binary vector should be {expected_byte_size} bytes, got {len(actual_binary)}"
+
+        # Roundtrip test
+        sig = binary_vector_to_signature(actual_binary)
+        roundtrip_binary = signature_to_binary_vector(sig)
+        assert actual_binary == roundtrip_binary, "Binary vector should survive roundtrip conversion"
+
+        # Verify against Python computation
+        perm_a, perm_b = init_permutations_like_milvus(num_hashes, seed)
+        base_hashes = hash_shingles_xxhash(test_text, shingle_size)
+        expected_sig = compute_minhash_signature(base_hashes, perm_a, perm_b)
+        expected_binary = signature_to_binary_vector(expected_sig)
+
+        assert actual_binary == expected_binary, \
+            f"Binary vector mismatch: expected {expected_binary.hex()}, got {actual_binary.hex()}"
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_minhash_empty_and_short_text_handling(self):
+        """
+        target: verify MinHash handles edge cases (empty and very short text)
+        method: insert empty and single-char texts
+        expected: MinHash generates valid signatures for all inputs
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        seed = 42
+        num_hashes = 16
+        shingle_size = 3
+        dim = num_hashes * 32
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
+
+        schema.add_function(Function(
+            name="text_to_minhash",
+            function_type=FunctionType.MINHASH,
+            input_field_names=[default_text_field_name],
+            output_field_names=[default_minhash_field_name],
+            params={"num_hashes": num_hashes, "shingle_size": shingle_size, "seed": seed},
+        ))
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name=default_minhash_field_name,
+            index_type="MINHASH_LSH",
+            metric_type="MHJACCARD",
+            params={"mh_lsh_band": 8},
+        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        # Edge case texts
+        edge_cases = [
+            (1, "a"),           # Single char
+            (2, "ab"),          # Two chars (less than shingle_size)
+            (3, "abc"),         # Exactly shingle_size
+            (4, " "),           # Single space
+            (5, "  "),          # Multiple spaces
+        ]
+
+        rows = [{default_primary_key_field_name: pk, default_text_field_name: text}
+                for pk, text in edge_cases]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        # Verify all texts get valid signatures
+        results = self.query(client, collection_name,
+                             filter=f"{default_primary_key_field_name} >= 0",
+                             output_fields=[default_primary_key_field_name,
+                                            default_text_field_name,
+                                            default_minhash_field_name])[0]
+
+        assert len(results) == len(edge_cases), "All edge cases should be inserted"
+
+        perm_a, perm_b = init_permutations_like_milvus(num_hashes, seed)
+
+        for result in results:
+            binary_vec = result[default_minhash_field_name]
+            text = result[default_text_field_name]
+
+            # Binary vector should have correct size
+            assert len(binary_vec) == num_hashes * 4, f"Invalid binary vector size for '{text}'"
+
+            sig = binary_vector_to_signature(binary_vec)
+
+            # All signature values should be valid 32-bit
+            for s in sig:
+                assert 0 <= s <= 0xFFFFFFFF, f"Invalid signature value for '{text}'"
+
+            # Verify against Python computation
+            base_hashes = hash_shingles_xxhash(text, shingle_size)
+            expected_sig = compute_minhash_signature(base_hashes, perm_a, perm_b)
+
+            assert sig == expected_sig, \
+                f"Signature mismatch for edge case '{text}': expected {expected_sig}, got {sig}"
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_minhash_jaccard_distance_correlation(self):
+        """
+        target: verify MinHash Jaccard distance correlates with actual Jaccard similarity
+        method: create pairs with known overlaps, verify distance ordering
+        expected: higher text overlap -> higher similarity (lower distance)
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        seed = 42
+        num_hashes = 128  # More hashes for better accuracy
+        shingle_size = 3
+        dim = num_hashes * 32
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
+
+        schema.add_function(Function(
+            name="text_to_minhash",
+            function_type=FunctionType.MINHASH,
+            input_field_names=[default_text_field_name],
+            output_field_names=[default_minhash_field_name],
+            params={"num_hashes": num_hashes, "shingle_size": shingle_size, "seed": seed},
+        ))
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name=default_minhash_field_name,
+            index_type="MINHASH_LSH",
+            metric_type="MHJACCARD",
+            params={"mh_lsh_band": 16},
+        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        # Base text and variants with decreasing similarity
+        base_text = "the quick brown fox jumps over the lazy dog"
+        variants = [
+            (0, base_text),                                              # Identical
+            (1, "the quick brown fox jumps over the lazy cat"),          # 1 word changed
+            (2, "the slow brown fox jumps over the lazy dog"),           # 1 word changed
+            (3, "a slow red fox runs over the tired dog"),               # Multiple changes
+            (4, "completely different text about something else"),       # Very different
+        ]
+
+        rows = [{default_primary_key_field_name: pk, default_text_field_name: text}
+                for pk, text in variants]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        # Search with base text
+        results = self.search(client, collection_name, [base_text],
+                              anns_field=default_minhash_field_name,
+                              search_params={"metric_type": "MHJACCARD", "params": {}},
+                              limit=len(variants),
+                              output_fields=[default_primary_key_field_name, default_text_field_name])[0]
+
+        # Verify result ordering: identical text should be first
+        assert results[0][0]["id"] == 0, "Identical text should be first result"
+        assert results[0][0]["distance"] == 1.0, "Identical text should have distance 1.0"
+
+        # Verify distances are monotonically decreasing (more similar = higher score)
+        distances = [hit["distance"] for hit in results[0]]
+        # Note: MHJACCARD returns similarity (1.0 = identical), not distance
+        # So higher values mean more similar
+
+        # The very different text should have lowest similarity
+        last_hit = results[0][-1]
+        assert last_hit["distance"] < 0.9, \
+            f"Very different text should have lower similarity, got {last_hit['distance']}"
+
+        self.drop_collection(client, collection_name)
