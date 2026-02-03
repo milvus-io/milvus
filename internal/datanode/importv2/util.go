@@ -104,7 +104,6 @@ func NewSyncTask(ctx context.Context,
 		WithPartitionID(partitionID).
 		WithChannelName(vchannel).
 		WithSegmentID(segmentID).
-		WithTimeRange(ts, ts).
 		WithLevel(segmentLevel).
 		WithDataSource(metrics.BulkinsertDataSourceLabel).
 		WithBatchRows(int64(insertData.GetRowNum()))

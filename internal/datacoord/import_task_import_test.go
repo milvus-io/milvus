@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -413,8 +414,17 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 
 		im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+		assert.NoError(t, err)
+
+		var job ImportJob = &importJob{
+			ImportJob: &datapb.ImportJob{
+				JobID: 1,
+			},
+		}
+		err = im.AddJob(context.TODO(), job)
 		assert.NoError(t, err)
 
 		taskProto := &datapb.ImportTaskV2{
@@ -473,6 +483,101 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		assert.Equal(t, datapb.ImportTaskStateV2_Completed, task.GetState())
 		assert.Equal(t, int64(100), task.meta.segments.GetSegment(5).GetNumOfRows())
 		assert.Equal(t, int64(200), task.meta.segments.GetSegment(6).GetNumOfRows())
+	})
+}
+
+func TestExtractTimestampFromBinlogs(t *testing.T) {
+	t.Run("empty binlogs", func(t *testing.T) {
+		minTs, maxTs := extractTimestampFromBinlogs(nil)
+		assert.Equal(t, uint64(math.MaxUint64), minTs)
+		assert.Equal(t, uint64(0), maxTs)
+	})
+
+	t.Run("empty field binlogs", func(t *testing.T) {
+		binlogs := []*datapb.FieldBinlog{}
+		minTs, maxTs := extractTimestampFromBinlogs(binlogs)
+		assert.Equal(t, uint64(math.MaxUint64), minTs)
+		assert.Equal(t, uint64(0), maxTs)
+	})
+
+	t.Run("single binlog", func(t *testing.T) {
+		binlogs := []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{
+						TimestampFrom: 1000,
+						TimestampTo:   2000,
+					},
+				},
+			},
+		}
+		minTs, maxTs := extractTimestampFromBinlogs(binlogs)
+		assert.Equal(t, uint64(1000), minTs)
+		assert.Equal(t, uint64(2000), maxTs)
+	})
+
+	t.Run("multiple binlogs in single field", func(t *testing.T) {
+		binlogs := []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{
+						TimestampFrom: 1000,
+						TimestampTo:   2000,
+					},
+					{
+						TimestampFrom: 500,
+						TimestampTo:   3000,
+					},
+				},
+			},
+		}
+		minTs, maxTs := extractTimestampFromBinlogs(binlogs)
+		assert.Equal(t, uint64(500), minTs)
+		assert.Equal(t, uint64(3000), maxTs)
+	})
+
+	t.Run("multiple fields with multiple binlogs", func(t *testing.T) {
+		binlogs := []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{
+						TimestampFrom: 1000,
+						TimestampTo:   2000,
+					},
+				},
+			},
+			{
+				FieldID: 101,
+				Binlogs: []*datapb.Binlog{
+					{
+						TimestampFrom: 500,
+						TimestampTo:   1500,
+					},
+					{
+						TimestampFrom: 800,
+						TimestampTo:   3000,
+					},
+				},
+			},
+		}
+		minTs, maxTs := extractTimestampFromBinlogs(binlogs)
+		assert.Equal(t, uint64(500), minTs)
+		assert.Equal(t, uint64(3000), maxTs)
+	})
+
+	t.Run("field binlog with no binlogs inside", func(t *testing.T) {
+		binlogs := []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{},
+			},
+		}
+		minTs, maxTs := extractTimestampFromBinlogs(binlogs)
+		assert.Equal(t, uint64(math.MaxUint64), minTs)
+		assert.Equal(t, uint64(0), maxTs)
 	})
 }
 

@@ -1231,6 +1231,35 @@ func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
 	}
 }
 
+// UpdateImportSegmentPosition updates the segment's StartPosition and DmlPosition
+// for import segments using actual timestamps from the imported data.
+// Unlike UpdateStartPosition/UpdateDmlPosition, this operator allows nil MsgID
+// since import segments don't have message queue positions.
+func UpdateImportSegmentPosition(segmentID int64, minTs, maxTs uint64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: update import segment position failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		channelName := segment.GetInsertChannel()
+		// Use actual min timestamp for StartPosition
+		segment.StartPosition = &msgpb.MsgPosition{
+			ChannelName: channelName,
+			MsgID:       nil,
+			Timestamp:   minTs,
+		}
+		// Use actual max timestamp for DmlPosition
+		segment.DmlPosition = &msgpb.MsgPosition{
+			ChannelName: channelName,
+			MsgID:       nil,
+			Timestamp:   maxTs,
+		}
+		return true
+	}
+}
+
 // UpdateAsDroppedIfEmptyWhenFlushing updates segment state to Dropped if segment is empty and in Flushing state
 // It's used to make a empty flushing segment to be dropped directly.
 func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {

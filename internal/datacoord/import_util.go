@@ -241,11 +241,6 @@ func AllocImportSegment(ctx context.Context,
 			return nil, err
 		}
 	}
-	position := &msgpb.MsgPosition{
-		ChannelName: channelName,
-		MsgID:       nil,
-		Timestamp:   ts,
-	}
 
 	segmentInfo := &datapb.SegmentInfo{
 		ID:             id,
@@ -257,8 +252,6 @@ func AllocImportSegment(ctx context.Context,
 		MaxRowNum:      0,
 		Level:          level,
 		LastExpireTime: math.MaxUint64,
-		StartPosition:  position,
-		DmlPosition:    position,
 		StorageVersion: storageVersion,
 	}
 	segmentInfo.IsImporting = true
