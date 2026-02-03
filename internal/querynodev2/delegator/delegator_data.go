@@ -225,6 +225,130 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 }
 
+// ProcessUpsert handles upsert data in delegator.
+// It processes both insert and delete parts of the upsert operation.
+//
+// NOTE: This method is currently UNUSED. The pipeline (pipeline/message.go) splits UpsertMsg
+// into separate InsertMsg and DeleteMsg, which are then processed by ProcessInsert() and
+// ProcessDelete() respectively. This method is kept for potential future optimization where
+// upsert could be processed as a single atomic operation.
+//
+// If this method is to be used in the future, the panic() calls on lines 255 and 270 should
+// be replaced with proper error returns.
+func (sd *shardDelegator) ProcessUpsert(insertRecords map[int64]*InsertData, deleteData []*DeleteData, ts uint64) {
+	method := "ProcessUpsert"
+	tr := timerecord.NewTimeRecorder(method)
+	log := sd.getLogger(context.Background())
+
+	// Process insert part - similar to ProcessInsert
+	for segmentID, insertData := range insertRecords {
+		growing := sd.segmentManager.GetGrowing(segmentID)
+		newGrowingSegment := false
+		if growing == nil {
+			var err error
+			growing, err = segments.NewSegment(
+				context.Background(),
+				sd.collection,
+				sd.segmentManager,
+				segments.SegmentTypeGrowing,
+				0,
+				&querypb.SegmentLoadInfo{
+					SegmentID:     segmentID,
+					PartitionID:   insertData.PartitionID,
+					CollectionID:  sd.collectionID,
+					InsertChannel: sd.vchannelName,
+					StartPosition: insertData.StartPosition,
+					DeltaPosition: insertData.StartPosition,
+					Level:         datapb.SegmentLevel_L1,
+				},
+			)
+			if err != nil {
+				log.Error("failed to create new segment",
+					zap.Int64("segmentID", segmentID),
+					zap.Error(err))
+				panic(err)
+			}
+			newGrowingSegment = true
+		}
+
+		err := growing.Insert(context.Background(), insertData.RowIDs, insertData.Timestamps, insertData.InsertRecord)
+		if err != nil {
+			log.Error("failed to insert data into growing segment",
+				zap.Int64("segmentID", segmentID),
+				zap.Error(err),
+			)
+			if errors.IsAny(err, merr.ErrSegmentNotLoaded, merr.ErrSegmentNotFound) {
+				log.Warn("try to insert data into released segment, skip it", zap.Error(err))
+				continue
+			}
+			panic(err)
+		}
+		growing.UpdateBloomFilter(insertData.PrimaryKeys)
+
+		if newGrowingSegment {
+			sd.growingSegmentLock.Lock()
+			if ok := sd.VerifyExcludedSegments(segmentID, 0); !ok {
+				log.Warn("try to insert data into released segment, skip it", zap.Int64("segmentID", segmentID))
+				sd.growingSegmentLock.Unlock()
+				growing.Release(context.Background())
+				continue
+			}
+
+			if !sd.pkOracle.Exists(growing, paramtable.GetNodeID()) {
+				sd.pkOracle.Register(growing, paramtable.GetNodeID())
+				if sd.idfOracle != nil {
+					sd.idfOracle.RegisterGrowing(segmentID, insertData.BM25Stats)
+				}
+				sd.segmentManager.Put(context.Background(), segments.SegmentTypeGrowing, growing)
+				sd.addGrowing(SegmentEntry{
+					NodeID:        paramtable.GetNodeID(),
+					SegmentID:     segmentID,
+					PartitionID:   insertData.PartitionID,
+					Version:       0,
+					TargetVersion: initialTargetVersion,
+				})
+			}
+
+			sd.growingSegmentLock.Unlock()
+		} else if sd.idfOracle != nil {
+			sd.idfOracle.UpdateGrowing(growing.ID(), insertData.BM25Stats)
+		}
+		log.Info("upsert insert into growing segment",
+			zap.Int64("collectionID", growing.Collection()),
+			zap.Int64("segmentID", segmentID),
+			zap.Int("rowCount", len(insertData.RowIDs)),
+			zap.Uint64("maxTimestamp", insertData.Timestamps[len(insertData.Timestamps)-1]),
+		)
+	}
+
+	// Process delete part - similar to ProcessDelete
+	sd.deleteMut.Lock()
+	defer sd.deleteMut.Unlock()
+
+	log.Debug("start to process upsert delete part", zap.Uint64("ts", ts))
+	cacheItems := make([]deletebuffer.BufferItem, 0, len(deleteData))
+	for _, entry := range deleteData {
+		cacheItems = append(cacheItems, deletebuffer.BufferItem{
+			PartitionID: entry.PartitionID,
+			DeleteData: storage.DeleteData{
+				Pks:      entry.PrimaryKeys,
+				Tss:      entry.Timestamps,
+				RowCount: entry.RowCount,
+			},
+		})
+	}
+
+	sd.deleteBuffer.Put(&deletebuffer.Item{
+		Ts:   ts,
+		Data: cacheItems,
+	})
+
+	sd.forwardStreamingDeletion(context.Background(), deleteData)
+
+	metrics.QueryNodeProcessCost.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.UpsertLabel).
+		Observe(float64(tr.ElapseSpan().Milliseconds()))
+}
+
 type BatchApplyRet = struct {
 	DeleteDataIdx int
 	StartIdx      int

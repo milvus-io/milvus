@@ -203,14 +203,7 @@ func TestStreamingProduce(t *testing.T) {
 
 	for i := 0; i < 500; i++ {
 		time.Sleep(time.Millisecond * 1)
-		txn, err := streaming.WAL().Txn(context.Background(), streaming.TxnOption{
-			VChannel:  vChannels[0],
-			Keepalive: 500 * time.Millisecond,
-		})
-		if err != nil {
-			t.Errorf("txn failed: %v", err)
-			return
-		}
+		msgs := make([]message.MutableMessage, 0)
 		for j := 0; j < 5; j++ {
 			msg, _ := message.NewInsertMessageBuilderV1().
 				WithHeader(&message.InsertMessageHeader{
@@ -221,14 +214,14 @@ func TestStreamingProduce(t *testing.T) {
 				}).
 				WithVChannel(vChannels[0]).
 				BuildMutable()
-			err := txn.Append(context.Background(), msg)
+			msgs = append(msgs, msg)
 			fmt.Printf("%+v\n", err)
 		}
-		result, err := txn.Commit(context.Background())
+		err := streaming.WAL().AppendMessages(context.Background(), msgs...).UnwrapFirstError()
 		if err != nil {
 			t.Errorf("txn failed: %v", err)
 		}
-		t.Logf("txn commit: %+v\n", result)
+		t.Logf("txn commit: %+v\n", resp)
 	}
 
 	msg, _ = message.NewDropCollectionMessageBuilderV1().

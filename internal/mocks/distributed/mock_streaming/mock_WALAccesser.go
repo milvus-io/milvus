@@ -87,68 +87,6 @@ func (_c *MockWALAccesser_AppendMessages_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
-// AppendMessagesWithOption provides a mock function with given fields: ctx, opts, msgs
-func (_m *MockWALAccesser) AppendMessagesWithOption(ctx context.Context, opts streaming.AppendOption, msgs ...message.MutableMessage) streaming.AppendResponses {
-	_va := make([]interface{}, len(msgs))
-	for _i := range msgs {
-		_va[_i] = msgs[_i]
-	}
-	var _ca []interface{}
-	_ca = append(_ca, ctx, opts)
-	_ca = append(_ca, _va...)
-	ret := _m.Called(_ca...)
-
-	if len(ret) == 0 {
-		panic("no return value specified for AppendMessagesWithOption")
-	}
-
-	var r0 streaming.AppendResponses
-	if rf, ok := ret.Get(0).(func(context.Context, streaming.AppendOption, ...message.MutableMessage) streaming.AppendResponses); ok {
-		r0 = rf(ctx, opts, msgs...)
-	} else {
-		r0 = ret.Get(0).(streaming.AppendResponses)
-	}
-
-	return r0
-}
-
-// MockWALAccesser_AppendMessagesWithOption_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AppendMessagesWithOption'
-type MockWALAccesser_AppendMessagesWithOption_Call struct {
-	*mock.Call
-}
-
-// AppendMessagesWithOption is a helper method to define mock.On call
-//   - ctx context.Context
-//   - opts streaming.AppendOption
-//   - msgs ...message.MutableMessage
-func (_e *MockWALAccesser_Expecter) AppendMessagesWithOption(ctx interface{}, opts interface{}, msgs ...interface{}) *MockWALAccesser_AppendMessagesWithOption_Call {
-	return &MockWALAccesser_AppendMessagesWithOption_Call{Call: _e.mock.On("AppendMessagesWithOption",
-		append([]interface{}{ctx, opts}, msgs...)...)}
-}
-
-func (_c *MockWALAccesser_AppendMessagesWithOption_Call) Run(run func(ctx context.Context, opts streaming.AppendOption, msgs ...message.MutableMessage)) *MockWALAccesser_AppendMessagesWithOption_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]message.MutableMessage, len(args)-2)
-		for i, a := range args[2:] {
-			if a != nil {
-				variadicArgs[i] = a.(message.MutableMessage)
-			}
-		}
-		run(args[0].(context.Context), args[1].(streaming.AppendOption), variadicArgs...)
-	})
-	return _c
-}
-
-func (_c *MockWALAccesser_AppendMessagesWithOption_Call) Return(_a0 streaming.AppendResponses) *MockWALAccesser_AppendMessagesWithOption_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockWALAccesser_AppendMessagesWithOption_Call) RunAndReturn(run func(context.Context, streaming.AppendOption, ...message.MutableMessage) streaming.AppendResponses) *MockWALAccesser_AppendMessagesWithOption_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // Balancer provides a mock function with no fields
 func (_m *MockWALAccesser) Balancer() streaming.Balancer {
 	ret := _m.Called()
@@ -548,65 +486,6 @@ func (_c *MockWALAccesser_Replicate_Call) Return(_a0 streaming.ReplicateService)
 }
 
 func (_c *MockWALAccesser_Replicate_Call) RunAndReturn(run func() streaming.ReplicateService) *MockWALAccesser_Replicate_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// Txn provides a mock function with given fields: ctx, opts
-func (_m *MockWALAccesser) Txn(ctx context.Context, opts streaming.TxnOption) (streaming.Txn, error) {
-	ret := _m.Called(ctx, opts)
-
-	if len(ret) == 0 {
-		panic("no return value specified for Txn")
-	}
-
-	var r0 streaming.Txn
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, streaming.TxnOption) (streaming.Txn, error)); ok {
-		return rf(ctx, opts)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, streaming.TxnOption) streaming.Txn); ok {
-		r0 = rf(ctx, opts)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(streaming.Txn)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, streaming.TxnOption) error); ok {
-		r1 = rf(ctx, opts)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockWALAccesser_Txn_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Txn'
-type MockWALAccesser_Txn_Call struct {
-	*mock.Call
-}
-
-// Txn is a helper method to define mock.On call
-//   - ctx context.Context
-//   - opts streaming.TxnOption
-func (_e *MockWALAccesser_Expecter) Txn(ctx interface{}, opts interface{}) *MockWALAccesser_Txn_Call {
-	return &MockWALAccesser_Txn_Call{Call: _e.mock.On("Txn", ctx, opts)}
-}
-
-func (_c *MockWALAccesser_Txn_Call) Run(run func(ctx context.Context, opts streaming.TxnOption)) *MockWALAccesser_Txn_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(streaming.TxnOption))
-	})
-	return _c
-}
-
-func (_c *MockWALAccesser_Txn_Call) Return(_a0 streaming.Txn, _a1 error) *MockWALAccesser_Txn_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockWALAccesser_Txn_Call) RunAndReturn(run func(context.Context, streaming.TxnOption) (streaming.Txn, error)) *MockWALAccesser_Txn_Call {
 	_c.Call.Return(run)
 	return _c
 }

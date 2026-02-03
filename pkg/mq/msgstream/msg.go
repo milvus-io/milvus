@@ -452,6 +452,152 @@ type UpsertMsg struct {
 	DeleteMsg *DeleteMsg
 }
 
+// interface implementation validation
+var _ TsMsg = &UpsertMsg{}
+
+// TraceCtx returns the context for tracing
+func (um *UpsertMsg) TraceCtx() context.Context {
+	if um.InsertMsg != nil {
+		return um.InsertMsg.TraceCtx()
+	}
+	return context.Background()
+}
+
+// SetTraceCtx sets the trace context
+func (um *UpsertMsg) SetTraceCtx(ctx context.Context) {
+	if um.InsertMsg != nil {
+		um.InsertMsg.SetTraceCtx(ctx)
+	}
+	if um.DeleteMsg != nil {
+		um.DeleteMsg.SetTraceCtx(ctx)
+	}
+}
+
+// ID returns the message ID
+func (um *UpsertMsg) ID() UniqueID {
+	if um.InsertMsg != nil {
+		return um.InsertMsg.ID()
+	}
+	return 0
+}
+
+// SetID sets the message ID
+func (um *UpsertMsg) SetID(id UniqueID) {
+	if um.InsertMsg != nil {
+		um.InsertMsg.SetID(id)
+	}
+	if um.DeleteMsg != nil {
+		um.DeleteMsg.SetID(id)
+	}
+}
+
+// BeginTs returns the begin timestamp
+func (um *UpsertMsg) BeginTs() Timestamp {
+	if um.InsertMsg != nil {
+		return um.InsertMsg.BeginTs()
+	}
+	return 0
+}
+
+// EndTs returns the end timestamp
+func (um *UpsertMsg) EndTs() Timestamp {
+	if um.InsertMsg != nil {
+		return um.InsertMsg.EndTs()
+	}
+	return 0
+}
+
+// Type returns the message type
+func (um *UpsertMsg) Type() MsgType {
+	return commonpb.MsgType_Upsert
+}
+
+// VChannel returns the virtual channel name
+func (um *UpsertMsg) VChannel() string {
+	if um.InsertMsg != nil {
+		return um.InsertMsg.VChannel()
+	}
+	return ""
+}
+
+// CollID returns the collection ID
+func (um *UpsertMsg) CollID() int64 {
+	if um.InsertMsg != nil {
+		return um.InsertMsg.CollID()
+	}
+	return 0
+}
+
+// SourceID returns the source ID
+func (um *UpsertMsg) SourceID() int64 {
+	if um.InsertMsg != nil {
+		return um.InsertMsg.SourceID()
+	}
+	return 0
+}
+
+// HashKeys returns the hash keys
+func (um *UpsertMsg) HashKeys() []uint32 {
+	if um.InsertMsg != nil {
+		return um.InsertMsg.HashKeys()
+	}
+	return nil
+}
+
+// Marshal marshals the message
+func (um *UpsertMsg) Marshal(input TsMsg) (MarshalType, error) {
+	// Not implemented for upsert message
+	return nil, nil
+}
+
+// Unmarshal unmarshals the message
+func (um *UpsertMsg) Unmarshal(input MarshalType) (TsMsg, error) {
+	// UpsertMsg is a V2 message type that flows through the new streaming architecture
+	// It should not be unmarshaled through the old msgstream proto path
+	// V2 messages are handled by adaptors in pkg/streaming/util/message/adaptor
+	return nil, errors.New("UpsertMsg.Unmarshal is not supported for V2 message type")
+}
+
+// Position returns the message position
+func (um *UpsertMsg) Position() *MsgPosition {
+	if um.InsertMsg != nil {
+		return um.InsertMsg.Position()
+	}
+	return nil
+}
+
+// SetPosition sets the message position
+func (um *UpsertMsg) SetPosition(pos *MsgPosition) {
+	if um.InsertMsg != nil {
+		um.InsertMsg.SetPosition(pos)
+	}
+	if um.DeleteMsg != nil {
+		um.DeleteMsg.SetPosition(pos)
+	}
+}
+
+// SetTs sets the timestamp
+func (um *UpsertMsg) SetTs(ts uint64) {
+	if um.InsertMsg != nil {
+		um.InsertMsg.SetTs(ts)
+	}
+	if um.DeleteMsg != nil {
+		um.DeleteMsg.SetTs(ts)
+	}
+}
+
+// Size returns the size of the message
+func (um *UpsertMsg) Size() int {
+	size := 0
+	if um.InsertMsg != nil {
+		size += um.InsertMsg.Size()
+	}
+	if um.DeleteMsg != nil {
+		size += um.DeleteMsg.Size()
+	}
+	return size
+}
+
 /////////////////////////////////////////TimeTick//////////////////////////////////////////
 
 // TimeTickMsg is a message pack that contains time tick only

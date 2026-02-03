@@ -56,6 +56,16 @@
         },
         {
             "MessageSpecializedType": {
+                "HeaderType": "messagespb.UpsertMessageHeader",
+                "BodyType": "messagespb.UpsertMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeUpsert",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
                 "HeaderType": "messagespb.CreateCollectionMessageHeader",
                 "BodyType": "msgpb.CreateCollectionRequest"
             },

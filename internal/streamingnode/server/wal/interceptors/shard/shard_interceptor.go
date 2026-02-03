@@ -39,6 +39,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeDropPartition:      impl.handleDropPartition,
 		message.MessageTypeInsert:             impl.handleInsertMessage,
 		message.MessageTypeDelete:             impl.handleDeleteMessage,
+		message.MessageTypeUpsert:             impl.handleUpsertMessage,
 		message.MessageTypeManualFlush:        impl.handleManualFlushMessage,
 		message.MessageTypeSchemaChange:       impl.handleSchemaChange,
 		message.MessageTypeAlterCollection:    impl.handleAlterCollection,
@@ -144,7 +145,8 @@ func (impl *shardInterceptor) handleDropPartition(ctx context.Context, msg messa
 func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	insertMsg := message.MustAsMutableInsertMessageV1(msg)
 	// Assign segment for insert message.
-	// !!! Current implementation a insert message only has one parition, but we need to merge the message for partition-key in future.
+	// Supports both single-partition and multi-partition insert messages.
+	// For multi-partition messages (from partition-key inserts), proxy merges multiple partitions into one message.
 	header := insertMsg.Header()
 	for _, partition := range header.GetPartitions() {
 		if partition.BinarySize == 0 {
@@ -207,6 +209,79 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 	}
 
 	impl.shardManager.ApplyDelete(deleteMessage)
+	return appendOp(ctx, msg)
+}
+
+// handleUpsertMessage handles the upsert message.
+// Upsert combines both insert and delete operations.
+func (impl *shardInterceptor) handleUpsertMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	upsertMsg := message.MustAsMutableUpsertMessageV2(msg)
+	header := upsertMsg.Header()
+
+	// Check if collection exists
+	if err := impl.shardManager.CheckIfCollectionExists(header.GetCollectionId()); err != nil {
+		return nil, status.NewUnrecoverableError(err.Error())
+	}
+
+	// Handle insert part: assign segments for insert data
+	for _, partition := range header.GetPartitions() {
+		if partition.BinarySize == 0 {
+			// binary size should be set at proxy with estimate, but we don't implement it right now.
+			// use payload size instead.
+			partition.BinarySize = uint64(msg.EstimateSize())
+		}
+		req := &shards.AssignSegmentRequest{
+			CollectionID: header.GetCollectionId(),
+			PartitionID:  partition.GetPartitionId(),
+			ModifiedMetrics: stats.ModifiedMetrics{
+				Rows:       partition.GetRows(),
+				BinarySize: partition.GetBinarySize(),
+			},
+			TimeTick: msg.TimeTick(),
+		}
+		if session := txn.GetTxnSessionFromContext(ctx); session != nil {
+			req.TxnSession = session
+		}
+		result, err := impl.shardManager.AssignSegment(req)
+		if errors.IsAny(err, shards.ErrTimeTickTooOld, shards.ErrWaitForNewSegment, shards.ErrFencedAssign) {
+			return nil, redo.ErrRedo
+		}
+		if errors.IsAny(err, shards.ErrTooLargeInsert, shards.ErrPartitionNotFound, shards.ErrCollectionNotFound) {
+			impl.shardManager.Logger().Warn("unrecoverable upsert operation", zap.Object("message", msg), zap.Error(err))
+			return nil, status.NewUnrecoverableError("fail to assign segment for upsert, %s", err.Error())
+		}
+		if err != nil {
+			return nil, err
+		}
+		defer result.Ack()
+
+		// Attach segment assignment to message
+		partition.SegmentAssignment = &message.SegmentAssignment{
+			SegmentId: result.SegmentID,
+		}
+	}
+
+	// Handle delete part: observe delete metrics
+	// Note: For upsert, we just need to track the delete metrics,
+	// the actual delete operation will be handled by the consumer (querynode/datanode)
+	if header.GetDeleteRows() > 0 {
+		// ApplyDelete only updates metrics, so we need to observe delete metrics for upsert
+		// Create a temporary delete message header to pass to ApplyDelete
+		deleteHeader := &message.DeleteMessageHeader{
+			CollectionId: header.GetCollectionId(),
+			Rows:         header.GetDeleteRows(),
+		}
+		tempDeleteMsg, _ := message.NewDeleteMessageBuilderV1().
+			WithHeader(deleteHeader).
+			WithBody(&message.DeleteRequest{}).
+			WithVChannel(msg.VChannel()).
+			BuildMutable()
+		impl.shardManager.ApplyDelete(message.MustAsMutableDeleteMessageV1(tempDeleteMsg))
+	}
+
+	// Overwrite header with segment assignment
+	upsertMsg.OverwriteHeader(header)
+
 	return appendOp(ctx, msg)
 }
 

@@ -57,6 +57,7 @@ func TestHandlerClient(t *testing.T) {
 	w.EXPECT().Close().Run(func() {})
 
 	p := mock_producer.NewMockProducer(t)
+	p.EXPECT().Register(mock.Anything).Return()
 	p.EXPECT().Close().RunAndReturn(func() {})
 	c := mock_consumer.NewMockConsumer(t)
 	c.EXPECT().Close().RunAndReturn(func() error { return nil })
