@@ -76,7 +76,7 @@ ThrowS3Error(const std::string& func,
              const std::string& fmt_string,
              Args&&... args) {
     std::string error_message = S3ErrorMessage(func, err, fmt_string, args...);
-    LOG_WARN(error_message);
+    LOG_WARN("{}", error_message);
     throw SegcoreError(S3Error, error_message);
 }
 
