@@ -4532,6 +4532,7 @@ class TestSearchByPK(TestBase):
     The first result for each query should be itself with distance ~0 (for L2/COSINE metrics).
     """
 
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/47495 - JSON float64 precision loss for large int64 IDs")
     def test_search_by_pk_with_int64_ids_as_numbers(self):
         """
         Search by primary key with int64 ids provided as numbers.
@@ -4539,8 +4540,10 @@ class TestSearchByPK(TestBase):
 
         Note: When using autoId=True, Milvus generates int64 IDs that may exceed
         JavaScript's MAX_SAFE_INTEGER (2^53-1). Due to JSON float64 precision loss,
-        it's recommended to pass such large IDs as strings instead of numbers.
-        This test uses string IDs to avoid the precision issue.
+        large int64 IDs lose precision when decoded as float64, causing "duplicate IDs" error.
+
+        This test is expected to fail until the issue is fixed.
+        Related issue: https://github.com/milvus-io/milvus/issues/47495
         """
         name = gen_collection_name()
         self.name = name
@@ -4549,9 +4552,9 @@ class TestSearchByPK(TestBase):
         limit = 10
         schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
 
-        # Use string IDs to avoid float64 precision loss for large int64 IDs
-        # (autoId generates IDs > 2^53 which lose precision when parsed as JSON numbers)
-        test_ids = [str(i) for i in insert_ids[:3]]
+        # Use numeric IDs directly - this will trigger precision loss for large int64 IDs
+        # autoId generates IDs > 2^53 which lose precision when parsed as JSON float64
+        test_ids = [int(i) for i in insert_ids[:3]]
 
         payload = {
             "collectionName": name,
@@ -4567,7 +4570,7 @@ class TestSearchByPK(TestBase):
         # The queried IDs should appear in results (as they match themselves with distance ~0)
         returned_ids = [item['id'] for item in rsp['data']]
         for rid in test_ids:
-            assert int(rid) in returned_ids
+            assert rid in returned_ids
 
     def test_search_by_pk_with_int64_ids_as_strings(self):
         """
