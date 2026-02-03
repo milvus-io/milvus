@@ -29,7 +29,6 @@ func (m *partitionManager) asyncFlushSegment(
 		vchannel:     m.vchannel,
 		segment:      segment,
 		wal:          m.wal.Get(),
-		msg:          nil,
 	}
 	w.SetLogger(m.Logger())
 	go w.do()
@@ -44,7 +43,6 @@ type segmentFlushWorker struct {
 	vchannel     string
 	segment      *segmentAllocManager // the segment is belong to one collection
 	wal          wal.WAL
-	msg          message.MutableMessage
 }
 
 // do is the main loop of the segment flush worker.
@@ -109,15 +107,27 @@ func (w *segmentFlushWorker) doOnce() error {
 	if !w.checkIfReady() {
 		return errDelayFlush
 	}
-	w.generateFlushMessage()
 
-	result, err := w.wal.Append(w.ctx, w.msg)
+	// Build a fresh message each time to avoid reusing a contaminated message.
+	// After a failed WAL append, the message may have internal state set (e.g., WAL term)
+	// that would cause a panic if reused.
+	msg := message.NewFlushMessageBuilderV2().
+		WithVChannel(w.vchannel).
+		WithHeader(&message.FlushMessageHeader{
+			CollectionId: w.segment.GetCollectionID(),
+			PartitionId:  w.segment.GetPartitionID(),
+			SegmentId:    w.segment.GetSegmentID(),
+		}).
+		WithBody(&message.FlushMessageBody{}).MustBuildMutable()
+
+	result, err := w.wal.Append(w.ctx, msg)
 	if err != nil {
-		w.Logger().Error("failed to append flush message", zap.Error(err))
+		w.Logger().Error("failed to append flush message", log.FieldMessage(msg), zap.Error(err))
 		return err
 	}
 	policy := w.segment.SealPolicy()
 	w.Logger().Info("segment has been flushed",
+		log.FieldMessage(msg),
 		zap.String("policy", string(policy.Policy)),
 		zap.Any("extras", policy.Extra),
 		zap.Any("stats", w.segment.GetFlushedStat()),
@@ -139,19 +149,4 @@ func (w *segmentFlushWorker) checkIfReady() bool {
 		return false
 	}
 	return true
-}
-
-// generateFlushMessage generates the flush message for the segments.
-func (w *segmentFlushWorker) generateFlushMessage() {
-	if w.msg != nil {
-		return
-	}
-	w.msg = message.NewFlushMessageBuilderV2().
-		WithVChannel(w.vchannel).
-		WithHeader(&message.FlushMessageHeader{
-			CollectionId: w.segment.GetCollectionID(),
-			PartitionId:  w.segment.GetPartitionID(),
-			SegmentId:    w.segment.GetSegmentID(),
-		}).
-		WithBody(&message.FlushMessageBody{}).MustBuildMutable()
 }
