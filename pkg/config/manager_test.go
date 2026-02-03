@@ -126,11 +126,10 @@ func TestBasic(t *testing.T) {
 
 func TestOnEvent(t *testing.T) {
 	cfg, _ := embed.ConfigFromFile("../../configs/advanced/etcd.yaml")
-	cfg.Dir = "/tmp/milvus/test"
+	cfg.Dir = t.TempDir()
 	e, err := embed.StartEtcd(cfg)
 	assert.NoError(t, err)
 	defer e.Close()
-	defer os.RemoveAll(cfg.Dir)
 
 	client := v3client.New(e.Server)
 
@@ -233,11 +232,10 @@ func TestDeadlock(t *testing.T) {
 
 func TestCachedConfig(t *testing.T) {
 	cfg, _ := embed.ConfigFromFile("../../configs/advanced/etcd.yaml")
-	cfg.Dir = "/tmp/milvus/test"
+	cfg.Dir = t.TempDir()
 	e, err := embed.StartEtcd(cfg)
 	assert.NoError(t, err)
 	defer e.Close()
-	defer os.RemoveAll(cfg.Dir)
 
 	dir, _ := os.MkdirTemp("", "milvus")
 	yamlFile := path.Join(dir, "milvus.yaml")
