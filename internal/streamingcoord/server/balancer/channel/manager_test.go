@@ -357,6 +357,53 @@ func TestChannelManager(t *testing.T) {
 		assert.Equal(t, param.Version.Local, oldLocalVersion+3)
 		assert.True(t, proto.Equal(param.ReplicateConfiguration, cfg))
 		assert.Equal(t, m.ReplicateRole(), replicateutil.RoleSecondary)
+
+		// Force promote to standalone primary
+		forcePromoteCfg := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "by-dev", Pchannels: []string{"by-dev-test-channel-1", "by-dev-test-channel-2"}},
+			},
+		}
+		forcePromoteMsg := message.NewAlterReplicateConfigMessageBuilderV2().
+			WithHeader(&message.AlterReplicateConfigMessageHeader{
+				ReplicateConfiguration: forcePromoteCfg,
+				ForcePromote:           true,
+			}).
+			WithBody(&message.AlterReplicateConfigMessageBody{}).
+			WithBroadcast([]string{"by-dev-test-channel-1", "by-dev-test-channel-2"}).
+			MustBuildBroadcast()
+		forcePromoteResult := message.BroadcastResultAlterReplicateConfigMessageV2{
+			Message: message.MustAsBroadcastAlterReplicateConfigMessageV2(forcePromoteMsg),
+			Results: map[string]*message.AppendResult{
+				"by-dev-test-channel-1": {
+					MessageID:              walimplstest.NewTestMessageID(10),
+					LastConfirmedMessageID: walimplstest.NewTestMessageID(11),
+					TimeTick:               100,
+				},
+				"by-dev-test-channel-2": {
+					MessageID:              walimplstest.NewTestMessageID(12),
+					LastConfirmedMessageID: walimplstest.NewTestMessageID(13),
+					TimeTick:               100,
+				},
+			},
+		}
+		catalog.EXPECT().SaveReplicateConfiguration(mock.Anything, mock.Anything, mock.Anything).Unset()
+		catalog.EXPECT().SaveReplicateConfiguration(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, config *streamingpb.ReplicateConfigurationMeta, replicatingTasks []*streamingpb.ReplicatePChannelMeta) error {
+				assert.True(t, proto.Equal(config.ReplicateConfiguration, forcePromoteCfg))
+				assert.True(t, config.ForcePromoted)
+				assert.True(t, config.ForcePromoteTimestamp > 0)
+				assert.Len(t, replicatingTasks, 0) // standalone primary has no replication targets
+				return nil
+			})
+		err = m.UpdateReplicateConfiguration(ctx, forcePromoteResult)
+		assert.NoError(t, err)
+
+		param, err = m.GetLatestChannelAssignment()
+		assert.NoError(t, err)
+		assert.Equal(t, param.Version.Local, oldLocalVersion+4)
+		assert.True(t, proto.Equal(param.ReplicateConfiguration, forcePromoteCfg))
+		assert.Equal(t, m.ReplicateRole(), replicateutil.RolePrimary)
 	})
 }
 
