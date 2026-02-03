@@ -1,0 +1,78 @@
+# milvus-minhash
+
+Milvus MinHash C++ binding for Python testing.
+
+This module provides exact Python bindings to Milvus's MinHash implementation, enabling precise verification of MinHash signatures in tests.
+
+## Requirements
+
+- Python >= 3.8
+- pybind11
+- xxhash library (libxxhash)
+- OpenSSL (libcrypto)
+
+### macOS
+
+```bash
+brew install xxhash openssl
+```
+
+### Ubuntu/Debian
+
+```bash
+apt-get install libxxhash-dev libssl-dev
+```
+
+## Installation
+
+```bash
+cd tests/python_client/minhash_binding
+pip install -e .
+```
+
+Or add to requirements.txt:
+```
+-e ./minhash_binding
+```
+
+## Usage
+
+```python
+import milvus_minhash as mh
+
+# High-level API
+signature = mh.compute_minhash(
+    text="hello world",
+    num_hashes=16,
+    shingle_size=3,
+    seed=1234,
+    use_char_level=True,   # False for word-level
+    use_sha1=False         # True for SHA1 hash
+)
+
+# Low-level API
+perm_a, perm_b = mh.init_permutations(num_hashes=16, seed=1234)
+base_hashes = mh.hash_shingles_char("hello", shingle_size=3)
+signature = mh.compute_signature(base_hashes, perm_a, perm_b)
+```
+
+## API Reference
+
+### Constants
+
+- `mh.MERSENNE_PRIME` - 2^61 - 1
+- `mh.MAX_HASH_MASK` - 2^32 - 1
+
+### Functions
+
+- `init_permutations(num_hashes, seed)` - Generate permutation parameters
+- `hash_shingles_char(text, shingle_size, use_sha1=False)` - Hash char-level shingles
+- `hash_shingles_word(text, shingle_size, use_sha1=False)` - Hash word-level shingles
+- `compute_signature(base_hashes, perm_a, perm_b)` - Compute MinHash signature
+- `compute_minhash(text, num_hashes, shingle_size, seed, use_char_level=True, use_sha1=False)` - High-level API
+
+## Compatibility
+
+This binding is synchronized with Milvus MinHash implementation:
+- Milvus commit: `eb63a363bd` (PR #45322)
+- Merged: 2026-01-14
