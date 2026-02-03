@@ -243,3 +243,4 @@ func listAllObjectsWithPrefixAtBucket(ctx context.Context, objectStorage ObjectS
 	}
 	return dirs, mods, nil
 }
+
