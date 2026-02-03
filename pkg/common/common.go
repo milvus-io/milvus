@@ -162,6 +162,8 @@ const (
 
 	// JSONStatsPath storage path const for json stats
 	JSONStatsPath = "json_stats"
+
+	DefaultResourceGroupName = "__default_resource_group"
 )
 
 const (
