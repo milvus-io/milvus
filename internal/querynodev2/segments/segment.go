@@ -1355,20 +1355,6 @@ func (s *LocalSegment) CreateTextIndex(ctx context.Context, fieldID int64) error
 	return nil
 }
 
-func (s *LocalSegment) FinishLoad() error {
-	err := s.csegment.FinishLoad()
-	if err != nil {
-		return err
-	}
-	// TODO: disable logical resource handling for now
-	// usage := s.ResourceUsageEstimate()
-	// s.manager.AddLogicalResource(usage)
-	binlogSize := calculateSegmentMemorySize(s.LoadInfo())
-	s.manager.AddLoadedBinlogSize(binlogSize)
-	s.binlogSize.Store(binlogSize)
-	return nil
-}
-
 func (s *LocalSegment) Load(ctx context.Context) error {
 	return s.csegment.Load(ctx)
 }
