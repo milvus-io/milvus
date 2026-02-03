@@ -1491,3 +1491,205 @@ func TestForcePromoteMultiplePChannels(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
 }
+
+func TestSupplementIncompleteBroadcasts(t *testing.T) {
+	resource.InitForTest()
+
+	t.Run("no_pending_messages", func(t *testing.T) {
+		broadcast.ResetBroadcaster()
+		snmanager.ResetStreamingNodeManager()
+
+		b := mock_balancer.NewMockBalancer(t)
+		b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+		b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+			<-ctx.Done()
+			return ctx.Err()
+		}).Maybe()
+		b.EXPECT().Close().Return().Maybe()
+		b.EXPECT().UpdateReplicateConfiguration(mock.Anything, mock.Anything).Return(nil).Maybe()
+		balance.Register(b)
+
+		mb := mock_broadcaster.NewMockBroadcaster(t)
+		mb.EXPECT().GetPendingBroadcastMessages().Return(nil)
+		mb.EXPECT().Close().Return().Maybe()
+		broadcast.Register(mb)
+
+		mw := mock_streaming.NewMockWALAccesser(t)
+		mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan").Maybe()
+		streaming.SetWALForTest(mw)
+
+		as := &assignmentServiceImpl{}
+		err := as.supplementIncompleteBroadcasts(context.Background())
+		assert.NoError(t, err)
+	})
+
+	t.Run("with_pending_messages_success", func(t *testing.T) {
+		broadcast.ResetBroadcaster()
+		snmanager.ResetStreamingNodeManager()
+
+		b := mock_balancer.NewMockBalancer(t)
+		b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+		b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+			<-ctx.Done()
+			return ctx.Err()
+		}).Maybe()
+		b.EXPECT().Close().Return().Maybe()
+		balance.Register(b)
+
+		// Create a pending message
+		pendingMsg := message.NewCreateDatabaseMessageBuilderV2().
+			WithHeader(&message.CreateDatabaseMessageHeader{}).
+			WithBody(&message.CreateDatabaseMessageBody{}).
+			WithVChannel("v1").
+			MustBuildMutable()
+
+		mb := mock_broadcaster.NewMockBroadcaster(t)
+		mb.EXPECT().GetPendingBroadcastMessages().Return([]message.MutableMessage{pendingMsg})
+		mb.EXPECT().Close().Return().Maybe()
+		broadcast.Register(mb)
+
+		mw := mock_streaming.NewMockWALAccesser(t)
+		mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan").Maybe()
+		mw.EXPECT().AppendMessages(mock.Anything, mock.Anything).Return(streaming.AppendResponses{
+			Responses: []streaming.AppendResponse{
+				{
+					AppendResult: &types.AppendResult{TimeTick: 100},
+				},
+			},
+		}).Maybe()
+		streaming.SetWALForTest(mw)
+
+		as := &assignmentServiceImpl{}
+		err := as.supplementIncompleteBroadcasts(context.Background())
+		assert.NoError(t, err)
+	})
+
+	t.Run("with_pending_messages_failure", func(t *testing.T) {
+		broadcast.ResetBroadcaster()
+		snmanager.ResetStreamingNodeManager()
+
+		b := mock_balancer.NewMockBalancer(t)
+		b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+		b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+			<-ctx.Done()
+			return ctx.Err()
+		}).Maybe()
+		b.EXPECT().Close().Return().Maybe()
+		balance.Register(b)
+
+		// Create pending messages
+		pendingMsg := message.NewCreateDatabaseMessageBuilderV2().
+			WithHeader(&message.CreateDatabaseMessageHeader{}).
+			WithBody(&message.CreateDatabaseMessageBody{}).
+			WithVChannel("v1").
+			MustBuildMutable()
+
+		mb := mock_broadcaster.NewMockBroadcaster(t)
+		mb.EXPECT().GetPendingBroadcastMessages().Return([]message.MutableMessage{pendingMsg})
+		mb.EXPECT().Close().Return().Maybe()
+		broadcast.Register(mb)
+
+		appendErr := errors.New("append failed")
+		mw := mock_streaming.NewMockWALAccesser(t)
+		mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan").Maybe()
+		mw.EXPECT().AppendMessages(mock.Anything, mock.Anything).Return(streaming.AppendResponses{
+			Responses: []streaming.AppendResponse{
+				{
+					Error: appendErr,
+				},
+			},
+		}).Maybe()
+		streaming.SetWALForTest(mw)
+
+		as := &assignmentServiceImpl{}
+		err := as.supplementIncompleteBroadcasts(context.Background())
+		assert.Error(t, err)
+	})
+}
+
+func TestForcePromoteUpdateConfigError(t *testing.T) {
+	resource.InitForTest()
+
+	// Set up WAL mock with Broadcast that succeeds
+	mockBroadcastService := mock_streaming.NewMockBroadcast(t)
+	mockBroadcastService.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{
+		BroadcastID: 1,
+		AppendResults: map[string]*types.AppendResult{
+			"by-dev-1": {TimeTick: 100},
+		},
+	}, nil)
+
+	mw := mock_streaming.NewMockWALAccesser(t)
+	mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan").Maybe()
+	mw.EXPECT().Broadcast().Return(mockBroadcastService).Maybe()
+	streaming.SetWALForTest(mw)
+
+	broadcast.ResetBroadcaster()
+	snmanager.ResetStreamingNodeManager()
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}).Maybe()
+	b.EXPECT().Close().Return().Maybe()
+
+	currentReplicateConfig := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "primary", Pchannels: []string{"primary-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://primary:19530", Token: "primary"}},
+			{ClusterId: "by-dev", Pchannels: []string{"by-dev-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://test:19530", Token: "by-dev"}},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
+			{SourceClusterId: "primary", TargetClusterId: "by-dev"},
+		},
+	}
+	b.EXPECT().GetLatestChannelAssignment().Return(&balancer.WatchChannelAssignmentsCallbackParam{
+		PChannelView: &channel.PChannelView{
+			Channels: map[channel.ChannelID]*channel.PChannelMeta{
+				{Name: "by-dev-1"}: channel.NewPChannelMeta("by-dev-1", types.AccessModeRW),
+			},
+		},
+		ReplicateConfiguration: currentReplicateConfig,
+	}, nil).Maybe()
+	// UpdateReplicateConfiguration fails
+	b.EXPECT().UpdateReplicateConfiguration(mock.Anything, mock.Anything).Return(errors.New("update config failed"))
+	balance.Register(b)
+
+	mb := mock_broadcaster.NewMockBroadcaster(t)
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, rk ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+		return nil, broadcaster.ErrNotPrimary
+	}).Maybe()
+	mb.EXPECT().Close().Return().Maybe()
+	broadcast.Register(mb)
+
+	as := NewAssignmentService()
+	forcePromoteCfg := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "by-dev", Pchannels: []string{"by-dev-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://test:19530", Token: "by-dev"}},
+		},
+	}
+	_, err := as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{
+		Configuration: forcePromoteCfg,
+		ForcePromote:  true,
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "update config failed")
+}
+
+func TestSupplementIncompleteBroadcastsGetBroadcasterError(t *testing.T) {
+	// Covers supplementIncompleteBroadcasts broadcast.GetWithContext error (lines 379-381)
+	resource.InitForTest()
+
+	broadcast.ResetBroadcaster()
+	snmanager.ResetStreamingNodeManager()
+
+	mw := mock_streaming.NewMockWALAccesser(t)
+	mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan").Maybe()
+	streaming.SetWALForTest(mw)
+
+	as := &assignmentServiceImpl{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := as.supplementIncompleteBroadcasts(ctx)
+	assert.Error(t, err)
+}
