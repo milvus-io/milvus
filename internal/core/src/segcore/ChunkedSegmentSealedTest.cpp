@@ -625,10 +625,10 @@ TEST_P(TestChunkSegment, TestCompareExpr) {
         create_index_info, file_manager_ctx);
     std::vector<int64_t> data(test_data_count * chunk_num);
     for (int i = 0; i < chunk_num; i++) {
-        auto pw = segment->chunk_data<int64_t>(nullptr, fid, i);
+        auto pw = segment->chunk_view<int64_t>(nullptr, fid, i);
         auto d = pw.get();
-        std::copy(d.data(),
-                  d.data() + test_data_count,
+        std::copy(d->Data(),
+                  d->Data() + test_data_count,
                   data.begin() + i * test_data_count);
     }
 

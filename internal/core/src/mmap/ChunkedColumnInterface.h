@@ -70,45 +70,23 @@ class ChunkedColumnInterface {
     virtual int64_t
     chunk_row_nums(int64_t chunk_id) const = 0;
 
-    virtual PinWrapper<SpanBase>
-    Span(milvus::OpContext* op_ctx, int64_t chunk_id) const = 0;
+    virtual PinWrapper<AnyDataView>
+    ChunkDataView(milvus::OpContext* op_ctx, int64_t chunk_id) const = 0;
+
+    virtual PinWrapper<AnyDataView>
+    ChunkDataViewByRange(milvus::OpContext* op_ctx,
+                         int64_t chunk_id,
+                         int64_t start_offset,
+                         int64_t length) const = 0;
+
+    virtual PinWrapper<AnyDataView>
+    ChunkDataViewByOffsets(milvus::OpContext* op_ctx,
+                           int64_t chunk_id,
+                           const FixedVector<int32_t>& offsets) const = 0;
 
     virtual void
     PrefetchChunks(milvus::OpContext* op_ctx,
                    const std::vector<int64_t>& chunk_ids) const = 0;
-
-    virtual PinWrapper<
-        std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    StringViews(milvus::OpContext* op_ctx,
-                int64_t chunk_id,
-                std::optional<std::pair<int64_t, int64_t>> offset_len =
-                    std::nullopt) const = 0;
-
-    virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-    ArrayViews(milvus::OpContext* op_ctx,
-               int64_t chunk_id,
-               std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
-
-    virtual PinWrapper<
-        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
-    VectorArrayViews(
-        milvus::OpContext* op_ctx,
-        int64_t chunk_id,
-        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
-
-    virtual PinWrapper<const size_t*>
-    VectorArrayOffsets(milvus::OpContext* op_ctx, int64_t chunk_id) const = 0;
-
-    virtual PinWrapper<
-        std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    StringViewsByOffsets(milvus::OpContext* op_ctx,
-                         int64_t chunk_id,
-                         const FixedVector<int32_t>& offsets) const = 0;
-
-    virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-    ArrayViewsByOffsets(milvus::OpContext* op_ctx,
-                        int64_t chunk_id,
-                        const FixedVector<int32_t>& offsets) const = 0;
 
     // Convert a global offset to (chunk_id, offset_in_chunk) pair
     virtual std::pair<size_t, size_t>

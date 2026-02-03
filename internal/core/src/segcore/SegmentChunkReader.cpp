@@ -48,10 +48,10 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
     }
     // pw is captured by value, each time we need to access a new chunk, we need to
     // pin a new Chunk.
-    auto pw = segment_->chunk_data<T>(op_ctx_, field_id, current_chunk_id);
+    auto pw = segment_->chunk_view<T>(op_ctx_, field_id, current_chunk_id);
     auto chunk_info = pw.get();
-    auto chunk_data = chunk_info.data();
-    auto chunk_valid_data = chunk_info.valid_data();
+    auto chunk_data = chunk_info->Data();
+    auto chunk_valid_data = chunk_info->ValidData();
     auto current_chunk_size = segment_->chunk_size(field_id, current_chunk_id);
     return [=,
             pw = std::move(pw),
@@ -61,9 +61,9 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
             current_chunk_id++;
             current_chunk_pos = 0;
             // the old chunk will be unpinned, pw will now pin the new chunk.
-            pw = segment_->chunk_data<T>(op_ctx_, field_id, current_chunk_id);
-            chunk_data = pw.get().data();
-            chunk_valid_data = pw.get().valid_data();
+            pw = segment_->chunk_view<T>(op_ctx_, field_id, current_chunk_id);
+            chunk_data = pw.get()->Data();
+            chunk_valid_data = pw.get()->ValidData();
             current_chunk_size =
                 segment_->chunk_size(field_id, current_chunk_id);
         }
@@ -109,11 +109,11 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
         !storage::MmapManager::GetInstance()
              .GetMmapConfig()
              .growing_enable_mmap) {
-        auto pw = segment_->chunk_data<std::string>(
+        auto pw = segment_->chunk_view<std::string_view>(
             op_ctx_, field_id, current_chunk_id);
         auto chunk_info = pw.get();
-        auto chunk_data = chunk_info.data();
-        auto chunk_valid_data = chunk_info.valid_data();
+        auto chunk_data = chunk_info->Data();
+        auto chunk_valid_data = chunk_info->ValidData();
         auto current_chunk_size =
             segment_->chunk_size(field_id, current_chunk_id);
         return [pw = std::move(pw),
@@ -128,10 +128,10 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
             if (current_chunk_pos >= current_chunk_size) {
                 current_chunk_id++;
                 current_chunk_pos = 0;
-                pw = segment_->chunk_data<std::string>(
+                pw = segment_->chunk_view<std::string_view>(
                     op_ctx_, field_id, current_chunk_id);
-                chunk_data = pw.get().data();
-                chunk_valid_data = pw.get().valid_data();
+                chunk_data = pw.get()->Data();
+                chunk_valid_data = pw.get()->ValidData();
                 current_chunk_size =
                     segment_->chunk_size(field_id, current_chunk_id);
             }
@@ -139,7 +139,8 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
                 current_chunk_pos++;
                 return std::nullopt;
             }
-            return chunk_data[current_chunk_pos++];
+            // Convert string_view to string for the variant
+            return std::string(chunk_data[current_chunk_pos++]);
         };
     } else {
         auto pw = segment_->chunk_view<std::string_view>(
@@ -158,14 +159,13 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
                 current_chunk_size =
                     segment_->chunk_size(field_id, current_chunk_id);
             }
-            auto& chunk_data = pw.get().first;
-            auto& chunk_valid_data = pw.get().second;
-            if (current_chunk_pos < chunk_valid_data.size() &&
-                !chunk_valid_data[current_chunk_pos]) {
+            auto data_view = pw.get();
+            auto chunk_valid_data = data_view->ValidData();
+            if (chunk_valid_data && !chunk_valid_data[current_chunk_pos]) {
                 current_chunk_pos++;
                 return std::nullopt;
             }
-            return std::string(chunk_data[current_chunk_pos++]);
+            return std::string((*data_view)[current_chunk_pos++]);
         };
     }
 }
@@ -233,11 +233,11 @@ SegmentChunkReader::GetChunkDataAccessor(
             };
         }
     }
-    auto pw = segment_->chunk_data<T>(op_ctx_, field_id, chunk_id);
+    auto pw = segment_->chunk_view<T>(op_ctx_, field_id, chunk_id);
     return [pw = std::move(pw)](int i) mutable -> const data_access_type {
         auto chunk_info = pw.get();
-        auto chunk_data = chunk_info.data();
-        auto chunk_valid_data = chunk_info.valid_data();
+        auto chunk_data = chunk_info->Data();
+        auto chunk_valid_data = chunk_info->ValidData();
         if (chunk_valid_data && !chunk_valid_data[i]) {
             return std::nullopt;
         }
@@ -272,25 +272,25 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
              .GetMmapConfig()
              .growing_enable_mmap) {
         auto pw =
-            segment_->chunk_data<std::string>(op_ctx_, field_id, chunk_id);
+            segment_->chunk_view<std::string_view>(op_ctx_, field_id, chunk_id);
         return [pw = std::move(pw)](int i) mutable -> const data_access_type {
-            auto chunk_data = pw.get().data();
-            auto chunk_valid_data = pw.get().valid_data();
+            auto chunk_data = pw.get()->Data();
+            auto chunk_valid_data = pw.get()->ValidData();
             if (chunk_valid_data && !chunk_valid_data[i]) {
                 return std::nullopt;
             }
-            return chunk_data[i];
+            return std::string(chunk_data[i]);
         };
     } else {
         auto pw =
             segment_->chunk_view<std::string_view>(op_ctx_, field_id, chunk_id);
         return [pw = std::move(pw)](int i) mutable -> const data_access_type {
-            auto chunk_data = pw.get().first;
-            auto chunk_valid_data = pw.get().second;
-            if (i < chunk_valid_data.size() && !chunk_valid_data[i]) {
+            auto data_view = pw.get();
+            auto chunk_valid_data = data_view->ValidData();
+            if (chunk_valid_data && !chunk_valid_data[i]) {
                 return std::nullopt;
             }
-            return std::string(chunk_data[i]);
+            return std::string((*data_view)[i]);
         };
     }
 }
