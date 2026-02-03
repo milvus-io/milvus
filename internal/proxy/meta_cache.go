@@ -697,7 +697,7 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionNa
 		values := make([]*partitionInfo, 0)
 		versions := make([]uint64, 0)
 		var ret *partitionInfo
-		for i, _ := range resp.PartitionNames {
+		for i := range resp.PartitionNames {
 			keys = append(keys, buildPartitionSfKey(database, collectionName, resp.PartitionNames[i]))
 			values = append(values, &partitionInfo{
 				name:                resp.PartitionNames[i],
