@@ -1,20 +1,24 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include <gtest/gtest.h>
 #include <cstdint>
 #include <memory>
 #include <regex>
 #include <vector>
-#include <chrono>
 
 #include "common/Types.h"
 #include "expr/ITypeExpr.h"
@@ -38,43 +42,15 @@ TEST(Expr, TestArrayRange) {
                            std::string,
                            std::function<bool(milvus::Array & array)>>>
         testcases = {
-            {R"(binary_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              lower_inclusive: false,
-              upper_inclusive: false,
-              lower_value: <
-                int64_val: 1
-              >
-              upper_value: <
-                int64_val: 10000
-              >
-        >)",
+            // binary_range_expr: 1 < long_array[0] < 10000
+            {"1 < long_array[0] < 10000",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return 1 < val && val < 10000;
              }},
-            {R"(binary_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"1024"
-                element_type:Int64
-              >
-              lower_inclusive: false,
-              upper_inclusive: false,
-              lower_value: <
-                int64_val: 1
-              >
-              upper_value: <
-                int64_val: 10000
-              >
-        >)",
+            // binary_range_expr: 1 < long_array[1024] < 10000
+            {"1 < long_array[1024] < 10000",
              "long",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -83,43 +59,15 @@ TEST(Expr, TestArrayRange) {
                  auto val = array.get_data<int64_t>(1024);
                  return 1 < val && val < 10000;
              }},
-            {R"(binary_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              lower_inclusive: true,
-              upper_inclusive: false,
-              lower_value: <
-                int64_val: 1
-              >
-              upper_value: <
-                int64_val: 10000
-              >
-        >)",
+            // binary_range_expr: 1 <= long_array[0] < 10000
+            {"1 <= long_array[0] < 10000",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return 1 <= val && val < 10000;
              }},
-            {R"(binary_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"1024"
-                element_type:Int64
-              >
-              lower_inclusive: true,
-              upper_inclusive: false,
-              lower_value: <
-                int64_val: 1
-              >
-              upper_value: <
-                int64_val: 10000
-              >
-        >)",
+            // binary_range_expr: 1 <= long_array[1024] < 10000
+            {"1 <= long_array[1024] < 10000",
              "long",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -128,43 +76,15 @@ TEST(Expr, TestArrayRange) {
                  auto val = array.get_data<int64_t>(1024);
                  return 1 <= val && val < 10000;
              }},
-            {R"(binary_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              lower_inclusive: false,
-              upper_inclusive: true,
-              lower_value: <
-                int64_val: 1
-              >
-              upper_value: <
-                int64_val: 10000
-              >
-        >)",
+            // binary_range_expr: 1 < long_array[0] <= 10000
+            {"1 < long_array[0] <= 10000",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return 1 < val && val <= 10000;
              }},
-            {R"(binary_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"1024"
-                element_type:Int64
-              >
-              lower_inclusive: false,
-              upper_inclusive: true,
-              lower_value: <
-                int64_val: 1
-              >
-              upper_value: <
-                int64_val: 10000
-              >
-        >)",
+            // binary_range_expr: 1 < long_array[1024] <= 10000
+            {"1 < long_array[1024] <= 10000",
              "long",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -173,43 +93,15 @@ TEST(Expr, TestArrayRange) {
                  auto val = array.get_data<int64_t>(1024);
                  return 1 < val && val <= 10000;
              }},
-            {R"(binary_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              lower_inclusive: true,
-              upper_inclusive: true,
-              lower_value: <
-                int64_val: 1
-              >
-              upper_value: <
-                int64_val: 10000
-              >
-        >)",
+            // binary_range_expr: 1 <= long_array[0] <= 10000
+            {"1 <= long_array[0] <= 10000",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return 1 <= val && val <= 10000;
              }},
-            {R"(binary_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"1024"
-                element_type:Int64
-              >
-              lower_inclusive: true,
-              upper_inclusive: true,
-              lower_value: <
-                int64_val: 1
-              >
-              upper_value: <
-                int64_val: 10000
-              >
-        >)",
+            // binary_range_expr: 1 <= long_array[1024] <= 10000
+            {"1 <= long_array[1024] <= 10000",
              "long",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -218,213 +110,85 @@ TEST(Expr, TestArrayRange) {
                  auto val = array.get_data<int64_t>(1024);
                  return 1 <= val && val <= 10000;
              }},
-            {R"(binary_range_expr: <
-              column_info: <
-                field_id: 104
-                data_type: Array
-                nested_path:"0"
-                element_type:VarChar
-              >
-              lower_inclusive: true,
-              upper_inclusive: true,
-              lower_value: <
-                string_val: "aaa"
-              >
-              upper_value: <
-                string_val: "zzz"
-              >
-        >)",
+            // binary_range_expr: "aaa" <= string_array[0] <= "zzz"
+            {R"("aaa" <= string_array[0] <= "zzz")",
              "string",
              [](milvus::Array& array) {
                  auto val = array.get_data<std::string_view>(0);
                  return "aaa" <= val && val <= "zzz";
              }},
-            {R"(binary_range_expr: <
-              column_info: <
-                field_id: 105
-                data_type: Array
-                nested_path:"0"
-                element_type:Float
-              >
-              lower_inclusive: true,
-              upper_inclusive: true,
-              lower_value: <
-                float_val: 1.1
-              >
-              upper_value: <
-                float_val: 2048.12
-              >
-        >)",
+            // binary_range_expr: 1.1 <= double_array[0] <= 2048.12
+            {"1.1 <= double_array[0] <= 2048.12",
              "float",
              [](milvus::Array& array) {
                  auto val = array.get_data<double>(0);
                  return 1.1 <= val && val <= 2048.12;
              }},
-            {R"(unary_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              op: GreaterEqual,
-              value: <
-                int64_val: 10000
-              >
-        >)",
+            // unary_range_expr: long_array[0] >= 10000
+            {"long_array[0] >= 10000",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val >= 10000;
              }},
-            {R"(unary_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              op: GreaterThan,
-              value: <
-                int64_val: 2000
-              >
-        >)",
+            // unary_range_expr: long_array[0] > 2000
+            {"long_array[0] > 2000",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val > 2000;
              }},
-            {R"(unary_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              op: LessEqual,
-              value: <
-                int64_val: 2000
-              >
-        >)",
+            // unary_range_expr: long_array[0] <= 2000
+            {"long_array[0] <= 2000",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val <= 2000;
              }},
-            {R"(unary_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              op: LessThan,
-              value: <
-                int64_val: 2000
-              >
-        >)",
+            // unary_range_expr: long_array[0] < 2000
+            {"long_array[0] < 2000",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val < 2000;
              }},
-            {R"(unary_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              op: Equal,
-              value: <
-                int64_val: 2000
-              >
-        >)",
+            // unary_range_expr: long_array[0] == 2000
+            {"long_array[0] == 2000",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val == 2000;
              }},
-            {R"(unary_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              op: NotEqual,
-              value: <
-                int64_val: 2000
-              >
-        >)",
+            // unary_range_expr: long_array[0] != 2000
+            {"long_array[0] != 2000",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val != 2000;
              }},
-            {R"(unary_range_expr: <
-              column_info: <
-                field_id: 103
-                data_type: Array
-                nested_path:"0"
-                element_type:Bool
-              >
-              op: Equal,
-              value: <
-                bool_val: false
-              >
-        >)",
+            // unary_range_expr: bool_array[0] == false
+            {"bool_array[0] == false",
              "bool",
              [](milvus::Array& array) {
                  auto val = array.get_data<bool>(0);
                  return !val;
              }},
-            {R"(unary_range_expr: <
-              column_info: <
-                field_id: 104
-                data_type: Array
-                nested_path:"0"
-                element_type:VarChar
-              >
-              op: Equal,
-              value: <
-                string_val: "abc"
-              >
-        >)",
+            // unary_range_expr: string_array[0] == "abc"
+            {R"(string_array[0] == "abc")",
              "string",
              [](milvus::Array& array) {
                  auto val = array.get_data<std::string_view>(0);
                  return val == "abc";
              }},
-            {R"(unary_range_expr: <
-              column_info: <
-                field_id: 105
-                data_type: Array
-                nested_path:"0"
-                element_type:Float
-              >
-              op: Equal,
-              value: <
-                float_val: 2.2
-              >
-        >)",
+            // unary_range_expr: double_array[0] == 2.2
+            {"double_array[0] == 2.2",
              "float",
              [](milvus::Array& array) {
                  auto val = array.get_data<double>(0);
                  return val == 2.2;
              }},
-            {R"(unary_range_expr: <
-              column_info: <
-                field_id: 105
-                data_type: Array
-                nested_path:"1024"
-                element_type:Float
-              >
-              op: Equal,
-              value: <
-                float_val: 2.2
-              >
-        >)",
+            // unary_range_expr: double_array[1024] == 2.2
+            {"double_array[1024] == 2.2",
              "float",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -433,18 +197,8 @@ TEST(Expr, TestArrayRange) {
                  auto val = array.get_data<double>(1024);
                  return val == 2.2;
              }},
-            {R"(unary_range_expr: <
-              column_info: <
-                field_id: 105
-                data_type: Array
-                nested_path:"1024"
-                element_type:Float
-              >
-              op: NotEqual,
-              value: <
-                float_val: 2.2
-              >
-        >)",
+            // unary_range_expr: double_array[1024] != 2.2
+            {"double_array[1024] != 2.2",
              "float",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -453,18 +207,8 @@ TEST(Expr, TestArrayRange) {
                  auto val = array.get_data<double>(1024);
                  return val != 2.2;
              }},
-            {R"(unary_range_expr: <
-              column_info: <
-                field_id: 105
-                data_type: Array
-                nested_path:"1024"
-                element_type:Float
-              >
-              op: GreaterEqual,
-              value: <
-                float_val: 2.2
-              >
-        >)",
+            // unary_range_expr: double_array[1024] >= 2.2
+            {"double_array[1024] >= 2.2",
              "float",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -473,18 +217,8 @@ TEST(Expr, TestArrayRange) {
                  auto val = array.get_data<double>(1024);
                  return val >= 2.2;
              }},
-            {R"(unary_range_expr: <
-              column_info: <
-                field_id: 105
-                data_type: Array
-                nested_path:"1024"
-                element_type:Float
-              >
-              op: GreaterThan,
-              value: <
-                float_val: 2.2
-              >
-        >)",
+            // unary_range_expr: double_array[1024] > 2.2
+            {"double_array[1024] > 2.2",
              "float",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -493,18 +227,8 @@ TEST(Expr, TestArrayRange) {
                  auto val = array.get_data<double>(1024);
                  return val > 2.2;
              }},
-            {R"(unary_range_expr: <
-              column_info: <
-                field_id: 105
-                data_type: Array
-                nested_path:"1024"
-                element_type:Float
-              >
-              op: LessEqual,
-              value: <
-                float_val: 2.2
-              >
-        >)",
+            // unary_range_expr: double_array[1024] <= 2.2
+            {"double_array[1024] <= 2.2",
              "float",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -513,18 +237,8 @@ TEST(Expr, TestArrayRange) {
                  auto val = array.get_data<double>(1024);
                  return val <= 2.2;
              }},
-            {R"(unary_range_expr: <
-              column_info: <
-                field_id: 105
-                data_type: Array
-                nested_path:"1024"
-                element_type:Float
-              >
-              op: LessThan,
-              value: <
-                float_val: 2.2
-              >
-        >)",
+            // unary_range_expr: double_array[1024] < 2.2
+            {"double_array[1024] < 2.2",
              "float",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -535,19 +249,6 @@ TEST(Expr, TestArrayRange) {
              }},
 
         };
-    std::string raw_plan_tmp = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      @@@@
-                                    >
-                                    query_info: <
-                                      topk: 10
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -599,11 +300,10 @@ TEST(Expr, TestArrayRange) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    for (auto [clause, array_type, ref_func] : testcases) {
-        auto loc = raw_plan_tmp.find("@@@@");
-        auto raw_plan = raw_plan_tmp;
-        raw_plan.replace(loc, 4, clause);
-        auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
+    ScopedSchemaHandle schema_handle(*schema);
+    for (auto [expr, array_type, ref_func] : testcases) {
+        auto plan_str = schema_handle.ParseSearch(
+            expr, "fakevec", 10, "L2", R"({"nprobe": 10})", 3);
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
@@ -647,19 +347,8 @@ TEST(Expr, TestArrayEqual) {
     std::vector<
         std::tuple<std::string, std::function<bool(std::vector<int64_t>)>>>
         testcases = {
-            {R"(unary_range_expr: <
-                column_info: <
-                    field_id: 102
-                    data_type: Array
-                    element_type:Int64
-                  >
-                op:Equal
-                value:<
-                    array_val:<array:<int64_val:1 > array:<int64_val:2 > array:<int64_val:3 >
-                        same_type:true
-                        element_type:Int64
-                    >>
-        >)",
+            // unary_range_expr: long_array == [1, 2, 3]
+            {"long_array == [1, 2, 3]",
              [](std::vector<int64_t> v) {
                  if (v.size() != 3) {
                      return false;
@@ -671,18 +360,8 @@ TEST(Expr, TestArrayEqual) {
                  }
                  return true;
              }},
-            {R"(unary_range_expr: <
-                column_info: <
-                  field_id: 102
-                  data_type: Array
-                  element_type:Int64
-                >
-                op:NotEqual
-                value:<array_val:<array:<int64_val:1 > array:<int64_val:2 > array:<int64_val:3 >
-                    same_type:true
-                    element_type:Int64
-                >>
-        >)",
+            // unary_range_expr: long_array != [1, 2, 3]
+            {"long_array != [1, 2, 3]",
              [](std::vector<int64_t> v) {
                  if (v.size() != 3) {
                      return true;
@@ -695,20 +374,6 @@ TEST(Expr, TestArrayEqual) {
                  return false;
              }},
         };
-
-    std::string raw_plan_tmp = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      @@@@
-                                    >
-                                    query_info: <
-                                      topk: 10
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -737,11 +402,10 @@ TEST(Expr, TestArrayEqual) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    for (auto [clause, ref_func] : testcases) {
-        auto loc = raw_plan_tmp.find("@@@@");
-        auto raw_plan = raw_plan_tmp;
-        raw_plan.replace(loc, 4, clause);
-        auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
+    ScopedSchemaHandle schema_handle(*schema);
+    for (auto [expr, ref_func] : testcases) {
+        auto plan_str = schema_handle.ParseSearch(
+            expr, "fakevec", 10, "L2", R"({"nprobe": 10})", 3);
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
@@ -788,31 +452,9 @@ TEST(Expr, TestArrayEqual) {
 TEST(Expr, TestArrayNullExpr) {
     std::vector<std::tuple<std::string, std::function<bool(bool)>>> testcases =
         {
-            {R"(null_expr: <
-                column_info: <
-                    field_id: 102
-                    data_type: Array
-                    element_type:Int64
-                    nullable: true
-                  >
-                op:IsNull
-        >)",
-             [](bool v) { return !v; }},
+            // null_expr: long_array is null
+            {"long_array is null", [](bool v) { return !v; }},
         };
-
-    std::string raw_plan_tmp = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      @@@@
-                                    >
-                                    query_info: <
-                                      topk: 10
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -846,11 +488,10 @@ TEST(Expr, TestArrayNullExpr) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    for (auto [clause, ref_func] : testcases) {
-        auto loc = raw_plan_tmp.find("@@@@");
-        auto raw_plan = raw_plan_tmp;
-        raw_plan.replace(loc, 4, clause);
-        auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
+    ScopedSchemaHandle schema_handle(*schema);
+    for (auto [expr, ref_func] : testcases) {
+        auto plan_str = schema_handle.ParseSearch(
+            expr, "fakevec", 10, "L2", R"({"nprobe": 10})", 3);
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
@@ -887,82 +528,29 @@ TEST(Expr, TestArrayNullExpr) {
 }
 
 TEST(Expr, PraseArrayContainsExpr) {
-    std::vector<const char*> raw_plans{
-        R"(vector_anns:<
-            field_id:100
-            predicates:<
-                json_contains_expr:<
-                    column_info:<
-                        field_id:101
-                        data_type:Array
-                        element_type:Int64
-                    >
-                    elements:<int64_val:1 >
-                    op:Contains
-                    elements_same_type:true
-                >
-            >
-            query_info:<
-                topk: 10
-                round_decimal: 3
-                metric_type: "L2"
-                search_params: "{\"nprobe\": 10}"
-            > placeholder_tag:"$0"
-        >)",
-        R"(vector_anns:<
-            field_id:100
-            predicates:<
-                json_contains_expr:<
-                    column_info:<
-                        field_id:101
-                        data_type:Array
-                        element_type:Int64
-                    >
-                    elements:<int64_val:1 > elements:<int64_val:2 > elements:<int64_val:3 >
-                    op:ContainsAll
-                    elements_same_type:true
-                >
-            >
-            query_info:<
-                topk: 10
-                round_decimal: 3
-                metric_type: "L2"
-                search_params: "{\"nprobe\": 10}"
-            > placeholder_tag:"$0"
-        >)",
-        R"(vector_anns:<
-            field_id:100
-            predicates:<
-                json_contains_expr:<
-                    column_info:<
-                        field_id:101
-                        data_type:Array
-                        element_type:Int64
-                    >
-                    elements:<int64_val:1 > elements:<int64_val:2 > elements:<int64_val:3 >
-                    op:ContainsAny
-                    elements_same_type:true
-                >
-            >
-            query_info:<
-                topk: 10
-                round_decimal: 3
-                metric_type: "L2"
-                search_params: "{\"nprobe\": 10}"
-            > placeholder_tag:"$0"
-        >)",
+    // Test expressions for array_contains operations
+    std::vector<const char*> exprs{
+        // json_contains_expr: array_contains(array, 1)
+        "array_contains(array, 1)",
+        // json_contains_expr: array_contains_all(array, [1, 2, 3])
+        "array_contains_all(array, [1, 2, 3])",
+        // json_contains_expr: array_contains_any(array, [1, 2, 3])
+        "array_contains_any(array, [1, 2, 3])",
     };
 
-    for (auto& raw_plan : raw_plans) {
-        auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-        auto schema = std::make_shared<Schema>();
-        schema->AddDebugField(
-            "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
-        schema->AddField(FieldName("array"),
-                         FieldId(101),
-                         DataType::ARRAY,
-                         DataType::INT64,
-                         false);
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->AddField(FieldName("array"),
+                     FieldId(101),
+                     DataType::ARRAY,
+                     DataType::INT64,
+                     false);
+    ScopedSchemaHandle schema_handle(*schema);
+
+    for (auto& expr : exprs) {
+        auto plan_str = schema_handle.ParseSearch(
+            expr, "fakevec", 10, "L2", R"({"nprobe": 10})", 3);
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     }
@@ -1057,7 +645,6 @@ TEST(Expr, TestArrayContains) {
             gen_val.set_bool_val(val);
             values.push_back(gen_val);
         }
-        auto start = std::chrono::steady_clock::now();
         auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
             expr::ColumnInfo(bool_array_fid, DataType::ARRAY, DataType::BOOL),
             proto::plan::JSONContainsExpr_JSONOp_Contains,
@@ -1068,11 +655,6 @@ TEST(Expr, TestArrayContains) {
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         final =
             ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
-        std::cout << "cost"
-                  << std::chrono::duration_cast<std::chrono::microseconds>(
-                         std::chrono::steady_clock::now() - start)
-                         .count()
-                  << std::endl;
         EXPECT_EQ(final.size(), N * num_iters);
 
         // specify some offsets and do scalar filtering on these offsets
@@ -1128,7 +710,6 @@ TEST(Expr, TestArrayContains) {
             gen_val.set_float_val(val);
             values.push_back(gen_val);
         }
-        auto start = std::chrono::steady_clock::now();
         auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
             expr::ColumnInfo(
                 double_array_fid, DataType::ARRAY, DataType::DOUBLE),
@@ -1140,11 +721,6 @@ TEST(Expr, TestArrayContains) {
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         final =
             ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
-        std::cout << "cost"
-                  << std::chrono::duration_cast<std::chrono::microseconds>(
-                         std::chrono::steady_clock::now() - start)
-                         .count()
-                  << std::endl;
         EXPECT_EQ(final.size(), N * num_iters);
 
         // specify some offsets and do scalar filtering on these offsets
@@ -1190,7 +766,6 @@ TEST(Expr, TestArrayContains) {
             gen_val.set_float_val(val);
             values.push_back(gen_val);
         }
-        auto start = std::chrono::steady_clock::now();
         auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
             expr::ColumnInfo(float_array_fid, DataType::ARRAY, DataType::FLOAT),
             proto::plan::JSONContainsExpr_JSONOp_Contains,
@@ -1201,11 +776,6 @@ TEST(Expr, TestArrayContains) {
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         final =
             ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
-        std::cout << "cost"
-                  << std::chrono::duration_cast<std::chrono::microseconds>(
-                         std::chrono::steady_clock::now() - start)
-                         .count()
-                  << std::endl;
         EXPECT_EQ(final.size(), N * num_iters);
 
         // specify some offsets and do scalar filtering on these offsets
@@ -1261,7 +831,6 @@ TEST(Expr, TestArrayContains) {
             gen_val.set_int64_val(val);
             values.push_back(gen_val);
         }
-        auto start = std::chrono::steady_clock::now();
         auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
             expr::ColumnInfo(int_array_fid, DataType::ARRAY, DataType::INT8),
             proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
@@ -1272,11 +841,6 @@ TEST(Expr, TestArrayContains) {
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         final =
             ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
-        std::cout << "cost"
-                  << std::chrono::duration_cast<std::chrono::microseconds>(
-                         std::chrono::steady_clock::now() - start)
-                         .count()
-                  << std::endl;
         EXPECT_EQ(final.size(), N * num_iters);
 
         // specify some offsets and do scalar filtering on these offsets
@@ -1323,7 +887,6 @@ TEST(Expr, TestArrayContains) {
             gen_val.set_int64_val(val);
             values.push_back(gen_val);
         }
-        auto start = std::chrono::steady_clock::now();
         auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
             expr::ColumnInfo(long_array_fid, DataType::ARRAY, DataType::INT64),
             proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
@@ -1334,11 +897,6 @@ TEST(Expr, TestArrayContains) {
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         final =
             ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
-        std::cout << "cost"
-                  << std::chrono::duration_cast<std::chrono::microseconds>(
-                         std::chrono::steady_clock::now() - start)
-                         .count()
-                  << std::endl;
         EXPECT_EQ(final.size(), N * num_iters);
 
         // specify some offsets and do scalar filtering on these offsets
@@ -1392,7 +950,6 @@ TEST(Expr, TestArrayContains) {
             gen_val.set_string_val(val);
             values.push_back(gen_val);
         }
-        auto start = std::chrono::steady_clock::now();
         auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
             expr::ColumnInfo(
                 string_array_fid, DataType::ARRAY, DataType::VARCHAR),
@@ -1404,11 +961,6 @@ TEST(Expr, TestArrayContains) {
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         final =
             ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
-        std::cout << "cost"
-                  << std::chrono::duration_cast<std::chrono::microseconds>(
-                         std::chrono::steady_clock::now() - start)
-                         .count()
-                  << std::endl;
         EXPECT_EQ(final.size(), N * num_iters);
 
         // specify some offsets and do scalar filtering on these offsets
@@ -1482,7 +1034,6 @@ TEST(Expr, TestArrayContainsEmptyValues) {
     std::vector<proto::plan::GenericValue> empty_values;
 
     for (auto field_id : fields) {
-        auto start = std::chrono::steady_clock::now();
         auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
             expr::ColumnInfo(field_id, DataType::ARRAY),
             proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
@@ -1494,11 +1045,6 @@ TEST(Expr, TestArrayContainsEmptyValues) {
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         final =
             ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
-        std::cout << "cost"
-                  << std::chrono::duration_cast<std::chrono::microseconds>(
-                         std::chrono::steady_clock::now() - start)
-                         .count()
-                  << std::endl;
         EXPECT_EQ(final.size(), N * num_iters);
         for (int i = 0; i < N * num_iters; ++i) {
             ASSERT_EQ(final[i], false);
@@ -1508,6 +1054,8 @@ TEST(Expr, TestArrayContainsEmptyValues) {
 
 TEST(Expr, TestArrayBinaryArith) {
     auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
     auto int_array_fid =
         schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT8);
@@ -1555,601 +1103,252 @@ TEST(Expr, TestArrayBinaryArith) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    ScopedSchemaHandle schema_handle(*schema);
 
     std::vector<std::tuple<std::string,
                            std::string,
                            std::function<bool(milvus::Array & array)>>>
         testcases = {
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 101
-                data_type: Array
-                nested_path:"0"
-                element_type:Int8
-              >
-              arith_op:Add
-              right_operand:<int64_val:2 >
-              op:Equal
-              value:<int64_val:5 >
-        >)",
+            // int_array[0] + 2 == 5
+            {"int_array[0] + 2 == 5",
              "int",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val + 2 == 5;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 101
-                data_type: Array
-                nested_path:"0"
-                element_type:Int8
-              >
-              arith_op:Add
-              right_operand:<int64_val:2 >
-              op:NotEqual
-              value:<int64_val:5 >
-        >)",
+            // int_array[0] + 2 != 5
+            {"int_array[0] + 2 != 5",
              "int",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val + 2 != 5;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 101
-                data_type: Array
-                nested_path:"0"
-                element_type:Int8
-              >
-              arith_op:Add
-              right_operand:<int64_val:2 >
-              op:GreaterThan
-              value:<int64_val:5 >
-        >)",
+            // int_array[0] + 2 > 5
+            {"int_array[0] + 2 > 5",
              "int",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val + 2 > 5;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 101
-                data_type: Array
-                nested_path:"0"
-                element_type:Int8
-              >
-              arith_op:Add
-              right_operand:<int64_val:2 >
-              op:GreaterEqual
-              value:<int64_val:5 >
-        >)",
+            // int_array[0] + 2 >= 5
+            {"int_array[0] + 2 >= 5",
              "int",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val + 2 >= 5;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 101
-                data_type: Array
-                nested_path:"0"
-                element_type:Int8
-              >
-              arith_op:Add
-              right_operand:<int64_val:2 >
-              op:LessThan
-              value:<int64_val:5 >
-        >)",
+            // int_array[0] + 2 < 5
+            {"int_array[0] + 2 < 5",
              "int",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val + 2 < 5;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 101
-                data_type: Array
-                nested_path:"0"
-                element_type:Int8
-              >
-              arith_op:Add
-              right_operand:<int64_val:2 >
-              op:LessEqual
-              value:<int64_val:5 >
-        >)",
+            // int_array[0] + 2 <= 5
+            {"int_array[0] + 2 <= 5",
              "int",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val + 2 <= 5;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Sub
-              right_operand:<int64_val:1 >
-              op:Equal
-              value:<int64_val:144 >
-        >)",
+            // long_array[0] - 1 == 144
+            {"long_array[0] - 1 == 144",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val - 1 == 144;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Sub
-              right_operand:<int64_val:1 >
-              op:NotEqual
-              value:<int64_val:144 >
-        >)",
+            // long_array[0] - 1 != 144
+            {"long_array[0] - 1 != 144",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val - 1 != 144;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Sub
-              right_operand:<int64_val:1 >
-              op:GreaterThan
-              value:<int64_val:144 >
-        >)",
+            // long_array[0] - 1 > 144
+            {"long_array[0] - 1 > 144",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val - 1 > 144;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Sub
-              right_operand:<int64_val:1 >
-              op:GreaterEqual
-              value:<int64_val:144 >
-        >)",
+            // long_array[0] - 1 >= 144
+            {"long_array[0] - 1 >= 144",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val - 1 >= 144;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Sub
-              right_operand:<int64_val:1 >
-              op:LessThan
-              value:<int64_val:144 >
-        >)",
+            // long_array[0] - 1 < 144
+            {"long_array[0] - 1 < 144",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val - 1 < 144;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Sub
-              right_operand:<int64_val:1 >
-              op:LessEqual
-              value:<int64_val:144 >
-        >)",
+            // long_array[0] - 1 <= 144
+            {"long_array[0] - 1 <= 144",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val - 1 <= 144;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 103
-                data_type: Array
-                nested_path:"0"
-                element_type:Float
-              >
-              arith_op:Add
-              right_operand:<float_val:2.2 >
-              op:Equal
-              value:<float_val:133.2 >
-        >)",
+            // float_array[0] + 2.2 == 133.2
+            {"float_array[0] + 2.2 == 133.2",
              "float",
              [](milvus::Array& array) {
                  auto val = array.get_data<double>(0);
                  return val + 2.2 == 133.2;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 103
-                data_type: Array
-                nested_path:"0"
-                element_type:Float
-              >
-              arith_op:Add
-              right_operand:<float_val:2.2 >
-              op:NotEqual
-              value:<float_val:133.2 >
-        >)",
+            // float_array[0] + 2.2 != 133.2
+            {"float_array[0] + 2.2 != 133.2",
              "float",
              [](milvus::Array& array) {
                  auto val = array.get_data<double>(0);
                  return val + 2.2 != 133.2;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 104
-                data_type: Array
-                nested_path:"0"
-                element_type:Double
-              >
-              arith_op:Sub
-              right_operand:<float_val:11.1 >
-              op:Equal
-              value:<float_val:125.7 >
-        >)",
+            // double_array[0] - 11.1 == 125.7
+            {"double_array[0] - 11.1 == 125.7",
              "double",
              [](milvus::Array& array) {
                  auto val = array.get_data<double>(0);
                  return val - 11.1 == 125.7;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 104
-                data_type: Array
-                nested_path:"0"
-                element_type:Double
-              >
-              arith_op:Sub
-              right_operand:<float_val:11.1 >
-              op:NotEqual
-              value:<float_val:125.7 >
-        >)",
+            // double_array[0] - 11.1 != 125.7
+            {"double_array[0] - 11.1 != 125.7",
              "double",
              [](milvus::Array& array) {
                  auto val = array.get_data<double>(0);
                  return val - 11.1 != 125.7;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Mul
-              right_operand:<int64_val:2 >
-              op:Equal
-              value:<int64_val:8 >
-        >)",
+            // long_array[0] * 2 == 8
+            {"long_array[0] * 2 == 8",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val * 2 == 8;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Mul
-              right_operand:<int64_val:2 >
-              op:NotEqual
-              value:<int64_val:20 >
-        >)",
+            // long_array[0] * 2 != 20
+            {"long_array[0] * 2 != 20",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val * 2 != 20;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Mul
-              right_operand:<int64_val:2 >
-              op:GreaterThan
-              value:<int64_val:20 >
-        >)",
+            // long_array[0] * 2 > 20
+            {"long_array[0] * 2 > 20",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val * 2 > 20;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Mul
-              right_operand:<int64_val:2 >
-              op:GreaterEqual
-              value:<int64_val:20 >
-        >)",
+            // long_array[0] * 2 >= 20
+            {"long_array[0] * 2 >= 20",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val * 2 >= 20;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Mul
-              right_operand:<int64_val:2 >
-              op:LessThan
-              value:<int64_val:20 >
-        >)",
+            // long_array[0] * 2 < 20
+            {"long_array[0] * 2 < 20",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val * 2 < 20;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Mul
-              right_operand:<int64_val:2 >
-              op:LessEqual
-              value:<int64_val:20 >
-        >)",
+            // long_array[0] * 2 <= 20
+            {"long_array[0] * 2 <= 20",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val * 2 <= 20;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Div
-              right_operand:<int64_val:2 >
-              op:Equal
-              value:<int64_val:8 >
-        >)",
+            // long_array[0] / 2 == 8
+            {"long_array[0] / 2 == 8",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val / 2 == 8;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Div
-              right_operand:<int64_val:2 >
-              op:NotEqual
-              value:<int64_val:20 >
-        >)",
+            // long_array[0] / 2 != 20
+            {"long_array[0] / 2 != 20",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val / 2 != 20;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Div
-              right_operand:<int64_val:2 >
-              op:GreaterThan
-              value:<int64_val:20 >
-        >)",
+            // long_array[0] / 2 > 20
+            {"long_array[0] / 2 > 20",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val / 2 > 20;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Div
-              right_operand:<int64_val:2 >
-              op:GreaterEqual
-              value:<int64_val:20 >
-        >)",
+            // long_array[0] / 2 >= 20
+            {"long_array[0] / 2 >= 20",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val / 2 >= 20;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Div
-              right_operand:<int64_val:2 >
-              op:LessThan
-              value:<int64_val:20 >
-        >)",
+            // long_array[0] / 2 < 20
+            {"long_array[0] / 2 < 20",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val / 2 < 20;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Div
-              right_operand:<int64_val:2 >
-              op:LessEqual
-              value:<int64_val:20 >
-        >)",
+            // long_array[0] / 2 <= 20
+            {"long_array[0] / 2 <= 20",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val / 2 <= 20;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Mod
-              right_operand:<int64_val:3 >
-              op:Equal
-              value:<int64_val:0 >
-        >)",
+            // long_array[0] % 3 == 0
+            {"long_array[0] % 3 == 0",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val % 3 == 0;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Mod
-              right_operand:<int64_val:3 >
-              op:NotEqual
-              value:<int64_val:2 >
-        >)",
+            // long_array[0] % 3 != 2
+            {"long_array[0] % 3 != 2",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val % 3 != 2;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Mod
-              right_operand:<int64_val:3 >
-              op:GreaterThan
-              value:<int64_val:2 >
-        >)",
+            // long_array[0] % 3 > 2
+            {"long_array[0] % 3 > 2",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val % 3 > 2;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Mod
-              right_operand:<int64_val:3 >
-              op:GreaterEqual
-              value:<int64_val:2 >
-        >)",
+            // long_array[0] % 3 >= 2
+            {"long_array[0] % 3 >= 2",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val % 3 >= 2;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Mod
-              right_operand:<int64_val:3 >
-              op:LessThan
-              value:<int64_val:2 >
-        >)",
+            // long_array[0] % 3 < 2
+            {"long_array[0] % 3 < 2",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val % 3 < 2;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              arith_op:Mod
-              right_operand:<int64_val:3 >
-              op:LessEqual
-              value:<int64_val:2 >
-        >)",
+            // long_array[0] % 3 <= 2
+            {"long_array[0] % 3 <= 2",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val % 3 <= 2;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 103
-                data_type: Array
-                nested_path:"1024"
-                element_type:Float
-              >
-              arith_op:Add
-              right_operand:<float_val:2.2 >
-              op:Equal
-              value:<float_val:133.2 >
-        >)",
+            // float_array[1024] + 2.2 == 133.2
+            {"float_array[1024] + 2.2 == 133.2",
              "float",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -2158,18 +1357,8 @@ TEST(Expr, TestArrayBinaryArith) {
                  auto val = array.get_data<double>(1024);
                  return val + 2.2 == 133.2;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 103
-                data_type: Array
-                nested_path:"1024"
-                element_type:Float
-              >
-              arith_op:Add
-              right_operand:<float_val:2.2 >
-              op:NotEqual
-              value:<float_val:133.2 >
-        >)",
+            // float_array[1024] + 2.2 != 133.2
+            {"float_array[1024] + 2.2 != 133.2",
              "float",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -2178,18 +1367,8 @@ TEST(Expr, TestArrayBinaryArith) {
                  auto val = array.get_data<double>(1024);
                  return val + 2.2 != 133.2;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 104
-                data_type: Array
-                nested_path:"1024"
-                element_type:Double
-              >
-              arith_op:Sub
-              right_operand:<float_val:11.1 >
-              op:Equal
-              value:<float_val:125.7 >
-        >)",
+            // double_array[1024] - 11.1 == 125.7
+            {"double_array[1024] - 11.1 == 125.7",
              "double",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -2198,18 +1377,8 @@ TEST(Expr, TestArrayBinaryArith) {
                  auto val = array.get_data<double>(1024);
                  return val - 11.1 == 125.7;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 104
-                data_type: Array
-                nested_path:"1024"
-                element_type:Double
-              >
-              arith_op:Sub
-              right_operand:<float_val:11.1 >
-              op:NotEqual
-              value:<float_val:125.7 >
-        >)",
+            // double_array[1024] - 11.1 != 125.7
+            {"double_array[1024] - 11.1 != 125.7",
              "double",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -2218,18 +1387,8 @@ TEST(Expr, TestArrayBinaryArith) {
                  auto val = array.get_data<double>(1024);
                  return val - 11.1 != 125.7;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"1024"
-                element_type:Int64
-              >
-              arith_op:Mul
-              right_operand:<int64_val:2 >
-              op:Equal
-              value:<int64_val:8 >
-        >)",
+            // long_array[1024] * 2 == 8
+            {"long_array[1024] * 2 == 8",
              "long",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -2238,18 +1397,8 @@ TEST(Expr, TestArrayBinaryArith) {
                  auto val = array.get_data<int64_t>(1024);
                  return val * 2 == 8;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"1024"
-                element_type:Int64
-              >
-              arith_op:Mul
-              right_operand:<int64_val:2 >
-              op:NotEqual
-              value:<int64_val:20 >
-        >)",
+            // long_array[1024] * 2 != 20
+            {"long_array[1024] * 2 != 20",
              "long",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -2258,18 +1407,8 @@ TEST(Expr, TestArrayBinaryArith) {
                  auto val = array.get_data<int64_t>(1024);
                  return val * 2 != 20;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"1024"
-                element_type:Int64
-              >
-              arith_op:Div
-              right_operand:<int64_val:2 >
-              op:Equal
-              value:<int64_val:8 >
-        >)",
+            // long_array[1024] / 2 == 8
+            {"long_array[1024] / 2 == 8",
              "long",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -2278,18 +1417,8 @@ TEST(Expr, TestArrayBinaryArith) {
                  auto val = array.get_data<int64_t>(1024);
                  return val / 2 == 8;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"1024"
-                element_type:Int64
-              >
-              arith_op:Div
-              right_operand:<int64_val:2 >
-              op:NotEqual
-              value:<int64_val:20 >
-        >)",
+            // long_array[1024] / 2 != 20
+            {"long_array[1024] / 2 != 20",
              "long",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -2298,18 +1427,8 @@ TEST(Expr, TestArrayBinaryArith) {
                  auto val = array.get_data<int64_t>(1024);
                  return val / 2 != 20;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"1024"
-                element_type:Int64
-              >
-              arith_op:Mod
-              right_operand:<int64_val:3 >
-              op:Equal
-              value:<int64_val:0 >
-        >)",
+            // long_array[1024] % 3 == 0
+            {"long_array[1024] % 3 == 0",
              "long",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -2318,18 +1437,8 @@ TEST(Expr, TestArrayBinaryArith) {
                  auto val = array.get_data<int64_t>(1024);
                  return val % 3 == 0;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"1024"
-                element_type:Int64
-              >
-              arith_op:Mod
-              right_operand:<int64_val:3 >
-              op:NotEqual
-              value:<int64_val:2 >
-        >)",
+            // long_array[1024] % 3 != 2
+            {"long_array[1024] % 3 != 2",
              "long",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -2338,100 +1447,35 @@ TEST(Expr, TestArrayBinaryArith) {
                  auto val = array.get_data<int64_t>(1024);
                  return val % 3 != 2;
              }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 101
-                data_type: Array
-                nested_path:"0"
-                element_type:Int8
-              >
-              arith_op:ArrayLength
-              op:Equal
-              value:<int64_val:10 >
-        >)",
+            // array_length(int_array) == 10
+            {"array_length(int_array) == 10",
              "int",
              [](milvus::Array& array) { return array.length() == 10; }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 101
-                data_type: Array
-                nested_path:"0"
-                element_type:Int8
-              >
-              arith_op:ArrayLength
-              op:NotEqual
-              value:<int64_val:8 >
-        >)",
+            // array_length(int_array) != 8
+            {"array_length(int_array) != 8",
              "int",
              [](milvus::Array& array) { return array.length() != 8; }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 101
-                data_type: Array
-                element_type:Int8
-              >
-              arith_op:ArrayLength
-              op:GreaterThan
-              value:<int64_val:8 >
-        >)",
+            // array_length(int_array) > 8
+            {"array_length(int_array) > 8",
              "int",
              [](milvus::Array& array) { return array.length() > 8; }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 101
-                data_type: Array
-                element_type:Int8
-              >
-              arith_op:ArrayLength
-              op:GreaterEqual
-              value:<int64_val:8 >
-        >)",
+            // array_length(int_array) >= 8
+            {"array_length(int_array) >= 8",
              "int",
              [](milvus::Array& array) { return array.length() >= 8; }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 101
-                data_type: Array
-                element_type:Int8
-              >
-              arith_op:ArrayLength
-              op:LessThan
-              value:<int64_val:8 >
-        >)",
+            // array_length(int_array) < 8
+            {"array_length(int_array) < 8",
              "int",
              [](milvus::Array& array) { return array.length() < 8; }},
-            {R"(binary_arith_op_eval_range_expr: <
-              column_info: <
-                field_id: 101
-                data_type: Array
-                element_type:Int8
-              >
-              arith_op:ArrayLength
-              op:LessEqual
-              value:<int64_val:8 >
-        >)",
+            // array_length(int_array) <= 8
+            {"array_length(int_array) <= 8",
              "int",
              [](milvus::Array& array) { return array.length() <= 8; }},
         };
 
-    std::string raw_plan_tmp = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      @@@@
-                                    >
-                                    query_info: <
-                                      topk: 10
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
-    for (auto [clause, array_type, ref_func] : testcases) {
-        auto loc = raw_plan_tmp.find("@@@@");
-        auto raw_plan = raw_plan_tmp;
-        raw_plan.replace(loc, 4, clause);
-        auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
+    for (auto [expr, array_type, ref_func] : testcases) {
+        auto plan_str = schema_handle.ParseSearch(
+            expr, "fakevec", 10, "L2", R"({"nprobe": 10})", 3);
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
@@ -2532,7 +1576,6 @@ TEST(Expr, TestArrayStringMatch) {
     };
     //vector_anns:<field_id:201 predicates:<unary_range_expr:<column_info:<field_id:131 data_type:Array nested_path:"0" element_type:VarChar > op:PrefixMatch value:<string_val:"abc" > > > query_info:<> placeholder_tag:"$0" >
     for (auto& testcase : prefix_testcases) {
-        auto start = std::chrono::steady_clock::now();
         proto::plan::GenericValue value;
         value.set_string_val(testcase.value);
         auto expr = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
@@ -2546,11 +1589,6 @@ TEST(Expr, TestArrayStringMatch) {
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         final =
             ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
-        std::cout << "cost"
-                  << std::chrono::duration_cast<std::chrono::microseconds>(
-                         std::chrono::steady_clock::now() - start)
-                         .count()
-                  << std::endl;
         EXPECT_EQ(final.size(), N * num_iters);
 
         // specify some offsets and do scalar filtering on these offsets
@@ -2579,6 +1617,8 @@ TEST(Expr, TestArrayStringMatch) {
 
 TEST(Expr, TestArrayInTerm) {
     auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
     auto long_array_fid =
         schema->AddDebugField("long_array", DataType::ARRAY, DataType::INT64);
@@ -2625,116 +1665,58 @@ TEST(Expr, TestArrayInTerm) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    ScopedSchemaHandle schema_handle(*schema);
 
     std::vector<std::tuple<std::string,
                            std::string,
                            std::function<bool(milvus::Array & array)>>>
         testcases = {
-            {R"(term_expr: <
-              column_info: <
-                field_id: 101
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-              values:<int64_val:1 > values:<int64_val:2 > values:<int64_val:3 >
-        >)",
+            // term_expr: long_array[0] in [1, 2, 3]
+            {"long_array[0] in [1, 2, 3]",
              "long",
              [](milvus::Array& array) {
                  auto val = array.get_data<int64_t>(0);
                  return val == 1 || val == 2 || val == 3;
              }},
-            {R"(term_expr: <
-              column_info: <
-                field_id: 101
-                data_type: Array
-                nested_path:"0"
-                element_type:Int64
-              >
-        >)",
+            // term_expr: long_array[0] in [] (empty list)
+            {"long_array[0] in []",
              "long",
              [](milvus::Array& array) { return false; }},
-            {R"(term_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Bool
-              >
-                values:<bool_val:false > values:<bool_val:false >
-        >)",
+            // term_expr: bool_array[0] in [false, false]
+            {"bool_array[0] in [false, false]",
              "bool",
              [](milvus::Array& array) {
                  auto val = array.get_data<bool>(0);
                  return !val;
              }},
-            {R"(term_expr: <
-              column_info: <
-                field_id: 102
-                data_type: Array
-                nested_path:"0"
-                element_type:Bool
-              >
-        >)",
+            // term_expr: bool_array[0] in [] (empty list)
+            {"bool_array[0] in []",
              "bool",
              [](milvus::Array& array) { return false; }},
-            {R"(term_expr: <
-              column_info: <
-                field_id: 103
-                data_type: Array
-                nested_path:"0"
-                element_type:Float
-              >
-                values:<float_val:1.23 > values:<float_val:124.31 >
-        >)",
+            // term_expr: float_array[0] in [1.23, 124.31]
+            {"float_array[0] in [1.23, 124.31]",
              "float",
              [](milvus::Array& array) {
                  auto val = array.get_data<double>(0);
                  return val == 1.23 || val == 124.31;
              }},
-            {R"(term_expr: <
-              column_info: <
-                field_id: 103
-                data_type: Array
-                nested_path:"0"
-                element_type:Float
-              >
-        >)",
+            // term_expr: float_array[0] in [] (empty list)
+            {"float_array[0] in []",
              "float",
              [](milvus::Array& array) { return false; }},
-            {R"(term_expr: <
-              column_info: <
-                field_id: 104
-                data_type: Array
-                nested_path:"0"
-                element_type:VarChar
-              >
-                values:<string_val:"abc" > values:<string_val:"idhgf1s" >
-        >)",
+            // term_expr: string_array[0] in ["abc", "idhgf1s"]
+            {R"(string_array[0] in ["abc", "idhgf1s"])",
              "string",
              [](milvus::Array& array) {
                  auto val = array.get_data<std::string_view>(0);
                  return val == "abc" || val == "idhgf1s";
              }},
-            {R"(term_expr: <
-              column_info: <
-                field_id: 104
-                data_type: Array
-                nested_path:"0"
-                element_type:VarChar
-              >
-        >)",
+            // term_expr: string_array[0] in [] (empty list)
+            {R"(string_array[0] in [])",
              "string",
              [](milvus::Array& array) { return false; }},
-            {R"(term_expr: <
-              column_info: <
-                field_id: 104
-                data_type: Array
-                nested_path:"1024"
-                element_type:VarChar
-              >
-                values:<string_val:"abc" > values:<string_val:"idhgf1s" >
-        >)",
+            // term_expr: string_array[1024] in ["abc", "idhgf1s"]
+            {R"(string_array[1024] in ["abc", "idhgf1s"])",
              "string",
              [](milvus::Array& array) {
                  if (array.length() <= 1024) {
@@ -2745,25 +1727,9 @@ TEST(Expr, TestArrayInTerm) {
              }},
         };
 
-    std::string raw_plan_tmp = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      @@@@
-                                    >
-                                    query_info: <
-                                      topk: 10
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
-
-    for (auto [clause, array_type, ref_func] : testcases) {
-        auto loc = raw_plan_tmp.find("@@@@");
-        auto raw_plan = raw_plan_tmp;
-        raw_plan.replace(loc, 4, clause);
-        auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
+    for (auto [expr, array_type, ref_func] : testcases) {
+        auto plan_str = schema_handle.ParseSearch(
+            expr, "fakevec", 10, "L2", R"({"nprobe": 10})", 3);
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
@@ -2861,7 +1827,6 @@ TEST(Expr, TestTermInArray) {
     };
 
     for (auto& testcase : testcases) {
-        auto start = std::chrono::steady_clock::now();
         std::vector<proto::plan::GenericValue> values;
         for (auto& v : testcase.values) {
             proto::plan::GenericValue val;
@@ -2878,11 +1843,6 @@ TEST(Expr, TestTermInArray) {
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         final =
             ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
-        std::cout << "cost"
-                  << std::chrono::duration_cast<std::chrono::microseconds>(
-                         std::chrono::steady_clock::now() - start)
-                         .count()
-                  << std::endl;
         EXPECT_EQ(final.size(), N * num_iters);
 
         // specify some offsets and do scalar filtering on these offsets

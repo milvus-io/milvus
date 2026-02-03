@@ -618,19 +618,15 @@ TEST(GrowingTest, SearchVectorArray) {
     query_vec_offsets.push_back(3);
     query_vec_offsets.push_back(10);  // Second query has 7 vectors
 
-    // Create search plan
-    const char* raw_plan = R"(vector_anns: <
-                                  field_id: 101
-                                  query_info: <
-                                    topk: 5
-                                    round_decimal: 3
-                                    metric_type: "MAX_SIM"
-                                    search_params: "{\"nprobe\": 10}"
-                                  >
-                                  placeholder_tag: "$0"
-      >)";
-
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    // Create search plan using ScopedSchemaHandle
+    milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str =
+        schema_handle.ParseSearch("",           // expression (no filter)
+                                  "array_vec",  // vector field name
+                                  5,            // topk
+                                  "MAX_SIM",    // metric_type
+                                  R"({"nprobe": 10})",  // search_params
+                                  3);                   // round_decimal
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
 

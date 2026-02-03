@@ -345,17 +345,6 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* serialized_expr_plan = R"(vector_anns: <
-                                             field_id: 100
-                                             query_info: <
-                                                 topk: 5
-                                                 round_decimal: -1
-                                                 metric_type: "L2"
-                                                 search_params: "{\"nprobe\": 10}"
-                                             >
-                                             placeholder_tag: "$0"
-                                          >)";
-
     // create place_holder_group
     int num_queries = 5;
     auto raw_group =
@@ -364,7 +353,9 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    ScopedSchemaHandle schema_handle(*schema);
+    auto binary_plan = schema_handle.ParseSearch(
+        "", "fakevec", 5, "L2", R"({"nprobe": 10})", -1);
     status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -496,47 +487,6 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* raw_plan = R"(vector_anns: <
-                                field_id: 100
-                                predicates: <
-                                  binary_expr: <
-                                    op: LogicalAnd
-                                    left: <
-                                      unary_range_expr: <
-                                        column_info: <
-                                          field_id: 101
-                                          data_type: Int64
-                                        >
-                                        op: GreaterEqual
-                                        value: <
-                                          int64_val: 4200
-                                        >
-                                      >
-                                    >
-                                    right: <
-                                      unary_range_expr: <
-                                        column_info: <
-                                          field_id: 101
-                                          data_type: Int64
-                                        >
-                                        op: LessThan
-                                        value: <
-                                          int64_val: 4210
-                                        >
-                                      >
-                                    >
-                                  >
-                                >
-                                query_info: <
-                                  topk: 5
-                                  round_decimal: -1
-                                  metric_type: "L2"
-                                  search_params: "{\"nprobe\": 10}"
-                                >
-                                placeholder_tag: "$0"
-     >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-
     // create place_holder_group
     int num_queries = 10;
     auto raw_group =
@@ -545,6 +495,14 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str =
+        schema_handle.ParseSearch("counter >= 4200 and counter < 4210",
+                                  "fakevec",
+                                  5,
+                                  "L2",
+                                  R"({"nprobe": 10})",
+                                  -1);
     status = CreateSearchPlanByExpr(
         collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -677,46 +635,6 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
         ASSERT_EQ(ins_res.error_code, Success);
     }
 
-    const char* serialized_expr_plan = R"(vector_anns: <
-                                             field_id: 100
-                                             predicates: <
-                                               binary_expr: <
-                                                 op: LogicalAnd
-                                                 left: <
-                                                   unary_range_expr: <
-                                                     column_info: <
-                                                       field_id: 101
-                                                       data_type: Int64
-                                                     >
-                                                     op: GreaterEqual
-                                                     value: <
-                                                       int64_val: 4200
-                                                     >
-                                                   >
-                                                 >
-                                                 right: <
-                                                   unary_range_expr: <
-                                                     column_info: <
-                                                       field_id: 101
-                                                       data_type: Int64
-                                                     >
-                                                     op: LessThan
-                                                     value: <
-                                                       int64_val: 4210
-                                                     >
-                                                   >
-                                                 >
-                                               >
-                                             >
-                                             query_info: <
-                                               topk: 5
-                                               round_decimal: -1
-                                               metric_type: "L2"
-                                               search_params: "{\"nprobe\": 10}"
-                                             >
-                                             placeholder_tag: "$0"
-     >)";
-
     // create place_holder_group
     int num_queries = 10;
     auto raw_group =
@@ -725,7 +643,14 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    ScopedSchemaHandle schema_handle(*schema);
+    auto binary_plan =
+        schema_handle.ParseSearch("counter >= 4200 and counter < 4210",
+                                  "fakevec",
+                                  5,
+                                  "L2",
+                                  R"({"nprobe": 10})",
+                                  -1);
     status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -856,41 +781,6 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* raw_plan = R"(vector_anns: <
-                                             field_id: 100
-                                             predicates: <
-                                               term_expr: <
-                                                 column_info: <
-                                                   field_id: 101
-                                                   data_type: Int64
-                                                 >
-                                                 values: <
-                                                   int64_val: 4200
-                                                 >
-                                                 values: <
-                                                   int64_val: 4201
-                                                 >
-                                                 values: <
-                                                   int64_val: 4202
-                                                 >
-                                                 values: <
-                                                   int64_val: 4203
-                                                 >
-                                                 values: <
-                                                   int64_val: 4204
-                                                 >
-                                               >
-                                             >
-                                             query_info: <
-                                               topk: 5
-                                               round_decimal: -1
-                                               metric_type: "L2"
-                                               search_params: "{\"nprobe\": 10}"
-                                             >
-                                             placeholder_tag: "$0"
-     >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-
     // create place_holder_group
     int num_queries = 5;
     auto raw_group =
@@ -899,6 +789,14 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str =
+        schema_handle.ParseSearch("counter in [4200, 4201, 4202, 4203, 4204]",
+                                  "fakevec",
+                                  5,
+                                  "L2",
+                                  R"({"nprobe": 10})",
+                                  -1);
     status = CreateSearchPlanByExpr(
         collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -1029,41 +927,6 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* serialized_expr_plan = R"(
- vector_anns: <
-   field_id: 100
-   predicates: <
-     term_expr: <
-       column_info: <
-         field_id: 101
-         data_type: Int64
-       >
-       values: <
-         int64_val: 4200
-       >
-       values: <
-         int64_val: 4201
-       >
-       values: <
-         int64_val: 4202
-       >
-       values: <
-         int64_val: 4203
-       >
-       values: <
-         int64_val: 4204
-       >
-     >
-   >
-   query_info: <
-     topk: 5
-     round_decimal: -1
-     metric_type: "L2"
-     search_params: "{\"nprobe\": 10}"
-   >
-   placeholder_tag: "$0"
- >)";
-
     // create place_holder_group
     int num_queries = 5;
     auto raw_group =
@@ -1072,7 +935,14 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    ScopedSchemaHandle schema_handle(*schema);
+    auto binary_plan =
+        schema_handle.ParseSearch("counter in [4200, 4201, 4202, 4203, 4204]",
+                                  "fakevec",
+                                  5,
+                                  "L2",
+                                  R"({"nprobe": 10})",
+                                  -1);
     status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -1206,47 +1076,6 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* raw_plan = R"(vector_anns: <
-                                             field_id: 100
-                                             predicates: <
-                                               binary_expr: <
-                                                 op: LogicalAnd
-                                                 left: <
-                                                   unary_range_expr: <
-                                                     column_info: <
-                                                       field_id: 101
-                                                       data_type: Int64
-                                                     >
-                                                     op: GreaterEqual
-                                                     value: <
-                                                       int64_val: 4200
-                                                     >
-                                                   >
-                                                 >
-                                                 right: <
-                                                   unary_range_expr: <
-                                                     column_info: <
-                                                       field_id: 101
-                                                       data_type: Int64
-                                                     >
-                                                     op: LessThan
-                                                     value: <
-                                                       int64_val: 4210
-                                                     >
-                                                   >
-                                                 >
-                                               >
-                                             >
-                                             query_info: <
-                                               topk: 5
-                                               round_decimal: -1
-                                               metric_type: "JACCARD"
-                                               search_params: "{\"nprobe\": 10}"
-                                             >
-                                             placeholder_tag: "$0"
-     >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-
     // create place_holder_group
     int num_queries = 5;
     auto raw_group = CreatePlaceholderGroupFromBlob<milvus::BinaryVector>(
@@ -1255,6 +1084,14 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str =
+        schema_handle.ParseSearch("counter >= 4200 and counter < 4210",
+                                  "fakevec",
+                                  5,
+                                  "JACCARD",
+                                  R"({"nprobe": 10})",
+                                  -1);
     status = CreateSearchPlanByExpr(
         collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -1389,46 +1226,6 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* serialized_expr_plan = R"(vector_anns: <
-                                            field_id: 100
-                                            predicates: <
-                                              binary_expr: <
-                                                op: LogicalAnd
-                                                left: <
-                                                  unary_range_expr: <
-                                                    column_info: <
-                                                      field_id: 101
-                                                      data_type: Int64
-                                                    >
-                                                    op: GreaterEqual
-                                                    value: <
-                                                      int64_val: 4200
-                                                    >
-                                                  >
-                                                >
-                                                right: <
-                                                  unary_range_expr: <
-                                                    column_info: <
-                                                      field_id: 101
-                                                      data_type: Int64
-                                                    >
-                                                    op: LessThan
-                                                    value: <
-                                                      int64_val: 4210
-                                                    >
-                                                  >
-                                                >
-                                              >
-                                            >
-                                            query_info: <
-                                              topk: 5
-                                              round_decimal: -1
-                                              metric_type: "JACCARD"
-                                              search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0"
-                                        >)";
-
     // create place_holder_group
     int num_queries = 5;
     auto raw_group = CreatePlaceholderGroupFromBlob<milvus::BinaryVector>(
@@ -1437,7 +1234,14 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    ScopedSchemaHandle schema_handle(*schema);
+    auto binary_plan =
+        schema_handle.ParseSearch("counter >= 4200 and counter < 4210",
+                                  "fakevec",
+                                  5,
+                                  "JACCARD",
+                                  R"({"nprobe": 10})",
+                                  -1);
     status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -1572,41 +1376,6 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* raw_plan = R"(vector_anns: <
-                                             field_id: 100
-                                             predicates: <
-                                               term_expr: <
-                                                 column_info: <
-                                                   field_id: 101
-                                                   data_type: Int64
-                                                 >
-                                                 values: <
-                                                   int64_val: 4200
-                                                 >
-                                                 values: <
-                                                   int64_val: 4201
-                                                 >
-                                                 values: <
-                                                   int64_val: 4202
-                                                 >
-                                                 values: <
-                                                   int64_val: 4203
-                                                 >
-                                                 values: <
-                                                   int64_val: 4204
-                                                 >
-                                               >
-                                             >
-                                             query_info: <
-                                               topk: 5
-                                               round_decimal: -1
-                                               metric_type: "JACCARD"
-                                               search_params: "{\"nprobe\": 10}"
-                                             >
-                                             placeholder_tag: "$0"
-     >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-
     // create place_holder_group
     int num_queries = 5;
     int topK = 5;
@@ -1616,6 +1385,14 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str =
+        schema_handle.ParseSearch("counter in [4200, 4201, 4202, 4203, 4204]",
+                                  "fakevec",
+                                  5,
+                                  "JACCARD",
+                                  R"({"nprobe": 10})",
+                                  -1);
     status = CreateSearchPlanByExpr(
         collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -1772,40 +1549,6 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* serialized_expr_plan = R"(vector_anns: <
-                                            field_id: 100
-                                            predicates: <
-                                              term_expr: <
-                                                column_info: <
-                                                  field_id: 101
-                                                  data_type: Int64
-                                                >
-                                                values: <
-                                                  int64_val: 4200
-                                                >
-                                                values: <
-                                                  int64_val: 4201
-                                                >
-                                                values: <
-                                                  int64_val: 4202
-                                                >
-                                                values: <
-                                                  int64_val: 4203
-                                                >
-                                                values: <
-                                                  int64_val: 4204
-                                                >
-                                              >
-                                            >
-                                            query_info: <
-                                              topk: 5
-                                              round_decimal: -1
-                                              metric_type: "JACCARD"
-                                              search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0"
-                                        >)";
-
     // create place_holder_group
     int num_queries = 5;
     int topK = 5;
@@ -1815,7 +1558,14 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    ScopedSchemaHandle schema_handle(*schema);
+    auto binary_plan =
+        schema_handle.ParseSearch("counter in [4200, 4201, 4202, 4203, 4204]",
+                                  "fakevec",
+                                  5,
+                                  "JACCARD",
+                                  R"({"nprobe": 10})",
+                                  -1);
     status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);

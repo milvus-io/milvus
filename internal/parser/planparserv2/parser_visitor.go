@@ -744,6 +744,28 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 			}
 			values[i] = castedValue
 		}
+
+		// For JSON type, ensure all numeric values have consistent type.
+		// If there's a mix of integers and floats, convert all to floats.
+		if typeutil.IsJSONType(dataType) && len(values) > 0 {
+			hasInt := false
+			hasFloat := false
+			for _, val := range values {
+				if IsInteger(val) {
+					hasInt = true
+				} else if IsFloating(val) {
+					hasFloat = true
+				}
+			}
+			// If we have both int and float, convert all ints to floats
+			if hasInt && hasFloat {
+				for i, val := range values {
+					if IsInteger(val) {
+						values[i] = NewFloat(float64(val.GetInt64Val()))
+					}
+				}
+			}
+		}
 	}
 
 	expr := &planpb.Expr{
