@@ -78,11 +78,249 @@ func (r *rankParams) String() string {
 	return fmt.Sprintf("limit: %d, offset: %d, roundDecimal: %d", r.GetLimit(), r.GetOffset(), r.GetRoundDecimal())
 }
 
+// OrderByField represents a field to order by with its direction
+// Supports JSON subfield paths like metadata["price"] and dynamic fields
+//
+// Dynamic field handling:
+// When ordering by a dynamic field (e.g., "age" stored in $meta), the field lookup uses FieldName ("$meta"),
+// NOT OutputFieldName ("age"). This is because:
+//  1. C++ segcore creates DataArray with field_id only (no field_name)
+//  2. Delegator reduction copies the empty field_name from source
+//  3. Proxy's default_limit_reducer sets FieldName from schema (field.GetName() = "$meta")
+//
+// So after requery, the returned FieldData has FieldName="$meta", and JSONPath="/age" is used
+// to extract the actual value from the JSON data for comparison.
+type OrderByField struct {
+	FieldName       string // Top-level field name for result lookup (e.g., "metadata" or "$meta" for dynamic fields)
+	FieldID         int64  // Field ID for validation
+	JSONPath        string // JSON Pointer format: "/price" or "/user/age" (empty for non-JSON fields)
+	Ascending       bool   // true for ASC, false for DESC
+	OutputFieldName string // Field name to request in requery (e.g., "age" for dynamic fields, "metadata" for JSON fields)
+	IsDynamicField  bool   // true if this is a dynamic field (uses $meta extraction at QueryNode)
+}
+
 type SearchInfo struct {
-	planInfo     *planpb.QueryInfo
-	offset       int64
-	isIterator   bool
-	collectionID int64
+	planInfo      *planpb.QueryInfo
+	offset        int64
+	isIterator    bool
+	collectionID  int64
+	orderByFields []OrderByField
+}
+
+// parseOrderByFields parses the order_by_fields parameter from search params.
+// Format: "field1:asc,field2:desc" or "field1,field2" (default is asc)
+// Supports JSON subfield paths: metadata["price"]:asc, metadata["user"]["score"]:desc
+// Supports dynamic fields: age:desc (maps to $meta["age"])
+// Validates that fields exist in schema and are sortable types.
+func parseOrderByFields(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema) ([]OrderByField, error) {
+	orderByStr, err := funcutil.GetAttrByKeyFromRepeatedKV(OrderByFieldsKey, searchParamsPair)
+	if err != nil || orderByStr == "" {
+		return nil, nil
+	}
+
+	// Build field name to schema map and find dynamic field
+	fieldSchemaMap := make(map[string]*schemapb.FieldSchema)
+	var dynamicField *schemapb.FieldSchema
+	for _, field := range schema.GetFields() {
+		fieldSchemaMap[field.GetName()] = field
+		if field.GetIsDynamic() {
+			dynamicField = field
+		}
+	}
+
+	var orderByFields []OrderByField
+	pairs := strings.Split(orderByStr, ",")
+	for _, pair := range pairs {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+
+		// Split field spec and direction, handling brackets in field spec
+		// e.g., "metadata[\"price\"]:asc" -> fieldSpec="metadata[\"price\"]", direction="asc"
+		fieldSpec, direction := splitOrderByFieldAndDirection(pair)
+		if fieldSpec == "" {
+			return nil, fmt.Errorf("empty field name in order_by_fields")
+		}
+
+		// Parse direction
+		ascending := true // default is ascending
+		if direction != "" {
+			switch strings.ToLower(direction) {
+			case "asc", "ascending":
+				ascending = true
+			case "desc", "descending":
+				ascending = false
+			default:
+				return nil, fmt.Errorf("invalid order direction '%s' for field '%s', expected 'asc' or 'desc'", direction, fieldSpec)
+			}
+		}
+
+		// Parse field spec to extract field name, field ID, JSON path, and requery info
+		fieldName, fieldID, jsonPath, outputFieldName, isDynamic, err := parseOrderByFieldSpec(fieldSpec, fieldSchemaMap, dynamicField, schema)
+		if err != nil {
+			return nil, err
+		}
+
+		orderByFields = append(orderByFields, OrderByField{
+			FieldName:       fieldName,
+			FieldID:         fieldID,
+			JSONPath:        jsonPath,
+			Ascending:       ascending,
+			OutputFieldName: outputFieldName,
+			IsDynamicField:  isDynamic,
+		})
+	}
+
+	return orderByFields, nil
+}
+
+// splitOrderByFieldAndDirection splits "fieldSpec:direction" handling brackets in fieldSpec
+// e.g., "metadata[\"price\"]:asc" -> ("metadata[\"price\"]", "asc")
+// e.g., "name:desc" -> ("name", "desc")
+// e.g., "name" -> ("name", "")
+//
+// Limitation: This simple bracket-depth tracking does not handle:
+//   - Brackets inside quoted strings: metadata["key]value"] would incorrectly parse
+//   - Escaped quotes inside strings: metadata["key\"with\"quotes"] may misbehave
+//
+// These edge cases are rare in practice. Field names containing unbalanced brackets
+// or complex escape sequences are not supported.
+func splitOrderByFieldAndDirection(pair string) (fieldSpec, direction string) {
+	// Find the last colon that's not inside brackets
+	bracketDepth := 0
+	lastColonIdx := -1
+	for i, ch := range pair {
+		switch ch {
+		case '[':
+			bracketDepth++
+		case ']':
+			bracketDepth--
+		case ':':
+			if bracketDepth == 0 {
+				lastColonIdx = i
+			}
+		}
+	}
+
+	if lastColonIdx == -1 {
+		return strings.TrimSpace(pair), ""
+	}
+	return strings.TrimSpace(pair[:lastColonIdx]), strings.TrimSpace(pair[lastColonIdx+1:])
+}
+
+// parseOrderByFieldSpec parses a field specification and returns field name, ID, JSON path, and requery info
+// Handles: regular fields, JSON fields with paths, and dynamic fields
+// Returns:
+//   - fieldName: top-level field name ($meta for dynamic, actual name for others)
+//   - fieldID: field ID
+//   - jsonPath: JSON Pointer format path (empty for non-JSON fields)
+//   - outputFieldName: field name to use in requery (original key for dynamic fields)
+//   - isDynamicField: true if this uses dynamic field extraction at QueryNode
+func parseOrderByFieldSpec(fieldSpec string, fieldSchemaMap map[string]*schemapb.FieldSchema, dynamicField *schemapb.FieldSchema, schema *schemapb.CollectionSchema) (fieldName string, fieldID int64, jsonPath string, outputFieldName string, isDynamicField bool, err error) {
+	// Check for JSON path syntax (brackets)
+	hasBrackets := strings.Contains(fieldSpec, "[") && strings.Contains(fieldSpec, "]")
+
+	if hasBrackets {
+		// Extract base field name (part before the first '[')
+		baseName := strings.Split(fieldSpec, "[")[0]
+		field, exists := fieldSchemaMap[baseName]
+
+		if exists {
+			// Field exists in schema
+			if field.GetIsDynamic() {
+				// This is $meta["key"] - explicit dynamic field access
+				// Use QueryNode-level extraction for dynamic fields
+				fieldName = common.MetaFieldName
+				fieldID = field.GetFieldID()
+				jsonPath, err = typeutil2.ParseAndVerifyNestedPath(fieldSpec, schema, fieldID)
+				if err != nil {
+					return "", 0, "", "", false, fmt.Errorf("invalid JSON path in order_by field '%s': %w", fieldSpec, err)
+				}
+				outputFieldName = fieldSpec // Pass full spec for dynamic field extraction
+				isDynamicField = true
+			} else if typeutil.IsJSONType(field.GetDataType()) {
+				// Regular JSON field with path: metadata["price"]
+				// Regular JSON fields don't support QueryNode-level extraction
+				fieldName = baseName
+				fieldID = field.GetFieldID()
+				jsonPath, err = typeutil2.ParseAndVerifyNestedPath(fieldSpec, schema, fieldID)
+				if err != nil {
+					return "", 0, "", "", false, fmt.Errorf("invalid JSON path in order_by field '%s': %w", fieldSpec, err)
+				}
+				outputFieldName = baseName // Request the whole JSON field
+				isDynamicField = false
+			} else {
+				// Non-JSON field with brackets - not supported
+				return "", 0, "", "", false, fmt.Errorf("order_by field '%s' has brackets but is not a JSON type", fieldSpec)
+			}
+		} else if dynamicField != nil {
+			// Unknown field name with brackets, treat as dynamic field path
+			// e.g., unknown["key"] -> $meta with path /unknown/key
+			fieldName = common.MetaFieldName
+			fieldID = dynamicField.GetFieldID()
+			jsonPath, err = typeutil2.ParseAndVerifyNestedPath(fieldSpec, schema, fieldID)
+			if err != nil {
+				return "", 0, "", "", false, fmt.Errorf("invalid JSON path in order_by field '%s': %w", fieldSpec, err)
+			}
+			// For dynamic fields, pass the original spec so translateOutputFields can extract subfields
+			outputFieldName = fieldSpec
+			isDynamicField = true
+		} else {
+			return "", 0, "", "", false, fmt.Errorf("order_by field '%s' not found in schema and no dynamic field available", baseName)
+		}
+	} else {
+		// No brackets - regular field name or dynamic field key
+		field, exists := fieldSchemaMap[fieldSpec]
+		if exists {
+			// Regular field
+			fieldName = fieldSpec
+			fieldID = field.GetFieldID()
+			outputFieldName = fieldSpec
+			isDynamicField = false
+			// Validate sortable type
+			if !isSortableFieldType(field.GetDataType()) {
+				return "", 0, "", "", false, fmt.Errorf("order_by field '%s' has unsortable type %s; supported types: bool, int8/16/32/64, float, double, string, varchar; for JSON fields use path syntax like field[\"key\"]",
+					fieldSpec, field.GetDataType().String())
+			}
+		} else if dynamicField != nil {
+			// Treat as dynamic field key: age -> $meta["age"]
+			fieldName = common.MetaFieldName
+			fieldID = dynamicField.GetFieldID()
+			jsonPath, err = typeutil2.ParseAndVerifyNestedPath(fieldSpec, schema, fieldID)
+			if err != nil {
+				return "", 0, "", "", false, fmt.Errorf("invalid dynamic field key '%s': %w", fieldSpec, err)
+			}
+			// For dynamic fields, pass the original key so translateOutputFields can extract it
+			outputFieldName = fieldSpec
+			isDynamicField = true
+		} else {
+			return "", 0, "", "", false, fmt.Errorf("order_by field '%s' does not exist in collection schema", fieldSpec)
+		}
+	}
+
+	return fieldName, fieldID, jsonPath, outputFieldName, isDynamicField, nil
+}
+
+// isSortableFieldType returns true if the data type can be used for order_by
+// Note: JSON type is not directly sortable. Use JSON path syntax (e.g., metadata["price"])
+// to sort by specific JSON subfields, or use dynamic fields for schema-less data.
+func isSortableFieldType(dataType schemapb.DataType) bool {
+	switch dataType {
+	case schemapb.DataType_Bool,
+		schemapb.DataType_Int8,
+		schemapb.DataType_Int16,
+		schemapb.DataType_Int32,
+		schemapb.DataType_Int64,
+		schemapb.DataType_Float,
+		schemapb.DataType_Double,
+		schemapb.DataType_String,
+		schemapb.DataType_VarChar:
+		return true
+	default:
+		// Vectors, Arrays, JSON (without path), etc. are not sortable
+		return false
+	}
 }
 
 func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupByFieldId int64, isIterator bool, offset int64, queryTopK *int64) (*planpb.SearchIteratorV2Info, error) {
@@ -314,6 +552,18 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		}
 	}
 
+	// 8. parse order_by_fields
+	orderByFields, err := parseOrderByFields(searchParamsPair, schema)
+	if err != nil {
+		return nil, err
+	}
+
+	// 9. validate iterator + order_by combination is not allowed
+	if isIterator && len(orderByFields) > 0 {
+		return nil, merr.WrapErrParameterInvalid("", "",
+			"order_by is not supported when using search iterator")
+	}
+
 	return &SearchInfo{
 		planInfo: &planpb.QueryInfo{
 			Topk:                 queryTopK,
@@ -329,9 +579,10 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			JsonType:             jsonType,
 			StrictCast:           strictCast,
 		},
-		offset:       offset,
-		isIterator:   isIterator,
-		collectionID: collectionId,
+		offset:        offset,
+		isIterator:    isIterator,
+		collectionID:  collectionId,
+		orderByFields: orderByFields,
 	}, nil
 }
 
