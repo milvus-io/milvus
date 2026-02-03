@@ -34,6 +34,8 @@ func (v *visitor) visitExpr(expr *planpb.Expr) interface{} {
 		return v.visitUnaryExpr(real.UnaryExpr)
 	case *planpb.Expr_TermExpr:
 		return v.visitTermExpr(real.TermExpr)
+	case *planpb.Expr_ValueExpr:
+		return v.visitValueExpr(real.ValueExpr, expr)
 	// no optimization for other types
 	default:
 		return expr
@@ -104,6 +106,20 @@ func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
 func (v *visitor) visitTermExpr(expr *planpb.TermExpr) interface{} {
 	sortTermValues(expr)
 	return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: expr}}
+}
+
+// visitValueExpr converts constant boolean ValueExpr to AlwaysTrueExpr/AlwaysFalseExpr.
+// This handles cases like "1==1" which the parser constant-folds into ValueExpr(bool=true),
+// normalizing them to the canonical AlwaysTrueExpr/AlwaysFalseExpr representation.
+func (v *visitor) visitValueExpr(expr *planpb.ValueExpr, original *planpb.Expr) interface{} {
+	val := expr.GetValue()
+	if boolVal, ok := val.GetVal().(*planpb.GenericValue_BoolVal); ok {
+		if boolVal.BoolVal {
+			return newAlwaysTrueExpr()
+		}
+		return newAlwaysFalseExpr()
+	}
+	return original
 }
 
 func flattenOr(a, b *planpb.Expr) []*planpb.Expr {

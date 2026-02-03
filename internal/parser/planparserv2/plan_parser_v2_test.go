@@ -2477,3 +2477,139 @@ func TestExpr_GISFunctionsInvalidParameterTypes(t *testing.T) {
 		assertInvalidExpr(t, schema, expr)
 	}
 }
+
+// TestExpr_BooleanLiteral verifies how standalone "true"/"false" literals
+// are parsed by the proxy expression parser.
+//
+// Key behavior:
+//   - Standalone "true"/"false" are parsed into ValueExpr(BoolVal) with nodeDependent=true
+//   - Because nodeDependent=true, canBeExecuted() returns false
+//   - Therefore ParseExpr rejects them with "predicate is not a boolean expression"
+//   - But combined expressions like "BoolField == true" or "1==1" work fine
+//   - After rewriting, "1==1" becomes AlwaysTrueExpr, "1==2" becomes AlwaysFalseExpr
+func TestExpr_BooleanLiteral(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	// Case 1: standalone "true" / "false" should fail ParseExpr
+	// because VisitBoolean sets nodeDependent=true, and canBeExecuted requires nodeDependent=false
+	standaloneBoolExprs := []string{
+		"true",
+		"false",
+		"True",
+		"False",
+		"TRUE",
+		"FALSE",
+	}
+	for _, exprStr := range standaloneBoolExprs {
+		expr, err := ParseExpr(helper, exprStr, nil)
+		assert.Error(t, err, "standalone %q should fail", exprStr)
+		assert.Nil(t, expr, "standalone %q should return nil expr", exprStr)
+		assert.Contains(t, err.Error(), "predicate is not a boolean expression",
+			"standalone %q error message mismatch", exprStr)
+	}
+
+	// Case 2: verify that handleExpr (internal) does parse them into ValueExpr with Bool
+	// This shows the ANTLR + visitor layer works, but the outer canBeExecuted gate blocks it
+	for _, exprStr := range []string{"true", "false"} {
+		ret := handleExpr(helper, exprStr)
+		ewt, ok := ret.(*ExprWithType)
+		require.True(t, ok, "handleExpr(%q) should return *ExprWithType", exprStr)
+		assert.Equal(t, schemapb.DataType_Bool, ewt.dataType)
+		assert.True(t, ewt.nodeDependent, "boolean literal should be nodeDependent")
+
+		ve := ewt.expr.GetValueExpr()
+		require.NotNil(t, ve, "should be ValueExpr for %q", exprStr)
+		if exprStr == "true" {
+			assert.True(t, ve.GetValue().GetBoolVal())
+		} else {
+			assert.False(t, ve.GetValue().GetBoolVal())
+		}
+	}
+
+	// Case 3: boolean literals in valid combined expressions
+	// These all produce executable boolean predicates
+	validBoolExprs := []string{
+		"BoolField == true",
+		"BoolField == false",
+		"BoolField != true",
+		"BoolField != false",
+		"BoolField in [true, false]",
+	}
+	for _, exprStr := range validBoolExprs {
+		assertValidExpr(t, helper, exprStr)
+	}
+
+	// Case 4: constant-folded expressions become AlwaysTrueExpr / AlwaysFalseExpr
+	// "1==1" constant-folds to ValueExpr(true), then rewriter converts to AlwaysTrueExpr
+	exprTrue, err := ParseExpr(helper, "1==1", nil)
+	require.NoError(t, err)
+	assert.NotNil(t, exprTrue.GetAlwaysTrueExpr(),
+		"1==1 should be rewritten to AlwaysTrueExpr")
+
+	// "1==2" constant-folds to ValueExpr(false), then rewriter converts to AlwaysFalseExpr
+	// AlwaysFalseExpr is represented as UnaryExpr(Not, AlwaysTrueExpr)
+	exprFalse, err := ParseExpr(helper, "1==2", nil)
+	require.NoError(t, err)
+	ue := exprFalse.GetUnaryExpr()
+	require.NotNil(t, ue, "1==2 should be rewritten to UnaryExpr(Not, AlwaysTrueExpr)")
+	assert.Equal(t, planpb.UnaryExpr_Not, ue.GetOp())
+	assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
+
+	// Case 5: empty expression becomes AlwaysTrueExpr (special case in handleExprInternal)
+	exprEmpty, err := ParseExpr(helper, "", nil)
+	require.NoError(t, err)
+	assert.NotNil(t, exprEmpty.GetAlwaysTrueExpr(),
+		"empty expression should be AlwaysTrueExpr")
+
+	// Case 6: "true and false" / "true or false" — two boolean literals connected by logical operators
+	// Both sides are GenericValue (from VisitBoolean), so VisitLogicalAnd calls And() which
+	// constant-folds to ValueExpr(BoolVal = true && false = false) with nodeDependent=false (default).
+	// Since nodeDependent=false, canBeExecuted() passes, then rewriter converts to AlwaysFalseExpr.
+	t.Run("true_and_false", func(t *testing.T) {
+		expr, err := ParseExpr(helper, "true and false", nil)
+		require.NoError(t, err, "\"true and false\" should be valid")
+		// And(true, false) = false → rewriter → AlwaysFalseExpr = UnaryExpr(Not, AlwaysTrueExpr)
+		ue := expr.GetUnaryExpr()
+		require.NotNil(t, ue, "should be AlwaysFalseExpr (UnaryExpr Not)")
+		assert.Equal(t, planpb.UnaryExpr_Not, ue.GetOp())
+		assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
+	})
+
+	t.Run("true_and_true", func(t *testing.T) {
+		expr, err := ParseExpr(helper, "true and true", nil)
+		require.NoError(t, err, "\"true and true\" should be valid")
+		// And(true, true) = true → rewriter → AlwaysTrueExpr
+		assert.NotNil(t, expr.GetAlwaysTrueExpr(),
+			"\"true and true\" should become AlwaysTrueExpr")
+	})
+
+	t.Run("true_or_false", func(t *testing.T) {
+		expr, err := ParseExpr(helper, "true or false", nil)
+		require.NoError(t, err, "\"true or false\" should be valid")
+		// Or(true, false) = true → rewriter → AlwaysTrueExpr
+		assert.NotNil(t, expr.GetAlwaysTrueExpr(),
+			"\"true or false\" should become AlwaysTrueExpr")
+	})
+
+	t.Run("false_or_false", func(t *testing.T) {
+		expr, err := ParseExpr(helper, "false or false", nil)
+		require.NoError(t, err, "\"false or false\" should be valid")
+		// Or(false, false) = false → rewriter → AlwaysFalseExpr
+		ue := expr.GetUnaryExpr()
+		require.NotNil(t, ue, "should be AlwaysFalseExpr")
+		assert.Equal(t, planpb.UnaryExpr_Not, ue.GetOp())
+		assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
+	})
+
+	t.Run("false_and_false", func(t *testing.T) {
+		expr, err := ParseExpr(helper, "false and false", nil)
+		require.NoError(t, err, "\"false and false\" should be valid")
+		// And(false, false) = false → rewriter → AlwaysFalseExpr
+		ue := expr.GetUnaryExpr()
+		require.NotNil(t, ue, "should be AlwaysFalseExpr")
+		assert.Equal(t, planpb.UnaryExpr_Not, ue.GetOp())
+		assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
+	})
+}
