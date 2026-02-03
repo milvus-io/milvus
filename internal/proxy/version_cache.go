@@ -18,6 +18,14 @@ package proxy
 
 import "sync"
 
+// EntryState represents the state of a cache entry.
+type EntryState int
+
+const (
+	EntryStateActive EntryState = iota
+	EntryStateStale
+)
+
 type VersionTable[K comparable, V any] struct {
 	entries map[K]*VersionEntry[K, V]
 }
@@ -32,6 +40,7 @@ type VersionEntry[key comparable, V any] struct {
 	key     key
 	value   V
 	version uint64
+	state   EntryState
 }
 
 func (t *VersionTable[K, V]) Lookup(key K) (*VersionEntry[K, V], bool) {
@@ -49,6 +58,7 @@ func (t *VersionTable[K, V]) Insert(key K, value V, version uint64) *VersionEntr
 			key:     key,
 			value:   value,
 			version: version,
+			state:   EntryStateActive,
 		}
 		t.entries[key] = newEntry
 		return newEntry
@@ -58,6 +68,17 @@ func (t *VersionTable[K, V]) Insert(key K, value V, version uint64) *VersionEntr
 
 func (t *VersionTable[K, V]) Erase(key K) {
 	delete(t.entries, key)
+}
+
+func (t *VersionTable[K, V]) Stale(key K, version uint64) {
+	var v V
+	newEntry := &VersionEntry[K, V]{
+		key:     key,
+		value:   v,
+		version: version,
+		state:   EntryStateStale,
+	}
+	t.entries[key] = newEntry
 }
 
 type RefCount[K comparable] map[K]uint64
@@ -132,26 +153,46 @@ func (c *VersionCache[K, V]) Release(entry *VersionEntry[K, V]) {
 	c.refs.Dec(entry.key)
 }
 
-// TryErase erases the entry from the cache if the reference count is 0 and returns true.
-// If the reference count is not 0, it returns false.
-func (c *VersionCache[K, V]) TryErase(key K) bool {
+// Stale marks the entry as stale or erases it if the reference count is 0.
+func (c *VersionCache[K, V]) Stale(key K, version uint64) {
 	c.Lock()
 	defer c.Unlock()
+
 	if c.refs.Count(key) == 0 {
 		c.table.Erase(key)
 		c.refs.Erase(key)
-		return true
+	} else {
+		c.table.Stale(key, version)
 	}
-	return false
 }
 
-// Prune erases all entries with reference count 0.
+// StaleIf marks entries as stale or erases them based on the predicate.
+// For each entry where predicate returns true:
+//   - if ref count is 0, erase it directly
+//   - otherwise, mark it as Stale
+func (c *VersionCache[K, V]) StaleIf(predicate func(K) bool, version uint64) {
+	c.Lock()
+	defer c.Unlock()
+
+	for key := range c.table.entries {
+		if predicate(key) {
+			if c.refs.Count(key) == 0 {
+				c.table.Erase(key)
+				c.refs.Erase(key)
+			} else {
+				c.table.Stale(key, version)
+			}
+		}
+	}
+}
+
+// Prune erases all entries that are stale and have reference count 0.
 // Users should call this function if they care about memory usage.
 func (c *VersionCache[K, V]) Prune() {
 	c.Lock()
 	defer c.Unlock()
-	for key := range c.refs {
-		if c.refs.Count(key) == 0 {
+	for key, entry := range c.table.entries {
+		if c.refs.Count(key) == 0 && entry.state == EntryStateStale {
 			c.table.Erase(key)
 			c.refs.Erase(key)
 		}
