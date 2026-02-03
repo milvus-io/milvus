@@ -93,6 +93,7 @@ func (suite *ReplicaObserverSuite) SetupTest() {
 
 	suite.distMgr = meta.NewDistributionManager(suite.nodeMgr)
 	suite.targetMgr = meta.NewMockTargetManager(suite.T())
+	suite.targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, mock.Anything, mock.Anything).Return(map[string]*meta.DmChannel{}).Maybe()
 	suite.observer = NewReplicaObserver(suite.meta, suite.distMgr, suite.targetMgr)
 	suite.observer.Start()
 	suite.collectionID = int64(1000)
