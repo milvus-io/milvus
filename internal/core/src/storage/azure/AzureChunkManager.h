@@ -49,7 +49,7 @@ ThrowAzureError(const std::string& func,
                 Args&&... args) {
     std::string error_message =
         AzureErrorMessage(func, err, fmt_string, args...);
-    LOG_WARN(error_message);
+    LOG_WARN("{}", error_message);
     throw SegcoreError(S3Error, error_message);
 }
 
