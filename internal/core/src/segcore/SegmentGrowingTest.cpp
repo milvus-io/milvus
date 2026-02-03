@@ -11,6 +11,9 @@
 
 #include <gtest/gtest.h>
 
+#include <thread>
+#include <vector>
+
 #include "common/Types.h"
 #include "knowhere/comp/index_param.h"
 #include "segcore/SegmentGrowing.h"
@@ -641,4 +644,225 @@ TEST(GrowingTest, SearchVectorArray) {
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     auto sr_parsed = SearchResultToJson(*sr);
     std::cout << sr_parsed.dump(1) << std::endl;
+}
+
+// Resource tracking tests for growing segments
+TEST(Growing, EmptySegmentResourceEstimation) {
+    auto schema = std::make_shared<Schema>();
+    auto dim = 128;
+    auto metric_type = knowhere::metric::L2;
+    auto vec_fid =
+        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    // Empty segment should have zero resource usage
+    auto resource = segment_impl->EstimateSegmentResourceUsage();
+    EXPECT_EQ(resource.memory_bytes, 0);
+    EXPECT_EQ(resource.file_bytes, 0);
+}
+
+TEST(Growing, ResourceEstimationAfterInsert) {
+    auto schema = std::make_shared<Schema>();
+    auto dim = 128;
+    auto metric_type = knowhere::metric::L2;
+    auto vec_fid =
+        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    // Insert some data
+    const int64_t N = 1000;
+    auto dataset = DataGen(schema, N);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    // After insert, resource usage should be positive
+    auto resource = segment_impl->EstimateSegmentResourceUsage();
+    EXPECT_GT(resource.memory_bytes, 0);
+
+    // Memory should include at least:
+    // - Vector data: N * dim * sizeof(float) = 1000 * 128 * 4 = 512000 bytes
+    // - Timestamps: N * sizeof(Timestamp) = 1000 * 8 = 8000 bytes
+    // - PK field: N * sizeof(int64_t) = 1000 * 8 = 8000 bytes
+    // Plus safety margin of 1.2x
+    int64_t expected_min_size =
+        N * dim * sizeof(float) + N * sizeof(Timestamp) + N * sizeof(int64_t);
+    EXPECT_GE(resource.memory_bytes, expected_min_size);
+}
+
+TEST(Growing, ResourceIncrementsWithMoreInserts) {
+    auto schema = std::make_shared<Schema>();
+    auto dim = 128;
+    auto metric_type = knowhere::metric::L2;
+    auto vec_fid =
+        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    // First insert
+    const int64_t N1 = 500;
+    auto dataset1 = DataGen(schema, N1, 42, 0);
+    segment->PreInsert(N1);
+    segment->Insert(0,
+                    N1,
+                    dataset1.row_ids_.data(),
+                    dataset1.timestamps_.data(),
+                    dataset1.raw_);
+    auto resource1 = segment_impl->EstimateSegmentResourceUsage();
+
+    // Second insert
+    const int64_t N2 = 500;
+    auto dataset2 = DataGen(schema, N2, 43, N1);
+    segment->PreInsert(N2);
+    segment->Insert(N1,
+                    N2,
+                    dataset2.row_ids_.data(),
+                    dataset2.timestamps_.data(),
+                    dataset2.raw_);
+    auto resource2 = segment_impl->EstimateSegmentResourceUsage();
+
+    // Resource should increase after second insert
+    EXPECT_GT(resource2.memory_bytes, resource1.memory_bytes);
+}
+
+TEST(Growing, ResourceTrackingAfterDelete) {
+    auto schema = std::make_shared<Schema>();
+    auto dim = 64;
+    auto metric_type = knowhere::metric::L2;
+    auto vec_fid =
+        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    // Insert data first
+    const int64_t N = 100;
+    auto dataset = DataGen(schema, N);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    auto resource_before_delete = segment_impl->EstimateSegmentResourceUsage();
+    EXPECT_GT(resource_before_delete.memory_bytes, 0);
+
+    // Delete some rows
+    auto pks = dataset.get_col<int64_t>(pk_fid);
+    auto del_pks = GenPKs(pks.begin(), pks.begin() + 5);
+    auto del_tss = GenTss(5, N);
+    auto status = segment->Delete(5, del_pks.get(), del_tss.data());
+    EXPECT_TRUE(status.ok());
+
+    // Resource estimation should still work after delete
+    auto resource_after_delete = segment_impl->EstimateSegmentResourceUsage();
+    EXPECT_GT(resource_after_delete.memory_bytes, 0);
+}
+
+TEST(Growing, ConcurrentInsertResourceTracking) {
+    auto schema = std::make_shared<Schema>();
+    auto dim = 32;
+    auto metric_type = knowhere::metric::L2;
+    auto vec_fid =
+        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    const int num_threads = 4;
+    const int64_t rows_per_thread = 100;
+    std::vector<std::thread> threads;
+
+    // Reserve space for all rows upfront
+    int64_t total_rows = num_threads * rows_per_thread;
+    segment->PreInsert(total_rows);
+
+    // Concurrent inserts from multiple threads
+    for (int t = 0; t < num_threads; ++t) {
+        threads.emplace_back([&, t]() {
+            auto dataset =
+                DataGen(schema, rows_per_thread, 42 + t, t * rows_per_thread);
+            segment->Insert(t * rows_per_thread,
+                            rows_per_thread,
+                            dataset.row_ids_.data(),
+                            dataset.timestamps_.data(),
+                            dataset.raw_);
+        });
+    }
+
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    // Verify total row count
+    EXPECT_EQ(segment->get_row_count(), total_rows);
+
+    // Verify resource estimation is consistent and positive
+    auto resource = segment_impl->EstimateSegmentResourceUsage();
+    EXPECT_GT(resource.memory_bytes, 0);
+}
+
+TEST(Growing, MultipleFieldsResourceEstimation) {
+    // Create schema with multiple fields
+    auto schema = std::make_shared<Schema>();
+    auto dim = 64;
+    auto metric_type = knowhere::metric::L2;
+    auto vec_fid =
+        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto float_fid = schema->AddDebugField("age", DataType::FLOAT);
+    auto double_fid = schema->AddDebugField("score", DataType::DOUBLE);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    // Insert data
+    const int64_t N = 500;
+    auto dataset = DataGen(schema, N);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    auto resource = segment_impl->EstimateSegmentResourceUsage();
+
+    // Memory should include all fields:
+    // - Vector: N * dim * sizeof(float) = 500 * 64 * 4 = 128000 bytes
+    // - pk (int64): N * 8 = 4000 bytes
+    // - age (float): N * 4 = 2000 bytes
+    // - score (double): N * 8 = 4000 bytes
+    // - Timestamps: N * 8 = 4000 bytes
+    // Plus safety margin
+    int64_t min_expected = N * dim * sizeof(float) + N * sizeof(int64_t) +
+                           N * sizeof(float) + N * sizeof(double) +
+                           N * sizeof(Timestamp);
+    EXPECT_GE(resource.memory_bytes, min_expected);
 }

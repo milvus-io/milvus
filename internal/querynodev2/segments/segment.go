@@ -499,6 +499,20 @@ func (s *LocalSegment) LastDeltaTimestamp() uint64 {
 	return s.lastDeltaTimestamp.Load()
 }
 
+// UpdateBloomFilter updates bloom filter with provided pks and charges resource if BF is newly created.
+// This overrides baseSegment.UpdateBloomFilter to handle resource charging for growing segments.
+func (s *LocalSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
+	if s.skipGrowingBF {
+		return
+	}
+
+	// Update bloom filter (may create new BF if not exist)
+	s.bloomFilterSet.UpdateBloomFilter(pks)
+
+	// Charge bloom filter resource (safe to call multiple times - only charges once)
+	s.bloomFilterSet.Charge()
+}
+
 func (s *LocalSegment) GetIndexByID(indexID int64) *IndexedFieldInfo {
 	info, _ := s.fieldIndexes.Get(indexID)
 	return info
@@ -1434,6 +1448,9 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 	// TODO: disable logical resource handling for now
 	// usage := s.ResourceUsageEstimate()
 	// s.manager.SubLogicalResource(usage)
+
+	// Refund bloom filter resource
+	s.bloomFilterSet.Refund()
 
 	binlogSize := s.binlogSize.Load()
 	if binlogSize > 0 {
