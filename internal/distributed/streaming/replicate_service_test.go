@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/protobuf/proto"
@@ -81,6 +82,141 @@ func TestReplicateService(t *testing.T) {
 		_, err := rs.Append(context.Background(), msg)
 		assert.NoError(t, err)
 	}
+}
+
+func TestReplicateService_GetReplicateConfiguration(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+
+		expectedConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{
+					ClusterId: "primary",
+					ConnectionParam: &commonpb.ConnectionParam{
+						Uri:   "http://primary:19530",
+						Token: "secret-token",
+					},
+					Pchannels: []string{"channel1"},
+				},
+				{
+					ClusterId: "secondary",
+					ConnectionParam: &commonpb.ConnectionParam{
+						Uri:   "http://secondary:19530",
+						Token: "another-secret",
+					},
+					Pchannels: []string{"channel1"},
+				},
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "primary", TargetClusterId: "secondary"},
+			},
+		}
+
+		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(
+			replicateutil.MustNewConfigHelper("secondary", expectedConfig), nil,
+		)
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "secondary",
+				streamingCoordClient: c,
+			},
+		}
+
+		config, err := rs.GetReplicateConfiguration(context.Background())
+		assert.NoError(t, err)
+		assert.NotNil(t, config)
+
+		// Tokens should be sanitized for all clusters
+		assert.Empty(t, config.Clusters[0].ConnectionParam.Token)
+		assert.Empty(t, config.Clusters[1].ConnectionParam.Token)
+		// URIs should be preserved
+		assert.Equal(t, "http://primary:19530", config.Clusters[0].ConnectionParam.Uri)
+		assert.Equal(t, "http://secondary:19530", config.Clusters[1].ConnectionParam.Uri)
+	})
+
+	t.Run("lifetime_closed", func(t *testing.T) {
+		lifetime := typeutil.NewLifetime()
+		lifetime.SetState(typeutil.LifetimeStateStopped)
+		lifetime.Wait()
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime: lifetime,
+			},
+		}
+
+		config, err := rs.GetReplicateConfiguration(context.Background())
+		assert.Error(t, err)
+		assert.Nil(t, config)
+		assert.ErrorIs(t, err, ErrWALAccesserClosed)
+	})
+
+	t.Run("assignment_error", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+
+		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(
+			nil, errors.New("assignment service unavailable"),
+		)
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "secondary",
+				streamingCoordClient: c,
+			},
+		}
+
+		config, err := rs.GetReplicateConfiguration(context.Background())
+		assert.Error(t, err)
+		assert.Nil(t, config)
+		assert.Contains(t, err.Error(), "assignment service unavailable")
+	})
+
+	t.Run("standalone_single_cluster", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+
+		standaloneConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{
+					ClusterId: "standalone",
+					ConnectionParam: &commonpb.ConnectionParam{
+						Uri:   "http://standalone:19530",
+						Token: "standalone-secret",
+					},
+					Pchannels: []string{"ch1"},
+				},
+			},
+		}
+
+		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(
+			replicateutil.MustNewConfigHelper("standalone", standaloneConfig), nil,
+		)
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "standalone",
+				streamingCoordClient: c,
+			},
+		}
+
+		config, err := rs.GetReplicateConfiguration(context.Background())
+		assert.NoError(t, err)
+		assert.NotNil(t, config)
+		assert.Len(t, config.Clusters, 1)
+		assert.Equal(t, "standalone", config.Clusters[0].ClusterId)
+		assert.Empty(t, config.Clusters[0].ConnectionParam.Token)
+		assert.Equal(t, "http://standalone:19530", config.Clusters[0].ConnectionParam.Uri)
+		assert.Empty(t, config.CrossClusterTopology)
+	})
 }
 
 func createReplicateCreateCollectionMessages() []message.ReplicateMutableMessage {
