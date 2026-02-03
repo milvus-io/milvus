@@ -1279,3 +1279,15 @@ func (s *mixCoordImpl) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.
 func (s *mixCoordImpl) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
 	return s.datacoordServer.ListSnapshots(ctx, req)
 }
+
+func (s *mixCoordImpl) RefreshExternalCollection(ctx context.Context, req *datapb.RefreshExternalCollectionRequest) (*datapb.RefreshExternalCollectionResponse, error) {
+	return s.datacoordServer.RefreshExternalCollection(ctx, req)
+}
+
+func (s *mixCoordImpl) GetRefreshExternalCollectionProgress(ctx context.Context, req *datapb.GetRefreshExternalCollectionProgressRequest) (*datapb.GetRefreshExternalCollectionProgressResponse, error) {
+	return s.datacoordServer.GetRefreshExternalCollectionProgress(ctx, req)
+}
+
+func (s *mixCoordImpl) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+	return s.datacoordServer.ListRefreshExternalCollectionJobs(ctx, req)
+}

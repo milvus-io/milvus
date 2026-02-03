@@ -102,6 +102,8 @@ func TestDatabaseInterceptor(t *testing.T) {
 			&milvuspb.SelectGrantRequest{Entity: &milvuspb.GrantEntity{}},
 			&milvuspb.ManualCompactionRequest{},
 			&milvuspb.RunAnalyzerRequest{},
+			&milvuspb.RefreshExternalCollectionRequest{},
+			&milvuspb.ListRefreshExternalCollectionJobsRequest{},
 		}
 
 		md := metadata.Pairs(util.HeaderDBName, "db")
