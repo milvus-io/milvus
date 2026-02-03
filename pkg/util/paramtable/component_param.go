@@ -2653,7 +2653,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.Balancer = ParamItem{
 		Key:          "queryCoord.balancer",
 		Version:      "2.0.0",
-		DefaultValue: "ScoreBasedBalancer",
+		DefaultValue: "ChannelLevelScoreBalancer",
 		PanicIfEmpty: false,
 		Doc:          "auto balancer used for segments on queryNodes",
 		Export:       true,
@@ -3119,7 +3119,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.ChannelExclusiveNodeFactor = ParamItem{
 		Key:          "queryCoord.channelExclusiveNodeFactor",
 		Version:      "2.4.2",
-		DefaultValue: "4",
+		DefaultValue: "1",
 		Doc:          "the least node number for enable channel's exclusive mode",
 		Export:       true,
 	}
