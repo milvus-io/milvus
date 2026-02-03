@@ -272,6 +272,15 @@ if ( BUILD_UNIT_TEST STREQUAL "ON" AND BUILD_COVERAGE STREQUAL "ON" )
                         "-fprofile-arcs"
                         "-ftest-coverage"
                         )
+    # Also add coverage flags to linker (required on macOS with Clang)
+    append_flags( CMAKE_EXE_LINKER_FLAGS
+                  FLAGS
+                        "--coverage"
+                        )
+    append_flags( CMAKE_SHARED_LINKER_FLAGS
+                  FLAGS
+                        "--coverage"
+                        )
 endif ()
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )

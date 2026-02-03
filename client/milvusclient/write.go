@@ -19,6 +19,7 @@ package milvusclient
 import (
 	"context"
 	"math"
+	"time"
 
 	"google.golang.org/grpc"
 
@@ -33,8 +34,10 @@ type InsertResult struct {
 }
 
 func (c *Client) Insert(ctx context.Context, option InsertOption, callOptions ...grpc.CallOption) (InsertResult, error) {
+	startTime := time.Now()
+	collectionName := option.CollectionName()
 	result := InsertResult{}
-	err := c.retryIfSchemaError(ctx, option.CollectionName(), func(ctx context.Context) (uint64, error) {
+	err := c.retryIfSchemaError(ctx, collectionName, func(ctx context.Context) (uint64, error) {
 		collection, err := c.getCollection(ctx, option.CollectionName())
 		if err != nil {
 			return math.MaxUint64, err
@@ -64,6 +67,7 @@ func (c *Client) Insert(ctx context.Context, option InsertOption, callOptions ..
 			return option.WriteBackPKs(collection.Schema, result.IDs)
 		})
 	})
+	c.recordOperation("Insert", collectionName, startTime, err)
 	return result, err
 }
 
@@ -72,10 +76,16 @@ type DeleteResult struct {
 }
 
 func (c *Client) Delete(ctx context.Context, option DeleteOption, callOptions ...grpc.CallOption) (DeleteResult, error) {
+	startTime := time.Now()
 	req := option.Request()
-
+	collectionName := req.GetCollectionName()
 	result := DeleteResult{}
-	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	var err error
+	defer func() {
+		c.recordOperation("Delete", collectionName, startTime, err)
+	}()
+
+	err = c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.Delete(ctx, req, callOptions...)
 		if err = merr.CheckRPCCall(resp, err); err != nil {
 			return err
@@ -92,9 +102,11 @@ type UpsertResult struct {
 }
 
 func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ...grpc.CallOption) (UpsertResult, error) {
+	startTime := time.Now()
+	collectionName := option.CollectionName()
 	result := UpsertResult{}
-	err := c.retryIfSchemaError(ctx, option.CollectionName(), func(ctx context.Context) (uint64, error) {
-		collection, err := c.getCollection(ctx, option.CollectionName())
+	err := c.retryIfSchemaError(ctx, collectionName, func(ctx context.Context) (uint64, error) {
+		collection, err := c.getCollection(ctx, collectionName)
 		if err != nil {
 			return math.MaxUint64, err
 		}
@@ -116,5 +128,6 @@ func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ..
 			return nil
 		})
 	})
+	c.recordOperation("Upsert", collectionName, startTime, err)
 	return result, err
 }
