@@ -16,6 +16,9 @@
 
 #pragma once
 
+#include <cstddef>
+#include <string>
+
 #include "common/Types.h"
 
 namespace milvus {

@@ -11,8 +11,14 @@
 
 #pragma once
 
+#include <stdint.h>
+#include <cstddef>
+
 #include "common/BitsetView.h"
 #include "common/OpContext.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Types.h"
 #include "segcore/SegmentGrowingImpl.h"
 
 namespace milvus::query {

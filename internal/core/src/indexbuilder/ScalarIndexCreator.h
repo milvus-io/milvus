@@ -11,12 +11,16 @@
 
 #pragma once
 
-#include "indexbuilder/IndexCreatorBase.h"
-#include <string>
+#include <stdint.h>
 #include <memory>
-#include <common/CDataType.h>
+#include <string>
+
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
 #include "index/Index.h"
-#include "index/ScalarIndex.h"
+#include "index/IndexStats.h"
+#include "indexbuilder/IndexCreatorBase.h"
+#include "storage/FileManager.h"
 
 namespace milvus::indexbuilder {
 

@@ -17,10 +17,8 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
-#include <shared_mutex>
+#include <string>
 
-#include "storage/ChunkManager.h"
 #include "storage/LocalChunkManager.h"
 
 namespace milvus::storage {

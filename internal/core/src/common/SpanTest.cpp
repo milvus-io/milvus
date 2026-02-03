@@ -9,13 +9,28 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
 
+#include "cachinglayer/CacheSlot.h"
+#include "common/IndexMeta.h"
+#include "common/Schema.h"
+#include "common/Span.h"
 #include "common/Types.h"
 #include "common/Utils.h"
-#include "common/Span.h"
 #include "common/VectorTrait.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
+#include "query/PlanNode.h"
+#include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
+#include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
 
 const int64_t ROW_COUNT = 100 * 1000;

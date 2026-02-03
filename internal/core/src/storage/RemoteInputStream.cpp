@@ -1,5 +1,14 @@
 #include <unistd.h>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <utility>
+#include <vector>
+
 #include "RemoteInputStream.h"
+#include "arrow/io/interfaces.h"
+#include "arrow/result.h"
+#include "arrow/status.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 

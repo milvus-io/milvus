@@ -10,14 +10,33 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <stddef.h>
+#include <cstdint>
+#include <iostream>
+#include <memory>
+#include <string>
+#include <vector>
 
+#include "common/EasyAssert.h"
+#include "common/QueryResult.h"
+#include "common/Types.h"
+#include "common/VectorTrait.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "segcore/Collection.h"
+#include "segcore/ReduceStructure.h"
 #include "segcore/collection_c.h"
-#include "segcore/segment_c.h"
+#include "segcore/reduce/Reduce.h"
 #include "segcore/reduce_c.h"
-
+#include "segcore/segment_c.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
+#include "test_utils/PbHelper.h"
 #include "test_utils/c_api_test_utils.h"
 #include "test_utils/storage_test_utils.h"
-#include "test_utils/GenExprProto.h"
 
 using namespace milvus;
 using namespace milvus::segcore;

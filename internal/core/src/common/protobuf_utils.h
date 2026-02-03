@@ -16,14 +16,20 @@
 
 #pragma once
 
-#include <string>
+#include <ctype.h>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
 #include <map>
 #include <optional>
-#include <google/protobuf/text_format.h>
-#include <google/protobuf/repeated_field.h>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <utility>
 
-#include "pb/schema.pb.h"
 #include "common/EasyAssert.h"
+#include "pb/common.pb.h"
 
 using std::string;
 
@@ -92,6 +98,7 @@ GetStringFromRepeatedKVs(
 }
 
 class ProtoLayout;
+
 using ProtoLayoutPtr = std::unique_ptr<ProtoLayout>;
 
 // ProtoLayout is a c++ type for esaier resource management at C-side.

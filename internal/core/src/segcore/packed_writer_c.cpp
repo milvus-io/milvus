@@ -12,28 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <arrow/c/bridge.h>
+#include <arrow/filesystem/filesystem.h>
+#include <arrow/record_batch.h>
+#include <exception>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "arrow/array/array_base.h"
+#include "arrow/c/abi.h"
+#include "arrow/result.h"
+#include "arrow/status.h"
+#include "arrow/type.h"
+#include "common/EasyAssert.h"
 #include "common/common_type_c.h"
+#include "common/type_c.h"
+#include "milvus-storage/common/config.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/packed/writer.h"
+#include "monitor/scope_metric.h"
 #include "parquet/encryption/encryption.h"
 #include "parquet/properties.h"
 #include "parquet/types.h"
 #include "segcore/column_groups_c.h"
 #include "segcore/packed_writer_c.h"
-#include "milvus-storage/packed/writer.h"
-#include "milvus-storage/common/config.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "storage/PluginLoader.h"
 #include "storage/KeyRetriever.h"
+#include "storage/PluginLoader.h"
 #include "storage/StorageV2FSCache.h"
-
-#include <arrow/c/bridge.h>
-#include <arrow/filesystem/filesystem.h>
-#include <arrow/array.h>
-#include <arrow/record_batch.h>
-#include <arrow/memory_pool.h>
-#include <arrow/device.h>
-#include "common/EasyAssert.h"
-#include "common/type_c.h"
-#include "monitor/scope_metric.h"
+#include "storage/plugin/PluginInterface.h"
 
 CStatus
 NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,

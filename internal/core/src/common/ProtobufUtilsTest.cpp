@@ -10,8 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <string>
 
 #include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
 #include "pb/cgo_msg.pb.h"
 
 TEST(Util_Common, ProtoLayout) {

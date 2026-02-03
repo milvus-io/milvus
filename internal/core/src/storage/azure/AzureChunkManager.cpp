@@ -16,12 +16,16 @@
 
 #include <chrono>
 #include <iostream>
-#include <sstream>
+
+#include "AzureChunkManager.h"
 #include "common/Consts.h"
-#include "common/EasyAssert.h"
+#include "fmt/core.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
-#include "AzureChunkManager.h"
+#include "prometheus/counter.h"
+#include "prometheus/histogram.h"
+#include "storage/Types.h"
+#include "storage/azure/AzureBlobChunkManager.h"
 
 namespace milvus {
 namespace storage {

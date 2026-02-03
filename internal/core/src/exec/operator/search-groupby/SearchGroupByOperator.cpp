@@ -14,11 +14,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include "SearchGroupByOperator.h"
-#include "common/Consts.h"
+
+#include <algorithm>
+#include <cstdint>
+#include <tuple>
+#include <variant>
+
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "fmt/core.h"
 #include "query/Utils.h"
-#include "common/JsonUtils.h"
 
 namespace milvus {
+
 namespace exec {
 
 void

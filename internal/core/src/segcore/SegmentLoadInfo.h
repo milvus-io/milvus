@@ -11,18 +11,27 @@
 
 #pragma once
 
+#include <stddef.h>
+#include <algorithm>
+#include <cstdint>
 #include <map>
-#include <optional>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "NamedType/named_type_impl.hpp"
+#include "NamedType/underlying_functionalities.hpp"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
 #include "milvus-storage/column_groups.h"
+#include "pb/common.pb.h"
 #include "pb/segcore.pb.h"
 #include "segcore/Types.h"
 

@@ -10,13 +10,21 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <stdint.h>
+#include <algorithm>
+#include <memory>
 #include <random>
-#include <vector>
 #include <string>
+#include <vector>
 
-#include "common/VectorArray.h"
-#include "pb/schema.pb.h"
+#include "common/FieldMeta.h"
 #include "common/Schema.h"
+#include "common/Types.h"
+#include "common/VectorArray.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
 
 using namespace milvus;
 

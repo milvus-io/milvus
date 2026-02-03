@@ -8,17 +8,19 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <gtest/gtest.h>
 #include <cstring>
-#include <string>
-#include <vector>
 #include <map>
+#include <string>
+#include <utility>
+#include <vector>
 
-#include "index/json_stats/JsonKeyStats.h"
 #include "common/jsmn.h"
-#include "storage/ChunkManager.h"
-#include "storage/Types.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "index/json_stats/JsonKeyStats.h"
+#include "index/json_stats/utils.h"
 #include "storage/FileManager.h"
+#include "storage/Types.h"
 #include "storage/Util.h"
 
 using milvus::index::JsonKey;

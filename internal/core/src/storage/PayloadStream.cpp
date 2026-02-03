@@ -14,10 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "arrow/api.h"
+#include <string.h>
+#include <cstdint>
 
+#include "arrow/api.h"
 #include "storage/PayloadStream.h"
-#include "common/EasyAssert.h"
 
 namespace milvus::storage {
 

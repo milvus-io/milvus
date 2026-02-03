@@ -9,27 +9,44 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <fcntl.h>
-#include <gtest/gtest.h>
-#include <arrow/buffer.h>
+#include <arrow/api.h>
 #include <arrow/io/memory.h>
+#include <folly/FBVector.h>
+#include <gtest/gtest.h>
 #include <parquet/arrow/reader.h>
-#include <unistd.h>
+#include <simdjson.h>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "boost/filesystem/operations.hpp"
-#include "boost/filesystem/path.hpp"
+#include "common/Array.h"
 #include "common/Chunk.h"
 #include "common/ChunkWriter.h"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
-#include "common/File.h"
-#include "common/Geometry.h"
+#include "common/Json.h"
+#include "common/Span.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/object.h"
+#include "knowhere/sparse_utils.h"
+#include "pb/schema.pb.h"
 #include "storage/Event.h"
+#include "storage/PayloadReader.h"
+#include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"

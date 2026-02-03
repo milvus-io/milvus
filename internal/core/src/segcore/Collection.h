@@ -11,12 +11,15 @@
 
 #pragma once
 
+#include <stdint.h>
 #include <memory>
 #include <shared_mutex>
 #include <string>
+#include <string_view>
 
-#include "common/Schema.h"
 #include "common/IndexMeta.h"
+#include "common/Schema.h"
+#include "pb/schema.pb.h"
 
 namespace milvus::segcore {
 

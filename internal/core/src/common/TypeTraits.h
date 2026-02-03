@@ -22,8 +22,11 @@
 #include "Array.h"
 #include "Types.h"
 #include "VectorArray.h"
+#include "knowhere/operands.h"
 
 namespace milvus {
+
+using SparseValueType = typename knowhere::sparse_u32_f32::ValueType;
 
 template <typename T>
 constexpr bool IsVector = std::is_base_of_v<VectorTrait, T>;

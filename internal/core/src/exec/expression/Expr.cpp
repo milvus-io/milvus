@@ -16,6 +16,12 @@
 
 #include "Expr.h"
 
+#include <atomic>
+#include <chrono>
+#include <memory>
+#include <ratio>
+
+#include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "common/Tracer.h"
 #include "exec/expression/AlwaysTrueExpr.h"
@@ -33,15 +39,18 @@
 #include "exec/expression/MatchExpr.h"
 #include "exec/expression/NullExpr.h"
 #include "exec/expression/TermExpr.h"
-#include "exec/expression/UnaryExpr.h"
-#include "expr/ITypeExpr.h"
-#include "exec/expression/ValueExpr.h"
 #include "exec/expression/TimestamptzArithCompareExpr.h"
+#include "exec/expression/UnaryExpr.h"
+#include "exec/expression/ValueExpr.h"
 #include "expr/ITypeExpr.h"
+#include "glog/logging.h"
+#include "index/SkipIndex.h"
+#include "log/Log.h"
 #include "monitor/Monitor.h"
+#include "pb/plan.pb.h"
+#include "prometheus/histogram.h"
 #include "segcore/Utils.h"
 
-#include <memory>
 namespace milvus {
 namespace exec {
 

@@ -14,11 +14,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "log/Log.h"
+#include <algorithm>
+#include <cstdint>
+#include <exception>
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
+
 #include "common/EasyAssert.h"
 #include "common/LoadInfo.h"
-#include "segcore/load_field_data_c.h"
 #include "monitor/scope_metric.h"
+#include "pb/common.pb.h"
+#include "segcore/load_field_data_c.h"
 
 CStatus
 NewLoadFieldDataInfo(CLoadFieldDataInfo* c_load_field_data_info,

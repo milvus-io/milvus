@@ -3,6 +3,7 @@ package segcore
 /*
 #cgo pkg-config: milvus_core
 
+#include <stdlib.h>
 #include "common/type_c.h"
 #include "segcore/load_field_data_c.h"
 */

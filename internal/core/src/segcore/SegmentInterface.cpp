@@ -11,16 +11,39 @@
 
 #include "SegmentInterface.h"
 
+#include <folly/ExceptionWrapper.h>
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <map>
+#include <ratio>
+#include <type_traits>
+#include <unordered_set>
 
+#include "NamedType/named_type_impl.hpp"
 #include "Utils.h"
+#include "bitset/bitset.h"
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/OpContext.h"
+#include "common/QueryResult.h"
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
-#include "monitor/Monitor.h"
-#include "query/ExecPlanNodeVisitor.h"
+#include "common/Utils.h"
+#include "expr/ITypeExpr.h"
+#include "fmt/core.h"
 #include "futures/Future.h"
+#include "monitor/Monitor.h"
+#include "pb/schema.pb.h"
+#include "plan/PlanNode.h"
+#include "plan/PlanNodeIdGenerator.h"
+#include "prometheus/histogram.h"
+#include "query/ExecPlanNodeVisitor.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "segcore/ConcurrentVector.h"
 
 namespace milvus::segcore {
 

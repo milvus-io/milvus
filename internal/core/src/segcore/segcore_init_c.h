@@ -11,11 +11,10 @@
 
 #pragma once
 
-#include <stdbool.h>
 #include <stdint.h>
-#include "common/type_c.h"
+#include <stdbool.h>
 
-#include "common/type_c.h"
+#include "common/common_type_c.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -11,19 +11,21 @@
 
 #pragma once
 
-#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <vector>
-#include <queue>
+#include <string>
 #include <unordered_set>
+#include <utility>
+#include <variant>
+#include <vector>
 
-#include "common/type_c.h"
 #include "common/QueryResult.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "pb/schema.pb.h"
 #include "query/PlanImpl.h"
 #include "segcore/ReduceStructure.h"
-#include "common/Tracer.h"
-#include "segcore/segment_c.h"
 
 namespace milvus::segcore {
 

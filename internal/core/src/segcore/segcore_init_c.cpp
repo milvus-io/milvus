@@ -9,15 +9,22 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "pthread.h"
+#include <stdlib.h>
+#include <string.h>
 #include <chrono>
+#include <exception>
+#include <mutex>
+#include <string>
+
+#include "cachinglayer/Manager.h"
+#include "common/EasyAssert.h"
 #include "config/ConfigKnowhere.h"
-#include "fmt/core.h"
+#include "glog/logging.h"
 #include "log/Log.h"
+#include "pthread.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/segcore_init_c.h"
-#include "cachinglayer/Manager.h"
-#include "cachinglayer/Utils.h"
+
 namespace milvus::segcore {
 
 std::once_flag close_glog_once;

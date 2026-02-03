@@ -17,9 +17,8 @@
 #include "instruction_set.h"
 
 #include <cpuid.h>
-
 #include <cstring>
-#include <iostream>
+#include <memory>
 
 namespace milvus {
 namespace bitset {

@@ -12,14 +12,23 @@
 #pragma once
 
 #include <fmt/core.h>
+#include <stdint.h>
 #include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
-#include "common/FieldDataInterface.h"
+#include "common/OpContext.h"
+#include "common/Types.h"
 #include "common/Vector.h"
+#include "common/protobuf_utils.h"
+#include "common/type_c.h"
+#include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
+#include "pb/plan.pb.h"
 #include "segcore/SegmentInterface.h"
-#include "common/GeometryCache.h"
 
 namespace milvus {
 namespace exec {

@@ -10,8 +10,18 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "IndexConfigGenerator.h"
+
+#include <assert.h>
+#include <algorithm>
+#include <cstdint>
+#include <map>
+#include <utility>
+
+#include "glog/logging.h"
 #include "knowhere/comp/index_param.h"
 #include "log/Log.h"
+#include "nlohmann/json.hpp"
+#include "segcore/SegcoreConfig.h"
 
 namespace milvus::segcore {
 VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,

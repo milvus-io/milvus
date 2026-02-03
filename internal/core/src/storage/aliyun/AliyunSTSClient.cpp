@@ -14,28 +14,35 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include <aws/core/internal/AWSHttpResourceClient.h>
-#include <aws/core/client/DefaultRetryStrategy.h>
-#include <aws/core/http/HttpClient.h>
 #include <aws/core/http/HttpClientFactory.h>
-#include <aws/core/http/HttpResponse.h>
-#include <aws/core/utils/logging/LogMacros.h>
-#include <aws/core/utils/StringUtils.h>
-#include <aws/core/utils/HashingUtils.h>
 #include <aws/core/platform/Environment.h>
-#include <aws/core/client/AWSError.h>
-#include <aws/core/client/CoreErrors.h>
+#include <aws/core/utils/HashingUtils.h>
+#include <aws/core/utils/StringUtils.h>
+#include <aws/core/utils/logging/LogMacros.h>
 #include <aws/core/utils/xml/XmlSerializer.h>
 #include <limits.h>
-#include <mutex>
-#include <sstream>
+#include <memory>
 #include <random>
+#include <sstream>
+#include <string>
+
 #include "AliyunSTSClient.h"
+#include "aws/core/AmazonWebServiceResult.h"
+#include "aws/core/auth/AWSCredentials.h"
+#include "aws/core/client/AWSErrorMarshaller.h"
+#include "aws/core/client/ClientConfiguration.h"
+#include "aws/core/http/HttpRequest.h"
+#include "aws/core/http/HttpTypes.h"
+#include "aws/core/utils/DateTime.h"
+#include "aws/core/utils/memory/AWSMemory.h"
+#include "aws/core/utils/memory/stl/AWSAllocator.h"
+#include "aws/core/utils/memory/stl/AWSStreamFwd.h"
+#include "aws/core/utils/memory/stl/AWSString.h"
+#include "aws/core/utils/memory/stl/AWSStringStream.h"
+#include "aws/core/utils/stream/ResponseStream.h"
 
 namespace Aws {
 namespace Http {
-class HttpClient;
-class HttpRequest;
 enum class HttpResponseCode;
 }  // namespace Http
 

@@ -9,23 +9,43 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <string.h>
+#include <algorithm>
+#include <cstddef>
+#include <exception>
 #include <map>
+#include <optional>
 #include <string>
-#include <thread>
-#include <unordered_map>
+#include <utility>
+#include <vector>
 
+#include "IndexConfigGenerator.h"
 #include "common/EasyAssert.h"
+#include "common/FieldDataInterface.h"
+#include "common/OffsetMapping.h"
+#include "common/TypeTraits.h"
 #include "common/Types.h"
-#include "fmt/format.h"
+#include "common/Utils.h"
+#include "common/VectorTrait.h"
+#include "common/type_c.h"
+#include "fmt/core.h"
+#include "folly/FBVector.h"
+#include "index/RTreeIndex.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexMarisa.h"
-
-#include "common/SystemProperty.h"
+#include "index/VectorMemIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/dataset.h"
+#include "knowhere/expected.h"
+#include "knowhere/object.h"
+#include "knowhere/sparse_utils.h"
+#include "knowhere/version.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "nlohmann/json.hpp"
+#include "pb/schema.pb.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/FieldIndexing.h"
-#include "index/VectorMemIndex.h"
-#include "IndexConfigGenerator.h"
-#include "index/RTreeIndex.h"
+#include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 

@@ -9,13 +9,43 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
-#include "common/Schema.h"
-#include "query/Plan.h"
+#include <stddef.h>
+#include <stdint.h>
+#include <algorithm>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
-#include "segcore/reduce_c.h"
-#include "test_utils/cachinglayer_test_utils.h"
+#include "NamedType/named_type_impl.hpp"
+#include "common/IndexMeta.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
+#include "common/TracerBase.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
+#include "index/VectorIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "pb/common.pb.h"
+#include "query/Plan.h"
+#include "query/PlanNode.h"
+#include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentGrowing.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/Types.h"
+#include "segcore/storagev1translator/ChunkTranslator.h"
+#include "storage/FileWriter.h"
+#include "storage/Types.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;

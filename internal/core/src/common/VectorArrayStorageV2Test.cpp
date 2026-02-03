@@ -14,40 +14,67 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <arrow/api.h>
+#include <arrow/array/array_base.h>
+#include <arrow/array/builder_base.h>
+#include <arrow/array/builder_binary.h>
+#include <arrow/array/builder_nested.h>
+#include <arrow/array/builder_primitive.h>
+#include <arrow/filesystem/filesystem.h>
+#include <arrow/record_batch.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <parquet/properties.h>
+#include <stddef.h>
 #include <algorithm>
-#include <numeric>
-#include <vector>
+#include <cstdint>
+#include <iostream>
+#include <map>
 #include <memory>
+#include <numeric>
+#include <optional>
 #include <string>
 #include <unordered_map>
-#include <iostream>
+#include <vector>
 
-#include <arrow/record_batch.h>
-#include <arrow/array/builder_binary.h>
-#include <arrow/array/builder_primitive.h>
-
-#include "common/Schema.h"
-#include "common/Types.h"
-#include "common/VectorArray.h"
+#include "NamedType/named_type_impl.hpp"
 #include "common/Consts.h"
-#include "milvus-storage/packed/writer.h"
+#include "common/FieldMeta.h"
+#include "common/LoadInfo.h"
+#include "common/OpContext.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
+#include "index/IndexFactory.h"
+#include "index/IndexInfo.h"
+#include "index/IndexStats.h"
+#include "index/Meta.h"
+#include "index/VectorIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/config.h"
+#include "knowhere/dataset.h"
+#include "knowhere/version.h"
+#include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
-#include "milvus-storage/common/constants.h"
-#include "segcore/SegmentSealed.h"
+#include "milvus-storage/packed/writer.h"
+#include "pb/common.pb.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
-#include "segcore/Types.h"
-#include "test_utils/DataGen.h"
-#include "pb/schema.pb.h"
-#include "knowhere/comp/index_param.h"
-#include "index/IndexFactory.h"
-#include "index/VectorIndex.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/TimestampIndex.h"
+#include "storage/FileManager.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
 #include "storage/Util.h"
-#include "storage/ChunkManager.h"
+#include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
-#include "common/QueryResult.h"
 
 using namespace milvus;
 using namespace milvus::segcore;

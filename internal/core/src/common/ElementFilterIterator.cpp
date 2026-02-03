@@ -16,7 +16,15 @@
 
 #include "ElementFilterIterator.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
+#include "bitset/bitset.h"
+#include "bitset/detail/element_vectorized.h"
 #include "common/EasyAssert.h"
+#include "common/Types.h"
+#include "common/Vector.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
 

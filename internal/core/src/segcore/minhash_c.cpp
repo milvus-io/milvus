@@ -10,11 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "segcore/minhash_c.h"
+
 #include "minhash/MinHashComputer.h"
 #include "minhash/MinHashHook.h"
-#include <vector>
-#include <cstring>
-#include <random>
 
 void
 InitPermutations(int32_t num_hashes,

@@ -15,9 +15,17 @@
 // limitations under the License.
 
 #include "MvccNode.h"
+
+#include <utility>
+#include <vector>
+
 #include "common/Tracer.h"
-#include "fmt/format.h"
-#include <iostream>
+#include "exec/QueryContext.h"
+#include "exec/expression/Utils.h"
+#include "fmt/core.h"
+#include "plan/PlanNode.h"
+#include "segcore/SegmentInterface.h"
+
 namespace milvus {
 namespace exec {
 

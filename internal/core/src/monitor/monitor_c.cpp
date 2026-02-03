@@ -9,10 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <stdlib.h>
 #include <string.h>
+#include <string>
 
-#include "monitor_c.h"
 #include "common/PrometheusClient.h"
+#include "monitor_c.h"
 
 char*
 GetCoreMetrics() {

@@ -15,18 +15,26 @@
 // limitations under the License.
 
 #include "common/FieldData.h"
-#include <cstdint>
 
+#include <simdjson.h>
+#include <string.h>
+#include <cstdint>
+#include <iosfwd>
+#include <optional>
+
+#include "arrow/api.h"
+#include "arrow/array/array_base.h"
 #include "arrow/array/array_binary.h"
-#include "arrow/chunked_array.h"
+#include "arrow/array/array_nested.h"
+#include "arrow/array/array_primitive.h"
 #include "bitset/detail/element_wise.h"
 #include "bitset/detail/popcount.h"
 #include "common/Array.h"
 #include "common/EasyAssert.h"
-#include "common/Exception.h"
 #include "common/FieldDataInterface.h"
+#include "common/Geometry.h"
 #include "common/Json.h"
-#include "index/Utils.h"
+#include "pb/schema.pb.h"
 #include "simdjson/padded_string.h"
 
 namespace milvus {

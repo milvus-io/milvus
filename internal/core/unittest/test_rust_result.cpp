@@ -9,9 +9,13 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <stddef.h>
 #include <cstdint>
+#include <memory>
+
 #include "gtest/gtest.h"
 #include "tantivy-binding.h"
+
 TEST(RustResultTest, TestResult) {
     auto arr = test_enum_with_array();
     auto len = arr.value.rust_array._0.len;

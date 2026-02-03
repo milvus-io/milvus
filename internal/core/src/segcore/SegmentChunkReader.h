@@ -15,11 +15,18 @@
 // limitations under the License.
 #pragma once
 
-#include <fmt/core.h>
-#include <boost/variant.hpp>
+#include <stdint.h>
+#include <functional>
 #include <optional>
+#include <string>
+#include <vector>
 
+#include "boost/variant/variant.hpp"
+#include "cachinglayer/CacheSlot.h"
+#include "common/OpContext.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "index/Index.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus::segcore {

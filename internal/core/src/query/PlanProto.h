@@ -12,13 +12,15 @@
 #pragma once
 
 #include <boost/dynamic_bitset.hpp>
+#include <functional>
 #include <memory>
 
 #include "Plan.h"
 #include "PlanNode.h"
 #include "common/Schema.h"
+#include "expr/ITypeExpr.h"
 #include "pb/plan.pb.h"
-#include "plan/PlanNode.h"
+#include "rescores/Scorer.h"
 
 namespace milvus::query {
 

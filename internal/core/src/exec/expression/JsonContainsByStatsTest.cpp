@@ -9,23 +9,46 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <fmt/core.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <simdjson.h>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "NamedType/named_type_impl.hpp"
+#include "bitset/bitset.h"
+#include "bitset/detail/element_vectorized.h"
+#include "common/Consts.h"
+#include "common/FieldData.h"
+#include "common/Json.h"
 #include "common/Schema.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
 #include "expr/ITypeExpr.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "index/IndexStats.h"
 #include "index/json_stats/JsonKeyStats.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "pb/common.pb.h"
 #include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
-#include "segcore/Types.h"
+#include "segcore/SegmentSealed.h"
+#include "simdjson/padded_string.h"
+#include "storage/ChunkManager.h"
+#include "storage/FileManager.h"
 #include "storage/InsertData.h"
+#include "storage/PayloadReader.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/storage_test_utils.h"
 

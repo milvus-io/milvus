@@ -12,8 +12,7 @@
 #pragma once
 
 #include <stdint.h>
-
-#include "common/type_c.h"
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {

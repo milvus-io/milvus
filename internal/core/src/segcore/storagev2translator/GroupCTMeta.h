@@ -15,6 +15,11 @@
 // limitations under the License.
 #pragma once
 
+#include <algorithm>
+#include <cstdint>
+#include <utility>
+#include <vector>
+
 #include "cachinglayer/Translator.h"
 
 namespace milvus::segcore::storagev2translator {

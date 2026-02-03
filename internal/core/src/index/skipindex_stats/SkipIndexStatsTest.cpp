@@ -14,16 +14,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <memory>
-#include <vector>
-#include <gtest/gtest.h>
 #include <arrow/api.h>
+#include <arrow/array/array_base.h>
+#include <arrow/array/builder_binary.h>
+#include <arrow/array/builder_primitive.h>
+#include <arrow/io/memory.h>
 #include <arrow/type_fwd.h>
-#include <parquet/statistics.h>
+#include <folly/FBVector.h>
+#include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <parquet/arrow/reader.h>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
 
-#include "storage/Util.h"
 #include "common/ChunkWriter.h"
+#include "common/FieldDataInterface.h"
+#include "common/FieldMeta.h"
+#include "common/TracerBase.h"
+#include "common/Types.h"
+#include "gtest/gtest.h"
 #include "index/skipindex_stats/SkipIndexStats.h"
+#include "storage/Event.h"
+#include "storage/PayloadReader.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 
 using namespace milvus;
 using namespace milvus::index;

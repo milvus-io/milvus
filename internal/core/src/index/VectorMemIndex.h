@@ -16,16 +16,28 @@
 
 #pragma once
 
-#include <map>
+#include <stdint.h>
 #include <memory>
-#include <string>
 #include <vector>
-#include <boost/dynamic_bitset.hpp>
+
+#include "common/BitsetView.h"
+#include "common/OpContext.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Tracer.h"
+#include "common/TypeTraits.h"
 #include "common/Types.h"
-#include "knowhere/index/index_factory.h"
-#include "index/VectorIndex.h"
-#include "storage/MemFileManagerImpl.h"
 #include "index/IndexInfo.h"
+#include "index/IndexStats.h"
+#include "index/VectorIndex.h"
+#include "knowhere/config.h"
+#include "knowhere/expected.h"
+#include "knowhere/index/index.h"
+#include "knowhere/index/index_node.h"
+#include "knowhere/object.h"
+#include "knowhere/sparse_utils.h"
+#include "storage/FileManager.h"
+#include "storage/MemFileManagerImpl.h"
 
 namespace milvus::index {
 // TODO : growing index should be isolated from VectorMemIndex

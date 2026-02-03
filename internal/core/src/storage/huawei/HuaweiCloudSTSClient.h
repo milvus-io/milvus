@@ -11,12 +11,17 @@
 
 #pragma once
 
-#include <aws/core/internal/AWSHttpResourceClient.h>
+#include <memory>
+
+#include "aws/core/Core_EXPORTS.h"
+#include "aws/core/auth/AWSCredentials.h"
+#include "aws/core/client/ClientConfiguration.h"
+#include "aws/core/internal/AWSHttpResourceClient.h"
+#include "aws/core/utils/memory/stl/AWSString.h"
+#include "storage/huawei/HuaweiCloudSTSClient.h"
 
 namespace Aws {
 namespace Http {
-class HttpClient;
-class HttpRequest;
 enum class HttpResponseCode;
 }  // namespace Http
 

@@ -10,12 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <google/protobuf/text_format.h>
-
 #include <memory>
 
-#include "pb/schema.pb.h"
-#include "segcore/Collection.h"
+#include "common/EasyAssert.h"
+#include "glog/logging.h"
 #include "log/Log.h"
+#include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
+#include "segcore/Collection.h"
 
 namespace milvus::segcore {
 

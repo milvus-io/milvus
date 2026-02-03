@@ -15,20 +15,27 @@
 // limitations under the License.
 #pragma once
 
-#include <string>
-#include <vector>
+#include <assert.h>
+#include <stdint.h>
+#include <algorithm>
+#include <cstddef>
 #include <memory>
+#include <string>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
+#include "NamedType/underlying_functionalities.hpp"
+#include "arrow/record_batch.h"
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
-#include "milvus-storage/common/metadata.h"
-#include "mmap/Types.h"
-#include "common/Types.h"
+#include "common/FieldMeta.h"
 #include "common/GroupChunk.h"
-#include "parquet/metadata.h"
-#include "segcore/ChunkedSegmentSealedImpl.h"
-#include "segcore/InsertRecord.h"
+#include "common/OpContext.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "milvus-storage/reader.h"
+#include "pb/common.pb.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 
 namespace milvus::segcore::storagev2translator {

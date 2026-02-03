@@ -9,26 +9,38 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <fmt/core.h>
+#include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <initializer_list>
+#include <map>
 #include <memory>
-#include <regex>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <fmt/core.h>
-#include <gtest/gtest.h>
+#include <utility>
+#include <vector>
 
-#include "common/FieldDataInterface.h"
+#include "NamedType/named_type_impl.hpp"
+#include "common/QueryInfo.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/comp/materialized_view.h"
 #include "knowhere/config.h"
+#include "pb/common.pb.h"
+#include "query/ExecPlanNodeVisitor.h"
 #include "query/Plan.h"
 #include "query/PlanImpl.h"
-#include "query/ExecPlanNodeVisitor.h"
+#include "query/PlanNode.h"
 #include "segcore/SegmentSealed.h"
-
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 

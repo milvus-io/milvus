@@ -10,14 +10,22 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include <gmock/gmock.h>
-#include <filesystem>
-#include <fstream>
+#include <stdint.h>
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <memory>
+#include <stdexcept>
+#include <string>
 #include <thread>
+#include <vector>
 
+#include "common/EasyAssert.h"
+#include "gtest/gtest.h"
 #include "storage/FileWriter.h"
 
 using namespace milvus;

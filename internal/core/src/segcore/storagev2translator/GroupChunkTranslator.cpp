@@ -15,33 +15,44 @@
 // limitations under the License.
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 
-#include "common/type_c.h"
-#include "segcore/Utils.h"
-#include "segcore/storagev2translator/GroupCTMeta.h"
-#include "common/GroupChunk.h"
-#include "mmap/Types.h"
-#include "common/Types.h"
-#include "milvus-storage/common/metadata.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "milvus-storage/common/constants.h"
-#include "milvus-storage/format/parquet/file_reader.h"
-#include "storage/ThreadPools.h"
-#include "storage/KeyRetriever.h"
-#include "segcore/memory_planner.h"
-
+#include <assert.h>
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <string>
-#include <unordered_set>
-#include <vector>
+#include <type_traits>
 #include <unordered_map>
-#include <set>
-#include <algorithm>
+#include <vector>
 
-#include "arrow/type.h"
-#include "arrow/type_fwd.h"
+#include "NamedType/named_type_impl.hpp"
+#include "arrow/api.h"
 #include "cachinglayer/Utils.h"
+#include "common/ArrowDataWrapper.h"
+#include "common/Channel.h"
+#include "common/Chunk.h"
 #include "common/ChunkWriter.h"
+#include "common/Common.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/GroupChunk.h"
+#include "common/Types.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
+#include "log/Log.h"
+#include "milvus-storage/common/config.h"
+#include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/metadata.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/format/parquet/file_reader.h"
+#include "mmap/Types.h"
+#include "segcore/InsertRecord.h"
 #include "segcore/Utils.h"
+#include "segcore/memory_planner.h"
+#include "segcore/storagev2translator/GroupCTMeta.h"
+#include "storage/KeyRetriever.h"
 #include "storage/Util.h"
 
 namespace milvus::segcore::storagev2translator {

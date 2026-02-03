@@ -15,10 +15,17 @@
 // limitations under the License.
 
 #include "CompareExpr.h"
-#include "common/Tracer.h"
-#include "fmt/format.h"
+
+#include <functional>
 #include <optional>
+
+#include "boost/variant/detail/apply_visitor_binary.hpp"
+#include "common/Tracer.h"
+#include "fmt/core.h"
+#include "folly/FBVector.h"
+#include "opentelemetry/trace/span.h"
 #include "query/Relational.h"
+
 namespace milvus {
 namespace exec {
 

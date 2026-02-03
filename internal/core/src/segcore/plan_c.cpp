@@ -9,8 +9,24 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "pb/segcore.pb.h"
+#include <string.h>
+#include <exception>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "NamedType/named_type_impl.hpp"
+#include "NamedType/underlying_functionalities.hpp"
+#include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/IndexMeta.h"
+#include "common/QueryInfo.h"
+#include "common/Schema.h"
+#include "common/Types.h"
 #include "query/Plan.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
 #include "segcore/Collection.h"
 #include "segcore/plan_c.h"
 

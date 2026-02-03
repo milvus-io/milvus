@@ -16,44 +16,65 @@
 
 #include "index/VectorMemIndex.h"
 
-#include <unistd.h>
+#include <assert.h>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
+#include <exception>
 #include <filesystem>
+#include <initializer_list>
+#include <iosfwd>
+#include <list>
+#include <map>
 #include <memory>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
+#include "common/BitsetView.h"
 #include "common/Common.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
+#include "common/File.h"
+#include "common/OffsetMapping.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/RangeSearchHelper.h"
+#include "common/Slice.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
-#include "common/type_c.h"
-#include "fmt/format.h"
-
-#include "index/Index.h"
-#include "index/IndexInfo.h"
+#include "common/Utils.h"
+#include "common/VectorArray.h"
+#include "common/VectorTrait.h"
+#include "common/protobuf_utils.h"
+#include "glog/logging.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
-#include "common/EasyAssert.h"
-#include "config/ConfigKnowhere.h"
-#include "knowhere/index/index_factory.h"
+#include "knowhere/binaryset.h"
+#include "knowhere/comp/index_param.h"
 #include "knowhere/comp/time_recorder.h"
-#include "common/BitsetView.h"
-#include "common/Consts.h"
-#include "common/FieldData.h"
-#include "common/File.h"
-#include "common/Slice.h"
-#include "common/RangeSearchHelper.h"
-#include "common/Utils.h"
+#include "knowhere/dataset.h"
+#include "knowhere/index/index_factory.h"
+#include "knowhere/sparse_utils.h"
 #include "log/Log.h"
+#include "monitor/Monitor.h"
+#include "nlohmann/json.hpp"
+#include "opentelemetry/trace/span.h"
+#include "opentelemetry/trace/tracer.h"
+#include "pb/common.pb.h"
+#include "prometheus/histogram.h"
 #include "storage/DataCodec.h"
+#include "storage/FileWriter.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/ThreadPools.h"
-#include "storage/Util.h"
-#include "monitor/Monitor.h"
-
-#include "storage/FileWriter.h"
 
 namespace milvus::index {
 
