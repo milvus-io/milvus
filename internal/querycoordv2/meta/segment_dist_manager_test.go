@@ -99,6 +99,25 @@ func (suite *SegmentDistManagerSuite) TestVersion() {
 	suite.Greater(v2, v1)
 }
 
+func (suite *SegmentDistManagerSuite) TestNodeOffline() {
+	dist := suite.dist
+
+	// Verify node 0 has segments
+	segments := dist.GetByFilter(WithNodeID(suite.nodes[0]))
+	suite.Len(segments, 2)
+
+	// Simulate node offline by calling Update with empty segments
+	dist.Update(suite.nodes[0])
+
+	// Verify node 0's segments are removed
+	segments = dist.GetByFilter(WithNodeID(suite.nodes[0]))
+	suite.Len(segments, 0)
+
+	// Verify other nodes are not affected
+	segments = dist.GetByFilter(WithNodeID(suite.nodes[1]))
+	suite.Len(segments, 4)
+}
+
 func (suite *SegmentDistManagerSuite) TestGetBy() {
 	dist := suite.dist
 	// Test GetByNode
