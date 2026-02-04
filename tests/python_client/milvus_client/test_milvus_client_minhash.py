@@ -755,13 +755,13 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
 
         num_hashes = 128
         dim = num_hashes * 32
-        num_rows = 2000  # Large enough to trigger index search instead of brute force
+        num_rows = 10000  # Use 10K rows to ensure index search path is used
 
         # Generate test data with variations
         base_texts = [
             "the quick brown fox jumps over the lazy dog",
             "the quick brown fox jumps over the lazy cat",
-            "a]fast red wolf leaps across the sleeping hound",
+            "a fast red wolf leaps across the sleeping hound",
             "machine learning algorithms process data efficiently",
             "natural language processing transforms text analysis",
             "deep neural networks recognize complex patterns",
@@ -771,7 +771,7 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
             "software engineering practices improve code quality",
         ]
 
-        # Generate 2000 rows by adding variations
+        # Generate 10K rows by adding variations
         test_texts = []
         for i in range(num_rows):
             base = base_texts[i % len(base_texts)]
