@@ -18,7 +18,9 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
@@ -27,6 +29,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/SystemProperty.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "common/protobuf_utils.h"
@@ -358,6 +361,136 @@ BuildProjectAndAggregationNodes(
         std::move(aggregates),
         agg_sources);
 }
+// Helper function to build ProjectNode for ORDER BY queries.
+// Returns {ProjectNode, deferred_field_ids, pipeline_field_ids}.
+// deferred_field_ids is empty for single-project mode (all columns materialized
+// in the first project), or non-empty for two-project mode (variable-width
+// non-sort output columns deferred until after TopK).
+// pipeline_field_ids mirrors project_ids so FillOrderByResult can stamp
+// the correct field_id on each DataArray produced by the pipeline.
+std::tuple<plan::PlanNodePtr, std::vector<FieldId>, std::vector<FieldId>>
+BuildOrderByProjectNode(const proto::plan::QueryPlanNode& query,
+                        const planpb::PlanNode& plan_node_proto,
+                        const SchemaPtr& schema,
+                        const std::vector<plan::PlanNodePtr>& sources) {
+    std::vector<FieldId> project_ids;
+    std::vector<std::string> project_names;
+    std::vector<milvus::DataType> project_types;
+
+    // Positional layout contract:
+    //   [pk, orderby_fields, non-sort-output-fields]
+    // PK at position 0 for proxy reduce/dedup.
+    // ORDER BY fields at positions 1..N for sorting.
+    // Remaining output fields at positions N+1..M.
+    std::set<int64_t> seen_field_ids;
+    auto pk_field_id = schema->get_primary_field_id();
+    if (pk_field_id.has_value()) {
+        auto pk_fid = pk_field_id.value();
+        seen_field_ids.insert(pk_fid.get());
+        project_ids.push_back(pk_fid);
+        project_names.push_back(schema->GetFieldName(pk_fid));
+        project_types.push_back(schema->GetFieldType(pk_fid));
+    }
+    auto order_by_field_count = query.order_by_fields_size();
+    for (int i = 0; i < order_by_field_count; i++) {
+        auto fid_raw = query.order_by_fields(i).field_id();
+        if (seen_field_ids.insert(fid_raw).second) {
+            auto fid = FieldId(fid_raw);
+            project_ids.push_back(fid);
+            project_names.push_back(schema->GetFieldName(fid));
+            project_types.push_back(schema->GetFieldType(fid));
+        }
+    }
+
+    // Collect non-sort output fields and check for variable-width types.
+    // Skip system fields (RowFieldID, TimestampFieldID) — they are handled
+    // separately in FillTargetEntry and must not enter the pipeline.
+    std::vector<FieldId> non_sort_output_fields;
+    bool has_variable_width = false;
+    for (auto fid_raw : plan_node_proto.output_field_ids()) {
+        if (seen_field_ids.count(fid_raw) == 0) {
+            auto fid = FieldId(fid_raw);
+            if (SystemProperty::Instance().IsSystem(fid)) {
+                continue;
+            }
+            non_sort_output_fields.push_back(fid);
+            if (IsVariableDataType(schema->GetFieldType(fid))) {
+                has_variable_width = true;
+            }
+        }
+    }
+
+    std::vector<FieldId> deferred_field_ids;
+    if (has_variable_width) {
+        // Two-project mode: defer ALL non-sort output fields until after TopK.
+        deferred_field_ids = non_sort_output_fields;
+    } else {
+        // Single-project mode: materialize all columns in the first project.
+        for (auto& fid : non_sort_output_fields) {
+            seen_field_ids.insert(fid.get());
+            project_ids.push_back(fid);
+            project_names.push_back(schema->GetFieldName(fid));
+            project_types.push_back(schema->GetFieldType(fid));
+        }
+    }
+
+    // Always append SegmentOffsetFieldID as the last pipeline column.
+    // FillOrderByResult uses these offsets to populate system fields
+    // (e.g., TimestampField for QN-side pk+ts dedup) and, in two-project
+    // mode, to bulk-fetch deferred fields via late materialization.
+    project_ids.push_back(SegmentOffsetFieldID);
+    project_names.push_back("SegmentOffset");
+    project_types.push_back(DataType::INT64);
+
+    // Save pipeline field IDs before moving project_ids into ProjectNode.
+    auto pipeline_field_ids = project_ids;
+
+    auto plannode =
+        std::make_shared<plan::ProjectNode>(milvus::plan::GetNextPlanNodeId(),
+                                            std::move(project_ids),
+                                            std::move(project_names),
+                                            std::move(project_types),
+                                            sources);
+    return {
+        plannode, std::move(deferred_field_ids), std::move(pipeline_field_ids)};
+}
+
+// Helper function to build OrderByNode with sorting keys.
+plan::PlanNodePtr
+BuildOrderByNode(const proto::plan::QueryPlanNode& query,
+                 const SchemaPtr& schema,
+                 const std::vector<plan::PlanNodePtr>& sources) {
+    auto order_by_field_count = query.order_by_fields_size();
+    std::vector<expr::FieldAccessTypeExprPtr> sorting_keys;
+    std::vector<plan::SortOrder> sorting_orders;
+    sorting_keys.reserve(order_by_field_count);
+    sorting_orders.reserve(order_by_field_count);
+
+    for (int i = 0; i < order_by_field_count; i++) {
+        auto& order_by_field = query.order_by_fields(i);
+        auto input_field_id = order_by_field.field_id();
+        AssertInfo(input_field_id > 0,
+                   "input field_id to order by must be positive, "
+                   "but is:{}",
+                   input_field_id);
+        auto field_id = FieldId(input_field_id);
+        auto field_type = schema->GetFieldType(field_id);
+        auto field_name = schema->GetFieldName(field_id);
+
+        sorting_keys.emplace_back(
+            std::make_shared<const expr::FieldAccessTypeExpr>(
+                field_type, field_name, field_id));
+        sorting_orders.emplace_back(plan::SortOrder(
+            order_by_field.ascending(), order_by_field.nulls_first()));
+    }
+
+    return std::make_shared<plan::OrderByNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::move(sorting_keys),
+        std::move(sorting_orders),
+        query.limit(),
+        sources);
+}
 }  // namespace
 
 std::unique_ptr<VectorPlanNode>
@@ -601,6 +734,28 @@ ProtoParser::RetrievePlanNodeFromProto(
                     std::move(project_id_list),
                     std::move(project_name_list),
                     std::move(project_type_list));
+                sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+            }
+
+            // 4. Build OrderByNode if needed
+            auto order_by_field_count = query.order_by_fields_size();
+            if (order_by_field_count > 0) {
+                // Without aggregation, the source is MvccNode which has
+                // no output_type (bitmap-only). Insert a ProjectNode to
+                // materialize column data so OrderByNode can sort it.
+                bool has_aggregation =
+                    (group_by_field_count > 0 || agg_functions_count > 0);
+                if (!has_aggregation) {
+                    auto [project, deferred, pipeline_ids] =
+                        BuildOrderByProjectNode(
+                            query, plan_node_proto, schema, sources);
+                    plannode = project;
+                    sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+                    node->deferred_field_ids_ = std::move(deferred);
+                    node->pipeline_field_ids_ = std::move(pipeline_ids);
+                }
+                plannode = BuildOrderByNode(query, schema, sources);
+                node->has_order_by_ = true;
             }
             node->plannodes_ = plannode;
             node->limit_ = query.limit();
