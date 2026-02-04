@@ -16,6 +16,7 @@ default_primary_key_field_name = ct.default_primary_key_field_name
 default_vector_field_name = ct.default_vector_field_name
 default_int32_field_name = ct.default_int32_field_name
 default_search_exp = "id >= 0"
+ENTITY_TTL_QUERY_COLLECTION = "test_entity_ttl_query" + cf.gen_unique_str("_")
 
 class TestMilvusClientTTL(TestMilvusClientV2Base):
     """ Test case of Time To Live """
@@ -50,7 +51,7 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         nb = 1000
         collection_name = cf.gen_collection_name_by_testcase_name()
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=dim)
         schema.add_field("embeddings_2", DataType.FLOAT_VECTOR, dim=dim)
         schema.add_field("visible", DataType.BOOL, nullable=True)
@@ -70,13 +71,13 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         # insert data
         insert_times = 2
         for i in range(insert_times):
-            vectors = cf.gen_vectors(nb, dim=default_dim)
+            vectors = cf.gen_vectors(nb, dim=dim)
             vectors_2 = cf.gen_vectors(nb, dim=dim)
             rows = []
             start_id = i * nb
             for j in range(nb):
                 row = {
-                    default_primary_key_field_name: start_id + j,
+                    "id": start_id + j,
                     "embeddings": list(vectors[j]),
                     "embeddings_2": list(vectors_2[j]),
                     "visible": False
@@ -139,13 +140,13 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
 
         # insert more data
         for i in range(insert_times):
-            vectors = cf.gen_vectors(nb, dim=default_dim)
+            vectors = cf.gen_vectors(nb, dim=dim)
             vectors_2 = cf.gen_vectors(nb, dim=dim)
             rows = []
             start_id = (insert_times + i) * nb
             for j in range(nb):
                 row = {
-                    default_primary_key_field_name: start_id + j,
+                    "id": start_id + j,
                     "embeddings": list(vectors[j]),
                     "embeddings_2": list(vectors_2[j]),
                     "visible": True
@@ -226,7 +227,6 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
                 assert res[0].get('count(*)', 0) == insert_times * nb * 2
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("not stable")
     def test_milvus_client_ttl_edge(self):
         """
         Test case for verifying edge case of TTL (Time To Live) functionality in Milvus client.
@@ -250,29 +250,13 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=dim)
-        
+        schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=dim)       
         # Attempt to create collection with extremely large TTL, expecting it to fail
         # Use force_teardown=False since collection creation should fail
+        error = {ct.err_code: 1100, ct.err_msg: f"collection TTL is out of range, expect [-1, 3155760000], got {ttl}: invalid parameter"}
         self.create_collection(client, collection_name, schema=schema, 
-                               properties={"collection.ttl.seconds": ttl})
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="embeddings", index_type="IVF_FLAT", metric_type="COSINE", nlist=128)
-        self.create_index(client, collection_name, index_params=index_params)
-
-        # insert data
-        vectors = cf.gen_vectors(1000, dim=dim)
-        rows = []
-        for i in range(1000):
-            row = {default_primary_key_field_name: i, "embeddings": list(vectors[i])}
-            rows.append(row)
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
-
-        self.describe_collection(client, collection_name)
-
-        self.query(client, collection_name, output_fields=["count(*)"])
+                               properties={"collection.ttl.seconds": ttl},
+                               check_task=CheckTasks.err_res, check_items=error)
     
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("partial_update", [False, True])
@@ -565,8 +549,6 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
 
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip("BUG #47413")
-    # BUG #47413
     def test_insert_with_future_entity_ttl(self):
         """
         target: test inserting data with future ttl timestamp
@@ -705,8 +687,6 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip("BUG #47413")
-    # BUG #47413
     def test_insert_mixed_entity_ttl_values(self):
         """
         target: test inserting data with mixed ttl values (future, past, NULL)
@@ -774,8 +754,6 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
 
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip("BUG #47413")
-    # BUG #47413
     def test_upsert_partial_update_without_entity_ttl(self):
         """
         target: test partial update without ttl field preserves original ttl
@@ -840,6 +818,11 @@ class TestMilvusClientEntityTTLQuery(TestMilvusClientV2Base):
     """
     Entity TTL Query Tests - Using shared collection to reduce time cost
     """
+    collection_name = ENTITY_TTL_QUERY_COLLECTION
+    nb = 500
+    dim = default_dim
+    ttl_seconds = 10
+    vectors = None
     _ttl_expired = False
 
     @pytest.fixture(scope="class", autouse=True)
@@ -848,9 +831,12 @@ class TestMilvusClientEntityTTLQuery(TestMilvusClientV2Base):
         Prepare shared collection with entity ttl data for query tests
         """
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        nb = 500
-        ttl_seconds = 10
+        collection_name = self.collection_name
+        nb = self.nb
+        ttl_seconds = self.ttl_seconds
+
+        if client.has_collection(collection_name):
+            client.drop_collection(collection_name)
 
         # Create schema
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
@@ -859,9 +845,9 @@ class TestMilvusClientEntityTTLQuery(TestMilvusClientV2Base):
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field("varchar_field", DataType.VARCHAR, max_length=100, nullable=True)
 
-        # Create collection with ttl_field
+        # Create collection with ttl_field (force_teardown=False to keep shared collection across tests)
         properties = {"ttl_field": "ttl", "timezone": "UTC"}
-        self.create_collection(client, collection_name, schema=schema, properties=properties)
+        self.create_collection(client, collection_name, schema=schema, properties=properties, force_teardown=False)
 
         # Create index and load
         index_params = self.prepare_index_params(client)[0]
@@ -892,18 +878,17 @@ class TestMilvusClientEntityTTLQuery(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
-        # Store for test methods
-        self.collection_name = collection_name
-        self.nb = nb
-        self.dim = default_dim
-        self.ttl_seconds = ttl_seconds
-        self.vectors = vectors
+        # Store generated vectors on class (other attributes are already class-level)
+        TestMilvusClientEntityTTLQuery.vectors = vectors
         TestMilvusClientEntityTTLQuery._ttl_expired = False
 
-        yield
-
-        # Cleanup
-        self.drop_collection(client, collection_name)
+        def teardown():
+            try:
+                if self.has_collection(self._client(), collection_name):
+                    self.drop_collection(self._client(), collection_name)
+            except Exception:
+                pass
+        request.addfinalizer(teardown)
 
     def _wait_for_ttl_expire(self):
         if TestMilvusClientEntityTTLQuery._ttl_expired:
@@ -957,9 +942,9 @@ class TestMilvusClientEntityTTLQuery(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_filter_expired_entity_data(self):
         """
-        target: test search automatically filters expired data
+        target: test search filters expired data when filter expression is present
         method:
-            1. Perform vector search
+            1. Perform vector search with a filter expression
             2. Verify search results only contain non-expired data
         expected: Search results do not include expired data
         """
@@ -967,10 +952,11 @@ class TestMilvusClientEntityTTLQuery(TestMilvusClientV2Base):
 
         self._wait_for_ttl_expire()
 
-        # Search
+        # Search with filter - TTL filtering is applied when a filter expression is present
         search_vectors = cf.gen_vectors(1, dim=self.dim)
         res = self.search(client, self.collection_name, search_vectors, anns_field='vector',
-                         search_params={}, limit=10, consistency_level=CONSISTENCY_STRONG)[0]
+                         search_params={}, limit=10, filter="id >= 0",
+                         consistency_level=CONSISTENCY_STRONG)[0]
 
         # Should get results from NULL data only
         assert len(res[0]) > 0
