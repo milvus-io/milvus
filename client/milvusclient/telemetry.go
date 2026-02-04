@@ -1158,13 +1158,19 @@ func (m *ClientTelemetryManager) RecordOperation(operation, collection string, s
 	latencyUs := time.Since(startTime).Microseconds()
 	success := err == nil
 
-	m.mu.Lock()
+	m.mu.RLock()
 	collector, ok := m.collectors[operation]
+	m.mu.RUnlock()
+
 	if !ok {
-		collector = NewOperationMetricsCollector()
-		m.collectors[operation] = collector
+		m.mu.Lock()
+		collector, ok = m.collectors[operation]
+		if !ok {
+			collector = NewOperationMetricsCollector()
+			m.collectors[operation] = collector
+		}
+		m.mu.Unlock()
 	}
-	m.mu.Unlock()
 
 	// Check if collection-level metrics are enabled for this collection
 	// By default, collection metrics are DISABLED. They must be explicitly enabled
@@ -1206,13 +1212,19 @@ func (m *ClientTelemetryManager) RecordOperationWithRequestID(operation, collect
 	latencyUs := time.Since(startTime).Microseconds()
 	success := err == nil
 
-	m.mu.Lock()
+	m.mu.RLock()
 	collector, ok := m.collectors[operation]
+	m.mu.RUnlock()
+
 	if !ok {
-		collector = NewOperationMetricsCollector()
-		m.collectors[operation] = collector
+		m.mu.Lock()
+		collector, ok = m.collectors[operation]
+		if !ok {
+			collector = NewOperationMetricsCollector()
+			m.collectors[operation] = collector
+		}
+		m.mu.Unlock()
 	}
-	m.mu.Unlock()
 
 	// Check if collection-level metrics are enabled for this collection
 	// By default, collection metrics are DISABLED. They must be explicitly enabled
