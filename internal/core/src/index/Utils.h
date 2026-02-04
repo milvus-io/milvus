@@ -34,6 +34,7 @@
 #include "common/QueryInfo.h"
 #include "common/RangeSearchHelper.h"
 #include "index/IndexInfo.h"
+#include "index/ScalarIndex.h"
 #include "storage/Types.h"
 #include "storage/DataCodec.h"
 #include "log/Log.h"
@@ -169,6 +170,12 @@ GetIndexEngineVersionFromConfig(const Config& config);
 
 int32_t
 GetBitmapCardinalityLimitFromConfig(const Config& config);
+
+ScalarIndexType
+GetHybridLowCardinalityIndexTypeFromConfig(const Config& config);
+
+ScalarIndexType
+GetHybridHighCardinalityIndexTypeFromConfig(const Config& config);
 
 storage::FieldDataMeta
 GetFieldDataMetaFromConfig(const Config& config);
