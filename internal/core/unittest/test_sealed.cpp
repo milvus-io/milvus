@@ -505,6 +505,7 @@ TEST(Sealed, LoadFieldData) {
     schema->AddDebugField("float", DataType::FLOAT);
     schema->AddDebugField("json", DataType::JSON);
     schema->AddDebugField("geometry", DataType::GEOMETRY);
+    schema->AddDebugField("mol", DataType::MOL);
     schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
     auto int8_nullable_id =
@@ -670,6 +671,7 @@ TEST(Sealed, ClearData) {
     schema->AddDebugField("float", DataType::FLOAT);
     schema->AddDebugField("json", DataType::JSON);
     schema->AddDebugField("geometry", DataType::GEOMETRY);
+    schema->AddDebugField("mol", DataType::MOL);
     schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
 
@@ -757,6 +759,7 @@ TEST(Sealed, LoadFieldDataMmap) {
     schema->AddDebugField("float", DataType::FLOAT);
     schema->AddDebugField("json", DataType::JSON);
     schema->AddDebugField("geometry", DataType::GEOMETRY);
+    schema->AddDebugField("mol", DataType::MOL);
     schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
 
@@ -1930,6 +1933,7 @@ TEST(Sealed, QueryAllFields) {
     auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
     auto json_field = schema->AddDebugField("json", DataType::JSON);
     auto geometry_field = schema->AddDebugField("geometry", DataType::GEOMETRY);
+    schema->AddDebugField("mol", DataType::MOL);
     auto int_array_field =
         schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT8);
     auto long_array_field =
@@ -2106,6 +2110,7 @@ TEST(Sealed, QueryAllNullableFields) {
     auto json_field = schema->AddDebugField("json", DataType::JSON, true);
     auto geometry_field =
         schema->AddDebugField("geometry", DataType::GEOMETRY, true);
+    auto mol_field = schema->AddDebugField("mol", DataType::MOL, true);
     auto int_array_field = schema->AddDebugField(
         "int_array", DataType::ARRAY, DataType::INT8, true);
     auto long_array_field = schema->AddDebugField(
