@@ -40,6 +40,7 @@
 #include "common/Utils.h"
 #include "fmt/core.h"
 #include "index/Meta.h"
+#include "index/ScalarIndex.h"
 #include "index/Utils.h"
 #include "knowhere/comp/index_param.h"
 #include "storage/Util.h"
@@ -193,6 +194,28 @@ GetBitmapCardinalityLimitFromConfig(const Config& config) {
         LOG_ERROR("{}", err_message);
         throw std::logic_error(err_message);
     }
+}
+
+ScalarIndexType
+GetHybridLowCardinalityIndexTypeFromConfig(const Config& config) {
+    auto index_type = GetValueFromConfig<std::string>(
+        config, index::HYBRID_LOW_CARDINALITY_INDEX_TYPE);
+    if (index_type.has_value()) {
+        return FromString(index_type.value());
+    }
+    // Default to BITMAP for low cardinality
+    return ScalarIndexType::BITMAP;
+}
+
+ScalarIndexType
+GetHybridHighCardinalityIndexTypeFromConfig(const Config& config) {
+    auto index_type = GetValueFromConfig<std::string>(
+        config, index::HYBRID_HIGH_CARDINALITY_INDEX_TYPE);
+    if (index_type.has_value()) {
+        return FromString(index_type.value());
+    }
+    // Default to STLSORT for high cardinality
+    return ScalarIndexType::STLSORT;
 }
 
 // TODO :: too ugly

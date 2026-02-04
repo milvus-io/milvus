@@ -4693,7 +4693,9 @@ type dataCoordConfig struct {
 	SyncSegmentsInterval    ParamItem `refreshable:"false"`
 
 	// Index related configuration
-	IndexMemSizeEstimateMultiplier ParamItem `refreshable:"true"`
+	IndexMemSizeEstimateMultiplier      ParamItem `refreshable:"true"`
+	HybridIndexLowCardinalityIndexType  ParamItem `refreshable:"true"`
+	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
 
 	// Clustering Compaction
 	ClusteringCompactionEnable                 ParamItem `refreshable:"true"`
@@ -5339,6 +5341,24 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.IndexMemSizeEstimateMultiplier.Init(base.mgr)
+
+	p.HybridIndexLowCardinalityIndexType = ParamItem{
+		Key:          "dataCoord.index.hybridIndex.lowCardinalityIndexType",
+		Version:      "2.6.10",
+		DefaultValue: "BITMAP",
+		Doc:          "Index type for low cardinality fields in hybrid index. Does not apply to Array types (always BITMAP).",
+		Export:       false,
+	}
+	p.HybridIndexLowCardinalityIndexType.Init(base.mgr)
+
+	p.HybridIndexHighCardinalityIndexType = ParamItem{
+		Key:          "dataCoord.index.hybridIndex.highCardinalityIndexType",
+		Version:      "2.6.10",
+		DefaultValue: "STL_SORT",
+		Doc:          "Index type for high cardinality fields in hybrid index. Does not apply to Array types (always INVERTED).",
+		Export:       false,
+	}
+	p.HybridIndexHighCardinalityIndexType.Init(base.mgr)
 
 	p.ClusteringCompactionEnable = ParamItem{
 		Key:          "dataCoord.compaction.clustering.enable",
