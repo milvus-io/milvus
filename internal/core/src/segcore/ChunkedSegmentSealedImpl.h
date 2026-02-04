@@ -1009,9 +1009,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      *
      * @param segment_load_info The segment load information to be updated
      * @param load_diff The differences to apply, containing fields and indexes to add/remove
+     * @param op_ctx The operation context
      */
     void
-    ApplyLoadDiff(SegmentLoadInfo& segment_load_info, LoadDiff& load_diff);
+    ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
+                  LoadDiff& load_diff,
+                  milvus::OpContext* op_ctx = nullptr);
 
     void
     load_field_data_common(

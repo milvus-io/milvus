@@ -1023,7 +1023,7 @@ ChunkedSegmentSealedImpl::reload_field_data(const FieldId field_id) {
 
         if (target_index != -1) {
             LoadColumnGroup(
-                column_groups, properties, target_index, {field_id});
+                column_groups, properties, target_index, {field_id}, {});
         } else {
             LOG_WARN(
                 "Cannot reload field data for field {} in segment {} "
@@ -2667,7 +2667,8 @@ ChunkedSegmentSealedImpl::Reopen(
 
 void
 ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
-                                        LoadDiff& diff) {
+                                        LoadDiff& diff,
+                                        milvus::OpContext* op_ctx) {
     milvus::tracer::TraceContext trace_ctx;
     if (!diff.indexes_to_load.empty()) {
         LoadBatchIndexes(trace_ctx, diff.indexes_to_load, op_ctx);
@@ -2948,23 +2949,10 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     std::string warmup_policy =
         has_warmup_setting ? (warmup_sync ? "sync" : "disable") : "";
 
-    if (index_has_rawdata) {
-        LOG_INFO(
-            "[StorageV2] segment {} index(es) provide all raw data for column "
-            "group index {}, skip loading binlog",
-            this->get_segment_id(),
-            index);
-        return;
-    }
-
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
     bool global_use_mmap = is_vector ? mmap_config.GetVectorFieldEnableMmap()
                                      : mmap_config.GetScalarFieldEnableMmap();
     auto use_mmap = has_mmap_setting ? mmap_enabled : global_use_mmap;
-    auto mmap_dir_path =
-        milvus::storage::LocalChunkManagerSingleton::GetInstance()
-            .GetChunkManager()
-            ->GetRootPath();
 
     auto chunk_reader_result = reader_->get_chunk_reader(index);
     AssertInfo(chunk_reader_result.ok(),
@@ -3254,7 +3242,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
 
     auto diff = segment_load_info_.GetLoadDiff();
     LOG_WARN("Load segment {} with diff {}", id_, diff.ToString());
-    ApplyLoadDiff(segment_load_info_, diff);
+    ApplyLoadDiff(segment_load_info_, diff, op_ctx);
 
     LOG_INFO("Successfully loaded segment {} with {} rows", id_, num_rows);
 }
