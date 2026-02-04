@@ -138,6 +138,51 @@ class ResponseChecker:
         return True
 
     def assert_exception(self, res, actual=True, error_dict=None):
+        """
+        target: check that the API response contains the expected error code and message keywords.
+        method: 1. check that 'actual' is False (indicating a failure was expected).
+                2. validate the error code matches the expected code.
+                3. check if the expected message (string or list of keywords) exists in the response.
+        """
+        assert actual is False, f"Response of API {self.func_name} expected an error, but it succeeded."
+        assert len(error_dict) > 0, "No expected error criteria (error_dict) provided for the check task."
+
+        if isinstance(res, Error):
+            expected_code = error_dict.get(ct.err_code)
+            expected_msg = error_dict.get(ct.err_msg, "")
+            actual_msg = res.message
+
+            # 1. Check the error code
+            assert res.code == expected_code, (
+                f"Response of API {self.func_name} code mismatch. "
+                f"Expected: {expected_code}, Got: {res.code}. Message: {actual_msg}"
+            )
+
+            # 2. Check the error message (Supports both string and list of keywords)
+            if isinstance(expected_msg, list):
+                # Ensure every keyword in the list is present in the actual error message
+                for keyword in expected_msg:
+                    assert keyword in actual_msg, (
+                        f"Response of API {self.func_name} missing expected keyword: [{keyword}]. "
+                        f"Actual message: {actual_msg}"
+                    )
+            else:
+                # Traditional substring matching for a single string
+                assert expected_msg in actual_msg, (
+                    f"Response of API {self.func_name} expected message to contain: [{expected_msg}]. "
+                    f"Actual message: {actual_msg}"
+                )
+
+        else:
+            log.error("[CheckFunc] Response of API is not an Error object: %s" % str(res))
+            assert False, (
+                f"Response of API {self.func_name} expected an error "
+                f"({error_dict.get(ct.err_code)}: {error_dict.get(ct.err_msg)}), but it succeeded."
+            )
+
+        return True
+
+    def assert_exception_depreacated(self, res, actual=True, error_dict=None):
         assert actual is False, f"Response of API {self.func_name} expect get error, but success"
         assert len(error_dict) > 0
         if isinstance(res, Error):

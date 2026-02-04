@@ -161,7 +161,7 @@ class TestMilvusClientAliasInvalid(TestMilvusClientV2Base):
         alias_name = cf.gen_unique_str('alias')
         self.create_alias(client, collection_name, alias_name)
         error = {ct.err_code: 1601,
-                 ct.err_msg: f"collection name [{alias_name}] conflicts with an existing alias, "
+                 ct.err_msg: f"collection name conflicts with an existing alias, "
                              f"please choose a unique name"}
         self.create_collection(client, alias_name, default_dim,
                                check_task=CheckTasks.err_res, check_items=error)
@@ -437,7 +437,7 @@ class TestMilvusClientAliasInvalid(TestMilvusClientV2Base):
         
         # step 2: create a collection with same name as alias, but a different schema
         error = {ct.err_code: 65535, 
-                 ct.err_msg: f"collection name [{alias}] conflicts with an existing alias, please choose a unique name"}
+                 ct.err_msg: f"collection name conflicts with an existing alias, please choose a unique name"}
         self.create_collection(client, alias, default_dim, 
                                consistency_level="Strong",
                                schema=default_schema,

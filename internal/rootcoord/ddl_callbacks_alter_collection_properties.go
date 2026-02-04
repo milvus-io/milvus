@@ -36,7 +36,7 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 	}
 
 	if len(req.GetProperties()) > 0 && len(req.GetDeleteKeys()) > 0 {
-		return merr.WrapErrParameterInvalidMsg("can not provide properties and deletekeys at the same time")
+		return merr.WrapErrOperationNotSupportedMsg("can not provide properties and deletekeys at the same time")
 	}
 
 	if hookutil.ContainsCipherProperties(req.GetProperties(), req.GetDeleteKeys()) {
@@ -44,7 +44,7 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 	}
 
 	if funcutil.SliceContain(req.GetDeleteKeys(), common.EnableDynamicSchemaKey) {
-		return merr.WrapErrParameterInvalidMsg("cannot delete key %s, dynamic field schema could support set to true/false", common.EnableDynamicSchemaKey)
+		return merr.WrapErrOperationNotSupportedMsg("cannot delete key %s, use true/false to enable or disable dynamic schema instead", common.EnableDynamicSchemaKey)
 	}
 
 	// Validate timezone

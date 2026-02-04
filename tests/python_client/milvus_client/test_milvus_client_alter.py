@@ -120,7 +120,7 @@ class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
         assert res1.get('mmap.enabled', None) is None
         unsupported_values = [None, [], '', 20, '  ', 0.01, "new_value"]
         for value in unsupported_values:
-            error = {ct.err_code: 1, ct.err_msg: f"invalid mmap.enabled value: {value}, expected: true, false"}
+            error = {ct.err_code: 1100, ct.err_msg: ["invalid mmap.enabled value", "expected: true, false"]}
             self.alter_index_properties(client, collection_name, idx_names[0],
                                         properties={"mmap.enabled": value},
                                         check_task=CheckTasks.err_res, check_items=error)
@@ -148,24 +148,24 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         assert len(res1.get('properties', {})) == 1
         # 1. alter collection properties after load
         self.load_collection(client, collection_name)
-        error = {ct.err_code: 999,
-                 ct.err_msg: "can not alter mmap properties if collection loaded"}
+        error = {ct.err_code: 14,
+                 ct.err_msg: ["can not alter mmap properties if collection loaded"]}
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True},
                                          check_task=CheckTasks.err_res, check_items=error)
         self.alter_collection_properties(client, collection_name, properties={"lazyload.enabled": True},
                                          check_task=CheckTasks.err_res, check_items=error)
-        error = {ct.err_code: 999,
+        error = {ct.err_code: 1100,
                  ct.err_msg: "dynamic schema cannot supported to be disabled: invalid parameter"}
         self.alter_collection_properties(client, collection_name, properties={"dynamicfield.enabled": False},
                                          check_task=CheckTasks.err_res, check_items=error)
-        error = {ct.err_code: 999,
-                 ct.err_msg: "can not delete mmap properties if collection loaded"}
+        error = {ct.err_code: 14,
+                 ct.err_msg: ["can not delete mmap properties if collection loaded"]}
         self.drop_collection_properties(client, collection_name, property_keys=["mmap.enabled"],
                                         check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection_properties(client, collection_name, property_keys=["lazyload.enabled"],
                                         check_task=CheckTasks.err_res, check_items=error)
         # TODO                                
-        error = {ct.err_code: 999,
+        error = {ct.err_code: 14,
                  ct.err_msg: "cannot delete key dynamicfield.enabled"}
         self.drop_collection_properties(client, collection_name, property_keys=["dynamicfield.enabled"],
                                         check_task=CheckTasks.err_res, check_items=error)

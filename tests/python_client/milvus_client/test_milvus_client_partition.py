@@ -601,7 +601,7 @@ class TestMilvusClientReleasePartitionInvalid(TestMilvusClientV2Base):
         # 2. Drop the collection
         self.drop_collection(client, collection_name)
         # 3. Try to load partition after collection drop - should raise exception
-        error = {ct.err_code: 100, ct.err_msg: "collection not found"}
+        error = {ct.err_code: 110, ct.err_msg: "collection not found"}
         self.load_partitions(client, collection_name, partition_name,
                            check_task=CheckTasks.err_res, check_items=error)
         # 4. Try to release partition after collection drop - should raise exception

@@ -609,7 +609,10 @@ func ShouldFieldBeLoaded(kvs []*commonpb.KeyValuePair) (bool, error) {
 	for _, kv := range kvs {
 		if kv.GetKey() == FieldSkipLoadKey {
 			val, err := strconv.ParseBool(kv.GetValue())
-			return !val, merr.WrapErrParameterInvalidErr(err, "parse %s failed", FieldSkipLoadKey)
+			if err != nil {
+				return !val, merr.WrapErrParameterInvalidErr(err, "parse %s failed", FieldSkipLoadKey)
+			}
+			return !val, nil
 		}
 	}
 	return true, nil
@@ -619,7 +622,10 @@ func IsEnableDynamicSchema(kvs []*commonpb.KeyValuePair) (found bool, value bool
 	for _, kv := range kvs {
 		if kv.GetKey() == EnableDynamicSchemaKey {
 			value, err = strconv.ParseBool(kv.GetValue())
-			return true, value, merr.WrapErrParameterInvalidErr(err, "parse %s failed", EnableDynamicSchemaKey)
+			if err != nil {
+				return true, value, merr.WrapErrParameterInvalidErr(err, "parse %s failed", EnableDynamicSchemaKey)
+			}
+			return true, value, nil
 		}
 	}
 	return false, false, nil

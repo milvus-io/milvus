@@ -81,7 +81,7 @@ var (
 	ErrCollectionVectorClusteringKeyNotAllowed = newMilvusError("vector clustering key not allowed", 107, false, WithErrorType(InputError))
 	ErrCollectionReplicateMode                 = newMilvusError("can't operate on the collection under standby mode", 108, false, WithErrorType(InputError))
 	ErrCollectionSchemaMismatch                = newMilvusError("collection schema mismatch", 109, false, WithErrorType(InputError))
-	ErrCollectionIDNotFound                    = newMilvusError("collectionID not found", 110, false)
+	ErrCollectionIDNotFound                    = newMilvusError("collection not found", 110, false)
 	ErrCollectionExistConflict                 = newMilvusError("conflicted with exist collection", 111, false)
 
 	// Partition related
