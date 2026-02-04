@@ -106,7 +106,7 @@ TextMatchIndexTranslator::get_cells(
     {
         milvus::ScopedTimer timer(
             "text_match_index_load",
-            [](double /*ms*/) {
+            [](double /*us*/) {
                 // no specific metric defined for text match index load yet
             },
             milvus::ScopedTimer::LogLevel::Info);

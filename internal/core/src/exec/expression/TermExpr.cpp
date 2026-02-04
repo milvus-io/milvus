@@ -31,10 +31,12 @@
 #include "common/Tracer.h"
 #include "common/bson_view.h"
 #include "common/type_c.h"
+#include "common/ScopedTimer.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Utils.h"
 #include "folly/FBVector.h"
 #include "glog/logging.h"
+#include "monitor/Monitor.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "index/json_stats/utils.h"
 #include "log/Log.h"
@@ -45,6 +47,7 @@
 #include "segcore/SegmentSealed.h"
 #include "storage/MmapManager.h"
 #include "storage/Types.h"
+#include "query/Utils.h"
 
 namespace milvus {
 class SkipIndex;
@@ -109,6 +112,7 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::JSON: {
+            span.GetSpan()->SetAttribute("json_filter_expr_type", "term");
             if (expr_->vals_.size() == 0) {
                 result = ExecVisitorImplTemplateJson<bool>(context);
                 break;
@@ -663,52 +667,58 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
             }
         };
 
-        if constexpr (std::is_same_v<GetType, bool>) {
-            try_execute(milvus::index::JSONType::BOOL,
-                        res_view,
-                        valid_res_view,
-                        bool{});
-        } else if constexpr (std::is_same_v<GetType, int64_t>) {
-            try_execute(milvus::index::JSONType::INT64,
-                        res_view,
-                        valid_res_view,
-                        int64_t{});
-            // and double compare
-            TargetBitmap res_double(active_count_, false);
-            TargetBitmapView res_double_view(res_double);
-            TargetBitmap res_double_valid(active_count_, true);
-            TargetBitmapView valid_res_double_view(res_double_valid);
-            try_execute(milvus::index::JSONType::DOUBLE,
-                        res_double_view,
-                        valid_res_double_view,
-                        double{});
-            res_view.inplace_or_with_count(res_double_view, active_count_);
-            valid_res_view.inplace_or_with_count(valid_res_double_view,
-                                                 active_count_);
+        {
+            milvus::ScopedTimer timer(
+                "term_json_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
 
-        } else if constexpr (std::is_same_v<GetType, double>) {
-            try_execute(milvus::index::JSONType::DOUBLE,
-                        res_view,
-                        valid_res_view,
-                        double{});
-            // and int64 compare
-            TargetBitmap res_int64(active_count_, false);
-            TargetBitmapView res_int64_view(res_int64);
-            TargetBitmap res_int64_valid(active_count_, true);
-            TargetBitmapView valid_res_int64_view(res_int64_valid);
-            try_execute(milvus::index::JSONType::INT64,
-                        res_int64_view,
-                        valid_res_int64_view,
-                        int64_t{});
-            res_view.inplace_or_with_count(res_int64_view, active_count_);
-            valid_res_view.inplace_or_with_count(valid_res_int64_view,
-                                                 active_count_);
-        } else if constexpr (std::is_same_v<GetType, std::string_view> ||
-                             std::is_same_v<GetType, std::string>) {
-            try_execute(milvus::index::JSONType::STRING,
-                        res_view,
-                        valid_res_view,
-                        std::string_view{});
+            if constexpr (std::is_same_v<GetType, bool>) {
+                try_execute(milvus::index::JSONType::BOOL,
+                            res_view,
+                            valid_res_view,
+                            bool{});
+            } else if constexpr (std::is_same_v<GetType, int64_t>) {
+                try_execute(milvus::index::JSONType::INT64,
+                            res_view,
+                            valid_res_view,
+                            int64_t{});
+                // and double compare
+                TargetBitmap res_double(active_count_, false);
+                TargetBitmapView res_double_view(res_double);
+                TargetBitmap res_double_valid(active_count_, true);
+                TargetBitmapView valid_res_double_view(res_double_valid);
+                try_execute(milvus::index::JSONType::DOUBLE,
+                            res_double_view,
+                            valid_res_double_view,
+                            double{});
+                res_view.inplace_or_with_count(res_double_view, active_count_);
+                valid_res_view.inplace_or_with_count(valid_res_double_view,
+                                                     active_count_);
+
+            } else if constexpr (std::is_same_v<GetType, double>) {
+                try_execute(milvus::index::JSONType::DOUBLE,
+                            res_view,
+                            valid_res_view,
+                            double{});
+                // and int64 compare
+                TargetBitmap res_int64(active_count_, false);
+                TargetBitmapView res_int64_view(res_int64);
+                TargetBitmap res_int64_valid(active_count_, true);
+                TargetBitmapView valid_res_int64_view(res_int64_valid);
+                try_execute(milvus::index::JSONType::INT64,
+                            res_int64_view,
+                            valid_res_int64_view,
+                            int64_t{});
+                res_view.inplace_or_with_count(res_int64_view, active_count_);
+                valid_res_view.inplace_or_with_count(valid_res_int64_view,
+                                                     active_count_);
+            } else if constexpr (std::is_same_v<GetType, std::string_view> ||
+                                 std::is_same_v<GetType, std::string>) {
+                try_execute(milvus::index::JSONType::STRING,
+                            res_view,
+                            valid_res_view,
+                            std::string_view{});
+            }
         }
 
         // process shared data
@@ -737,8 +747,14 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
             }
         };
 
-        index->ExecuteForSharedData(
-            op_ctx_, bson_index_, pointer, shared_executor);
+        {
+            milvus::ScopedTimer timer(
+                "term_json_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
+        }
         cached_index_chunk_id_ = 0;
     }
 
@@ -761,8 +777,15 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
     FieldId field_id = expr_->column_.field_id_;
     if (!has_offset_input_ &&
         CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+        milvus::ScopedTimer timer("term_json_by_stats", [this](double us) {
+            json_filter_stats_latency_us_ += us;
+        });
         return ExecJsonInVariableByStats<ValueType>();
     }
+
+    milvus::ScopedTimer timer("term_json_bruteforce", [this](double us) {
+        json_filter_bruteforce_latency_us_ += us;
+    });
 
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();

@@ -34,7 +34,7 @@ class ScopedTimer {
     };
 
     ScopedTimer(std::string_view name,
-                std::function<void(double /*ms*/)> reporter,
+                std::function<void(double /*us*/)> reporter,
                 LogLevel level = LogLevel::Debug)
         : name_(name),
           reporter_(std::move(reporter)),
@@ -46,7 +46,7 @@ class ScopedTimer {
         auto end = std::chrono::steady_clock::now();
         auto duration_us =
             std::chrono::duration<double, std::micro>(end - start_).count();
-        reporter_(duration_us / 1000.0);  // report in milliseconds
+        reporter_(duration_us);  // report in microseconds
         switch (level_) {
             case LogLevel::Trace:
                 LOG_TRACE("{} time: {} ms", name_, duration_us / 1000.0);
