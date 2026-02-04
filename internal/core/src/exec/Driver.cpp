@@ -62,8 +62,9 @@ DriverContext::GetQueryConfig() {
 }
 
 std::shared_ptr<Driver>
-DriverFactory::CreateDriver(std::unique_ptr<DriverContext> ctx,
-                            std::function<int(int pipelineid)> num_drivers) {
+DriverFactory::CreateDriver(
+    std::unique_ptr<DriverContext> ctx,
+    const std::function<int(int pipelineid)>& num_drivers) {
     auto driver = std::shared_ptr<Driver>(new Driver());
     ctx->driver_ = driver.get();
     std::vector<std::unique_ptr<Operator>> operators;

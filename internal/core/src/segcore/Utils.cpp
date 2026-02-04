@@ -1597,6 +1597,6 @@ bulk_script_field_data(milvus::OpContext* op_ctx,
         }
     }
 
-    return std::move(ret);
+    return ret;
 }
 }  // namespace milvus::segcore
