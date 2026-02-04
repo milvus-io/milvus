@@ -727,15 +727,16 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_minhash_with_raw_data_affects_jaccard_distance(self):
         """
         target: test if with_raw_data affects mh_search_with_jaccard distance calculation
         method:
             1. Create two collections with with_raw_data=True and with_raw_data=False
-            2. Insert same data into both collections
-            3. Search with mh_search_with_jaccard=True on both
-            4. Compare returned distances
+            2. Insert large dataset (2000+ rows) to ensure index search path (not brute force)
+            3. Flush data to trigger index building
+            4. Search with mh_search_with_jaccard=True on both
+            5. Compare returned distances
         expected:
             - with_raw_data=True: returns actual Jaccard distance (computed from raw data)
             - with_raw_data=False: may return estimated distance or different behavior
@@ -744,13 +745,33 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
 
         num_hashes = 128
         dim = num_hashes * 32
+        num_rows = 2000  # Large enough to trigger index search instead of brute force
 
-        # Test data with known similarity characteristics
-        test_texts = [
+        # Generate test data with variations
+        base_texts = [
             "the quick brown fox jumps over the lazy dog",
-            "the quick brown fox jumps over the lazy cat",  # very similar
-            "completely different text about something else entirely new",  # very different
+            "the quick brown fox jumps over the lazy cat",
+            "a]fast red wolf leaps across the sleeping hound",
+            "machine learning algorithms process data efficiently",
+            "natural language processing transforms text analysis",
+            "deep neural networks recognize complex patterns",
+            "database systems store and retrieve information",
+            "distributed computing enables parallel processing",
+            "cloud infrastructure supports scalable applications",
+            "software engineering practices improve code quality",
         ]
+
+        # Generate 2000 rows by adding variations
+        test_texts = []
+        for i in range(num_rows):
+            base = base_texts[i % len(base_texts)]
+            # Add variation to create unique texts
+            variation = f" variant number {i} with extra words for uniqueness"
+            test_texts.append(base + variation)
+
+        # Query texts - use original base texts for searching
+        query_text = base_texts[0]  # "the quick brown fox jumps over the lazy dog"
+        similar_id = 1  # "the quick brown fox jumps over the lazy cat" variant
 
         results_by_config = {}
 
@@ -779,21 +800,29 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
             )
             self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
-            rows = [{default_primary_key_field_name: i, default_text_field_name: t}
-                    for i, t in enumerate(test_texts)]
-            self.insert(client, collection_name, rows)
+            # Insert data in batches
+            batch_size = 500
+            for i in range(0, num_rows, batch_size):
+                batch = test_texts[i:i+batch_size]
+                rows = [{default_primary_key_field_name: i + j, default_text_field_name: t}
+                        for j, t in enumerate(batch)]
+                self.insert(client, collection_name, rows)
+
+            # Flush to ensure data is persisted and index is built
             self.flush(client, collection_name)
             self.load_collection(client, collection_name)
 
+            log.info(f"with_raw_data={with_raw_data}: inserted {num_rows} rows, flushed and loaded")
+
             # Search with mh_search_with_jaccard=True
-            results = self.search(client, collection_name, [test_texts[0]],
+            results = self.search(client, collection_name, [query_text],
                                   anns_field=default_minhash_field_name,
                                   search_params={
                                       "metric_type": "MHJACCARD",
                                       "params": {"mh_search_with_jaccard": True},
                                   },
-                                  limit=3,
-                                  output_fields=[default_primary_key_field_name])[0]
+                                  limit=10,
+                                  output_fields=[default_primary_key_field_name, default_text_field_name])[0]
 
             # Store results for comparison
             distances = {}
@@ -804,17 +833,21 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
             results_by_config[with_raw_data] = {
                 "distances": distances,
                 "num_results": len(results[0]),
+                "results": results[0],
             }
 
             log.info(f"with_raw_data={with_raw_data}: {len(results[0])} results")
-            for hit in results[0]:
-                log.info(f"  id={hit['entity'][default_primary_key_field_name]}, distance={hit['distance']:.6f}")
+            for i, hit in enumerate(results[0][:5]):  # Log top 5
+                hit_id = hit["entity"][default_primary_key_field_name]
+                text_preview = hit["entity"][default_text_field_name][:50] + "..."
+                log.info(f"  [{i}] id={hit_id}, distance={hit['distance']:.6f}, text={text_preview}")
 
             self.drop_collection(client, collection_name)
 
         # Compare results between with_raw_data=True and with_raw_data=False
         log.info("=" * 60)
         log.info("COMPARISON: with_raw_data=True vs with_raw_data=False")
+        log.info(f"Data size: {num_rows} rows (should trigger index search, not brute force)")
         log.info("=" * 60)
 
         true_distances = results_by_config[True]["distances"]
@@ -822,13 +855,15 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
 
         # Check if distances are identical or different
         distances_match = True
-        for doc_id in true_distances:
-            if doc_id in false_distances:
-                diff = abs(true_distances[doc_id] - false_distances[doc_id])
-                log.info(f"  doc_id={doc_id}: True={true_distances[doc_id]:.6f}, "
-                         f"False={false_distances[doc_id]:.6f}, diff={diff:.6f}")
-                if diff > 1e-6:
-                    distances_match = False
+        common_ids = set(true_distances.keys()) & set(false_distances.keys())
+        log.info(f"Common result IDs: {len(common_ids)}")
+
+        for doc_id in sorted(common_ids)[:10]:  # Compare top 10
+            diff = abs(true_distances[doc_id] - false_distances[doc_id])
+            log.info(f"  doc_id={doc_id}: True={true_distances[doc_id]:.6f}, "
+                     f"False={false_distances[doc_id]:.6f}, diff={diff:.6f}")
+            if diff > 1e-6:
+                distances_match = False
 
         if distances_match:
             log.info("RESULT: Distances are IDENTICAL - with_raw_data has NO effect on mh_search_with_jaccard")
