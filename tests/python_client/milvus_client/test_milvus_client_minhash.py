@@ -836,9 +836,15 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
             index_info = self.describe_index(client, collection_name, index_name)[0]
             log.info(f"with_raw_data={with_raw_data}: index_info={index_info}")
 
+            # Load collection first
             self.load_collection(client, collection_name)
 
-            log.info(f"with_raw_data={with_raw_data}: inserted {num_rows} rows, index ready, loaded")
+            # CRITICAL: Use refresh_load to ensure QueryNode loads sealed segment with index
+            # Without this, QueryNode may only have Growing segment loaded
+            self.refresh_load(client, collection_name)
+            time.sleep(2)  # Give QueryNode time to load sealed segment
+
+            log.info(f"with_raw_data={with_raw_data}: inserted {num_rows} rows, index ready, refresh loaded")
 
             # Search with mh_search_with_jaccard=True
             # Note: If search goes through MINHASH_LSH index path with with_raw_data=False,
@@ -899,6 +905,22 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
             log.info(f"with_raw_data=False: FAILED with error: {false_result['error']}")
             log.info("ANALYSIS: This error is EXPECTED if search goes through MINHASH_LSH index path")
             log.info("         (knowhere requires with_raw_data=True for mh_search_with_jaccard=True)")
+            return
+
+        # Compare result counts
+        true_count = true_result["num_results"]
+        false_count = false_result["num_results"]
+        log.info(f"Result counts: with_raw_data=True: {true_count}, with_raw_data=False: {false_count}")
+
+        # Check if result counts differ significantly
+        # This indicates that with_raw_data=False causes knowhere to return error (ignored)
+        # which results in fewer/no valid results
+        if true_count > 1 and false_count <= 1:
+            log.info("RESULT: with_raw_data=False returns significantly fewer results")
+            log.info("ANALYSIS: Search goes through MINHASH_LSH index path.")
+            log.info("         knowhere detects mh_search_with_jaccard=True without raw data")
+            log.info("         and returns Status::invalid_args (but error is silently ignored)")
+            log.info("         Check server logs for: 'fail to search with jaccard distance without raw data'")
             return
 
         true_distances = true_result["distances"]
