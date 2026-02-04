@@ -196,6 +196,12 @@ source ${ROOT_DIR}/scripts/setenv.sh
 # Use Ninja if available for faster builds, fallback to Unix Makefiles
 if command -v ninja &> /dev/null; then
     CMAKE_GENERATOR="Ninja"
+    # If ninja is available but build dir has Makefile (not build.ninja), clean it
+    if [[ -f "${BUILD_OUTPUT_DIR}/Makefile" && ! -f "${BUILD_OUTPUT_DIR}/build.ninja" ]]; then
+        echo "Detected Makefile build but ninja is available, cleaning build directory..."
+        rm -rf "${BUILD_OUTPUT_DIR}"
+        mkdir -p "${BUILD_OUTPUT_DIR}"
+    fi
 else
     CMAKE_GENERATOR="Unix Makefiles"
 fi
