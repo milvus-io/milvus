@@ -1,1 +1,0 @@
-milvus_minhash

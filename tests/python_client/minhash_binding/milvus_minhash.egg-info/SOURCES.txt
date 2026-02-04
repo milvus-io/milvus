@@ -1,9 +1,0 @@
-README.md
-minhash_binding.cpp
-pyproject.toml
-setup.py
-milvus_minhash.egg-info/PKG-INFO
-milvus_minhash.egg-info/SOURCES.txt
-milvus_minhash.egg-info/dependency_links.txt
-milvus_minhash.egg-info/requires.txt
-milvus_minhash.egg-info/top_level.txt
