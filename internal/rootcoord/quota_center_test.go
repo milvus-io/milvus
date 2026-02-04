@@ -32,7 +32,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
@@ -62,7 +61,7 @@ func TestQuotaCenter(t *testing.T) {
 	pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Maybe()
 
 	dc := mocks.NewMixCoord(t)
-	dc.EXPECT().GetDcMetrics(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	dc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(&metricsinfo.DataCoordTopology{}, nil).Maybe()
 
 	collectionIDToPartitionIDs := map[int64][]int64{
 		1: {},
@@ -92,7 +91,7 @@ func TestQuotaCenter(t *testing.T) {
 		paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaCenterCollectInterval.Key, "1")
 		defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaCenterCollectInterval.Key)
 		// mock query coord stuck for  at most 10s
-		dc.EXPECT().GetQcMetrics(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, gmr *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+		dc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, gmr *milvuspb.GetMetricsRequest) (*metricsinfo.QueryCoordTopology, error) {
 			counter := 0
 			for {
 				select {
@@ -134,32 +133,14 @@ func TestQuotaCenter(t *testing.T) {
 			},
 		}, nil).Maybe()
 
-		dc.EXPECT().GetQcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{Status: merr.Success()}, nil)
+		dc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(&metricsinfo.QueryCoordTopology{}, nil)
+		dc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
 		quotaCenter := NewQuotaCenter(pcm, dc, core.tsoAllocator, meta)
 		err = quotaCenter.collectMetrics()
-		assert.Error(t, err) // for empty response
-
-		quotaCenter = NewQuotaCenter(pcm, dc, core.tsoAllocator, meta)
-		err = quotaCenter.collectMetrics()
 		assert.Error(t, err)
 
-		dc.EXPECT().GetDcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status: merr.Status(errors.New("mock error")),
-		}, nil)
-
-		quotaCenter = NewQuotaCenter(pcm, dc, core.tsoAllocator, meta)
-		err = quotaCenter.collectMetrics()
-		assert.Error(t, err)
-
-		dc.EXPECT().GetDcMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
-		dc.EXPECT().GetQcMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
-		quotaCenter = NewQuotaCenter(pcm, dc, core.tsoAllocator, meta)
-		err = quotaCenter.collectMetrics()
-		assert.Error(t, err)
-
-		dc.EXPECT().GetQcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status: merr.Status(err),
-		}, nil)
+		dc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
+		dc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
 		quotaCenter = NewQuotaCenter(pcm, dc, core.tsoAllocator, meta)
 		err = quotaCenter.collectMetrics()
 		assert.Error(t, err)
@@ -170,18 +151,8 @@ func TestQuotaCenter(t *testing.T) {
 		pcm2 := proxyutil.NewMockProxyClientManager(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 
-		emptyQueryCoordTopology := &metricsinfo.QueryCoordTopology{}
-		queryBytes, _ := json.Marshal(emptyQueryCoordTopology)
-		dc2.EXPECT().GetQcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Success(),
-			Response: string(queryBytes),
-		}, nil).Once()
-		emptyDataCoordTopology := &metricsinfo.DataCoordTopology{}
-		dataBytes, _ := json.Marshal(emptyDataCoordTopology)
-		dc2.EXPECT().GetDcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Success(),
-			Response: string(dataBytes),
-		}, nil).Once()
+		dc2.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(&metricsinfo.QueryCoordTopology{}, nil).Once()
+		dc2.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(&metricsinfo.DataCoordTopology{}, nil).Once()
 		pcm2.EXPECT().GetProxyMetrics(mock.Anything).Return([]*milvuspb.GetMetricsResponse{}, nil).Once()
 
 		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Once()
@@ -195,7 +166,7 @@ func TestQuotaCenter(t *testing.T) {
 		pcm2 := proxyutil.NewMockProxyClientManager(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 
-		emptyQueryCoordTopology := &metricsinfo.QueryCoordTopology{
+		queryCoordTopology := &metricsinfo.QueryCoordTopology{
 			Cluster: metricsinfo.QueryClusterTopology{
 				ConnectedNodes: []metricsinfo.QueryNodeInfos{
 					{
@@ -213,17 +184,8 @@ func TestQuotaCenter(t *testing.T) {
 				},
 			},
 		}
-		queryBytes, _ := json.Marshal(emptyQueryCoordTopology)
-		dc2.EXPECT().GetQcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Success(),
-			Response: string(queryBytes),
-		}, nil).Once()
-		emptyDataCoordTopology := &metricsinfo.DataCoordTopology{}
-		dataBytes, _ := json.Marshal(emptyDataCoordTopology)
-		dc2.EXPECT().GetDcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Success(),
-			Response: string(dataBytes),
-		}, nil).Once()
+		dc2.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(queryCoordTopology, nil).Once()
+		dc2.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(&metricsinfo.DataCoordTopology{}, nil).Once()
 		pcm2.EXPECT().GetProxyMetrics(mock.Anything).Return([]*milvuspb.GetMetricsResponse{}, nil).Once()
 		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return([]*model.Database{
 			{
@@ -243,13 +205,8 @@ func TestQuotaCenter(t *testing.T) {
 		pcm2 := proxyutil.NewMockProxyClientManager(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 
-		emptyQueryCoordTopology := &metricsinfo.QueryCoordTopology{}
-		queryBytes, _ := json.Marshal(emptyQueryCoordTopology)
-		dc2.EXPECT().GetQcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Success(),
-			Response: string(queryBytes),
-		}, nil).Once()
-		emptyDataCoordTopology := &metricsinfo.DataCoordTopology{
+		dc2.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(&metricsinfo.QueryCoordTopology{}, nil).Once()
+		dataCoordTopology := &metricsinfo.DataCoordTopology{
 			Cluster: metricsinfo.DataClusterTopology{
 				ConnectedDataNodes: []metricsinfo.DataNodeInfos{
 					{
@@ -262,11 +219,7 @@ func TestQuotaCenter(t *testing.T) {
 				},
 			},
 		}
-		dataBytes, _ := json.Marshal(emptyDataCoordTopology)
-		dc2.EXPECT().GetDcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Success(),
-			Response: string(dataBytes),
-		}, nil).Once()
+		dc2.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(dataCoordTopology, nil).Once()
 		pcm2.EXPECT().GetProxyMetrics(mock.Anything).Return([]*milvuspb.GetMetricsResponse{}, nil).Once()
 		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return([]*model.Database{
 			{
@@ -1146,24 +1099,16 @@ func (s *QuotaCenterSuite) SetupTest() {
 	s.meta = mockrootcoord.NewIMetaTable(s.T())
 }
 
-func (s *QuotaCenterSuite) getEmptyQCMetricsRsp() string {
-	metrics := &metricsinfo.QueryCoordTopology{
+func (s *QuotaCenterSuite) getEmptyQCTopology() *metricsinfo.QueryCoordTopology {
+	return &metricsinfo.QueryCoordTopology{
 		Cluster: metricsinfo.QueryClusterTopology{},
 	}
-
-	resp, err := metricsinfo.MarshalTopology(metrics)
-	s.Require().NoError(err)
-	return resp
 }
 
-func (s *QuotaCenterSuite) getEmptyDCMetricsRsp() string {
-	metrics := &metricsinfo.DataCoordTopology{
+func (s *QuotaCenterSuite) getEmptyDCTopology() *metricsinfo.DataCoordTopology {
+	return &metricsinfo.DataCoordTopology{
 		Cluster: metricsinfo.DataClusterTopology{},
 	}
-
-	resp, err := metricsinfo.MarshalTopology(metrics)
-	s.Require().NoError(err)
-	return resp
 }
 
 func (s *QuotaCenterSuite) TestSyncMetricsSuccess() {
@@ -1182,12 +1127,9 @@ func (s *QuotaCenterSuite) TestSyncMetricsSuccess() {
 
 	s.Run("querycoord_cluster", func() {
 		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
-		qc.EXPECT().GetDcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Status(nil),
-			Response: s.getEmptyDCMetricsRsp(),
-		}, nil).Once()
+		qc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyDCTopology(), nil).Once()
 
-		metrics := &metricsinfo.QueryCoordTopology{
+		qcTopology := &metricsinfo.QueryCoordTopology{
 			Cluster: metricsinfo.QueryClusterTopology{
 				ConnectedNodes: []metricsinfo.QueryNodeInfos{
 					{BaseComponentInfos: metricsinfo.BaseComponentInfos{ID: 1}, QuotaMetrics: &metricsinfo.QueryNodeQuotaMetrics{Effect: metricsinfo.NodeEffect{NodeID: 1, CollectionIDs: []int64{100, 200}}}},
@@ -1196,20 +1138,14 @@ func (s *QuotaCenterSuite) TestSyncMetricsSuccess() {
 			},
 		}
 
-		resp, err := metricsinfo.MarshalTopology(metrics)
-		s.Require().NoError(err)
-
-		qc.EXPECT().GetQcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Status(nil),
-			Response: resp,
-		}, nil).Once()
+		qc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(qcTopology, nil).Once()
 		meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, i int64) (*model.Collection, error) {
 			return &model.Collection{CollectionID: i, DBID: 1}, nil
 		}).Times(3)
 
 		quotaCenter := NewQuotaCenter(pcm, qc, core.tsoAllocator, meta)
 
-		err = quotaCenter.collectMetrics()
+		err := quotaCenter.collectMetrics()
 		s.Require().NoError(err)
 
 		s.ElementsMatch([]int64{100, 200, 300}, lo.Keys(quotaCenter.readableCollections[1]))
@@ -1219,12 +1155,9 @@ func (s *QuotaCenterSuite) TestSyncMetricsSuccess() {
 
 	s.Run("datacoord_cluster", func() {
 		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
-		qc.EXPECT().GetQcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Status(nil),
-			Response: s.getEmptyQCMetricsRsp(),
-		}, nil).Once()
+		qc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyQCTopology(), nil).Once()
 
-		metrics := &metricsinfo.DataCoordTopology{
+		dcTopology := &metricsinfo.DataCoordTopology{
 			Cluster: metricsinfo.DataClusterTopology{
 				ConnectedDataNodes: []metricsinfo.DataNodeInfos{
 					{BaseComponentInfos: metricsinfo.BaseComponentInfos{ID: 1}, QuotaMetrics: &metricsinfo.DataNodeQuotaMetrics{Effect: metricsinfo.NodeEffect{NodeID: 1, CollectionIDs: []int64{100, 200}}}},
@@ -1233,20 +1166,14 @@ func (s *QuotaCenterSuite) TestSyncMetricsSuccess() {
 			},
 		}
 
-		resp, err := metricsinfo.MarshalTopology(metrics)
-		s.Require().NoError(err)
-
-		qc.EXPECT().GetDcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Status(nil),
-			Response: resp,
-		}, nil).Once()
+		qc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(dcTopology, nil).Once()
 		meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, i int64) (*model.Collection, error) {
 			return &model.Collection{CollectionID: i, DBID: 1}, nil
 		}).Times(3)
 
 		quotaCenter := NewQuotaCenter(pcm, qc, core.tsoAllocator, meta)
 
-		err = quotaCenter.collectMetrics()
+		err := quotaCenter.collectMetrics()
 		s.Require().NoError(err)
 
 		s.ElementsMatch([]int64{100, 200, 300}, lo.Keys(quotaCenter.writableCollections[1]))
@@ -1270,29 +1197,8 @@ func (s *QuotaCenterSuite) TestSyncMetricsFailure() {
 
 	s.Run("querycoord_failure", func() {
 		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
-		qc.EXPECT().GetDcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Status(nil),
-			Response: s.getEmptyDCMetricsRsp(),
-		}, nil).Once()
-		qc.EXPECT().GetQcMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("mock")).Once()
-
-		quotaCenter := NewQuotaCenter(pcm, qc, core.tsoAllocator, meta)
-
-		err := quotaCenter.collectMetrics()
-		s.Error(err)
-	})
-
-	s.Run("querycoord_bad_response", func() {
-		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
-		qc.EXPECT().GetDcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Status(nil),
-			Response: s.getEmptyDCMetricsRsp(),
-		}, nil).Once()
-
-		qc.EXPECT().GetQcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Status(nil),
-			Response: "abc",
-		}, nil).Once()
+		qc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyDCTopology(), nil).Once()
+		qc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(nil, errors.New("mock")).Once()
 
 		quotaCenter := NewQuotaCenter(pcm, qc, core.tsoAllocator, meta)
 
@@ -1302,29 +1208,9 @@ func (s *QuotaCenterSuite) TestSyncMetricsFailure() {
 
 	s.Run("datacoord_failure", func() {
 		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
-		qc.EXPECT().GetQcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Status(nil),
-			Response: s.getEmptyQCMetricsRsp(),
-		}, nil).Once()
+		qc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyQCTopology(), nil).Once()
 
-		qc.EXPECT().GetDcMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("mocked")).Once()
-
-		quotaCenter := NewQuotaCenter(pcm, qc, core.tsoAllocator, meta)
-		err := quotaCenter.collectMetrics()
-		s.Error(err)
-	})
-
-	s.Run("datacoord_bad_response", func() {
-		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
-		qc.EXPECT().GetQcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Status(nil),
-			Response: s.getEmptyQCMetricsRsp(),
-		}, nil).Once()
-
-		qc.EXPECT().GetDcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Status(nil),
-			Response: "abc",
-		}, nil).Once()
+		qc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(nil, errors.New("mocked")).Once()
 
 		quotaCenter := NewQuotaCenter(pcm, qc, core.tsoAllocator, meta)
 		err := quotaCenter.collectMetrics()
@@ -1332,14 +1218,8 @@ func (s *QuotaCenterSuite) TestSyncMetricsFailure() {
 	})
 
 	s.Run("proxy_manager_return_failure", func() {
-		qc.EXPECT().GetQcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Status(nil),
-			Response: s.getEmptyQCMetricsRsp(),
-		}, nil).Once()
-		qc.EXPECT().GetDcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Status(nil),
-			Response: s.getEmptyDCMetricsRsp(),
-		}, nil).Once()
+		qc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyQCTopology(), nil).Once()
+		qc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyDCTopology(), nil).Once()
 
 		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, errors.New("mocked")).Once()
 
@@ -1349,14 +1229,8 @@ func (s *QuotaCenterSuite) TestSyncMetricsFailure() {
 	})
 
 	s.Run("proxy_manager_bad_response", func() {
-		qc.EXPECT().GetQcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Status(nil),
-			Response: s.getEmptyQCMetricsRsp(),
-		}, nil).Once()
-		qc.EXPECT().GetDcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   merr.Status(nil),
-			Response: s.getEmptyDCMetricsRsp(),
-		}, nil).Once()
+		qc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyQCTopology(), nil).Once()
+		qc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyDCTopology(), nil).Once()
 
 		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return([]*milvuspb.GetMetricsResponse{
 			{
@@ -1422,13 +1296,8 @@ func (s *QuotaCenterSuite) TestNodeOffline() {
 			},
 		},
 	}
-	resp, err := metricsinfo.MarshalTopology(qcMetrics)
-	s.Require().NoError(err)
 
-	qc.EXPECT().GetQcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-		Status:   merr.Status(nil),
-		Response: resp,
-	}, nil).Once()
+	qc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(qcMetrics, nil).Once()
 
 	// dc first time
 	dcMetrics := &metricsinfo.DataCoordTopology{
@@ -1452,15 +1321,10 @@ func (s *QuotaCenterSuite) TestNodeOffline() {
 		},
 	}
 
-	resp, err = metricsinfo.MarshalTopology(dcMetrics)
-	s.Require().NoError(err)
-	qc.EXPECT().GetDcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-		Status:   merr.Status(nil),
-		Response: resp,
-	}, nil).Once()
+	qc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(dcMetrics, nil).Once()
 
 	quotaCenter := NewQuotaCenter(pcm, qc, core.tsoAllocator, meta)
-	err = quotaCenter.collectMetrics()
+	err := quotaCenter.collectMetrics()
 	s.Require().NoError(err)
 
 	quotaCenter.getTimeTickDelayFactor(tsoutil.ComposeTSByTime(time.Now(), 0))
@@ -1481,13 +1345,8 @@ func (s *QuotaCenterSuite) TestNodeOffline() {
 			},
 		},
 	}
-	resp, err = metricsinfo.MarshalTopology(qcMetrics)
-	s.Require().NoError(err)
 
-	qc.EXPECT().GetQcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-		Status:   merr.Status(nil),
-		Response: resp,
-	}, nil).Once()
+	qc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(qcMetrics, nil).Once()
 
 	// dc second time
 	dcMetrics = &metricsinfo.DataCoordTopology{
@@ -1504,12 +1363,7 @@ func (s *QuotaCenterSuite) TestNodeOffline() {
 		},
 	}
 
-	resp, err = metricsinfo.MarshalTopology(dcMetrics)
-	s.Require().NoError(err)
-	qc.EXPECT().GetDcMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-		Status:   merr.Status(nil),
-		Response: resp,
-	}, nil).Once()
+	qc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(dcMetrics, nil).Once()
 
 	err = quotaCenter.collectMetrics()
 	s.Require().NoError(err)

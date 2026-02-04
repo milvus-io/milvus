@@ -212,17 +212,8 @@ func getQueryCoordMetrics(ctx context.Context, mixCoord types.MixCoord) (*metric
 	if err != nil {
 		return nil, err
 	}
-
-	rsp, err := mixCoord.GetQcMetrics(ctx, req)
-	if err = merr.CheckRPCCall(rsp, err); err != nil {
-		return nil, err
-	}
-	queryCoordTopology := &metricsinfo.QueryCoordTopology{}
-	if err := metricsinfo.UnmarshalTopology(rsp.GetResponse(), queryCoordTopology); err != nil {
-		return nil, err
-	}
-
-	return queryCoordTopology, nil
+	// Use direct topology method to avoid JSON marshal/unmarshal overhead in MixCoord mode
+	return mixCoord.GetQueryCoordTopology(ctx, req)
 }
 
 func getDataCoordMetrics(ctx context.Context, mixCoord types.MixCoord) (*metricsinfo.DataCoordTopology, error) {
@@ -230,17 +221,8 @@ func getDataCoordMetrics(ctx context.Context, mixCoord types.MixCoord) (*metrics
 	if err != nil {
 		return nil, err
 	}
-
-	rsp, err := mixCoord.GetDcMetrics(ctx, req)
-	if err = merr.CheckRPCCall(rsp, err); err != nil {
-		return nil, err
-	}
-	dataCoordTopology := &metricsinfo.DataCoordTopology{}
-	if err = metricsinfo.UnmarshalTopology(rsp.GetResponse(), dataCoordTopology); err != nil {
-		return nil, err
-	}
-
-	return dataCoordTopology, nil
+	// Use direct topology method to avoid JSON marshal/unmarshal overhead in MixCoord mode
+	return mixCoord.GetDataCoordTopology(ctx, req)
 }
 
 func getProxyMetrics(ctx context.Context, proxies proxyutil.ProxyClientManagerInterface) ([]*metricsinfo.ProxyInfos, error) {
