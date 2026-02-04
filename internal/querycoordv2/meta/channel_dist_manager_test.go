@@ -105,6 +105,25 @@ func (suite *ChannelDistManagerSuite) TestVersion() {
 	suite.Greater(v2, v1)
 }
 
+func (suite *ChannelDistManagerSuite) TestNodeOffline() {
+	dist := suite.dist
+
+	// Verify node 1 has channels (node 1 has dmc0 and dmc1)
+	channels := dist.GetByFilter(WithNodeID2Channel(suite.nodes[1]))
+	suite.Len(channels, 2)
+
+	// Simulate node offline by calling Update with empty channels
+	dist.Update(suite.nodes[1])
+
+	// Verify node 1's channels are removed
+	channels = dist.GetByFilter(WithNodeID2Channel(suite.nodes[1]))
+	suite.Len(channels, 0)
+
+	// Verify other nodes are not affected
+	channels = dist.GetByFilter(WithNodeID2Channel(suite.nodes[0]))
+	suite.Len(channels, 1)
+}
+
 func (suite *ChannelDistManagerSuite) TestGetBy() {
 	dist := suite.dist
 
