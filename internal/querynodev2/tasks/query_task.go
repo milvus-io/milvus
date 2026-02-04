@@ -129,11 +129,6 @@ func (t *QueryTask) Execute() error {
 		return err
 	}
 
-	reducer := segments.CreateSegCoreReducer(
-		t.req,
-		t.collection.Schema(),
-		t.segmentManager,
-	)
 	beforeReduce := time.Now()
 
 	reduceResults := make([]*segcorepb.RetrieveResults, 0, len(results))
@@ -142,7 +137,10 @@ func (t *QueryTask) Execute() error {
 		reduceResults = append(reduceResults, result.Result)
 		querySegments = append(querySegments, result.Segment)
 	}
-	reducedResult, err := reducer.Reduce(t.ctx, reduceResults, querySegments, retrievePlan)
+	reducedResult, err := segments.RunQNQueryPipeline(
+		t.ctx, t.req, t.collection.Schema(), t.plan,
+		reduceResults, querySegments, t.segmentManager, retrievePlan,
+	)
 
 	metrics.QueryNodeReduceLatency.WithLabelValues(
 		paramtable.GetStringNodeID(),

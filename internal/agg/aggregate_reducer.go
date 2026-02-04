@@ -346,13 +346,8 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 
 	// 2. compute hash values for all rows in the result retrieved
 	var totalRowCount int64 = 0
-processResults:
+	limitReached := false
 	for _, result := range results {
-		// Check limit before processing each shard to avoid unnecessary work
-		if reducer.groupLimit != -1 && totalRowCount >= reducer.groupLimit {
-			break processResults
-		}
-
 		reducedResult.allRetrieveCount += result.GetAllRetrieveCount()
 		if result == nil {
 			return nil, fmt.Errorf("input result from any sources cannot be nil")
@@ -386,10 +381,6 @@ processResults:
 		}
 
 		for row := 0; row < rowCount; row++ {
-			// Check limit before processing each row to avoid unnecessary hashing and copying
-			if reducer.groupLimit != -1 && totalRowCount >= reducer.groupLimit {
-				break processResults
-			}
 			rowFieldValues := make([]*FieldValue, outputColumnCount)
 			var hashVal uint64
 			for col := 0; col < outputColumnCount; col++ {
@@ -414,19 +405,33 @@ processResults:
 			}
 			newRow := NewRow(rowFieldValues)
 			if bucket := reducer.hashValsMap[hashVal]; bucket == nil {
+				// New group: check groupLimit before adding
+				if limitReached {
+					continue
+				}
 				newBucket := NewBucket()
 				newBucket.AddRow(newRow)
 				totalRowCount++
 				reducer.hashValsMap[hashVal] = newBucket
+				if reducer.groupLimit != -1 && totalRowCount >= reducer.groupLimit {
+					limitReached = true
+				}
 			} else {
 				if rowIdx := bucket.Find(newRow, numGroupingKeys); rowIdx == NONE {
+					// New sub-group in existing bucket: check groupLimit
+					if limitReached {
+						continue
+					}
 					bucket.AddRow(newRow)
 					totalRowCount++
+					if reducer.groupLimit != -1 && totalRowCount >= reducer.groupLimit {
+						limitReached = true
+					}
 				} else {
+					// Existing group: always accumulate regardless of limit
 					bucket.Accumulate(newRow, rowIdx, numGroupingKeys, aggs)
 				}
 			}
-			// Don't guarantee specific groups to be returned before milvus support order by
 		}
 	}
 
