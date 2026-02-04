@@ -864,6 +864,14 @@ func (s *mixCoordImpl) GetQcMetrics(ctx context.Context, in *milvuspb.GetMetrics
 	return s.queryCoordServer.GetMetrics(ctx, in)
 }
 
+func (s *mixCoordImpl) GetDataCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.DataCoordTopology, error) {
+	return s.datacoordServer.GetDataCoordTopology(ctx, req)
+}
+
+func (s *mixCoordImpl) GetQueryCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.QueryCoordTopology, error) {
+	return s.queryCoordServer.GetQueryCoordTopology(ctx, req)
+}
+
 // QueryCoordServer
 func (s *mixCoordImpl) ActivateChecker(ctx context.Context, req *querypb.ActivateCheckerRequest) (*commonpb.Status, error) {
 	return s.queryCoordServer.ActivateChecker(ctx, req)

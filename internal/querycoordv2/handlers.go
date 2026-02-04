@@ -330,6 +330,20 @@ func (s *Server) getSystemInfoMetrics(
 	ctx context.Context,
 	req *milvuspb.GetMetricsRequest,
 ) (string, error) {
+	coordTopology := s.getQueryCoordTopology(ctx, req)
+	resp, err := metricsinfo.MarshalTopology(coordTopology)
+	if err != nil {
+		return "", err
+	}
+	return resp, nil
+}
+
+// getQueryCoordTopology returns QueryCoord topology directly without JSON serialization
+// This is optimized for in-process calls in MixCoord mode to avoid marshal/unmarshal overhead
+func (s *Server) getQueryCoordTopology(
+	ctx context.Context,
+	req *milvuspb.GetMetricsRequest,
+) metricsinfo.QueryCoordTopology {
 	used, total, err := hardware.GetDiskUsage(paramtable.Get().LocalStorageCfg.Path.GetValue())
 	if err != nil {
 		log.Ctx(ctx).Warn("get disk usage failed", zap.Error(err))
@@ -368,7 +382,7 @@ func (s *Server) getSystemInfoMetrics(
 	nodesMetrics := s.tryGetNodesMetrics(ctx, req, s.nodeMgr.GetAll()...)
 	s.fillMetricsWithNodes(&clusterTopology, nodesMetrics)
 
-	coordTopology := metricsinfo.QueryCoordTopology{
+	return metricsinfo.QueryCoordTopology{
 		Cluster: clusterTopology,
 		Connections: metricsinfo.ConnTopology{
 			Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, paramtable.GetNodeID()),
@@ -376,13 +390,6 @@ func (s *Server) getSystemInfoMetrics(
 			ConnectedComponents: []metricsinfo.ConnectionInfo{},
 		},
 	}
-
-	resp, err := metricsinfo.MarshalTopology(coordTopology)
-	if err != nil {
-		return "", err
-	}
-
-	return resp, nil
 }
 
 func (s *Server) fillMetricsWithNodes(topo *metricsinfo.QueryClusterTopology, nodeMetrics []*metricResp) {
@@ -525,4 +532,14 @@ func (s *Server) fillReplicaInfo(ctx context.Context, replica *meta.Replica, wit
 	}
 	info.ShardReplicas = shardReplicas
 	return info
+}
+
+// GetQueryCoordTopology returns QueryCoord topology directly without JSON serialization
+// This is optimized for in-process calls in MixCoord mode to avoid marshal/unmarshal overhead
+func (s *Server) GetQueryCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.QueryCoordTopology, error) {
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		return nil, err
+	}
+	topology := s.getQueryCoordTopology(ctx, req)
+	return &topology, nil
 }
