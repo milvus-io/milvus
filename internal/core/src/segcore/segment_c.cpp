@@ -263,7 +263,8 @@ AsyncSearch(CTraceContext c_trace,
             CPlaceholderGroup c_placeholder_group,
             uint64_t timestamp,
             int32_t consistency_level,
-            uint64_t collection_ttl) {
+            uint64_t collection_ttl,
+            uint64_t entity_ttl_physical_time_us) {
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto plan = static_cast<milvus::query::Plan*>(c_plan);
     auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
@@ -278,7 +279,8 @@ AsyncSearch(CTraceContext c_trace,
          phg_ptr,
          timestamp,
          consistency_level,
-         collection_ttl](folly::CancellationToken cancel_token) {
+         collection_ttl,
+         entity_ttl_physical_time_us](folly::CancellationToken cancel_token) {
             // save trace context into search_info
             auto& trace_ctx = plan->plan_node_->search_info_.trace_ctx_;
             trace_ctx.traceID = c_trace.traceID;
@@ -295,7 +297,8 @@ AsyncSearch(CTraceContext c_trace,
                                                  timestamp,
                                                  cancel_token,
                                                  consistency_level,
-                                                 collection_ttl);
+                                                 collection_ttl,
+                                                 entity_ttl_physical_time_us);
             if (!milvus::PositivelyRelated(
                     plan->plan_node_->search_info_.metric_type_)) {
                 for (auto& dis : search_result->distances_) {
@@ -345,7 +348,8 @@ AsyncRetrieve(CTraceContext c_trace,
               int64_t limit_size,
               bool ignore_non_pk,
               int32_t consistency_level,
-              uint64_t collection_ttl) {
+              uint64_t collection_ttl,
+              uint64_t entity_ttl_physical_time_us) {
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
     auto future = milvus::futures::Future<CRetrieveResult>::async(
@@ -358,21 +362,24 @@ AsyncRetrieve(CTraceContext c_trace,
          limit_size,
          ignore_non_pk,
          consistency_level,
-         collection_ttl](folly::CancellationToken cancel_token) {
+         collection_ttl,
+         entity_ttl_physical_time_us](folly::CancellationToken cancel_token) {
             auto trace_ctx = milvus::tracer::TraceContext{
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
             milvus::tracer::AutoSpan span("SegCoreRetrieve", &trace_ctx, true);
 
             segment->LazyCheckSchema(plan->schema_);
 
-            auto retrieve_result = segment->Retrieve(&trace_ctx,
-                                                     plan,
-                                                     timestamp,
-                                                     limit_size,
-                                                     ignore_non_pk,
-                                                     cancel_token,
-                                                     consistency_level,
-                                                     collection_ttl);
+            auto retrieve_result =
+                segment->Retrieve(&trace_ctx,
+                                  plan,
+                                  timestamp,
+                                  limit_size,
+                                  ignore_non_pk,
+                                  cancel_token,
+                                  consistency_level,
+                                  collection_ttl,
+                                  entity_ttl_physical_time_us);
 
             return CreateLeakedCRetrieveResultFromProto(
                 std::move(retrieve_result));

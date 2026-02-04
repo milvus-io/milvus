@@ -273,6 +273,9 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 
 	t.SearchRequest.GuaranteeTimestamp = guaranteeTs
+	// Extract physical time for entity-level TTL (issue #47413)
+	physicalTimeMs, _ := tsoutil.ParseHybridTs(guaranteeTs)
+	t.SearchRequest.EntityTtlPhysicalTime = uint64(physicalTimeMs * 1000)
 	t.SearchRequest.ConsistencyLevel = consistencyLevel
 	if t.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
 		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()

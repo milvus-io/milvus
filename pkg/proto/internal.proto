@@ -135,6 +135,7 @@ message SearchRequest {
   bool is_iterator = 28;
   string analyzer_name = 29;
   uint64 collection_ttl_timestamps = 30;
+  uint64 entity_ttl_physical_time = 31;
 }
 
 message SubSearchResults {
@@ -207,6 +208,7 @@ message RetrieveRequest {
   // for query agg
   repeated int64 group_by_field_ids = 21;
   repeated plan.Aggregate aggregates = 22;
+  uint64 entity_ttl_physical_time = 23;
 }
 
 
