@@ -210,17 +210,17 @@ func (_c *MockCluster_CreateExternalCollectionTask_Call) RunAndReturn(run func(i
 	return _c
 }
 
-// CreateImport provides a mock function with given fields: nodeID, in, taskSlot
-func (_m *MockCluster) CreateImport(nodeID int64, in *datapb.ImportRequest, taskSlot int64) error {
-	ret := _m.Called(nodeID, in, taskSlot)
+// CreateImport provides a mock function with given fields: nodeID, in
+func (_m *MockCluster) CreateImport(nodeID int64, in *datapb.ImportRequest) error {
+	ret := _m.Called(nodeID, in)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateImport")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *datapb.ImportRequest, int64) error); ok {
-		r0 = rf(nodeID, in, taskSlot)
+	if rf, ok := ret.Get(0).(func(int64, *datapb.ImportRequest) error); ok {
+		r0 = rf(nodeID, in)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -236,14 +236,13 @@ type MockCluster_CreateImport_Call struct {
 // CreateImport is a helper method to define mock.On call
 //   - nodeID int64
 //   - in *datapb.ImportRequest
-//   - taskSlot int64
-func (_e *MockCluster_Expecter) CreateImport(nodeID interface{}, in interface{}, taskSlot interface{}) *MockCluster_CreateImport_Call {
-	return &MockCluster_CreateImport_Call{Call: _e.mock.On("CreateImport", nodeID, in, taskSlot)}
+func (_e *MockCluster_Expecter) CreateImport(nodeID interface{}, in interface{}) *MockCluster_CreateImport_Call {
+	return &MockCluster_CreateImport_Call{Call: _e.mock.On("CreateImport", nodeID, in)}
 }
 
-func (_c *MockCluster_CreateImport_Call) Run(run func(nodeID int64, in *datapb.ImportRequest, taskSlot int64)) *MockCluster_CreateImport_Call {
+func (_c *MockCluster_CreateImport_Call) Run(run func(nodeID int64, in *datapb.ImportRequest)) *MockCluster_CreateImport_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*datapb.ImportRequest), args[2].(int64))
+		run(args[0].(int64), args[1].(*datapb.ImportRequest))
 	})
 	return _c
 }
@@ -253,7 +252,7 @@ func (_c *MockCluster_CreateImport_Call) Return(_a0 error) *MockCluster_CreateIm
 	return _c
 }
 
-func (_c *MockCluster_CreateImport_Call) RunAndReturn(run func(int64, *datapb.ImportRequest, int64) error) *MockCluster_CreateImport_Call {
+func (_c *MockCluster_CreateImport_Call) RunAndReturn(run func(int64, *datapb.ImportRequest) error) *MockCluster_CreateImport_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -305,17 +304,17 @@ func (_c *MockCluster_CreateIndex_Call) RunAndReturn(run func(int64, *workerpb.C
 	return _c
 }
 
-// CreatePreImport provides a mock function with given fields: nodeID, in, taskSlot
-func (_m *MockCluster) CreatePreImport(nodeID int64, in *datapb.PreImportRequest, taskSlot int64) error {
-	ret := _m.Called(nodeID, in, taskSlot)
+// CreatePreImport provides a mock function with given fields: nodeID, in
+func (_m *MockCluster) CreatePreImport(nodeID int64, in *datapb.PreImportRequest) error {
+	ret := _m.Called(nodeID, in)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreatePreImport")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *datapb.PreImportRequest, int64) error); ok {
-		r0 = rf(nodeID, in, taskSlot)
+	if rf, ok := ret.Get(0).(func(int64, *datapb.PreImportRequest) error); ok {
+		r0 = rf(nodeID, in)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -331,14 +330,13 @@ type MockCluster_CreatePreImport_Call struct {
 // CreatePreImport is a helper method to define mock.On call
 //   - nodeID int64
 //   - in *datapb.PreImportRequest
-//   - taskSlot int64
-func (_e *MockCluster_Expecter) CreatePreImport(nodeID interface{}, in interface{}, taskSlot interface{}) *MockCluster_CreatePreImport_Call {
-	return &MockCluster_CreatePreImport_Call{Call: _e.mock.On("CreatePreImport", nodeID, in, taskSlot)}
+func (_e *MockCluster_Expecter) CreatePreImport(nodeID interface{}, in interface{}) *MockCluster_CreatePreImport_Call {
+	return &MockCluster_CreatePreImport_Call{Call: _e.mock.On("CreatePreImport", nodeID, in)}
 }
 
-func (_c *MockCluster_CreatePreImport_Call) Run(run func(nodeID int64, in *datapb.PreImportRequest, taskSlot int64)) *MockCluster_CreatePreImport_Call {
+func (_c *MockCluster_CreatePreImport_Call) Run(run func(nodeID int64, in *datapb.PreImportRequest)) *MockCluster_CreatePreImport_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*datapb.PreImportRequest), args[2].(int64))
+		run(args[0].(int64), args[1].(*datapb.PreImportRequest))
 	})
 	return _c
 }
@@ -348,7 +346,7 @@ func (_c *MockCluster_CreatePreImport_Call) Return(_a0 error) *MockCluster_Creat
 	return _c
 }
 
-func (_c *MockCluster_CreatePreImport_Call) RunAndReturn(run func(int64, *datapb.PreImportRequest, int64) error) *MockCluster_CreatePreImport_Call {
+func (_c *MockCluster_CreatePreImport_Call) RunAndReturn(run func(int64, *datapb.PreImportRequest) error) *MockCluster_CreatePreImport_Call {
 	_c.Call.Return(run)
 	return _c
 }

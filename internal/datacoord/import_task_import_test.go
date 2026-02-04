@@ -150,7 +150,7 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 		assert.NoError(t, err)
 
 		cluster := session.NewMockCluster(t)
-		cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
+		cluster.EXPECT().CreateImport(mock.Anything, mock.Anything).Return(errors.New("mock err"))
 		task.CreateTaskOnWorker(1, cluster)
 		assert.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
 	})
@@ -195,7 +195,7 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 		assert.NoError(t, err)
 
 		cluster := session.NewMockCluster(t)
-		cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateImport(mock.Anything, mock.Anything).Return(nil)
 
 		catalog = mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(errors.New("mock err"))
@@ -245,7 +245,7 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 		assert.NoError(t, err)
 
 		cluster := session.NewMockCluster(t)
-		cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateImport(mock.Anything, mock.Anything).Return(nil)
 		task.CreateTaskOnWorker(1, cluster)
 		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
 	})

@@ -31,6 +31,8 @@ const (
 	TypeKey        = "task_type"
 	SubTypeKey     = "task_sub_type" // optional, only for Stats
 	SlotKey        = "task_slot"
+	CPUSlotKey     = "cpu_slot"
+	MemorySlotKey  = "memory_slot"
 	NumRowsKey     = "num_row"      // optional, only for Index, Stats
 	TaskVersionKey = "task_version" // optional, only for Index, Stats and Analyze
 
@@ -75,6 +77,14 @@ func (p Properties) AppendSubType(subType string) {
 
 func (p Properties) AppendTaskSlot(slot int64) {
 	p[SlotKey] = fmt.Sprintf("%d", slot)
+}
+
+func (p Properties) AppendCPUSlot(slot float64) {
+	p[CPUSlotKey] = fmt.Sprintf("%f", slot)
+}
+
+func (p Properties) AppendMemorySlot(slot float64) {
+	p[MemorySlotKey] = fmt.Sprintf("%f", slot)
 }
 
 func (p Properties) AppendNumRows(rows int64) {
@@ -160,6 +170,20 @@ func (p Properties) GetTaskSlot() (int64, error) {
 		return 0, WrapErrTaskPropertyLack(SlotKey, p[TaskIDKey])
 	}
 	return strconv.ParseInt(p[SlotKey], 10, 64)
+}
+
+func (p Properties) GetTaskCPUSlot() (float64, error) {
+	if _, ok := p[CPUSlotKey]; !ok {
+		return 0, WrapErrTaskPropertyLack(CPUSlotKey, p[TaskIDKey])
+	}
+	return strconv.ParseFloat(p[CPUSlotKey], 64)
+}
+
+func (p Properties) GetTaskMemorySlot() (float64, error) {
+	if _, ok := p[MemorySlotKey]; !ok {
+		return 0, WrapErrTaskPropertyLack(MemorySlotKey, p[TaskIDKey])
+	}
+	return strconv.ParseFloat(p[MemorySlotKey], 64)
 }
 
 func (p Properties) GetNumRows() int64 {
