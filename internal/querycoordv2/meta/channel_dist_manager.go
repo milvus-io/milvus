@@ -319,6 +319,14 @@ func (m *ChannelDistManager) Update(nodeID typeutil.UniqueID, channels ...*DmCha
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
+	if len(channels) == 0 {
+		// Node offline, remove entry to avoid memory leak
+		delete(m.channels, nodeID)
+		m.updateCollectionIndex()
+		m.version++
+		return nil
+	}
+
 	newServiceableChannels := make([]*DmChannel, 0)
 	for _, channel := range channels {
 		channel.Node = nodeID
