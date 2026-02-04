@@ -66,7 +66,7 @@ jobs:
       - name: Setup Go environment
         uses: actions/setup-go@v4
         with:
-          go-version: '1.24.11'
+          go-version: '1.24.12'
           cache: false
       - name: Download Caches
         uses: ./.github/actions/macos-cache-restore
