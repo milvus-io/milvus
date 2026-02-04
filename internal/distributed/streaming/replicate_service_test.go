@@ -114,7 +114,7 @@ func TestReplicateService_GetReplicateConfiguration(t *testing.T) {
 			},
 		}
 
-		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(
+		as.EXPECT().GetReplicateConfiguration(mock.Anything, mock.Anything).Return(
 			replicateutil.MustNewConfigHelper("secondary", expectedConfig), nil,
 		)
 
@@ -160,7 +160,7 @@ func TestReplicateService_GetReplicateConfiguration(t *testing.T) {
 		as := mock_client.NewMockAssignmentService(t)
 		c.EXPECT().Assignment().Return(as).Maybe()
 
-		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(
+		as.EXPECT().GetReplicateConfiguration(mock.Anything, mock.Anything).Return(
 			nil, errors.New("assignment service unavailable"),
 		)
 
@@ -196,7 +196,7 @@ func TestReplicateService_GetReplicateConfiguration(t *testing.T) {
 			},
 		}
 
-		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(
+		as.EXPECT().GetReplicateConfiguration(mock.Anything, mock.Anything).Return(
 			replicateutil.MustNewConfigHelper("standalone", standaloneConfig), nil,
 		)
 
