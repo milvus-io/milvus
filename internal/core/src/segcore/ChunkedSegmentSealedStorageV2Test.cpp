@@ -327,10 +327,9 @@ TEST_P(TestChunkSegmentStorageV2, TestCompareExpr) {
     auto index = index::IndexFactory::GetInstance().CreateScalarIndex(
         create_index_info, file_manager_ctx);
     std::vector<int64_t> data(test_data_count * chunk_num);
-    auto pw = segment->chunk_data<int64_t>(nullptr, fid, 0);
-    auto d = pw.get();
-    std::copy(
-        d.data(), d.data() + test_data_count, data.begin() + test_data_count);
+    auto pw = segment->chunk_view<int64_t>(nullptr, fid, 0);
+    auto d = pw.get()->Data();
+    std::copy(d, d + test_data_count, data.begin() + test_data_count);
 
     index->BuildWithRawDataForUT(data.size(), data.data());
     segcore::LoadIndexInfo load_index_info;

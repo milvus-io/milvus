@@ -28,6 +28,7 @@
 #include "common/QueryInfo.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/VectorTrait.h"
 #include "expr/ITypeExpr.h"
 #include "gtest/gtest.h"
 #include "index/IndexFactory.h"
@@ -98,8 +99,15 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
 
         auto chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
-        chunks.emplace_back(std::make_unique<FixedWidthChunk>(
-            chunk_size, dim, buf, buf_size, 4, false, chunk_mmap_guard));
+        chunks.emplace_back(
+            std::make_unique<FixedWidthChunk<milvus::FloatVector>>(
+                chunk_size,
+                dim,
+                buf,
+                buf_size,
+                sizeof(float),
+                false,
+                chunk_mmap_guard));
     }
 
     auto translator = std::make_unique<TestChunkTranslator>(
@@ -229,13 +237,14 @@ TEST(test_chunk_segment, TestSearchOnSealedWithAllNullVectors) {
         auto chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
         chunks.emplace_back(
-            std::make_unique<FixedWidthChunk>(chunk_size,
-                                              dim,
-                                              buf,
-                                              buf_size,
-                                              sizeof(float),
-                                              true,
-                                              chunk_mmap_guard));
+            std::make_unique<FixedWidthChunk<milvus::FloatVector>>(
+                chunk_size,
+                dim,
+                buf,
+                buf_size,
+                sizeof(float),
+                true,
+                chunk_mmap_guard));
     }
 
     auto translator = std::make_unique<TestChunkTranslator>(
@@ -335,13 +344,14 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithAllNullVectors) {
         auto chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
         chunks.emplace_back(
-            std::make_unique<FixedWidthChunk>(chunk_size,
-                                              dim,
-                                              buf,
-                                              buf_size,
-                                              sizeof(float),
-                                              true,
-                                              chunk_mmap_guard));
+            std::make_unique<FixedWidthChunk<milvus::FloatVector>>(
+                chunk_size,
+                dim,
+                buf,
+                buf_size,
+                sizeof(float),
+                true,
+                chunk_mmap_guard));
     }
 
     auto translator = std::make_unique<TestChunkTranslator>(

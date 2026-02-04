@@ -676,7 +676,7 @@ make_chunk(const FieldMeta& field_meta,
                                                               nullable,
                                                               chunk_mmap_guard);
         case milvus::DataType::VECTOR_FLOAT:
-            return std::make_unique<FixedWidthChunk<FloatVector>>(
+            return std::make_unique<FixedWidthChunk<milvus::FloatVector>>(
                 row_nums,
                 dim,
                 data,
@@ -685,7 +685,7 @@ make_chunk(const FieldMeta& field_meta,
                 nullable,
                 chunk_mmap_guard);
         case milvus::DataType::VECTOR_BINARY:
-            return std::make_unique<FixedWidthChunk<BinaryVector>>(
+            return std::make_unique<FixedWidthChunk<milvus::BinaryVector>>(
                 row_nums,
                 dim / 8,
                 data,
@@ -694,7 +694,7 @@ make_chunk(const FieldMeta& field_meta,
                 nullable,
                 chunk_mmap_guard);
         case milvus::DataType::VECTOR_FLOAT16:
-            return std::make_unique<FixedWidthChunk<Float16Vector>>(
+            return std::make_unique<FixedWidthChunk<milvus::Float16Vector>>(
                 row_nums,
                 dim,
                 data,
@@ -703,7 +703,7 @@ make_chunk(const FieldMeta& field_meta,
                 nullable,
                 chunk_mmap_guard);
         case milvus::DataType::VECTOR_BFLOAT16:
-            return std::make_unique<FixedWidthChunk<BFloat16Vector>>(
+            return std::make_unique<FixedWidthChunk<milvus::BFloat16Vector>>(
                 row_nums,
                 dim,
                 data,
@@ -712,7 +712,7 @@ make_chunk(const FieldMeta& field_meta,
                 nullable,
                 chunk_mmap_guard);
         case milvus::DataType::VECTOR_INT8:
-            return std::make_unique<FixedWidthChunk<Int8Vector>>(
+            return std::make_unique<FixedWidthChunk<milvus::Int8Vector>>(
                 row_nums,
                 dim,
                 data,
