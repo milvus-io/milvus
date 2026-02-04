@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 const (
@@ -128,6 +129,13 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(searchReq)
 
+	// Use physical time for entity-level TTL (issue #47413)
+	physicalTimeUs := int64(searchReq.entityTTLPhysicalTime)
+	if physicalTimeUs == 0 {
+		physicalTimeMs, _ := tsoutil.ParseHybridTs(searchReq.mvccTimestamp)
+		physicalTimeUs = physicalTimeMs * 1000
+	}
+
 	future := cgo.Async(ctx,
 		func() cgo.CFuturePtr {
 			return (cgo.CFuturePtr)(C.AsyncSearch(
@@ -138,6 +146,7 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 				C.uint64_t(searchReq.mvccTimestamp),
 				C.int32_t(searchReq.consistencyLevel),
 				C.uint64_t(searchReq.collectionTTL),
+				C.uint64_t(physicalTimeUs),
 			))
 		},
 		cgo.WithName("search"),
@@ -155,6 +164,14 @@ func (s *cSegmentImpl) Retrieve(ctx context.Context, plan *RetrievePlan) (*Retri
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(plan)
+
+	// Use physical time for entity-level TTL (issue #47413)
+	physicalTimeUs := int64(plan.entityTTLPhysicalTime)
+	if physicalTimeUs == 0 {
+		physicalTimeMs, _ := tsoutil.ParseHybridTs(plan.Timestamp)
+		physicalTimeUs = physicalTimeMs * 1000
+	}
+
 	future := cgo.Async(
 		ctx,
 		func() cgo.CFuturePtr {
@@ -167,6 +184,7 @@ func (s *cSegmentImpl) Retrieve(ctx context.Context, plan *RetrievePlan) (*Retri
 				C.bool(plan.ignoreNonPk),
 				C.int32_t(plan.consistencyLevel),
 				C.uint64_t(plan.collectionTTL),
+				C.uint64_t(physicalTimeUs),
 			))
 		},
 		cgo.WithName("retrieve"),

@@ -86,12 +86,11 @@ CreateTTLFieldFilterExpression(QueryContext* query_context) {
     auto ttl_field_id = schema.get_ttl_field_id().value();
     auto& ttl_field_meta = schema[ttl_field_id];
 
-    // Convert query_timestamp to physical microseconds for TTL comparison
-    auto query_timestamp = query_context->get_query_timestamp();
-    int64_t physical_us =
-        static_cast<int64_t>(
-            milvus::segcore::TimestampToPhysicalMs(query_timestamp)) *
-        1000;
+    // Use entity_ttl_physical_time_us (already converted to physical microseconds in Go layer)
+    // instead of query_timestamp (MVCC time) to ensure correct expiration judgment
+    // See issue #47413 - Strong consistency uses MVCC timestamp which doesn't advance
+    // without new writes, causing entity-level TTL to fail
+    int64_t physical_us = query_context->get_entity_ttl_physical_time_us();
 
     expr::ColumnInfo ttl_column_info(ttl_field_id,
                                      ttl_field_meta.get_data_type(),
