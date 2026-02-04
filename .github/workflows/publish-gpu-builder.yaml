@@ -29,11 +29,22 @@ concurrency:
 
 jobs:
   publish-gpu-builder:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 500
     env:
       OS: ubuntu22.04
     steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 10240
+          overprovision-lvm: 'true'
+          swap-size-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
       - name: Checkout
         uses: actions/checkout@v2
       - name: Get version from system time after release step
@@ -73,7 +84,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           file: build/docker/builder/gpu/${{ env.OS }}/Dockerfile
       - name: Bump Builder Version
-        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && ${{ env.OS == 'ubuntu22.04' }}
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && env.OS == 'ubuntu22.04'
         uses: ./.github/actions/bump-builder-version
         with:
           tag: "${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}"
