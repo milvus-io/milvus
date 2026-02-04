@@ -13,7 +13,7 @@ FROM ubuntu:focal-20220426
 
 ARG TARGETARCH
 
-RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 \
     g++ gcc gdb gdbserver ninja-build git make ccache libssl-dev zlib1g-dev zip unzip \
     clang-format-12 clang-tidy-12 lcov libtool m4 autoconf automake python3 python3-pip \
     pkg-config uuid-dev libaio-dev libopenblas-dev && \
@@ -40,7 +40,7 @@ ENV GOPATH /go
 ENV GOROOT /usr/local/go
 ENV GO111MODULE on
 ENV PATH $GOPATH/bin:$GOROOT/bin:$PATH
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.11.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.12.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
     mkdir -p "$GOPATH/src" "$GOPATH/bin" && \
     go clean --modcache && \
     chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
