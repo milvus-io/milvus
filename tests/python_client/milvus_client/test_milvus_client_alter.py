@@ -563,6 +563,62 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
                          output_fields=["*"])[0]
         assert (len(res)) == 10
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_alter_collection_field_nullable_field(self):
+        """
+        target: test alter collection field with nullable field
+        method: create collection with nullable field and alter field
+        expected: alter successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 8
+        # create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id_string", DataType.VARCHAR, max_length=64, is_primary=True, auto_id=False)
+        schema.add_field("embeddings_1", DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        schema.add_field("embeddings_2", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("varchar_1", DataType.VARCHAR, max_length=64, nullable=True)
+        schema.add_field("varchar_2", DataType.VARCHAR, max_length=64)
+        self.create_collection(client, collection_name, dimension=dim, schema=schema)
+
+        # try to alert nullable vector field to non-nullable field
+        error = {ct.err_code: 999,
+                 ct.err_msg: "nullable does not allow update in collection field param"}
+        self.alter_collection_field(client, collection_name, field_name="embeddings_1",
+                                    field_params={"nullable": False},
+                                    check_task=CheckTasks.err_res, check_items=error)
+        # try to alert non-nullable vector field to nullable field
+        self.alter_collection_field(client, collection_name, field_name="embeddings_2",
+                                    field_params={"nullable": True},
+                                    check_task=CheckTasks.err_res, check_items=error)
+        # try to alert nullable varchar field to non-nullable varchar field
+        self.alter_collection_field(client, collection_name, field_name="varchar_1",
+                                    field_params={"nullable": False},
+                                    check_task=CheckTasks.err_res, check_items=error)
+        # try to alert non-nullable varchar field to nullable varchar field 
+        self.alter_collection_field(client, collection_name, field_name="varchar_2",
+                                    field_params={"nullable": True},
+                                    check_task=CheckTasks.err_res, check_items=error)
+
+        # add a nullable vector field to the collection
+        self.add_collection_field(client, collection_name, field_name="embeddings_3", 
+                                  data_type=DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        # try to alert the new added nullable vector field to non-nullable field
+        self.alter_collection_field(client, collection_name, field_name="embeddings_3",
+                                    field_params={"nullable": False},
+                                    check_task=CheckTasks.err_res, check_items=error)
+        # add a nullable varchar field to the collection
+        self.add_collection_field(client, collection_name, field_name="varchar_3", 
+                                  data_type=DataType.VARCHAR, max_length=64, nullable=True)
+        # try to alert the new added nullable varchar field to non-nullable varchar field
+        self.alter_collection_field(client, collection_name, field_name="varchar_3",
+                                    field_params={"nullable": False},
+                                    check_task=CheckTasks.err_res, check_items=error)
+
+        # drop the collection
+        self.drop_collection(client, collection_name)
+
 
 class TestMilvusClientAlterDatabase(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L0)
