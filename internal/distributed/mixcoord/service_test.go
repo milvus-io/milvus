@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
@@ -829,5 +831,87 @@ func Test_NewServer(t *testing.T) {
 		resp, err := server.BatchUpdateManifest(ctx, req)
 		assert.NoError(t, err)
 		assert.True(t, merr.Ok(resp))
+	})
+
+	t.Run("RefreshExternalCollection", func(t *testing.T) {
+		req := &datapb.RefreshExternalCollectionRequest{
+			CollectionId:   1001,
+			CollectionName: "test_collection",
+		}
+		mockRefresh := mockey.Mock(mockey.GetMethod(mockMixCoord, "RefreshExternalCollection")).Return(&datapb.RefreshExternalCollectionResponse{
+			Status: merr.Success(),
+			JobId:  54321,
+		}, nil).Build()
+		defer mockRefresh.UnPatch()
+		resp, err := server.RefreshExternalCollection(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(54321), resp.GetJobId())
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("GetRefreshExternalCollectionProgress", func(t *testing.T) {
+		req := &datapb.GetRefreshExternalCollectionProgressRequest{
+			JobId: 54321,
+		}
+		mockProgress := mockey.Mock(mockey.GetMethod(mockMixCoord, "GetRefreshExternalCollectionProgress")).
+			Return(&datapb.GetRefreshExternalCollectionProgressResponse{
+				Status: merr.Success(),
+				JobInfo: &datapb.ExternalCollectionRefreshJob{
+					JobId:          54321,
+					CollectionName: "test_collection",
+					State:          indexpb.JobState_JobStateInProgress,
+					Progress:       50,
+				},
+			}, nil).Build()
+		defer mockProgress.UnPatch()
+		resp, err := server.GetRefreshExternalCollectionProgress(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(54321), resp.GetJobInfo().GetJobId())
+		assert.Equal(t, int64(50), resp.GetJobInfo().GetProgress())
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("ListRefreshExternalCollectionJobs", func(t *testing.T) {
+		req := &datapb.ListRefreshExternalCollectionJobsRequest{
+			CollectionId: 1001,
+		}
+		mockList := mockey.Mock(mockey.GetMethod(mockMixCoord, "ListRefreshExternalCollectionJobs")).
+			Return(&datapb.ListRefreshExternalCollectionJobsResponse{
+				Status: merr.Success(),
+				Jobs: []*datapb.ExternalCollectionRefreshJob{
+					{
+						JobId:          54321,
+						CollectionName: "test_collection",
+						State:          indexpb.JobState_JobStateFinished,
+						Progress:       100,
+					},
+					{
+						JobId:          54322,
+						CollectionName: "test_collection",
+						State:          indexpb.JobState_JobStateFailed,
+						Progress:       50,
+						FailReason:     "Test failure",
+					},
+				},
+			}, nil).Build()
+		defer mockList.UnPatch()
+		resp, err := server.ListRefreshExternalCollectionJobs(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(resp.GetJobs()))
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("CreateExternalCollection", func(t *testing.T) {
+		req := &msgpb.CreateCollectionRequest{
+			CollectionName: "test_external_collection",
+		}
+		mockCreate := mockey.Mock(mockey.GetMethod(mockMixCoord, "CreateExternalCollection")).
+			Return(&datapb.CreateExternalCollectionResponse{
+				Status: merr.Success(),
+			}, nil).Build()
+		defer mockCreate.UnPatch()
+		resp, err := server.CreateExternalCollection(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 }

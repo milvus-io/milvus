@@ -155,3 +155,69 @@ func TestConvertToEntityJobInfo(t *testing.T) {
 		assert.Equal(t, entity.RefreshStatePending, result.State)
 	})
 }
+
+func TestRefreshExternalCollectionOption_Updates(t *testing.T) {
+	t.Run("update_external_source", func(t *testing.T) {
+		opt := NewRefreshExternalCollectionOption("test_collection").
+			WithExternalSource("s3://new-bucket")
+		req := opt.Request()
+		assert.Equal(t, "s3://new-bucket", req.GetExternalSource())
+	})
+
+	t.Run("update_external_spec", func(t *testing.T) {
+		opt := NewRefreshExternalCollectionOption("test_collection").
+			WithExternalSpec("new-spec")
+		req := opt.Request()
+		assert.Equal(t, "new-spec", req.GetExternalSpec())
+	})
+}
+
+func TestGetRefreshExternalCollectionProgressOption_Validation(t *testing.T) {
+	t.Run("different_job_ids", func(t *testing.T) {
+		opt1 := NewGetRefreshExternalCollectionProgressOption(123)
+		opt2 := NewGetRefreshExternalCollectionProgressOption(456)
+
+		assert.NotEqual(t, opt1.Request().GetJobId(), opt2.Request().GetJobId())
+		assert.Equal(t, int64(123), opt1.Request().GetJobId())
+		assert.Equal(t, int64(456), opt2.Request().GetJobId())
+	})
+}
+
+func TestListRefreshExternalCollectionJobsOption_Validation(t *testing.T) {
+	t.Run("different_collections", func(t *testing.T) {
+		opt1 := NewListRefreshExternalCollectionJobsOption("collection_1")
+		opt2 := NewListRefreshExternalCollectionJobsOption("collection_2")
+
+		assert.NotEqual(t, opt1.Request().GetCollectionName(), opt2.Request().GetCollectionName())
+		assert.Equal(t, "collection_1", opt1.Request().GetCollectionName())
+		assert.Equal(t, "collection_2", opt2.Request().GetCollectionName())
+	})
+}
+
+func TestConvertToEntityJobInfo_AllStates(t *testing.T) {
+	t.Run("unknown_state", func(t *testing.T) {
+		info := &milvuspb.RefreshExternalCollectionJobInfo{
+			JobId: 123,
+			State: 999, // Invalid state
+		}
+
+		result := convertToEntityJobInfo(info)
+		assert.NotNil(t, result)
+		assert.Equal(t, int64(123), result.JobID)
+	})
+
+	t.Run("with_collection_info", func(t *testing.T) {
+		info := &milvuspb.RefreshExternalCollectionJobInfo{
+			JobId:          123,
+			CollectionName: "test_collection",
+			State:          milvuspb.RefreshExternalCollectionState_RefreshInProgress,
+			Progress:       75,
+		}
+
+		result := convertToEntityJobInfo(info)
+		assert.NotNil(t, result)
+		assert.Equal(t, int64(123), result.JobID)
+		assert.Equal(t, "test_collection", result.CollectionName)
+		assert.Equal(t, int64(75), result.Progress)
+	})
+}
