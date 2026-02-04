@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -217,6 +218,25 @@ func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Contex
 }
 
 func (minioObjectStorage *MinioObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {
+	// isDeleteSuccessful treats 200 and 404 as successful deletion.
+	// Some S3-compatible storage doesn't fully comply with S3 spec (minio SDK expects 204).
+	isDeleteSuccessful := func(err error) bool {
+		if err == nil {
+			return true
+		}
+		statusCode := minio.ToErrorResponse(err).StatusCode
+		return statusCode == http.StatusOK || statusCode == http.StatusNotFound
+	}
+
 	err := minioObjectStorage.Client.RemoveObject(ctx, bucketName, objectName, minio.RemoveObjectOptions{})
+	if isDeleteSuccessful(err) {
+		if err != nil {
+			log.Debug("object already removed or storage returned non-standard success code",
+				zap.String("bucket", bucketName),
+				zap.String("object", objectName),
+				zap.Int("statusCode", minio.ToErrorResponse(err).StatusCode))
+		}
+		return nil
+	}
 	return checkObjectStorageError(objectName, err)
 }
