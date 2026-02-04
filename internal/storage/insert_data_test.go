@@ -3,6 +3,7 @@ package storage
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
@@ -475,4 +476,194 @@ func (s *ArrayFieldDataSuite) TestArrayFieldData() {
 	s.Equal(126, insertData.GetMemorySize())
 	s.False(insertData.IsEmpty())
 	s.Equal(115, insertData.GetRowSize(0))
+}
+
+func TestMolFieldData(t *testing.T) {
+	t.Run("Test MolFieldData - Basic Operations", func(t *testing.T) {
+		// Test non-nullable MolFieldData
+		molData := &MolFieldData{
+			Data:      make([][]byte, 0),
+			Nullable:  false,
+			ValidData: nil,
+		}
+
+		// Test RowNum
+		assert.Equal(t, 0, molData.RowNum())
+
+		// Test AppendRow with []byte
+		testData1 := []byte("CCO") // Ethanol SMILES
+		err := molData.AppendRow(testData1)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, molData.RowNum())
+		assert.Equal(t, testData1, molData.Data[0])
+
+		// Test AppendRow with string
+		testData2 := "CC" // Ethane SMILES
+		err = molData.AppendRow(testData2)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, molData.RowNum())
+		assert.Equal(t, []byte(testData2), molData.Data[1])
+
+		// Test GetRow
+		row0 := molData.GetRow(0)
+		assert.Equal(t, testData1, row0)
+		row1 := molData.GetRow(1)
+		assert.Equal(t, []byte(testData2), row1)
+
+		// Test GetDataRows
+		dataRows := molData.GetDataRows()
+		assert.Equal(t, molData.Data, dataRows)
+
+		// Test GetDataType
+		assert.Equal(t, schemapb.DataType_Mol, molData.GetDataType())
+
+		// Test GetNullable
+		assert.Equal(t, false, molData.GetNullable())
+
+		// Test GetMemorySize
+		memorySize := molData.GetMemorySize()
+		assert.Greater(t, memorySize, 0)
+
+		// Test GetRowSize
+		rowSize0 := molData.GetRowSize(0)
+		assert.Equal(t, len(testData1)+16, rowSize0)
+		rowSize1 := molData.GetRowSize(1)
+		assert.Equal(t, len(testData2)+16, rowSize1)
+	})
+
+	t.Run("Test MolFieldData - Nullable", func(t *testing.T) {
+		molData := &MolFieldData{
+			Data:      make([][]byte, 0),
+			Nullable:  true,
+			ValidData: make([]bool, 0),
+		}
+
+		// Test AppendRow with nil (nullable)
+		err := molData.AppendRow(nil)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, molData.RowNum())
+		assert.Equal(t, 1, len(molData.ValidData))
+		assert.False(t, molData.ValidData[0])
+
+		// Test GetRow with null value
+		row := molData.GetRow(0)
+		assert.Nil(t, row)
+
+		// Test AppendRow with valid data
+		testData := []byte("CCO")
+		err = molData.AppendRow(testData)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, molData.RowNum())
+		assert.True(t, molData.ValidData[1])
+		assert.Equal(t, testData, molData.Data[1])
+
+		// Test GetValidData
+		validData := molData.GetValidData()
+		assert.Equal(t, []bool{false, true}, validData)
+	})
+
+	t.Run("Test MolFieldData - AppendRows", func(t *testing.T) {
+		molData := &MolFieldData{
+			Data:      make([][]byte, 0),
+			Nullable:  false,
+			ValidData: nil,
+		}
+
+		// Test AppendDataRows with [][]byte
+		testData := [][]byte{
+			[]byte("CCO"),
+			[]byte("CC"),
+			[]byte("C"),
+		}
+		err := molData.AppendDataRows(testData)
+		assert.NoError(t, err)
+		assert.Equal(t, 3, molData.RowNum())
+		assert.Equal(t, testData, molData.Data)
+
+		// Test AppendDataRows with []string
+		molData2 := &MolFieldData{
+			Data:      make([][]byte, 0),
+			Nullable:  false,
+			ValidData: nil,
+		}
+		testData2 := []string{"CCO", "CC", "C"}
+		err = molData2.AppendDataRows(testData2)
+		assert.NoError(t, err)
+		assert.Equal(t, 3, molData2.RowNum())
+		for i, s := range testData2 {
+			assert.Equal(t, []byte(s), molData2.Data[i])
+		}
+
+		// Test AppendValidDataRows
+		molData3 := &MolFieldData{
+			Data:      make([][]byte, 0),
+			Nullable:  true,
+			ValidData: make([]bool, 0),
+		}
+		err = molData3.AppendDataRows(testData)
+		assert.NoError(t, err)
+		validData := []bool{true, false, true}
+		err = molData3.AppendValidDataRows(validData)
+		assert.NoError(t, err)
+		assert.Equal(t, validData, molData3.ValidData)
+	})
+
+	t.Run("Test MolFieldData - Error Cases", func(t *testing.T) {
+		molData := &MolFieldData{
+			Data:      make([][]byte, 0),
+			Nullable:  false,
+			ValidData: nil,
+		}
+
+		// Test AppendRow with invalid type
+		err := molData.AppendRow(123)
+		assert.Error(t, err)
+
+		// Test AppendDataRows with invalid type
+		err = molData.AppendDataRows([]int{1, 2, 3})
+		assert.Error(t, err)
+
+		// Test AppendValidDataRows with invalid type
+		molData2 := &MolFieldData{
+			Data:      make([][]byte, 0),
+			Nullable:  true,
+			ValidData: make([]bool, 0),
+		}
+		err = molData2.AppendValidDataRows([]int{1, 2})
+		assert.Error(t, err)
+	})
+
+	t.Run("Test MolFieldData - NewFieldData", func(t *testing.T) {
+		// Test non-nullable
+		fieldSchema := &schemapb.FieldSchema{
+			FieldID:    100,
+			Name:       "mol_field",
+			DataType:   schemapb.DataType_Mol,
+			Nullable:   false,
+			TypeParams: nil,
+		}
+		fieldData, err := NewFieldData(schemapb.DataType_Mol, fieldSchema, 10)
+		assert.NoError(t, err)
+		assert.NotNil(t, fieldData)
+		molData, ok := fieldData.(*MolFieldData)
+		assert.True(t, ok)
+		assert.False(t, molData.Nullable)
+		assert.Nil(t, molData.ValidData)
+
+		// Test nullable
+		fieldSchema2 := &schemapb.FieldSchema{
+			FieldID:    101,
+			Name:       "mol_field_nullable",
+			DataType:   schemapb.DataType_Mol,
+			Nullable:   true,
+			TypeParams: nil,
+		}
+		fieldData2, err := NewFieldData(schemapb.DataType_Mol, fieldSchema2, 10)
+		assert.NoError(t, err)
+		assert.NotNil(t, fieldData2)
+		molData2, ok := fieldData2.(*MolFieldData)
+		assert.True(t, ok)
+		assert.True(t, molData2.Nullable)
+		assert.NotNil(t, molData2.ValidData)
+	})
 }

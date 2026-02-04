@@ -599,6 +599,18 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 			if err != nil {
 				return err
 			}
+
+		case *schemapb.ScalarField_MolData:
+			sd.MolData.Data, err = fillWithNullValueImpl(sd.MolData.Data, field.GetValidData())
+			if err != nil {
+				return err
+			}
+
+		case *schemapb.ScalarField_MolSmilesData:
+			sd.MolSmilesData.Data, err = fillWithNullValueImpl(sd.MolSmilesData.Data, field.GetValidData())
+			if err != nil {
+				return err
+			}
 		default:
 			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
 		}
@@ -742,6 +754,22 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 				return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
 			}
 			sd.GeometryData.Data, err = fillWithDefaultValueImpl(sd.GeometryData.Data, defaultValueWkbBytes, field.GetValidData())
+			if err != nil {
+				return err
+			}
+
+		case *schemapb.ScalarField_MolData:
+			if len(field.GetValidData()) != numRows {
+				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
+				return merr.WrapErrParameterInvalid(numRows, len(field.GetValidData()), msg)
+			}
+			defaultValue := fieldSchema.GetDefaultValue().GetStringData()
+			defaultValuePickleBytes, err := common.ConvertSMILESToPickle(defaultValue)
+			if err != nil {
+				log.Warn("invalid default value for mol field", zap.Error(err))
+				return merr.WrapErrParameterInvalidMsg("invalid default value for mol field")
+			}
+			sd.MolData.Data, err = fillWithDefaultValueImpl(sd.MolData.Data, defaultValuePickleBytes, field.GetValidData())
 			if err != nil {
 				return err
 			}
