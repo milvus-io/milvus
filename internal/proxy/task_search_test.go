@@ -5360,3 +5360,259 @@ func TestSearchTask_OrderByValidation(t *testing.T) {
 		assert.Contains(t, err.Error(), "order_by is not supported when using search iterator")
 	})
 }
+
+// mockHighlighter is a mock implementation of Highlighter interface for testing
+type mockHighlighter struct {
+	fieldIDs          []int64
+	requiredFieldIDs  []int64
+	dynamicFieldNames []string
+}
+
+func (m *mockHighlighter) AsSearchPipelineOperator(t *searchTask) (operator, error) {
+	return nil, nil
+}
+
+func (m *mockHighlighter) FieldIDs() []int64 {
+	return m.fieldIDs
+}
+
+func (m *mockHighlighter) RequiredFieldIDs() []int64 {
+	return m.requiredFieldIDs
+}
+
+func (m *mockHighlighter) DynamicFieldNames() []string {
+	return m.dynamicFieldNames
+}
+
+func TestSearchTask_InitSearchRequestWithHighlighter(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	// Create a schema with dynamic field enabled
+	schema := &schemapb.CollectionSchema{
+		Name:               "test_highlight_collection",
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "title", DataType: schemapb.DataType_VarChar},
+			{FieldID: 102, Name: "content", DataType: schemapb.DataType_Text},
+			{FieldID: 103, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+			{FieldID: 104, Name: "embedding", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+		},
+	}
+
+	schemaInfo := newSchemaInfo(schema)
+
+	t.Run("highlighter adds RequiredFieldIDs to OutputFieldsId", func(t *testing.T) {
+		task := &searchTask{
+			ctx:            ctx,
+			collectionName: "test_highlight_collection",
+			SearchRequest: &internalpb.SearchRequest{
+				CollectionID:     1,
+				PartitionIDs:     []int64{1},
+				Dsl:              "",
+				PlaceholderGroup: nil,
+				DslType:          commonpb.DslType_BoolExprV1,
+				OutputFieldsId:   []int64{100}, // pk field
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: "test_highlight_collection",
+				OutputFields:   []string{"pk", "title"},
+				Dsl:            "",
+				SearchParams: []*commonpb.KeyValuePair{
+					{Key: AnnsFieldKey, Value: "embedding"},
+					{Key: TopKKey, Value: "10"},
+					{Key: common.MetricTypeKey, Value: metric.L2},
+					{Key: ParamsKey, Value: `{"nprobe": 10}`},
+				},
+				SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+					PlaceholderGroup: nil,
+				},
+				ConsistencyLevel: commonpb.ConsistencyLevel_Session,
+			},
+			schema:                 schemaInfo,
+			translatedOutputFields: []string{"pk", "title"},
+			tr:                     timerecord.NewTimeRecorder("test"),
+			queryInfos:             []*planpb.QueryInfo{{}},
+			// Set up a mock highlighter with specific RequiredFieldIDs
+			highlighter: &mockHighlighter{
+				fieldIDs:          []int64{101, 102},      // title, content
+				requiredFieldIDs:  []int64{101, 102, 103}, // title, content, $meta
+				dynamicFieldNames: []string{},
+			},
+		}
+
+		err := task.initSearchRequest(ctx)
+		assert.NoError(t, err)
+
+		// Verify that highlighter's RequiredFieldIDs are added to OutputFieldsId
+		assert.Contains(t, task.SearchRequest.OutputFieldsId, int64(101)) // title
+		assert.Contains(t, task.SearchRequest.OutputFieldsId, int64(102)) // content
+		assert.Contains(t, task.SearchRequest.OutputFieldsId, int64(103)) // $meta
+	})
+
+	t.Run("highlighter merges DynamicFieldNames into plan.DynamicFields", func(t *testing.T) {
+		task := &searchTask{
+			ctx:            ctx,
+			collectionName: "test_highlight_collection",
+			SearchRequest: &internalpb.SearchRequest{
+				CollectionID:     1,
+				PartitionIDs:     []int64{1},
+				Dsl:              "",
+				PlaceholderGroup: nil,
+				DslType:          commonpb.DslType_BoolExprV1,
+				OutputFieldsId:   []int64{100, 101}, // pk, title
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: "test_highlight_collection",
+				OutputFields:   []string{"pk", "title"},
+				Dsl:            "",
+				SearchParams: []*commonpb.KeyValuePair{
+					{Key: AnnsFieldKey, Value: "embedding"},
+					{Key: TopKKey, Value: "10"},
+					{Key: common.MetricTypeKey, Value: metric.L2},
+					{Key: ParamsKey, Value: `{"nprobe": 10}`},
+				},
+				SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+					PlaceholderGroup: nil,
+				},
+				ConsistencyLevel: commonpb.ConsistencyLevel_Session,
+			},
+			schema:                 schemaInfo,
+			translatedOutputFields: []string{"pk", "title"}, // no vector field, so needRequery = false
+			userDynamicFields:      []string{"user_field1"},
+			tr:                     timerecord.NewTimeRecorder("test"),
+			queryInfos:             []*planpb.QueryInfo{{}},
+			// Set up a mock highlighter with dynamic field names
+			highlighter: &mockHighlighter{
+				fieldIDs:          []int64{101},
+				requiredFieldIDs:  []int64{101, 103}, // title, $meta
+				dynamicFieldNames: []string{"dyn_content", "dyn_summary"},
+			},
+		}
+
+		err := task.initSearchRequest(ctx)
+		assert.NoError(t, err)
+
+		// Verify that needRequery is false (no vector fields in output)
+		assert.False(t, task.needRequery)
+
+		// Deserialize the plan to check DynamicFields
+		plan := &planpb.PlanNode{}
+		err = proto.Unmarshal(task.SearchRequest.SerializedExprPlan, plan)
+		assert.NoError(t, err)
+
+		// Verify that highlighter's DynamicFieldNames are merged into plan.DynamicFields
+		assert.Contains(t, plan.DynamicFields, "user_field1") // original user dynamic field
+		assert.Contains(t, plan.DynamicFields, "dyn_content") // from highlighter
+		assert.Contains(t, plan.DynamicFields, "dyn_summary") // from highlighter
+	})
+
+	t.Run("highlighter with empty DynamicFieldNames does not modify plan.DynamicFields", func(t *testing.T) {
+		task := &searchTask{
+			ctx:            ctx,
+			collectionName: "test_highlight_collection",
+			SearchRequest: &internalpb.SearchRequest{
+				CollectionID:     1,
+				PartitionIDs:     []int64{1},
+				Dsl:              "",
+				PlaceholderGroup: nil,
+				DslType:          commonpb.DslType_BoolExprV1,
+				OutputFieldsId:   []int64{100, 101},
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: "test_highlight_collection",
+				OutputFields:   []string{"pk", "title"},
+				Dsl:            "",
+				SearchParams: []*commonpb.KeyValuePair{
+					{Key: AnnsFieldKey, Value: "embedding"},
+					{Key: TopKKey, Value: "10"},
+					{Key: common.MetricTypeKey, Value: metric.L2},
+					{Key: ParamsKey, Value: `{"nprobe": 10}`},
+				},
+				SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+					PlaceholderGroup: nil,
+				},
+				ConsistencyLevel: commonpb.ConsistencyLevel_Session,
+			},
+			schema:                 schemaInfo,
+			translatedOutputFields: []string{"pk", "title"},
+			userDynamicFields:      []string{"user_field1"},
+			tr:                     timerecord.NewTimeRecorder("test"),
+			queryInfos:             []*planpb.QueryInfo{{}},
+			// Highlighter with empty DynamicFieldNames
+			highlighter: &mockHighlighter{
+				fieldIDs:          []int64{101},
+				requiredFieldIDs:  []int64{101},
+				dynamicFieldNames: []string{}, // empty
+			},
+		}
+
+		err := task.initSearchRequest(ctx)
+		assert.NoError(t, err)
+
+		// Deserialize the plan
+		plan := &planpb.PlanNode{}
+		err = proto.Unmarshal(task.SearchRequest.SerializedExprPlan, plan)
+		assert.NoError(t, err)
+
+		// Only original user dynamic fields should be present
+		assert.Equal(t, []string{"user_field1"}, plan.DynamicFields)
+	})
+
+	t.Run("highlighter DynamicFields not set when needRequery is true", func(t *testing.T) {
+		task := &searchTask{
+			ctx:            ctx,
+			collectionName: "test_highlight_collection",
+			SearchRequest: &internalpb.SearchRequest{
+				CollectionID:     1,
+				PartitionIDs:     []int64{1},
+				Dsl:              "",
+				PlaceholderGroup: nil,
+				DslType:          commonpb.DslType_BoolExprV1,
+				OutputFieldsId:   []int64{100, 104}, // pk, embedding (vector field)
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: "test_highlight_collection",
+				OutputFields:   []string{"pk", "embedding"}, // includes vector field
+				Dsl:            "",
+				SearchParams: []*commonpb.KeyValuePair{
+					{Key: AnnsFieldKey, Value: "embedding"},
+					{Key: TopKKey, Value: "10"},
+					{Key: common.MetricTypeKey, Value: metric.L2},
+					{Key: ParamsKey, Value: `{"nprobe": 10}`},
+				},
+				SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+					PlaceholderGroup: nil,
+				},
+				ConsistencyLevel: commonpb.ConsistencyLevel_Session,
+			},
+			schema:                 schemaInfo,
+			translatedOutputFields: []string{"pk", "embedding"}, // vector field -> needRequery = true
+			userDynamicFields:      []string{"user_field1"},
+			tr:                     timerecord.NewTimeRecorder("test"),
+			queryInfos:             []*planpb.QueryInfo{{}},
+			// Highlighter with dynamic field names
+			highlighter: &mockHighlighter{
+				fieldIDs:          []int64{101},
+				requiredFieldIDs:  []int64{101, 103},
+				dynamicFieldNames: []string{"dyn_content"},
+			},
+		}
+
+		err := task.initSearchRequest(ctx)
+		assert.NoError(t, err)
+
+		// Verify that needRequery is true (vector field in output)
+		assert.True(t, task.needRequery)
+
+		// Deserialize the plan
+		plan := &planpb.PlanNode{}
+		err = proto.Unmarshal(task.SearchRequest.SerializedExprPlan, plan)
+		assert.NoError(t, err)
+
+		// When needRequery is true, DynamicFields should NOT be set (the branch is skipped)
+		// The DynamicFields will be handled in requery stage instead
+		assert.Empty(t, plan.DynamicFields)
+	})
+}
