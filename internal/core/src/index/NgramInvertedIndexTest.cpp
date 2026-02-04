@@ -49,6 +49,7 @@
 #include "index/IndexStats.h"
 #include "index/Meta.h"
 #include "index/NgramInvertedIndex.h"
+#include "common/RegexQuery.h"
 #include "index/Utils.h"
 #include "pb/common.pb.h"
 #include "pb/plan.pb.h"
@@ -1271,5 +1272,285 @@ TEST(NgramIndex, TestJsonNonLikeExpressionsWithNgram) {
         for (size_t i = 1; i < nb; i++) {
             EXPECT_TRUE(result[i]);
         }
+    }
+}
+
+// ============== Ngram Index Pattern Matching Consistency Tests ==============
+// These tests verify that ngram index pattern matching produces the same results
+// as RE2 and LikePatternMatcher. Ngram index uses a two-phase approach:
+// 1. Phase 1: Use ngram matching to get candidate rows (may have false positives)
+// 2. Phase 2: Use LikePatternMatcher to filter candidates (exact matching)
+// The final result must be consistent with direct RE2/LikePatternMatcher matching.
+
+TEST(NgramPatternMatchConsistency, MatchersMustAgree) {
+    // Test data - strings that are long enough for ngram matching (min_gram=2)
+    boost::container::vector<std::string> test_data = {
+        "hello",      "hello world",  "world hello", "say hello there",
+        "helloworld", "worldhello",   "testing",     "tested",
+        "tester",     "test case",    "application", "apple pie",
+        "pineapple",  "banana split", "aaaa",        "aaa",
+        "aaab",       "abaa",         "abab",        "ababab",
+        "xaax",       "xaaax",
+    };
+
+    // Patterns to test - all have segments >= 2 chars for ngram
+    std::vector<std::pair<std::string, proto::plan::OpType>> test_cases = {
+        // PrefixMatch tests
+        {"hello", proto::plan::OpType::PrefixMatch},
+        {"test", proto::plan::OpType::PrefixMatch},
+        {"app", proto::plan::OpType::PrefixMatch},
+        {"ab", proto::plan::OpType::PrefixMatch},
+
+        // PostfixMatch tests
+        {"world", proto::plan::OpType::PostfixMatch},
+        {"ing", proto::plan::OpType::PostfixMatch},
+        {"ple", proto::plan::OpType::PostfixMatch},
+        {"ab", proto::plan::OpType::PostfixMatch},
+
+        // InnerMatch tests
+        {"ello", proto::plan::OpType::InnerMatch},
+        {"test", proto::plan::OpType::InnerMatch},
+        {"app", proto::plan::OpType::InnerMatch},
+        {"aa", proto::plan::OpType::InnerMatch},
+        {"ab", proto::plan::OpType::InnerMatch},
+
+        // Match (LIKE pattern) tests - patterns with segments >= 2 chars
+        {"hello%", proto::plan::OpType::Match},
+        {"%world", proto::plan::OpType::Match},
+        {"%ello%", proto::plan::OpType::Match},
+        {"test%ing", proto::plan::OpType::Match},
+        {"%aa%aa%", proto::plan::OpType::Match},  // Overlapping pattern
+        {"ab%ab", proto::plan::OpType::Match},
+        {"%ab%ab%", proto::plan::OpType::Match},
+    };
+
+    for (const auto& [pattern, op_type] : test_cases) {
+        // Compute expected results using RE2 and LikePatternMatcher
+        std::vector<bool> re2_results;
+        std::vector<bool> like_results;
+
+        PatternMatchTranslator translator;
+        std::string like_pattern;
+
+        // Convert to LIKE pattern based on op_type
+        switch (op_type) {
+            case proto::plan::OpType::PrefixMatch:
+                like_pattern = pattern + "%";
+                break;
+            case proto::plan::OpType::PostfixMatch:
+                like_pattern = "%" + pattern;
+                break;
+            case proto::plan::OpType::InnerMatch:
+                like_pattern = "%" + pattern + "%";
+                break;
+            case proto::plan::OpType::Match:
+                like_pattern = pattern;
+                break;
+            default:
+                continue;
+        }
+
+        auto regex_pattern = translator(like_pattern);
+        RegexMatcher re2_matcher(regex_pattern);
+        LikePatternMatcher like_matcher(like_pattern);
+
+        for (const auto& data : test_data) {
+            re2_results.push_back(re2_matcher(data));
+            like_results.push_back(like_matcher(data));
+        }
+
+        // Verify RE2 and LikePatternMatcher agree
+        for (size_t i = 0; i < test_data.size(); i++) {
+            EXPECT_EQ(re2_results[i], like_results[i])
+                << "RE2/LikePatternMatcher mismatch for ngram test:\n"
+                << "  pattern=\"" << pattern
+                << "\", op_type=" << static_cast<int>(op_type) << "\n"
+                << "  like_pattern=\"" << like_pattern << "\"\n"
+                << "  data=\"" << test_data[i] << "\"\n"
+                << "  RE2=" << re2_results[i] << ", Like=" << like_results[i];
+        }
+
+        // Test with ngram index
+        test_ngram_with_data(test_data, pattern, op_type, like_results);
+    }
+}
+
+TEST(NgramPatternMatchConsistency, OverlappingPatterns) {
+    // Test data specifically for overlapping patterns
+    boost::container::vector<std::string> test_data = {
+        "aa",
+        "aaa",
+        "aaaa",
+        "aaaaa",
+        "aaaaaa",
+        "ab",
+        "aba",
+        "abab",
+        "ababab",
+        "abba",
+        "aab",
+        "baa",
+        "xaax",
+        "xaaax",
+        "xaaaax",
+        "abcabc",
+        "abcabcabc",
+    };
+
+    // Overlapping patterns with segments >= 2 chars
+    std::vector<std::string> patterns = {
+        "%aa%aa%",     // Two overlapping "aa"
+        "%aa%aa%aa%",  // Three overlapping "aa"
+        "%ab%ab%",     // Two "ab"
+        "%ab%ab%ab%",  // Three "ab"
+        "aa%aa",       // Prefix and suffix both "aa"
+        "ab%ab",       // Prefix and suffix both "ab"
+        "%abc%abc%",   // Two "abc"
+    };
+
+    for (const auto& pattern : patterns) {
+        // Compute expected results
+        std::vector<bool> expected_results;
+
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(pattern);
+        RegexMatcher re2_matcher(regex_pattern);
+        LikePatternMatcher like_matcher(pattern);
+
+        for (const auto& data : test_data) {
+            bool re2_result = re2_matcher(data);
+            bool like_result = like_matcher(data);
+
+            // RE2 and LikePatternMatcher must agree
+            EXPECT_EQ(re2_result, like_result)
+                << "RE2/LikePatternMatcher mismatch for overlapping pattern:\n"
+                << "  pattern=\"" << pattern << "\"\n"
+                << "  data=\"" << data << "\"\n"
+                << "  RE2=" << re2_result << ", Like=" << like_result;
+
+            expected_results.push_back(like_result);
+        }
+
+        // Test with ngram index
+        test_ngram_with_data(
+            test_data, pattern, proto::plan::OpType::Match, expected_results);
+    }
+}
+
+TEST(NgramPatternMatchConsistency, UTF8Patterns) {
+    // UTF-8 test data with strings long enough for ngram
+    boost::container::vector<std::string> test_data = {
+        "café latte",    // 2-byte UTF-8
+        "hello café",    // Mixed
+        "你好世界",      // 3-byte UTF-8 (Chinese)
+        "test你好test",  // Mixed ASCII and Chinese
+        "emoji😀test",    // 4-byte UTF-8 (emoji)
+        "normal text",
+        "café café",  // Repeated UTF-8
+        "你好你好",   // Repeated Chinese
+    };
+
+    // Patterns with UTF-8 characters (segments must be >= 2 chars)
+    std::vector<std::pair<std::string, proto::plan::OpType>> test_cases = {
+        {"café", proto::plan::OpType::PrefixMatch},
+        {"café", proto::plan::OpType::InnerMatch},
+        {"你好", proto::plan::OpType::PrefixMatch},
+        {"你好", proto::plan::OpType::InnerMatch},
+        {"%café%", proto::plan::OpType::Match},
+        {"%你好%", proto::plan::OpType::Match},
+        {"%café%café%", proto::plan::OpType::Match},  // Overlapping UTF-8
+        {"%你好%你好%", proto::plan::OpType::Match},  // Overlapping Chinese
+    };
+
+    for (const auto& [pattern, op_type] : test_cases) {
+        // Compute expected results
+        std::vector<bool> expected_results;
+
+        PatternMatchTranslator translator;
+        std::string like_pattern;
+
+        switch (op_type) {
+            case proto::plan::OpType::PrefixMatch:
+                like_pattern = pattern + "%";
+                break;
+            case proto::plan::OpType::PostfixMatch:
+                like_pattern = "%" + pattern;
+                break;
+            case proto::plan::OpType::InnerMatch:
+                like_pattern = "%" + pattern + "%";
+                break;
+            case proto::plan::OpType::Match:
+                like_pattern = pattern;
+                break;
+            default:
+                continue;
+        }
+
+        auto regex_pattern = translator(like_pattern);
+        RegexMatcher re2_matcher(regex_pattern);
+        LikePatternMatcher like_matcher(like_pattern);
+
+        for (const auto& data : test_data) {
+            bool re2_result = re2_matcher(data);
+            bool like_result = like_matcher(data);
+
+            EXPECT_EQ(re2_result, like_result)
+                << "RE2/LikePatternMatcher UTF-8 mismatch:\n"
+                << "  pattern=\"" << pattern << "\"\n"
+                << "  data=\"" << data << "\"\n"
+                << "  RE2=" << re2_result << ", Like=" << like_result;
+
+            expected_results.push_back(like_result);
+        }
+
+        // Test with ngram index
+        test_ngram_with_data(test_data, pattern, op_type, expected_results);
+    }
+}
+
+TEST(NgramPatternMatchConsistency, EscapeSequences) {
+    // Test data with special characters
+    boost::container::vector<std::string> test_data = {
+        "100% complete",
+        "50% off sale",
+        "file_name.txt",
+        "path\\to\\file",
+        "normal text",
+        "%percent%",
+        "_underscore_",
+        "test\\escape",
+    };
+
+    // Patterns with escape sequences (segments >= 2 chars)
+    std::vector<std::string> patterns = {
+        "%100\\%%",   // Contains literal %
+        "%file\\_%",  // Contains literal _
+        "%\\\\%",     // Contains backslash
+    };
+
+    for (const auto& pattern : patterns) {
+        std::vector<bool> expected_results;
+
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(pattern);
+        RegexMatcher re2_matcher(regex_pattern);
+        LikePatternMatcher like_matcher(pattern);
+
+        for (const auto& data : test_data) {
+            bool re2_result = re2_matcher(data);
+            bool like_result = like_matcher(data);
+
+            EXPECT_EQ(re2_result, like_result)
+                << "RE2/LikePatternMatcher escape mismatch:\n"
+                << "  pattern=\"" << pattern << "\"\n"
+                << "  data=\"" << data << "\"\n"
+                << "  RE2=" << re2_result << ", Like=" << like_result;
+
+            expected_results.push_back(like_result);
+        }
+
+        // Test with ngram index
+        test_ngram_with_data(
+            test_data, pattern, proto::plan::OpType::Match, expected_results);
     }
 }

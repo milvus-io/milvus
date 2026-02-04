@@ -31,10 +31,31 @@ is_special(char c) {
     return special_bytes_bitmap[c + 128];
 }
 
+// Regex pattern to match a single UTF-8 character (1-4 bytes)
+// Using RE2 hex escapes (\\xHH) for byte values in character classes
+// Note: We use \\x (escaped backslash) so RE2 interprets the hex escape, not the C++ compiler
+// UTF-8 encoding ranges:
+//   1 byte:  0x00-0x7F (ASCII) - including NUL for consistency with LikePatternMatcher
+//   2 bytes: 0xC2-0xDF followed by 0x80-0xBF
+//   3 bytes: 0xE0-0xEF followed by 0x80-0xBF (x2)
+//   4 bytes: 0xF0-0xF7 followed by 0x80-0xBF (x3)
+static const char kUtf8CharPattern[] =
+    "(?:[\\x00-\\x7f]"             // 1-byte ASCII (0x00-0x7F) including NUL
+    "|[\\xc2-\\xdf][\\x80-\\xbf]"  // 2-byte sequences
+    "|[\\xe0-\\xef][\\x80-\\xbf][\\x80-\\xbf]"  // 3-byte sequences
+    "|[\\xf0-\\xf7][\\x80-\\xbf][\\x80-\\xbf][\\x80-\\xbf])";  // 4-byte sequences
+
+// Pattern to match zero or more UTF-8 characters
+static const char kUtf8CharsPattern[] =
+    "(?:[\\x00-\\x7f]"             // 1-byte ASCII (0x00-0x7F) including NUL
+    "|[\\xc2-\\xdf][\\x80-\\xbf]"  // 2-byte sequences
+    "|[\\xe0-\\xef][\\x80-\\xbf][\\x80-\\xbf]"  // 3-byte sequences
+    "|[\\xf0-\\xf7][\\x80-\\xbf][\\x80-\\xbf][\\x80-\\xbf])*";  // 4-byte sequences
+
 std::string
 translate_pattern_match_to_regex(const std::string& pattern) {
     std::string r;
-    r.reserve(2 * pattern.size());
+    r.reserve(4 * pattern.size());  // UTF-8 patterns are longer
     bool escape_mode = false;
     for (char c : pattern) {
         if (escape_mode) {
@@ -47,9 +68,9 @@ translate_pattern_match_to_regex(const std::string& pattern) {
             if (c == '\\') {
                 escape_mode = true;
             } else if (c == '%') {
-                r += "[\\s\\S]*";
+                r += kUtf8CharsPattern;
             } else if (c == '_') {
-                r += "[\\s\\S]";
+                r += kUtf8CharPattern;
             } else {
                 if (is_special(c)) {
                     r += '\\';
@@ -57,6 +78,12 @@ translate_pattern_match_to_regex(const std::string& pattern) {
                 r += c;
             }
         }
+    }
+    // Trailing backslash is a parse error - nothing to escape
+    if (escape_mode) {
+        ThrowInfo(ExprInvalid,
+                  "Invalid LIKE pattern: trailing backslash with nothing "
+                  "to escape");
     }
     return r;
 }
@@ -80,6 +107,12 @@ extract_fixed_prefix_from_pattern(const std::string& pattern) {
                 prefix += c;
             }
         }
+    }
+    // Trailing backslash is a parse error - nothing to escape
+    if (escape_mode) {
+        ThrowInfo(ExprInvalid,
+                  "Invalid LIKE pattern: trailing backslash with nothing "
+                  "to escape");
     }
     return prefix;
 }
