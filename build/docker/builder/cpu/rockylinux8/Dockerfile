@@ -8,6 +8,7 @@ RUN dnf -y install curl wget tar zip unzip git \
 RUN dnf -y update && \
     dnf -y install dnf-plugins-core && \
     dnf config-manager --set-enabled powertools && \
+# Trigger rebuild
     dnf -y install ninja-build
 
 ########################################################################################
