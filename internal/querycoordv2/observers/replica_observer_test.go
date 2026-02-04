@@ -93,10 +93,17 @@ func (suite *ReplicaObserverSuite) SetupTest() {
 
 	suite.distMgr = meta.NewDistributionManager(suite.nodeMgr)
 	suite.targetMgr = meta.NewMockTargetManager(suite.T())
-	suite.targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, mock.Anything, mock.Anything).Return(map[string]*meta.DmChannel{}).Maybe()
+	suite.collectionID = int64(1000)
+	suite.targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, mock.Anything, mock.Anything).Return(map[string]*meta.DmChannel{
+		"test-insert-channel1": {
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID: suite.collectionID,
+				ChannelName:  "test-insert-channel1",
+			},
+		},
+	}).Maybe()
 	suite.observer = NewReplicaObserver(suite.meta, suite.distMgr, suite.targetMgr)
 	suite.observer.Start()
-	suite.collectionID = int64(1000)
 	suite.partitionID = int64(100)
 }
 
@@ -140,7 +147,7 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 	replicas, err := suite.meta.Spawn(ctx, suite.collectionID, map[string]int{
 		"rg1": 1,
 		"rg2": 1,
-	}, nil, commonpb.LoadPriority_LOW)
+	}, []string{"test-insert-channel1"}, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	suite.Equal(2, len(replicas))
 
@@ -256,7 +263,7 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 	replicas, err := suite.meta.Spawn(ctx, suite.collectionID, map[string]int{
 		"rg1": 1,
 		"rg2": 1,
-	}, nil, commonpb.LoadPriority_LOW)
+	}, []string{"test-insert-channel1"}, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	suite.Equal(2, len(replicas))
 
