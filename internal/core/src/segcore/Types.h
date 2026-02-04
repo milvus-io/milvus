@@ -91,7 +91,8 @@ struct LoadIndexInfo {
           schema(other.schema),
           index_size(other.index_size),
           num_rows(other.num_rows),
-          dim(other.dim) {
+          dim(other.dim),
+          warmup_policy(other.warmup_policy) {
     }
 
     // Copy assignment operator
@@ -120,6 +121,7 @@ struct LoadIndexInfo {
             index_size = other.index_size;
             num_rows = other.num_rows;
             dim = other.dim;
+            warmup_policy = other.warmup_policy;
         }
         return *this;
     }
