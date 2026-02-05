@@ -1716,3 +1716,128 @@ func TestMeta_GetSegmentIndexStatus(t *testing.T) {
 		assert.Empty(t, segmentIndexes)
 	})
 }
+
+func TestCheckParams(t *testing.T) {
+	t.Run("identical params", func(t *testing.T) {
+		fieldIndex := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+		}
+		req := &indexpb.CreateIndexRequest{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+		}
+		assert.True(t, checkParams(fieldIndex, req))
+	})
+
+	t.Run("different params", func(t *testing.T) {
+		fieldIndex := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+		}
+		req := &indexpb.CreateIndexRequest{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "256"},
+			},
+		}
+		assert.False(t, checkParams(fieldIndex, req))
+	})
+
+	t.Run("ignore mmap key difference", func(t *testing.T) {
+		fieldIndex := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+				{Key: common.MmapEnabledKey, Value: "true"},
+			},
+		}
+		req := &indexpb.CreateIndexRequest{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+				{Key: common.MmapEnabledKey, Value: "false"},
+			},
+		}
+		assert.True(t, checkParams(fieldIndex, req))
+	})
+
+	t.Run("ignore warmup key difference", func(t *testing.T) {
+		fieldIndex := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+				{Key: common.WarmupKey, Value: "sync"},
+			},
+		}
+		req := &indexpb.CreateIndexRequest{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+				{Key: common.WarmupKey, Value: "async"},
+			},
+		}
+		assert.True(t, checkParams(fieldIndex, req))
+	})
+
+	t.Run("ignore both mmap and warmup key difference", func(t *testing.T) {
+		fieldIndex := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+				{Key: common.MmapEnabledKey, Value: "true"},
+				{Key: common.WarmupKey, Value: "sync"},
+			},
+		}
+		req := &indexpb.CreateIndexRequest{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+				{Key: common.MmapEnabledKey, Value: "false"},
+				{Key: common.WarmupKey, Value: "disable"},
+			},
+		}
+		assert.True(t, checkParams(fieldIndex, req))
+	})
+
+	t.Run("one has warmup key and another does not", func(t *testing.T) {
+		fieldIndex := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+				{Key: common.WarmupKey, Value: "sync"},
+			},
+		}
+		req := &indexpb.CreateIndexRequest{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+		}
+		assert.True(t, checkParams(fieldIndex, req))
+	})
+
+	t.Run("one has mmap key and another does not", func(t *testing.T) {
+		fieldIndex := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+		}
+		req := &indexpb.CreateIndexRequest{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+				{Key: common.MmapEnabledKey, Value: "true"},
+			},
+		}
+		assert.True(t, checkParams(fieldIndex, req))
+	})
+
+	t.Run("different param count after removing ignored keys", func(t *testing.T) {
+		fieldIndex := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+				{Key: "extra_key", Value: "value"},
+			},
+		}
+		req := &indexpb.CreateIndexRequest{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+		}
+		assert.False(t, checkParams(fieldIndex, req))
+	})
+}
