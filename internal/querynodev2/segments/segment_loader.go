@@ -276,16 +276,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	var err error
 	var requestResourceResult requestResourceResult
 
-	if !isLazyLoad(collection, segmentType) {
-		// Check memory & storage limit
-		// no need to check resource for lazy load here
-		requestResourceResult, err = loader.requestResource(ctx, infos...)
-		if err != nil {
-			log.Warn("request resource failed", zap.Error(err))
-			return nil, err
-		}
-		defer loader.freeRequestResource(requestResourceResult)
-	}
 	newSegments := typeutil.NewConcurrentMap[int64, Segment]()
 	loaded := typeutil.NewConcurrentMap[int64, Segment]()
 	defer func() {
@@ -369,10 +359,8 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		if loadInfo.GetLevel() != datapb.SegmentLevel_L0 {
 			s := segment.(*LocalSegment)
 			// lazy load segment do not load segment at first time.
-			if !s.IsLazyLoad() {
-				if err = loader.LoadSegment(ctx, s, loadInfo); err != nil {
-					return errors.Wrap(err, "At LoadSegment")
-				}
+			if err = loader.LoadSegment(ctx, s, loadInfo); err != nil {
+				return errors.Wrap(err, "At LoadSegment")
 			}
 		}
 		if err = loader.loadDeltalogs(ctx, segment, loadInfo.GetDeltalogs()); err != nil {
@@ -944,9 +932,6 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	collection := segment.GetCollection()
 	schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
 	indexedFieldInfos, _, textIndexes, unindexedTextFields, jsonKeyStats := separateLoadInfoV2(loadInfo, collection.Schema())
-	if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
-		return err
-	}
 
 	log := log.Ctx(ctx).With(zap.Int64("segmentID", segment.ID()))
 	tr := timerecord.NewTimeRecorder("segmentLoader.loadSealedSegment")

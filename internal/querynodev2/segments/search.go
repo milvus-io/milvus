@@ -77,20 +77,6 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 				accessRecord.Finish(err)
 			}()
 
-			if seg.IsLazyLoad() {
-				ctx, cancel := withLazyLoadTimeoutContext(ctx)
-				defer cancel()
-
-				var missing bool
-				missing, err = mgr.DiskCache.Do(ctx, seg.ID(), searcher)
-				if missing {
-					accessRecord.CacheMissing()
-				}
-				if err != nil {
-					log.Warn("failed to do search for disk cache", zap.Int64("segID", seg.ID()), zap.Error(err))
-				}
-				return err
-			}
 			return searcher(ctx, seg)
 		})
 	}
