@@ -104,7 +104,6 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 				return
 			}
 		}
-
 	}
 
 	// All collections meet the requirements

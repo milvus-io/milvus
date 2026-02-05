@@ -156,8 +156,8 @@ func (s *StreamingNodeManager) GetStreamingQueryNodeIDs() typeutil.UniqueSet {
 		// causing panic, so we need to return the previous node ids.
 		streamingNodes = s.previousNodesByRG
 	} else {
-	    s.previousNodesByRG = streamingNodes
-    }
+		s.previousNodesByRG = streamingNodes
+	}
 	streamingNodeIDs := typeutil.NewUniqueSet()
 	for _, streamingNode := range streamingNodes {
 		streamingNodeIDs.Insert(streamingNode.ServerID)
@@ -178,7 +178,7 @@ func (s *StreamingNodeManager) GetStreamingQueryNodeIDsByResourceGroup() map[str
 		streamingNodes = s.previousNodesByRG
 	} else {
 		s.previousNodesByRG = streamingNodes
-    }
+	}
 	nodesByRG := make(map[string]typeutil.UniqueSet)
 	for _, node := range streamingNodes {
 		if _, ok := nodesByRG[node.ResourceGroup]; !ok {
