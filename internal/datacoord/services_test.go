@@ -2688,6 +2688,16 @@ func TestServer_DropSnapshot(t *testing.T) {
 			}).Build()
 		defer mockGetSnapshot.UnPatch()
 
+		mockBroadcaster := &struct{ broadcaster.BroadcastAPI }{}
+		mockClose := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Close).Return(nil).Build()
+		defer mockClose.UnPatch()
+
+		mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				return mockBroadcaster, nil
+			}).Build()
+		defer mockBroadcast.UnPatch()
+
 		server := &Server{
 			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
 		}
