@@ -1,4 +1,4 @@
-# ruff: noqa: F403, F405, F811
+# ruff: noqa: F403, F405
 import random
 import threading
 
@@ -1162,6 +1162,41 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
             },
         )[0]
         assert set(res[0].keys()) == {default_primary_key_field_name}
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_output_fields_nullable_vector_fields(self):
+        """
+        target: test query with nullable vector fields
+        method: create collection with nullable vector fields, insert data with nullable vector fields, query with nullable vector fields
+        expected: query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim, nullable=True)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 3. query with nullable vector fields
+        res = self.query(
+            client,
+            collection_name,
+            filter=default_search_exp,
+            output_fields=[default_primary_key_field_name, default_vector_field_name],
+            check_task=CheckTasks.check_query_results,
+            check_items={exp_res: rows, "with_vec": True, "pk_name": default_primary_key_field_name},
+        )[0]
+        assert set(res[0].keys()) == {default_primary_key_field_name, default_vector_field_name}
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -5257,7 +5292,7 @@ class TestQueryString(TestMilvusClientV2Base):
         elif 'TEXT_MATCH(varchar, "test")' in expression:
             # Should match both "test data 0" and "this is test content"
             exp_len = (default_nb // 10) * 2
-        # 3. create indexes
+            # 3. create indexes
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
         index_params.add_index(
@@ -5478,12 +5513,14 @@ class TestQueryArray(TestMilvusClientV2Base):
 
             def match_func(x):
                 return x.startswith("0")
+
         elif 'like "%0"' in array_expression:
             # Suffix match: first element ends with "0"
             filter_data = [row for row in string_field_value if row[0].endswith("0")]
 
             def match_func(x):
                 return x.endswith("0")
+
         elif 'like "%0%"' in array_expression:
             # Inner match: first element contains "0"
             filter_data = [row for row in string_field_value if "0" in row[0]]

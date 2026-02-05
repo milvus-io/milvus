@@ -1,4 +1,4 @@
-# ruff: noqa: F403, F405, F811
+# ruff: noqa: F403, F405
 import json
 import os
 import random
@@ -2779,7 +2779,7 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         """Create collection with struct array schema"""
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim, nullable=True)
 
         struct_schema = client.create_struct_field_schema()
         struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim)
@@ -2817,7 +2817,7 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         for i in range(2000):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": [random.random() for _ in range(default_dim)] if random.random() > 0.8 else None,
                 "clips": [
                     {
                         "clip_embedding1": [random.random() for _ in range(default_dim)],
@@ -2841,7 +2841,7 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         for i in range(2000, 3000):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": [random.random() for _ in range(default_dim)] if random.random() > 0.8 else None,
                 "clips": [
                     {
                         "clip_embedding1": [random.random() for _ in range(default_dim)],
@@ -2881,7 +2881,7 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         for i in range(0, 10):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": [random.random() for _ in range(default_dim)] if random.random() > 0.8 else None,
                 "clips": [
                     {
                         "clip_embedding1": [random.random() for _ in range(default_dim)],
@@ -2896,7 +2896,7 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
         for i in range(2000, 2010):
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(default_dim)],
+                "normal_vector": [random.random() for _ in range(default_dim)] if random.random() > 0.8 else None,
                 "clips": [
                     {
                         "clip_embedding1": [random.random() for _ in range(default_dim)],
@@ -3600,6 +3600,36 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("nullable_field", ["clip_embedding1", "scalar_field"])
+    def test_struct_array_with_nullable_field(self, nullable_field):
+
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field(
+            "clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim, nullable=("clip_embedding1" == nullable_field)
+        )
+        struct_schema.add_field("scalar_field", DataType.INT64, nullable=("scalar_field" == nullable_field))
+        struct_schema.add_field("label", DataType.VARCHAR, max_length=128)
+
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=100,
+        )
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: f"nullable is not supported for fields in struct array now, fieldName = {nullable_field}",
+        }
+        self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_struct_array_range_search_not_supported(self):
