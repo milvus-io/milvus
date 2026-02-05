@@ -1716,3 +1716,124 @@ func TestMeta_GetSegmentIndexStatus(t *testing.T) {
 		assert.Empty(t, segmentIndexes)
 	})
 }
+
+func TestCheckParams(t *testing.T) {
+	t.Run("same params without warmup", func(t *testing.T) {
+		fieldIndex := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+			},
+		}
+		req := &indexpb.CreateIndexRequest{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+			},
+		}
+		assert.True(t, checkParams(fieldIndex, req))
+	})
+
+	t.Run("same params with warmup in request only", func(t *testing.T) {
+		// This test verifies the fix for the idempotency bug
+		// When index is created, WarmupKey is removed from stored TypeParams
+		// But when checking idempotency, WarmupKey should also be ignored in request
+		fieldIndex := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+				// Note: WarmupKey is NOT in stored TypeParams because it was removed during CreateIndex
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+			},
+		}
+		req := &indexpb.CreateIndexRequest{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+				{Key: common.WarmupKey, Value: "sync"}, // WarmupKey in request should be ignored
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+			},
+		}
+		// Before fix: this would return false because len(metaTypeParams) != len(reqTypeParams)
+		// After fix: this should return true because WarmupKey is filtered from both
+		assert.True(t, checkParams(fieldIndex, req))
+	})
+
+	t.Run("same params with warmup in different order", func(t *testing.T) {
+		fieldIndex := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+			},
+		}
+		req := &indexpb.CreateIndexRequest{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.WarmupKey, Value: "sync"},
+				{Key: common.DimKey, Value: "128"},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+				{Key: common.MetricTypeKey, Value: "L2"},
+			},
+		}
+		assert.True(t, checkParams(fieldIndex, req))
+	})
+
+	t.Run("different params", func(t *testing.T) {
+		fieldIndex := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+			},
+		}
+		req := &indexpb.CreateIndexRequest{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "256"}, // Different dimension
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+			},
+		}
+		assert.False(t, checkParams(fieldIndex, req))
+	})
+
+	t.Run("mmap enabled should be ignored", func(t *testing.T) {
+		fieldIndex := &model.Index{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+			},
+		}
+		req := &indexpb.CreateIndexRequest{
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+				{Key: common.MmapEnabledKey, Value: "true"},
+			},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "L2"},
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+			},
+		}
+		assert.True(t, checkParams(fieldIndex, req))
+	})
+}
