@@ -10,6 +10,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -271,6 +272,33 @@ func (c *catalog) SaveConsumeCheckpoint(ctx context.Context, pchannelName string
 	return c.metaKV.Save(ctx, key, string(value))
 }
 
+// SaveSalvageCheckpoint saves the salvage checkpoint.
+func (c *catalog) SaveSalvageCheckpoint(ctx context.Context, pchannelName string, checkpoint *commonpb.ReplicateCheckpoint) error {
+	key := buildSalvageCheckpointPath(pchannelName)
+	value, err := proto.Marshal(checkpoint)
+	if err != nil {
+		return err
+	}
+	return c.metaKV.Save(ctx, key, string(value))
+}
+
+// GetSalvageCheckpoint gets the salvage checkpoint.
+func (c *catalog) GetSalvageCheckpoint(ctx context.Context, pchannelName string) (*commonpb.ReplicateCheckpoint, error) {
+	key := buildSalvageCheckpointPath(pchannelName)
+	value, err := c.metaKV.Load(ctx, key)
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	val := &commonpb.ReplicateCheckpoint{}
+	if err = proto.Unmarshal([]byte(value), val); err != nil {
+		return nil, err
+	}
+	return val, nil
+}
+
 // Prefix functions: return paths ending with "/" for LoadWithPrefix queries.
 
 // buildWALPrefix returns the prefix for all WAL metadata under a pchannel.
@@ -316,4 +344,9 @@ func removePrefix(prefix string, keys []string) []string {
 		keys[idx] = typeutil.After(key, prefix)
 	}
 	return keys
+}
+
+// buildSalvageCheckpointPath builds the path for salvage checkpoint
+func buildSalvageCheckpointPath(pchannelName string) string {
+	return buildWALPrefix(pchannelName) + KeySalvageCheckpoint
 }

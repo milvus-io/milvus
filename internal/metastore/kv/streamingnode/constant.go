@@ -8,5 +8,6 @@ const (
 	DirectoryVChannel      = "vchannel"
 	DirectorySchema        = "schema"
 
-	KeyConsumeCheckpoint = "consume-checkpoint"
+	KeyConsumeCheckpoint  = "consume-checkpoint"
+	KeySalvageCheckpoint  = "salvage-checkpoint"
 )
