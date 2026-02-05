@@ -28,6 +28,10 @@ type WAL interface {
 	// the message id of the replicate checkpoint will be 0.
 	GetReplicateCheckpoint() (*ReplicateCheckpoint, error)
 
+	// GetSalvageCheckpoint returns the salvage checkpoint captured during force promote.
+	// Returns nil if no force promote has occurred or TTL expired.
+	GetSalvageCheckpoint() *ReplicateCheckpoint
+
 	// Append writes a record to the log.
 	Append(ctx context.Context, msg message.MutableMessage) (*AppendResult, error)
 

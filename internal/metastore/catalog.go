@@ -5,6 +5,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -339,4 +340,12 @@ type StreamingNodeCataLog interface {
 
 	// SaveConsumeCheckpoint saves the consuming checkpoint of the wal.
 	SaveConsumeCheckpoint(ctx context.Context, pChannelName string, checkpoint *streamingpb.WALCheckpoint) error
+
+	// SaveSalvageCheckpoint saves the salvage checkpoint.
+	// The checkpoint is captured during force promote.
+	SaveSalvageCheckpoint(ctx context.Context, pChannelName string, checkpoint *commonpb.ReplicateCheckpoint) error
+
+	// GetSalvageCheckpoint gets the salvage checkpoint.
+	// Returns nil, nil if not found (either not set or deleted).
+	GetSalvageCheckpoint(ctx context.Context, pChannelName string) (*commonpb.ReplicateCheckpoint, error)
 }

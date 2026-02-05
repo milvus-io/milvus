@@ -1192,6 +1192,11 @@ func (s *Server) CreateReplicateStream(stream milvuspb.MilvusService_CreateRepli
 	return s.proxy.CreateReplicateStream(stream)
 }
 
+// DumpMessages streams messages from a WAL range for data salvage.
+func (s *Server) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvuspb.MilvusService_DumpMessagesServer) error {
+	return s.proxy.DumpMessages(req, stream)
+}
+
 // ComputePhraseMatchSlop computes the minimum slop required for phrase matching.
 func (s *Server) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.ComputePhraseMatchSlopRequest) (*milvuspb.ComputePhraseMatchSlopResponse, error) {
 	return s.proxy.ComputePhraseMatchSlop(ctx, req)

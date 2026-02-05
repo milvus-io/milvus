@@ -249,6 +249,10 @@ func (r *recoveryStorageImpl) updateCheckpoint(msg message.ImmutableMessage) {
 		clusterRole := replicateutil.MustNewConfigHelper(r.currentClusterID, cfg.Header().ReplicateConfiguration).GetCurrentCluster()
 		switch clusterRole.Role() {
 		case replicateutil.RolePrimary:
+			// Persist salvage checkpoint to separate etcd key before clearing on force promote
+			if cfg.Header().GetForcePromote() && r.checkpoint.ReplicateCheckpoint != nil {
+				r.persistSalvageCheckpoint(context.Background(), r.checkpoint.ReplicateCheckpoint)
+			}
 			r.checkpoint.ReplicateCheckpoint = nil
 		case replicateutil.RoleSecondary:
 			// Update the replicate checkpoint if the cluster role is secondary.
@@ -648,4 +652,17 @@ func (r *recoveryStorageImpl) getFlusherCheckpoint() *WALCheckpoint {
 		}
 	}
 	return minimumCheckpoint
+}
+
+// persistSalvageCheckpoint persists the salvage checkpoint to a separate etcd key.
+// This is called during force promote to preserve the last synced position for data salvage.
+func (r *recoveryStorageImpl) persistSalvageCheckpoint(ctx context.Context, cp *utility.ReplicateCheckpoint) {
+	if cp == nil {
+		return
+	}
+	if err := r.retryOperationWithBackoff(ctx, r.Logger().With(zap.String("op", "persistSalvageCheckpoint")), func(ctx context.Context) error {
+		return resource.Resource().StreamingNodeCatalog().SaveSalvageCheckpoint(ctx, r.channel.Name, cp.IntoProto())
+	}); err != nil {
+		r.Logger().Warn("failed to persist salvage checkpoint", zap.Error(err))
+	}
 }

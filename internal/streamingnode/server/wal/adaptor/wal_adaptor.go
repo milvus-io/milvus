@@ -133,6 +133,16 @@ func (w *walAdaptorImpl) GetReplicateCheckpoint() (*utility.ReplicateCheckpoint,
 	return w.param.ReplicateManager.GetReplicateCheckpoint()
 }
 
+// GetSalvageCheckpoint returns the salvage checkpoint captured during force promote.
+func (w *walAdaptorImpl) GetSalvageCheckpoint() *utility.ReplicateCheckpoint {
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil
+	}
+	defer w.lifetime.Done()
+
+	return w.param.ReplicateManager.GetSalvageCheckpoint()
+}
+
 // Append writes a record to the log.
 func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage) (*wal.AppendResult, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {

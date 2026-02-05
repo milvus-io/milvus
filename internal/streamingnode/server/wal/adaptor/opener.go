@@ -225,11 +225,20 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		InitialRecoverSnapshot: snapshot,
 		TxnManager:             param.TxnManager,
 	})
+	// Load salvage checkpoint from etcd for data salvage support
+	var salvageCheckpoint *utility.ReplicateCheckpoint
+	if salvageCPProto, err := resource.Resource().StreamingNodeCatalog().GetSalvageCheckpoint(ctx, param.ChannelInfo.Name); err != nil {
+		log.Ctx(ctx).Warn("failed to load salvage checkpoint", zap.Error(err))
+	} else if salvageCPProto != nil {
+		salvageCheckpoint = utility.NewReplicateCheckpointFromProto(salvageCPProto)
+	}
+
 	if param.ReplicateManager, err = replicates.RecoverReplicateManager(
 		&replicates.ReplicateManagerRecoverParam{
 			ChannelInfo:            param.ChannelInfo,
 			CurrentClusterID:       paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 			InitialRecoverSnapshot: snapshot,
+			SalvageCheckpoint:      salvageCheckpoint,
 		},
 	); err != nil {
 		return nil, err
