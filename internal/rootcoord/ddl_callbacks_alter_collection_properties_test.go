@@ -306,7 +306,7 @@ func createCollectionAndAliasForTest(t *testing.T, ctx context.Context, core *Co
 }
 
 func assertReplicaNumber(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, replicaNumber int64) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	replicaNum, err := common.CollectionLevelReplicaNumber(coll.Properties)
 	if replicaNumber == 0 {
@@ -318,7 +318,7 @@ func assertReplicaNumber(t *testing.T, ctx context.Context, core *Core, dbName s
 }
 
 func assertResourceGroups(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, resourceGroups []string) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	rgs, err := common.CollectionLevelResourceGroups(coll.Properties)
 	if len(resourceGroups) == 0 {
@@ -330,25 +330,25 @@ func assertResourceGroups(t *testing.T, ctx context.Context, core *Core, dbName 
 }
 
 func assertConsistencyLevel(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, consistencyLevel commonpb.ConsistencyLevel) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Equal(t, consistencyLevel, coll.ConsistencyLevel)
 }
 
 func assertDescription(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, description string) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Equal(t, description, coll.Description)
 }
 
 func assertSchemaVersion(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, schemaVersion int32) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Equal(t, schemaVersion, coll.SchemaVersion)
 }
 
 func assertDynamicSchema(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, dynamicSchema bool) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Equal(t, dynamicSchema, coll.EnableDynamicField)
 	if !dynamicSchema {

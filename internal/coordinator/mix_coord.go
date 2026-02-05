@@ -472,6 +472,10 @@ func (s *mixCoordImpl) CreatePartition(ctx context.Context, req *milvuspb.Create
 	return s.rootcoordServer.CreatePartition(ctx, req)
 }
 
+func (s *mixCoordImpl) CreatePartitionV2(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*rootcoordpb.CreatePartitionResponse, error) {
+	return s.rootcoordServer.CreatePartitionV2(ctx, req)
+}
+
 func (s *mixCoordImpl) DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	return s.rootcoordServer.DropPartition(ctx, req)
 }

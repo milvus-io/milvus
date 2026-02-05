@@ -423,6 +423,13 @@ func (m *CollectionManager) GetAllPartitions(ctx context.Context) []*Partition {
 	return lo.Values(m.partitions)
 }
 
+func (m *CollectionManager) GetPartitionIDsByCollection(ctx context.Context, collectionID typeutil.UniqueID) []int64 {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+
+	return m.collectionPartitions[collectionID].Collect()
+}
+
 func (m *CollectionManager) GetPartitionsByCollection(ctx context.Context, collectionID typeutil.UniqueID) []*Partition {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
@@ -490,6 +497,13 @@ func (m *CollectionManager) PutPartitionWithoutSave(ctx context.Context, partiti
 }
 
 func (m *CollectionManager) putPartition(ctx context.Context, partitions []*Partition, withSave bool) error {
+	// Check all partitions' collections exist (prevent orphan partitions)
+	for _, partition := range partitions {
+		if _, ok := m.collections[partition.GetCollectionID()]; !ok {
+			return merr.WrapErrCollectionNotLoaded(partition.GetCollectionID())
+		}
+	}
+
 	if withSave {
 		loadInfos := lo.Map(partitions, func(partition *Partition, _ int) *querypb.PartitionLoadInfo {
 			return partition.PartitionLoadInfo

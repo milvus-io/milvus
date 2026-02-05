@@ -384,6 +384,18 @@ func (c *Client) CreatePartition(ctx context.Context, in *milvuspb.CreatePartiti
 	})
 }
 
+// CreatePartitionV2 create partition and return partition ID
+func (c *Client) CreatePartitionV2(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*rootcoordpb.CreatePartitionResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*rootcoordpb.CreatePartitionResponse, error) {
+		return client.CreatePartitionV2(ctx, in)
+	})
+}
+
 // DropPartition drop partition
 func (c *Client) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	in = typeutil.Clone(in)

@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -92,12 +93,14 @@ type Cache interface {
 	GetDatabaseInfo(ctx context.Context, database string) (*databaseInfo, error)
 	// AllocID is only using on requests that need to skip timestamp allocation, don't overuse it.
 	AllocID(ctx context.Context) (int64, error)
+
+	RemovePartition(ctx context.Context, database, collectionName string, partitionName string, version uint64)
 }
 
 type collectionInfo struct {
-	collID                typeutil.UniqueID
-	schema                *schemaInfo
-	partInfo              *partitionInfos
+	collID typeutil.UniqueID
+	schema *schemaInfo
+	// partInfo              *partitionInfos
 	createdTimestamp      uint64
 	createdUtcTimestamp   uint64
 	consistencyLevel      commonpb.ConsistencyLevel
@@ -357,6 +360,15 @@ type MetaCache struct {
 	IDLock  sync.RWMutex
 
 	collectionCacheVersion map[UniqueID]uint64 // collectionID -> cacheVersion
+
+	partitionCache          *VersionCache[string, *partitionInfo]  // partitionName -> partitionInfo
+	collLevelPartitionCache *VersionCache[string, *partitionInfos] // collectionName -> partitionInfos
+
+	sfPartitionCache          conc.Singleflight[*partitionInfo]
+	sfCollLevelPartitionCache conc.Singleflight[*partitionInfos]
+
+	stopCh    chan struct{}
+	closeOnce sync.Once
 }
 
 // globalMetaCache is singleton instance of Cache
@@ -385,15 +397,21 @@ func InitMetaCache(ctx context.Context, mixCoord types.MixCoordClient) error {
 
 // NewMetaCache creates a MetaCache with provided RootCoord and QueryNode
 func NewMetaCache(mixCoord types.MixCoordClient) (*MetaCache, error) {
-	return &MetaCache{
-		mixCoord:               mixCoord,
-		dbInfo:                 map[string]*databaseInfo{},
-		collInfo:               map[string]map[string]*collectionInfo{},
-		credMap:                map[string]*internalpb.CredentialInfo{},
-		privilegeInfos:         map[string]struct{}{},
-		userToRoles:            map[string]map[string]struct{}{},
-		collectionCacheVersion: make(map[UniqueID]uint64),
-	}, nil
+	metaCache := &MetaCache{
+		mixCoord:                mixCoord,
+		dbInfo:                  map[string]*databaseInfo{},
+		collInfo:                map[string]map[string]*collectionInfo{},
+		credMap:                 map[string]*internalpb.CredentialInfo{},
+		privilegeInfos:          map[string]struct{}{},
+		userToRoles:             map[string]map[string]struct{}{},
+		collectionCacheVersion:  make(map[UniqueID]uint64),
+		partitionCache:          NewVersionCache[string, *partitionInfo](),
+		collLevelPartitionCache: NewVersionCache[string, *partitionInfos](),
+		stopCh:                  make(chan struct{}),
+		closeOnce:               sync.Once{},
+	}
+	metaCache.backgroundGCLoop(metaCache.stopCh)
+	return metaCache, nil
 }
 
 func (m *MetaCache) getCollection(database, collectionName string, collectionID UniqueID) (*collectionInfo, bool) {
@@ -429,27 +447,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		return nil, err
 	}
 
-	partitions, err := m.showPartitions(ctx, database, collectionName, collectionID)
-	if err != nil {
-		return nil, err
-	}
-
-	// check partitionID, createdTimestamp and utcstamp has sam element numbers
-	if len(partitions.PartitionNames) != len(partitions.CreatedTimestamps) || len(partitions.PartitionNames) != len(partitions.CreatedUtcTimestamps) {
-		return nil, merr.WrapErrParameterInvalidMsg("partition names and timestamps number is not aligned, response: %s", partitions.String())
-	}
-
-	defaultPartitionName := Params.CommonCfg.DefaultPartitionName.GetValue()
-	infos := lo.Map(partitions.GetPartitionIDs(), func(partitionID int64, idx int) *partitionInfo {
-		return &partitionInfo{
-			name:                partitions.PartitionNames[idx],
-			partitionID:         partitions.PartitionIDs[idx],
-			createdTimestamp:    partitions.CreatedTimestamps[idx],
-			createdUtcTimestamp: partitions.CreatedUtcTimestamps[idx],
-			isDefault:           partitions.PartitionNames[idx] == defaultPartitionName,
-		}
-	})
-
 	if collectionName == "" {
 		collectionName = collection.Schema.GetName()
 	}
@@ -474,7 +471,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		return &collectionInfo{
 			collID:                collection.CollectionID,
 			schema:                schemaInfo,
-			partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
 			createdTimestamp:      collection.CreatedTimestamp,
 			createdUtcTimestamp:   collection.CreatedUtcTimestamp,
 			consistencyLevel:      collection.ConsistencyLevel,
@@ -497,7 +493,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	m.collInfo[database][collectionName] = &collectionInfo{
 		collID:                collection.CollectionID,
 		schema:                schemaInfo,
-		partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
 		createdTimestamp:      collection.CreatedTimestamp,
 		createdUtcTimestamp:   collection.CreatedUtcTimestamp,
 		consistencyLevel:      collection.ConsistencyLevel,
@@ -514,7 +509,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 
 	log.Ctx(ctx).Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName),
 		zap.String("actual collection Name", collection.Schema.GetName()), zap.Int64("collectionID", collection.CollectionID),
-		zap.Strings("partition", partitions.PartitionNames), zap.Uint64("currentVersion", curVersion),
 		zap.Uint64("version", collection.GetRequestTime()), zap.Any("aliases", collection.Aliases),
 	)
 
@@ -530,6 +524,10 @@ func buildSfKeyByName(database, collectionName string) string {
 
 func buildSfKeyById(database string, collectionID UniqueID) string {
 	return database + "--" + fmt.Sprint(collectionID)
+}
+
+func buildPartitionSfKey(database, collectionName, partitionName string) string {
+	return database + "-" + collectionName + "-" + partitionName
 }
 
 func (m *MetaCache) UpdateByName(ctx context.Context, database, collectionName string) (*collectionInfo, error) {
@@ -676,24 +674,56 @@ func (m *MetaCache) GetPartitions(ctx context.Context, database, collectionName 
 }
 
 func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionName string, partitionName string) (*partitionInfo, error) {
-	partitions, err := m.GetPartitionInfos(ctx, database, collectionName)
+	// Handle empty partitionName - use default partition
+	if partitionName == "" {
+		partitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
+	}
+
+	key := buildPartitionSfKey(database, collectionName, partitionName)
+	entry, ok, release := m.partitionCache.Lookup(key)
+	defer release(entry)
+	if ok && entry.state == EntryStateActive && entry.value != nil {
+		return entry.value, nil
+	}
+
+	collectionKey := buildSfKeyByName(database, collectionName)
+	_, err, _ := m.sfPartitionCache.Do(collectionKey, func() (*partitionInfo, error) {
+		// as rootcoord does not support show partitions by partition name, we need to get all partitions first.
+		resp, err := m.showPartitions(ctx, database, collectionName, 0)
+		if err != nil {
+			return nil, err
+		}
+		keys := make([]string, 0)
+		values := make([]*partitionInfo, 0)
+		versions := make([]uint64, 0)
+		var ret *partitionInfo
+		for i := range resp.PartitionNames {
+			keys = append(keys, buildPartitionSfKey(database, collectionName, resp.PartitionNames[i]))
+			values = append(values, &partitionInfo{
+				name:                resp.PartitionNames[i],
+				partitionID:         resp.PartitionIDs[i],
+				createdTimestamp:    resp.CreatedTimestamps[i],
+				createdUtcTimestamp: resp.CreatedUtcTimestamps[i],
+			})
+			versions = append(versions, resp.CreatedTimestamps[i])
+			if resp.PartitionNames[i] == partitionName {
+				ret = values[i]
+			}
+		}
+		m.partitionCache.InsertBatchWithoutRef(keys, values, versions)
+		return ret, nil
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	if partitionName == "" {
-		for _, info := range partitions.partitionInfos {
-			if info.isDefault {
-				return info, nil
-			}
-		}
+	entry, ok, release = m.partitionCache.Lookup(key)
+	defer release(entry)
+	if ok && entry.state == EntryStateActive && entry.value != nil {
+		return entry.value, nil
 	}
+	return nil, merr.WrapErrPartitionNotFound(partitionName)
 
-	info, ok := partitions.name2Info[partitionName]
-	if !ok {
-		return nil, merr.WrapErrPartitionNotFound(partitionName)
-	}
-	return info, nil
 }
 
 func (m *MetaCache) GetPartitionsIndex(ctx context.Context, database, collectionName string) ([]string, error) {
@@ -710,22 +740,44 @@ func (m *MetaCache) GetPartitionsIndex(ctx context.Context, database, collection
 }
 
 func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionName string) (*partitionInfos, error) {
-	method := "GetPartitionInfo"
-	collInfo, ok := m.getCollection(database, collectionName, 0)
-
-	if !ok {
-		tr := timerecord.NewTimeRecorder("UpdateCache")
-		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
-
-		collInfo, err := m.UpdateByName(ctx, database, collectionName)
+	key := buildSfKeyByName(database, collectionName)
+	entry, ok, release := m.collLevelPartitionCache.Lookup(key)
+	defer release(entry)
+	if ok && entry.state == EntryStateActive && entry.value != nil {
+		return entry.value, nil
+	}
+	partitionsInfo, err, _ := m.sfCollLevelPartitionCache.Do(collectionName, func() (*partitionInfos, error) {
+		collection, err := m.describeCollection(ctx, database, collectionName, 0)
 		if err != nil {
 			return nil, err
 		}
+		schemaInfo := newSchemaInfo(collection.Schema)
 
-		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		return collInfo.partInfo, nil
+		resp, err := m.showPartitions(ctx, database, collectionName, 0)
+		if err != nil {
+			return nil, err
+		}
+		partitions := make([]*partitionInfo, 0)
+		for i, name := range resp.PartitionNames {
+			partitions = append(partitions, &partitionInfo{
+				name:                name,
+				partitionID:         resp.PartitionIDs[i],
+				createdTimestamp:    resp.CreatedTimestamps[i],
+				createdUtcTimestamp: resp.CreatedUtcTimestamps[i],
+			})
+		}
+		partitionsInfo := parsePartitionsInfo(partitions, schemaInfo.IsPartitionKeyCollection())
+		entry, release := m.collLevelPartitionCache.Insert(key, partitionsInfo, collection.RequestTime)
+		defer release(entry)
+		return entry.value, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	return collInfo.partInfo, nil
+	if partitionsInfo == nil {
+		return nil, merr.WrapErrServiceInternal("partition info not found")
+	}
+	return partitionsInfo, nil
 }
 
 // Get the collection information from rootcoord.
@@ -854,6 +906,7 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionNa
 			}
 		}
 	}
+
 	log.Ctx(ctx).Debug("remove collection", zap.String("db", database), zap.String("collection", collectionName))
 }
 
@@ -871,10 +924,20 @@ func (m *MetaCache) removeCollectionByID(ctx context.Context, collectionID Uniqu
 		for k, v := range db {
 			if v.collID == collectionID {
 				if version == 0 || curVersion <= version {
+
 					delete(m.collInfo[database], k)
 					collNames = append(collNames, k)
-					m.sfGlobal.Forget(buildSfKeyByName(database, k))
+					collectionKey := buildSfKeyByName(database, k)
+					m.sfGlobal.Forget(collectionKey)
 					m.sfGlobal.Forget(buildSfKeyById(database, v.collID))
+					m.sfCollLevelPartitionCache.Forget(collectionKey)
+					m.collLevelPartitionCache.Stale(collectionKey, version)
+
+					partitionPrefix := database + "-" + k + "-"
+					m.sfPartitionCache.Forget(collectionKey)
+					m.partitionCache.StaleIf(func(key string) bool {
+						return strings.HasPrefix(key, partitionPrefix)
+					}, version)
 				}
 			}
 		}
@@ -894,8 +957,27 @@ func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 	log.Ctx(ctx).Debug("remove database", zap.String("name", database))
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Forget singleflight keys for all collections in this database
+	if db, ok := m.collInfo[database]; ok {
+		for collectionName := range db {
+			collectionKey := buildSfKeyByName(database, collectionName)
+			m.sfCollLevelPartitionCache.Forget(collectionKey)
+			m.sfPartitionCache.Forget(collectionKey)
+		}
+	}
+
 	delete(m.collInfo, database)
 	delete(m.dbInfo, database)
+
+	// Clean up partition cache
+	prefix := database + "-"
+	m.collLevelPartitionCache.StaleIf(func(key string) bool {
+		return strings.HasPrefix(key, prefix)
+	}, 0)
+	m.partitionCache.StaleIf(func(key string) bool {
+		return strings.HasPrefix(key, prefix)
+	}, 0)
 }
 
 func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {
@@ -963,4 +1045,47 @@ func (m *MetaCache) AllocID(ctx context.Context) (int64, error) {
 	id := m.IDStart + m.IDIndex
 	m.IDIndex++
 	return id, nil
+}
+
+func (m *MetaCache) RemovePartition(ctx context.Context, database, collectionName string, partitionName string, version uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	collectionKey := buildSfKeyByName(database, collectionName)
+	m.sfPartitionCache.Forget(collectionKey)
+	m.partitionCache.Stale(buildPartitionSfKey(database, collectionName, partitionName), version)
+
+	m.sfCollLevelPartitionCache.Forget(collectionKey)
+	m.collLevelPartitionCache.Stale(collectionKey, version)
+
+	log.Ctx(ctx).Debug("remove partition", zap.String("db", database), zap.String("collection", collectionName), zap.String("partition", partitionName), zap.Uint64("version", version))
+}
+
+func (m *MetaCache) backgroundGCLoop(stopCh <-chan struct{}) {
+	go func() {
+		interval := Params.ProxyCfg.MetaCacheGCTimeInterval.GetAsDuration(time.Second)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				m.partitionCache.Prune()
+				m.collLevelPartitionCache.Prune()
+
+				newInterval := Params.ProxyCfg.MetaCacheGCTimeInterval.GetAsDuration(time.Second)
+				if newInterval != interval {
+					interval = newInterval
+					ticker.Reset(interval)
+				}
+			case <-stopCh:
+				return
+			}
+		}
+	}()
+}
+
+func (m *MetaCache) Close() {
+	m.closeOnce.Do(func() {
+		close(m.stopCh)
+	})
 }

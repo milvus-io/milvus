@@ -1878,7 +1878,11 @@ func (t *createPartitionTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *createPartitionTask) Execute(ctx context.Context) (err error) {
-	t.result, err = t.mixCoord.CreatePartition(ctx, t.CreatePartitionRequest)
+	resp, err := t.mixCoord.CreatePartitionV2(ctx, t.CreatePartitionRequest)
+	if err != nil {
+		return err
+	}
+	t.result = resp.Status
 	if err := merr.CheckRPCCall(t.result, err); err != nil {
 		return err
 	}
@@ -1887,15 +1891,10 @@ func (t *createPartitionTask) Execute(ctx context.Context) (err error) {
 		t.result = merr.Status(err)
 		return err
 	}
-	partitionID, err := globalMetaCache.GetPartitionID(ctx, t.GetDbName(), t.GetCollectionName(), t.GetPartitionName())
-	if err != nil {
-		t.result = merr.Status(err)
-		return err
-	}
 	t.result, err = t.mixCoord.SyncNewCreatedPartition(ctx, &querypb.SyncNewCreatedPartitionRequest{
 		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleasePartitions)),
 		CollectionID: collectionID,
-		PartitionID:  partitionID,
+		PartitionID:  resp.PartitionID,
 	})
 	return merr.CheckRPCCall(t.result, err)
 }

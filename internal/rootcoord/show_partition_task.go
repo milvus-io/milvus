@@ -50,7 +50,7 @@ func (t *showPartitionTask) Execute(ctx context.Context) error {
 	if t.Req.GetCollectionName() == "" {
 		coll, err = t.core.meta.GetCollectionByID(ctx, t.Req.GetDbName(), t.Req.GetCollectionID(), typeutil.MaxTimestamp, t.allowUnavailable)
 	} else {
-		coll, err = t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
+		coll, err = t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	}
 	if err != nil {
 		t.Rsp.Status = merr.Status(err)

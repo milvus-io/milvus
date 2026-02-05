@@ -126,7 +126,7 @@ func TestDDLCallbacksAlterCollectionField(t *testing.T) {
 }
 
 func assertFieldPropertiesNotFound(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, fieldName string, key string) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	for _, field := range coll.Fields {
 		if field.Name == fieldName {
@@ -140,7 +140,7 @@ func assertFieldPropertiesNotFound(t *testing.T, ctx context.Context, core *Core
 }
 
 func assertFieldProperties(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, fieldName string, key string, val string) {
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	for _, field := range coll.Fields {
 		if field.Name == fieldName {

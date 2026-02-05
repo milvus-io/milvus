@@ -782,7 +782,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			names:   newNameDb(),
 			aliases: newNameDb(),
 		}
-		_, err := meta.GetCollectionByName(ctx, "", "not_exist", typeutil.MaxTimestamp)
+		_, err := meta.GetCollectionByName(ctx, "", "not_exist", typeutil.MaxTimestamp, false)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	})

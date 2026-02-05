@@ -104,6 +104,33 @@ func WaitCurrentTargetUpdated(ctx context.Context, targetObserver *observers.Tar
 
 	// accelerate check
 	targetObserver.TriggerUpdateCurrentTarget(collection)
+
+	// wait current target ready
+	select {
+	case <-ready:
+		return nil
+	case <-ctx.Done():
+		return errors.Wrapf(ctx.Err(), "context error while waiting for current target updated, collection=%d", collection)
+	case <-time.After(waitCollectionReleasedTimeout):
+		return errors.Errorf("wait current target updated timeout, collection=%d", collection)
+	}
+}
+
+func WaitUpdatePartition(ctx context.Context, targetObserver *observers.TargetObserver, collection int64, partition int64) error {
+	// manual trigger update next target
+	ready, err := targetObserver.UpdatePartition(collection, partition)
+	if err != nil {
+		return errors.Wrapf(err, "failed to update next target, collection=%d", collection)
+	}
+	select {
+	case <-ready:
+		return nil
+	default:
+	}
+
+	// accelerate check
+	targetObserver.TriggerUpdateCurrentTarget(collection)
+
 	// wait current target ready
 	select {
 	case <-ready:
