@@ -85,10 +85,10 @@ func NewLoadCollectionJob(
 func (job *LoadCollectionJob) Execute() error {
 	req := job.result.Message.Header()
 	vchannels := job.result.GetVChannelsWithoutControlChannel()
-
 	log := log.Ctx(job.ctx).With(zap.Int64("collectionID", req.GetCollectionId()))
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionId())
 
+	triggerResourceLimitFlagClearHook()
 	// 1. create replica if not exist
 	if _, err := utils.SpawnReplicasWithReplicaConfig(job.ctx, job.meta, meta.SpawnWithReplicaConfigParams{
 		CollectionID: req.GetCollectionId(),
