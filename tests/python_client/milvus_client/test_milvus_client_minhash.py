@@ -1570,9 +1570,7 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         client.drop_collection(collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("invalid_num_hashes", [0, -1])
-    # Note: "abc" removed - causes server panic (bug: Param num_hashes:abc is not a number)
-    # TODO: Add back after server bug is fixed
+    @pytest.mark.parametrize("invalid_num_hashes", [0, -1, "abc", "123abc"])
     def test_minhash_invalid_num_hashes(self, invalid_num_hashes):
         """
         target: test MinHash function with invalid num_hashes value
@@ -1602,8 +1600,7 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
             client.create_collection(collection_name, schema=schema)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("invalid_shingle_size", [0, -1])
-    @pytest.mark.xfail(reason="Server bug: shingle_size parameter not validated - accepts invalid values")
+    @pytest.mark.parametrize("invalid_shingle_size", [0, -1, "xyz"])
     def test_minhash_invalid_shingle_size(self, invalid_shingle_size):
         """
         target: test MinHash function with invalid shingle_size value
@@ -1632,7 +1629,6 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
                                check_items={"err_code": 1})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="Server bug: hash_function parameter not validated - accepts invalid values like 'md5'")
     def test_minhash_invalid_hash_function(self):
         """
         target: test MinHash function with invalid hash_function value
@@ -1656,6 +1652,72 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
                 "num_hashes": default_num_hashes,
                 "shingle_size": default_shingle_size,
                 "hash_function": "md5",  # Invalid - only xxhash64 and sha1 supported
+            },
+        ))
+
+        # Error should occur during collection creation (server-side validation)
+        self.create_collection(client, collection_name, schema=schema,
+                               check_task=CheckTasks.err_res,
+                               check_items={"err_code": 1})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_token_level", ["sentence", "invalid", ""])
+    def test_minhash_invalid_token_level(self, invalid_token_level):
+        """
+        target: test MinHash function with invalid token_level value
+        method: try to create function with unsupported token_level
+        expected: error raised during collection creation
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+
+        schema.add_function(Function(
+            name="text_to_minhash",
+            function_type=FunctionType.MINHASH,
+            input_field_names=[default_text_field_name],
+            output_field_names=[default_minhash_field_name],
+            params={
+                "num_hashes": default_num_hashes,
+                "shingle_size": default_shingle_size,
+                "token_level": invalid_token_level,
+            },
+        ))
+
+        # Error should occur during collection creation (server-side validation)
+        self.create_collection(client, collection_name, schema=schema,
+                               check_task=CheckTasks.err_res,
+                               check_items={"err_code": 1})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_seed", ["not_a_number", "abc123"])
+    def test_minhash_invalid_seed(self, invalid_seed):
+        """
+        target: test MinHash function with invalid seed value
+        method: try to create function with non-numeric seed
+        expected: error raised during collection creation
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+
+        schema.add_function(Function(
+            name="text_to_minhash",
+            function_type=FunctionType.MINHASH,
+            input_field_names=[default_text_field_name],
+            output_field_names=[default_minhash_field_name],
+            params={
+                "num_hashes": default_num_hashes,
+                "shingle_size": default_shingle_size,
+                "seed": invalid_seed,
             },
         ))
 
