@@ -31,7 +31,6 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     span.GetSpan()->SetAttribute("data_type",
                                  static_cast<int>(expr_->column_.data_type_));
 
-    context.set_apply_valid_data_after_flip(false);
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     switch (expr_->column_.data_type_) {
@@ -161,7 +160,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
                 offset = (offsets) ? offsets[i] : i;
             }
             if (valid_data != nullptr && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
+                res[i] = false;
                 continue;
             }
             if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {

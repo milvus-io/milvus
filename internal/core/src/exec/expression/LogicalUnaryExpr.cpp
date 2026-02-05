@@ -15,7 +15,7 @@
 // limitations under the License.
 
 #include "LogicalUnaryExpr.h"
-
+#include "common/ValueOp.h"
 namespace milvus {
 namespace exec {
 
@@ -29,14 +29,7 @@ PhyLogicalUnaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     inputs_[0]->Eval(context, result);
     if (expr_->op_type_ == milvus::expr::LogicalUnaryExpr::OpType::LogicalNot) {
-        auto flat_vec = GetColumnVector(result);
-        TargetBitmapView data(flat_vec->GetRawData(), flat_vec->size());
-        data.flip();
-        if (context.get_apply_valid_data_after_flip()) {
-            TargetBitmapView valid_data(flat_vec->GetValidRawData(),
-                                        flat_vec->size());
-            data &= valid_data;
-        }
+        common::ThreeValuedLogicOp::Not(GetColumnVector(result));
     }
 }
 
