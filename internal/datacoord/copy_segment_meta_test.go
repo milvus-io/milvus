@@ -18,9 +18,11 @@ package datacoord
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -861,4 +863,84 @@ func (s *CopySegmentMetaSuite) TestCopySegmentTasks_Operations() {
 	s.Nil(tasks.get(1001))
 	s.NotNil(tasks.get(1002))
 	s.Len(tasks.listTasks(), 1)
+}
+
+func TestSnapshotRestoreRefTracker(t *testing.T) {
+	tracker := NewSnapshotRestoreRefTracker()
+	snapshotName := "test_snapshot"
+
+	// Test initial count is 0
+	assert.Equal(t, int32(0), tracker.GetRestoreRefCount(snapshotName))
+
+	// Test increment
+	tracker.IncrementRestoreRef(snapshotName)
+	assert.Equal(t, int32(1), tracker.GetRestoreRefCount(snapshotName))
+
+	tracker.IncrementRestoreRef(snapshotName)
+	assert.Equal(t, int32(2), tracker.GetRestoreRefCount(snapshotName))
+
+	// Test decrement
+	tracker.DecrementRestoreRef(snapshotName)
+	assert.Equal(t, int32(1), tracker.GetRestoreRefCount(snapshotName))
+
+	tracker.DecrementRestoreRef(snapshotName)
+	assert.Equal(t, int32(0), tracker.GetRestoreRefCount(snapshotName))
+
+	// Test multiple snapshots
+	tracker.IncrementRestoreRef("snapshot_a")
+	tracker.IncrementRestoreRef("snapshot_b")
+	assert.Equal(t, int32(1), tracker.GetRestoreRefCount("snapshot_a"))
+	assert.Equal(t, int32(1), tracker.GetRestoreRefCount("snapshot_b"))
+
+	// Test decrement different snapshots separately
+	tracker.DecrementRestoreRef("snapshot_a")
+	assert.Equal(t, int32(0), tracker.GetRestoreRefCount("snapshot_a"))
+	assert.Equal(t, int32(1), tracker.GetRestoreRefCount("snapshot_b"))
+}
+
+func TestSnapshotRestoreRefTracker_Concurrent(t *testing.T) {
+	tracker := NewSnapshotRestoreRefTracker()
+	snapshotName := "concurrent_snapshot"
+	concurrency := 20
+
+	var wg sync.WaitGroup
+
+	// Concurrent increment
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tracker.IncrementRestoreRef(snapshotName)
+		}()
+	}
+	wg.Wait()
+
+	assert.Equal(t, int32(concurrency), tracker.GetRestoreRefCount(snapshotName))
+
+	// Concurrent decrement
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tracker.DecrementRestoreRef(snapshotName)
+		}()
+	}
+	wg.Wait()
+
+	assert.Equal(t, int32(0), tracker.GetRestoreRefCount(snapshotName))
+}
+
+func TestSnapshotRestoreRefTracker_UnderflowProtection(t *testing.T) {
+	tracker := NewSnapshotRestoreRefTracker()
+	snapshotName := "test_snapshot"
+
+	// Should not go negative
+	tracker.DecrementRestoreRef(snapshotName)
+	assert.Equal(t, int32(0), tracker.GetRestoreRefCount(snapshotName))
+
+	// Multiple decrements should not go negative
+	tracker.IncrementRestoreRef(snapshotName)
+	tracker.DecrementRestoreRef(snapshotName)
+	tracker.DecrementRestoreRef(snapshotName)
+	assert.Equal(t, int32(0), tracker.GetRestoreRefCount(snapshotName))
 }

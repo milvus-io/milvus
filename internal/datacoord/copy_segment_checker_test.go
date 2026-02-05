@@ -640,3 +640,235 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_UpdateSegmentStates() {
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted, updatedJob.GetState())
 	s.Equal(int64(100), updatedJob.GetTotalRows())
 }
+
+func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Completed() {
+	snapshotName := "test_snapshot"
+	jobID := int64(100)
+
+	// Setup: Create job and increment ref count
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        jobID,
+			CollectionId: s.collectionID,
+			SnapshotName: snapshotName,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.copyMeta.AddJob(context.TODO(), job)
+	s.copyMeta.IncrementRestoreRef(snapshotName)
+	s.Equal(int32(1), s.copyMeta.GetRestoreRefCount(snapshotName))
+
+	// Execute: Update job to Completed
+	err := s.checker.updateJobStateAndReleaseRef(jobID, snapshotName,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
+	s.NoError(err)
+
+	// Verify: Ref count is released
+	s.Equal(int32(0), s.copyMeta.GetRestoreRefCount(snapshotName))
+}
+
+func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Failed() {
+	snapshotName := "test_snapshot_fail"
+	jobID := int64(101)
+
+	// Setup: Create job and increment ref count
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        jobID,
+			CollectionId: s.collectionID,
+			SnapshotName: snapshotName,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.copyMeta.AddJob(context.TODO(), job)
+	s.copyMeta.IncrementRestoreRef(snapshotName)
+	s.Equal(int32(1), s.copyMeta.GetRestoreRefCount(snapshotName))
+
+	// Execute: Update job to Failed
+	err := s.checker.updateJobStateAndReleaseRef(jobID, snapshotName,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
+	s.NoError(err)
+
+	// Verify: Ref count is released
+	s.Equal(int32(0), s.copyMeta.GetRestoreRefCount(snapshotName))
+}
+
+func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Executing() {
+	snapshotName := "test_snapshot_exec"
+	jobID := int64(102)
+
+	// Setup: Create job and increment ref count
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        jobID,
+			CollectionId: s.collectionID,
+			SnapshotName: snapshotName,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.copyMeta.AddJob(context.TODO(), job)
+	s.copyMeta.IncrementRestoreRef(snapshotName)
+	s.Equal(int32(1), s.copyMeta.GetRestoreRefCount(snapshotName))
+
+	// Execute: Update job to Executing (non-terminal state)
+	err := s.checker.updateJobStateAndReleaseRef(jobID, snapshotName,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting))
+	s.NoError(err)
+
+	// Verify: Ref count is NOT released
+	s.Equal(int32(1), s.copyMeta.GetRestoreRefCount(snapshotName))
+}
+
+func (s *CopySegmentCheckerSuite) TestCheckPendingJob_NoMappings_ReleasesRef() {
+	snapshotName := "test_snapshot_no_mappings"
+	jobID := int64(200)
+
+	// Setup: Create job with no ID mappings
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        jobID,
+			CollectionId: s.collectionID,
+			SnapshotName: snapshotName,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
+			IdMappings:   []*datapb.CopySegmentIDMapping{}, // Empty
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.copyMeta.AddJob(context.TODO(), job)
+	s.copyMeta.IncrementRestoreRef(snapshotName)
+	s.Equal(int32(1), s.copyMeta.GetRestoreRefCount(snapshotName))
+
+	// Execute: Check pending job
+	s.checker.checkPendingJob(job)
+
+	// Verify: Job marked as Completed and ref released
+	updatedJob := s.copyMeta.GetJob(context.TODO(), jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted, updatedJob.GetState())
+	s.Equal(int32(0), s.copyMeta.GetRestoreRefCount(snapshotName))
+}
+
+func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksDone_ReleasesRef() {
+	snapshotName := "test_snapshot_copying_completed"
+	jobID := int64(400)
+
+	// Setup mocks: SaveCopySegmentJob is called once for AddJob, once for finishJob update
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	// Setup: Create job in Executing state with all tasks completed
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        jobID,
+			CollectionId: s.collectionID,
+			SnapshotName: snapshotName,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			IdMappings: []*datapb.CopySegmentIDMapping{
+				{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
+			},
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.copyMeta.AddJob(context.TODO(), job)
+	s.copyMeta.IncrementRestoreRef(snapshotName)
+
+	// Create segments for target segment ID mapping
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            101,
+			State:         commonpb.SegmentState_Growing,
+			NumOfRows:     100,
+			CollectionID:  s.collectionID,
+			InsertChannel: "ch1",
+		},
+	}
+	s.meta.AddSegment(context.TODO(), segment)
+
+	// Create a completed task
+	task := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		meta:     s.meta,
+		tr:       timerecord.NewTimeRecorder("test task"),
+		times:    taskcommon.NewTimes(),
+	}
+	taskProto := &datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        jobID,
+		CollectionId: s.collectionID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		IdMappings:   []*datapb.CopySegmentIDMapping{{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10}},
+	}
+	task.task.Store(taskProto)
+	s.copyMeta.AddTask(context.TODO(), task)
+
+	s.Equal(int32(1), s.copyMeta.GetRestoreRefCount(snapshotName))
+
+	// Execute: Check copying job
+	s.checker.checkCopyingJob(job)
+
+	// Verify: Job marked as Completed and ref released
+	updatedJob := s.copyMeta.GetJob(context.TODO(), jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted, updatedJob.GetState())
+	s.Equal(int32(0), s.copyMeta.GetRestoreRefCount(snapshotName))
+}
+
+func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_FailedTask_ReleasesRef() {
+	snapshotName := "test_snapshot_task_failed"
+	jobID := int64(500)
+
+	// Setup mocks
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	// Setup: Create job in Executing state with a failed task
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        jobID,
+			CollectionId: s.collectionID,
+			SnapshotName: snapshotName,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			IdMappings: []*datapb.CopySegmentIDMapping{
+				{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
+			},
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.copyMeta.AddJob(context.TODO(), job)
+	s.copyMeta.IncrementRestoreRef(snapshotName)
+
+	// Create a failed task
+	task := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		meta:     s.meta,
+		tr:       timerecord.NewTimeRecorder("test task"),
+		times:    taskcommon.NewTimes(),
+	}
+	taskProto := &datapb.CopySegmentTask{
+		TaskId:       1002,
+		JobId:        jobID,
+		CollectionId: s.collectionID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskFailed,
+		Reason:       "test failure",
+		IdMappings:   []*datapb.CopySegmentIDMapping{{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10}},
+	}
+	task.task.Store(taskProto)
+	s.copyMeta.AddTask(context.TODO(), task)
+
+	s.Equal(int32(1), s.copyMeta.GetRestoreRefCount(snapshotName))
+
+	// Execute: Check copying job - should detect failed task and mark job as Failed
+	s.checker.checkCopyingJob(job)
+
+	// Verify: Job marked as Failed and ref released
+	updatedJob := s.copyMeta.GetJob(context.TODO(), jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
+	s.Equal(int32(0), s.copyMeta.GetRestoreRefCount(snapshotName))
+}

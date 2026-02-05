@@ -2139,6 +2139,20 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 		return merr.Success(), nil
 	}
 
+	// Check if snapshot is being restored
+	snapshotName := req.GetName()
+	if refCount := s.snapshotManager.GetSnapshotRestoreRefCount(snapshotName); refCount > 0 {
+		reason := fmt.Sprintf("snapshot %s is restoring, %d restore operations in progress",
+			snapshotName, refCount)
+		log.Warn("cannot drop snapshot with active restore operations",
+			zap.String("snapshot", snapshotName),
+			zap.Int32("activeRestoreCount", refCount))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    reason,
+		}, nil
+	}
+
 	// Broadcast DropSnapshot message via DDL framework
 	if _, err := broadcaster.Broadcast(ctx, message.NewDropSnapshotMessageBuilderV2().
 		WithHeader(&message.DropSnapshotMessageHeader{

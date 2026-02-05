@@ -262,6 +262,18 @@ type SnapshotManager interface {
 	//   - restoreInfos: List of restore job information
 	//   - error: If listing fails
 	ListRestoreJobs(ctx context.Context, collectionIDFilter int64) ([]*datapb.RestoreSnapshotInfo, error)
+
+	// Snapshot restore reference tracking
+	//
+	// GetSnapshotRestoreRefCount returns the restore reference count for a snapshot.
+	// This is used to check if there are active restore operations before allowing deletion.
+	//
+	// Parameters:
+	//   - snapshotName: Name of the snapshot
+	//
+	// Returns:
+	//   - refCount: Number of active restore operations
+	GetSnapshotRestoreRefCount(snapshotName string) int32
 }
 
 // ============================================================================
@@ -1088,6 +1100,14 @@ func (sm *snapshotManager) createRestoreJob(
 		return err
 	}
 
+	// Increment snapshot restore reference count to protect snapshot from deletion
+	// This ref will be decremented when the job is garbage collected (after 3 hours retention)
+	snapshotName := snapshotData.SnapshotInfo.GetName()
+	sm.copySegmentMeta.IncrementRestoreRef(snapshotName)
+	log.Info("incremented snapshot restore ref count",
+		zap.String("snapshot", snapshotName),
+		zap.Int64("jobID", jobID))
+
 	log.Info("copy segment job created successfully",
 		zap.Int64("jobID", jobID),
 		zap.Int("totalSegments", len(idMappings)))
@@ -1150,6 +1170,12 @@ func (sm *snapshotManager) ListRestoreJobs(
 		zap.Int64("filterCollectionId", collectionIDFilter))
 
 	return restoreInfos, nil
+}
+
+// GetSnapshotRestoreRefCount returns the restore reference count for a snapshot.
+// This is used in DropSnapshot to check if there are active restore operations.
+func (sm *snapshotManager) GetSnapshotRestoreRefCount(snapshotName string) int32 {
+	return sm.copySegmentMeta.GetRestoreRefCount(snapshotName)
 }
 
 // ============================================================================
