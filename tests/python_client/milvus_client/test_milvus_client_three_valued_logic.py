@@ -507,3 +507,177 @@ class TestMilvusClientThreeValuedLogic(TestMilvusClientV2Base):
         # search_res[0] is the hits for the first query vector
         actual_ids = set(hit.get("id") for hit in search_res[0])
         assert actual_ids == expected_ids, f"Expected {expected_ids}, got {actual_ids}"
+
+
+@pytest.mark.xdist_group("TestMilvusClientThreeValuedLogicIssue46972")
+class TestMilvusClientThreeValuedLogicIssue46972(TestMilvusClientV2Base):
+    """
+    Test cases for issue #46972: False OR False = True bug in complex JSON expressions.
+
+    Related Issue: https://github.com/milvus-io/milvus/issues/46972
+
+    This tests the critical logic error where complex OR expressions with
+    nullable fields and JSON fields incorrectly evaluate False OR False as True.
+    """
+
+    def setup_class(self):
+        super().setup_class(self)
+        self.collection_name = cf.gen_unique_str(f"{prefix}_issue46972")
+        self.pk_field = "id"
+        self.vector_field = "vector"
+        self.dim = 128
+        self.datas = []
+
+    @pytest.fixture(scope="class", autouse=True)
+    def prepare_collection(self, request):
+        """
+        Initialize collection with nullable fields and JSON field for issue #46972.
+        """
+        client = self._client()
+
+        # Create schema matching the issue reproduction case
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field(self.pk_field, DataType.INT64, is_primary=True)
+        schema.add_field(self.vector_field, DataType.FLOAT_VECTOR, dim=self.dim)
+        schema.add_field("c0", DataType.DOUBLE, nullable=True)
+        schema.add_field("c1", DataType.BOOL, nullable=True)
+        schema.add_field("c2", DataType.INT64, nullable=True)
+        schema.add_field("c3", DataType.DOUBLE, nullable=True)
+        schema.add_field("c4", DataType.DOUBLE, nullable=True)
+        schema.add_field("c5", DataType.BOOL, nullable=True)
+        schema.add_field("c6", DataType.INT64, nullable=True)
+        schema.add_field("c7", DataType.BOOL, nullable=True)
+        schema.add_field("c8", DataType.VARCHAR, max_length=512, nullable=True)
+        schema.add_field("c9", DataType.DOUBLE, nullable=True)
+        schema.add_field("c10", DataType.VARCHAR, max_length=512, nullable=True)
+        schema.add_field("c11", DataType.INT64, nullable=True)
+        schema.add_field("c12", DataType.BOOL, nullable=True)
+        schema.add_field("c13", DataType.INT64, nullable=True)
+        schema.add_field("c14", DataType.DOUBLE, nullable=True)
+        schema.add_field("c15", DataType.DOUBLE, nullable=True)
+        schema.add_field("c16", DataType.DOUBLE, nullable=True)
+        schema.add_field("c17", DataType.BOOL, nullable=True)
+        schema.add_field("meta_json", DataType.JSON, nullable=True)
+        schema.add_field("tags_array", DataType.ARRAY, element_type=DataType.INT64,
+                         max_capacity=50, nullable=True)
+
+        self.create_collection(client, self.collection_name, schema=schema, force_teardown=False)
+        log.info(f"Created collection for issue #46972: {self.collection_name}")
+
+        # Create index
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(self.vector_field, index_type="HNSW", metric_type="L2",
+                               params={"M": 32, "efConstruction": 256})
+        self.create_index(client, self.collection_name, index_params=index_params)
+
+        # Insert the exact test data from the issue
+        self.datas = [{
+            'id': 1051,
+            'vector': [0.1] * self.dim,
+            'c0': None, 'c1': True, 'c2': 55943, 'c3': 2379.7519128726576, 'c4': None, 'c5': True,
+            'c6': -57942, 'c7': False, 'c8': 'Vaxr5xzbWPHJazy9loD', 'c9': 1682.7331496087677,
+            'c10': None, 'c11': -62195, 'c12': False, 'c13': 71210, 'c14': None,
+            'c15': 2884.9004720171306, 'c16': 4866.809897346821, 'c17': True,
+            'meta_json': {
+                'price': 561, 'color': 'Green', 'active': False,
+                'config': {'version': 7}, 'history': [7, 20, 88], 'random_payload': 12168
+            },
+            'tags_array': [73]
+        }]
+
+        self.insert(client, self.collection_name, self.datas)
+        self.flush(client, self.collection_name)
+        self.load_collection(client, self.collection_name)
+        log.info(f"Inserted {len(self.datas)} rows for issue #46972 test")
+
+        def teardown():
+            self.drop_collection(self._client(), self.collection_name)
+            log.info(f"Dropped collection: {self.collection_name}")
+
+        request.addfinalizer(teardown)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_issue_46972_false_or_false_complex_json(self):
+        """
+        target: test that False OR False = False (not True) with complex JSON expressions
+        method: use the exact expressions from issue #46972
+        expected: left expr is False, right expr is False, combined is False
+
+        This is the critical bug fixed in PR #47333: complex expressions with
+        JSON fields and nullable fields incorrectly evaluated (False OR False) as True.
+        """
+        client = self._client()
+
+        # Block A: Left Expression (should be False for test data)
+        expr_left = """
+(((meta_json["config"]["version"] == 9 or (meta_json["history"][0] > 49 or (meta_json["history"][0] > 47 and (meta_json["price"] > 294 and meta_json["price"] < 379)))) and (((meta_json["config"]["version"] == 7 or meta_json["history"][0] > 27) or (tags_array is not null or null is null)) or c17 == false)) or ((((c14 <= 863.28694295187 or (c10 != "kaKmPWPbAaEFnHzX" and c10 != "ZmBmv")) and ((c4 > 1113.2711377477458 or c13 >= -76839) or (meta_json["config"]["version"] == 3 or (meta_json["price"] > 150 and meta_json["price"] < 237)))) and c7 == false) and ((((c1 is not null and null is null) or (c12 == false and meta_json["config"]["version"] == 4)) or (((meta_json["active"] == true and meta_json["color"] == "Blue") and c12 == true) and (c6 is not null or c13 == 180192))) or (c4 < 105376.953125 or ((c15 <= 3484.876420871185 or c1 == false) or (meta_json["config"]["version"] == 9 and c10 != "OjcbvwxZ5LfV2PZNPgS7"))))))
+"""
+
+        # Block B: Right Expression (should be False for test data)
+        expr_right = """
+((((((c17 == false or exists(meta_json["non_exist"])) or c14 <= 5363.7872388701035) or meta_json["history"][0] > 72) or (((c4 is not null and c17 == true) and ((c2 < 60835 or c1 is null) or (c5 == false or meta_json["history"][0] > 64))) and ((c6 >= -56376 or c16 is not null) or ((c4 >= 812.9318963654309 and c16 >= 2907.7772038042867) and (meta_json["price"] > 449 and meta_json["price"] < 624))))) or (((((null is not null and c13 < 180192) or (c13 < -71746 or c17 == true)) and ((meta_json["price"] > 407 and meta_json["price"] < 521) and (c8 like "w%" or c14 > 3021.9496428003613))) and (((c12 == false or (meta_json["price"] > 412 and meta_json["price"] < 571)) or (c9 < 1264.220988053753 or c6 != 2063)) or c5 == false)) and (meta_json["active"] == true and meta_json["color"] == "Red"))) or ((((c13 != 54759 and (c7 is null and (c17 == true or c9 <= 1067.5165787120216))) and (((c11 != 36936 or meta_json["history"][0] > 59) or ((meta_json["price"] > 354 and meta_json["price"] < 528) and c9 >= 135.84002581554114)) and ((c0 > 105381.9375 or exists(meta_json["non_exist"])) or (c12 == true or meta_json is null)))) or ((((c14 >= 2547.2285277180335 and c1 == false) and (meta_json["history"][0] > 37 or json_contains(meta_json["k_11"], "o"))) and ((c9 < 2869.0647504243566 and c4 > 449.2640493406897) or (meta_json["config"]["version"] == 9 and c16 < 3626.0660282789318))) and (((c11 <= -57792 or (meta_json["price"] > 320 and meta_json["price"] < 488)) and (meta_json["active"] == false and c3 >= 105383.3671875)) or ((c13 >= -32496 and c5 == true) and (meta_json["active"] == true and meta_json["color"] == "Blue"))))) and c13 <= 180192))
+"""
+
+        # Combined expression
+        expr_combined = f"({expr_left}) OR ({expr_right})"
+
+        # Query with left expression
+        res_left = self.query(client, self.collection_name, filter=expr_left,
+                              output_fields=[self.pk_field])[0]
+        is_left_true = len(res_left) > 0
+
+        # Query with right expression
+        res_right = self.query(client, self.collection_name, filter=expr_right,
+                               output_fields=[self.pk_field])[0]
+        is_right_true = len(res_right) > 0
+
+        # Query with combined expression
+        res_combined = self.query(client, self.collection_name, filter=expr_combined,
+                                  output_fields=[self.pk_field])[0]
+        is_combined_true = len(res_combined) > 0
+
+        log.info(f"Expr Left result: {is_left_true} (hits: {len(res_left)})")
+        log.info(f"Expr Right result: {is_right_true} (hits: {len(res_right)})")
+        log.info(f"Combined result: {is_combined_true} (hits: {len(res_combined)})")
+
+        # Verify: For this data, both expressions should be False
+        assert not is_left_true, "Left expression should be False for test data"
+        assert not is_right_true, "Right expression should be False for test data"
+
+        # The critical check: False OR False should NOT be True
+        assert not is_combined_true, \
+            f"BUG: (False OR False) evaluated to True! Combined result has {len(res_combined)} hits"
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_issue_46972_simplified_false_or_false(self):
+        """
+        target: test simplified False OR False scenario with nullable fields
+        method: create conditions that are both False due to NULL comparisons
+        expected: combined OR expression is also False
+
+        Verifies the fix handles NULL comparisons correctly in OR expressions.
+        """
+        client = self._client()
+
+        # For the test data: c0=NULL, c4=NULL, c10=NULL, c14=NULL
+        # Expression 1: c0 > 100 (NULL > 100 = UNKNOWN, treated as False)
+        # Expression 2: c4 > 100 (NULL > 100 = UNKNOWN, treated as False)
+        expr_left = "c0 > 100"
+        expr_right = "c4 > 100"
+        expr_combined = f"({expr_left}) OR ({expr_right})"
+
+        res_left = self.query(client, self.collection_name, filter=expr_left,
+                              output_fields=[self.pk_field])[0]
+        res_right = self.query(client, self.collection_name, filter=expr_right,
+                               output_fields=[self.pk_field])[0]
+        res_combined = self.query(client, self.collection_name, filter=expr_combined,
+                                  output_fields=[self.pk_field])[0]
+
+        log.info(f"Simplified test - Left: {len(res_left)}, Right: {len(res_right)}, Combined: {len(res_combined)}")
+
+        # Both should be empty (NULL comparisons are UNKNOWN)
+        assert len(res_left) == 0, "NULL > 100 should return 0 results"
+        assert len(res_right) == 0, "NULL > 100 should return 0 results"
+        # Combined should also be empty
+        assert len(res_combined) == 0, \
+            "Combined (NULL > 100) OR (NULL > 100) should return 0 results"
