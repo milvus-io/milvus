@@ -157,11 +157,6 @@ type WALAccesser interface {
 	// Local returns the local services.
 	Local() Local
 
-	// Txn returns a transaction for writing records to one vchannel.
-	// It promises the atomicity written of the messages.
-	// Once the txn is returned, the Commit or Rollback operation must be called once, otherwise resource leak on wal.
-	Txn(ctx context.Context, opts TxnOption) (Txn, error)
-
 	// RawAppend writes a records to the log.
 	RawAppend(ctx context.Context, msgs message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error)
 
@@ -181,10 +176,6 @@ type WALAccesser interface {
 	// Otherwise, it will be sent as individual messages.
 	// !!! This function do not promise the atomicity and deliver order of the messages appending.
 	AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses
-
-	// AppendMessagesWithOption appends messages to the wal with the given option.
-	// Same with AppendMessages, but with the given option.
-	AppendMessagesWithOption(ctx context.Context, opts AppendOption, msgs ...message.MutableMessage) AppendResponses
 }
 
 type Local interface {
@@ -210,20 +201,4 @@ type Broadcast interface {
 	// It must be called after the message is comsumed by the unique-consumer.
 	// It will only return error when the ctx is canceled.
 	Ack(ctx context.Context, msg message.ImmutableMessage) error
-}
-
-// Txn is the interface for writing transaction into the wal.
-type Txn interface {
-	// Append writes a record to the log.
-	Append(ctx context.Context, msg message.MutableMessage, opts ...AppendOption) error
-
-	// Commit commits the transaction.
-	// Commit and Rollback can be only call once, and not concurrent safe with append operation.
-	Commit(ctx context.Context) (*types.AppendResult, error)
-
-	// Rollback rollbacks the transaction.
-	// Commit and Rollback can be only call once, and not concurrent safe with append operation.
-	// TODO: Manually rollback is make no sense for current single wal txn.
-	// It is preserved for future cross-wal txn.
-	Rollback(ctx context.Context) error
 }
