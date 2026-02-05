@@ -1470,6 +1470,25 @@ func TestGetDataVChanPositions(t *testing.T) {
 	}
 	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(s3))
 	require.Nil(t, err)
+	l0Segment := &datapb.SegmentInfo{
+		ID:            4,
+		CollectionID:  0,
+		PartitionID:   1,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Flushed,
+		StartPosition: &msgpb.MsgPosition{
+			ChannelName: "ch1",
+			MsgID:       []byte{8, 9, 10},
+		},
+		DmlPosition: &msgpb.MsgPosition{
+			ChannelName: "ch1",
+			MsgID:       []byte{11, 12, 13},
+			Timestamp:   2,
+		},
+		Level: datapb.SegmentLevel_L0,
+	}
+	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(l0Segment))
+	require.Nil(t, err)
 
 	t.Run("get unexisted channel", func(t *testing.T) {
 		vchan := svr.handler.GetDataVChanPositions(&channelMeta{Name: "chx1", CollectionID: 0}, allPartitionID)
@@ -1483,6 +1502,8 @@ func TestGetDataVChanPositions(t *testing.T) {
 		assert.EqualValues(t, 1, vchan.FlushedSegmentIds[0])
 		assert.EqualValues(t, 2, len(vchan.UnflushedSegmentIds))
 		assert.ElementsMatch(t, []int64{s2.ID, s3.ID}, vchan.UnflushedSegmentIds)
+		assert.EqualValues(t, 1, len(vchan.LevelZeroSegmentIds))
+		assert.ElementsMatch(t, []int64{l0Segment.ID}, vchan.LevelZeroSegmentIds)
 	})
 
 	t.Run("empty collection", func(t *testing.T) {
