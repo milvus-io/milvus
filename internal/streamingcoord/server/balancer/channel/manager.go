@@ -620,7 +620,6 @@ func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, resu
 		configMeta = &streamingpb.ReplicateConfigurationMeta{
 			ReplicateConfiguration: config.GetReplicateConfiguration(),
 			ForcePromoted:          true,
-			ForcePromoteTimestamp:  result.GetMaxTimeTick(),
 		}
 		cm.Logger().Info("Applying force promote to replicate configuration",
 			replicateutil.ConfigLogField(config.GetReplicateConfiguration()),
@@ -630,7 +629,6 @@ func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, resu
 		configMeta = &streamingpb.ReplicateConfigurationMeta{
 			ReplicateConfiguration: config.GetReplicateConfiguration(),
 			ForcePromoted:          false,
-			ForcePromoteTimestamp:  0,
 		}
 	}
 

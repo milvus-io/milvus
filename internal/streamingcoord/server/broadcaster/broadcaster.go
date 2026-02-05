@@ -36,6 +36,12 @@ type Broadcaster interface {
 	// Used by forced promotion to supplement incomplete broadcasts.
 	GetPendingBroadcastMessages() []message.MutableMessage
 
+	// FixIncompleteBroadcastsForForcePromote fixes incomplete broadcasts for force promote.
+	// It marks incomplete AlterReplicateConfig messages with ignore=true before supplementing
+	// them to remaining vchannels. This ensures old incomplete messages don't overwrite
+	// the force promote configuration.
+	FixIncompleteBroadcastsForForcePromote(ctx context.Context) error
+
 	// Close closes the broadcaster.
 	Close()
 }

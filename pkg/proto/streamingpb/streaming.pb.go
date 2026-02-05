@@ -5185,9 +5185,8 @@ type ReplicateConfigurationMeta struct {
 	unknownFields protoimpl.UnknownFields
 
 	ReplicateConfiguration *commonpb.ReplicateConfiguration `protobuf:"bytes,1,opt,name=replicate_configuration,json=replicateConfiguration,proto3" json:"replicate_configuration,omitempty"`
-	AckedResult            *AckedResult                     `protobuf:"bytes,2,opt,name=acked_result,json=ackedResult,proto3" json:"acked_result,omitempty"`                                  // a acked helper to help managing the consuming of PutReplicateConfigMessageV2 message at coordinator.
-	ForcePromoted          bool                             `protobuf:"varint,3,opt,name=force_promoted,json=forcePromoted,proto3" json:"force_promoted,omitempty"`                           // marks if this was force-promoted
-	ForcePromoteTimestamp  uint64                           `protobuf:"varint,4,opt,name=force_promote_timestamp,json=forcePromoteTimestamp,proto3" json:"force_promote_timestamp,omitempty"` // timestamp of force promote (milliseconds since epoch)
+	AckedResult            *AckedResult                     `protobuf:"bytes,2,opt,name=acked_result,json=ackedResult,proto3" json:"acked_result,omitempty"`        // a acked helper to help managing the consuming of PutReplicateConfigMessageV2 message at coordinator.
+	ForcePromoted          bool                             `protobuf:"varint,3,opt,name=force_promoted,json=forcePromoted,proto3" json:"force_promoted,omitempty"` // marks if this was force-promoted
 }
 
 func (x *ReplicateConfigurationMeta) Reset() {
