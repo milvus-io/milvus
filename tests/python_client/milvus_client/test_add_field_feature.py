@@ -96,7 +96,6 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         # 3. add collection field
         self.add_collection_field(client, collection_name, field_name=default_new_field_name, data_type=DataType.INT64,
                                   nullable=True, is_clustering_key=True, default_value=default_value)
-        cost = 180
         vectors = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
         vectors_to_search = [vectors[0]]
         # 4. insert new field after add field
