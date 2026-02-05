@@ -158,13 +158,18 @@ func (fc *FuncChain) validateOperators(stage string) error {
 	return nil
 }
 
-// Execute executes the chain.
+// Execute executes the chain with a single input.
 func (fc *FuncChain) Execute(input *DataFrame) (*DataFrame, error) {
 	return fc.ExecuteWithContext(context.Background(), input)
 }
 
 // ExecuteWithContext executes the chain with context for cancellation support.
-func (fc *FuncChain) ExecuteWithContext(ctx context.Context, input *DataFrame) (*DataFrame, error) {
+// Supports multiple inputs when the first operator is MergeOp.
+func (fc *FuncChain) ExecuteWithContext(ctx context.Context, inputs ...*DataFrame) (*DataFrame, error) {
+	if len(inputs) == 0 {
+		return nil, fmt.Errorf("at least one input is required")
+	}
+
 	// Validate chain before execution
 	if err := fc.Validate(); err != nil {
 		return nil, err
@@ -172,34 +177,64 @@ func (fc *FuncChain) ExecuteWithContext(ctx context.Context, input *DataFrame) (
 
 	funcCtx := types.NewFuncContextFull(ctx, fc.alloc, fc.stage)
 
-	result := input
-	for _, op := range fc.operators {
+	var result *DataFrame
+	startIdx := 0
+
+	// If first operator is MergeOp, handle multiple inputs
+	if len(fc.operators) > 0 {
+		if mergeOp, ok := fc.operators[0].(*MergeOp); ok {
+			var err error
+			result, err = mergeOp.ExecuteMulti(funcCtx, inputs)
+			if err != nil {
+				return nil, fmt.Errorf("%s failed: %w", mergeOp.Name(), err)
+			}
+			startIdx = 1
+		} else {
+			result = inputs[0]
+		}
+	} else {
+		result = inputs[0]
+	}
+
+	// Process remaining operators
+	for i := startIdx; i < len(fc.operators); i++ {
+		op := fc.operators[i]
+
 		// Check for context cancellation before each operator
 		select {
 		case <-ctx.Done():
-			// Release intermediate result on cancellation (but not original input)
-			if result != input {
-				result.Release()
-			}
+			fc.releaseIfOwned(result, inputs)
 			return nil, ctx.Err()
 		default:
 		}
 
 		newResult, err := op.Execute(funcCtx, result)
 		if err != nil {
-			// Release intermediate result on error (but not original input)
-			if result != input {
-				result.Release()
-			}
+			fc.releaseIfOwned(result, inputs)
 			return nil, fmt.Errorf("%s failed: %w", op.Name(), err)
 		}
-		// Release intermediate results (but not the original input)
-		if result != input && result != newResult {
-			result.Release()
+
+		// Release intermediate results (but not the original inputs)
+		if result != newResult {
+			fc.releaseIfOwned(result, inputs)
 		}
 		result = newResult
 	}
+
 	return result, nil
+}
+
+// releaseIfOwned releases df if it's not one of the original inputs.
+func (fc *FuncChain) releaseIfOwned(df *DataFrame, inputs []*DataFrame) {
+	if df == nil {
+		return
+	}
+	for _, input := range inputs {
+		if df == input {
+			return
+		}
+	}
+	df.Release()
 }
 
 // Map applies a function to the DataFrame with specified column mappings.
@@ -255,6 +290,12 @@ func (fc *FuncChain) LimitWithOffset(limit, offset int64) *FuncChain {
 		return fc.addWithError(nil, fmt.Errorf("offset must be non-negative, got %d", offset))
 	}
 	return fc.Add(NewLimitOp(limit, offset))
+}
+
+// Merge adds a MergeOp to merge multiple DataFrames.
+// This should be the first operator in the chain when handling multiple inputs.
+func (fc *FuncChain) Merge(strategy MergeStrategy, opts ...MergeOption) *FuncChain {
+	return fc.Add(NewMergeOp(strategy, opts...))
 }
 
 // String returns a string representation of the FuncChain.

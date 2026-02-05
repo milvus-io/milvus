@@ -1785,3 +1785,263 @@ func (s *ChainTestSuite) TestFuncChain_StringWithOperators() {
 	s.Contains(str, "Sort")
 	s.Contains(str, "Limit")
 }
+
+// =============================================================================
+// MergeOp Test Suite
+// =============================================================================
+
+type MergeOpTestSuite struct {
+	suite.Suite
+	pool *memory.CheckedAllocator
+}
+
+func (s *MergeOpTestSuite) SetupTest() {
+	s.pool = memory.NewCheckedAllocator(memory.NewGoAllocator())
+}
+
+func (s *MergeOpTestSuite) TearDownTest() {
+	s.pool.AssertSize(s.T(), 0)
+}
+
+func TestMergeOpTestSuite(t *testing.T) {
+	suite.Run(t, new(MergeOpTestSuite))
+}
+
+// =============================================================================
+// MergeOp Helper Functions
+// =============================================================================
+
+func (s *MergeOpTestSuite) createSearchResultData(ids []int64, scores []float32, topks []int64) *schemapb.SearchResultData {
+	return &schemapb.SearchResultData{
+		NumQueries: int64(len(topks)),
+		TopK:       topks[0],
+		Topks:      topks,
+		Scores:     scores,
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: ids,
+				},
+			},
+		},
+		FieldsData: []*schemapb.FieldData{},
+	}
+}
+
+func (s *MergeOpTestSuite) createDataFrame(ids []int64, scores []float32, topks []int64) *DataFrame {
+	resultData := s.createSearchResultData(ids, scores, topks)
+	df, err := FromSearchResultData(resultData, s.pool)
+	s.Require().NoError(err)
+	return df
+}
+
+// =============================================================================
+// MergeOp Tests
+// =============================================================================
+
+func (s *MergeOpTestSuite) TestNewMergeOp() {
+	// Test RRF strategy
+	op := NewMergeOp(MergeStrategyRRF, WithRRFK(60))
+	s.Equal(MergeStrategyRRF, op.strategy)
+	s.Equal(60.0, op.rrfK)
+	s.True(op.normalize)
+
+	// Test Weighted strategy
+	weights := []float64{0.3, 0.7}
+	op = NewMergeOp(MergeStrategyWeighted, WithWeights(weights), WithNormalize(false))
+	s.Equal(MergeStrategyWeighted, op.strategy)
+	s.Equal(weights, op.weights)
+	s.False(op.normalize)
+
+	// Test Max strategy
+	op = NewMergeOp(MergeStrategyMax)
+	s.Equal(MergeStrategyMax, op.strategy)
+}
+
+func (s *MergeOpTestSuite) TestMergeOpSingleInput() {
+	// Create single input DataFrame
+	df := s.createDataFrame(
+		[]int64{1, 2, 3},
+		[]float32{0.9, 0.8, 0.7},
+		[]int64{3},
+	)
+	defer df.Release()
+
+	// Create MergeOp
+	op := NewMergeOp(MergeStrategyMax,
+		WithMetricTypes([]string{"COSINE"}),
+		WithNormalize(true))
+
+	// Execute
+	ctx := types.NewFuncContextWithStage(s.pool, types.StageL2Rerank)
+	result, err := op.ExecuteMulti(ctx, []*DataFrame{df})
+	s.Require().NoError(err)
+	defer result.Release()
+
+	// Verify result
+	s.Equal(1, result.NumChunks())
+	s.True(result.HasColumn(types.IDFieldName))
+	s.True(result.HasColumn(types.ScoreFieldName))
+}
+
+func (s *MergeOpTestSuite) TestMergeOpRRF() {
+	// Create two input DataFrames with overlapping IDs
+	df1 := s.createDataFrame(
+		[]int64{1, 2, 3},
+		[]float32{0.9, 0.8, 0.7},
+		[]int64{3},
+	)
+	defer df1.Release()
+
+	df2 := s.createDataFrame(
+		[]int64{2, 3, 4},
+		[]float32{0.95, 0.85, 0.75},
+		[]int64{3},
+	)
+	defer df2.Release()
+
+	// Create MergeOp with RRF strategy
+	op := NewMergeOp(MergeStrategyRRF,
+		WithRRFK(60),
+		WithMetricTypes([]string{"COSINE", "COSINE"}),
+		WithNormalize(true))
+
+	// Execute
+	ctx := types.NewFuncContextWithStage(s.pool, types.StageL2Rerank)
+	result, err := op.ExecuteMulti(ctx, []*DataFrame{df1, df2})
+	s.Require().NoError(err)
+	defer result.Release()
+
+	// Verify result
+	s.Equal(1, result.NumChunks())
+
+	// IDs 2 and 3 should have higher scores because they appear in both lists
+	idCol := result.Column(types.IDFieldName)
+	s.NotNil(idCol)
+	s.GreaterOrEqual(idCol.Chunk(0).Len(), 3) // At least 3 unique IDs
+}
+
+func (s *MergeOpTestSuite) TestMergeOpWeighted() {
+	// Create two input DataFrames
+	df1 := s.createDataFrame(
+		[]int64{1, 2},
+		[]float32{1.0, 0.5},
+		[]int64{2},
+	)
+	defer df1.Release()
+
+	df2 := s.createDataFrame(
+		[]int64{2, 3},
+		[]float32{1.0, 0.5},
+		[]int64{2},
+	)
+	defer df2.Release()
+
+	// Create MergeOp with Weighted strategy
+	op := NewMergeOp(MergeStrategyWeighted,
+		WithWeights([]float64{0.3, 0.7}),
+		WithMetricTypes([]string{"COSINE", "COSINE"}),
+		WithNormalize(true))
+
+	// Execute
+	ctx := types.NewFuncContextWithStage(s.pool, types.StageL2Rerank)
+	result, err := op.ExecuteMulti(ctx, []*DataFrame{df1, df2})
+	s.Require().NoError(err)
+	defer result.Release()
+
+	// Verify result
+	s.Equal(1, result.NumChunks())
+
+	// ID 2 appears in both lists, should have score = 0.3 * norm(0.5) + 0.7 * norm(1.0)
+	idCol := result.Column(types.IDFieldName)
+	s.NotNil(idCol)
+	s.Equal(3, idCol.Chunk(0).Len()) // 3 unique IDs: 1, 2, 3
+}
+
+func (s *MergeOpTestSuite) TestMergeOpMax() {
+	// Create two input DataFrames with overlapping IDs
+	df1 := s.createDataFrame(
+		[]int64{1, 2},
+		[]float32{0.5, 0.3},
+		[]int64{2},
+	)
+	defer df1.Release()
+
+	df2 := s.createDataFrame(
+		[]int64{1, 2},
+		[]float32{0.4, 0.6},
+		[]int64{2},
+	)
+	defer df2.Release()
+
+	// Create MergeOp with Max strategy
+	op := NewMergeOp(MergeStrategyMax,
+		WithMetricTypes([]string{"COSINE", "COSINE"}),
+		WithNormalize(true))
+
+	// Execute
+	ctx := types.NewFuncContextWithStage(s.pool, types.StageL2Rerank)
+	result, err := op.ExecuteMulti(ctx, []*DataFrame{df1, df2})
+	s.Require().NoError(err)
+	defer result.Release()
+
+	// Verify: ID 1 should have max score, ID 2 should have max score
+	s.Equal(1, result.NumChunks())
+	s.Equal(int64(2), result.NumRows())
+}
+
+func (s *MergeOpTestSuite) TestMergeOpWeightsCountMismatch() {
+	df1 := s.createDataFrame([]int64{1}, []float32{0.9}, []int64{1})
+	defer df1.Release()
+
+	df2 := s.createDataFrame([]int64{2}, []float32{0.8}, []int64{1})
+	defer df2.Release()
+
+	// Weights count doesn't match inputs count
+	op := NewMergeOp(MergeStrategyWeighted,
+		WithWeights([]float64{0.5}), // Only 1 weight for 2 inputs
+		WithMetricTypes([]string{"COSINE", "COSINE"}))
+
+	ctx := types.NewFuncContextWithStage(s.pool, types.StageL2Rerank)
+	_, err := op.ExecuteMulti(ctx, []*DataFrame{df1, df2})
+	s.Error(err)
+	s.Contains(err.Error(), "weights count")
+}
+
+func (s *MergeOpTestSuite) TestMergeOpEmptyInput() {
+	op := NewMergeOp(MergeStrategyRRF)
+
+	ctx := types.NewFuncContextWithStage(s.pool, types.StageL2Rerank)
+	_, err := op.ExecuteMulti(ctx, []*DataFrame{})
+	s.Error(err)
+	s.Contains(err.Error(), "no inputs")
+}
+
+func (s *MergeOpTestSuite) TestMergeOpMultipleChunks() {
+	// Create DataFrames with 2 chunks (2 queries)
+	df1 := s.createDataFrame(
+		[]int64{1, 2, 3, 4}, // Query 1: [1,2], Query 2: [3,4]
+		[]float32{0.9, 0.8, 0.7, 0.6},
+		[]int64{2, 2},
+	)
+	defer df1.Release()
+
+	df2 := s.createDataFrame(
+		[]int64{2, 5, 4, 6},
+		[]float32{0.95, 0.85, 0.75, 0.65},
+		[]int64{2, 2},
+	)
+	defer df2.Release()
+
+	op := NewMergeOp(MergeStrategyRRF,
+		WithRRFK(60),
+		WithMetricTypes([]string{"COSINE", "COSINE"}))
+
+	ctx := types.NewFuncContextWithStage(s.pool, types.StageL2Rerank)
+	result, err := op.ExecuteMulti(ctx, []*DataFrame{df1, df2})
+	s.Require().NoError(err)
+	defer result.Release()
+
+	// Should have 2 chunks
+	s.Equal(2, result.NumChunks())
+}
