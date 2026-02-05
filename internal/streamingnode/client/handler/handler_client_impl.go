@@ -151,7 +151,9 @@ func (hc *handlerClientImpl) CreateProducer(ctx context.Context, opts *ProducerO
 	if err != nil {
 		return nil, err
 	}
-	return p.(Producer), nil
+	newProducer := p.(Producer)
+	newProducer.Register(opts.RateLimitObserver)
+	return newProducer, nil
 }
 
 // CreateConsumer creates a consumer.
