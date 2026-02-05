@@ -258,14 +258,30 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 
 	nextTargetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID)
 	nextTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.NextTarget)
+	currentTargetExist := c.targetMgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID)
 	currentTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.CurrentTarget)
+
 	// Segment which exist on next target, but not on dist
 	for _, segment := range nextTargetMap {
 		if isSegmentLack(segment) {
-			_, existOnCurrent := currentTargetMap[segment.GetID()]
-			if existOnCurrent {
-				loadPriorities = append(loadPriorities, commonpb.LoadPriority_HIGH)
+			if currentTargetExist {
+				_, existOnCurrent := currentTargetMap[segment.GetID()]
+				if existOnCurrent {
+					// Segment exists in current target but missing in dist -> Recovery scenario (HIGH priority)
+					loadPriorities = append(loadPriorities, commonpb.LoadPriority_HIGH)
+				} else {
+					// Segment not in current target -> check if refresh in progress
+					collection := c.meta.CollectionManager.GetCollection(ctx, collectionID)
+					if collection != nil && !collection.IsRefreshed() {
+						// Refresh scenario (import) -> Use user's configured priority
+						loadPriorities = append(loadPriorities, replica.LoadPriority())
+					} else {
+						// Handoff scenario (growing -> sealed flush) -> LOW priority
+						loadPriorities = append(loadPriorities, commonpb.LoadPriority_LOW)
+					}
+				}
 			} else {
+				// Initial Load -> Use user's configured priority
 				loadPriorities = append(loadPriorities, replica.LoadPriority())
 			}
 			toLoad = append(toLoad, segment)
