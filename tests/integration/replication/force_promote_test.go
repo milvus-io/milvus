@@ -18,6 +18,7 @@ package replication
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -35,6 +36,18 @@ type ForcePromoteSuite struct {
 
 func TestForcePromote(t *testing.T) {
 	suite.Run(t, new(ForcePromoteSuite))
+}
+
+// getPChannelNames generates the correct pchannel names for the current cluster.
+// Pchannels are named <RootCoordDml>_<n> where n goes from 0 to DmlChannelNum-1.
+func (s *ForcePromoteSuite) getPChannelNames() []string {
+	rootCoordDml := paramtable.Get().CommonCfg.RootCoordDml.GetValue()
+	dmlChannelNum := paramtable.Get().RootCoordCfg.DmlChannelNum.GetAsInt()
+	pchannels := make([]string, dmlChannelNum)
+	for i := 0; i < dmlChannelNum; i++ {
+		pchannels[i] = fmt.Sprintf("%s_%d", rootCoordDml, i)
+	}
+	return pchannels
 }
 
 // TestForcePromoteOnPrimaryClusterShouldFail verifies that force promote
@@ -70,15 +83,16 @@ func (s *ForcePromoteSuite) TestForcePromoteWithNonEmptyClustersShouldFail() {
 	ctx := context.Background()
 
 	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+	pchannels := s.getPChannelNames()
 
 	// Create config with clusters (invalid for force promote - must be empty)
 	config := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
 			{
 				ClusterId: clusterID,
-				Pchannels: []string{clusterID + "-pchan0"},
+				Pchannels: pchannels,
 				ConnectionParam: &commonpb.ConnectionParam{
-					Uri:   "localhost:19530",
+					Uri:   "http://localhost:19530",
 					Token: "test-token",
 				},
 			},
@@ -138,15 +152,16 @@ func (s *ForcePromoteSuite) TestNormalUpdateReplicateConfiguration() {
 	ctx := context.Background()
 
 	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+	pchannels := s.getPChannelNames()
 
 	// Create a valid single-cluster config (making current cluster primary)
 	config := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
 			{
 				ClusterId: clusterID,
-				Pchannels: []string{clusterID + "-pchan0"},
+				Pchannels: pchannels,
 				ConnectionParam: &commonpb.ConnectionParam{
-					Uri:   "localhost:19530",
+					Uri:   "http://localhost:19530",
 					Token: "test-token",
 				},
 			},
@@ -175,14 +190,15 @@ func (s *ForcePromoteSuite) TestUpdateReplicateConfigurationIdempotent() {
 	ctx := context.Background()
 
 	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+	pchannels := s.getPChannelNames()
 
 	config := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
 			{
 				ClusterId: clusterID,
-				Pchannels: []string{clusterID + "-pchan0"},
+				Pchannels: pchannels,
 				ConnectionParam: &commonpb.ConnectionParam{
-					Uri:   "localhost:19530",
+					Uri:   "http://localhost:19530",
 					Token: "test-token",
 				},
 			},
