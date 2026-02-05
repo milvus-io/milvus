@@ -276,6 +276,15 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	var err error
 	var requestResourceResult requestResourceResult
 
+	// Check memory & storage limit
+	// no need to check resource for lazy load here
+	requestResourceResult, err = loader.requestResource(ctx, infos...)
+	if err != nil {
+		log.Warn("request resource failed", zap.Error(err))
+		return nil, err
+	}
+	defer loader.freeRequestResource(requestResourceResult)
+
 	newSegments := typeutil.NewConcurrentMap[int64, Segment]()
 	loaded := typeutil.NewConcurrentMap[int64, Segment]()
 	defer func() {
