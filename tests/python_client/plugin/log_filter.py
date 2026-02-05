@@ -2,9 +2,12 @@
 Pytest plugin for conditional logging based on test outcome.
 
 This plugin captures logs per test in memory buffers and only persists
-detailed logs for failed tests:
+detailed logs for failed/xpass tests:
 - PASSED tests: Only metadata saved (nodeid, duration, timestamp)
 - FAILED tests: Full logs + error traceback + metadata
+- SKIPPED tests: Only metadata + skip reason
+- XFAIL tests: Only metadata + xfail reason (expected failures)
+- XPASS tests: Full logs + xfail reason (unexpected passes - need attention)
 
 Generates two report formats:
 - test_report.json: AI-friendly structured format with complete test data
@@ -99,6 +102,8 @@ class ConditionalLogHandler(logging.Handler):
             'passed': [],
             'failed': [],
             'skipped': [],
+            'xfail': [],   # Expected failures (tests marked xfail that failed as expected)
+            'xpass': [],   # Unexpected passes (tests marked xfail that passed unexpectedly)
             'start_time': None,
             'end_time': None
         }
@@ -138,7 +143,33 @@ class ConditionalLogHandler(logging.Handler):
                 test_class = test_parts[1] if len(test_parts) > 2 else None
                 test_function = test_parts[-1] if test_parts else "unknown"
 
-                if report.passed:
+                # Check for xfail/xpass first (wasxfail attribute indicates xfail marker)
+                wasxfail = getattr(report, 'wasxfail', None)
+
+                if report.passed and wasxfail:
+                    # xpass: test was expected to fail but passed
+                    self.test_stats['xpass'].append({
+                        'nodeid': item.nodeid,
+                        'file': file_path,
+                        'class': test_class,
+                        'function': test_function,
+                        'duration': report.duration,
+                        'timestamp': datetime.now().isoformat(),
+                        'xfail_reason': wasxfail,
+                        'logs': buffer.get_structured_logs()
+                    })
+                elif report.skipped and wasxfail:
+                    # xfail: test was expected to fail and did fail (or was skipped due to xfail)
+                    self.test_stats['xfail'].append({
+                        'nodeid': item.nodeid,
+                        'file': file_path,
+                        'class': test_class,
+                        'function': test_function,
+                        'duration': report.duration,
+                        'timestamp': datetime.now().isoformat(),
+                        'xfail_reason': wasxfail
+                    })
+                elif report.passed:
                     self.test_stats['passed'].append({
                         'nodeid': item.nodeid,
                         'file': file_path,
@@ -237,6 +268,8 @@ class ConditionalLogHandler(logging.Handler):
                 'passed': self.test_stats['passed'],
                 'skipped': self.test_stats['skipped'],
                 'failed': self.test_stats['failed'],
+                'xfail': self.test_stats['xfail'],
+                'xpass': self.test_stats['xpass'],
                 'start_time': self.test_stats['start_time'].isoformat() if self.test_stats['start_time'] else None,
                 'end_time': self.test_stats['end_time'].isoformat() if self.test_stats['end_time'] else None
             }
@@ -263,6 +296,8 @@ class ConditionalLogHandler(logging.Handler):
                     self.test_stats['passed'].extend(worker_data.get('passed', []))
                     self.test_stats['skipped'].extend(worker_data.get('skipped', []))
                     self.test_stats['failed'].extend(worker_data.get('failed', []))
+                    self.test_stats['xfail'].extend(worker_data.get('xfail', []))
+                    self.test_stats['xpass'].extend(worker_data.get('xpass', []))
 
                     # Delete worker file after merging
                     os.remove(worker_file)
@@ -275,10 +310,14 @@ class ConditionalLogHandler(logging.Handler):
     def generate_json_report(self):
         """Generate AI-friendly JSON report"""
         try:
-            total = len(self.test_stats['passed']) + len(self.test_stats['failed']) + len(self.test_stats['skipped'])
-            total_duration = sum(t['duration'] for t in self.test_stats['passed']) + \
-                           sum(t['duration'] for t in self.test_stats['failed']) + \
-                           sum(t['duration'] for t in self.test_stats['skipped'])
+            total = (len(self.test_stats['passed']) + len(self.test_stats['failed']) +
+                     len(self.test_stats['skipped']) + len(self.test_stats['xfail']) +
+                     len(self.test_stats['xpass']))
+            total_duration = (sum(t['duration'] for t in self.test_stats['passed']) +
+                              sum(t['duration'] for t in self.test_stats['failed']) +
+                              sum(t['duration'] for t in self.test_stats['skipped']) +
+                              sum(t['duration'] for t in self.test_stats['xfail']) +
+                              sum(t['duration'] for t in self.test_stats['xpass']))
 
             # Build JSON structure optimized for AI analysis
             report_data = {
@@ -302,6 +341,14 @@ class ConditionalLogHandler(logging.Handler):
                     'skipped': {
                         'count': len(self.test_stats['skipped']),
                         'percentage': round(len(self.test_stats['skipped']) / total * 100, 1) if total > 0 else 0
+                    },
+                    'xfail': {
+                        'count': len(self.test_stats['xfail']),
+                        'percentage': round(len(self.test_stats['xfail']) / total * 100, 1) if total > 0 else 0
+                    },
+                    'xpass': {
+                        'count': len(self.test_stats['xpass']),
+                        'percentage': round(len(self.test_stats['xpass']) / total * 100, 1) if total > 0 else 0
                     }
                 },
                 'tests': {
@@ -352,6 +399,37 @@ class ConditionalLogHandler(logging.Handler):
                             'reason': t['reason']
                         }
                         for t in self.test_stats['skipped']
+                    ],
+                    'xfail': [
+                        {
+                            'id': t['nodeid'],
+                            'file': t['file'],
+                            'class': t['class'],
+                            'function': t['function'],
+                            'duration': round(t['duration'], 3),
+                            'timestamp': t['timestamp'],
+                            'xfail_reason': t['xfail_reason']
+                        }
+                        for t in self.test_stats['xfail']
+                    ],
+                    'xpass': [
+                        {
+                            'id': t['nodeid'],
+                            'file': t['file'],
+                            'class': t['class'],
+                            'function': t['function'],
+                            'duration': round(t['duration'], 3),
+                            'timestamp': t['timestamp'],
+                            'xfail_reason': t['xfail_reason'],
+                            'logs': {
+                                'debug': t['logs']['debug'],
+                                'info': t['logs']['info'],
+                                'warning': t['logs']['warning'],
+                                'error': t['logs']['error'],
+                                'critical': t['logs']['critical']
+                            }
+                        }
+                        for t in self.test_stats['xpass']
                     ]
                 }
             }
@@ -366,14 +444,20 @@ class ConditionalLogHandler(logging.Handler):
     def generate_html_report(self):
         """Generate HTML test report for humans"""
         try:
-            total = len(self.test_stats['passed']) + len(self.test_stats['failed']) + len(self.test_stats['skipped'])
-            total_duration = sum(t['duration'] for t in self.test_stats['passed']) + \
-                           sum(t['duration'] for t in self.test_stats['failed']) + \
-                           sum(t['duration'] for t in self.test_stats['skipped'])
+            total = (len(self.test_stats['passed']) + len(self.test_stats['failed']) +
+                     len(self.test_stats['skipped']) + len(self.test_stats['xfail']) +
+                     len(self.test_stats['xpass']))
+            total_duration = (sum(t['duration'] for t in self.test_stats['passed']) +
+                              sum(t['duration'] for t in self.test_stats['failed']) +
+                              sum(t['duration'] for t in self.test_stats['skipped']) +
+                              sum(t['duration'] for t in self.test_stats['xfail']) +
+                              sum(t['duration'] for t in self.test_stats['xpass']))
 
             passed_pct = (len(self.test_stats['passed'])/total*100) if total > 0 else 0
             failed_pct = (len(self.test_stats['failed'])/total*100) if total > 0 else 0
             skipped_pct = (len(self.test_stats['skipped'])/total*100) if total > 0 else 0
+            xfail_pct = (len(self.test_stats['xfail'])/total*100) if total > 0 else 0
+            xpass_pct = (len(self.test_stats['xpass'])/total*100) if total > 0 else 0
 
             with open(self.report_html, 'w', encoding='utf-8') as f:
                 # HTML header
@@ -415,6 +499,8 @@ class ConditionalLogHandler(logging.Handler):
         .passed { color: #10b981; }
         .failed { color: #ef4444; }
         .skipped { color: #f59e0b; }
+        .xfail { color: #8b5cf6; }
+        .xpass { color: #ec4899; }
         .test-section {
             background: white;
             padding: 20px;
@@ -436,6 +522,8 @@ class ConditionalLogHandler(logging.Handler):
         .test-item.passed { border-color: #10b981; }
         .test-item.failed { border-color: #ef4444; }
         .test-item.skipped { border-color: #f59e0b; }
+        .test-item.xfail { border-color: #8b5cf6; }
+        .test-item.xpass { border-color: #ec4899; }
         .test-name { font-family: monospace; font-size: 13px; }
         .duration { color: #6b7280; font-size: 12px; }
         .error-box {
@@ -498,6 +586,16 @@ class ConditionalLogHandler(logging.Handler):
             <div class="duration">{skipped_pct:.1f}%</div>
         </div>
         <div class="summary-card">
+            <h3>XFail</h3>
+            <div class="value xfail">{len(self.test_stats['xfail'])}</div>
+            <div class="duration">{xfail_pct:.1f}%</div>
+        </div>
+        <div class="summary-card">
+            <h3>XPass</h3>
+            <div class="value xpass">{len(self.test_stats['xpass'])}</div>
+            <div class="duration">{xpass_pct:.1f}%</div>
+        </div>
+        <div class="summary-card">
             <h3>Duration</h3>
             <div class="value">{total_duration:.2f}s</div>
         </div>
@@ -551,6 +649,61 @@ class ConditionalLogHandler(logging.Handler):
                             f.write('            </div>\n')
 
                         f.write('        </details>\n')
+                    f.write('    </div>\n')
+
+                # XPass tests section (unexpected passes - need attention)
+                if self.test_stats['xpass']:
+                    f.write('    <div class="test-section">\n')
+                    f.write('        <h2>⚠️ XPass Tests (Unexpected Passes)</h2>\n')
+                    for test_info in self.test_stats['xpass']:
+                        f.write(f'        <details open>\n')
+                        f.write(f'            <summary class="test-item xpass">\n')
+                        f.write(f'                <span class="test-name">{test_info["nodeid"]}</span>\n')
+                        f.write(f'                <span class="duration"> ({test_info["duration"]:.2f}s)</span>\n')
+                        f.write(f'            </summary>\n')
+
+                        # XFail reason
+                        xfail_reason = test_info.get('xfail_reason', 'Unknown')
+                        if xfail_reason:
+                            reason_text = str(xfail_reason).replace('<', '&lt;').replace('>', '&gt;')
+                            f.write(f'            <div style="margin:10px 0;padding:10px;background:#fdf4ff;border:1px solid #ec4899;border-radius:4px;">\n')
+                            f.write(f'                <strong>Expected to fail:</strong> {reason_text}\n')
+                            f.write(f'            </div>\n')
+
+                        # Captured logs
+                        logs = test_info.get('logs', {})
+                        has_logs = any(logs.get(level, []) for level in ['debug', 'info', 'warning', 'error', 'critical'])
+
+                        if has_logs:
+                            f.write('            <div class="logs-box">\n')
+                            f.write('                <strong>Captured Logs:</strong>\n')
+
+                            for level in ['debug', 'info', 'warning', 'error', 'critical']:
+                                for log_entry in logs.get(level, []):
+                                    msg = log_entry['message'].replace('<', '&lt;').replace('>', '&gt;')
+                                    ts = log_entry['timestamp'].split('T')[1].split('.')[0]
+                                    loc = log_entry['location']
+                                    f.write(f'                <div class="log-entry log-{level}">')
+                                    f.write(f'[{ts} - {level.upper()}] {msg} ({loc})</div>\n')
+
+                            f.write('            </div>\n')
+
+                        f.write('        </details>\n')
+                    f.write('    </div>\n')
+
+                # XFail tests section (expected failures)
+                if self.test_stats['xfail']:
+                    f.write('    <div class="test-section">\n')
+                    f.write('        <h2>📋 XFail Tests (Expected Failures)</h2>\n')
+                    for test in self.test_stats['xfail']:
+                        f.write(f'        <div class="test-item xfail">\n')
+                        f.write(f'            <span class="test-name">{test["nodeid"]}</span>\n')
+                        f.write(f'            <span class="duration"> ({test["duration"]:.2f}s)</span>\n')
+                        xfail_reason = test.get('xfail_reason', 'Unknown')
+                        if xfail_reason:
+                            reason_text = str(xfail_reason).replace('<', '&lt;').replace('>', '&gt;')
+                            f.write(f'            <div style="margin-top:5px;color:#6b7280;font-size:12px;">Expected: {reason_text}</div>\n')
+                        f.write(f'        </div>\n')
                     f.write('    </div>\n')
 
                 # Passed tests section
