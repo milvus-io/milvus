@@ -1334,7 +1334,8 @@ func TestHandleForcePromoteValidatorError(t *testing.T) {
 		PChannelView: &channel.PChannelView{
 			Channels: map[channel.ChannelID]*channel.PChannelMeta{
 				{Name: "by-dev-1"}: channel.NewPChannelMeta("by-dev-1", types.AccessModeRW),
-				{Name: "other-1"}:  channel.NewPChannelMeta("other-1", types.AccessModeRW),			},
+				{Name: "other-1"}:  channel.NewPChannelMeta("other-1", types.AccessModeRW),
+			},
 		},
 		ReplicateConfiguration: &commonpb.ReplicateConfiguration{
 			Clusters: []*commonpb.MilvusCluster{
@@ -1344,6 +1345,7 @@ func TestHandleForcePromoteValidatorError(t *testing.T) {
 			CrossClusterTopology: []*commonpb.CrossClusterTopology{
 				{SourceClusterId: "primary", TargetClusterId: "by-dev"},
 			},
+
 		},
 	}, nil).Maybe()
 	balance.Register(b)
