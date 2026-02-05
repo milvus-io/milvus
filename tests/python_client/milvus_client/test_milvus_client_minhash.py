@@ -1626,7 +1626,8 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         # Error should occur during collection creation (server-side validation)
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 1})
+                               check_items={"err_code": 65535,
+                                             "err_msg": "shingle_size"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_minhash_invalid_hash_function(self):
@@ -1658,7 +1659,8 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         # Error should occur during collection creation (server-side validation)
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 1})
+                               check_items={"err_code": 65535,
+                                             "err_msg": "Unknown hash function"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_token_level", ["sentence", "invalid", ""])
@@ -1691,7 +1693,8 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         # Error should occur during collection creation (server-side validation)
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 1})
+                               check_items={"err_code": 65535,
+                                             "err_msg": "Unknown token_level"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_seed", ["not_a_number", "abc123"])
@@ -1724,7 +1727,8 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         # Error should occur during collection creation (server-side validation)
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 1})
+                               check_items={"err_code": 65535,
+                                             "err_msg": "seed"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_minhash_search_empty_collection(self):
