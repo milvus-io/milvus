@@ -885,3 +885,93 @@ func TestDescribeCollectionByName_StatusError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, resp)
 }
+
+func TestDescribeDatabase_Success(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *rootcoordpb.DescribeDatabaseRequest) (*rootcoordpb.DescribeDatabaseResponse, error) {
+			assert.Equal(t, "test_db", req.GetDbName())
+			assert.NotNil(t, req.GetBase())
+			return &rootcoordpb.DescribeDatabaseResponse{
+				Status:           merr.Success(),
+				DbName:           "test_db",
+				DbID:             1001,
+				CreatedTimestamp: 1000,
+				Properties: []*commonpb.KeyValuePair{
+					{Key: "cipher.ezID", Value: "ez-123"},
+					{Key: "cipher.key", Value: "key-456"},
+				},
+			}, nil
+		})
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	resp, err := broker.DescribeDatabase(ctx, "test_db")
+
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, "test_db", resp.GetDbName())
+	assert.Equal(t, int64(1001), resp.GetDbID())
+	assert.Equal(t, uint64(1000), resp.GetCreatedTimestamp())
+	assert.Len(t, resp.GetProperties(), 2)
+}
+
+func TestDescribeDatabase_RPCError(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(nil, errors.New("rpc error"))
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	resp, err := broker.DescribeDatabase(ctx, "test_db")
+
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+}
+
+func TestDescribeDatabase_StatusError(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(
+		&rootcoordpb.DescribeDatabaseResponse{
+			Status: merr.Status(merr.WrapErrDatabaseNotFound("test_db")),
+		}, nil)
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	resp, err := broker.DescribeDatabase(ctx, "test_db")
+
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+}
+
+func TestDescribeDatabase_EmptyProperties(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *rootcoordpb.DescribeDatabaseRequest) (*rootcoordpb.DescribeDatabaseResponse, error) {
+			assert.Equal(t, "empty_db", req.GetDbName())
+			return &rootcoordpb.DescribeDatabaseResponse{
+				Status:           merr.Success(),
+				DbName:           "empty_db",
+				DbID:             2001,
+				CreatedTimestamp: 2000,
+				Properties:       []*commonpb.KeyValuePair{},
+			}, nil
+		})
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	resp, err := broker.DescribeDatabase(ctx, "empty_db")
+
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, "empty_db", resp.GetDbName())
+	assert.Equal(t, int64(2001), resp.GetDbID())
+	assert.Empty(t, resp.GetProperties())
+}

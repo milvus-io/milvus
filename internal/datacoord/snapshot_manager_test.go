@@ -24,11 +24,15 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -1472,4 +1476,308 @@ func TestSnapshotManager_BuildPartitionMapping_ShowPartitionsError(t *testing.T)
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.Equal(t, expectedErr, err)
+}
+
+// --- Test validateCMEKCompatibility ---
+
+func TestSnapshotManager_ValidateCMEKCompatibility_NonEncryptedSnapshot(t *testing.T) {
+	ctx := context.Background()
+
+	// Non-encrypted snapshot (no cipher.ezID in properties)
+	snapshotData := &SnapshotData{
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{
+				Properties: []*commonpb.KeyValuePair{
+					{Key: "other_key", Value: "other_value"},
+				},
+			},
+		},
+	}
+
+	// Mock DescribeDatabase to return non-encrypted database
+	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
+		b *broker.MockBroker,
+		ctx context.Context,
+		dbName string,
+	) (*rootcoordpb.DescribeDatabaseResponse, error) {
+		return &rootcoordpb.DescribeDatabaseResponse{
+			DbName:     dbName,
+			Properties: []*commonpb.KeyValuePair{},
+		}, nil
+	}).Build()
+	defer mockDescribeDB.UnPatch()
+
+	sm := &snapshotManager{
+		broker: broker.NewMockBroker(t),
+	}
+
+	// Should pass - non-encrypted snapshot to non-encrypted database
+	err := sm.validateCMEKCompatibility(ctx, snapshotData, "target_db")
+
+	assert.NoError(t, err)
+}
+
+func TestSnapshotManager_ValidateCMEKCompatibility_SameEZDatabase(t *testing.T) {
+	ctx := context.Background()
+
+	// Encrypted snapshot with ezID = 12345
+	snapshotData := &SnapshotData{
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{
+				Properties: []*commonpb.KeyValuePair{
+					{Key: "cipher.ezID", Value: "12345"},
+				},
+			},
+		},
+	}
+
+	// Mock DescribeDatabase to return same ezID
+	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
+		b *broker.MockBroker,
+		ctx context.Context,
+		dbName string,
+	) (*rootcoordpb.DescribeDatabaseResponse, error) {
+		return &rootcoordpb.DescribeDatabaseResponse{
+			DbName: dbName,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: "cipher.ezID", Value: "12345"},
+				{Key: "cipher.key", Value: "encrypted_root_key"},
+			},
+		}, nil
+	}).Build()
+	defer mockDescribeDB.UnPatch()
+
+	sm := &snapshotManager{
+		broker: broker.NewMockBroker(t),
+	}
+
+	// Should pass - same encryption zone
+	err := sm.validateCMEKCompatibility(ctx, snapshotData, "target_db")
+
+	assert.NoError(t, err)
+}
+
+func TestSnapshotManager_ValidateCMEKCompatibility_NonEncryptedDatabase(t *testing.T) {
+	ctx := context.Background()
+
+	// Encrypted snapshot with ezID = 12345
+	snapshotData := &SnapshotData{
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{
+				Properties: []*commonpb.KeyValuePair{
+					{Key: "cipher.ezID", Value: "12345"},
+				},
+			},
+		},
+	}
+
+	// Mock DescribeDatabase to return non-encrypted database
+	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
+		b *broker.MockBroker,
+		ctx context.Context,
+		dbName string,
+	) (*rootcoordpb.DescribeDatabaseResponse, error) {
+		return &rootcoordpb.DescribeDatabaseResponse{
+			DbName:     dbName,
+			Properties: []*commonpb.KeyValuePair{
+				// No cipher.enabled property or set to false
+			},
+		}, nil
+	}).Build()
+	defer mockDescribeDB.UnPatch()
+
+	sm := &snapshotManager{
+		broker: broker.NewMockBroker(t),
+	}
+
+	// Should fail - cannot restore encrypted snapshot to non-encrypted database
+	err := sm.validateCMEKCompatibility(ctx, snapshotData, "target_db")
+
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
+	assert.Contains(t, err.Error(), "non-encrypted database")
+}
+
+func TestSnapshotManager_ValidateCMEKCompatibility_DifferentEZDatabase(t *testing.T) {
+	ctx := context.Background()
+
+	// Encrypted snapshot with ezID = 12345
+	snapshotData := &SnapshotData{
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{
+				Properties: []*commonpb.KeyValuePair{
+					{Key: "cipher.ezID", Value: "12345"},
+				},
+			},
+		},
+	}
+
+	// Mock DescribeDatabase to return different ezID (67890)
+	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
+		b *broker.MockBroker,
+		ctx context.Context,
+		dbName string,
+	) (*rootcoordpb.DescribeDatabaseResponse, error) {
+		return &rootcoordpb.DescribeDatabaseResponse{
+			DbName: dbName,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: "cipher.enabled", Value: "true"},
+				{Key: "cipher.ezID", Value: "67890"},
+				{Key: "cipher.key", Value: "test-root-key"},
+			},
+		}, nil
+	}).Build()
+	defer mockDescribeDB.UnPatch()
+
+	sm := &snapshotManager{
+		broker: broker.NewMockBroker(t),
+	}
+
+	// Should fail - different encryption zone
+	err := sm.validateCMEKCompatibility(ctx, snapshotData, "target_db")
+
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
+	assert.Contains(t, err.Error(), "different encryption zone")
+	assert.Contains(t, err.Error(), "12345")
+	assert.Contains(t, err.Error(), "67890")
+}
+
+func TestSnapshotManager_ValidateCMEKCompatibility_DescribeDatabaseError(t *testing.T) {
+	ctx := context.Background()
+
+	// Encrypted snapshot with ezID = 12345
+	snapshotData := &SnapshotData{
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{
+				Properties: []*commonpb.KeyValuePair{
+					{Key: "cipher.ezID", Value: "12345"},
+				},
+			},
+		},
+	}
+
+	expectedErr := errors.New("describe database error")
+
+	// Mock DescribeDatabase to return error
+	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
+		b *broker.MockBroker,
+		ctx context.Context,
+		dbName string,
+	) (*rootcoordpb.DescribeDatabaseResponse, error) {
+		return nil, expectedErr
+	}).Build()
+	defer mockDescribeDB.UnPatch()
+
+	sm := &snapshotManager{
+		broker: broker.NewMockBroker(t),
+	}
+
+	// Should return error from DescribeDatabase
+	err := sm.validateCMEKCompatibility(ctx, snapshotData, "target_db")
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to describe target database")
+}
+
+func TestSnapshotManager_ValidateCMEKCompatibility_NonEncryptedToEncrypted(t *testing.T) {
+	ctx := context.Background()
+
+	// Non-encrypted snapshot (no cipher.ezID in properties)
+	snapshotData := &SnapshotData{
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{
+				Properties: []*commonpb.KeyValuePair{
+					{Key: "other_key", Value: "other_value"},
+				},
+			},
+		},
+	}
+
+	// Mock DescribeDatabase to return encrypted database
+	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
+		b *broker.MockBroker,
+		ctx context.Context,
+		dbName string,
+	) (*rootcoordpb.DescribeDatabaseResponse, error) {
+		return &rootcoordpb.DescribeDatabaseResponse{
+			DbName: dbName,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: "cipher.enabled", Value: "true"},
+				{Key: "cipher.ezID", Value: "12345"},
+				{Key: "cipher.key", Value: "test-root-key"},
+			},
+		}, nil
+	}).Build()
+	defer mockDescribeDB.UnPatch()
+
+	sm := &snapshotManager{
+		broker: broker.NewMockBroker(t),
+	}
+
+	// Should fail - cannot restore non-encrypted collection to CMEK-encrypted database
+	err := sm.validateCMEKCompatibility(ctx, snapshotData, "target_db")
+
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
+	assert.Contains(t, err.Error(), "cannot restore non-encrypted collection to CMEK-encrypted database")
+}
+
+// --- Test RestoreCollection ---
+
+func TestSnapshotManager_RestoreCollection_SchemaNameAndDbName(t *testing.T) {
+	ctx := context.Background()
+
+	// Snapshot data with original collection name and db name
+	snapshotData := &SnapshotData{
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{
+				Name:   "original_collection",
+				DbName: "original_db",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				},
+			},
+			NumShards:        2,
+			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+			Partitions:       map[string]int64{"_default": 1},
+		},
+	}
+
+	targetCollectionName := "target_collection"
+	targetDbName := "target_db"
+
+	// Capture the CreateCollectionRequest to verify schema modifications
+	var capturedReq *milvuspb.CreateCollectionRequest
+
+	mockBroker := broker.NewMockBroker(t)
+	mockBroker.EXPECT().CreateCollection(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *milvuspb.CreateCollectionRequest) {
+		capturedReq = req
+	}).Return(nil)
+
+	mockBroker.EXPECT().DescribeCollectionByName(mock.Anything, targetDbName, targetCollectionName).Return(&milvuspb.DescribeCollectionResponse{
+		Status:       merr.Success(),
+		CollectionID: 12345,
+	}, nil)
+
+	sm := &snapshotManager{
+		broker: mockBroker,
+	}
+
+	collectionID, err := sm.RestoreCollection(ctx, snapshotData, targetCollectionName, targetDbName)
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(12345), collectionID)
+
+	// Verify the schema in the request has updated Name and DbName
+	assert.NotNil(t, capturedReq)
+	assert.Equal(t, targetDbName, capturedReq.DbName)
+	assert.Equal(t, targetCollectionName, capturedReq.CollectionName)
+
+	// Unmarshal and verify the schema bytes
+	var schema schemapb.CollectionSchema
+	err = proto.Unmarshal(capturedReq.Schema, &schema)
+	assert.NoError(t, err)
+	assert.Equal(t, targetCollectionName, schema.Name, "schema.Name should be updated to target collection name")
+	assert.Equal(t, targetDbName, schema.DbName, "schema.DbName should be updated to target database name")
 }

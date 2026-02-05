@@ -237,6 +237,65 @@ func (_c *MockBroker_DescribeCollectionInternal_Call) RunAndReturn(run func(cont
 	return _c
 }
 
+// DescribeDatabase provides a mock function with given fields: ctx, dbName
+func (_m *MockBroker) DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error) {
+	ret := _m.Called(ctx, dbName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DescribeDatabase")
+	}
+
+	var r0 *rootcoordpb.DescribeDatabaseResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*rootcoordpb.DescribeDatabaseResponse, error)); ok {
+		return rf(ctx, dbName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *rootcoordpb.DescribeDatabaseResponse); ok {
+		r0 = rf(ctx, dbName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.DescribeDatabaseResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, dbName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroker_DescribeDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeDatabase'
+type MockBroker_DescribeDatabase_Call struct {
+	*mock.Call
+}
+
+// DescribeDatabase is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dbName string
+func (_e *MockBroker_Expecter) DescribeDatabase(ctx interface{}, dbName interface{}) *MockBroker_DescribeDatabase_Call {
+	return &MockBroker_DescribeDatabase_Call{Call: _e.mock.On("DescribeDatabase", ctx, dbName)}
+}
+
+func (_c *MockBroker_DescribeDatabase_Call) Run(run func(ctx context.Context, dbName string)) *MockBroker_DescribeDatabase_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockBroker_DescribeDatabase_Call) Return(_a0 *rootcoordpb.DescribeDatabaseResponse, _a1 error) *MockBroker_DescribeDatabase_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBroker_DescribeDatabase_Call) RunAndReturn(run func(context.Context, string) (*rootcoordpb.DescribeDatabaseResponse, error)) *MockBroker_DescribeDatabase_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropCollection provides a mock function with given fields: ctx, dbName, collectionName
 func (_m *MockBroker) DropCollection(ctx context.Context, dbName string, collectionName string) error {
 	ret := _m.Called(ctx, dbName, collectionName)
