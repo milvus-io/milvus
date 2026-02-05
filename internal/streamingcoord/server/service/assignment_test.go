@@ -412,7 +412,14 @@ func TestForcePromoteIdempotent(t *testing.T) {
 	// This will be matched against the auto-constructed config
 	alreadyPromotedConfig := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
-			{ClusterId: "by-dev", Pchannels: []string{"by-dev-1"}},
+			{
+				ClusterId: "by-dev",
+				Pchannels: []string{"by-dev-1"},
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "http://localhost:19530",
+					Token: "",
+				},
+			},
 		},
 	}
 	b.EXPECT().GetLatestChannelAssignment().Return(&balancer.WatchChannelAssignmentsCallbackParam{
@@ -795,7 +802,6 @@ func TestForcePromoteBroadcastAppendError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "broadcast append failed")
 }
-
 
 func TestAlterReplicateConfigCallbackErrors(t *testing.T) {
 	resource.InitForTest()
@@ -1181,21 +1187,8 @@ func TestHandleForcePromoteGetAssignmentError(t *testing.T) {
 		return ctx.Err()
 	}).Maybe()
 	b.EXPECT().Close().Return().Maybe()
-	// First call returns config, second call in handleForcePromote fails
-	callCount := 0
-	b.EXPECT().GetLatestChannelAssignment().RunAndReturn(func() (*balancer.WatchChannelAssignmentsCallbackParam, error) {
-		callCount++
-		if callCount <= 1 {
-			return &balancer.WatchChannelAssignmentsCallbackParam{
-				PChannelView: &channel.PChannelView{
-					Channels: map[channel.ChannelID]*channel.PChannelMeta{
-						{Name: "by-dev-1"}: channel.NewPChannelMeta("by-dev-1", types.AccessModeRW),
-					},
-				},
-			}, nil
-		}
-		return nil, errors.New("assignment error")
-	})
+	// GetLatestChannelAssignment in handleForcePromote fails
+	b.EXPECT().GetLatestChannelAssignment().Return(nil, errors.New("assignment error")).Maybe()
 	balance.Register(b)
 
 	// WithSecondaryClusterResourceKey succeeds (we are secondary)
@@ -1225,9 +1218,17 @@ func TestHandleForcePromoteSameConfigAfterBroadcasterCheck(t *testing.T) {
 	snmanager.ResetStreamingNodeManager()
 
 	// The auto-constructed standalone primary config
+	// ConnectionParam must match what exists in the secondary config
 	forcePromoteCfg := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
-			{ClusterId: "by-dev", Pchannels: []string{"by-dev-1"}},
+			{
+				ClusterId: "by-dev",
+				Pchannels: []string{"by-dev-1"},
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "http://test:19530",
+					Token: "by-dev",
+				},
+			},
 		},
 	}
 
@@ -1242,38 +1243,16 @@ func TestHandleForcePromoteSameConfigAfterBroadcasterCheck(t *testing.T) {
 		return ctx.Err()
 	}).Maybe()
 	b.EXPECT().Close().Return().Maybe()
-	callCount := 0
-	b.EXPECT().GetLatestChannelAssignment().RunAndReturn(func() (*balancer.WatchChannelAssignmentsCallbackParam, error) {
-		callCount++
-		if callCount <= 1 {
-			// First call: config is different (has secondary setup)
-			return &balancer.WatchChannelAssignmentsCallbackParam{
-				PChannelView: &channel.PChannelView{
-					Channels: map[channel.ChannelID]*channel.PChannelMeta{
-						{Name: "by-dev-1"}: channel.NewPChannelMeta("by-dev-1", types.AccessModeRW),
-					},
-				},
-				ReplicateConfiguration: &commonpb.ReplicateConfiguration{
-					Clusters: []*commonpb.MilvusCluster{
-						{ClusterId: "primary", Pchannels: []string{"primary-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://primary:19530", Token: "primary"}},
-						{ClusterId: "by-dev", Pchannels: []string{"by-dev-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://test:19530", Token: "by-dev"}},
-					},
-					CrossClusterTopology: []*commonpb.CrossClusterTopology{
-						{SourceClusterId: "primary", TargetClusterId: "by-dev"},
-					},
-				},
-			}, nil
-		}
-		// Second call (in handleForcePromote): config is now the same as auto-constructed
-		return &balancer.WatchChannelAssignmentsCallbackParam{
-			PChannelView: &channel.PChannelView{
-				Channels: map[channel.ChannelID]*channel.PChannelMeta{
-					{Name: "by-dev-1"}: channel.NewPChannelMeta("by-dev-1", types.AccessModeRW),
-				},
+	// Return the standalone primary config directly
+	// This tests the idempotent path where config already matches
+	b.EXPECT().GetLatestChannelAssignment().Return(&balancer.WatchChannelAssignmentsCallbackParam{
+		PChannelView: &channel.PChannelView{
+			Channels: map[channel.ChannelID]*channel.PChannelMeta{
+				{Name: "by-dev-1"}: channel.NewPChannelMeta("by-dev-1", types.AccessModeRW),
 			},
-			ReplicateConfiguration: forcePromoteCfg,
-		}, nil
-	})
+		},
+		ReplicateConfiguration: forcePromoteCfg,
+	}, nil).Maybe()
 	balance.Register(b)
 
 	// Broadcaster returns success for secondary check
@@ -1314,48 +1293,25 @@ func TestHandleForcePromoteValidatorError(t *testing.T) {
 		return ctx.Err()
 	}).Maybe()
 	b.EXPECT().Close().Return().Maybe()
-	callCount := 0
-	b.EXPECT().GetLatestChannelAssignment().RunAndReturn(func() (*balancer.WatchChannelAssignmentsCallbackParam, error) {
-		callCount++
-		if callCount <= 1 {
-			// First call: different config (secondary setup)
-			return &balancer.WatchChannelAssignmentsCallbackParam{
-				PChannelView: &channel.PChannelView{
-					Channels: map[channel.ChannelID]*channel.PChannelMeta{
-						{Name: "by-dev-1"}: channel.NewPChannelMeta("by-dev-1", types.AccessModeRW),
-					},
-				},
-				ReplicateConfiguration: &commonpb.ReplicateConfiguration{
-					Clusters: []*commonpb.MilvusCluster{
-						{ClusterId: "primary", Pchannels: []string{"primary-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://primary:19530", Token: "primary"}},
-						{ClusterId: "by-dev", Pchannels: []string{"by-dev-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://test:19530", Token: "by-dev"}},
-					},
-					CrossClusterTopology: []*commonpb.CrossClusterTopology{
-						{SourceClusterId: "primary", TargetClusterId: "by-dev"},
-					},
-				},
-			}, nil
-		}
-		// Second call in handleForcePromote: return config with extra pchannel
-		// that causes validator to fail
-		return &balancer.WatchChannelAssignmentsCallbackParam{
-			PChannelView: &channel.PChannelView{
-				Channels: map[channel.ChannelID]*channel.PChannelMeta{
-					{Name: "by-dev-1"}: channel.NewPChannelMeta("by-dev-1", types.AccessModeRW),
-					{Name: "other-1"}:  channel.NewPChannelMeta("other-1", types.AccessModeRW),
-				},
+	// Return config with extra pchannel in PChannelView that causes validator to fail
+	// PChannelView has 2 pchannels but current config's cluster has only 1
+	b.EXPECT().GetLatestChannelAssignment().Return(&balancer.WatchChannelAssignmentsCallbackParam{
+		PChannelView: &channel.PChannelView{
+			Channels: map[channel.ChannelID]*channel.PChannelMeta{
+				{Name: "by-dev-1"}: channel.NewPChannelMeta("by-dev-1", types.AccessModeRW),
+				{Name: "other-1"}:  channel.NewPChannelMeta("other-1", types.AccessModeRW),
 			},
-			ReplicateConfiguration: &commonpb.ReplicateConfiguration{
-				Clusters: []*commonpb.MilvusCluster{
-					{ClusterId: "primary", Pchannels: []string{"primary-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://primary:19530", Token: "primary"}},
-					{ClusterId: "by-dev", Pchannels: []string{"by-dev-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://test:19530", Token: "by-dev"}},
-				},
-				CrossClusterTopology: []*commonpb.CrossClusterTopology{
-					{SourceClusterId: "primary", TargetClusterId: "by-dev"},
-				},
+		},
+		ReplicateConfiguration: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "primary", Pchannels: []string{"primary-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://primary:19530", Token: "primary"}},
+				{ClusterId: "by-dev", Pchannels: []string{"by-dev-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://test:19530", Token: "by-dev"}},
 			},
-		}, nil
-	})
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "primary", TargetClusterId: "by-dev"},
+			},
+		},
+	}, nil).Maybe()
 	balance.Register(b)
 
 	// WithSecondaryClusterResourceKey succeeds

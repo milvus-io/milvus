@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sort"
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -234,11 +235,32 @@ func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *
 	pchannels := lo.MapToSlice(latestAssignment.PChannelView.Channels, func(_ channel.ChannelID, ch *channel.PChannelMeta) string {
 		return ch.Name()
 	})
+	// Sort pchannels for consistent ordering (map iteration order is randomized)
+	sort.Strings(pchannels)
+	// ConnectionParam is required by validator. Try to get it from the current config if available,
+	// otherwise use a placeholder (not used for standalone primary with no topology).
+	var connectionParam *commonpb.ConnectionParam
+	if currentConfig != nil {
+		for _, cluster := range currentConfig.GetClusters() {
+			if cluster.GetClusterId() == currentClusterID {
+				connectionParam = cluster.GetConnectionParam()
+				break
+			}
+		}
+	}
+	if connectionParam == nil {
+		// Use placeholder if no current config exists (shouldn't happen for force promote)
+		connectionParam = &commonpb.ConnectionParam{
+			Uri:   "http://localhost:19530",
+			Token: "",
+		}
+	}
 	forcePromoteConfig := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
 			{
-				ClusterId: currentClusterID,
-				Pchannels: pchannels,
+				ClusterId:       currentClusterID,
+				Pchannels:       pchannels,
+				ConnectionParam: connectionParam,
 			},
 		},
 		CrossClusterTopology: nil, // No topology means standalone primary

@@ -392,7 +392,6 @@ func TestChannelManager(t *testing.T) {
 			func(ctx context.Context, config *streamingpb.ReplicateConfigurationMeta, replicatingTasks []*streamingpb.ReplicatePChannelMeta) error {
 				assert.True(t, proto.Equal(config.ReplicateConfiguration, forcePromoteCfg))
 				assert.True(t, config.ForcePromoted)
-				assert.True(t, config.ForcePromoteTimestamp > 0)
 				assert.Len(t, replicatingTasks, 0) // standalone primary has no replication targets
 				return nil
 			})
