@@ -77,6 +77,10 @@ type HandlerClient interface {
 	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner.
 	GetReplicateCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error)
 
+	// GetSalvageCheckpoint returns the salvage checkpoint captured during force promote.
+	// Returns nil if no force promote has occurred or TTL expired.
+	GetSalvageCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error)
+
 	// GetWALMetricsIfLocal gets the metrics of the local wal.
 	// It will only return the metrics of the local wal but not the remote wal.
 	GetWALMetricsIfLocal(ctx context.Context) (*types.StreamingNodeMetrics, error)

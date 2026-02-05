@@ -100,6 +100,20 @@ func (s replicateService) shouldSkipReplicateMessageType(msgType message.Message
 	return ok
 }
 
+func (s replicateService) GetSalvageCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error) {
+	if !s.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrWALAccesserClosed
+	}
+	defer s.lifetime.Done()
+
+	checkpoint, err := s.handlerClient.GetSalvageCheckpoint(ctx, channelName)
+	if err != nil {
+		return nil, err
+	}
+
+	return checkpoint, nil
+}
+
 // overwriteReplicateMessage overwrites the replicate message.
 // because some message such as create collection message write vchannel in its body, so we need to overwrite the message.
 func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg message.ReplicateMutableMessage, rh *message.ReplicateHeader) (message.MutableMessage, error) {

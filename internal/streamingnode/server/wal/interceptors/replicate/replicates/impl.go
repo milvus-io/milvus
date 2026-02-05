@@ -23,7 +23,8 @@ var ErrNotHandledByReplicateManager = errors.New("not handled by replicate manag
 type ReplicateManagerRecoverParam struct {
 	ChannelInfo            types.PChannelInfo
 	CurrentClusterID       string
-	InitialRecoverSnapshot *recovery.RecoverySnapshot // the initial recover snapshot of the replicate manager.
+	InitialRecoverSnapshot *recovery.RecoverySnapshot       // the initial recover snapshot of the replicate manager.
+	SalvageCheckpoint      *utility.ReplicateCheckpoint     // loaded from etcd, captured during force promote
 }
 
 // RecoverReplicateManager recovers the replicate manager from the initial recover snapshot.
@@ -39,6 +40,7 @@ func RecoverReplicateManager(param *ReplicateManagerRecoverParam) (ReplicateMana
 		currentClusterID:      param.CurrentClusterID,
 		pchannel:              param.ChannelInfo,
 		replicateConfigHelper: replicateConfigHelper,
+		salvageCheckpoint:     param.SalvageCheckpoint,
 	}
 	if !rm.isPrimaryRole() {
 		// if current cluster is not the primary role,
@@ -56,7 +58,8 @@ type replicatesManagerImpl struct {
 	pchannel              types.PChannelInfo
 	currentClusterID      string
 	replicateConfigHelper *replicateutil.ConfigHelper
-	secondaryState        *secondaryState // if the current cluster is not the primary role, it will have secondaryState.
+	secondaryState        *secondaryState              // if the current cluster is not the primary role, it will have secondaryState.
+	salvageCheckpoint     *utility.ReplicateCheckpoint // captured on force promote
 }
 
 // SwitchReplicateMode switches the replicates manager between replicating mode and non-replicating mode.
@@ -72,6 +75,10 @@ func (impl *replicatesManagerImpl) SwitchReplicateMode(_ context.Context, msg me
 	incomingCurrentClusterConfig := newGraph.GetCurrentCluster()
 	switch incomingCurrentClusterConfig.Role() {
 	case replicateutil.RolePrimary:
+		// Capture salvage checkpoint before dropping secondary state on force promote
+		if msg.Header().ForcePromote && impl.secondaryState != nil {
+			impl.salvageCheckpoint = impl.secondaryState.GetCheckpoint().Clone()
+		}
 		// drop the replicating state if the current cluster is switched to primary.
 		impl.secondaryState = nil
 	case replicateutil.RoleSecondary:
@@ -131,6 +138,13 @@ func (impl *replicatesManagerImpl) GetReplicateCheckpoint() (*utility.ReplicateC
 		return nil, status.NewReplicateViolation("wal is not a secondary cluster in replicating topology")
 	}
 	return impl.secondaryState.GetCheckpoint(), nil
+}
+
+// GetSalvageCheckpoint returns the salvage checkpoint captured during force promote.
+func (impl *replicatesManagerImpl) GetSalvageCheckpoint() *utility.ReplicateCheckpoint {
+	impl.mu.Lock()
+	defer impl.mu.Unlock()
+	return impl.salvageCheckpoint
 }
 
 // beginReplicateMessage begins the replicate message operation.
