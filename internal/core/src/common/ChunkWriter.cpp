@@ -576,7 +576,6 @@ make_chunk(const FieldMeta& field_meta,
            size_t row_nums,
            char* data,
            size_t size,
-           const std::string& file_path,
            std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard) {
     int dim = IsVectorDataType(field_meta.get_data_type()) &&
                       !IsSparseFloatVectorDataType(field_meta.get_data_type())
@@ -723,12 +722,12 @@ make_chunk(const FieldMeta& field_meta,
     }
 }
 
-std::unique_ptr<Chunk>
-create_chunk(const FieldMeta& field_meta,
-             const arrow::ArrayVector& array_vec,
-             const std::string& file_path,
-             bool mmap_populate,
-             proto::common::LoadPriority load_priority) {
+ChunkBuffer
+create_chunk_buffer(const FieldMeta& field_meta,
+                    const arrow::ArrayVector& array_vec,
+                    bool mmap_populate,
+                    const std::string& file_path,
+                    proto::common::LoadPriority load_priority) {
     auto cw = create_chunk_writer(field_meta);
     auto [size, row_nums] = cw->calculate_size(array_vec);
     size_t aligned_size = (size + ChunkTarget::ALIGNED_SIZE - 1) &
@@ -750,22 +749,47 @@ create_chunk(const FieldMeta& field_meta,
     } else {
         chunk_mmap_guard = std::make_shared<ChunkMmapGuard>(data, size, "");
     }
+    ChunkBuffer buffer;
+    buffer.data = data;
+    buffer.size = size;
+    buffer.row_nums = row_nums;
+    buffer.guard = std::move(chunk_mmap_guard);
+    return buffer;
+}
+
+std::unique_ptr<Chunk>
+make_chunk_from_buffer(const FieldMeta& field_meta,
+                       const ChunkBuffer& buffer,
+                       size_t row_nums_override) {
+    auto row_nums =
+        row_nums_override == 0 ? buffer.row_nums : row_nums_override;
     return make_chunk(
-        field_meta, row_nums, data, size, file_path, chunk_mmap_guard);
+        field_meta, row_nums, buffer.data, buffer.size, buffer.guard);
+}
+
+std::unique_ptr<Chunk>
+create_chunk(const FieldMeta& field_meta,
+             const arrow::ArrayVector& array_vec,
+             bool mmap_populate,
+             const std::string& file_path,
+             proto::common::LoadPriority load_priority) {
+    auto buffer = create_chunk_buffer(
+        field_meta, array_vec, mmap_populate, file_path, load_priority);
+    return make_chunk_from_buffer(field_meta, buffer, 0);
 }
 
 std::unordered_map<FieldId, std::shared_ptr<Chunk>>
 create_group_chunk(const std::vector<FieldId>& field_ids,
                    const std::vector<FieldMeta>& field_metas,
                    const std::vector<arrow::ArrayVector>& array_vec,
-                   const std::string& file_path,
                    bool mmap_populate,
+                   const std::string& file_path,
                    proto::common::LoadPriority load_priority) {
     std::vector<std::shared_ptr<ChunkWriterBase>> cws;
     cws.reserve(field_ids.size());
     size_t total_aligned_size = 0, final_row_nums = 0;
     for (size_t i = 0; i < field_ids.size(); i++) {
-        auto field_meta = field_metas[i];
+        const auto& field_meta = field_metas[i];
         cws.push_back(create_chunk_writer(field_meta));
     }
     std::vector<size_t> chunk_sizes;
@@ -843,7 +867,6 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
                                                     final_row_nums,
                                                     data + chunk_offsets[i],
                                                     chunk_sizes[i],
-                                                    file_path,
                                                     chunk_mmap_guard));
         LOG_INFO(
             "created chunk for field {} with chunk offset: {}, chunk "

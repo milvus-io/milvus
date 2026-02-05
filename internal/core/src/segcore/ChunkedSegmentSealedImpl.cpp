@@ -2755,12 +2755,27 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
         field_meta.get_data_type(),
         field_id.get(),
         id_);
+    auto [field_has_setting, field_mmap_enabled] =
+        schema_->MmapEnabled(field_id);
+    auto is_vector = IsVectorDataType(field_meta.get_data_type());
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    bool global_use_mmap = is_vector ? mmap_config.GetVectorFieldEnableMmap()
+                                     : mmap_config.GetScalarFieldEnableMmap();
+    bool use_mmap = field_has_setting ? field_mmap_enabled : global_use_mmap;
+    auto mmap_dir_path =
+        milvus::storage::LocalChunkManagerSingleton::GetInstance()
+            .GetChunkManager()
+            ->GetRootPath();
     int64_t size = num_rows_.value();
     AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
-    auto field_data_info = FieldDataInfo(field_id.get(), size, "");
+    auto field_data_info = FieldDataInfo(field_id.get(), size, mmap_dir_path);
     std::unique_ptr<Translator<milvus::Chunk>> translator =
         std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
-            get_segment_id(), field_meta, field_data_info, false);
+            get_segment_id(),
+            field_meta,
+            field_data_info,
+            use_mmap,
+            mmap_config.GetMmapPopulate());
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
         std::move(translator), nullptr);
     std::shared_ptr<milvus::ChunkedColumnBase> column{};
