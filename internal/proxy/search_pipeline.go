@@ -346,6 +346,13 @@ func newRequeryOperator(t *searchTask, _ map[string]any) (operator, error) {
 	if t.SearchRequest.GetIsAdvanced() {
 		outputFieldNames.Insert(t.functionScore.GetAllInputFieldNames()...)
 	}
+	// Add highlight dynamic fields to requery output
+	if t.highlighter != nil {
+		highlightDynFields := t.highlighter.DynamicFieldNames()
+		if len(highlightDynFields) > 0 {
+			outputFieldNames.Insert(highlightDynFields...)
+		}
+	}
 	return &requeryOperator{
 		traceCtx:           t.TraceCtx(),
 		outputFieldNames:   outputFieldNames.Collect(),
