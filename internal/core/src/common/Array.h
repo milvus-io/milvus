@@ -236,7 +236,7 @@ class Array {
             case DataType::STRING:
             case DataType::VARCHAR:
             //treat Geometry and MOL as string
-            case DataType::GEOMETRY: 
+            case DataType::GEOMETRY:
             case DataType::MOL: {
                 for (int i = 0; i < length_; ++i) {
                     if (get_data<std::string_view>(i) !=
@@ -368,11 +368,11 @@ class Array {
                 break;
             }
             case DataType::MOL: {
-                data_array.mutable_mol_data()->mutable_data()->Reserve(
-                    length_);
+                data_array.mutable_mol_data()->mutable_data()->Reserve(length_);
                 for (int j = 0; j < length_; ++j) {
                     auto element = get_data<std::string_view>(j);
-                    data_array.mutable_mol_data()->add_data(element.data(), element.size());
+                    data_array.mutable_mol_data()->add_data(element.data(),
+                                                            element.size());
                 }
                 break;
             }
@@ -643,11 +643,11 @@ class ArrayView {
                 break;
             }
             case DataType::MOL: {
-                data_array.mutable_mol_data()->mutable_data()->Reserve(
-                    length_);
+                data_array.mutable_mol_data()->mutable_data()->Reserve(length_);
                 for (int j = 0; j < length_; ++j) {
                     auto element = get_data<std::string_view>(j);
-                    data_array.mutable_mol_data()->add_data(element.data(), element.size());
+                    data_array.mutable_mol_data()->add_data(element.data(),
+                                                            element.size());
                 }
                 break;
             }

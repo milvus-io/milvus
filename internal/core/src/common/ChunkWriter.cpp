@@ -269,7 +269,7 @@ MolChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
 
 void
 MolChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
-                                 const std::shared_ptr<ChunkTarget>& target) {
+                                const std::shared_ptr<ChunkTarget>& target) {
     std::vector<std::string_view> mol_strs;
     std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
     mol_strs.reserve(row_nums_);
@@ -307,9 +307,7 @@ MolChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
 
     char padding[MMAP_MOL_PADDING];
     target->write(padding, MMAP_MOL_PADDING);
-    
 }
-
 
 std::pair<size_t, size_t>
 ArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {

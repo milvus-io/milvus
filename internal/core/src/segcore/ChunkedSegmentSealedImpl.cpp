@@ -2086,13 +2086,12 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
         }
 
         case DataType::MOL: {
-            bulk_subscript_ptr_impl<std::string>(op_ctx,
-                                                 column.get(),
-                                                 seg_offsets,
-                                                 count,
-                                                 ret->mutable_scalars()
-                                                     ->mutable_mol_data()
-                                                     ->mutable_data());
+            bulk_subscript_ptr_impl<std::string>(
+                op_ctx,
+                column.get(),
+                seg_offsets,
+                count,
+                ret->mutable_scalars()->mutable_mol_data()->mutable_data());
             break;
         }
 

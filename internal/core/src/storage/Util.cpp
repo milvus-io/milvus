@@ -656,7 +656,7 @@ CreateArrowSchema(DataType data_type, bool nullable) {
         }
         case DataType::ARRAY:
         case DataType::JSON:
-        case DataType::GEOMETRY: 
+        case DataType::GEOMETRY:
         case DataType::MOL: {
             return arrow::schema(
                 {arrow::field("val", arrow::binary(), nullable)});

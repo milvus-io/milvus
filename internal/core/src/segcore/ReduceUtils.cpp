@@ -181,7 +181,8 @@ AssembleGroupByValues(
                 auto field_data = group_by_res_values->mutable_mol_data();
                 for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
                     if (group_by_vals[idx].has_value()) {
-                        std::string val = std::get<std::string>(group_by_vals[idx].value());
+                        std::string val =
+                            std::get<std::string>(group_by_vals[idx].value());
                         *(field_data->mutable_data()->Add()) = val;
                     }
                 }

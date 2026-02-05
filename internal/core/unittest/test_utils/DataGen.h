@@ -273,9 +273,8 @@ struct GeneratedData {
                         case DataType::MOL: {
                             auto ret_data =
                                 reinterpret_cast<std::string*>(ret.data());
-                            auto src_data = target_field_data.scalars()
-                                                .mol_data()
-                                                .data();
+                            auto src_data =
+                                target_field_data.scalars().mol_data().data();
                             std::copy(
                                 src_data.begin(), src_data.end(), ret_data);
                             break;
@@ -558,16 +557,16 @@ inline std::string
 GenRandomMol() {
     // Simple SMILES molecules for testing
     static const std::vector<std::string> smiles_list = {
-        "C",           // Methane
-        "CC",          // Ethane
-        "CCC",         // Propane
-        "CCO",         // Ethanol
-        "CCCO",        // Propanol
-        "c1ccccc1",    // Benzene
-        "CC(=O)O",     // Acetic acid
-        "CCN",         // Ethylamine
-        "CCOCC",       // Diethyl ether
-        "CC(C)C",      // Isobutane
+        "C",         // Methane
+        "CC",        // Ethane
+        "CCC",       // Propane
+        "CCO",       // Ethanol
+        "CCCO",      // Propanol
+        "c1ccccc1",  // Benzene
+        "CC(=O)O",   // Acetic acid
+        "CCN",       // Ethylamine
+        "CCOCC",     // Diethyl ether
+        "CC(C)C",    // Isobutane
     };
     int idx = rand() % smiles_list.size();
     return smiles_list[idx];
@@ -1708,10 +1707,8 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 }
                 if (field_meta.is_nullable()) {
                     auto raw_valid_data = data->valid_data().data();
-                    createNullableFieldData(data_raw.data(),
-                                            raw_valid_data,
-                                            DataType::MOL,
-                                            dim);
+                    createNullableFieldData(
+                        data_raw.data(), raw_valid_data, DataType::MOL, dim);
                 } else {
                     createFieldData(data_raw.data(), DataType::MOL, dim);
                 }
