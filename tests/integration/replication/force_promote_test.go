@@ -18,7 +18,6 @@ package replication
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -44,23 +43,9 @@ func TestForcePromote(t *testing.T) {
 func (s *ForcePromoteSuite) TestForcePromoteOnPrimaryClusterShouldFail() {
 	ctx := context.Background()
 
-	// Get current cluster ID
-	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
-
-	// Create a valid force promote config (single cluster, no topology)
-	config := &commonpb.ReplicateConfiguration{
-		Clusters: []*commonpb.MilvusCluster{
-			{
-				ClusterId: clusterID,
-				Pchannels: []string{clusterID + "-pchan0"},
-				ConnectionParam: &commonpb.ConnectionParam{
-					Uri:   "localhost:19530",
-					Token: "test-token",
-				},
-			},
-		},
-		CrossClusterTopology: []*commonpb.CrossClusterTopology{},
-	}
+	// Force promote requires empty cluster and topology fields
+	// The configuration is auto-constructed from the cluster's existing meta
+	config := &commonpb.ReplicateConfiguration{}
 
 	// Call UpdateReplicateConfiguration with force_promote=true on primary cluster
 	req := &milvuspb.UpdateReplicateConfigurationRequest{
@@ -78,14 +63,15 @@ func (s *ForcePromoteSuite) TestForcePromoteOnPrimaryClusterShouldFail() {
 	s.Contains(err.Error(), "force promote can only be used on secondary clusters")
 }
 
-// TestForcePromoteWithMultipleClustersShouldFail verifies that force promote
-// rejects configurations with more than one cluster.
-func (s *ForcePromoteSuite) TestForcePromoteWithMultipleClustersShouldFail() {
+// TestForcePromoteWithNonEmptyClustersShouldFail verifies that force promote
+// rejects configurations with non-empty clusters field.
+// Force promote auto-constructs the configuration from existing meta.
+func (s *ForcePromoteSuite) TestForcePromoteWithNonEmptyClustersShouldFail() {
 	ctx := context.Background()
 
 	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 
-	// Create config with multiple clusters (invalid for force promote)
+	// Create config with clusters (invalid for force promote - must be empty)
 	config := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
 			{
@@ -96,16 +82,7 @@ func (s *ForcePromoteSuite) TestForcePromoteWithMultipleClustersShouldFail() {
 					Token: "test-token",
 				},
 			},
-			{
-				ClusterId: "other-cluster",
-				Pchannels: []string{"other-cluster-pchan0"},
-				ConnectionParam: &commonpb.ConnectionParam{
-					Uri:   "other-host:19530",
-					Token: "other-token",
-				},
-			},
 		},
-		CrossClusterTopology: []*commonpb.CrossClusterTopology{},
 	}
 
 	req := &milvuspb.UpdateReplicateConfigurationRequest{
@@ -115,19 +92,12 @@ func (s *ForcePromoteSuite) TestForcePromoteWithMultipleClustersShouldFail() {
 
 	resp, err := s.Cluster.MilvusClient.UpdateReplicateConfiguration(ctx, req)
 
-	// Should return an error about multiple clusters
+	// Should return an error about non-empty cluster/topology fields
 	s.NoError(err)
 	s.NotNil(resp)
 	err = merr.Error(resp)
 	s.Error(err)
-	// Either fails at validation or at the primary check first
-	// The exact error depends on which validation runs first
-	errMsg := err.Error()
-	s.True(
-		strings.Contains(errMsg, "primary count is not 1") ||
-			strings.Contains(errMsg, "force promote can only be used on secondary clusters"),
-		"unexpected error: %s", errMsg,
-	)
+	s.Contains(err.Error(), "force promote requires empty cluster and topology fields")
 }
 
 // TestForcePromoteWithTopologyShouldFail verifies that force promote
@@ -137,18 +107,8 @@ func (s *ForcePromoteSuite) TestForcePromoteWithTopologyShouldFail() {
 
 	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 
-	// Create config with topology (invalid for force promote)
+	// Create config with only topology (no clusters) - still invalid for force promote
 	config := &commonpb.ReplicateConfiguration{
-		Clusters: []*commonpb.MilvusCluster{
-			{
-				ClusterId: clusterID,
-				Pchannels: []string{clusterID + "-pchan0"},
-				ConnectionParam: &commonpb.ConnectionParam{
-					Uri:   "localhost:19530",
-					Token: "test-token",
-				},
-			},
-		},
 		CrossClusterTopology: []*commonpb.CrossClusterTopology{
 			{
 				SourceClusterId: clusterID,
@@ -164,59 +124,12 @@ func (s *ForcePromoteSuite) TestForcePromoteWithTopologyShouldFail() {
 
 	resp, err := s.Cluster.MilvusClient.UpdateReplicateConfiguration(ctx, req)
 
-	// Should return an error about topology
+	// Should return an error about non-empty topology field
 	s.NoError(err)
 	s.NotNil(resp)
 	err = merr.Error(resp)
 	s.Error(err)
-	// The error might be about wrong configuration or the primary check
-	errMsg := err.Error()
-	s.True(
-		strings.Contains(errMsg, "wrong replicate configuration") ||
-			strings.Contains(errMsg, "force promote can only be used on secondary clusters"),
-		"unexpected error: %s", errMsg,
-	)
-}
-
-// TestForcePromoteWithWrongClusterShouldFail verifies that force promote
-// rejects configurations where the cluster ID doesn't match the current cluster.
-func (s *ForcePromoteSuite) TestForcePromoteWithWrongClusterShouldFail() {
-	ctx := context.Background()
-
-	// Create config with wrong cluster ID
-	config := &commonpb.ReplicateConfiguration{
-		Clusters: []*commonpb.MilvusCluster{
-			{
-				ClusterId: "wrong-cluster-id",
-				Pchannels: []string{"wrong-cluster-id-pchan0"},
-				ConnectionParam: &commonpb.ConnectionParam{
-					Uri:   "localhost:19530",
-					Token: "test-token",
-				},
-			},
-		},
-		CrossClusterTopology: []*commonpb.CrossClusterTopology{},
-	}
-
-	req := &milvuspb.UpdateReplicateConfigurationRequest{
-		ReplicateConfiguration: config,
-		ForcePromote:           true,
-	}
-
-	resp, err := s.Cluster.MilvusClient.UpdateReplicateConfiguration(ctx, req)
-
-	// Should return an error about wrong cluster
-	s.NoError(err)
-	s.NotNil(resp)
-	err = merr.Error(resp)
-	s.Error(err)
-	// Should fail either with current cluster not found or primary check
-	errMsg := err.Error()
-	s.True(
-		strings.Contains(errMsg, "current cluster not found") ||
-			strings.Contains(errMsg, "force promote can only be used on secondary clusters"),
-		"unexpected error: %s", errMsg,
-	)
+	s.Contains(err.Error(), "force promote requires empty cluster and topology fields")
 }
 
 // TestNormalUpdateReplicateConfiguration verifies that normal (non-force) updates
