@@ -19,9 +19,6 @@
 #include <type_traits>
 #include <vector>
 
-#include "common/Json.h"
-#include "query/PlanImpl.h"
-#include "segcore/SegmentGrowing.h"
 #include "segcore/Utils.h"
 #include <utility>
 #include "PlanNodeVisitor.h"
