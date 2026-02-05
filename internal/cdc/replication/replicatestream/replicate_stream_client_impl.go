@@ -321,6 +321,14 @@ func (r *replicateStreamClient) handleAlterReplicateConfigMessage(msg message.Im
 	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
 	logger.Info("handle AlterReplicateConfigMessage", log.FieldMessage(msg))
 
+	// Check ignore field - if true, skip processing
+	// This is used for incomplete switchover messages that should be ignored after force promote
+	alterMsg := message.MustAsImmutableAlterReplicateConfigMessageV2(msg)
+	if alterMsg.Header().Ignore {
+		logger.Info("AlterReplicateConfig message has ignore flag set, skipping processing")
+		return false
+	}
+
 	replicationRemoved = util.IsReplicationRemovedByAlterReplicateConfigMessage(msg, r.channel.Value)
 	if replicationRemoved {
 		// Cannot find the target channel, it means that the `current->target` topology edge is removed,
