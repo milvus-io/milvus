@@ -1024,3 +1024,123 @@ TEST_P(DefaultValueChunkTranslatorTest, TestFixedWidthMultipleCellsWithTail) {
 
     EXPECT_EQ(total_rows, row_count);
 }
+
+// Test warmup policy is correctly set in the translator
+TEST_P(DefaultValueChunkTranslatorTest, TestWarmupPolicySync) {
+    bool use_mmap = GetParam();
+    int64_t row_count = 1000;
+    int64_t default_value = 42;
+
+    DefaultValueType value_field;
+    value_field.set_long_data(default_value);
+    FieldMeta field_meta(FieldName("test_warmup_sync"),
+                         FieldId(1301),
+                         DataType::INT64,
+                         false,
+                         value_field);
+
+    FieldDataInfo field_data_info(1301, row_count, getMmapDirPath());
+
+    // Create translator with "sync" warmup policy
+    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+        segment_id_, field_meta, field_data_info, use_mmap, true, "sync");
+
+    EXPECT_GT(translator->num_cells(), 0);
+
+    // Verify the translator works correctly with warmup policy
+    std::vector<cachinglayer::cid_t> cids = {0};
+    auto cells = translator->get_cells(nullptr, cids);
+    EXPECT_EQ(cells.size(), 1);
+
+    auto& [cid, chunk] = cells[0];
+    ASSERT_NE(chunk, nullptr);
+
+    // Verify data is correct
+    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
+    auto span = fixed_chunk->Span();
+    EXPECT_GT(span.row_count(), 0);
+
+    for (size_t i = 0; i < span.row_count(); ++i) {
+        auto value = *reinterpret_cast<int64_t*>((char*)span.data() +
+                                                 i * span.element_sizeof());
+        EXPECT_EQ(value, default_value);
+    }
+}
+
+// Test warmup policy "disable"
+TEST_P(DefaultValueChunkTranslatorTest, TestWarmupPolicyDisable) {
+    bool use_mmap = GetParam();
+    int64_t row_count = 500;
+    int64_t default_value = 99;
+
+    DefaultValueType value_field;
+    value_field.set_long_data(default_value);
+    FieldMeta field_meta(FieldName("test_warmup_disable"),
+                         FieldId(1302),
+                         DataType::INT64,
+                         false,
+                         value_field);
+
+    FieldDataInfo field_data_info(1302, row_count, getMmapDirPath());
+
+    // Create translator with "disable" warmup policy
+    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+        segment_id_, field_meta, field_data_info, use_mmap, true, "disable");
+
+    EXPECT_GT(translator->num_cells(), 0);
+
+    std::vector<cachinglayer::cid_t> cids = {0};
+    auto cells = translator->get_cells(nullptr, cids);
+    EXPECT_EQ(cells.size(), 1);
+
+    auto& [cid, chunk] = cells[0];
+    ASSERT_NE(chunk, nullptr);
+
+    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
+    auto span = fixed_chunk->Span();
+    EXPECT_GT(span.row_count(), 0);
+
+    for (size_t i = 0; i < span.row_count(); ++i) {
+        auto value = *reinterpret_cast<int64_t*>((char*)span.data() +
+                                                 i * span.element_sizeof());
+        EXPECT_EQ(value, default_value);
+    }
+}
+
+// Test warmup policy empty string (falls back to global config)
+TEST_P(DefaultValueChunkTranslatorTest, TestWarmupPolicyEmpty) {
+    bool use_mmap = GetParam();
+    int64_t row_count = 300;
+    std::string default_string = "warmup_empty_test";
+
+    DefaultValueType value_field;
+    value_field.set_string_data(default_string);
+    FieldMeta field_meta(FieldName("test_warmup_empty"),
+                         FieldId(1303),
+                         DataType::VARCHAR,
+                         false,
+                         value_field);
+
+    FieldDataInfo field_data_info(1303, row_count, getMmapDirPath());
+
+    // Create translator with empty warmup policy (uses global default)
+    auto translator = std::make_unique<DefaultValueChunkTranslator>(
+        segment_id_, field_meta, field_data_info, use_mmap, true, "");
+
+    EXPECT_GT(translator->num_cells(), 0);
+
+    std::vector<cachinglayer::cid_t> cids = {0};
+    auto cells = translator->get_cells(nullptr, cids);
+    EXPECT_EQ(cells.size(), 1);
+
+    auto& [cid, chunk] = cells[0];
+    ASSERT_NE(chunk, nullptr);
+
+    auto string_chunk = static_cast<StringChunk*>(chunk.get());
+    auto [views, valid] = string_chunk->StringViews(std::nullopt);
+
+    EXPECT_GT(views.size(), 0);
+    for (const auto& view : views) {
+        EXPECT_EQ(view, default_string);
+    }
+}

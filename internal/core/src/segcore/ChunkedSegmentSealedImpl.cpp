@@ -2762,6 +2762,12 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
     bool global_use_mmap = is_vector ? mmap_config.GetVectorFieldEnableMmap()
                                      : mmap_config.GetScalarFieldEnableMmap();
     bool use_mmap = field_has_setting ? field_mmap_enabled : global_use_mmap;
+
+    // Get warmup policy for the field (is_index = false for field data)
+    auto [field_has_warmup, field_warmup_policy] =
+        schema_->WarmupPolicy(field_id, is_vector, /*is_index=*/false);
+    std::string warmup_policy = field_has_warmup ? field_warmup_policy : "";
+
     auto mmap_dir_path =
         milvus::storage::LocalChunkManagerSingleton::GetInstance()
             .GetChunkManager()
@@ -2775,7 +2781,8 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
             field_meta,
             field_data_info,
             use_mmap,
-            mmap_config.GetMmapPopulate());
+            mmap_config.GetMmapPopulate(),
+            warmup_policy);
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
         std::move(translator), nullptr);
     std::shared_ptr<milvus::ChunkedColumnBase> column{};
