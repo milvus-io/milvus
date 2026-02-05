@@ -19,13 +19,13 @@ package datacoord
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/hamba/avro/v2"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/encoding/protojson"
