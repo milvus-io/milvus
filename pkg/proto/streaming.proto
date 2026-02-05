@@ -734,7 +734,6 @@ message ReplicateConfigurationMeta {
     common.ReplicateConfiguration replicate_configuration = 1;
     AckedResult acked_result = 2; // a acked helper to help managing the consuming of PutReplicateConfigMessageV2 message at coordinator.
     bool force_promoted = 3;        // marks if this was force-promoted
-    uint64 force_promote_timestamp = 4; // timestamp of force promote (milliseconds since epoch)
 }
 
 message ReplicatePChannelMeta {

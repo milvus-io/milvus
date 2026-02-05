@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
@@ -131,6 +132,35 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 	}, nil
 }
 
+// WithSecondaryClusterResourceKey acquires an exclusive cluster-level resource key
+// and verifies the cluster is secondary. Returns error if the cluster is primary.
+// This is used for force promote operations that should only be executed on secondary clusters.
+func (bm *broadcastTaskManager) WithSecondaryClusterResourceKey(ctx context.Context) (BroadcastAPI, error) {
+	id, err := resource.Resource().IDAllocator().Allocate(ctx)
+	if err != nil {
+		return nil, errors.Wrapf(err, "allocate new id failed")
+	}
+
+	startLockInstant := time.Now()
+	// Acquire an exclusive cluster resource key to block all other broadcasts
+	resourceKeys := []message.ResourceKey{message.NewExclusiveClusterResourceKey()}
+	guards := bm.resourceKeyLocker.Lock(resourceKeys...)
+
+	// Check if the cluster is secondary
+	if err := bm.checkClusterRoleSecondary(ctx); err != nil {
+		// unlock the guards if the cluster role is not secondary.
+		guards.Unlock()
+		return nil, err
+	}
+	bm.metrics.ObserveAcquireLockDuration(startLockInstant, guards.ResourceKeys())
+
+	return &broadcasterWithRK{
+		broadcaster: bm,
+		broadcastID: id,
+		guards:      guards,
+	}, nil
+}
+
 // checkClusterRole checks if the cluster status is primary, otherwise return error.
 func (bm *broadcastTaskManager) checkClusterRole(ctx context.Context) error {
 	if ctx.Err() != nil {
@@ -144,6 +174,24 @@ func (bm *broadcastTaskManager) checkClusterRole(ctx context.Context) error {
 	if b.ReplicateRole() != replicateutil.RolePrimary {
 		// a non-primary cluster cannot do any broadcast operation.
 		return ErrNotPrimary
+	}
+	return nil
+}
+
+// checkClusterRoleSecondary checks if the cluster status is secondary, otherwise return error.
+// This is used for force promote operations that should only be executed on secondary clusters.
+func (bm *broadcastTaskManager) checkClusterRoleSecondary(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	// Check if the cluster status is secondary, otherwise return error.
+	b, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	if b.ReplicateRole() != replicateutil.RoleSecondary {
+		// Force promote can only be performed on a secondary cluster.
+		return ErrNotSecondary
 	}
 	return nil
 }
@@ -321,4 +369,96 @@ func (bm *broadcastTaskManager) GetPendingBroadcastMessages() []message.MutableM
 		}
 	}
 	return pendingMessages
+}
+
+// FixIncompleteBroadcastsForForcePromote fixes incomplete broadcasts for force promote.
+// It marks incomplete AlterReplicateConfig messages with ignore=true before supplementing
+// them to remaining vchannels. This ensures old incomplete messages don't overwrite
+// the force promote configuration.
+func (bm *broadcastTaskManager) FixIncompleteBroadcastsForForcePromote(ctx context.Context) error {
+	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return status.NewOnShutdownError("broadcaster is closing")
+	}
+	defer bm.lifetime.Done()
+
+	bm.mu.Lock()
+	// Collect tasks that need fixing (AlterReplicateConfig messages with pending vchannels)
+	tasksToFix := make([]*broadcastTask, 0)
+	for _, task := range bm.tasks {
+		state := task.State()
+		// Only consider tasks that are pending or replicated and have pending messages
+		if (state == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING ||
+			state == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED) &&
+			task.IsAlterReplicateConfigMessage() {
+			msgs := task.PendingBroadcastMessages()
+			if len(msgs) > 0 {
+				tasksToFix = append(tasksToFix, task)
+			}
+		}
+	}
+	bm.mu.Unlock()
+
+	if len(tasksToFix) == 0 {
+		bm.Logger().Info("No incomplete AlterReplicateConfig broadcasts to fix for force promote")
+		return nil
+	}
+
+	bm.Logger().Info("Fixing incomplete AlterReplicateConfig broadcasts for force promote",
+		zap.Int("taskCount", len(tasksToFix)))
+
+	// Mark each task with ignore=true and save to catalog
+	for _, task := range tasksToFix {
+		bm.Logger().Info("Marking AlterReplicateConfig task with ignore=true",
+			zap.Uint64("broadcastID", task.Header().BroadcastID))
+
+		if err := task.MarkIgnoreAndSave(ctx); err != nil {
+			bm.Logger().Error("Failed to mark task with ignore",
+				zap.Uint64("broadcastID", task.Header().BroadcastID),
+				zap.Error(err))
+			return errors.Wrapf(err, "failed to mark task %d with ignore", task.Header().BroadcastID)
+		}
+	}
+
+	// Now supplement the marked messages to remaining vchannels
+	var pendingMessages []message.MutableMessage
+	for _, task := range tasksToFix {
+		msgs := task.PendingBroadcastMessages()
+		if len(msgs) > 0 {
+			bm.Logger().Info("Supplementing marked messages to remaining vchannels",
+				zap.Uint64("broadcastID", task.Header().BroadcastID),
+				zap.Int("pendingVChannels", len(msgs)))
+			pendingMessages = append(pendingMessages, msgs...)
+		}
+	}
+
+	if len(pendingMessages) == 0 {
+		bm.Logger().Info("No pending messages to supplement after marking")
+		return nil
+	}
+
+	// Append pending messages to their respective vchannels
+	appendResults := streaming.WAL().AppendMessages(ctx, pendingMessages...)
+
+	// Check for errors and count successes
+	var lastResultErr error
+	supplementCount := 0
+	failureCount := 0
+	for i, result := range appendResults.Responses {
+		if result.Error != nil {
+			bm.Logger().Warn("Failed to supplement marked message",
+				zap.String("vchannel", pendingMessages[i].VChannel()),
+				zap.Error(result.Error))
+			failureCount++
+			lastResultErr = result.Error
+			continue
+		}
+		supplementCount++
+	}
+
+	bm.Logger().Info("Completed fixing incomplete broadcasts for force promote",
+		zap.Int("supplementCount", supplementCount),
+		zap.Int("failureCount", failureCount),
+		zap.Int("totalPending", len(pendingMessages)))
+
+	return lastResultErr
 }

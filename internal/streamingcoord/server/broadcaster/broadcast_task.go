@@ -201,6 +201,42 @@ func (b *broadcastTask) PendingBroadcastMessages() []message.MutableMessage {
 	return pendingMessages
 }
 
+// IsAlterReplicateConfigMessage returns true if this task is an AlterReplicateConfig message.
+func (b *broadcastTask) IsAlterReplicateConfigMessage() bool {
+	return b.msg.MessageType() == message.MessageTypeAlterReplicateConfig
+}
+
+// MarkIgnoreAndSave marks the task's message header with ignore=true and saves to catalog.
+// This is used for force promote to mark incomplete AlterReplicateConfig messages as ignored.
+func (b *broadcastTask) MarkIgnoreAndSave(ctx context.Context) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Parse the message as AlterReplicateConfig
+	msg := message.NewBroadcastMutableMessageBeforeAppend(b.task.Message.Payload, b.task.Message.Properties)
+	alterMsg, err := message.AsMutableAlterReplicateConfigMessageV2(msg)
+	if err != nil {
+		return errors.Wrap(err, "failed to parse message as AlterReplicateConfigMessage")
+	}
+
+	// Get current header and set ignore to true
+	header := alterMsg.Header()
+	header.Ignore = true
+	alterMsg.OverwriteHeader(header)
+
+	// Re-create the broadcast message from updated payload and properties
+	// The OverwriteHeader call above modified the underlying messageImpl properties
+	updatedMsg := message.NewBroadcastMutableMessageBeforeAppend(b.task.Message.Payload, b.task.Message.Properties)
+
+	// Update the task's message proto
+	b.task.Message = updatedMsg.IntoMessageProto()
+	b.msg = updatedMsg
+	b.dirty = true
+
+	// Save to catalog
+	return b.saveTaskIfDirty(ctx, b.Logger())
+}
+
 // InitializeRecovery initializes the recovery of the broadcast task.
 func (b *broadcastTask) InitializeRecovery(ctx context.Context) error {
 	b.mu.Lock()
