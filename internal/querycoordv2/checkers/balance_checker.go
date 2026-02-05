@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -336,10 +337,14 @@ func (b *BalanceChecker) getReplicaForNormalBalance(ctx context.Context, collect
 //   - Creating channel move tasks from channel assignment plans
 //   - Setting task metadata (priority, reason, timeout)
 //
+// Parameters:
+//   - isStoppingBalance: if true, uses HIGH load priority for stopping balance (node draining);
+//     otherwise uses LOW priority for normal balance operations
+//
 // Returns:
 //   - segmentTasks: tasks for moving segments between nodes
 //   - channelTasks: tasks for moving channels between nodes
-func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, balancer balance.Balance, replicas []int64, config balanceConfig) ([]task.Task, []task.Task) {
+func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, balancer balance.Balance, replicas []int64, config balanceConfig, isStoppingBalance bool) ([]task.Task, []task.Task) {
 	if len(replicas) == 0 {
 		return nil, nil
 	}
@@ -356,6 +361,17 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, b
 		if len(segmentPlans) != 0 || len(channelPlans) != 0 {
 			balance.PrintNewBalancePlans(replica.GetCollectionID(), replica.GetID(), sPlans, cPlans)
 		}
+	}
+
+	// Set LoadPriority based on balance type:
+	// - Stopping balance (node draining): HIGH priority to quickly move data off stopping nodes
+	// - Normal balance: LOW priority to avoid interfering with user operations
+	loadPriority := commonpb.LoadPriority_LOW
+	if isStoppingBalance {
+		loadPriority = commonpb.LoadPriority_HIGH
+	}
+	for i := range segmentPlans {
+		segmentPlans[i].LoadPriority = loadPriority
 	}
 
 	segmentTasks := make([]task.Task, 0)
@@ -404,6 +420,7 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, b
 //   - constructQueueFunc: function to construct a new priority queue if needed
 //   - getQueueFunc: function to get the existing priority queue
 //   - config: balance configuration with batch sizes and limits
+//   - isStoppingBalance: if true, uses HIGH load priority for stopping balance
 //
 // Returns:
 //   - generatedSegmentTaskNum: number of generated segment balance tasks
@@ -415,6 +432,7 @@ func (b *BalanceChecker) processBalanceQueue(
 	constructQueueFunc func(context.Context) *assign.PriorityQueue,
 	getQueueFunc func() *assign.PriorityQueue,
 	config balanceConfig,
+	isStoppingBalance bool,
 ) (int, int) {
 	checkCollectionCount := 0
 	pq := getQueueFunc()
@@ -442,7 +460,7 @@ func (b *BalanceChecker) processBalanceQueue(
 			continue
 		}
 
-		newSegmentTasks, newChannelTasks := b.generateBalanceTasksFromReplicas(ctx, balancer, replicasToBalance, config)
+		newSegmentTasks, newChannelTasks := b.generateBalanceTasksFromReplicas(ctx, balancer, replicasToBalance, config, isStoppingBalance)
 		generatedSegmentTaskNum += len(newSegmentTasks)
 		generatedChannelTaskNum += len(newChannelTasks)
 		b.submitTasks(newSegmentTasks, newChannelTasks)
@@ -514,7 +532,9 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 			b.getReplicaForStoppingBalance,
 			b.constructStoppingBalanceQueue,
 			func() *assign.PriorityQueue { return b.stoppingBalanceQueue },
-			config)
+			config,
+			true, // isStoppingBalance: use HIGH priority for node draining
+		)
 
 		if generatedSegmentTaskNum > 0 || generatedChannelTaskNum > 0 {
 			// clean up the normal balance queue when stopping balance generated tasks
@@ -543,7 +563,9 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 			b.getReplicaForNormalBalance,
 			b.constructNormalBalanceQueue,
 			func() *assign.PriorityQueue { return b.normalBalanceQueue },
-			config)
+			config,
+			false, // isStoppingBalance: use LOW priority for normal balance
+		)
 
 		if generatedSegmentTaskNum > 0 || generatedChannelTaskNum > 0 {
 			// clean up the stopping balance queue when normal balance generated tasks
