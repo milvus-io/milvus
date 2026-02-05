@@ -1261,11 +1261,22 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
 
         auto codec_futures = storage::GetObjectData(
             rcm.get(), remote_files, milvus::PriorityForLoad(priority), false);
-        // Wait for all futures to ensure all threads complete
-        auto codecs = storage::WaitAllFutures(std::move(codec_futures));
-        for (auto& codec : codecs) {
-            auto reader = codec->GetReader();
-            channel->push(reader);
+
+        std::exception_ptr first_exception = nullptr;
+        for (auto& future : codec_futures) {
+            try {
+                auto codec = future.get();
+                if (!first_exception) {
+                    channel->push(codec->GetReader());
+                }
+            } catch (...) {
+                if (!first_exception) {
+                    first_exception = std::current_exception();
+                }
+            }
+        }
+        if (first_exception) {
+            std::rethrow_exception(first_exception);
         }
         channel->close();
     } catch (std::exception& e) {
@@ -1283,11 +1294,22 @@ LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                        .GetRemoteChunkManager();
         auto codec_futures = storage::GetObjectData(
             rcm.get(), remote_files, milvus::PriorityForLoad(priority));
-        // Wait for all futures to ensure all threads complete
-        auto codecs = storage::WaitAllFutures(std::move(codec_futures));
-        for (auto& codec : codecs) {
-            auto field_data = codec->GetFieldData();
-            channel->push(field_data);
+
+        std::exception_ptr first_exception = nullptr;
+        for (auto& future : codec_futures) {
+            try {
+                auto codec = future.get();
+                if (!first_exception) {
+                    channel->push(codec->GetFieldData());
+                }
+            } catch (...) {
+                if (!first_exception) {
+                    first_exception = std::current_exception();
+                }
+            }
+        }
+        if (first_exception) {
+            std::rethrow_exception(first_exception);
         }
         channel->close();
     } catch (std::exception& e) {

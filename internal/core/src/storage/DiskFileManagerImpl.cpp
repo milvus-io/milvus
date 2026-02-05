@@ -405,14 +405,24 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
                     GetObjectData(rcm_.get(),
                                   batch_remote_files,
                                   milvus::PriorityForLoad(priority));
-                // Wait for all futures to ensure all threads complete
-                auto chunk_codecs =
-                    storage::WaitAllFutures(std::move(index_chunks_futures));
-                for (auto& chunk_codec : chunk_codecs) {
-                    file_writer.Write(chunk_codec->PayloadData(),
-                                      chunk_codec->PayloadSize());
+                std::exception_ptr first_exception = nullptr;
+                for (auto& future : index_chunks_futures) {
+                    try {
+                        auto chunk_codec = future.get();
+                        if (!first_exception) {
+                            file_writer.Write(chunk_codec->PayloadData(),
+                                              chunk_codec->PayloadSize());
+                        }
+                    } catch (...) {
+                        if (!first_exception) {
+                            first_exception = std::current_exception();
+                        }
+                    }
                 }
                 batch_remote_files.clear();
+                if (first_exception) {
+                    std::rethrow_exception(first_exception);
+                }
             };
 
             for (int& iter : slices.second) {
@@ -558,38 +568,49 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
 
     auto FetchRawData = [&]() {
         auto field_datas = GetObjectData(rcm_.get(), batch_files);
-        // Wait for all futures to ensure all threads complete
-        auto codecs = storage::WaitAllFutures(std::move(field_datas));
-        int batch_size = batch_files.size();
-        for (int i = 0; i < batch_size; i++) {
-            auto field_data = codecs[i]->GetFieldData();
-            num_rows += uint32_t(field_data->get_valid_rows());
+        std::exception_ptr first_exception = nullptr;
+        for (auto& future : field_datas) {
+            try {
+                auto codec = future.get();
+                if (!first_exception) {
+                    auto field_data = codec->GetFieldData();
+                    num_rows += uint32_t(field_data->get_valid_rows());
 
-            if (valid_data_path.has_value() && field_data->IsNullable()) {
-                nullable = true;
-                auto rows = field_data->get_num_rows();
-                if (rows > 0) {
-                    auto new_size = (total_num_rows + rows + 7) / 8;
-                    if (new_size > static_cast<int64_t>(valid_bitmap.size())) {
-                        valid_bitmap.resize(new_size, 0);
-                    }
-                    for (int64_t i = 0; i < rows; ++i) {
-                        if (field_data->is_valid(i)) {
-                            set_bit(valid_bitmap, total_num_rows + i);
+                    if (valid_data_path.has_value() && field_data->IsNullable()) {
+                        nullable = true;
+                        auto rows = field_data->get_num_rows();
+                        if (rows > 0) {
+                            auto new_size = (total_num_rows + rows + 7) / 8;
+                            if (new_size >
+                                static_cast<int64_t>(valid_bitmap.size())) {
+                                valid_bitmap.resize(new_size, 0);
+                            }
+                            for (int64_t i = 0; i < rows; ++i) {
+                                if (field_data->is_valid(i)) {
+                                    set_bit(valid_bitmap, total_num_rows + i);
+                                }
+                            }
+                            total_num_rows += rows;
                         }
                     }
-                    total_num_rows += rows;
+
+                    cache_raw_data_to_disk_common<DataType>(
+                        field_data,
+                        local_chunk_manager,
+                        local_data_path,
+                        file_created,
+                        dim,
+                        write_offset,
+                        is_vector_array ? &offsets : nullptr);
+                }
+            } catch (...) {
+                if (!first_exception) {
+                    first_exception = std::current_exception();
                 }
             }
-
-            cache_raw_data_to_disk_common<DataType>(
-                field_data,
-                local_chunk_manager,
-                local_data_path,
-                file_created,
-                dim,
-                write_offset,
-                is_vector_array ? &offsets : nullptr);
+        }
+        if (first_exception) {
+            std::rethrow_exception(first_exception);
         }
     };
 
