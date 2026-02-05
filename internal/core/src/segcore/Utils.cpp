@@ -1261,23 +1261,10 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
 
         auto codec_futures = storage::GetObjectData(
             rcm.get(), remote_files, milvus::PriorityForLoad(priority), false);
-
-        std::exception_ptr first_exception = nullptr;
-        for (auto& future : codec_futures) {
-            try {
-                auto codec = future.get();
-                if (!first_exception) {
-                    channel->push(codec->GetReader());
-                }
-            } catch (...) {
-                if (!first_exception) {
-                    first_exception = std::current_exception();
-                }
-            }
-        }
-        if (first_exception) {
-            std::rethrow_exception(first_exception);
-        }
+        storage::ProcessFuturesInOrder(
+            codec_futures, [&](std::unique_ptr<storage::DataCodec> codec) {
+                channel->push(codec->GetReader());
+            });
         channel->close();
     } catch (std::exception& e) {
         LOG_INFO("failed to load data from remote: {}", e.what());
@@ -1294,23 +1281,10 @@ LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                        .GetRemoteChunkManager();
         auto codec_futures = storage::GetObjectData(
             rcm.get(), remote_files, milvus::PriorityForLoad(priority));
-
-        std::exception_ptr first_exception = nullptr;
-        for (auto& future : codec_futures) {
-            try {
-                auto codec = future.get();
-                if (!first_exception) {
-                    channel->push(codec->GetFieldData());
-                }
-            } catch (...) {
-                if (!first_exception) {
-                    first_exception = std::current_exception();
-                }
-            }
-        }
-        if (first_exception) {
-            std::rethrow_exception(first_exception);
-        }
+        storage::ProcessFuturesInOrder(
+            codec_futures, [&](std::unique_ptr<storage::DataCodec> codec) {
+                channel->push(codec->GetFieldData());
+            });
         channel->close();
     } catch (std::exception& e) {
         LOG_INFO("failed to load data from remote: {}", e.what());

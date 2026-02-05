@@ -149,26 +149,14 @@ MemFileManagerImpl::LoadIndexToMemory(
     auto LoadBatchIndexFiles = [&]() {
         auto index_datas = GetObjectData(
             rcm_.get(), batch_files, milvus::PriorityForLoad(priority));
-        std::exception_ptr first_exception = nullptr;
         size_t idx = 0;
-        for (auto& future : index_datas) {
-            try {
-                auto codec = future.get();
-                if (!first_exception) {
-                    auto file_name = batch_files[idx].substr(
-                        batch_files[idx].find_last_of('/') + 1);
-                    file_to_index_data[file_name] = std::move(codec);
-                }
-            } catch (...) {
-                if (!first_exception) {
-                    first_exception = std::current_exception();
-                }
-            }
-            ++idx;
-        }
-        if (first_exception) {
-            std::rethrow_exception(first_exception);
-        }
+        storage::ProcessFuturesInOrder(
+            index_datas, [&](std::unique_ptr<DataCodec> codec) {
+                auto file_name = batch_files[idx].substr(
+                    batch_files[idx].find_last_of('/') + 1);
+                file_to_index_data[file_name] = std::move(codec);
+                ++idx;
+            });
     };
 
     for (auto& file : remote_files) {
@@ -215,22 +203,10 @@ MemFileManagerImpl::cache_raw_data_to_memory_internal(const Config& config) {
 
     auto FetchRawData = [&]() {
         auto raw_datas = GetObjectData(rcm_.get(), batch_files);
-        std::exception_ptr first_exception = nullptr;
-        for (auto& future : raw_datas) {
-            try {
-                auto codec = future.get();
-                if (!first_exception) {
-                    field_datas.emplace_back(codec->GetFieldData());
-                }
-            } catch (...) {
-                if (!first_exception) {
-                    first_exception = std::current_exception();
-                }
-            }
-        }
-        if (first_exception) {
-            std::rethrow_exception(first_exception);
-        }
+        storage::ProcessFuturesInOrder(
+            raw_datas, [&](std::unique_ptr<DataCodec> codec) {
+                field_datas.emplace_back(codec->GetFieldData());
+            });
     };
 
     for (auto& file : remote_files) {

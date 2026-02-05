@@ -1319,22 +1319,9 @@ FetchFieldData(ChunkManager* cm, const std::vector<std::string>& remote_files) {
     std::vector<std::string> batch_files;
     auto FetchRawData = [&]() {
         auto fds = GetObjectData(cm, batch_files);
-        std::exception_ptr first_exception = nullptr;
-        for (auto& future : fds) {
-            try {
-                auto codec = future.get();
-                if (!first_exception) {
-                    field_datas.emplace_back(codec->GetFieldData());
-                }
-            } catch (...) {
-                if (!first_exception) {
-                    first_exception = std::current_exception();
-                }
-            }
-        }
-        if (first_exception) {
-            std::rethrow_exception(first_exception);
-        }
+        ProcessFuturesInOrder(fds, [&](std::unique_ptr<DataCodec> codec) {
+            field_datas.emplace_back(codec->GetFieldData());
+        });
     };
 
     auto parallel_degree =
