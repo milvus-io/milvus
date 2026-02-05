@@ -172,7 +172,15 @@ func (s replicateService) overwriteCreateCollectionMessage(sourceCluster *replic
 // overwriteAlterReplicateConfigMessage overwrites the alter replicate configuration message.
 func (s replicateService) overwriteAlterReplicateConfigMessage(currentReplicateConfig *replicateutil.ConfigHelper, msg message.ReplicateMutableMessage) error {
 	alterReplicateConfigMsg := message.MustAsMutableAlterReplicateConfigMessageV2(msg)
-	cfg := alterReplicateConfigMsg.Header().ReplicateConfiguration
+	header := alterReplicateConfigMsg.Header()
+
+	// Check ignore field - if true, skip processing
+	// This is used for incomplete switchover messages that should be ignored after force promote
+	if header.Ignore {
+		return nil
+	}
+
+	cfg := header.ReplicateConfiguration
 	_, err := replicateutil.NewConfigHelper(s.clusterID, cfg)
 	if err == nil {
 		return nil

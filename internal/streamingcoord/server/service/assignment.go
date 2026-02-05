@@ -72,6 +72,12 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 		replicateutil.ConfigLogField(config),
 	)
 
+	// Force promote path - promotes secondary cluster to standalone primary
+	// Check this BEFORE normal validation since force promote requires empty config
+	if req.GetForcePromote() {
+		return s.handleForcePromote(ctx, config)
+	}
+
 	// check if the configuration is same.
 	// so even if current cluster is not primary, we can still make a idempotent success result.
 	if _, err := s.validateReplicateConfiguration(ctx, config); err != nil {
@@ -80,11 +86,6 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 			return &streamingpb.UpdateReplicateConfigurationResponse{}, nil
 		}
 		return nil, err
-	}
-
-	// Force promote path - promotes secondary cluster to standalone primary
-	if req.GetForcePromote() {
-		return s.handleForcePromote(ctx, config)
 	}
 
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
@@ -190,53 +191,31 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 	return b, nil
 }
 
-// validateForcePromoteConfiguration validates that the force promote configuration is safe.
-// Requirements:
-// 1. Must contain ONLY the current cluster
-// 2. Must have NO topology (no replication relationships)
-func validateForcePromoteConfiguration(config *commonpb.ReplicateConfiguration, currentClusterID string) error {
-	// Use config helper to validate the configuration structure
-	helper, err := replicateutil.NewConfigHelper(currentClusterID, config)
-	if err != nil {
-		return status.NewInvaildArgument("invalid replicate configuration for force promote: %v", err)
-	}
-
-	// Check that configuration contains exactly one cluster (the current cluster)
-	if len(config.Clusters) != 1 {
-		return status.NewInvaildArgument(
-			"force promote requires configuration with exactly one cluster (current cluster only), got %d clusters",
-			len(config.Clusters))
-	}
-
-	// Check that the single cluster is the current cluster
-	if config.Clusters[0].ClusterId != currentClusterID {
-		return status.NewInvaildArgument(
-			"force promote requires configuration with only current cluster %s, got cluster %s",
-			currentClusterID,
-			config.Clusters[0].ClusterId)
-	}
-
-	// Check that there is NO topology (no replication)
-	if len(config.CrossClusterTopology) > 0 {
-		return status.NewInvaildArgument(
-			"force promote requires configuration with no topology (single primary cluster), got %d topology edges",
-			len(config.CrossClusterTopology))
-	}
-
-	// Verify the cluster role is primary (should be true for single cluster with no topology)
-	if helper.GetCurrentCluster().Role() != replicateutil.RolePrimary {
-		return status.NewInvaildArgument("force promote configuration must result in current cluster being primary")
-	}
-
-	return nil
-}
-
 // handleForcePromote handles force promote logic for replicate configuration.
 // It promotes a secondary cluster to standalone primary immediately without waiting for CDC replication.
 func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *commonpb.ReplicateConfiguration) (*streamingpb.UpdateReplicateConfigurationResponse, error) {
 	log.Ctx(ctx).Warn("Force promote replicate configuration requested")
 
-	// VALIDATION 1: Must be a secondary cluster (not primary)
+	// VALIDATION 1: Force promote requires empty cluster and topology fields
+	// The configuration will be constructed from the current cluster's existing meta
+	if config.Clusters != nil || config.CrossClusterTopology != nil {
+		return nil, status.NewInvaildArgument(
+			"force promote requires empty cluster and topology fields; it promotes the cluster to primary automatically")
+	}
+
+	// Use WithSecondaryClusterResourceKey to:
+	// 1. Acquire exclusive cluster-level resource key
+	// 2. Verify the cluster is secondary (not primary)
+	broadcaster, err := broadcast.StartBroadcastWithSecondaryClusterResourceKey(ctx)
+	if err != nil {
+		if errors.Is(err, broadcast.ErrNotSecondary) {
+			return nil, status.NewInvaildArgument("force promote can only be used on secondary clusters, current cluster is primary")
+		}
+		return nil, err
+	}
+	defer broadcaster.Close()
+
+	// Get current cluster info to construct the force promote config
 	balancer, err := balance.GetWithContext(ctx)
 	if err != nil {
 		return nil, err
@@ -250,44 +229,36 @@ func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *
 	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 	currentConfig := latestAssignment.ReplicateConfiguration
 
-	// Check if current cluster is primary by attempting to acquire cluster lock
-	// Only non-primary clusters should use force promote
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
-	if err == nil {
-		// Successfully acquired lock = we ARE primary cluster
-		broadcaster.Close()
-		return nil, status.NewInvaildArgument("force promote can only be used on secondary clusters, current cluster is primary")
-	}
-	if !errors.Is(err, broadcast.ErrNotPrimary) {
-		// Some other error, not the expected ErrNotPrimary
-		return nil, err
-	}
-	// We got ErrNotPrimary, which is what we expect for secondary cluster - continue
-
-	// VALIDATION 2: New config must contain ONLY current cluster and no topology
-	if err := validateForcePromoteConfiguration(config, currentClusterID); err != nil {
-		return nil, err
+	// Construct the standalone primary configuration from existing meta
+	// This configuration makes the current cluster a standalone primary with no replication
+	pchannels := lo.MapToSlice(latestAssignment.PChannelView.Channels, func(_ channel.ChannelID, ch *channel.PChannelMeta) string {
+		return ch.Name()
+	})
+	forcePromoteConfig := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{
+				ClusterId: currentClusterID,
+				Pchannels: pchannels,
+			},
+		},
+		CrossClusterTopology: nil, // No topology means standalone primary
 	}
 
-	// Double check if configuration is same
-	if proto.Equal(config, currentConfig) {
+	// Double check if configuration is same (already standalone primary)
+	if proto.Equal(forcePromoteConfig, currentConfig) {
 		log.Ctx(ctx).Info("configuration is same in force promote, ignored")
 		return &streamingpb.UpdateReplicateConfigurationResponse{}, nil
 	}
 
 	// Validate the configuration using existing validator
-	controlChannel := streaming.WAL().ControlChannel()
-	pchannels := lo.MapToSlice(latestAssignment.PChannelView.Channels, func(_ channel.ChannelID, channel *channel.PChannelMeta) string {
-		return channel.Name()
-	})
-
-	validator := replicateutil.NewReplicateConfigValidator(config, currentConfig, currentClusterID, pchannels)
+	validator := replicateutil.NewReplicateConfigValidator(forcePromoteConfig, currentConfig, currentClusterID, pchannels)
 	if err := validator.Validate(); err != nil {
 		log.Ctx(ctx).Warn("Force promote replicate configuration validation failed", zap.Error(err))
 		return nil, err
 	}
 
 	// Create the AlterReplicateConfigMessage with force promote flag
+	controlChannel := streaming.WAL().ControlChannel()
 	broadcastPChannels := lo.Map(pchannels, func(pchannel string, _ int) string {
 		if funcutil.IsOnPhysicalChannel(controlChannel, pchannel) {
 			return controlChannel
@@ -297,126 +268,66 @@ func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *
 
 	msg := message.NewAlterReplicateConfigMessageBuilderV2().
 		WithHeader(&message.AlterReplicateConfigMessageHeader{
-			ReplicateConfiguration: config,
+			ReplicateConfiguration: forcePromoteConfig,
 			ForcePromote:           true, // marks as force promote
 		}).
 		WithBody(&message.AlterReplicateConfigMessageBody{}).
-		WithBroadcast(broadcastPChannels).
+		WithBroadcast(broadcastPChannels, message.OptBuildBroadcastAckSyncUp()). // Disable fast DDL ack
 		MustBuildBroadcast()
 
-	// Use Broadcast().Append() to broadcast the message
-	// This properly broadcasts to all vchannels and handles resource keys
-	broadcastService := streaming.WAL().Broadcast()
-	broadcastResult, err := broadcastService.Append(ctx, msg)
+	// Use Broadcast() to broadcast the message
+	// The ACK callback will handle DDL fixing and meta saving
+	_, err = broadcaster.Broadcast(ctx, msg)
 	if err != nil {
 		log.Ctx(ctx).Error("Failed to broadcast force promote AlterReplicateConfigMessage", zap.Error(err))
 		return nil, err
 	}
 
-	// Convert types.BroadcastAppendResult to message.BroadcastResultAlterReplicateConfigMessageV2
-	msgAppendResults := make(map[string]*message.AppendResult)
-	for vchannel, appendResult := range broadcastResult.AppendResults {
-		msgAppendResults[vchannel] = &message.AppendResult{
-			MessageID:              appendResult.MessageID,
-			LastConfirmedMessageID: appendResult.LastConfirmedMessageID,
-			TimeTick:               appendResult.TimeTick,
-		}
-	}
-
-	result := message.BroadcastResultAlterReplicateConfigMessageV2{
-		Message: message.MustAsSpecializedBroadcastMessage[*message.AlterReplicateConfigMessageHeader, *message.AlterReplicateConfigMessageBody](msg),
-		Results: msgAppendResults,
-	}
-
-	// Apply the configuration using the normal update method
-	// The channel manager will detect force promote flag from message header
-	if err := balancer.UpdateReplicateConfiguration(ctx, result); err != nil {
-		return nil, err
-	}
-
-	log.Ctx(ctx).Info("Force promote replicate configuration completed successfully")
+	log.Ctx(ctx).Info("Force promote replicate configuration broadcast completed successfully")
 	return &streamingpb.UpdateReplicateConfigurationResponse{}, nil
 }
 
 // alterReplicateConfiguration puts the replicate configuration into the balancer.
 // It's a callback function of the broadcast service.
 func (s *assignmentServiceImpl) alterReplicateConfiguration(ctx context.Context, result message.BroadcastResultAlterReplicateConfigMessageV2) error {
+	header := result.Message.Header()
+
+	// Check ignore field first - skip all processing if true
+	// This is used for incomplete switchover messages that should be ignored after force promote
+	if header.Ignore {
+		log.Ctx(ctx).Info("AlterReplicateConfig message has ignore flag set, skipping processing",
+			zap.Bool("forcePromote", header.ForcePromote))
+		return nil
+	}
+
 	balancer, err := balance.GetWithContext(ctx)
 	if err != nil {
 		return err
 	}
 
-	// Update the configuration first
+	// Check if this is a force promote by looking at the message header
+	isForcePromote := header.ForcePromote
+
+	// For force promote: DDL fixing FIRST, then save meta
+	// This ensures incomplete broadcasts are supplemented with ignore=true before
+	// the force promote configuration is saved
+	if isForcePromote {
+		log.Ctx(ctx).Info("Force promote callback, fixing incomplete broadcasts first")
+
+		if err := broadcast.FixIncompleteBroadcastsForForcePromote(ctx); err != nil {
+			log.Ctx(ctx).Warn("Failed to fix incomplete broadcasts for force promote", zap.Error(err))
+			return err
+		}
+
+		log.Ctx(ctx).Info("Completed fixing incomplete broadcasts, now updating configuration")
+	}
+
+	// Update the configuration
 	if err := balancer.UpdateReplicateConfiguration(ctx, result); err != nil {
 		return err
 	}
 
-	// Check if this is a force promote by looking at the message header
-	isForcePromote := result.Message.Header().ForcePromote
-
-	// If this is a force promote, supplement incomplete broadcasts
-	if isForcePromote {
-		log.Ctx(ctx).Info("Force promote completed, supplementing incomplete broadcasts")
-
-		if err := s.supplementIncompleteBroadcasts(ctx); err != nil {
-			log.Ctx(ctx).Warn("Failed to supplement incomplete broadcasts", zap.Error(err))
-			return err
-		}
-
-		log.Ctx(ctx).Info("Completed supplementing incomplete broadcasts")
-	}
-
 	return nil
-}
-
-// supplementIncompleteBroadcasts supplements any incomplete broadcast messages
-// by re-sending to vchannels that haven't received them.
-func (s *assignmentServiceImpl) supplementIncompleteBroadcasts(ctx context.Context) error {
-	log.Ctx(ctx).Info("Supplementing incomplete broadcasts after force promote")
-
-	// Get broadcaster to access pending tasks
-	broadcaster, err := broadcast.GetWithContext(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to get broadcaster")
-	}
-
-	// Get all pending broadcast messages
-	pendingMessages := broadcaster.GetPendingBroadcastMessages()
-	if len(pendingMessages) == 0 {
-		log.Ctx(ctx).Info("No pending broadcast messages to supplement")
-		return nil
-	}
-
-	log.Ctx(ctx).Info("Found pending broadcast messages to supplement",
-		zap.Int("pendingCount", len(pendingMessages)))
-
-	// Append pending messages to their respective vchannels
-	appendResults := streaming.WAL().AppendMessages(ctx, pendingMessages...)
-
-	// Check for errors and count successes
-	var lastResultErr error
-	supplementCount := 0
-	failureCount := 0
-	for i, result := range appendResults.Responses {
-		if result.Error != nil {
-			log.Ctx(ctx).Warn("Failed to supplement message",
-				zap.String("vchannel", pendingMessages[i].VChannel()),
-				zap.Error(result.Error))
-			failureCount++
-			lastResultErr = result.Error
-			continue
-		}
-		supplementCount++
-	}
-
-	log.Ctx(ctx).Info("Completed supplementing incomplete broadcasts",
-		zap.Int("supplementCount", supplementCount),
-		zap.Int("failureCount", failureCount),
-		zap.Int("totalPending", len(pendingMessages)),
-		zap.Error(lastResultErr),
-	)
-
-	return lastResultErr
 }
 
 // UpdateWALBalancePolicy is used to update the WAL balance policy.
