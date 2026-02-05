@@ -11,6 +11,10 @@
 
 #include <gtest/gtest.h>
 
+#include "common/Schema.h"
+#include "index/Meta.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/index/index_factory.h"
 #include "segcore/SegmentLoadInfo.h"
 
 using namespace milvus;
@@ -20,6 +24,23 @@ class SegmentLoadInfoTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
+        // Setup schema with test fields (sequential field IDs starting from 100)
+        schema_ = std::make_shared<Schema>();
+        // Field IDs: 100=pk, 101=vec, 102=json, 103=varchar, 104-110=additional fields
+        schema_->AddDebugField("pk", DataType::INT64);
+        schema_->AddDebugField(
+            "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+        schema_->AddDebugField("json_field", DataType::JSON);
+        schema_->AddDebugField("bm25_field", DataType::JSON);
+        schema_->AddDebugField("group_field", DataType::INT64);
+        schema_->AddDebugField("child_field1", DataType::FLOAT);
+        schema_->AddDebugField("child_field2", DataType::FLOAT);
+        schema_->AddDebugField("child_field3", DataType::FLOAT);
+        schema_->AddDebugField("extra_field1", DataType::INT64);
+        schema_->AddDebugField("extra_field2", DataType::FLOAT);
+        schema_->AddDebugField("extra_field3", DataType::FLOAT);
+        schema_->set_primary_field_id(FieldId(100));
+
         // Setup a basic SegmentLoadInfo proto
         proto_.set_segmentid(12345);
         proto_.set_partitionid(100);
@@ -38,7 +59,7 @@ class SegmentLoadInfoTest : public ::testing::Test {
         proto_.add_compactionfrom(111);
         proto_.add_compactionfrom(222);
 
-        // Add index info
+        // Add index info (field 101=vec, field 102=json_field)
         auto* index_info = proto_.add_index_infos();
         index_info->set_fieldid(101);
         index_info->set_indexid(1001);
@@ -46,13 +67,21 @@ class SegmentLoadInfoTest : public ::testing::Test {
         index_info->set_index_version(1);
         index_info->add_index_file_paths("/path/to/index1");
         index_info->add_index_file_paths("/path/to/index2");
+        // Add required index_type parameter for vector field
+        auto* index_param1 = index_info->add_index_params();
+        index_param1->set_key("index_type");
+        index_param1->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
 
         auto* index_info2 = proto_.add_index_infos();
         index_info2->set_fieldid(102);
         index_info2->set_indexid(1002);
         index_info2->add_index_file_paths("/path/to/index3");
+        // Add required index_type parameter for scalar field
+        auto* index_param2 = index_info2->add_index_params();
+        index_param2->set_key("index_type");
+        index_param2->set_value(milvus::index::INVERTED_INDEX_TYPE);
 
-        // Add binlog paths
+        // Add binlog paths (field 101)
         auto* binlog = proto_.add_binlog_paths();
         binlog->set_fieldid(101);
         auto* log1 = binlog->add_binlogs();
@@ -62,11 +91,11 @@ class SegmentLoadInfoTest : public ::testing::Test {
         log2->set_log_path("/path/to/binlog2");
         log2->set_entries_num(500);
 
-        // Add column group binlog
+        // Add column group binlog (field 104 with child fields 105, 106)
         auto* group_binlog = proto_.add_binlog_paths();
-        group_binlog->set_fieldid(200);
-        group_binlog->add_child_fields(201);
-        group_binlog->add_child_fields(202);
+        group_binlog->set_fieldid(104);
+        group_binlog->add_child_fields(105);
+        group_binlog->add_child_fields(106);
         auto* group_log = group_binlog->add_binlogs();
         group_log->set_log_path("/path/to/group_binlog");
         group_log->set_entries_num(1000);
@@ -101,6 +130,7 @@ class SegmentLoadInfoTest : public ::testing::Test {
         bm25_binlog->set_log_path("/path/to/bm25log");
     }
 
+    SchemaPtr schema_;
     proto::segcore::SegmentLoadInfo proto_;
 };
 
@@ -112,7 +142,7 @@ TEST_F(SegmentLoadInfoTest, DefaultConstructor) {
 }
 
 TEST_F(SegmentLoadInfoTest, ConstructFromProto) {
-    SegmentLoadInfo info(proto_);
+    SegmentLoadInfo info(proto_, schema_);
 
     EXPECT_FALSE(info.IsEmpty());
     EXPECT_EQ(info.GetSegmentID(), 12345);
@@ -131,7 +161,7 @@ TEST_F(SegmentLoadInfoTest, ConstructFromProto) {
 }
 
 TEST_F(SegmentLoadInfoTest, MoveConstructor) {
-    SegmentLoadInfo info1(proto_);
+    SegmentLoadInfo info1(proto_, schema_);
     SegmentLoadInfo info2(std::move(info1));
 
     EXPECT_EQ(info2.GetSegmentID(), 12345);
@@ -139,7 +169,7 @@ TEST_F(SegmentLoadInfoTest, MoveConstructor) {
 }
 
 TEST_F(SegmentLoadInfoTest, CopyAssignment) {
-    SegmentLoadInfo info1(proto_);
+    SegmentLoadInfo info1(proto_, schema_);
     SegmentLoadInfo info2;
     info2 = info1;
 
@@ -149,14 +179,14 @@ TEST_F(SegmentLoadInfoTest, CopyAssignment) {
 
 TEST_F(SegmentLoadInfoTest, SetMethod) {
     SegmentLoadInfo info;
-    info.Set(proto_);
+    info.Set(proto_, schema_);
 
     EXPECT_EQ(info.GetSegmentID(), 12345);
     EXPECT_EQ(info.GetNumOfRows(), 10000);
 }
 
 TEST_F(SegmentLoadInfoTest, CompactionInfo) {
-    SegmentLoadInfo info(proto_);
+    SegmentLoadInfo info(proto_, schema_);
 
     EXPECT_TRUE(info.IsCompacted());
     EXPECT_EQ(info.GetCompactionFromCount(), 2);
@@ -165,7 +195,7 @@ TEST_F(SegmentLoadInfoTest, CompactionInfo) {
 }
 
 TEST_F(SegmentLoadInfoTest, IndexInfo) {
-    SegmentLoadInfo info(proto_);
+    SegmentLoadInfo info(proto_, schema_);
 
     EXPECT_EQ(info.GetIndexInfoCount(), 2);
     EXPECT_TRUE(info.HasIndexInfo(FieldId(101)));
@@ -174,11 +204,7 @@ TEST_F(SegmentLoadInfoTest, IndexInfo) {
 
     auto index_infos = info.GetFieldIndexInfos(FieldId(101));
     EXPECT_EQ(index_infos.size(), 1);
-    EXPECT_EQ(index_infos[0]->indexid(), 1001);
-
-    auto first_index = info.GetFirstFieldIndexInfo(FieldId(101));
-    EXPECT_NE(first_index, nullptr);
-    EXPECT_EQ(first_index->buildid(), 2001);
+    EXPECT_EQ(index_infos[0].index_id, 1001);
 
     auto indexed_fields = info.GetIndexedFieldIds();
     EXPECT_EQ(indexed_fields.size(), 2);
@@ -188,17 +214,14 @@ TEST_F(SegmentLoadInfoTest, IndexInfo) {
     // Test non-existent field
     auto empty_infos = info.GetFieldIndexInfos(FieldId(999));
     EXPECT_TRUE(empty_infos.empty());
-
-    auto null_index = info.GetFirstFieldIndexInfo(FieldId(999));
-    EXPECT_EQ(null_index, nullptr);
 }
 
 TEST_F(SegmentLoadInfoTest, BinlogInfo) {
-    SegmentLoadInfo info(proto_);
+    SegmentLoadInfo info(proto_, schema_);
 
     EXPECT_EQ(info.GetBinlogPathCount(), 2);
     EXPECT_TRUE(info.HasBinlogPath(FieldId(101)));
-    EXPECT_TRUE(info.HasBinlogPath(FieldId(200)));
+    EXPECT_TRUE(info.HasBinlogPath(FieldId(104)));
     EXPECT_FALSE(info.HasBinlogPath(FieldId(999)));
 
     auto binlog = info.GetFieldBinlog(FieldId(101));
@@ -222,23 +245,23 @@ TEST_F(SegmentLoadInfoTest, BinlogInfo) {
 }
 
 TEST_F(SegmentLoadInfoTest, ColumnGroup) {
-    SegmentLoadInfo info(proto_);
+    SegmentLoadInfo info(proto_, schema_);
 
-    EXPECT_TRUE(info.IsColumnGroup(FieldId(200)));
+    EXPECT_TRUE(info.IsColumnGroup(FieldId(104)));
     EXPECT_FALSE(info.IsColumnGroup(FieldId(101)));
     EXPECT_FALSE(info.IsColumnGroup(FieldId(999)));
 
-    auto child_fields = info.GetChildFieldIds(FieldId(200));
+    auto child_fields = info.GetChildFieldIds(FieldId(104));
     EXPECT_EQ(child_fields.size(), 2);
-    EXPECT_EQ(child_fields[0], 201);
-    EXPECT_EQ(child_fields[1], 202);
+    EXPECT_EQ(child_fields[0], 105);
+    EXPECT_EQ(child_fields[1], 106);
 
     auto empty_children = info.GetChildFieldIds(FieldId(101));
     EXPECT_TRUE(empty_children.empty());
 }
 
 TEST_F(SegmentLoadInfoTest, StatsAndDeltaLogs) {
-    SegmentLoadInfo info(proto_);
+    SegmentLoadInfo info(proto_, schema_);
 
     EXPECT_EQ(info.GetStatslogCount(), 1);
     EXPECT_EQ(info.GetDeltalogCount(), 1);
@@ -251,7 +274,7 @@ TEST_F(SegmentLoadInfoTest, StatsAndDeltaLogs) {
 }
 
 TEST_F(SegmentLoadInfoTest, TextStats) {
-    SegmentLoadInfo info(proto_);
+    SegmentLoadInfo info(proto_, schema_);
 
     EXPECT_TRUE(info.HasTextStatsLog(101));
     EXPECT_FALSE(info.HasTextStatsLog(999));
@@ -266,7 +289,7 @@ TEST_F(SegmentLoadInfoTest, TextStats) {
 }
 
 TEST_F(SegmentLoadInfoTest, JsonKeyStats) {
-    SegmentLoadInfo info(proto_);
+    SegmentLoadInfo info(proto_, schema_);
 
     EXPECT_TRUE(info.HasJsonKeyStatsLog(102));
     EXPECT_FALSE(info.HasJsonKeyStatsLog(999));
@@ -280,7 +303,7 @@ TEST_F(SegmentLoadInfoTest, JsonKeyStats) {
 }
 
 TEST_F(SegmentLoadInfoTest, Bm25Logs) {
-    SegmentLoadInfo info(proto_);
+    SegmentLoadInfo info(proto_, schema_);
 
     EXPECT_EQ(info.GetBm25logCount(), 1);
     const auto& bm25log = info.GetBm25log(0);
@@ -288,7 +311,7 @@ TEST_F(SegmentLoadInfoTest, Bm25Logs) {
 }
 
 TEST_F(SegmentLoadInfoTest, UnderlyingProtoAccess) {
-    SegmentLoadInfo info(proto_);
+    SegmentLoadInfo info(proto_, schema_);
 
     const auto& proto = info.GetProto();
     EXPECT_EQ(proto.segmentid(), 12345);
@@ -305,7 +328,7 @@ TEST_F(SegmentLoadInfoTest, EmptyManifestPath) {
     empty_proto.set_segmentid(1);
     empty_proto.set_num_of_rows(100);
 
-    SegmentLoadInfo info(empty_proto);
+    SegmentLoadInfo info(empty_proto, schema_);
     EXPECT_FALSE(info.HasManifestPath());
     EXPECT_TRUE(info.GetManifestPath().empty());
 }
@@ -320,9 +343,479 @@ TEST_F(SegmentLoadInfoTest, IndexWithoutFiles) {
     index_info->set_indexid(1001);
     // No index_file_paths added
 
-    SegmentLoadInfo info(test_proto);
+    SegmentLoadInfo info(test_proto, schema_);
 
     // Index without files should not be in cache
     EXPECT_FALSE(info.HasIndexInfo(FieldId(101)));
     EXPECT_EQ(info.GetIndexInfoCount(), 1);  // Proto still has it
+}
+
+// ==================== GetLoadDiff Tests ====================
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffWithEmptyInfo) {
+    // Empty SegmentLoadInfo should return empty diff
+    SegmentLoadInfo empty_info;
+    auto diff = empty_info.GetLoadDiff();
+
+    EXPECT_FALSE(diff.HasChanges());
+    EXPECT_TRUE(diff.indexes_to_load.empty());
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
+    EXPECT_TRUE(diff.indexes_to_drop.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+    EXPECT_FALSE(diff.manifest_updated);
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffWithIndexesOnly) {
+    // Create info with only indexes (no binlogs, no manifest)
+    proto::segcore::SegmentLoadInfo test_proto;
+    test_proto.set_segmentid(100);
+    test_proto.set_num_of_rows(1000);
+
+    // Add two indexes
+    auto* index1 = test_proto.add_index_infos();
+    index1->set_fieldid(101);
+    index1->set_indexid(1001);
+    index1->add_index_file_paths("/path/to/index1");
+    auto* index_param1 = index1->add_index_params();
+    index_param1->set_key("index_type");
+    index_param1->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+
+    auto* index2 = test_proto.add_index_infos();
+    index2->set_fieldid(102);
+    index2->set_indexid(1002);
+    index2->add_index_file_paths("/path/to/index2");
+    auto* index_param2 = index2->add_index_params();
+    index_param2->set_key("index_type");
+    index_param2->set_value(milvus::index::INVERTED_INDEX_TYPE);
+
+    SegmentLoadInfo info(test_proto, schema_);
+    auto diff = info.GetLoadDiff();
+    std::cout << diff.ToString() << "\n";
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Both indexes should be in indexes_to_load
+    EXPECT_EQ(diff.indexes_to_load.size(), 2);
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(101)) > 0);
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(102)) > 0);
+    EXPECT_EQ(diff.indexes_to_load[FieldId(101)].size(), 1);
+    EXPECT_EQ(diff.indexes_to_load[FieldId(102)].size(), 1);
+
+    // No drops or other changes
+    EXPECT_TRUE(diff.indexes_to_drop.empty());
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffWithBinlogsOnly) {
+    // Create info with only binlogs (no indexes, no manifest)
+    proto::segcore::SegmentLoadInfo test_proto;
+    test_proto.set_segmentid(100);
+    test_proto.set_num_of_rows(1000);
+
+    // Add binlog with child fields (field 104 with children 105, 106)
+    auto* binlog = test_proto.add_binlog_paths();
+    binlog->set_fieldid(104);
+    binlog->add_child_fields(105);
+    binlog->add_child_fields(106);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/binlog");
+    log->set_entries_num(500);
+
+    SegmentLoadInfo info(test_proto, schema_);
+    auto diff = info.GetLoadDiff();
+    std::cout << diff.ToString() << "\n";
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Binlogs should be in binlogs_to_load
+    EXPECT_EQ(diff.binlogs_to_load.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first.size(), 2);  // 2 child fields
+    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(), 105);
+    EXPECT_EQ(diff.binlogs_to_load[0].first[1].get(), 106);
+
+    // No index changes
+    EXPECT_TRUE(diff.indexes_to_load.empty());
+    EXPECT_TRUE(diff.indexes_to_drop.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffWithIndexesAndBinlogs) {
+    // Create info with both indexes and binlogs
+    proto::segcore::SegmentLoadInfo test_proto;
+    test_proto.set_segmentid(100);
+    test_proto.set_num_of_rows(1000);
+
+    // Add index
+    auto* index = test_proto.add_index_infos();
+    index->set_fieldid(101);
+    index->set_indexid(1001);
+    index->add_index_file_paths("/path/to/index");
+    auto* index_param = index->add_index_params();
+    index_param->set_key("index_type");
+    index_param->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+
+    // Add binlog with child fields (field 104 with child 105)
+    auto* binlog = test_proto.add_binlog_paths();
+    binlog->set_fieldid(104);
+    binlog->add_child_fields(105);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/binlog");
+    log->set_entries_num(500);
+
+    SegmentLoadInfo info(test_proto, schema_);
+    auto diff = info.GetLoadDiff();
+    std::cout << diff.ToString() << "\n";
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Index should be in indexes_to_load
+    EXPECT_EQ(diff.indexes_to_load.size(), 1);
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(101)) > 0);
+
+    // Binlog should be in binlogs_to_load
+    EXPECT_EQ(diff.binlogs_to_load.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(), 105);
+
+    // No drops
+    EXPECT_TRUE(diff.indexes_to_drop.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffIgnoresIndexesWithoutFiles) {
+    // Indexes without files should be ignored in GetLoadDiff
+    proto::segcore::SegmentLoadInfo test_proto;
+    test_proto.set_segmentid(100);
+    test_proto.set_num_of_rows(1000);
+
+    // Add index with files
+    auto* index1 = test_proto.add_index_infos();
+    index1->set_fieldid(101);
+    index1->set_indexid(1001);
+    index1->add_index_file_paths("/path/to/index");
+    auto* index_param1 = index1->add_index_params();
+    index_param1->set_key("index_type");
+    index_param1->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+
+    // Add index without files - should be ignored
+    auto* index2 = test_proto.add_index_infos();
+    index2->set_fieldid(102);
+    index2->set_indexid(1002);
+    // No index_file_paths added
+
+    SegmentLoadInfo info(test_proto, schema_);
+    auto diff = info.GetLoadDiff();
+    std::cout << diff.ToString() << "\n";
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Only index with files should be in indexes_to_load
+    EXPECT_EQ(diff.indexes_to_load.size(), 1);
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(101)) > 0);
+    EXPECT_FALSE(diff.indexes_to_load.count(FieldId(102)) > 0);
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffWithMultipleIndexesPerField) {
+    // A field can have multiple indexes (e.g., JSON field with multiple paths)
+    proto::segcore::SegmentLoadInfo test_proto;
+    test_proto.set_segmentid(100);
+    test_proto.set_num_of_rows(1000);
+
+    // Add two indexes for the same field
+    auto* index1 = test_proto.add_index_infos();
+    index1->set_fieldid(101);
+    index1->set_indexid(1001);
+    index1->add_index_file_paths("/path/to/index1");
+    auto* index_param1 = index1->add_index_params();
+    index_param1->set_key("index_type");
+    index_param1->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+
+    auto* index2 = test_proto.add_index_infos();
+    index2->set_fieldid(101);
+    index2->set_indexid(1002);
+    index2->add_index_file_paths("/path/to/index2");
+    auto* index_param2 = index2->add_index_params();
+    index_param2->set_key("index_type");
+    index_param2->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+
+    SegmentLoadInfo info(test_proto, schema_);
+    auto diff = info.GetLoadDiff();
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Both indexes should be in indexes_to_load for the same field
+    EXPECT_EQ(diff.indexes_to_load.size(), 1);
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(101)) > 0);
+    EXPECT_EQ(diff.indexes_to_load[FieldId(101)].size(), 2);
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffWithMultipleBinlogGroups) {
+    // Test with multiple binlog groups
+    proto::segcore::SegmentLoadInfo test_proto;
+    test_proto.set_segmentid(100);
+    test_proto.set_num_of_rows(1000);
+
+    // Add first binlog group (field 104 with children 105, 106)
+    auto* binlog1 = test_proto.add_binlog_paths();
+    binlog1->set_fieldid(104);
+    binlog1->add_child_fields(105);
+    binlog1->add_child_fields(106);
+    auto* log1 = binlog1->add_binlogs();
+    log1->set_log_path("/path/to/binlog1");
+    log1->set_entries_num(500);
+
+    // Add second binlog group (field 108 with child 109)
+    auto* binlog2 = test_proto.add_binlog_paths();
+    binlog2->set_fieldid(108);
+    binlog2->add_child_fields(109);
+    auto* log2 = binlog2->add_binlogs();
+    log2->set_log_path("/path/to/binlog2");
+    log2->set_entries_num(500);
+
+    SegmentLoadInfo info(test_proto, schema_);
+    auto diff = info.GetLoadDiff();
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Both binlog groups should be in binlogs_to_load
+    EXPECT_EQ(diff.binlogs_to_load.size(), 2);
+
+    // Check first group
+    EXPECT_EQ(diff.binlogs_to_load[0].first.size(), 2);
+    // Check second group
+    EXPECT_EQ(diff.binlogs_to_load[1].first.size(), 1);
+}
+
+// ==================== Legacy Format (v1) Tests ====================
+// Test binlogs without child_fields (v1/legacy format where group_id == field_id)
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffWithBinlogsLegacyFormat) {
+    // Create info with binlogs without child_fields (legacy/v1 format)
+    proto::segcore::SegmentLoadInfo test_proto;
+    test_proto.set_segmentid(100);
+    test_proto.set_num_of_rows(1000);
+
+    // Add binlog WITHOUT child_fields - this is the legacy format
+    auto* binlog = test_proto.add_binlog_paths();
+    binlog->set_fieldid(101);
+    // Note: no child_fields added - this triggers the legacy handling
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/binlog");
+    log->set_entries_num(500);
+
+    SegmentLoadInfo info(test_proto, schema_);
+    auto diff = info.GetLoadDiff();
+    std::cout << "Legacy format diff: " << diff.ToString() << "\n";
+
+    EXPECT_TRUE(diff.HasChanges());
+    // In legacy format, field_id itself is used as the child_id
+    EXPECT_EQ(diff.binlogs_to_load.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(),
+              101);  // field_id as child_id
+
+    // No index changes
+    EXPECT_TRUE(diff.indexes_to_load.empty());
+    EXPECT_TRUE(diff.indexes_to_drop.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffWithMultipleBinlogsLegacyFormat) {
+    // Test multiple binlogs in legacy format
+    proto::segcore::SegmentLoadInfo test_proto;
+    test_proto.set_segmentid(100);
+    test_proto.set_num_of_rows(1000);
+
+    // Add first binlog without child_fields
+    auto* binlog1 = test_proto.add_binlog_paths();
+    binlog1->set_fieldid(101);
+    auto* log1 = binlog1->add_binlogs();
+    log1->set_log_path("/path/to/binlog1");
+    log1->set_entries_num(500);
+
+    // Add second binlog without child_fields
+    auto* binlog2 = test_proto.add_binlog_paths();
+    binlog2->set_fieldid(102);
+    auto* log2 = binlog2->add_binlogs();
+    log2->set_log_path("/path/to/binlog2");
+    log2->set_entries_num(500);
+
+    SegmentLoadInfo info(test_proto, schema_);
+    auto diff = info.GetLoadDiff();
+
+    EXPECT_TRUE(diff.HasChanges());
+    EXPECT_EQ(diff.binlogs_to_load.size(), 2);
+    EXPECT_EQ(diff.binlogs_to_load[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(), 101);
+    EXPECT_EQ(diff.binlogs_to_load[1].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[1].first[0].get(), 102);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffWithBinlogsLegacyFormat) {
+    // Test ComputeDiff between two SegmentLoadInfos using legacy format
+
+    // Current: has field 101
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* binlog1 = current_proto.add_binlog_paths();
+    binlog1->set_fieldid(101);
+    auto* log1 = binlog1->add_binlogs();
+    log1->set_log_path("/path/to/binlog1");
+    log1->set_entries_num(500);
+
+    // New: has field 101 and 102
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog1 = new_proto.add_binlog_paths();
+    new_binlog1->set_fieldid(101);
+    auto* new_log1 = new_binlog1->add_binlogs();
+    new_log1->set_log_path("/path/to/binlog1");
+    new_log1->set_entries_num(500);
+
+    auto* new_binlog2 = new_proto.add_binlog_paths();
+    new_binlog2->set_fieldid(102);
+    auto* new_log2 = new_binlog2->add_binlogs();
+    new_log2->set_log_path("/path/to/binlog2");
+    new_log2->set_entries_num(500);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "ComputeDiff legacy format: " << diff.ToString() << "\n";
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Field 102 should be added
+    EXPECT_EQ(diff.binlogs_to_load.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(), 102);
+
+    // No fields should be dropped
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffDropFieldLegacyFormat) {
+    // Test ComputeDiff when dropping a field in legacy format
+
+    // Current: has fields 101 and 102
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    auto* binlog1 = current_proto.add_binlog_paths();
+    binlog1->set_fieldid(101);
+    auto* log1 = binlog1->add_binlogs();
+    log1->set_log_path("/path/to/binlog1");
+    log1->set_entries_num(500);
+
+    auto* binlog2 = current_proto.add_binlog_paths();
+    binlog2->set_fieldid(102);
+    auto* log2 = binlog2->add_binlogs();
+    log2->set_log_path("/path/to/binlog2");
+    log2->set_entries_num(500);
+
+    // New: only has field 101 (102 is dropped)
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+
+    auto* new_binlog1 = new_proto.add_binlog_paths();
+    new_binlog1->set_fieldid(101);
+    auto* new_log1 = new_binlog1->add_binlogs();
+    new_log1->set_log_path("/path/to/binlog1");
+    new_log1->set_entries_num(500);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.HasChanges());
+    // No new binlogs to load
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    // Field 102 should be dropped
+    EXPECT_EQ(diff.field_data_to_drop.size(), 1);
+    EXPECT_TRUE(diff.field_data_to_drop.count(FieldId(102)) > 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffMixedFormats) {
+    // Test ComputeDiff with mixed formats: legacy and column group
+
+    // Current: has field 101 (legacy) and column group 104 with child fields 105, 106
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    // Legacy format binlog
+    auto* binlog1 = current_proto.add_binlog_paths();
+    binlog1->set_fieldid(101);
+    auto* log1 = binlog1->add_binlogs();
+    log1->set_log_path("/path/to/binlog1");
+    log1->set_entries_num(500);
+
+    // Column group format binlog
+    auto* binlog2 = current_proto.add_binlog_paths();
+    binlog2->set_fieldid(104);
+    binlog2->add_child_fields(105);
+    binlog2->add_child_fields(106);
+    auto* log2 = binlog2->add_binlogs();
+    log2->set_log_path("/path/to/group_binlog");
+    log2->set_entries_num(1000);
+
+    // New: has all existing + new field 103 (legacy) + new field 107 in column group
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+
+    auto* new_binlog1 = new_proto.add_binlog_paths();
+    new_binlog1->set_fieldid(101);
+    auto* new_log1 = new_binlog1->add_binlogs();
+    new_log1->set_log_path("/path/to/binlog1");
+    new_log1->set_entries_num(500);
+
+    // New legacy field
+    auto* new_binlog3 = new_proto.add_binlog_paths();
+    new_binlog3->set_fieldid(103);
+    auto* new_log3 = new_binlog3->add_binlogs();
+    new_log3->set_log_path("/path/to/binlog3");
+    new_log3->set_entries_num(500);
+
+    // Updated column group with additional field
+    auto* new_binlog2 = new_proto.add_binlog_paths();
+    new_binlog2->set_fieldid(104);
+    new_binlog2->add_child_fields(105);
+    new_binlog2->add_child_fields(106);
+    new_binlog2->add_child_fields(107);  // New field added to group
+    auto* new_log2 = new_binlog2->add_binlogs();
+    new_log2->set_log_path("/path/to/group_binlog_new");
+    new_log2->set_entries_num(1500);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "Mixed format diff: " << diff.ToString() << "\n";
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Field 103 (legacy) and field 107 (in column group) should be loaded
+    EXPECT_EQ(diff.binlogs_to_load.size(), 2);
+
+    // No fields should be dropped
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffNoChangesLegacyFormat) {
+    // Test ComputeDiff when there are no changes (same binlogs)
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(101);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/binlog");
+    log->set_entries_num(500);
+
+    SegmentLoadInfo current_info(proto, schema_);
+    SegmentLoadInfo new_info(proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_FALSE(diff.HasChanges());
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
 }

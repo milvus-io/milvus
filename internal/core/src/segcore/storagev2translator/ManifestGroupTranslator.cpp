@@ -60,6 +60,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     const std::string& mmap_dir_path,
     int64_t num_fields,
     milvus::proto::common::LoadPriority load_priority,
+    bool eager_load,
     const std::string& warmup_policy)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
@@ -95,7 +96,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                     }
                     return false;
                 }(),
-                /* is_index */ false),
+                /* is_index */ false,
+                /* in_load_list*/ eager_load),
             /* support_eviction */ true),
       use_mmap_(use_mmap),
       mmap_populate_(mmap_populate),
