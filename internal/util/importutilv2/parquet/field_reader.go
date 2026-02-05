@@ -180,6 +180,12 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		}
 		data, err := ReadGeometryData(c, count)
 		return data, nil, err
+	case schemapb.DataType_Mol:
+		if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
+			return ReadNullableMolData(c, count)
+		}
+		data, err := ReadMolData(c, count)
+		return data, nil, err
 	case schemapb.DataType_Timestamptz:
 		if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
 			return ReadNullableTimestamptzData(c, count)
@@ -845,6 +851,56 @@ func ReadGeometryData(pcr *FieldReader, count int64) (any, error) {
 		wkbValues = append(wkbValues, wkbValue)
 	}
 	return wkbValues, nil
+}
+
+func ReadMolData(pcr *FieldReader, count int64) (any, error) {
+	// MOL field reads data from string array Parquet (SMILES format)
+	data, err := ReadStringData(pcr, count, false)
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		return nil, nil
+	}
+
+	pickleValues := make([][]byte, 0)
+	for _, smilesValue := range data.([]string) {
+		pickleValue, err := pkgcommon.ConvertSMILESToPickle(smilesValue)
+		if err != nil {
+			return nil, err
+		}
+		pickleValues = append(pickleValues, pickleValue)
+	}
+	return pickleValues, nil
+}
+
+func ReadNullableMolData(pcr *FieldReader, count int64) (any, []bool, error) {
+	// MOL field reads data from string array Parquet (SMILES format)
+	data, validData, err := readRawStringDataFromParquet(pcr, count)
+	if err != nil {
+		return nil, nil, err
+	}
+	if data == nil {
+		return nil, nil, nil
+	}
+	pickleValues := make([][]byte, 0)
+	defaultValueStr := pcr.field.GetDefaultValue().GetStringData()
+	defaultValue := []byte(nil)
+	if defaultValueStr != "" {
+		defaultValue, _ = pkgcommon.ConvertSMILESToPickle(defaultValueStr)
+	}
+	for i, smilesValue := range data {
+		if !validData[i] {
+			pickleValues = append(pickleValues, defaultValue)
+			continue
+		}
+		pickleValue, err := pkgcommon.ConvertSMILESToPickle(smilesValue)
+		if err != nil {
+			return nil, nil, err
+		}
+		pickleValues = append(pickleValues, pickleValue)
+	}
+	return pickleValues, validData, nil
 }
 
 func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
