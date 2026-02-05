@@ -212,7 +212,7 @@ class QueryContext : public Context {
         return executor_;
     }
 
-    const std::unordered_map<std::string, std::shared_ptr<BaseConfig>>&
+    const std::unordered_map<std::string, std::shared_ptr<Config>>&
     connector_configs() const {
         return connector_configs_;
     }
@@ -378,8 +378,7 @@ class QueryContext : public Context {
  private:
     folly::Executor* executor_;
     //folly::Executor::KeepAlive<> executor_keepalive_;
-    std::unordered_map<std::string, std::shared_ptr<BaseConfig>>
-        connector_configs_;
+    std::unordered_map<std::string, std::shared_ptr<Config>> connector_configs_;
     std::shared_ptr<QueryConfig> query_config_;
     std::string query_id_;
 
