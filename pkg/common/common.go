@@ -251,7 +251,6 @@ const (
 // common properties
 const (
 	MmapEnabledKey             = "mmap.enabled"
-	LazyLoadEnableKey          = "lazyload.enabled" // deprecated by warmup related params
 	LoadPriorityKey            = "load_priority"
 	PartitionKeyIsolationKey   = "partitionkey.isolation"
 	FieldSkipLoadKey           = "field.skipLoad"
@@ -439,24 +438,6 @@ func FieldHasMmapKey(schema *schemapb.CollectionSchema, fieldID int64) bool {
 				}
 				return false
 			}
-		}
-	}
-	return false
-}
-
-func HasLazyload(props []*commonpb.KeyValuePair) bool {
-	for _, kv := range props {
-		if kv.Key == LazyLoadEnableKey {
-			return true
-		}
-	}
-	return false
-}
-
-func IsCollectionLazyLoadEnabled(kvs ...*commonpb.KeyValuePair) bool {
-	for _, kv := range kvs {
-		if kv.Key == LazyLoadEnableKey && strings.ToLower(kv.Value) == "true" {
-			return true
 		}
 	}
 	return false

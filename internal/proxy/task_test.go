@@ -6145,11 +6145,6 @@ func TestHasPropInDeletekeys(t *testing.T) {
 		assert.Equal(t, common.MmapEnabledKey, hasPropInDeletekeys(keys))
 	})
 
-	t.Run("has lazyload key", func(t *testing.T) {
-		keys := []string{common.LazyLoadEnableKey}
-		assert.Equal(t, common.LazyLoadEnableKey, hasPropInDeletekeys(keys))
-	})
-
 	t.Run("has generic warmup key", func(t *testing.T) {
 		keys := []string{common.WarmupKey}
 		assert.Equal(t, common.WarmupKey, hasPropInDeletekeys(keys))
