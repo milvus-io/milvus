@@ -53,7 +53,8 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("collection_name", ["12-s", "12 s", "(mn)", "中文", "%$#", "español", "عربي", "हिंदी", "Русский"])
+    @pytest.mark.parametrize("collection_name",
+                             ["12-s", "12 s", "(mn)", "中文", "%$#", "español", "عربي", "हिंदी", "Русский"])
     def test_milvus_client_collection_invalid_collection_name(self, collection_name):
         """
         target: test fast create collection with invalid collection name
@@ -66,8 +67,9 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
             expected_msg = "collection name can only contain numbers, letters and underscores"
         else:
             expected_msg = "the first character of a collection name must be an underscore or letter"
-        
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {collection_name}. {expected_msg}: invalid parameter"}
+
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"Invalid collection name: {collection_name}. {expected_msg}: invalid parameter"}
         self.create_collection(client, collection_name, default_dim,
                                check_task=CheckTasks.err_res, check_items=error)
 
@@ -189,7 +191,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         method: specify auto_id=True for a non-primary int64 field
         expected: raise exception indicating auto_id can only be specified on primary key field
         """
-        client = self._client()        
+        client = self._client()
         # Create schema and try to add non-primary field with auto_id=True - this should raise exception
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         # Add primary key field
@@ -243,12 +245,11 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
                                check_task=CheckTasks.err_res, check_items=error)
         # Verify original collection's primary field is unchanged
         self.describe_collection(client, collection_name,
-                                check_task=CheckTasks.check_describe_collection_property,
-                                check_items={"collection_name": collection_name,
-                                             "dim": default_dim,
-                                             "id_name": "id"})
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "dim": default_dim,
+                                              "id_name": "id"})
         self.drop_collection(client, collection_name)
-
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric_type", [1, " ", "invalid"])
@@ -304,7 +305,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("unsupported_field_type", [
-        DataType.NONE, DataType.BOOL, DataType.INT8, DataType.INT16, DataType.INT32, 
+        DataType.NONE, DataType.BOOL, DataType.INT8, DataType.INT16, DataType.INT32,
         DataType.FLOAT, DataType.DOUBLE, DataType.STRING, DataType.JSON,
         DataType.ARRAY, DataType.GEOMETRY,
         DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR, DataType.SPARSE_FLOAT_VECTOR,
@@ -320,22 +321,22 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # Create schema with unsupported primary field type
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        if unsupported_field_type in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR, 
-                                     DataType.INT8_VECTOR, DataType.FLOAT16_VECTOR, 
-                                     DataType.BFLOAT16_VECTOR]:
+        if unsupported_field_type in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR,
+                                      DataType.INT8_VECTOR, DataType.FLOAT16_VECTOR,
+                                      DataType.BFLOAT16_VECTOR]:
             schema.add_field("unsupported_primary", unsupported_field_type, is_primary=True, dim=default_dim)
         elif unsupported_field_type == DataType.SPARSE_FLOAT_VECTOR:
             schema.add_field("unsupported_primary", unsupported_field_type, is_primary=True)
         elif unsupported_field_type == DataType.ARRAY:
-            schema.add_field("unsupported_primary", unsupported_field_type, is_primary=True, 
-                           element_type=DataType.INT64, max_capacity=100)
+            schema.add_field("unsupported_primary", unsupported_field_type, is_primary=True,
+                             element_type=DataType.INT64, max_capacity=100)
         else:
             schema.add_field("unsupported_primary", unsupported_field_type, is_primary=True)
         schema.add_field("vector_field", DataType.FLOAT_VECTOR, dim=default_dim)
         # Try to create collection - should fail here
         error = {ct.err_code: 1100, ct.err_msg: "Primary key type must be DataType.INT64 or DataType.VARCHAR"}
         self.create_collection(client, collection_name, schema=schema,
-                              check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("invalid_name", ["中文", "español", "عربي", "हिंदी", "Русский", "!@#$%^&*()", "123abc"])
@@ -357,9 +358,10 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
             expected_msg = "Field name can only contain numbers, letters, and underscores."
         else:
             expected_msg = "The first character of a field name must be an underscore or letter."
-        error = {ct.err_code: 1701, ct.err_msg: f"Invalid field name: {invalid_name}. {expected_msg}: field name invalid[field={invalid_name}]"}
+        error = {ct.err_code: 1701,
+                 ct.err_msg: f"Invalid field name: {invalid_name}. {expected_msg}: field name invalid[field={invalid_name}]"}
         self.create_collection(client, collection_name, schema=schema,
-                              check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("keyword", [
@@ -385,8 +387,8 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         # Attempt to create collection with invalid field name - should fail
         error = {ct.err_code: 1701, ct.err_msg: f"Invalid field name: {keyword}"}
         self.create_collection(client, collection_name, schema=schema,
-                             check_task=CheckTasks.err_res, check_items=error)
-    
+                               check_task=CheckTasks.err_res, check_items=error)
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_empty_fields(self):
         """
@@ -456,7 +458,6 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, schema=schema_4,
                                check_task=CheckTasks.err_res, check_items=error_fields_over_64)
 
-
     @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_collection_without_vectors(self):
         """
@@ -490,7 +491,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         schema.add_field("vector_field", vector_type)
         error = {ct.err_code: 1, ct.err_msg: "dimension is not defined in field type params"}
         self.create_collection(client, collection_name, schema=schema,
-                              check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("vector_type", [DataType.FLOAT_VECTOR, DataType.INT8_VECTOR, DataType.BINARY_VECTOR])
@@ -529,8 +530,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         error = {ct.err_code: 999, ct.err_msg: "Param primary_field must be int or str type"}
         # This should fail when creating schema with invalid primary_field type
         self.create_schema(client, enable_dynamic_field=False, primary_field=primary_field,
-                          check_task=CheckTasks.err_res, check_items=error)
-
+                           check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("is_primary", [None, 2, "string"])
@@ -547,7 +547,6 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         # Attempt to add a field with invalid is_primary value, expect error
         self.add_field(schema, "id", DataType.INT64, is_primary=is_primary,
                        check_task=CheckTasks.err_res, check_items=error)
-
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_collection_dup_field(self):
@@ -599,15 +598,15 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        
+
         # Try to create schema with None description
         schema = self.create_schema(client, enable_dynamic_field=False, description=None)[0]
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=default_dim)
-        
+
         error = {ct.err_code: 1100, ct.err_msg: "description [None] has type NoneType, but expected one of: bytes, str"}
         self.create_collection(client, collection_name, schema=schema,
-                                   check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_invalid_schema_multi_pk(self):
@@ -638,7 +637,8 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
                                check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("shards_num,error_type", [(ct.max_shards_num + 1, "range"), (257, "range"), (1.0, "type"), ("2", "type")])
+    @pytest.mark.parametrize("shards_num,error_type",
+                             [(ct.max_shards_num + 1, "range"), (257, "range"), (1.0, "type"), ("2", "type")])
     def test_milvus_client_collection_invalid_shards(self, shards_num, error_type):
         """
         target: test collection with invalid shards_num values
@@ -654,6 +654,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         # Try to create collection with invalid shards_num (should fail)
         self.create_collection(client, collection_name, default_dim, shards_num=shards_num,
                                check_task=CheckTasks.err_res, check_items=error)
+
 
 class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
     """ Test case of create collection interface """
@@ -823,6 +824,155 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
             self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("vector_types", [ct.all_vector_types[:3], ct.all_vector_types[3:]])
+    @pytest.mark.parametrize("pre_build", [True, False])
+    def test_milvus_client_collection_nullable_vector_field_on_all_vector_types(self, pre_build, vector_types):
+        """
+        target: test collection with nullable vector field on all vector types
+        method: create collection with nullable vector field on all vector types
+        expected: create collection with default schema, index, and load successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 32
+        # create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id_string", DataType.VARCHAR, max_length=64, is_primary=True, auto_id=False)
+        for vector_type in vector_types:
+            if vector_type == DataType.SPARSE_FLOAT_VECTOR:
+                schema.add_field(f"embeddings_{vector_type.name}", vector_type, nullable=True)
+            else:
+                schema.add_field(f"embeddings_{vector_type.name}", vector_type, dim=dim, nullable=True)
+        if pre_build is True:
+            index_params = self.prepare_index_params(client)[0]
+            for vector_type in vector_types:
+                index_params.add_index(f"embeddings_{vector_type.name}", index_type="AUTOINDEX",
+                                       metric_type=ct.default_metric_for_vector_type[vector_type])
+            self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        else:
+            self.create_collection(client, collection_name, dimension=dim, schema=schema)
+
+        # insert data with null vector
+        rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        if pre_build is False:
+            index_params = self.prepare_index_params(client)[0]
+            for vector_type in vector_types:
+                index_params.add_index(f"embeddings_{vector_type.name}", index_type="AUTOINDEX",
+                                       metric_type=ct.default_metric_for_vector_type[vector_type])
+            self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+
+        # search on vector field with null vector
+        for vector_type in vector_types:
+            vectors_to_search = cf.gen_vectors(ct.default_nq, dim, vector_data_type=vector_type)
+            self.search(client, collection_name, vectors_to_search,
+                        search_params={},
+                        anns_field=f"embeddings_{vector_type.name}",
+                        limit=ct.default_limit,
+                        check_task=CheckTasks.check_search_results,
+                        check_items={"enable_milvus_client_api": True,
+                                     "nq": ct.default_nq,
+                                     "limit": ct.default_limit,
+                                     "pk_name": "id_string"})
+
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_collection_null_vector_field_search(self):
+        """
+        target: test collection with null vector field search
+        method: create collection with null vector field and search
+        expected: search successfully and output values are correct
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 128
+        # create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id_string", DataType.VARCHAR, max_length=64, is_primary=True, auto_id=False)
+        schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("embeddings", index_type="FLAT", metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+
+        # insert 10 entities with half null vector
+        num_entities_with_not_null_vector = ct.default_limit // 2
+        rows = []
+        for i in range(num_entities_with_not_null_vector * 2):
+            if i % 2 == 0:
+                rows.append({"id_string": str(i), "embeddings": None})
+            else:
+                rows.append({"id_string": str(i),
+                             "embeddings": cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0]})
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # search limit more than the number of entities with not null vector
+        vectors_to_search = cf.gen_vectors(ct.default_nq, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        self.search(client, collection_name, vectors_to_search,
+                    search_params={},
+                    anns_field="embeddings",
+                    limit=ct.default_limit,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": ct.default_nq,
+                                 "limit": num_entities_with_not_null_vector,
+                                 "pk_name": "id_string"})
+
+        # not support search on null vector with is null or is not null filter
+        error = {ct.err_code: 999,
+                 ct.err_msg: "error: IsNull/IsNotNull operations are not supported on vector fields"}
+        self.search(client, collection_name, vectors_to_search,
+                    search_params={},
+                    filter="embeddings is null",
+                    limit=ct.default_limit,
+                    check_task=CheckTasks.err_res, check_items=error)
+        self.query(client, collection_name,
+                   filter="embeddings is not null",
+                   output_fields=["count(*)"],
+                   check_task=CheckTasks.err_res, check_items=error)
+
+        # search by ids that belong to not null vectors
+        ids_to_search = ["1", "3"]
+        self.search(client, collection_name, ids=ids_to_search,
+                    search_params={},
+                    anns_field="embeddings",
+                    limit=ct.default_limit,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(ids_to_search),
+                                 "limit": num_entities_with_not_null_vector,
+                                 "pk_name": "id_string"})
+        # search by ids that belong to null vectors (returns empty results after #47065 fix)
+        ids_to_search = ["0", "2"]
+        res = self.search(client, collection_name, ids=ids_to_search,
+                          search_params={},
+                          anns_field="embeddings",
+                          limit=ct.default_limit)[0]
+        assert len(res) == len(ids_to_search)
+        for i in range(len(ids_to_search)):
+            assert len(res[i]) == 0  # null vectors return empty results
+        # search by ids have both not null and null vectors
+        ids_to_search = ["0", "1", "2", "3"]
+        res = self.search(client, collection_name, ids=ids_to_search,
+                          search_params={},
+                          anns_field="embeddings",
+                          limit=ct.default_limit)[0]
+        assert len(res) == len(ids_to_search)
+        for i in range(len(ids_to_search)):
+            if ids_to_search[i] in ["0", "2"]:
+                assert len(res[i]) == 0
+            else:
+                assert len(res[i]) == num_entities_with_not_null_vector  # only 5 non-null vectors exist
+
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_key_type", ["int64", "varchar"])
     def test_milvus_client_collection_max_fields_and_max_vector_fields(self, primary_key_type):
         """
@@ -847,11 +997,11 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name_a, default_dim, schema=schema_a)
         assert collection_name_a in self.list_collections(client)[0]
         self.describe_collection(client, collection_name_a,
-            check_task=CheckTasks.check_describe_collection_property,
-            check_items={
-                "collection_name": collection_name_a,
-                "fields_num": ct.max_field_num,
-                "enable_dynamic_field": False,})
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={
+                                     "collection_name": collection_name_a,
+                                     "fields_num": ct.max_field_num,
+                                     "enable_dynamic_field": False, })
         self.drop_collection(client, collection_name_a)
         # ===================== Scenario B: maximum vector fields + maximum total fields =====================
         collection_name_b = cf.gen_collection_name_by_testcase_name()
@@ -874,16 +1024,16 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name_b, default_dim, schema=schema_b)
         assert collection_name_b in self.list_collections(client)[0]
         self.describe_collection(client, collection_name_b,
-            check_task=CheckTasks.check_describe_collection_property,
-            check_items={
-                "collection_name": collection_name_b,
-                "dim": [default_dim] * ct.max_vector_field_num,
-                "enable_dynamic_field": False,
-                "id_name": ct.default_int64_field_name if primary_key_type == "int64" else "pk_string",
-                "vector_name": vector_field_names,
-                "fields_num": ct.max_field_num,
-            }
-        )
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={
+                                     "collection_name": collection_name_b,
+                                     "dim": [default_dim] * ct.max_vector_field_num,
+                                     "enable_dynamic_field": False,
+                                     "id_name": ct.default_int64_field_name if primary_key_type == "int64" else "pk_string",
+                                     "vector_name": vector_field_names,
+                                     "fields_num": ct.max_field_num,
+                                 }
+                                 )
         self.drop_collection(client, collection_name_b)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -901,11 +1051,11 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
         self.create_collection(client, collection_name, schema=schema)
         self.describe_collection(client, collection_name,
-            check_task=CheckTasks.check_describe_collection_property,
-            check_items={"collection_name": collection_name,
-                         "id_name": ct.default_int64_field_name,
-                         "enable_dynamic_field": False}
-                         )
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "id_name": ct.default_int64_field_name,
+                                              "enable_dynamic_field": False}
+                                 )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -924,10 +1074,10 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
         self.create_collection(client, collection_name, schema=schema)
         self.describe_collection(client, collection_name,
-            check_task=CheckTasks.check_describe_collection_property,
-            check_items={"collection_name": collection_name,
-                         "id_name": ct.default_int64_field_name,
-                         "enable_dynamic_field": False})
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "id_name": ct.default_int64_field_name,
+                                              "enable_dynamic_field": False})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -945,11 +1095,11 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
         self.create_collection(client, collection_name, schema=schema)
         self.describe_collection(client, collection_name,
-            check_task=CheckTasks.check_describe_collection_property,
-            check_items={"collection_name": collection_name,
-                         "id_name": "primary_field",
-                         "enable_dynamic_field": False}
-                         )
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "id_name": "primary_field",
+                                              "enable_dynamic_field": False}
+                                 )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -982,10 +1132,10 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema)
         # Verify collection properties
         res = self.describe_collection(client, collection_name,
-                                     check_task=CheckTasks.check_describe_collection_property,
-                                     check_items={"collection_name": collection_name,
-                                                  "auto_id": auto_id,
-                                                  "enable_dynamic_field": False})
+                                       check_task=CheckTasks.check_describe_collection_property,
+                                       check_items={"collection_name": collection_name,
+                                                    "auto_id": auto_id,
+                                                    "enable_dynamic_field": False})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1006,10 +1156,10 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema)
         # Verify collection properties: auto_id should be True
         res = self.describe_collection(client, collection_name,
-                                     check_task=CheckTasks.check_describe_collection_property,
-                                     check_items={"collection_name": collection_name,
-                                                  "auto_id": True,
-                                                  "enable_dynamic_field": False})
+                                       check_task=CheckTasks.check_describe_collection_property,
+                                       check_items={"collection_name": collection_name,
+                                                    "auto_id": True,
+                                                    "enable_dynamic_field": False})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1033,10 +1183,10 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         expected_auto_id = field_auto_id or schema_auto_id
         # Verify that the final auto_id follows OR logic
         self.describe_collection(client, collection_name,
-                                check_task=CheckTasks.check_describe_collection_property,
-                                check_items={"collection_name": collection_name,
-                                             "auto_id": expected_auto_id,
-                                             "enable_dynamic_field": False})
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "auto_id": expected_auto_id,
+                                              "enable_dynamic_field": False})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1052,12 +1202,12 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
         # 2. create collection with same params
         self.create_collection(client, collection_name, default_dim)
-        
+
         collections = self.list_collections(client)[0]
         collection_count = collections.count(collection_name)
         assert collection_name in collections
         assert collection_count == 1, f"Expected only 1 collection named '{collection_name}', but found {collection_count}"
-        
+
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1411,7 +1561,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         expected: collection is successfully dropped and subsequent operations from the first client should fail with collection not found error
         """
         client1 = self._client(alias="client1")
-        client2 = self._client(alias="client2") 
+        client2 = self._client(alias="client2")
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. Create collection with client1
         self.create_collection(client1, collection_name, default_dim)
@@ -1422,8 +1572,8 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         # 4. Verify collection is deleted
         has_collection = self.has_collection(client1, collection_name)[0]
         assert not has_collection
-        error = {ct.err_code: 100, ct.err_msg:  f"can't find collection[database=default]"
-                                                f"[collection={collection_name}]"}
+        error = {ct.err_code: 100, ct.err_msg: f"can't find collection[database=default]"
+                                               f"[collection={collection_name}]"}
         self.describe_collection(client1, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1459,26 +1609,26 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         expected: collection created successfully for all valid names
         """
         client = self._client()
-        
+
         # Create schema with fields that also use naming rule elements
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("_1nt", DataType.INT64)  # field name using naming rule elements
         schema.add_field("f10at_", DataType.FLOAT_VECTOR, dim=default_dim)  # vector field with naming elements
-        
+
         # Create collection with valid name
         self.create_collection(client, collection_name, schema=schema)
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        
+
         collection_info = self.describe_collection(client, collection_name)[0]
         assert collection_info["collection_name"] == collection_name
-        
+
         field_names = [field["name"] for field in collection_info["fields"]]
         assert ct.default_int64_field_name in field_names
         assert "_1nt" in field_names
         assert "f10at_" in field_names
-        
+
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -1534,10 +1684,10 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, default_dim)        
+        self.create_collection(client, collection_name, default_dim)
         self.drop_collection(client, collection_name)
         assert not self.has_collection(client, collection_name)[0]
-        
+
         self.create_collection(client, collection_name, default_dim)
         assert self.has_collection(client, collection_name)[0]
 
@@ -1560,6 +1710,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
             collection_name = cf.gen_collection_name_by_testcase_name() + "_" + cf.gen_unique_str()
             collection_names.append(collection_name)
             self.create_collection(client, collection_name, default_dim)
+
         # Start multiple threads to create collections
         for i in range(threads_num):
             t = MyThread(target=create, args=())
@@ -1599,7 +1750,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
             threads.append(t)
             t.start()
             time.sleep(0.2)
-        
+
         for t in threads:
             t.join()
 
@@ -1670,8 +1821,6 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
 
-
-
 class TestMilvusClientDropCollectionInvalid(TestMilvusClientV2Base):
     """ Test case of drop collection interface """
     """
@@ -1734,7 +1883,7 @@ class TestMilvusClientDropCollectionInvalid(TestMilvusClientV2Base):
         self.close(client_temp)
         error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
         self.drop_collection(client_temp, collection_name,
-                           check_task=CheckTasks.err_res, check_items=error)
+                             check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestMilvusClientReleaseCollectionInvalid(TestMilvusClientV2Base):
@@ -1903,7 +2052,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         error = {ct.err_code: 999, ct.err_msg: "collection not found"}
         self.load_collection(client, collection_name,
                              check_task=CheckTasks.err_res, check_items=error)
-    
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_load_release_collection(self):
         """
@@ -2009,7 +2158,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         # 4. Attempt to load with empty partition_names list
         error = {ct.err_code: 0, ct.err_msg: "due to no partition specified"}
         self.load_partitions(client, collection_name, partition_names=partition_names,
-                           check_task=CheckTasks.err_res, check_items=error)
+                             check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2042,7 +2191,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         # 4. Attempt to load with invalid replica_number
         error = {ct.err_code: 999, ct.err_msg: f"`replica_number` value {invalid_num_replica} is illegal"}
         self.load_collection(client, collection_name, replica_number=invalid_num_replica,
-                           check_task=CheckTasks.err_res, check_items=error)
+                             check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2076,7 +2225,8 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name, replica_number=replicas)
         # 5. Verify replicas
         load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after loading collection, but got {load_state['state']}"
+        assert load_state[
+                   "state"] == LoadState.Loaded, f"Expected Loaded after loading collection, but got {load_state['state']}"
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2110,9 +2260,8 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
                  ct.err_msg: "call query coordinator LoadCollection: when load 3 replica count: "
                              "service resource insufficient[currentStreamingNode=2][expectedStreamingNode=3]"}
         self.load_collection(client, collection_name, replica_number=3,
-                           check_task=CheckTasks.err_res, check_items=error)
+                             check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
-
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_create_collection_without_connection(self):
@@ -2127,7 +2276,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         self.close(client_temp)
         error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
         self.create_collection(client_temp, collection_name, default_dim,
-                              check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_load_collection_after_disconnect(self):
@@ -2144,8 +2293,8 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         self.close(client_temp)
         error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
         self.load_collection(client_temp, collection_name,
-                            check_task=CheckTasks.err_res, check_items=error)
-        
+                             check_task=CheckTasks.err_res, check_items=error)
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_release_collection_after_disconnect(self):
         """
@@ -2161,8 +2310,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         self.close(client_temp)
         error = {ct.err_code: 999, ct.err_msg: 'should create connection first'}
         self.release_collection(client_temp, collection_name,
-                            check_task=CheckTasks.err_res, check_items=error)
-
+                                check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
@@ -2220,27 +2368,33 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         # Step 2: Release collection and verify state NotLoad
         self.release_collection(client, collection_name)
         load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.NotLoad, f"Expected NotLoad after release, but got {load_state['state']}"
+        assert load_state[
+                   "state"] == LoadState.NotLoad, f"Expected NotLoad after release, but got {load_state['state']}"
         # Step 3: Load specific partition and verify state changes to Loaded
         self.load_partitions(client, collection_name, [partition_name])
         load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after loading partition, but got {load_state['state']}"
+        assert load_state[
+                   "state"] == LoadState.Loaded, f"Expected Loaded after loading partition, but got {load_state['state']}"
         # Step 4: Load entire collection and verify state remains Loaded
         self.load_collection(client, collection_name)
         load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after loading collection, but got {load_state['state']}"
+        assert load_state[
+                   "state"] == LoadState.Loaded, f"Expected Loaded after loading collection, but got {load_state['state']}"
         # Step 5: Release collection and verify state changes to NotLoad
         self.release_collection(client, collection_name)
         load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.NotLoad, f"Expected NotLoad after release, but got {load_state['state']}"
+        assert load_state[
+                   "state"] == LoadState.NotLoad, f"Expected NotLoad after release, but got {load_state['state']}"
         # Step 6: Load multiple partitions and verify state changes to Loaded
         self.load_partitions(client, collection_name, ["_default", partition_name])
         load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after loading partitions, but got {load_state['state']}"
+        assert load_state[
+                   "state"] == LoadState.Loaded, f"Expected Loaded after loading partitions, but got {load_state['state']}"
         # Step 7: Load collection again and verify state remains Loaded
         self.load_collection(client, collection_name)
         load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after final load collection, but got {load_state['state']}"
+        assert load_state[
+                   "state"] == LoadState.Loaded, f"Expected Loaded after final load collection, but got {load_state['state']}"
         # Step 8: Cleanup - drop collection if it exists
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
@@ -2264,19 +2418,22 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.create_partition(client, collection_name, partition_name_2)
         # Verify initial state is Loaded
         load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after loading collection, but got {load_state['state']}"
+        assert load_state[
+                   "state"] == LoadState.Loaded, f"Expected Loaded after loading collection, but got {load_state['state']}"
         # Load collection and verify state
         self.load_collection(client, collection_name)
         load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after loading collection, but got {load_state['state']}"
+        assert load_state[
+                   "state"] == LoadState.Loaded, f"Expected Loaded after loading collection, but got {load_state['state']}"
         # Load partitions and verify state (should remain Loaded)
         self.load_partitions(client, collection_name, [partition_name_1, partition_name_2])
         load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after loading partitions, but got {load_state['state']}"
+        assert load_state[
+                   "state"] == LoadState.Loaded, f"Expected Loaded after loading partitions, but got {load_state['state']}"
         # Search on one partition
         vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
-        self.search(client, collection_name, vectors_to_search, 
-                   limit=default_limit, partition_names=[partition_name_1])
+        self.search(client, collection_name, vectors_to_search,
+                    limit=default_limit, partition_names=[partition_name_1])
         # Verify state remains Loaded after search
         load_state = self.get_load_state(client, collection_name)[0]
         assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after search, but got {load_state['state']}"
@@ -2302,25 +2459,27 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         assert load_state["state"] == LoadState.Loaded, f"Expected Loaded, but got {load_state['state']}"
         vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
         self.search(client, collection_name, vectors_to_search, limit=default_limit)
-        self.query(client, collection_name, filter=default_search_exp)        
+        self.query(client, collection_name, filter=default_search_exp)
         # Step 3: Test point 2 - loaded collection can be loaded again
         self.load_collection(client, collection_name)
         load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after repeated load, but got {load_state['state']}"
+        assert load_state[
+                   "state"] == LoadState.Loaded, f"Expected Loaded after repeated load, but got {load_state['state']}"
         # Step 4: Test point 3 - released collection cannot be searched/queried
         self.release_collection(client, collection_name)
         load_state = self.get_load_state(client, collection_name)[0]
         assert load_state["state"] == LoadState.NotLoad, f"Expected NotLoad, but got {load_state['state']}"
         error_search = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
         self.search(client, collection_name, vectors_to_search, limit=default_limit,
-                   check_task=CheckTasks.err_res, check_items=error_search)
+                    check_task=CheckTasks.err_res, check_items=error_search)
         error_query = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
         self.query(client, collection_name, filter=default_search_exp,
-                  check_task=CheckTasks.err_res, check_items=error_query)
+                   check_task=CheckTasks.err_res, check_items=error_query)
         # Step 5: Test point 4 - released collection can be released again
         self.release_collection(client, collection_name)
         load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.NotLoad, f"Expected NotLoad after repeated release, but got {load_state['state']}"
+        assert load_state[
+                   "state"] == LoadState.NotLoad, f"Expected NotLoad after repeated release, but got {load_state['state']}"
         # Step 6: Test point 5 - released collection can be loaded again
         self.load_collection(client, collection_name)
         load_state = self.get_load_state(client, collection_name)[0]
@@ -2353,27 +2512,31 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         load_state = self.get_load_state(client, collection_name)[0]
         assert load_state["state"] == LoadState.Loaded, f"Expected Loaded, but got {load_state['state']}"
         vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
-        self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name_1, partition_name_2])
-        self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name_1, partition_name_2])
+        self.search(client, collection_name, vectors_to_search, limit=default_limit,
+                    partition_names=[partition_name_1, partition_name_2])
+        self.query(client, collection_name, filter=default_search_exp,
+                   partition_names=[partition_name_1, partition_name_2])
         # Step 3: Test point 2 - loaded partitions can be loaded again
         self.load_partitions(client, collection_name, [partition_name_1, partition_name_2])
-        self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name_1, partition_name_2])
-        self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name_1, partition_name_2])
+        self.search(client, collection_name, vectors_to_search, limit=default_limit,
+                    partition_names=[partition_name_1, partition_name_2])
+        self.query(client, collection_name, filter=default_search_exp,
+                   partition_names=[partition_name_1, partition_name_2])
         # Step 4: Test point 3 - released partitions cannot be searched/queried
         self.release_partitions(client, collection_name, [partition_name_1])
         error_search = {ct.err_code: 201, ct.err_msg: "partition not loaded"}
         self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name_1],
-                   check_task=CheckTasks.err_res, check_items=error_search)
+                    check_task=CheckTasks.err_res, check_items=error_search)
         error_query = {ct.err_code: 201, ct.err_msg: "partition not loaded"}
         self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name_1],
-                  check_task=CheckTasks.err_res, check_items=error_query)
+                   check_task=CheckTasks.err_res, check_items=error_query)
         # Non-released partition should still work
         self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name_2])
         # Step 5: Test point 4 - released partitions can be released again
         self.release_partitions(client, collection_name, [partition_name_1])  # Release again
         error_search = {ct.err_code: 201, ct.err_msg: "partition not loaded"}
         self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name_1],
-                   check_task=CheckTasks.err_res, check_items=error_search)
+                    check_task=CheckTasks.err_res, check_items=error_search)
         # Step 6: Test point 5 - released partitions can be loaded again
         self.load_partitions(client, collection_name, [partition_name_1])
         self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name_1])
@@ -2401,36 +2564,43 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         # Step 2: Test Release partition after collection release
         self.release_collection(client, collection_name)
         load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.NotLoad, f"Expected NotLoad after collection release, but got {load_state['state']}"
+        assert load_state[
+                   "state"] == LoadState.NotLoad, f"Expected NotLoad after collection release, but got {load_state['state']}"
         self.release_partitions(client, collection_name, ["_default"])
         load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.NotLoad, f"Expected NotLoad after default partition release, but got {load_state['state']}"
+        assert load_state[
+                   "state"] == LoadState.NotLoad, f"Expected NotLoad after default partition release, but got {load_state['state']}"
         # Step 3: Load specific partitions
         self.load_partitions(client, collection_name, [partition_name_1])
         load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after partition load, but got {load_state['state']}"
+        assert load_state[
+                   "state"] == LoadState.Loaded, f"Expected Loaded after partition load, but got {load_state['state']}"
         # Search should work on loaded partitions
         self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name_1])
         self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name_1])
         # Step 4: Test load collection after partition load
         self.load_collection(client, collection_name)
-        self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name_1, partition_name_2])
-        self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name_1, partition_name_2])
+        self.search(client, collection_name, vectors_to_search, limit=default_limit,
+                    partition_names=[partition_name_1, partition_name_2])
+        self.query(client, collection_name, filter=default_search_exp,
+                   partition_names=[partition_name_1, partition_name_2])
         # Step 5: Test edge case - release all partitions individually
         self.release_partitions(client, collection_name, ["_default", partition_name_1, partition_name_2])
         load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.NotLoad, f"Expected NotLoad after releasing all partitions, but got {load_state['state']}"
+        assert load_state[
+                   "state"] == LoadState.NotLoad, f"Expected NotLoad after releasing all partitions, but got {load_state['state']}"
         error_search = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
         self.search(client, collection_name, vectors_to_search, limit=default_limit,
-                   check_task=CheckTasks.err_res, check_items=error_search)
+                    check_task=CheckTasks.err_res, check_items=error_search)
         # Step 6: Test release collection after partition release
         self.release_collection(client, collection_name)
-        assert load_state["state"] == LoadState.NotLoad, f"Expected NotLoad after releasing all partitions, but got {load_state['state']}"
+        assert load_state[
+                   "state"] == LoadState.NotLoad, f"Expected NotLoad after releasing all partitions, but got {load_state['state']}"
         error = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
         self.search(client, collection_name, vectors_to_search, limit=default_limit,
-                   check_task=CheckTasks.err_res, check_items=error)
+                    check_task=CheckTasks.err_res, check_items=error)
         self.query(client, collection_name, filter=default_search_exp,
-                  check_task=CheckTasks.err_res, check_items=error)
+                   check_task=CheckTasks.err_res, check_items=error)
         # Step 7: Cleanup
         self.drop_collection(client, collection_name)
 
@@ -2452,7 +2622,7 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
         self.create_partition(client, collection_name, partition_name_1)
         self.create_partition(client, collection_name, partition_name_2)
-        
+
         self.load_collection(client, collection_name)
         self.release_partitions(client, collection_name, [partition_name_1])
         self.drop_partition(client, collection_name, partition_name_1)
@@ -2461,7 +2631,7 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.query(client, collection_name, filter=default_search_exp,
                    partition_names=[partition_name_2],
                    check_task=CheckTasks.err_res, check_items=error)
-    
+
         self.load_collection(client, collection_name)
         self.query(client, collection_name, filter=default_search_exp,
                    partition_names=[partition_name_2])
@@ -2485,7 +2655,7 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
         self.create_partition(client, collection_name, partition_name_1)
         self.create_partition(client, collection_name, partition_name_2)
-        
+
         self.load_collection(client, collection_name)
         self.release_partitions(client, collection_name, [partition_name_1])
         self.drop_partition(client, collection_name, partition_name_1)
@@ -2516,7 +2686,7 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
         self.create_partition(client, collection_name, partition_name_1)
         self.create_partition(client, collection_name, partition_name_2)
-        
+
         self.load_collection(client, collection_name)
         self.release_partitions(client, collection_name, [partition_name_1])
         self.drop_partition(client, collection_name, partition_name_1)
@@ -2539,20 +2709,20 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name_1 = cf.gen_unique_str("partition1")
         partition_name_2 = cf.gen_unique_str("partition2")
-        
+
         self.create_collection(client, collection_name, default_dim)
         self.create_partition(client, collection_name, partition_name_1)
         self.create_partition(client, collection_name, partition_name_2)
-        
+
         self.load_collection(client, collection_name)
         self.release_partitions(client, collection_name, [partition_name_1])
         self.drop_partition(client, collection_name, partition_name_1)
         self.load_collection(client, collection_name)
-        
+
         # Query on the remaining partition
         self.query(client, collection_name, filter=default_search_exp,
                    partition_names=[partition_name_2])
-        
+
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -2578,7 +2748,7 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
-        
+
         index_params = self.prepare_index_params(client)[0]
         if vector_type == DataType.FLOAT_VECTOR:
             index_params.add_index(field_name="vector", index_type="IVF_SQ8", metric_type="L2")
@@ -2621,8 +2791,8 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         assert load_state["state"] == LoadState.Loaded
         # Query to verify functionality
         self.query(client, collection_name, filter=f"{default_primary_key_field_name} in [0]",
-                  check_task=CheckTasks.check_query_results,
-                  check_items={"exp_res": [rows[0]], "with_vec": True})
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": [rows[0]], "with_vec": True})
         # Load with replica_number=2 (should work)
         self.load_collection(client, collection_name, replica_number=2)
         load_state = self.get_load_state(client, collection_name)[0]
@@ -2634,8 +2804,8 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         assert load_state["state"] == LoadState.Loaded
         # Verify query still works after replica change
         self.query(client, collection_name, filter=f"{default_primary_key_field_name} in [0]",
-                  check_task=CheckTasks.check_query_results,
-                  check_items={"exp_res": [rows[0]], "with_vec": True})
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": [rows[0]], "with_vec": True})
         # Cleanup
         self.drop_collection(client, collection_name)
 
@@ -2678,18 +2848,19 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         load_state = self.get_load_state(client, collection_name)[0]
         assert load_state["state"] == LoadState.Loaded
         # Query test
-        query_res, _ = self.query(client, collection_name, filter=f"{default_primary_key_field_name} in [0, {default_nb}]",
-                  check_task=CheckTasks.check_query_results,
-                  check_items={"exp_res": [all_rows[0], all_rows[default_nb]], "with_vec": True})
+        query_res, _ = self.query(client, collection_name,
+                                  filter=f"{default_primary_key_field_name} in [0, {default_nb}]",
+                                  check_task=CheckTasks.check_query_results,
+                                  check_items={"exp_res": [all_rows[0], all_rows[default_nb]], "with_vec": True})
         assert len(query_res) == 2
         # Search test
         vectors_to_search = cf.gen_vectors(default_nq, default_dim)
         self.search(client, collection_name, vectors_to_search,
-                   check_task=CheckTasks.check_search_results,
-                   check_items={"enable_milvus_client_api": True,
-                               "nq": len(vectors_to_search),
-                               "limit": default_limit,
-                               "pk_name": default_primary_key_field_name})
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "limit": default_limit,
+                                 "pk_name": default_primary_key_field_name})
         # Cleanup
         self.drop_collection(client, collection_name)
 
@@ -2731,14 +2902,14 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         assert load_state["state"] == LoadState.Loaded
         # Query on loaded partition (should succeed)
         self.query(client, collection_name, filter=f"{default_primary_key_field_name} in [{default_nb}]",
-                  partition_names=[partition_name],
-                  check_task=CheckTasks.check_query_results,
-                  check_items={"exp_res": [rows_2[0]], "with_vec": True})
+                   partition_names=[partition_name],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": [rows_2[0]], "with_vec": True})
         # Query on non-loaded partition (should fail)
         error = {ct.err_code: 65538, ct.err_msg: "partition not loaded"}
         self.query(client, collection_name, filter=f"{default_primary_key_field_name} in [0]",
-                  partition_names=[ct.default_partition_name, partition_name],
-                  check_task=CheckTasks.err_res, check_items=error)
+                   partition_names=[ct.default_partition_name, partition_name],
+                   check_task=CheckTasks.err_res, check_items=error)
         # Cleanup
         self.drop_collection(client, collection_name)
 
@@ -2773,13 +2944,12 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         assert load_state["state"] == LoadState.Loaded
         # Count with multi replicas
         self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0",
-                  output_fields=["count(*)"],
-                  check_task=CheckTasks.check_query_results,
-                  check_items={"exp_res": [{"count(*)": default_nb}]})
-        
+                   output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": [{"count(*)": default_nb}]})
+
         # Cleanup
         self.drop_collection(client, collection_name)
-
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_load_collection_after_load_release(self):
@@ -2926,21 +3096,21 @@ class TestMilvusClientLoadPartition(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name_1 = cf.gen_unique_str("partition1")
         partition_name_2 = cf.gen_unique_str("partition2")
-        
+
         # Create collection and partitions
         self.create_collection(client, collection_name, default_dim)
         self.create_partition(client, collection_name, partition_name_1)
         self.create_partition(client, collection_name, partition_name_2)
         self.release_collection(client, collection_name)
-        
+
         # Scenario 1: load partition -> release partition -> load collection -> search
         self.load_partitions(client, collection_name, [partition_name_1])
         self.release_partitions(client, collection_name, [partition_name_1])
         self.load_collection(client, collection_name)
         vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
         self.search(client, collection_name, vectors_to_search, limit=default_limit,
-                   partition_names=[partition_name_1, partition_name_2])
-        
+                    partition_names=[partition_name_1, partition_name_2])
+
         # Scenario 2: load partition -> release partitions -> query (should fail) -> load collection -> query
         self.release_collection(client, collection_name)
         self.load_partitions(client, collection_name, [partition_name_1])
@@ -2948,12 +3118,12 @@ class TestMilvusClientLoadPartition(TestMilvusClientV2Base):
         self.release_partitions(client, collection_name, [partition_name_2])
         error = {ct.err_code: 65535, ct.err_msg: 'collection not loaded'}
         self.query(client, collection_name, filter=default_search_exp,
-                  partition_names=[partition_name_1, partition_name_2],
-                  check_task=CheckTasks.err_res, check_items=error)
+                   partition_names=[partition_name_1, partition_name_2],
+                   check_task=CheckTasks.err_res, check_items=error)
         self.load_collection(client, collection_name)
         self.query(client, collection_name, filter=default_search_exp,
-                  partition_names=[partition_name_1, partition_name_2])
-        
+                   partition_names=[partition_name_1, partition_name_2])
+
         # Scenario 3: load partition -> drop partition -> query (should fail) -> drop another -> load collection -> query
         self.release_collection(client, collection_name)
         self.load_partitions(client, collection_name, [partition_name_1])
@@ -2961,15 +3131,14 @@ class TestMilvusClientLoadPartition(TestMilvusClientV2Base):
         self.drop_partition(client, collection_name, partition_name_1)
         error = {ct.err_code: 65535, ct.err_msg: f'partition name {partition_name_1} not found'}
         self.query(client, collection_name, filter=default_search_exp,
-                  partition_names=[partition_name_1, partition_name_2],
-                  check_task=CheckTasks.err_res, check_items=error)
+                   partition_names=[partition_name_1, partition_name_2],
+                   check_task=CheckTasks.err_res, check_items=error)
         self.drop_partition(client, collection_name, partition_name_2)
         self.load_collection(client, collection_name)
         self.query(client, collection_name, filter=default_search_exp)
-        
+
         # Cleanup
         self.drop_collection(client, collection_name)
-
 
 
 class TestMilvusClientDescribeCollectionInvalid(TestMilvusClientV2Base):
@@ -3044,9 +3213,9 @@ class TestMilvusClientDescribeCollectionValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # Expected description structure 
         expected_description = {
-            'collection_name': collection_name, 
-            'auto_id': False, 
-            'num_shards': ct.default_shards_num, 
+            'collection_name': collection_name,
+            'auto_id': False,
+            'num_shards': ct.default_shards_num,
             'description': '',
             'fields': [
                 {'field_id': 100, 'name': 'id', 'description': '', 'type': DataType.INT64, 'params': {},
@@ -3054,11 +3223,11 @@ class TestMilvusClientDescribeCollectionValid(TestMilvusClientV2Base):
                 {'field_id': 101, 'name': 'vector', 'description': '', 'type': DataType.FLOAT_VECTOR,
                  'params': {'dim': default_dim}}
             ],
-            'functions': [], 
-            'aliases': [], 
-            'consistency_level': 0, 
+            'functions': [],
+            'aliases': [],
+            'consistency_level': 0,
             'properties': {'timezone': 'UTC'},
-            'num_partitions': 1, 
+            'num_partitions': 1,
             'enable_dynamic_field': True,
             'enable_namespace': False
         }
@@ -3094,9 +3263,11 @@ class TestMilvusClientDescribeCollectionValid(TestMilvusClientV2Base):
         # Check fields for nullable and default_value properties
         for field in res["fields"]:
             if field["name"] == "float_field":
-                assert field.get("nullable") is True, f"Expected nullable=True for float_field, got {field.get('nullable')}"
+                assert field.get(
+                    "nullable") is True, f"Expected nullable=True for float_field, got {field.get('nullable')}"
             if field["name"] == "varchar_field":
-                assert field["default_value"].string_data == "default_string", f"Expected 'default_string', got {field['default_value'].string_data}"
+                assert field[
+                           "default_value"].string_data == "default_string", f"Expected 'default_string', got {field['default_value'].string_data}"
         self.drop_collection(client, collection_name)
 
 
@@ -3107,6 +3278,7 @@ class TestMilvusClientHasCollectionValid(TestMilvusClientV2Base):
     #  The following are valid base cases
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_has_collection_multithread(self):
         """
@@ -3123,19 +3295,18 @@ class TestMilvusClientHasCollectionValid(TestMilvusClientV2Base):
         def has():
             result = self.has_collection(client, collection_name)[0]
             assert result == True
-        
+
         for i in range(threads_num):
             t = MyThread(target=has, args=())
             threads.append(t)
             t.start()
             time.sleep(0.2)
-        
+
         for t in threads:
             t.join()
 
         # Cleanup
         self.drop_collection(client, collection_name)
-
 
 
 class TestMilvusClientHasCollectionInvalid(TestMilvusClientV2Base):
@@ -3157,15 +3328,15 @@ class TestMilvusClientHasCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         if name == "a".join("a" for i in range(256)):
             error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. "
-                                                f"the length of a collection name must be less than 255 characters: "
-                                                f"invalid parameter"}
+                                                    f"the length of a collection name must be less than 255 characters: "
+                                                    f"invalid parameter"}
         else:
             error = {ct.err_code: 1100,
                      ct.err_msg: f"Invalid collection name: {name}. "
                                  f"the first character of a collection name must be an underscore or letter"}
         self.has_collection(client, name,
                             check_task=CheckTasks.err_res, check_items=error)
-    
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("collection_name", ['', None])
     def test_milvus_client_has_collection_with_empty_or_none_collection_name(self, collection_name):
@@ -3180,7 +3351,7 @@ class TestMilvusClientHasCollectionInvalid(TestMilvusClientV2Base):
         else:  # empty string
             error = {ct.err_code: -1, ct.err_msg: '`collection_name` value  is illegal'}
         self.has_collection(client, collection_name,
-                          check_task=CheckTasks.err_res, check_items=error)
+                            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_has_collection_not_existed(self):
@@ -3224,7 +3395,7 @@ class TestMilvusClientHasCollectionInvalid(TestMilvusClientV2Base):
         self.close(client_temp)
         error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
         self.has_collection(client_temp, collection_name,
-                          check_task=CheckTasks.err_res, check_items=error)
+                            check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestMilvusClientListCollection(TestMilvusClientV2Base):
@@ -3270,7 +3441,7 @@ class TestMilvusClientListCollection(TestMilvusClientV2Base):
         self.close(client_temp)
         error = {ct.err_code: 999, ct.err_msg: 'should create connection first'}
         self.list_collections(client_temp,
-                            check_task=CheckTasks.err_res, check_items=error)
+                              check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_list_collections_multithread(self):
@@ -3278,17 +3449,18 @@ class TestMilvusClientListCollection(TestMilvusClientV2Base):
         target: test list collections with multi-threads
         method: create collection and use multi-threads to list collections
         expected: all threads should correctly identify that collection exists in list
-        """        
+        """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # Create collection first
         self.create_collection(client, collection_name, default_dim)
         threads_num = 10
         threads = []
+
         def _list():
             collections_list = self.list_collections(client)[0]
             assert collection_name in collections_list
-        
+
         for i in range(threads_num):
             t = MyThread(target=_list)
             threads.append(t)
@@ -3296,10 +3468,9 @@ class TestMilvusClientListCollection(TestMilvusClientV2Base):
             time.sleep(0.2)
         for t in threads:
             t.join()
-            
+
         # Cleanup
         self.drop_collection(client, collection_name)
-
 
 
 class TestMilvusClientRenameCollectionInValid(TestMilvusClientV2Base):
@@ -3448,6 +3619,7 @@ class TestMilvusClientUsingDatabaseInvalid(TestMilvusClientV2Base):
         """
         pass
 
+
 class TestMilvusClientCollectionPropertiesInvalid(TestMilvusClientV2Base):
     """ Test case of alter/drop collection properties """
     """
@@ -3469,8 +3641,8 @@ class TestMilvusClientCollectionPropertiesInvalid(TestMilvusClientV2Base):
         properties = {'mmap.enabled': True}
         error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={alter_name}]"}
         self.alter_collection_properties(client, alter_name, properties,
-                                     check_task=CheckTasks.err_res,
-                                     check_items=error)
+                                         check_task=CheckTasks.err_res,
+                                         check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("properties", [""])
@@ -3485,18 +3657,18 @@ class TestMilvusClientCollectionPropertiesInvalid(TestMilvusClientV2Base):
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, id_type="string", max_length=ct.default_length)
         self.describe_collection(client, collection_name,
-                                     check_task=CheckTasks.check_describe_collection_property,
-                                     check_items={"collection_name": collection_name,
-                                                  "dim": default_dim,
-                                                  "consistency_level": 0})
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "dim": default_dim,
+                                              "consistency_level": 0})
         error = {ct.err_code: 1, ct.err_msg: f"`properties` value {properties} is illegal"}
         self.alter_collection_properties(client, collection_name, properties,
-                                     check_task=CheckTasks.err_res,
-                                     check_items=error)
+                                         check_task=CheckTasks.err_res,
+                                         check_items=error)
 
         self.drop_collection(client, collection_name)
 
-    #TODO properties with non-existent params
+    # TODO properties with non-existent params
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("drop_name", ["%$#", "test", " "])
@@ -3549,6 +3721,7 @@ class TestMilvusClientCollectionPropertiesValid(TestMilvusClientV2Base):
     #  The following are valid base cases
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_collection_alter_collection_properties(self):
         """
@@ -3573,7 +3746,7 @@ class TestMilvusClientCollectionPropertiesValid(TestMilvusClientV2Base):
         self.alter_collection_properties(client, collection_name, properties)
         describe = self.describe_collection(client, collection_name)[0].get("properties")
         assert describe["mmap.enabled"] == 'False'
-        #TODO add case that confirm the parameter is actually valid
+        # TODO add case that confirm the parameter is actually valid
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -3599,7 +3772,7 @@ class TestMilvusClientCollectionPropertiesValid(TestMilvusClientV2Base):
         self.drop_collection_properties(client, collection_name, property_keys)
         describe = self.describe_collection(client, collection_name)[0].get("properties")
         assert "mmap.enabled" not in describe
-        #TODO add case that confirm the parameter is actually invalid
+        # TODO add case that confirm the parameter is actually invalid
         self.drop_collection(client, collection_name)
 
 
@@ -3611,6 +3784,7 @@ class TestMilvusClientCollectionNullInvalid(TestMilvusClientV2Base):
     #  The followings are invalid cases
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("vector_type", ct.all_float_vector_dtypes)
     def test_milvus_client_collection_set_nullable_on_pk_field(self, vector_type):
@@ -3649,7 +3823,6 @@ class TestMilvusClientCollectionNullInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
 
-
 class TestMilvusClientCollectionDefaultValueInvalid(TestMilvusClientV2Base):
     """ Test case of collection interface """
 
@@ -3678,7 +3851,7 @@ class TestMilvusClientCollectionDefaultValueInvalid(TestMilvusClientV2Base):
             schema.add_field("vector", vector_type, dim=default_dim)
         error = {ct.err_code: 1100, ct.err_msg: "primary field not support default_value"}
         self.create_collection(client, collection_name, schema=schema,
-                             check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("vector_type", ct.all_float_vector_dtypes)
@@ -3699,8 +3872,8 @@ class TestMilvusClientCollectionDefaultValueInvalid(TestMilvusClientV2Base):
             schema.add_field("vector", vector_type, dim=default_dim, default_value=10)
         error = {ct.err_code: 1100, ct.err_msg: f"type not support default_value"}
         self.create_collection(client, collection_name, schema=schema,
-                             check_task=CheckTasks.err_res, check_items=error)
-    
+                               check_task=CheckTasks.err_res, check_items=error)
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("scalar_type", ["JSON", "Array"])
     def test_milvus_client_create_collection_default_value_on_not_support_scalar_field(self, scalar_type):
@@ -3718,14 +3891,14 @@ class TestMilvusClientCollectionDefaultValueInvalid(TestMilvusClientV2Base):
         if scalar_type == "JSON":
             schema.add_field("json_field", DataType.JSON, default_value=10)
         elif scalar_type == "Array":
-            schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, 
-                           max_capacity=ct.default_max_capacity, default_value=10)
+            schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64,
+                             max_capacity=ct.default_max_capacity, default_value=10)
         # Add vector field
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
-        
+
         error = {ct.err_code: 1100, ct.err_msg: f"type not support default_value, type:{scalar_type}"}
         self.create_collection(client, collection_name, schema=schema,
-                             check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("default_value", ["abc", 9.09, 1, False])
@@ -3766,7 +3939,7 @@ class TestMilvusClientCollectionDefaultValueInvalid(TestMilvusClientV2Base):
         error = {ct.err_code: 1100,
                  ct.err_msg: f"type ({field_type_str}) of field ({field_name}) is not equal to the type({expected_type}) of default_value"}
         self.create_collection(client, collection_name, schema=schema,
-                             check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nullable", [True, False])
@@ -3782,7 +3955,7 @@ class TestMilvusClientCollectionDefaultValueInvalid(TestMilvusClientV2Base):
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
-        
+
         if nullable:
             schema.add_field("int8_field", DataType.INT8, nullable=nullable, default_value=None)
             self.create_collection(client, collection_name, schema=schema)
@@ -3809,10 +3982,11 @@ class TestMilvusClientCollectionDefaultValueInvalid(TestMilvusClientV2Base):
         schema.add_field("pk", DataType.INT64, is_primary=True)
         schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field("string_field", DataType.VARCHAR, max_length=max_length, default_value=default_value)
-        error = {ct.err_code: 1100, ct.err_msg: f"the length ({len(default_value)}) of string exceeds max length ({max_length}): "
-                                                f"invalid parameter[expected=valid length string][actual=string length exceeds max length]"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"the length ({len(default_value)}) of string exceeds max length ({max_length}): "
+                             f"invalid parameter[expected=valid length string][actual=string length exceeds max length]"}
         self.create_collection(client, collection_name, schema=schema,
-                              check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestMilvusClientCollectionDefaultValueValid(TestMilvusClientV2Base):
@@ -3823,6 +3997,7 @@ class TestMilvusClientCollectionDefaultValueValid(TestMilvusClientV2Base):
     #  The followings are valid cases
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_create_collection_default_value_twice(self):
         """
@@ -3844,7 +4019,7 @@ class TestMilvusClientCollectionDefaultValueValid(TestMilvusClientV2Base):
         assert collection_1 == collection_2
         # Clean up: drop the collection
         self.drop_collection(client, collection_name)
-    
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_create_collection_none_twice(self):
         """
@@ -3892,11 +4067,11 @@ class TestMilvusClientCollectionDefaultValueValid(TestMilvusClientV2Base):
         # Create collection with default value fields
         self.create_collection(client, collection_name, schema=schema)
         self.describe_collection(client, collection_name,
-                                check_task=CheckTasks.check_describe_collection_property,
-                                check_items={"collection_name": collection_name,
-                                             "auto_id": auto_id,
-                                             "enable_dynamic_field": False,
-                                             "schema": schema})
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "auto_id": auto_id,
+                                              "enable_dynamic_field": False,
+                                              "schema": schema})
         self.drop_collection(client, collection_name)
 
 
@@ -3963,7 +4138,8 @@ class TestMilvusClientCollectionCountBinary(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         # Create index
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=ct.default_binary_vec_field_name, index_type="BIN_IVF_FLAT", metric_type="JACCARD")
+        index_params.add_index(field_name=ct.default_binary_vec_field_name, index_type="BIN_IVF_FLAT",
+                               metric_type="JACCARD")
         self.create_index(client, collection_name, index_params)
         # Verify entity count
         stats = self.get_collection_stats(client, collection_name)[0]
@@ -3984,13 +4160,13 @@ class TestMilvusClientCollectionCountBinary(TestMilvusClientV2Base):
         schema = self.create_schema(client, enable_dynamic_field=False, auto_id=auto_id)[0]
         schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
         # Try to add binary vector field with invalid dimension
-        error = {ct.err_code: 1, 
+        error = {ct.err_code: 1,
                  ct.err_msg: f"invalid dimension: {ct.min_dim} of field {ct.default_binary_vec_field_name}. "
                              f"binary vector dimension should be multiple of 8."}
         schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=ct.min_dim)
         # Try to create collection
         self.create_collection(client, collection_name, schema=schema,
-                              check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_count_no_entities(self):
@@ -4142,9 +4318,9 @@ class TestMilvusClientCollectionString(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, id_type="string", max_length=100)
         # Verify collection properties
         self.describe_collection(client, collection_name,
-                                check_task=CheckTasks.check_describe_collection_property,
-                                check_items={"collection_name": collection_name,
-                                           "id_name": "id"})  
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "id_name": "id"})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -4164,11 +4340,11 @@ class TestMilvusClientCollectionString(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema)
         # Verify collection properties
         self.describe_collection(client, collection_name,
-                                check_task=CheckTasks.check_describe_collection_property,
-                                check_items={"collection_name": collection_name,
-                                           "id_name": "string_pk",
-                                           "auto_id": True,
-                                           "enable_dynamic_field": False})
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "id_name": "string_pk",
+                                              "auto_id": True,
+                                              "enable_dynamic_field": False})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -4186,7 +4362,7 @@ class TestMilvusClientCollectionString(TestMilvusClientV2Base):
         # Try to create collection
         error = {ct.err_code: 1100, ct.err_msg: "schema does not contain vector field: invalid parameter"}
         self.create_collection(client, collection_name, schema=schema,
-                              check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_collection_string_field_over_max_length(self):
@@ -4205,10 +4381,11 @@ class TestMilvusClientCollectionString(TestMilvusClientV2Base):
         # Try to add string field with max_length > 65535
         max_length = 65535 + 1
         schema.add_field("string_field", DataType.VARCHAR, max_length=max_length)
-        error = {ct.err_code: 1100, ct.err_msg: f"the maximum length specified for the field(string_field) should be in (0, 65535], "
-                                                f"but got {max_length} instead: invalid parameter"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"the maximum length specified for the field(string_field) should be in (0, 65535], "
+                             f"but got {max_length} instead: invalid parameter"}
         self.create_collection(client, collection_name, schema=schema,
-                              check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_collection_invalid_string_field_dtype(self):
@@ -4227,7 +4404,7 @@ class TestMilvusClientCollectionString(TestMilvusClientV2Base):
         error = {ct.err_code: 1100, ct.err_msg: "string data type not supported yet, please use VarChar type instead"}
         schema.add_field("string_field", DataType.STRING)
         self.create_collection(client, collection_name, schema=schema,
-                              check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestMilvusClientCollectionJSON(TestMilvusClientV2Base):
@@ -4255,13 +4432,13 @@ class TestMilvusClientCollectionJSON(TestMilvusClientV2Base):
         schema1.add_field("vector_field", DataType.FLOAT_VECTOR, dim=default_dim)
         error = {ct.err_code: 1100, ct.err_msg: "Primary key type must be DataType.INT64 or DataType.VARCHAR"}
         self.create_collection(client, collection_name, schema=schema1,
-                              check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
         # Test 2: create json field as primary key through schema
         schema2 = self.create_schema(client, enable_dynamic_field=False, primary_field="json_field", auto_id=auto_id)[0]
         schema2.add_field("json_field", DataType.JSON)
         schema2.add_field("vector_field", DataType.FLOAT_VECTOR, dim=default_dim)
         self.create_collection(client, collection_name, schema=schema2, primary_field="json_field",
-                              check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestMilvusClientCollectionARRAY(TestMilvusClientV2Base):
@@ -4325,7 +4502,7 @@ class TestMilvusClientCollectionARRAY(TestMilvusClientV2Base):
         # Try to add array field with invalid element_type
         schema.add_field("array_field", DataType.ARRAY, element_type=element_type)
         self.create_collection(client, collection_name, schema=schema,
-                              check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("max_capacity", [None, [], 'a', (), -1, 4097])
@@ -4339,19 +4516,20 @@ class TestMilvusClientCollectionARRAY(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        
+
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field("int64_pk", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("vector_field", DataType.FLOAT_VECTOR, dim=default_dim)
         # Determine expected error based on max_capacity type and value
         if max_capacity in [[], 'a', (), None]:
-            error = {ct.err_code: 1100, ct.err_msg: "the value for max_capacity of field array_field must be an integer"}
+            error = {ct.err_code: 1100,
+                     ct.err_msg: "the value for max_capacity of field array_field must be an integer"}
         else:
             error = {ct.err_code: 1100, ct.err_msg: "the maximum capacity specified for a Array should be in (0, 4096]"}
         # Try to add array field with invalid max_capacity
         schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, max_capacity=max_capacity)
         self.create_collection(client, collection_name, schema=schema,
-                              check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_string_array_without_max_length(self):
@@ -4369,7 +4547,7 @@ class TestMilvusClientCollectionARRAY(TestMilvusClientV2Base):
         error = {ct.err_code: 1100, ct.err_msg: "type param(max_length) should be specified for the field(array_field)"}
         schema.add_field("array_field", DataType.ARRAY, element_type=DataType.VARCHAR)
         self.create_collection(client, collection_name, schema=schema,
-                      check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("max_length", [-1, 65536])
@@ -4387,11 +4565,11 @@ class TestMilvusClientCollectionARRAY(TestMilvusClientV2Base):
         schema.add_field("vector_field", DataType.FLOAT_VECTOR, dim=default_dim)
         # Try to add string array field with invalid max_length
         schema.add_field("array_field", DataType.ARRAY, element_type=DataType.VARCHAR, max_length=max_length)
-        error = {ct.err_code: 1100, ct.err_msg: f"the maximum length specified for the field(array_field) should be in (0, 65535], "
-                                                f"but got {max_length} instead: invalid parameter"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"the maximum length specified for the field(array_field) should be in (0, 65535], "
+                             f"but got {max_length} instead: invalid parameter"}
         self.create_collection(client, collection_name, schema=schema,
-                      check_task=CheckTasks.err_res, check_items=error)
-
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_array_field_all_datatype(self):
@@ -4420,23 +4598,33 @@ class TestMilvusClientCollectionARRAY(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema)
         # Verify collection properties and all fields
         expected_fields = [
-            {"field_id": 100, "name": "int64", "description": "", "type": DataType.INT64, "params": {}, "element_type": 0, "is_primary": True},
-            {"field_id": 101, "name": "vector", "description": "", "type": DataType.FLOAT_VECTOR, "params": {"dim": default_dim}, "element_type": 0},
-            {"field_id": 102, "name": "int8_array", "description": "", "type": DataType.ARRAY, "params": {"max_capacity": nb}, "element_type": DataType.INT8},
-            {"field_id": 103, "name": "int16_array", "description": "", "type": DataType.ARRAY, "params": {"max_capacity": nb}, "element_type": DataType.INT16},
-            {"field_id": 104, "name": "int32_array", "description": "", "type": DataType.ARRAY, "params": {"max_capacity": nb}, "element_type": DataType.INT32},
-            {"field_id": 105, "name": "int64_array", "description": "", "type": DataType.ARRAY, "params": {"max_capacity": nb}, "element_type": DataType.INT64},
-            {"field_id": 106, "name": "bool_array", "description": "", "type": DataType.ARRAY, "params": {"max_capacity": nb}, "element_type": DataType.BOOL},
-            {"field_id": 107, "name": "float_array", "description": "", "type": DataType.ARRAY, "params": {"max_capacity": nb}, "element_type": DataType.FLOAT},
-            {"field_id": 108, "name": "double_array", "description": "", "type": DataType.ARRAY, "params": {"max_capacity": nb}, "element_type": DataType.DOUBLE},
-            {"field_id": 109, "name": "string_array", "description": "", "type": DataType.ARRAY, "params": {"max_length": 100, "max_capacity": nb}, "element_type": DataType.VARCHAR}
+            {"field_id": 100, "name": "int64", "description": "", "type": DataType.INT64, "params": {},
+             "element_type": 0, "is_primary": True},
+            {"field_id": 101, "name": "vector", "description": "", "type": DataType.FLOAT_VECTOR,
+             "params": {"dim": default_dim}, "element_type": 0},
+            {"field_id": 102, "name": "int8_array", "description": "", "type": DataType.ARRAY,
+             "params": {"max_capacity": nb}, "element_type": DataType.INT8},
+            {"field_id": 103, "name": "int16_array", "description": "", "type": DataType.ARRAY,
+             "params": {"max_capacity": nb}, "element_type": DataType.INT16},
+            {"field_id": 104, "name": "int32_array", "description": "", "type": DataType.ARRAY,
+             "params": {"max_capacity": nb}, "element_type": DataType.INT32},
+            {"field_id": 105, "name": "int64_array", "description": "", "type": DataType.ARRAY,
+             "params": {"max_capacity": nb}, "element_type": DataType.INT64},
+            {"field_id": 106, "name": "bool_array", "description": "", "type": DataType.ARRAY,
+             "params": {"max_capacity": nb}, "element_type": DataType.BOOL},
+            {"field_id": 107, "name": "float_array", "description": "", "type": DataType.ARRAY,
+             "params": {"max_capacity": nb}, "element_type": DataType.FLOAT},
+            {"field_id": 108, "name": "double_array", "description": "", "type": DataType.ARRAY,
+             "params": {"max_capacity": nb}, "element_type": DataType.DOUBLE},
+            {"field_id": 109, "name": "string_array", "description": "", "type": DataType.ARRAY,
+             "params": {"max_length": 100, "max_capacity": nb}, "element_type": DataType.VARCHAR}
         ]
         self.describe_collection(client, collection_name,
-                                check_task=CheckTasks.check_describe_collection_property,
-                                check_items={"collection_name": collection_name,
-                                           "id_name": "int64",
-                                           "enable_dynamic_field": False,
-                                           "fields": expected_fields})
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "id_name": "int64",
+                                              "enable_dynamic_field": False,
+                                              "fields": expected_fields})
         # Generate and insert test data manually
         insert_nb = 10
         pk_values = [i for i in range(insert_nb)]
@@ -4483,7 +4671,8 @@ class TestMilvusClientCollectionMultipleVectorValid(TestMilvusClientV2Base):
     @pytest.mark.parametrize("primary_key_type", ["int64", "varchar"])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("shards_num", [1, 3])
-    def test_milvus_client_collection_multiple_vectors_all_supported_field_type(self, primary_key_type, auto_id, shards_num):
+    def test_milvus_client_collection_multiple_vectors_all_supported_field_type(self, primary_key_type, auto_id,
+                                                                                shards_num):
         """
         target: test create collection with multiple vector fields and all supported field types
         method: create collection with multiple vector fields and all supported field types
@@ -4506,11 +4695,11 @@ class TestMilvusClientCollectionMultipleVectorValid(TestMilvusClientV2Base):
         # Add all supported scalar data types from DataType.__members__
         supported_types = []
         for k, v in DataType.__members__.items():
-            if (v and v != DataType.UNKNOWN and v != DataType.STRING 
-                and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR 
-                and v != DataType.BINARY_VECTOR and v != DataType.ARRAY 
-                and v != DataType.FLOAT16_VECTOR and v != DataType.BFLOAT16_VECTOR 
-                and v != DataType.INT8_VECTOR and v != DataType.SPARSE_FLOAT_VECTOR):
+            if (v and v != DataType.UNKNOWN and v != DataType.STRING
+                    and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR
+                    and v != DataType.BINARY_VECTOR and v != DataType.ARRAY
+                    and v != DataType.FLOAT16_VECTOR and v != DataType.BFLOAT16_VECTOR
+                    and v != DataType.INT8_VECTOR and v != DataType.SPARSE_FLOAT_VECTOR):
                 supported_types.append((k.lower(), v))
         for field_name, data_type in supported_types:
             if field_name.lower().startswith("_"):
@@ -4520,10 +4709,11 @@ class TestMilvusClientCollectionMultipleVectorValid(TestMilvusClientV2Base):
                 # add struct field
                 struct_schema = client.create_struct_field_schema()
                 struct_schema.add_field("struct_scalar_field", DataType.INT64)
-                schema.add_field(field_name, DataType.ARRAY, element_type=DataType.STRUCT, struct_schema=struct_schema, max_capacity=10)
+                schema.add_field(field_name, DataType.ARRAY, element_type=DataType.STRUCT, struct_schema=struct_schema,
+                                 max_capacity=10)
                 continue
             # Skip INT64 and VARCHAR as they're already added as primary key  
-            if data_type != DataType.INT64 and data_type != DataType.VARCHAR: 
+            if data_type != DataType.INT64 and data_type != DataType.VARCHAR:
                 schema.add_field(field_name, data_type)
         # Add ARRAY field separately with required parameters
         schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, max_capacity=10)
@@ -4546,7 +4736,8 @@ class TestMilvusClientCollectionMultipleVectorValid(TestMilvusClientV2Base):
     @pytest.mark.parametrize("primary_key_type", ["int64", "varchar"])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_collection_multiple_vectors_different_dim(self, primary_key_type, auto_id, enable_dynamic_field):
+    def test_milvus_client_collection_multiple_vectors_different_dim(self, primary_key_type, auto_id,
+                                                                     enable_dynamic_field):
         """
         target: test create collection with multiple vector fields having different dimensions
         method: create collection with multiple vector fields with different dims
@@ -4571,12 +4762,12 @@ class TestMilvusClientCollectionMultipleVectorValid(TestMilvusClientV2Base):
         expected_dims = [ct.max_dim, ct.min_dim, default_dim]
         expected_vector_names = ["float_vec_max_dim", "float_vec_min_dim", "float_vec_default_dim"]
         self.describe_collection(client, collection_name,
-                                check_task=CheckTasks.check_describe_collection_property,
-                                check_items={"collection_name": collection_name,
-                                           "auto_id": auto_id,
-                                           "enable_dynamic_field": enable_dynamic_field,
-                                           "dim": expected_dims,
-                                           "vector_name": expected_vector_names})
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "auto_id": auto_id,
+                                              "enable_dynamic_field": enable_dynamic_field,
+                                              "dim": expected_dims,
+                                              "vector_name": expected_vector_names})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -4599,7 +4790,7 @@ class TestMilvusClientCollectionMultipleVectorValid(TestMilvusClientV2Base):
         # Add multiple vector fields with maximum dimension (up to max_vector_field_num)
         vector_field_names = []
         for i in range(ct.max_vector_field_num):
-            vector_field_name = f"float_vec_{i+1}"
+            vector_field_name = f"float_vec_{i + 1}"
             vector_field_names.append(vector_field_name)
             schema.add_field(vector_field_name, DataType.FLOAT_VECTOR, dim=ct.max_dim)
         # Create collection
@@ -4608,18 +4799,19 @@ class TestMilvusClientCollectionMultipleVectorValid(TestMilvusClientV2Base):
         expected_dims = [ct.max_dim] * ct.max_vector_field_num
         expected_vector_names = vector_field_names
         self.describe_collection(client, collection_name,
-                                check_task=CheckTasks.check_describe_collection_property,
-                                check_items={"collection_name": collection_name,
-                                           "enable_dynamic_field": False,
-                                           "dim": expected_dims,
-                                           "vector_name": expected_vector_names})
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "enable_dynamic_field": False,
+                                              "dim": expected_dims,
+                                              "vector_name": expected_vector_names})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_key_type", ["int64", "varchar"])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("partition_key_type", ["int64", "varchar"])
-    def test_milvus_client_collection_multiple_vectors_partition_key(self, primary_key_type, auto_id, partition_key_type):
+    def test_milvus_client_collection_multiple_vectors_partition_key(self, primary_key_type, auto_id,
+                                                                     partition_key_type):
         """
         target: test create collection with multiple vector fields and partition key
         method: create collection with multiple vector fields and partition key
@@ -4655,11 +4847,11 @@ class TestMilvusClientCollectionMultipleVectorValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema)
         # Verify collection properties
         self.describe_collection(client, collection_name,
-                                check_task=CheckTasks.check_describe_collection_property,
-                                check_items={"collection_name": collection_name,
-                                           "auto_id": auto_id,
-                                           "enable_dynamic_field": False,
-                                           "num_partitions": ct.default_partition_num})
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "auto_id": auto_id,
+                                              "enable_dynamic_field": False,
+                                              "num_partitions": ct.default_partition_num})
         self.drop_collection(client, collection_name)
 
 
@@ -4708,10 +4900,11 @@ class TestMilvusClientCollectionMultipleVectorInvalid(TestMilvusClientV2Base):
         # Try to create collection with duplicate field names
         error = {ct.err_code: 1100, ct.err_msg: "duplicated field name"}
         self.create_collection(client, collection_name, schema=schema,
-                              check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("invalid_vector_name", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))])
+    @pytest.mark.parametrize("invalid_vector_name",
+                             ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))])
     def test_milvus_client_collection_multiple_vectors_invalid_all_vector_field_name(self, invalid_vector_name):
         """
         target: test create collection with multiple vector fields where all have invalid names
@@ -4729,7 +4922,7 @@ class TestMilvusClientCollectionMultipleVectorInvalid(TestMilvusClientV2Base):
         # Try to create collection with invalid field names
         error = {ct.err_code: 1100, ct.err_msg: f"Invalid field name: {invalid_vector_name}"}
         self.create_collection(client, collection_name, schema=schema,
-                              check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip("issue #37543")
@@ -4750,7 +4943,7 @@ class TestMilvusClientCollectionMultipleVectorInvalid(TestMilvusClientV2Base):
         # Try to create collection with invalid dimension
         error = {ct.err_code: 65535, ct.err_msg: "invalid dimension"}
         self.create_collection(client, collection_name, schema=schema,
-                              check_task=CheckTasks.err_res, check_items=error)
+                               check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestMilvusClientCollectionMmap(TestMilvusClientV2Base):
@@ -4812,7 +5005,7 @@ class TestMilvusClientCollectionMmap(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name="vector", index_type="HNSW", metric_type="L2")
         self.create_index(client, collection_name, index_params)
-        
+
         self.release_collection(client, collection_name)
         # Set mmap enabled before loading
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
@@ -4824,8 +5017,8 @@ class TestMilvusClientCollectionMmap(TestMilvusClientV2Base):
         # Try to alter mmap after loading - should raise exception
         error = {ct.err_code: 999, ct.err_msg: "can not alter mmap properties if collection loaded"}
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True},
-                                        check_task=CheckTasks.err_res, check_items=error)
-        
+                                         check_task=CheckTasks.err_res, check_items=error)
+
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -4930,9 +5123,9 @@ class TestMilvusClientCollectionMmap(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         # Generate search vectors 
         search_data = cf.gen_vectors(default_nq, default_dim)
-        self.search(client, collection_name, search_data, 
-                               check_task=CheckTasks.check_search_results,
-                               check_items={"nq": default_nq, "limit": default_limit})
+        self.search(client, collection_name, search_data,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": default_nq, "limit": default_limit})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -4950,8 +5143,7 @@ class TestMilvusClientCollectionMmap(TestMilvusClientV2Base):
         # Try to enable mmap on dropped collection - should raise exception
         error = {ct.err_code: 100, ct.err_msg: "collection not found"}
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True},
-                                        check_task=CheckTasks.err_res, check_items=error)
-
+                                         check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestMilvusClientTruncateCollection(TestMilvusClientV2Base):
@@ -5346,3 +5538,4 @@ class TestMilvusClientTruncateCollection(TestMilvusClientV2Base):
         num_entities = self.get_collection_stats(client, collection_name)[0]
         assert num_entities.get("row_count", -1) == 0
         self.drop_collection(client, collection_name)
+
