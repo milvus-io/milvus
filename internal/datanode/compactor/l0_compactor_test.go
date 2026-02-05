@@ -834,6 +834,13 @@ func (s *LevelZeroCompactionTaskSuite) TestFailed() {
 	})
 }
 
+func (s *LevelZeroCompactionTaskSuite) TestGetStorageConfig() {
+	// Verify GetStorageConfig returns the storage config from compaction params
+	storageConfig := s.task.GetStorageConfig()
+	s.NotNil(storageConfig)
+	s.Equal(s.task.compactionParams.StorageConfig, storageConfig)
+}
+
 func (s *LevelZeroCompactionTaskSuite) TestLoadBFWithDecompression() {
 	s.Run("successful decompression with root path", func() {
 		// Test that DecompressBinLogWithRootPath is called with correct parameters

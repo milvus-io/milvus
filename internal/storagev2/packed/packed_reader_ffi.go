@@ -74,7 +74,7 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 			storage_type:           C.CString(storageConfig.GetStorageType()),
 			cloud_provider:         C.CString(storageConfig.GetCloudProvider()),
 			iam_endpoint:           C.CString(storageConfig.GetIAMEndpoint()),
-			log_level:              C.CString("Warn"), // TODO use config after storage support lower case configuration
+			log_level:              C.CString("warn"),
 			useSSL:                 C.bool(storageConfig.GetUseSSL()),
 			sslCACert:              C.CString(storageConfig.GetSslCACert()),
 			useIAM:                 C.bool(storageConfig.GetUseIAM()),

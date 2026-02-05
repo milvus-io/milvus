@@ -142,6 +142,8 @@ const (
 
 	TaskTypeLabel  = "task_type"
 	TaskStateLabel = "task_state"
+
+	filesystemKeyLabelName = "fs"
 )
 
 var (

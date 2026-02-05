@@ -675,6 +675,13 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeNoExpiration() {
 	}
 }
 
+func (s *MixCompactionTaskStorageV1Suite) TestGetStorageConfig() {
+	// Verify GetStorageConfig returns the storage config from compaction params
+	storageConfig := s.task.GetStorageConfig()
+	s.NotNil(storageConfig)
+	s.Equal(s.task.compactionParams.StorageConfig, storageConfig)
+}
+
 func (s *MixCompactionTaskStorageV1Suite) TestGetBM25FieldIDs() {
 	fieldIDs := GetBM25FieldIDs(&schemapb.CollectionSchema{
 		Functions: []*schemapb.FunctionSchema{{}},
