@@ -9,8 +9,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
-var ErrNotPrimary = errors.New("cluster is not primary, cannot do any DDL/DCL")
-var ErrNotSecondary = errors.New("cluster is not secondary, cannot perform force promote")
+var (
+	ErrNotPrimary   = errors.New("cluster is not primary, cannot do any DDL/DCL")
+	ErrNotSecondary = errors.New("cluster is not secondary, cannot perform force promote")
+)
 
 type Broadcaster interface {
 	// WithResourceKeys sets the resource keys of the broadcast operation.
