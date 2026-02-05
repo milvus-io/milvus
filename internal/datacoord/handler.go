@@ -80,6 +80,10 @@ func newServerHandler(s *Server) *ServerHandler {
 }
 
 // GetDataVChanPositions gets vchannel latest positions with provided dml channel names for DataNode.
+// unflushend segmentIDs ---> L1, growing segments
+// flushend segmentIDs   ---> L1&L2, flushed segments
+// dropped segmentIDs    ---> dropped segments
+// level zero segmentIDs ---> L0 segments
 func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID UniqueID) *datapb.VchannelInfo {
 	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
 	log.Info("GetDataVChanPositions",
@@ -88,6 +92,7 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 		zap.Int("numOfSegments", len(segments)),
 	)
 	var (
+		levelZeroIDs = make(typeutil.UniqueSet)
 		flushedIDs   = make(typeutil.UniqueSet)
 		unflushedIDs = make(typeutil.UniqueSet)
 		droppedIDs   = make(typeutil.UniqueSet)
@@ -104,12 +109,14 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 			continue
 		}
 
-		if s.GetState() == commonpb.SegmentState_Dropped {
+		switch {
+		case s.GetState() == commonpb.SegmentState_Dropped:
 			droppedIDs.Insert(s.GetID())
-			continue
-		} else if s.GetState() == commonpb.SegmentState_Flushing || s.GetState() == commonpb.SegmentState_Flushed {
+		case s.GetLevel() == datapb.SegmentLevel_L0:
+			levelZeroIDs.Insert(s.GetID())
+		case isFlushState(s.GetState()):
 			flushedIDs.Insert(s.GetID())
-		} else {
+		default:
 			unflushedIDs.Insert(s.GetID())
 		}
 	}
@@ -121,6 +128,7 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 		FlushedSegmentIds:   flushedIDs.Collect(),
 		UnflushedSegmentIds: unflushedIDs.Collect(),
 		DroppedSegmentIds:   droppedIDs.Collect(),
+		LevelZeroSegmentIds: levelZeroIDs.Collect(),
 	}
 }
 
