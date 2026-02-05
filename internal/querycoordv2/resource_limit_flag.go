@@ -38,7 +38,7 @@ func markResourceLimitFlag(ctx context.Context, cli *clientv3.Client) {
 	if cli == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	leaseResp, err := cli.Grant(ctx, int64(resourceLimitFlagTTL.Seconds()))
 	if err != nil {
@@ -55,7 +55,7 @@ func clearResourceLimitFlag(ctx context.Context, cli *clientv3.Client) {
 	if cli == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	key := resourceLimitFlagPath()
 	if _, err := cli.Delete(ctx, key); err != nil {
