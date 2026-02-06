@@ -125,6 +125,98 @@ class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
                                         properties={"mmap.enabled": value},
                                         check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_create_index_idempotent_with_field_warmup(self):
+        """
+        target: test create index idempotency when warmup is set at field level
+        method: 1. create collection
+                2. release collection
+                3. alter field to set warmup=sync at field level (this adds warmup to field TypeParams)
+                4. drop existing index
+                5. create index (first time)
+                6. create same index again (second time - should be idempotent)
+        expected: both create_index calls should succeed (idempotent behavior)
+        issue: https://github.com/milvus-io/milvus/issues/XXXXX
+        note: This test verifies the fix for checkParams function in index_meta.go
+              which was missing WarmupKey in DeleteParams, causing idempotency check to fail.
+              When index is created, WarmupKey is removed from stored TypeParams.
+              When checking idempotency, WarmupKey should also be filtered from request TypeParams.
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        # 2. release collection before altering field properties
+        self.release_collection(client, collection_name)
+        # 3. alter field to set warmup=sync at field level
+        # This adds warmup to field TypeParams, which will be included in CreateIndex request
+        self.alter_collection_field(client, collection_name, field_name=default_vector_field_name,
+                                    field_params={"warmup": "sync"})
+        # 4. drop existing index
+        self.drop_index(client, collection_name, default_vector_field_name)
+        res = self.list_indexes(client, collection_name)[0]
+        assert res == []
+        # 5. prepare index params
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW",
+                               metric_type="L2", params={"M": 8, "efConstruction": 200})
+        # 6. create index (first time) - should succeed
+        self.create_index(client, collection_name, index_params)
+        idx_names, _ = self.list_indexes(client, collection_name, field_name=default_vector_field_name)
+        assert len(idx_names) == 1
+        # 7. create same index again (second time) - should be idempotent and succeed
+        # Before fix: this would fail with "at most one distinct index is allowed per field"
+        # because checkParams didn't filter WarmupKey from TypeParams comparison
+        self.create_index(client, collection_name, index_params)
+        idx_names_after, _ = self.list_indexes(client, collection_name, field_name=default_vector_field_name)
+        assert len(idx_names_after) == 1
+        assert idx_names == idx_names_after
+        # 8. cleanup
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_create_index_idempotent_with_collection_warmup(self):
+        """
+        target: test create index idempotency when warmup is set at collection level
+        method: 1. create collection
+                2. release collection
+                3. alter collection properties to set warmup.vectorField=sync
+                4. drop existing index
+                5. create index (first time)
+                6. create same index again (second time - should be idempotent)
+        expected: both create_index calls should succeed (idempotent behavior)
+        note: This test verifies the fix for checkParams function in index_meta.go
+              using collection-level warmup settings (warmup.vectorField)
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        # 2. release collection before altering properties
+        self.release_collection(client, collection_name)
+        # 3. alter collection properties to set warmup.vectorField=sync
+        self.alter_collection_properties(client, collection_name,
+                                         properties={"warmup.vectorField": "sync"})
+        # 4. drop existing index
+        self.drop_index(client, collection_name, default_vector_field_name)
+        res = self.list_indexes(client, collection_name)[0]
+        assert res == []
+        # 5. prepare index params
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW",
+                               metric_type="L2", params={"M": 8, "efConstruction": 200})
+        # 6. create index (first time) - should succeed
+        self.create_index(client, collection_name, index_params)
+        idx_names, _ = self.list_indexes(client, collection_name, field_name=default_vector_field_name)
+        assert len(idx_names) == 1
+        # 7. create same index again (second time) - should be idempotent and succeed
+        self.create_index(client, collection_name, index_params)
+        idx_names_after, _ = self.list_indexes(client, collection_name, field_name=default_vector_field_name)
+        assert len(idx_names_after) == 1
+        assert idx_names == idx_names_after
+        # 8. cleanup
+        self.drop_collection(client, collection_name)
+
 
 class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L0)
