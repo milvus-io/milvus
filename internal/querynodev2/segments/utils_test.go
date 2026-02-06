@@ -219,8 +219,6 @@ func TestGetFieldWarmupPolicy(t *testing.T) {
 	})
 
 	t.Run("field TypeParams warmup propagated from collection level", func(t *testing.T) {
-		// Collection-level warmup settings are now propagated to field TypeParams by QueryCoord,
-		// so we test with warmup already in TypeParams
 		policy := getFieldWarmupPolicy(&schemapb.FieldSchema{
 			DataType: schemapb.DataType_String,
 			TypeParams: []*commonpb.KeyValuePair{
@@ -265,8 +263,6 @@ func TestGetIndexWarmupPolicy(t *testing.T) {
 	})
 
 	t.Run("index params warmup propagated from collection level", func(t *testing.T) {
-		// Collection-level warmup settings are now propagated to index params by QueryCoord,
-		// so we test with warmup already in IndexParams
 		policy := getIndexWarmupPolicy(
 			&schemapb.FieldSchema{DataType: schemapb.DataType_String},
 			&querypb.FieldIndexInfo{
@@ -296,5 +292,28 @@ func TestGetIndexWarmupPolicy(t *testing.T) {
 			&querypb.FieldIndexInfo{},
 		)
 		assert.Equal(t, common.WarmupDisable, policy)
+	})
+}
+
+func TestGetScalarDataWarmupPolicy(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("field TypeParams has warmup", func(t *testing.T) {
+		policy := getScalarDataWarmupPolicy(&schemapb.FieldSchema{
+			DataType: schemapb.DataType_String,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.WarmupKey, Value: common.WarmupSync},
+			},
+		})
+		assert.Equal(t, common.WarmupSync, policy)
+	})
+
+	t.Run("fallback to global config", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key, common.WarmupSync)
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key)
+		policy := getScalarDataWarmupPolicy(&schemapb.FieldSchema{
+			DataType: schemapb.DataType_String,
+		})
+		assert.Equal(t, common.WarmupSync, policy)
 	})
 }

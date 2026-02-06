@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -341,9 +342,20 @@ func applyCollectionMmapSetting(schema *schemapb.CollectionSchema,
 	return schema
 }
 
+// autoWarmupForNonPKIsolationCollection checks if autoWarmupForNonPKIsolationCollection should be applied for a collection.
+// Returns true when the AutoWarmupForNonPKIsolationCollection config is enabled AND the collection
+// does NOT have partition key isolation.
+func autoWarmupForNonPKIsolationCollection(collectionProperties []*commonpb.KeyValuePair) bool {
+	if !paramtable.Get().QueryNodeCfg.AutoWarmupForNonPKIsolationCollection.GetAsBool() {
+		return false
+	}
+	isPKI, _ := common.IsPartitionKeyIsolationKvEnabled(collectionProperties...)
+	return !isPKI
+}
+
 // applyCollectionWarmupSetting applies collection-level warmup setting to all fields
 // and propagates struct-level warmup to nested fields.
-// Priority: field-level > struct-level > collection-level
+// Priority: field-level > struct-level > collection-level > autoWarmupForNonPKIsolationCollection (scalar only)
 // Collection-level granular keys: warmup.scalarField, warmup.vectorField
 func applyCollectionWarmupSetting(schema *schemapb.CollectionSchema,
 	collectionProperties []*commonpb.KeyValuePair,
@@ -351,6 +363,7 @@ func applyCollectionWarmupSetting(schema *schemapb.CollectionSchema,
 	// Get collection-level granular warmup policies
 	scalarFieldWarmup, scalarFieldExist := common.GetWarmupPolicyByKey(common.WarmupScalarFieldKey, collectionProperties...)
 	vectorFieldWarmup, vectorFieldExist := common.GetWarmupPolicyByKey(common.WarmupVectorFieldKey, collectionProperties...)
+	autoWarmup := autoWarmupForNonPKIsolationCollection(collectionProperties)
 
 	// Apply collection-level warmup to regular fields
 	for _, field := range schema.GetFields() {
@@ -370,6 +383,12 @@ func applyCollectionWarmupSetting(schema *schemapb.CollectionSchema,
 				Key:   common.WarmupKey,
 				Value: scalarFieldWarmup,
 			})
+		} else if autoWarmup && !isVector {
+			// autoWarmupForNonPKIsolationCollection fallback: force sync warmup for scalar fields (not vector fields)
+			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+				Key:   common.WarmupKey,
+				Value: common.WarmupSync,
+			})
 		}
 	}
 
@@ -385,7 +404,7 @@ func applyCollectionWarmupSetting(schema *schemapb.CollectionSchema,
 				continue
 			}
 
-			// Priority: struct field setting > collection setting
+			// Priority: struct field setting > collection setting > autoWarmupForNonPKIsolationCollection
 			if structHasWarmup {
 				field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
 					Key:   common.WarmupKey,
@@ -403,6 +422,12 @@ func applyCollectionWarmupSetting(schema *schemapb.CollectionSchema,
 						Key:   common.WarmupKey,
 						Value: scalarFieldWarmup,
 					})
+				} else if autoWarmup && !isVector {
+					// autoWarmupForNonPKIsolationCollection fallback for struct nested scalar fields
+					field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+						Key:   common.WarmupKey,
+						Value: common.WarmupSync,
+					})
 				}
 			}
 		}
@@ -412,13 +437,15 @@ func applyCollectionWarmupSetting(schema *schemapb.CollectionSchema,
 
 // applyIndexWarmupSetting applies collection-level index warmup setting to segment index params
 // Index params warmup setting has higher priority than collection-level
+// Priority: index-level > collection-level > autoWarmupForNonPKIsolationCollection (all indexes)
 // Collection-level granular keys: warmup.scalarIndex, warmup.vectorIndex
 func applyIndexWarmupSetting(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema, collectionProperties []*commonpb.KeyValuePair) {
 	// Get collection-level granular warmup policies for indexes
 	scalarIndexWarmup, scalarIndexExist := common.GetWarmupPolicyByKey(common.WarmupScalarIndexKey, collectionProperties...)
 	vectorIndexWarmup, vectorIndexExist := common.GetWarmupPolicyByKey(common.WarmupVectorIndexKey, collectionProperties...)
+	autoWarmup := autoWarmupForNonPKIsolationCollection(collectionProperties)
 
-	if !scalarIndexExist && !vectorIndexExist {
+	if !scalarIndexExist && !vectorIndexExist && !autoWarmup {
 		return
 	}
 
@@ -456,6 +483,12 @@ func applyIndexWarmupSetting(loadInfo *querypb.SegmentLoadInfo, schema *schemapb
 			indexInfo.IndexParams = append(indexInfo.IndexParams, &commonpb.KeyValuePair{
 				Key:   common.WarmupKey,
 				Value: scalarIndexWarmup,
+			})
+		} else if autoWarmup {
+			// autoWarmupForNonPKIsolationCollection fallback: force sync warmup for ALL indexes (scalar and vector)
+			indexInfo.IndexParams = append(indexInfo.IndexParams, &commonpb.KeyValuePair{
+				Key:   common.WarmupKey,
+				Value: common.WarmupSync,
 			})
 		}
 	}
