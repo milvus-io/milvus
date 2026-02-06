@@ -3267,24 +3267,25 @@ type queryNodeConfig struct {
 	EnableGeometryCache           ParamItem `refreshable:"false"`
 
 	// TODO(tiered storage 2) this should be refreshable?
-	TieredWarmupScalarField         ParamItem `refreshable:"false"`
-	TieredWarmupScalarIndex         ParamItem `refreshable:"false"`
-	TieredWarmupVectorField         ParamItem `refreshable:"false"`
-	TieredWarmupVectorIndex         ParamItem `refreshable:"false"`
-	TieredMemoryLowWatermarkRatio   ParamItem `refreshable:"false"`
-	TieredMemoryHighWatermarkRatio  ParamItem `refreshable:"false"`
-	TieredDiskLowWatermarkRatio     ParamItem `refreshable:"false"`
-	TieredDiskHighWatermarkRatio    ParamItem `refreshable:"false"`
-	TieredEvictionEnabled           ParamItem `refreshable:"false"`
-	TieredEvictableMemoryCacheRatio ParamItem `refreshable:"false"`
-	TieredEvictableDiskCacheRatio   ParamItem `refreshable:"false"`
-	TieredCacheTouchWindowMs        ParamItem `refreshable:"false"`
-	TieredBackgroundEvictionEnabled ParamItem `refreshable:"false"`
-	TieredEvictionIntervalMs        ParamItem `refreshable:"false"`
-	CacheCellUnaccessedSurvivalTime ParamItem `refreshable:"false"`
-	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
-	TieredLoadingTimeoutMs          ParamItem `refreshable:"false"`
-	StorageUsageTrackingEnabled     ParamItem `refreshable:"false"`
+	TieredWarmupScalarField               ParamItem `refreshable:"false"`
+	TieredWarmupScalarIndex               ParamItem `refreshable:"false"`
+	TieredWarmupVectorField               ParamItem `refreshable:"false"`
+	TieredWarmupVectorIndex               ParamItem `refreshable:"false"`
+	TieredMemoryLowWatermarkRatio         ParamItem `refreshable:"false"`
+	TieredMemoryHighWatermarkRatio        ParamItem `refreshable:"false"`
+	TieredDiskLowWatermarkRatio           ParamItem `refreshable:"false"`
+	TieredDiskHighWatermarkRatio          ParamItem `refreshable:"false"`
+	TieredEvictionEnabled                 ParamItem `refreshable:"false"`
+	TieredEvictableMemoryCacheRatio       ParamItem `refreshable:"false"`
+	TieredEvictableDiskCacheRatio         ParamItem `refreshable:"false"`
+	TieredCacheTouchWindowMs              ParamItem `refreshable:"false"`
+	TieredBackgroundEvictionEnabled       ParamItem `refreshable:"false"`
+	TieredEvictionIntervalMs              ParamItem `refreshable:"false"`
+	CacheCellUnaccessedSurvivalTime       ParamItem `refreshable:"false"`
+	TieredLoadingResourceFactor           ParamItem `refreshable:"false"`
+	TieredLoadingTimeoutMs                ParamItem `refreshable:"false"`
+	StorageUsageTrackingEnabled           ParamItem `refreshable:"false"`
+	AutoWarmupForNonPKIsolationCollection ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -3725,6 +3726,16 @@ If set to 0, time based eviction is disabled.`,
 		Export: false,
 	}
 	p.TieredLoadingTimeoutMs.Init(base.mgr)
+
+	p.AutoWarmupForNonPKIsolationCollection = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.warmup.autoWarmupForNonPKIsolationCollection",
+		Version:      "2.6.10",
+		DefaultValue: "false",
+		Doc:          `When enabled, forces vectorIndex, scalarField, and scalarIndex warmup to sync for collections without partition key isolation. vectorField is not affected.`,
+		Forbidden:    true,
+		Export:       false,
+	}
+	p.AutoWarmupForNonPKIsolationCollection.Init(base.mgr)
 
 	p.EnableDisk = ParamItem{
 		Key:          "queryNode.enableDisk",
