@@ -106,9 +106,12 @@ type Segment interface {
 	GetBM25Stats() map[int64]*storage.BM25Stats
 
 	// Read operations
+	// Search executes a search on the segment.
+	// If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 	Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error)
 	Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error)
 	RetrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error)
+
 	IsLazyLoad() bool
 	ResetIndexesLazyLoad(lazyState bool)
 

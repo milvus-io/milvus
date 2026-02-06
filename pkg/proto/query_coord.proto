@@ -458,6 +458,9 @@ message SearchRequest {
     bool from_shard_leader = 4;
     DataScope scope = 5;  // All, Streaming, Historical
     int32 total_channel_num = 6;
+    // If true, only execute filter and return valid counts per segment (two-stage search stage 1).
+    // Results are returned in SearchResults.FilterValidCounts corresponding to SealedSegmentIDsSearched.
+    bool filter_only = 7;
 }
 
 message QueryRequest {

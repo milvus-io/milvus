@@ -57,6 +57,12 @@ class ProtoParser {
     std::shared_ptr<rescores::Scorer>
     ParseScorer(const proto::plan::ScoreFunction& function);
 
+    // Extract only filter-related nodes (FilterBitsNode, ElementFilterBitsNode)
+    // from a plan tree, avoiding VectorSearchNode, SearchGroupByNode, etc.
+    // Returns MvccNode only if no pre-filter nodes are found.
+    static std::shared_ptr<plan::PlanNode>
+    ExtractFilterOnlyPlan(const std::shared_ptr<plan::PlanNode>& root_node);
+
  private:
     expr::TypedExprPtr
     CreateAlwaysTrueExprs();
