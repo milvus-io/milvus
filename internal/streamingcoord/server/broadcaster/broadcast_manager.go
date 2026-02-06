@@ -373,52 +373,6 @@ func (bm *broadcastTaskManager) removeBroadcastTask(broadcastID uint64) {
 	delete(bm.tasks, broadcastID)
 }
 
-// getIncompleteBroadcastTasks returns all incomplete broadcast tasks that have pending messages.
-// Tasks in PENDING or REPLICATED state with pending messages are considered incomplete.
-func (bm *broadcastTaskManager) getIncompleteBroadcastTasks() []*broadcastTask {
-	bm.mu.Lock()
-	defer bm.mu.Unlock()
-
-	var result []*broadcastTask
-	for _, task := range bm.tasks {
-		state := task.State()
-		if state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING &&
-			state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED {
-			continue
-		}
-		msgs := task.PendingBroadcastMessages()
-		if len(msgs) == 0 {
-			continue
-		}
-		result = append(result, task)
-	}
-	return result
-}
-
-// GetPendingBroadcastMessages returns all pending broadcast messages that need to be appended.
-// Used ONLY in failover scenario to supplement incomplete broadcasts.
-func (bm *broadcastTaskManager) GetPendingBroadcastMessages() []message.MutableMessage {
-	bm.mu.Lock()
-	defer bm.mu.Unlock()
-
-	var pendingMessages []message.MutableMessage
-	for _, task := range bm.tasks {
-		state := task.State()
-		// Only consider tasks that are pending or waiting for ack
-		if state == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING ||
-			state == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED {
-			msgs := task.PendingBroadcastMessages()
-			if len(msgs) > 0 {
-				bm.Logger().Info("Found pending broadcast messages for supplementation",
-					zap.Uint64("broadcastID", task.Header().BroadcastID),
-					zap.String("messageType", task.msg.MessageType().String()),
-					zap.Int("pendingVChannels", len(msgs)))
-				pendingMessages = append(pendingMessages, msgs...)
-			}
-		}
-	}
-	return pendingMessages
-}
 
 // FixIncompleteBroadcastsForForcePromote fixes incomplete broadcasts for force promote.
 // It marks incomplete AlterReplicateConfig messages with ignore=true before supplementing
