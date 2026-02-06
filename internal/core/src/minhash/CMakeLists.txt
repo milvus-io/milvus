@@ -56,11 +56,6 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64)|(ARM64)")
     message(STATUS "Building with SVE support")
 endif()
 
-target_link_libraries(milvus_minhash PUBLIC
-    xxhash::xxhash
-    OpenSSL::SSL
-)
-
 target_include_directories(milvus_minhash PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/..
     ${CMAKE_CURRENT_SOURCE_DIR}/fusion_compute
