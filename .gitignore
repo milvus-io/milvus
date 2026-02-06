@@ -124,3 +124,18 @@ WARP.md
 claude.md
 docs/plans/
 
+# Git worktrees
+.worktrees/
+
+# Claude sandbox env
+.bash_profile
+.bashrc
+.claude/
+.gitconfig
+.gitmodules
+.idea
+.mcp.json
+.profile
+.ripgreprc
+.zprofile
+.zshrc

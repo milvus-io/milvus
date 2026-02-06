@@ -289,6 +289,133 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	}
 }
 
+func (suite *SegmentLoaderSuite) TestLoadSegmentWithIndexStatusMetric() {
+	// Test that LoadSegment correctly records index status metrics
+	ctx := context.Background()
+	msgLength := 100
+
+	// Test 1: Load segment with index (should be marked as indexed)
+	binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		suite.segmentID+100,
+		msgLength,
+		suite.schema,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+
+	// Generate indexes for all vector fields to ensure segment is fully indexed
+	indexInfos := make([]*querypb.FieldIndexInfo, 0)
+
+	// Get index infos which contains proper configuration for all vector fields
+	indexInfoList := mock_segcore.GenTestIndexInfoList(suite.collectionID, suite.schema)
+
+	for _, indexInfo := range indexInfoList {
+		// Find the corresponding field schema
+		var fieldSchema *schemapb.FieldSchema
+		for _, field := range suite.schema.Fields {
+			if field.GetFieldID() == indexInfo.GetFieldID() {
+				fieldSchema = field
+				break
+			}
+		}
+
+		if fieldSchema == nil {
+			suite.T().Fatalf("field schema not found for fieldID %d", indexInfo.GetFieldID())
+		}
+
+		// Use GenAndSaveIndexV2 which supports all vector types
+		fieldIndexInfo, err := mock_segcore.GenAndSaveIndexV2(
+			suite.collectionID,
+			suite.partitionID,
+			suite.segmentID+100,
+			indexInfo.GetIndexID(),
+			fieldSchema,
+			indexInfo,
+			suite.chunkManager,
+			msgLength,
+		)
+		suite.NoError(err)
+		indexInfos = append(indexInfos, fieldIndexInfo)
+	}
+
+	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+		SegmentID:     suite.segmentID + 100,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		IndexInfos:    indexInfos,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		Level:         datapb.SegmentLevel_Legacy,
+	})
+	suite.NoError(err)
+	suite.Len(segments, 1)
+
+	// Verify segment is marked as indexed
+	suite.Equal(IndexStatusIndexed, segments[0].GetIndexStatus())
+	// Verify all vector fields have indexes
+	for _, indexInfo := range indexInfoList {
+		suite.True(segments[0].ExistIndex(indexInfo.GetFieldID()))
+	}
+
+	// Test 2: Load segment without index (should be marked as unindexed)
+	binlogs2, statsLogs2, err := mock_segcore.SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		suite.segmentID+101,
+		msgLength,
+		suite.schema,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+
+	segments2, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+		SegmentID:     suite.segmentID + 101,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs2,
+		Statslogs:     statsLogs2,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		Level:         datapb.SegmentLevel_Legacy,
+	})
+	suite.NoError(err)
+	suite.Len(segments2, 1)
+
+	// Verify segment is marked as unindexed
+	suite.Equal(IndexStatusUnindexed, segments2[0].GetIndexStatus())
+
+	// Test 3: Load L0 segment (should not record index status)
+	binlogs3, statsLogs3, err := mock_segcore.SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		suite.segmentID+102,
+		msgLength,
+		suite.schema,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+
+	segments3, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+		SegmentID:     suite.segmentID + 102,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs3,
+		Statslogs:     statsLogs3,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		Level:         datapb.SegmentLevel_L0,
+	})
+	suite.NoError(err)
+	suite.Len(segments3, 1)
+
+	// L0 segment keeps default unindexed status (not explicitly set by LoadSegment)
+	suite.Equal(IndexStatusUnindexed, segments3[0].GetIndexStatus())
+}
+
 func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
 	ctx := context.Background()
 	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)

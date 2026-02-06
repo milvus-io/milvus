@@ -1051,6 +1051,21 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 			}
 		}
 	}
+
+	// Set initial index status (skip L0 segments)
+	// Note: Metric increment is done in manager.Put() to avoid double-counting
+	if segment.Level() != datapb.SegmentLevel_L0 {
+		allIndexed := checkAllVectorFieldsIndexed(segment, collection.Schema())
+		newStatus := IndexStatusUnindexed
+		if allIndexed {
+			newStatus = IndexStatusIndexed
+		}
+		segment.SetIndexStatus(newStatus)
+		log.Info("segment index status recorded",
+			zap.Int64("segmentID", segment.ID()),
+			zap.String("indexStatus", newStatus.String()))
+	}
+
 	return nil
 }
 
@@ -2193,6 +2208,23 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 		loader.notifyLoadFinish(loadInfo)
 	}
 
+	// Check if index status changed after loading indexes (skip L0 segments)
+	if segment.Level() != datapb.SegmentLevel_L0 {
+		collection := loader.manager.Collection.Get(segment.Collection())
+		if collection != nil {
+			allIndexed := checkAllVectorFieldsIndexed(segment, collection.Schema())
+			oldStatus := segment.GetIndexStatus()
+
+			// If all vector fields are now indexed and previous status was unindexed, update metric
+			if allIndexed && oldStatus == IndexStatusUnindexed {
+				updateSegmentIndexMetric(segment, oldStatus, IndexStatusIndexed)
+				log.Info("segment index status updated after handoff",
+					zap.String("oldStatus", oldStatus.String()),
+					zap.String("newStatus", IndexStatusIndexed.String()))
+			}
+		}
+	}
+
 	return loader.waitSegmentLoadDone(ctx, commonpb.SegmentState_SegmentStateNone, []int64{loadInfo.GetSegmentID()}, version)
 }
 
@@ -2318,4 +2350,78 @@ func checkSegmentGpuMemSize(fieldGpuMemSizeList []uint64, OverloadedMemoryThresh
 		currentGpuMem[minId] += minGpuMem
 	}
 	return nil
+}
+
+// checkAllVectorFieldsIndexed checks if all vector fields in the segment have indexes loaded.
+// Returns true if all vector fields are indexed, false otherwise.
+func checkAllVectorFieldsIndexed(segment Segment, schema *schemapb.CollectionSchema) bool {
+	if schema == nil {
+		return false
+	}
+
+	// Collect all vector field IDs from schema
+	vectorFieldIDs := make([]int64, 0)
+	for _, field := range schema.GetFields() {
+		if typeutil.IsVectorType(field.GetDataType()) {
+			vectorFieldIDs = append(vectorFieldIDs, field.GetFieldID())
+		}
+	}
+
+	// If no vector fields, consider it as indexed
+	if len(vectorFieldIDs) == 0 {
+		return true
+	}
+
+	// Check if all vector fields have indexes
+	for _, fieldID := range vectorFieldIDs {
+		if !segment.ExistIndex(fieldID) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// updateSegmentIndexMetric updates the segment index status metric.
+// It transitions the segment from oldStatus to newStatus and updates the corresponding Prometheus metrics.
+// This function is thread-safe and uses CompareAndSet to ensure atomicity.
+// Returns true if the status was successfully updated, false otherwise.
+func updateSegmentIndexMetric(segment Segment, oldStatus, newStatus IndexStatus) bool {
+	// If status hasn't changed, nothing to do
+	if oldStatus == newStatus {
+		return false
+	}
+
+	// Use CompareAndSet to atomically update the status
+	// This prevents race conditions when multiple threads try to update the same segment
+	if !segment.CompareAndSetIndexStatus(oldStatus, newStatus) {
+		log.Info("segment index status already updated, skipping metric update",
+			zap.Int64("segmentID", segment.ID()),
+			zap.String("expectedOldStatus", oldStatus.String()),
+			zap.String("actualStatus", segment.GetIndexStatus().String()),
+		)
+		return false
+	}
+
+	nodeID := fmt.Sprint(paramtable.GetNodeID())
+	collectionID := fmt.Sprint(segment.Collection())
+	segmentType := segment.Type().String()
+
+	// Decrement old status metric
+	metrics.QueryNodeLoadedSegmentCount.WithLabelValues(
+		nodeID,
+		collectionID,
+		segmentType,
+		oldStatus.String(),
+	).Dec()
+
+	// Increment new status metric
+	metrics.QueryNodeLoadedSegmentCount.WithLabelValues(
+		nodeID,
+		collectionID,
+		segmentType,
+		newStatus.String(),
+	).Inc()
+
+	return true
 }
