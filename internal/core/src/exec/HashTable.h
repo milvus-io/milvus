@@ -14,7 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #pragma once
+#if defined(__x86_64__) || defined(__i386__)
 #include <emmintrin.h>
+#elif defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
