@@ -1,4 +1,0 @@
-bank
-note
-fire
-work
