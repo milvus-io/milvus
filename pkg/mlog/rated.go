@@ -46,22 +46,17 @@ func ratedAllow(pc uintptr, limit rate.Limit, fields *[]Field) bool {
 	return true
 }
 
-// ratedLog is the shared implementation for package-level RatedXxx functions.
-// The caller must check globalLevel.Enabled before calling this function.
-func ratedLog(ctx context.Context, level Level, pc uintptr, limit rate.Limit, msg string, fields []Field) {
-	if !ratedAllow(pc, limit, &fields) {
-		return
-	}
-	log(ctx, level, msg, fields...)
-}
-
 // RatedLog logs a message at the specified level with rate limiting.
 func RatedLog(ctx context.Context, level Level, limit rate.Limit, msg string, fields ...Field) {
 	if !globalLevel.Enabled(level) {
 		return
 	}
 	pc, _, _, _ := runtime.Caller(1)
-	ratedLog(ctx, level, pc, limit, msg, fields)
+	if !ratedAllow(pc, limit, &fields) {
+		return
+	}
+	logger, fields := prepareLog(ctx, fields)
+	logger.Log(level, msg, fields...)
 }
 
 // RatedDebug logs a message at debug level with rate limiting.
@@ -70,7 +65,11 @@ func RatedDebug(ctx context.Context, limit rate.Limit, msg string, fields ...Fie
 		return
 	}
 	pc, _, _, _ := runtime.Caller(1)
-	ratedLog(ctx, DebugLevel, pc, limit, msg, fields)
+	if !ratedAllow(pc, limit, &fields) {
+		return
+	}
+	logger, fields := prepareLog(ctx, fields)
+	logger.Debug(msg, fields...)
 }
 
 // RatedInfo logs a message at info level with rate limiting.
@@ -79,7 +78,11 @@ func RatedInfo(ctx context.Context, limit rate.Limit, msg string, fields ...Fiel
 		return
 	}
 	pc, _, _, _ := runtime.Caller(1)
-	ratedLog(ctx, InfoLevel, pc, limit, msg, fields)
+	if !ratedAllow(pc, limit, &fields) {
+		return
+	}
+	logger, fields := prepareLog(ctx, fields)
+	logger.Info(msg, fields...)
 }
 
 // RatedWarn logs a message at warn level with rate limiting.
@@ -88,7 +91,11 @@ func RatedWarn(ctx context.Context, limit rate.Limit, msg string, fields ...Fiel
 		return
 	}
 	pc, _, _, _ := runtime.Caller(1)
-	ratedLog(ctx, WarnLevel, pc, limit, msg, fields)
+	if !ratedAllow(pc, limit, &fields) {
+		return
+	}
+	logger, fields := prepareLog(ctx, fields)
+	logger.Warn(msg, fields...)
 }
 
 // RatedError logs a message at error level with rate limiting.
@@ -97,16 +104,11 @@ func RatedError(ctx context.Context, limit rate.Limit, msg string, fields ...Fie
 		return
 	}
 	pc, _, _, _ := runtime.Caller(1)
-	ratedLog(ctx, ErrorLevel, pc, limit, msg, fields)
-}
-
-// ratedLog is the shared implementation for Logger RatedXxx methods.
-// The caller must check globalLevel.Enabled before calling this method.
-func (l *Logger) ratedLog(ctx context.Context, level Level, pc uintptr, limit rate.Limit, msg string, fields []Field) {
 	if !ratedAllow(pc, limit, &fields) {
 		return
 	}
-	l.Log(ctx, level, msg, fields...)
+	logger, fields := prepareLog(ctx, fields)
+	logger.Error(msg, fields...)
 }
 
 // RatedLog logs a message at the specified level with rate limiting.
@@ -115,7 +117,11 @@ func (l *Logger) RatedLog(ctx context.Context, level Level, limit rate.Limit, ms
 		return
 	}
 	pc, _, _, _ := runtime.Caller(1)
-	l.ratedLog(ctx, level, pc, limit, msg, fields)
+	if !ratedAllow(pc, limit, &fields) {
+		return
+	}
+	logger, fields := l.prepareLog(ctx, fields)
+	logger.Log(level, msg, fields...)
 }
 
 // RatedDebug logs a message at debug level with rate limiting.
@@ -124,7 +130,11 @@ func (l *Logger) RatedDebug(ctx context.Context, limit rate.Limit, msg string, f
 		return
 	}
 	pc, _, _, _ := runtime.Caller(1)
-	l.ratedLog(ctx, DebugLevel, pc, limit, msg, fields)
+	if !ratedAllow(pc, limit, &fields) {
+		return
+	}
+	logger, fields := l.prepareLog(ctx, fields)
+	logger.Debug(msg, fields...)
 }
 
 // RatedInfo logs a message at info level with rate limiting.
@@ -133,7 +143,11 @@ func (l *Logger) RatedInfo(ctx context.Context, limit rate.Limit, msg string, fi
 		return
 	}
 	pc, _, _, _ := runtime.Caller(1)
-	l.ratedLog(ctx, InfoLevel, pc, limit, msg, fields)
+	if !ratedAllow(pc, limit, &fields) {
+		return
+	}
+	logger, fields := l.prepareLog(ctx, fields)
+	logger.Info(msg, fields...)
 }
 
 // RatedWarn logs a message at warn level with rate limiting.
@@ -142,7 +156,11 @@ func (l *Logger) RatedWarn(ctx context.Context, limit rate.Limit, msg string, fi
 		return
 	}
 	pc, _, _, _ := runtime.Caller(1)
-	l.ratedLog(ctx, WarnLevel, pc, limit, msg, fields)
+	if !ratedAllow(pc, limit, &fields) {
+		return
+	}
+	logger, fields := l.prepareLog(ctx, fields)
+	logger.Warn(msg, fields...)
 }
 
 // RatedError logs a message at error level with rate limiting.
@@ -151,5 +169,9 @@ func (l *Logger) RatedError(ctx context.Context, limit rate.Limit, msg string, f
 		return
 	}
 	pc, _, _, _ := runtime.Caller(1)
-	l.ratedLog(ctx, ErrorLevel, pc, limit, msg, fields)
+	if !ratedAllow(pc, limit, &fields) {
+		return
+	}
+	logger, fields := l.prepareLog(ctx, fields)
+	logger.Error(msg, fields...)
 }

@@ -44,24 +44,16 @@ func getLogger() *zap.Logger {
 	return globalLogger.Load()
 }
 
-// log is the internal logging function
-func log(ctx context.Context, level Level, msg string, fields ...Field) {
-	// Early return if level is disabled - avoid field processing overhead
-	if !globalLevel.Enabled(level) {
-		return
-	}
-
-	// Handle nil context
+// prepareLog resolves the logger and fields from context for package-level functions.
+// It returns before the actual log call, so it does not appear in the call stack
+// when zap captures the caller.
+func prepareLog(ctx context.Context, fields []Field) (*zap.Logger, []Field) {
 	if ctx == nil {
-		fields = append(fields, nilContextField)
-		logWithLogger(getLogger(), level, msg, fields...)
-		return
+		return getLogger(), append(fields, nilContextField)
 	}
 
-	// Use cached logger from context if available
 	logger := loggerFromContext(ctx)
 	if logger == nil {
-		// No cached logger, use global logger with context fields
 		logger = getLogger()
 		ctxFields := FieldsFromContext(ctx)
 		if len(ctxFields) > 0 {
@@ -69,46 +61,52 @@ func log(ctx context.Context, level Level, msg string, fields ...Field) {
 		}
 	}
 
-	logWithLogger(logger, level, msg, fields...)
-}
-
-// logWithLogger logs a message using the provided logger
-func logWithLogger(logger *zap.Logger, level Level, msg string, fields ...Field) {
-	switch level {
-	case DebugLevel:
-		logger.Debug(msg, fields...)
-	case InfoLevel:
-		logger.Info(msg, fields...)
-	case WarnLevel:
-		logger.Warn(msg, fields...)
-	case ErrorLevel:
-		logger.Error(msg, fields...)
-	}
+	return logger, fields
 }
 
 // Log logs a message at the specified level.
 func Log(ctx context.Context, level Level, msg string, fields ...Field) {
-	log(ctx, level, msg, fields...)
+	if !globalLevel.Enabled(level) {
+		return
+	}
+	logger, fields := prepareLog(ctx, fields)
+	logger.Log(level, msg, fields...)
 }
 
 // Debug logs a message at debug level.
 func Debug(ctx context.Context, msg string, fields ...Field) {
-	log(ctx, DebugLevel, msg, fields...)
+	if !globalLevel.Enabled(DebugLevel) {
+		return
+	}
+	logger, fields := prepareLog(ctx, fields)
+	logger.Debug(msg, fields...)
 }
 
 // Info logs a message at info level.
 func Info(ctx context.Context, msg string, fields ...Field) {
-	log(ctx, InfoLevel, msg, fields...)
+	if !globalLevel.Enabled(InfoLevel) {
+		return
+	}
+	logger, fields := prepareLog(ctx, fields)
+	logger.Info(msg, fields...)
 }
 
 // Warn logs a message at warn level.
 func Warn(ctx context.Context, msg string, fields ...Field) {
-	log(ctx, WarnLevel, msg, fields...)
+	if !globalLevel.Enabled(WarnLevel) {
+		return
+	}
+	logger, fields := prepareLog(ctx, fields)
+	logger.Warn(msg, fields...)
 }
 
 // Error logs a message at error level.
 func Error(ctx context.Context, msg string, fields ...Field) {
-	log(ctx, ErrorLevel, msg, fields...)
+	if !globalLevel.Enabled(ErrorLevel) {
+		return
+	}
+	logger, fields := prepareLog(ctx, fields)
+	logger.Error(msg, fields...)
 }
 
 // Logger is a component-level logger with pre-configured fields.
@@ -184,81 +182,95 @@ func (l *Logger) Level() Level {
 	return GetLevel()
 }
 
-// Log logs a message at the specified level.
-// It optimizes by selecting the logger with more pre-encoded fields.
-func (l *Logger) Log(ctx context.Context, level Level, msg string, fields ...Field) {
-	// Early return if level is disabled
-	if !globalLevel.Enabled(level) {
-		return
-	}
-
-	// Handle nil context
+// prepareLog resolves the logger and fields for Logger methods.
+// It optimizes by selecting the logger with more pre-encoded fields
+// to minimize the number of fields that need encoding at log time.
+// It returns before the actual log call, so it does not appear in the call stack
+// when zap captures the caller.
+func (l *Logger) prepareLog(ctx context.Context, fields []Field) (*zap.Logger, []Field) {
 	if ctx == nil {
 		if len(fields) == 0 {
-			logWithLogger(l.logger, level, msg, nilContextField)
-		} else {
-			allFields := make([]Field, len(fields)+1)
-			copy(allFields, fields)
-			allFields[len(fields)] = nilContextField
-			logWithLogger(l.logger, level, msg, allFields...)
+			return l.logger, []Field{nilContextField}
 		}
-		return
+		allFields := make([]Field, len(fields)+1)
+		copy(allFields, fields)
+		allFields[len(fields)] = nilContextField
+		return l.logger, allFields
 	}
 
 	lc := getLogContext(ctx)
 
-	// Optimization: use the logger with more pre-encoded fields as base
-	// to minimize the number of fields that need encoding at log time
 	if lc.logger != nil && lc.fieldCount() >= len(l.fields) {
 		// ctx has more fields, use ctx logger, pass component fields + extra fields
 		switch {
-		case len(l.fields) == 0 && len(fields) == 0:
-			logWithLogger(lc.logger, level, msg)
 		case len(l.fields) == 0:
-			logWithLogger(lc.logger, level, msg, fields...)
+			return lc.logger, fields
 		case len(fields) == 0:
-			logWithLogger(lc.logger, level, msg, l.fields...)
+			return lc.logger, l.fields
 		default:
 			allFields := make([]Field, len(l.fields)+len(fields))
 			copy(allFields, l.fields)
 			copy(allFields[len(l.fields):], fields)
-			logWithLogger(lc.logger, level, msg, allFields...)
-		}
-	} else {
-		// component has more fields (or ctx has no logger), use component logger
-		ctxFields := lc.getFields()
-		switch {
-		case len(ctxFields) == 0 && len(fields) == 0:
-			logWithLogger(l.logger, level, msg)
-		case len(ctxFields) == 0:
-			logWithLogger(l.logger, level, msg, fields...)
-		case len(fields) == 0:
-			logWithLogger(l.logger, level, msg, ctxFields...)
-		default:
-			allFields := make([]Field, len(ctxFields)+len(fields))
-			copy(allFields, ctxFields)
-			copy(allFields[len(ctxFields):], fields)
-			logWithLogger(l.logger, level, msg, allFields...)
+			return lc.logger, allFields
 		}
 	}
+
+	// component has more fields (or ctx has no logger), use component logger
+	ctxFields := lc.getFields()
+	switch {
+	case len(ctxFields) == 0:
+		return l.logger, fields
+	case len(fields) == 0:
+		return l.logger, ctxFields
+	default:
+		allFields := make([]Field, len(ctxFields)+len(fields))
+		copy(allFields, ctxFields)
+		copy(allFields[len(ctxFields):], fields)
+		return l.logger, allFields
+	}
+}
+
+// Log logs a message at the specified level.
+func (l *Logger) Log(ctx context.Context, level Level, msg string, fields ...Field) {
+	if !globalLevel.Enabled(level) {
+		return
+	}
+	logger, fields := l.prepareLog(ctx, fields)
+	logger.Log(level, msg, fields...)
 }
 
 // Debug logs a message at debug level.
 func (l *Logger) Debug(ctx context.Context, msg string, fields ...Field) {
-	l.Log(ctx, DebugLevel, msg, fields...)
+	if !globalLevel.Enabled(DebugLevel) {
+		return
+	}
+	logger, fields := l.prepareLog(ctx, fields)
+	logger.Debug(msg, fields...)
 }
 
 // Info logs a message at info level.
 func (l *Logger) Info(ctx context.Context, msg string, fields ...Field) {
-	l.Log(ctx, InfoLevel, msg, fields...)
+	if !globalLevel.Enabled(InfoLevel) {
+		return
+	}
+	logger, fields := l.prepareLog(ctx, fields)
+	logger.Info(msg, fields...)
 }
 
 // Warn logs a message at warn level.
 func (l *Logger) Warn(ctx context.Context, msg string, fields ...Field) {
-	l.Log(ctx, WarnLevel, msg, fields...)
+	if !globalLevel.Enabled(WarnLevel) {
+		return
+	}
+	logger, fields := l.prepareLog(ctx, fields)
+	logger.Warn(msg, fields...)
 }
 
 // Error logs a message at error level.
 func (l *Logger) Error(ctx context.Context, msg string, fields ...Field) {
-	l.Log(ctx, ErrorLevel, msg, fields...)
+	if !globalLevel.Enabled(ErrorLevel) {
+		return
+	}
+	logger, fields := l.prepareLog(ctx, fields)
+	logger.Error(msg, fields...)
 }
