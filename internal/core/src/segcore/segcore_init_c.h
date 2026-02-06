@@ -124,7 +124,9 @@ ConfigureTieredStorage(
     const float loading_resource_factor,
     const float max_disk_usage_percentage,
     const char* disk_path,
-    const int64_t loading_timeout_ms);
+    const int64_t loading_timeout_ms,
+    // async warmup prefetch pool threads
+    const uint32_t prefetch_pool_threads);
 
 #ifdef __cplusplus
 }

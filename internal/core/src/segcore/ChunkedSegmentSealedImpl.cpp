@@ -3153,7 +3153,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     bool has_mmap_setting = false;
     bool mmap_enabled = false;
     bool has_warmup_setting = false;
-    bool warmup_sync = false;
+    std::string aggregated_warmup_policy = "disable";
     for (auto& [field_id, field_meta] : field_metas) {
         if (IsVectorDataType(field_meta.get_data_type())) {
             is_vector = true;
@@ -3171,14 +3171,19 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 
         // if field has warmup setting, use it
         // - warmup setting at collection level, uses appropriate key based on field type
-        // - warmup setting at field level, use the most aggressive policy (sync > disable)
+        // - warmup setting at field level, use the most aggressive policy (sync > async > disable)
         // Note: this is for field data loading, not index (is_index = false)
         bool field_is_vector = IsVectorDataType(field_meta.get_data_type());
         auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
             field_id, field_is_vector, /*is_index=*/false);
         if (field_has_warmup) {
             has_warmup_setting = true;
-            warmup_sync = warmup_sync || (field_warmup_policy == "sync");
+            if (field_warmup_policy == "sync") {
+                aggregated_warmup_policy = "sync";
+            } else if (field_warmup_policy == "async" &&
+                       aggregated_warmup_policy != "sync") {
+                aggregated_warmup_policy = "async";
+            }
         }
     }
 
@@ -3206,7 +3211,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     // Determine warmup policy: use per-field settings if any,
     // otherwise pass empty string to fall back to global config
     std::string warmup_policy =
-        has_warmup_setting ? (warmup_sync ? "sync" : "disable") : "";
+        has_warmup_setting ? aggregated_warmup_policy : "";
 
     auto translator =
         std::make_unique<storagev2translator::ManifestGroupTranslator>(
@@ -3372,7 +3377,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         bool is_vector = false;
 
         bool has_warmup_setting = false;
-        bool warmup_sync = false;
+        std::string aggregated_warmup_policy = "disable";
         for (const auto& child_field_id : field_ids) {
             auto& field_meta = schema_->operator[](child_field_id);
             if (IsVectorDataType(field_meta.get_data_type())) {
@@ -3401,7 +3406,12 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
                     /*is_index=*/false);
             if (field_has_warmup) {
                 has_warmup_setting = true;
-                warmup_sync = warmup_sync || (field_warmup_policy == "sync");
+                if (field_warmup_policy == "sync") {
+                    aggregated_warmup_policy = "sync";
+                } else if (field_warmup_policy == "async" &&
+                           aggregated_warmup_policy != "sync") {
+                    aggregated_warmup_policy = "async";
+                }
             }
         }
 
@@ -3445,7 +3455,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         // Determine group warmup policy: use per-field settings if any,
         // otherwise fall back to global warmup policy
         field_binlog_info.warmup_policy =
-            has_warmup_setting ? (warmup_sync ? "sync" : "disable") : "";
+            has_warmup_setting ? aggregated_warmup_policy : "";
 
         // Store in map
         load_field_data_info.field_infos[group_id] = field_binlog_info;
