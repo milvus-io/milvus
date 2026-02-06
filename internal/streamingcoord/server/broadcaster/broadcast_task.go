@@ -206,6 +206,18 @@ func (b *broadcastTask) IsAlterReplicateConfigMessage() bool {
 	return b.msg.MessageType() == message.MessageTypeAlterReplicateConfig
 }
 
+// IsForcePromoteMessage returns true if this task is a force promote AlterReplicateConfig message.
+func (b *broadcastTask) IsForcePromoteMessage() bool {
+	if b.msg.MessageType() != message.MessageTypeAlterReplicateConfig {
+		return false
+	}
+	alterMsg, err := message.AsMutableAlterReplicateConfigMessageV2(b.msg)
+	if err != nil {
+		return false
+	}
+	return alterMsg.Header().ForcePromote
+}
+
 // MarkIgnoreAndSave marks the task's message header with ignore=true and saves to catalog.
 // This is used for force promote to mark incomplete AlterReplicateConfig messages as ignored.
 func (b *broadcastTask) MarkIgnoreAndSave(ctx context.Context) error {

@@ -80,35 +80,6 @@ func TestStartBroadcastWithSecondaryClusterResourceKey(t *testing.T) {
 	})
 }
 
-func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		paramtable.Init()
-		ResetBroadcaster()
-
-		mbc := mock_broadcaster.NewMockBroadcaster(t)
-		mbc.EXPECT().FixIncompleteBroadcastsForForcePromote(mock.Anything).Return(nil).Maybe()
-		mbc.EXPECT().Close().Return().Maybe()
-		Register(mbc)
-
-		err := FixIncompleteBroadcastsForForcePromote(context.Background())
-		assert.NoError(t, err)
-	})
-
-	t.Run("error", func(t *testing.T) {
-		paramtable.Init()
-		ResetBroadcaster()
-
-		mbc := mock_broadcaster.NewMockBroadcaster(t)
-		mbc.EXPECT().FixIncompleteBroadcastsForForcePromote(mock.Anything).Return(errors.New("fix error")).Maybe()
-		mbc.EXPECT().Close().Return().Maybe()
-		Register(mbc)
-
-		err := FixIncompleteBroadcastsForForcePromote(context.Background())
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "fix error")
-	})
-}
-
 func TestStartBroadcastWithResourceKeys(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		paramtable.Init()

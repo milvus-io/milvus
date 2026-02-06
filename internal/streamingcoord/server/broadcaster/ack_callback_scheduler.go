@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -55,6 +57,8 @@ type ackCallbackScheduler struct {
 	// because it is just used to check if the resource-key is locked when acked.
 	// For primary milvus cluster, it makes no sense, because the execution order is already protected by the broadcastTaskManager.
 	// But for secondary milvus cluster, it is necessary to use this rkLocker to protect the resource-key when acked to avoid the execution order broken.
+
+	bm *broadcastTaskManager // reference to the broadcast task manager for accessing incomplete tasks
 }
 
 // Initialize initializes the ack scheduler with a list of broadcast tasks.
@@ -130,6 +134,12 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 
 	pendingTasks := make([]*broadcastTask, 0, len(s.pendingAckedTasks))
 	for _, task := range s.pendingAckedTasks {
+		if task.IsForcePromoteMessage() {
+			// Force promote: fix incomplete broadcasts in background (BlockUntilAllAck → fix).
+			// The task still goes through normal FastLock → doAckCallback below.
+			go s.doForcePromoteFixIncompleteBroadcasts(task)
+		}
+
 		g, err := s.rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
 		if err != nil {
 			s.Logger().Warn("lock is occupied, delay the ack callback", zap.Uint64("broadcastID", task.Header().BroadcastID), zap.Error(err))
@@ -140,6 +150,121 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 		go s.doAckCallback(task, g)
 	}
 	s.pendingAckedTasks = pendingTasks
+}
+
+// doForcePromoteFixIncompleteBroadcasts waits for all acks, then fixes incomplete broadcasts.
+// The actual ack callback is handled by the normal doAckCallback path.
+func (s *ackCallbackScheduler) doForcePromoteFixIncompleteBroadcasts(bt *broadcastTask) {
+	logger := s.Logger().With(zap.Uint64("broadcastID", bt.Header().BroadcastID))
+
+	if err := bt.BlockUntilAllAck(s.notifier.Context()); err != nil {
+		logger.Warn("force promote BlockUntilAllAck failed", zap.Error(err))
+		return
+	}
+
+	if err := s.fixIncompleteBroadcastsForForcePromote(s.notifier.Context()); err != nil {
+		logger.Warn("failed to fix incomplete broadcasts for force promote", zap.Error(err))
+		return
+	}
+	logger.Info("completed fixing incomplete broadcasts for force promote")
+}
+
+// fixIncompleteBroadcastsForForcePromote fixes incomplete broadcasts for force promote.
+// It marks incomplete AlterReplicateConfig messages with ignore=true before supplementing
+// all incomplete messages to remaining vchannels.
+func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx context.Context) error {
+	incompleteTasks := s.bm.getIncompleteBroadcastTasks()
+
+	// Sort by broadcastID to preserve the original order of DDL messages.
+	sort.Slice(incompleteTasks, func(i, j int) bool {
+		return incompleteTasks[i].Header().BroadcastID < incompleteTasks[j].Header().BroadcastID
+	})
+
+	// Separate AlterReplicateConfig from other broadcast messages
+	var alterReplicateConfigTasks []*broadcastTask
+	var otherBroadcastTasks []*broadcastTask
+	for _, task := range incompleteTasks {
+		if task.IsAlterReplicateConfigMessage() {
+			alterReplicateConfigTasks = append(alterReplicateConfigTasks, task)
+		} else {
+			otherBroadcastTasks = append(otherBroadcastTasks, task)
+		}
+	}
+
+	totalTasks := len(alterReplicateConfigTasks) + len(otherBroadcastTasks)
+	if totalTasks == 0 {
+		s.Logger().Info("No incomplete broadcasts to fix for force promote")
+		return nil
+	}
+
+	s.Logger().Info("Fixing incomplete broadcasts for force promote",
+		zap.Int("alterReplicateConfigTasks", len(alterReplicateConfigTasks)),
+		zap.Int("otherBroadcastTasks", len(otherBroadcastTasks)))
+
+	// Mark AlterReplicateConfig tasks with ignore=true (to prevent old config overwriting force promote config)
+	for _, task := range alterReplicateConfigTasks {
+		s.Logger().Info("Marking AlterReplicateConfig task with ignore=true",
+			zap.Uint64("broadcastID", task.Header().BroadcastID))
+
+		if err := task.MarkIgnoreAndSave(ctx); err != nil {
+			s.Logger().Error("Failed to mark task with ignore",
+				zap.Uint64("broadcastID", task.Header().BroadcastID),
+				zap.Error(err))
+			return errors.Wrapf(err, "failed to mark task %d with ignore", task.Header().BroadcastID)
+		}
+	}
+
+	// Collect pending messages from ALL incomplete tasks for supplementation
+	var pendingMessages []message.MutableMessage
+	for _, task := range alterReplicateConfigTasks {
+		msgs := task.PendingBroadcastMessages()
+		if len(msgs) > 0 {
+			s.Logger().Info("Supplementing AlterReplicateConfig messages to remaining vchannels",
+				zap.Uint64("broadcastID", task.Header().BroadcastID),
+				zap.Int("pendingVChannels", len(msgs)))
+			pendingMessages = append(pendingMessages, msgs...)
+		}
+	}
+	for _, task := range otherBroadcastTasks {
+		msgs := task.PendingBroadcastMessages()
+		if len(msgs) > 0 {
+			s.Logger().Info("Supplementing broadcast messages to remaining vchannels",
+				zap.Uint64("broadcastID", task.Header().BroadcastID),
+				zap.String("messageType", task.msg.MessageType().String()),
+				zap.Int("pendingVChannels", len(msgs)))
+			pendingMessages = append(pendingMessages, msgs...)
+		}
+	}
+
+	if len(pendingMessages) == 0 {
+		s.Logger().Info("No pending messages to supplement")
+		return nil
+	}
+
+	// Append pending messages to their respective vchannels
+	appendResults := streaming.WAL().AppendMessages(ctx, pendingMessages...)
+
+	var lastResultErr error
+	supplementCount := 0
+	failureCount := 0
+	for i, result := range appendResults.Responses {
+		if result.Error != nil {
+			s.Logger().Warn("Failed to supplement message",
+				zap.String("vchannel", pendingMessages[i].VChannel()),
+				zap.Error(result.Error))
+			failureCount++
+			lastResultErr = result.Error
+			continue
+		}
+		supplementCount++
+	}
+
+	s.Logger().Info("Completed fixing incomplete broadcasts for force promote",
+		zap.Int("supplementCount", supplementCount),
+		zap.Int("failureCount", failureCount),
+		zap.Int("totalPending", len(pendingMessages)))
+
+	return lastResultErr
 }
 
 // doAckCallback executes the ack callback.
