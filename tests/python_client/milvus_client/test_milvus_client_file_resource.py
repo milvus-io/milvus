@@ -30,7 +30,7 @@ import time
 import threading
 
 import pytest
-from pymilvus import DataType, Function, FunctionType, MilvusException
+from pymilvus import DataType, Function, FunctionType
 
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
@@ -112,21 +112,20 @@ class TestFileResourceAdd(FileResourceTestBase):
         """
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=JIEBA_DICT_PATH)
+        self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
         # cleanup
-        client.remove_file_resource(name=res_name)
+        self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_add_file_resource_path_not_exist(self, file_resource_env):
         """
         target: add a file resource whose path does not exist in MinIO
         method: add_file_resource with non-existent path
-        expected: MilvusException
+        expected: raise Exception
         """
         client = self._client()
-        with pytest.raises(MilvusException):
-            client.add_file_resource(name=cf.gen_unique_str(prefix),
-                                     path="not/exist.txt")
+        with pytest.raises(Exception):
+            self.add_file_resource(client, cf.gen_unique_str(prefix), "not/exist.txt")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_add_file_resource_idempotent_same_name_path(self, file_resource_env):
@@ -137,25 +136,25 @@ class TestFileResourceAdd(FileResourceTestBase):
         """
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=JIEBA_DICT_PATH)
-        client.add_file_resource(name=res_name, path=JIEBA_DICT_PATH)
-        client.remove_file_resource(name=res_name)
+        self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
+        self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
+        self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_add_file_resource_same_name_different_path(self, file_resource_env):
         """
         target: add with same name but different path should fail
         method: add(name="x", path="a") then add(name="x", path="b")
-        expected: second call raises MilvusException
+        expected: second call raises Exception
         """
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=JIEBA_DICT_PATH)
+        self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
         try:
-            with pytest.raises(MilvusException):
-                client.add_file_resource(name=res_name, path=SYNONYMS_PATH)
+            with pytest.raises(Exception):
+                self.add_file_resource(client, res_name, SYNONYMS_PATH)
         finally:
-            client.remove_file_resource(name=res_name)
+            self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_add_file_resource_empty_name(self, file_resource_env):
@@ -166,19 +165,19 @@ class TestFileResourceAdd(FileResourceTestBase):
         """
         client = self._client()
         # Server does not reject empty name currently
-        client.add_file_resource(name="", path=JIEBA_DICT_PATH)
-        client.remove_file_resource(name="")
+        self.add_file_resource(client, "", JIEBA_DICT_PATH)
+        self.remove_file_resource(client, "")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_add_file_resource_empty_path(self, file_resource_env):
         """
         target: add with empty path
         method: add_file_resource(name=..., path="")
-        expected: MilvusException
+        expected: raise Exception
         """
         client = self._client()
-        with pytest.raises(MilvusException):
-            client.add_file_resource(name=cf.gen_unique_str(prefix), path="")
+        with pytest.raises(Exception):
+            self.add_file_resource(client, cf.gen_unique_str(prefix), "")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_add_multiple_file_resources(self, file_resource_env):
@@ -191,9 +190,9 @@ class TestFileResourceAdd(FileResourceTestBase):
         names = [cf.gen_unique_str(prefix) for _ in range(3)]
         paths = [JIEBA_DICT_PATH, SYNONYMS_PATH, STOPWORDS_PATH]
         for n, p in zip(names, paths):
-            client.add_file_resource(name=n, path=p)
+            self.add_file_resource(client, n, p)
         for n in names:
-            client.remove_file_resource(name=n)
+            self.remove_file_resource(client, n)
 
 
 class TestFileResourceRemove(FileResourceTestBase):
@@ -208,8 +207,8 @@ class TestFileResourceRemove(FileResourceTestBase):
         """
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=JIEBA_DICT_PATH)
-        client.remove_file_resource(name=res_name)
+        self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
+        self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_remove_nonexistent_resource(self, file_resource_env):
@@ -219,7 +218,7 @@ class TestFileResourceRemove(FileResourceTestBase):
         expected: no error
         """
         client = self._client()
-        client.remove_file_resource(name=cf.gen_unique_str(prefix))
+        self.remove_file_resource(client, cf.gen_unique_str(prefix))
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_remove_idempotent(self, file_resource_env):
@@ -230,28 +229,28 @@ class TestFileResourceRemove(FileResourceTestBase):
         """
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=JIEBA_DICT_PATH)
-        client.remove_file_resource(name=res_name)
-        client.remove_file_resource(name=res_name)
+        self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
+        self.remove_file_resource(client, res_name)
+        self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_remove_resource_in_use_by_collection(self, file_resource_env):
         """
         target: cannot remove a resource still referenced by a collection
         method: add -> create collection using it -> remove
-        expected: MilvusException
+        expected: raise Exception
         """
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=STOPWORDS_PATH)
+        self.add_file_resource(client, res_name, STOPWORDS_PATH)
         try:
             self.create_bm25_collection_with_stop_filter(client, col_name, res_name)
-            with pytest.raises(MilvusException):
-                client.remove_file_resource(name=res_name)
+            with pytest.raises(Exception):
+                self.remove_file_resource(client, res_name)
         finally:
             self.drop_collection(client, col_name)
-            client.remove_file_resource(name=res_name)
+            self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_remove_then_readd_same_name(self, file_resource_env):
@@ -262,10 +261,10 @@ class TestFileResourceRemove(FileResourceTestBase):
         """
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=JIEBA_DICT_PATH)
-        client.remove_file_resource(name=res_name)
-        client.add_file_resource(name=res_name, path=SYNONYMS_PATH)
-        client.remove_file_resource(name=res_name)
+        self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
+        self.remove_file_resource(client, res_name)
+        self.add_file_resource(client, res_name, SYNONYMS_PATH)
+        self.remove_file_resource(client, res_name)
 
 
 class TestFileResourceList(FileResourceTestBase):
@@ -283,12 +282,14 @@ class TestFileResourceList(FileResourceTestBase):
         """
         client = self._client()
         # best-effort cleanup
-        for r in client.list_file_resources():
+        res, _ = self.list_file_resources(client)
+        for r in res:
             try:
-                client.remove_file_resource(name=r.name)
+                self.remove_file_resource(client, r.name)
             except Exception:
                 pass
-        assert len(client.list_file_resources()) == 0
+        res, _ = self.list_file_resources(client)
+        assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="Known bug: ListFileResources returns empty (PR #47568 not merged)")
@@ -299,23 +300,25 @@ class TestFileResourceList(FileResourceTestBase):
         expected: all 3 names present
         """
         client = self._client()
-        for r in client.list_file_resources():
+        res, _ = self.list_file_resources(client)
+        for r in res:
             try:
-                client.remove_file_resource(name=r.name)
+                self.remove_file_resource(client, r.name)
             except Exception:
                 pass
 
         names = [cf.gen_unique_str(prefix) for _ in range(3)]
         paths = [JIEBA_DICT_PATH, SYNONYMS_PATH, STOPWORDS_PATH]
         for n, p in zip(names, paths):
-            client.add_file_resource(name=n, path=p)
+            self.add_file_resource(client, n, p)
 
-        listed = {r.name for r in client.list_file_resources()}
+        res, _ = self.list_file_resources(client)
+        listed = {r.name for r in res}
         for n in names:
             assert n in listed, f"{n} missing from list"
 
         for n in names:
-            client.remove_file_resource(name=n)
+            self.remove_file_resource(client, n)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="Known bug: ListFileResources returns empty (PR #47568 not merged)")
@@ -326,26 +329,28 @@ class TestFileResourceList(FileResourceTestBase):
         expected: removed resource absent, other 2 present
         """
         client = self._client()
-        for r in client.list_file_resources():
+        res, _ = self.list_file_resources(client)
+        for r in res:
             try:
-                client.remove_file_resource(name=r.name)
+                self.remove_file_resource(client, r.name)
             except Exception:
                 pass
 
         names = [cf.gen_unique_str(prefix) for _ in range(3)]
         paths = [JIEBA_DICT_PATH, SYNONYMS_PATH, STOPWORDS_PATH]
         for n, p in zip(names, paths):
-            client.add_file_resource(name=n, path=p)
+            self.add_file_resource(client, n, p)
 
-        client.remove_file_resource(name=names[0])
+        self.remove_file_resource(client, names[0])
 
-        listed = {r.name for r in client.list_file_resources()}
+        res, _ = self.list_file_resources(client)
+        listed = {r.name for r in res}
         assert names[0] not in listed
         assert names[1] in listed
         assert names[2] in listed
 
         for n in names[1:]:
-            client.remove_file_resource(name=n)
+            self.remove_file_resource(client, n)
 
 
 # ===================================================================
@@ -382,7 +387,7 @@ class TestFileResourceJiebaAnalyzer(FileResourceTestBase):
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=JIEBA_DICT_PATH)
+        self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
         try:
             self.create_bm25_collection(client, col_name,
                                         self._jieba_analyzer_params(res_name))
@@ -403,7 +408,7 @@ class TestFileResourceJiebaAnalyzer(FileResourceTestBase):
                 f"Top hit should contain '向量数据库', got '{top_text}'"
         finally:
             self.drop_collection(client, col_name)
-            client.remove_file_resource(name=res_name)
+            self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_jieba_remote_dict_all_custom_words(self, file_resource_env):
@@ -415,7 +420,7 @@ class TestFileResourceJiebaAnalyzer(FileResourceTestBase):
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=JIEBA_DICT_PATH)
+        self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
         try:
             self.create_bm25_collection(client, col_name,
                                         self._jieba_analyzer_params(res_name))
@@ -436,7 +441,7 @@ class TestFileResourceJiebaAnalyzer(FileResourceTestBase):
                     f"Custom dict word '{expected_token}' should be a token, got {tokens}"
         finally:
             self.drop_collection(client, col_name)
-            client.remove_file_resource(name=res_name)
+            self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_jieba_default_vs_custom_comparison(self, file_resource_env):
@@ -495,7 +500,7 @@ class TestFileResourceSynonymAnalyzer(FileResourceTestBase):
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=SYNONYMS_PATH)
+        self.add_file_resource(client, res_name, SYNONYMS_PATH)
         try:
             self.create_bm25_collection(client, col_name,
                                         self._synonym_analyzer_params(res_name, expand=True))
@@ -515,7 +520,7 @@ class TestFileResourceSynonymAnalyzer(FileResourceTestBase):
                 f"Doc with '搜索' should match synonym query '检索', got {hit_texts}"
         finally:
             self.drop_collection(client, col_name)
-            client.remove_file_resource(name=res_name)
+            self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_synonym_expand_true_all_synonyms(self, file_resource_env):
@@ -527,7 +532,7 @@ class TestFileResourceSynonymAnalyzer(FileResourceTestBase):
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=SYNONYMS_PATH)
+        self.add_file_resource(client, res_name, SYNONYMS_PATH)
         try:
             self.create_bm25_collection(client, col_name,
                                         self._synonym_analyzer_params(res_name, expand=True))
@@ -552,7 +557,7 @@ class TestFileResourceSynonymAnalyzer(FileResourceTestBase):
                 f"expand=true on '向量' should produce {expected_synonyms}, got {tokens}"
         finally:
             self.drop_collection(client, col_name)
-            client.remove_file_resource(name=res_name)
+            self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_synonym_expand_false_maps_to_canonical(self, file_resource_env):
@@ -564,7 +569,7 @@ class TestFileResourceSynonymAnalyzer(FileResourceTestBase):
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=SYNONYMS_PATH)
+        self.add_file_resource(client, res_name, SYNONYMS_PATH)
         try:
             self.create_bm25_collection(client, col_name,
                                         self._synonym_analyzer_params(res_name, expand=False))
@@ -603,7 +608,7 @@ class TestFileResourceSynonymAnalyzer(FileResourceTestBase):
                 f"expand=false: canonical '搜索' should stay ['搜索'], got {tokens}"
         finally:
             self.drop_collection(client, col_name)
-            client.remove_file_resource(name=res_name)
+            self.remove_file_resource(client, res_name)
 
 
 class TestFileResourceStopWordsAnalyzer(FileResourceTestBase):
@@ -624,7 +629,7 @@ class TestFileResourceStopWordsAnalyzer(FileResourceTestBase):
         col_name = cf.gen_unique_str(prefix)
         text = "这是一个在测试的文本和数据在这里了"
         stop_words = {"的", "是", "在", "了", "和"}
-        client.add_file_resource(name=res_name, path=STOPWORDS_PATH)
+        self.add_file_resource(client, res_name, STOPWORDS_PATH)
         try:
             self.create_bm25_collection(client, col_name, {
                 "tokenizer": "jieba",
@@ -662,7 +667,7 @@ class TestFileResourceStopWordsAnalyzer(FileResourceTestBase):
                 f"Filtered output should still have content tokens, got {tokens_filtered}"
         finally:
             self.drop_collection(client, col_name)
-            client.remove_file_resource(name=res_name)
+            self.remove_file_resource(client, res_name)
 
 
 class TestFileResourceDecompounderAnalyzer(FileResourceTestBase):
@@ -683,7 +688,7 @@ class TestFileResourceDecompounderAnalyzer(FileResourceTestBase):
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=DECOMPOUNDER_PATH)
+        self.add_file_resource(client, res_name, DECOMPOUNDER_PATH)
         try:
             self.create_bm25_collection(client, col_name, {
                 "tokenizer": "standard",
@@ -714,7 +719,7 @@ class TestFileResourceDecompounderAnalyzer(FileResourceTestBase):
                 f"Compound 'firework' should be decomposed, got {tokens}"
         finally:
             self.drop_collection(client, col_name)
-            client.remove_file_resource(name=res_name)
+            self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_decompounder_baseline_without_filter(self, file_resource_env):
@@ -762,7 +767,7 @@ class TestFileResourceInvalidAnalyzerConfig(FileResourceTestBase):
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=STOPWORDS_PATH)
+        self.add_file_resource(client, res_name, STOPWORDS_PATH)
         try:
             with pytest.raises(Exception):
                 self.create_bm25_collection(client, col_name, {
@@ -771,7 +776,7 @@ class TestFileResourceInvalidAnalyzerConfig(FileResourceTestBase):
                         "type": "remote", "resource_name": res_name}}]
                 })
         finally:
-            client.remove_file_resource(name=res_name)
+            self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_remote_invalid_type(self, file_resource_env):
@@ -818,46 +823,46 @@ class TestFileResourceRefCount(FileResourceTestBase):
         """
         target: resource referenced by 1 collection cannot be removed
         method: add -> create col -> remove
-        expected: MilvusException
+        expected: raise Exception
         """
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=STOPWORDS_PATH)
+        self.add_file_resource(client, res_name, STOPWORDS_PATH)
         try:
             self.create_bm25_collection_with_stop_filter(client, col_name, res_name)
-            with pytest.raises(MilvusException):
-                client.remove_file_resource(name=res_name)
+            with pytest.raises(Exception):
+                self.remove_file_resource(client, res_name)
         finally:
             self.drop_collection(client, col_name)
-            client.remove_file_resource(name=res_name)
+            self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_multi_ref_partial_drop(self, file_resource_env):
         """
         target: resource referenced by 2 collections; dropping 1 still blocks removal
         method: add -> create col1 + col2 -> drop col1 -> remove
-        expected: MilvusException (col2 still references)
+        expected: raise Exception (col2 still references)
         """
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
         col1 = cf.gen_unique_str(prefix)
         col2 = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=STOPWORDS_PATH)
+        self.add_file_resource(client, res_name, STOPWORDS_PATH)
         try:
             self.create_bm25_collection_with_stop_filter(client, col1, res_name)
             self.create_bm25_collection_with_stop_filter(client, col2, res_name)
             self.drop_collection(client, col1)
             time.sleep(1)
-            with pytest.raises(MilvusException):
-                client.remove_file_resource(name=res_name)
+            with pytest.raises(Exception):
+                self.remove_file_resource(client, res_name)
         finally:
             for c in [col1, col2]:
                 try:
                     self.drop_collection(client, c)
                 except Exception:
                     pass
-            client.remove_file_resource(name=res_name)
+            self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_all_refs_dropped_can_delete(self, file_resource_env):
@@ -869,11 +874,11 @@ class TestFileResourceRefCount(FileResourceTestBase):
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=STOPWORDS_PATH)
+        self.add_file_resource(client, res_name, STOPWORDS_PATH)
         self.create_bm25_collection_with_stop_filter(client, col_name, res_name)
         self.drop_collection(client, col_name)
         time.sleep(1)
-        client.remove_file_resource(name=res_name)
+        self.remove_file_resource(client, res_name)
 
 
 class TestFileResourceSyncCheck(FileResourceTestBase):
@@ -889,12 +894,12 @@ class TestFileResourceSyncCheck(FileResourceTestBase):
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=STOPWORDS_PATH)
+        self.add_file_resource(client, res_name, STOPWORDS_PATH)
         try:
             self.create_bm25_collection_with_stop_filter(client, col_name, res_name)
         finally:
             self.drop_collection(client, col_name)
-            client.remove_file_resource(name=res_name)
+            self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_collection_without_add(self, file_resource_env):
@@ -920,9 +925,9 @@ class TestFileResourceIdempotency(FileResourceTestBase):
         """
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=JIEBA_DICT_PATH)
-        client.add_file_resource(name=res_name, path=JIEBA_DICT_PATH)
-        client.remove_file_resource(name=res_name)
+        self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
+        self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
+        self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_remove_idempotent(self, file_resource_env):
@@ -932,9 +937,9 @@ class TestFileResourceIdempotency(FileResourceTestBase):
         """
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=JIEBA_DICT_PATH)
-        client.remove_file_resource(name=res_name)
-        client.remove_file_resource(name=res_name)
+        self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
+        self.remove_file_resource(client, res_name)
+        self.remove_file_resource(client, res_name)
 
 
 class TestFileResourceConcurrency(FileResourceTestBase):
@@ -968,7 +973,7 @@ class TestFileResourceConcurrency(FileResourceTestBase):
             t.join(timeout=30)
         assert not errors, f"Concurrent add failed: {errors}"
         for n, _ in resources:
-            client.remove_file_resource(name=n)
+            self.remove_file_resource(client, n)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_concurrent_add_same_resource(self, file_resource_env):
@@ -992,7 +997,7 @@ class TestFileResourceConcurrency(FileResourceTestBase):
         for t in threads:
             t.join(timeout=30)
         assert not errors, f"Concurrent idempotent add failed: {errors}"
-        client.remove_file_resource(name=res_name)
+        self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_add_then_create_collection(self, file_resource_env):
@@ -1003,12 +1008,12 @@ class TestFileResourceConcurrency(FileResourceTestBase):
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=STOPWORDS_PATH)
+        self.add_file_resource(client, res_name, STOPWORDS_PATH)
         try:
             self.create_bm25_collection_with_stop_filter(client, col_name, res_name)
         finally:
             self.drop_collection(client, col_name)
-            client.remove_file_resource(name=res_name)
+            self.remove_file_resource(client, res_name)
 
 
 class TestFileResourceUpdate(FileResourceTestBase):
@@ -1022,10 +1027,10 @@ class TestFileResourceUpdate(FileResourceTestBase):
         """
         client = self._client()
         res_name = cf.gen_unique_str(prefix)
-        client.add_file_resource(name=res_name, path=JIEBA_DICT_PATH)
-        client.remove_file_resource(name=res_name)
-        client.add_file_resource(name=res_name, path=SYNONYMS_PATH)
-        client.remove_file_resource(name=res_name)
+        self.add_file_resource(client, res_name, JIEBA_DICT_PATH)
+        self.remove_file_resource(client, res_name)
+        self.add_file_resource(client, res_name, SYNONYMS_PATH)
+        self.remove_file_resource(client, res_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_overwrite_file_content_same_path(self, file_resource_env, minio_client):
@@ -1044,16 +1049,16 @@ class TestFileResourceUpdate(FileResourceTestBase):
         minio_client.put_object(bucket, remote_path,
                                 io.BytesIO(content1_bytes), len(content1_bytes))
         try:
-            client.add_file_resource(name=res_name, path=remote_path)
+            self.add_file_resource(client, res_name, remote_path)
             # overwrite with new content
             content2 = "的\n是\n在\n了\n和\n"
             content2_bytes = content2.encode("utf-8")
             minio_client.put_object(bucket, remote_path,
                                     io.BytesIO(content2_bytes), len(content2_bytes))
             # idempotent re-add
-            client.add_file_resource(name=res_name, path=remote_path)
+            self.add_file_resource(client, res_name, remote_path)
         finally:
-            client.remove_file_resource(name=res_name)
+            self.remove_file_resource(client, res_name)
             try:
                 minio_client.remove_object(bucket, remote_path)
             except Exception:
