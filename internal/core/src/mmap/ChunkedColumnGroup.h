@@ -417,12 +417,24 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         return group_->GetNumRowsUntilChunk();
     }
 
+    const std::vector<int64_t>&
+    GetNumValidRowsUntilChunk() const override {
+        // For nullable columns, return the cumulative valid row counts
+        // For non-nullable columns, this equals num_rows_until_chunk_
+        if (!num_valid_rows_until_chunk_.empty()) {
+            return num_valid_rows_until_chunk_;
+        }
+        return GetNumRowsUntilChunk();
+    }
+
     void
     BulkValueAt(milvus::OpContext* op_ctx,
                 std::function<void(const char*, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) override {
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto [cids, offsets_in_chunk] = field_meta_.is_nullable()
+                                            ? ToChunkIdAndOffsetByPhysical(offsets, count)
+                                            : ToChunkIdAndOffset(offsets, count);
         auto ca = group_->GetGroupChunks(op_ctx, cids);
         for (int64_t i = 0; i < count; i++) {
             auto* group_chunk = ca->get_cell_of(cids[i]);
@@ -438,7 +450,9 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                              const int64_t* offsets,
                              int64_t count) {
         static_assert(std::is_fundamental_v<S> && std::is_fundamental_v<T>);
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto [cids, offsets_in_chunk] = field_meta_.is_nullable()
+                                            ? ToChunkIdAndOffsetByPhysical(offsets, count)
+                                            : ToChunkIdAndOffset(offsets, count);
         auto ca = group_->GetGroupChunks(op_ctx, cids);
         auto typed_dst = static_cast<T*>(dst);
         for (int64_t i = 0; i < count; i++) {
@@ -523,7 +537,9 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                       const int64_t* offsets,
                       int64_t element_sizeof,
                       int64_t count) override {
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto [cids, offsets_in_chunk] = field_meta_.is_nullable()
+                                            ? ToChunkIdAndOffsetByPhysical(offsets, count)
+                                            : ToChunkIdAndOffset(offsets, count);
         auto ca = group_->GetGroupChunks(op_ctx, cids);
         auto dst_vec = reinterpret_cast<char*>(dst);
         for (int64_t i = 0; i < count; i++) {
@@ -705,6 +721,15 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             valid_count_per_chunk_[i] = valid_count;
             logical_offset += rows;
         }
+
+        num_valid_rows_until_chunk_.clear();
+        num_valid_rows_until_chunk_.reserve(total_chunks + 1);
+        num_valid_rows_until_chunk_.push_back(0);
+        for (int64_t i = 0; i < total_chunks; i++) {
+            num_valid_rows_until_chunk_.push_back(
+                num_valid_rows_until_chunk_.back() + valid_count_per_chunk_[i]);
+        }
+
         BuildOffsetMapping();
     }
 

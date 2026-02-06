@@ -727,7 +727,7 @@ TEST_P(GrowingNullableTest, SearchAndQueryNullableVectors) {
         ASSERT_TRUE(insert_record.is_valid_data_exist(vec));
 
         auto valid_data_ptr = insert_record.get_data_base(vec);
-        const auto& valid_data = valid_data_ptr->get_valid_data();
+        auto valid_data = valid_data_ptr->get_valid_data();
 
         // Test search
         auto sr =
