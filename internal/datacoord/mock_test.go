@@ -520,6 +520,14 @@ func (m *mockMixCoord) GetQcMetrics(ctx context.Context, req *milvuspb.GetMetric
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockMixCoord) GetDataCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.DataCoordTopology, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockMixCoord) GetQueryCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.QueryCoordTopology, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockMixCoord) BackupRBAC(ctx context.Context, req *milvuspb.BackupRBACMetaRequest) (*milvuspb.BackupRBACMetaResponse, error) {
 	panic("not implemented") // TODO: Implement
 }
