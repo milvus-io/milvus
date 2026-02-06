@@ -13,42 +13,43 @@ mlog is a context-aware logging library built on [zap](https://github.com/uber-g
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        mlog Package                          │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │  logger.go  │  │  context.go │  │     field.go        │  │
-│  │             │  │             │  │                     │  │
-│  │ - Init()    │  │ - WithFields│  │ - Field constructors│  │
-│  │ - InitNode()│  │ - GetProp.. │  │ - PropagatedString  │  │
-│  │ - Debug()   │  │ - logContext│  │ - PropagatedInt64   │  │
-│  │ - Info()    │  │             │  │                     │  │
-│  │ - Warn()    │  │             │  │                     │  │
-│  │ - Error()   │  └─────────────┘  └─────────────────────┘  │
-│  │ - Logger    │                                            │
-│  │   .With()   │                                            │
-│  │   .WithLazy │                                            │
-│  └─────────────┘                                            │
-│                                                              │
-│  ┌─────────────┐  ┌─────────────────────────────────────┐  │
-│  │  level.go   │  │         field_enum.go               │  │
-│  │             │  │                                     │  │
-│  │ - SetLevel  │  │ - Well-known keys (KeyXXX)         │  │
-│  │ - GetLevel  │  │ - Field helpers (FieldXXX)         │  │
-│  └─────────────┘  └─────────────────────────────────────┘  │
-├─────────────────────────────────────────────────────────────┤
-│                      mlog/grpc Package                       │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │                  interceptor.go                      │    │
-│  │                                                      │    │
-│  │  - UnaryServerInterceptor(module)                   │    │
-│  │  - StreamServerInterceptor(module)                  │    │
-│  │  - UnaryClientInterceptor()                         │    │
-│  │  - StreamClientInterceptor()                        │    │
-│  │  - extractPropagated() / injectPropagated()         │    │
-│  └─────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                           mlog Package                           │
+├──────────────────────────────────────────────────────────────────┤
+│  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐  │
+│  │  logger.go   │  │  context.go  │  │      field.go          │  │
+│  │              │  │              │  │                        │  │
+│  │ - Init()     │  │ - WithFields │  │ - Field constructors   │  │
+│  │ - InitNode() │  │ - GetProp..  │  │ - PropagatedString     │  │
+│  │ - Log()      │  │ - logContext │  │ - PropagatedInt64      │  │
+│  │ - Debug()    │  │              │  │                        │  │
+│  │ - Info()     │  │              │  └────────────────────────┘  │
+│  │ - Warn()     │  └──────────────┘                              │
+│  │ - Error()    │  ┌──────────────┐  ┌────────────────────────┐  │
+│  │ - Logger     │  │  rated.go    │  │    field_enum.go       │  │
+│  │   .With()    │  │              │  │                        │  │
+│  │   .WithLazy  │  │ - RatedLog   │  │ - Well-known keys      │  │
+│  └──────────────┘  │ - RatedDebug │  │   (KeyXXX)             │  │
+│                     │ - RatedInfo  │  │ - Field helpers        │  │
+│  ┌──────────────┐  │ - RatedWarn  │  │   (FieldXXX)           │  │
+│  │  level.go    │  │ - RatedError │  │                        │  │
+│  │              │  └──────────────┘  └────────────────────────┘  │
+│  │ - SetLevel   │                                                │
+│  │ - GetLevel   │                                                │
+│  └──────────────┘                                                │
+├──────────────────────────────────────────────────────────────────┤
+│                        mlog/grpc Package                         │
+├──────────────────────────────────────────────────────────────────┤
+│  ┌────────────────────────────────────────────────────────┐      │
+│  │                   interceptor.go                       │      │
+│  │                                                        │      │
+│  │  - UnaryServerInterceptor(module)                      │      │
+│  │  - StreamServerInterceptor(module)                     │      │
+│  │  - UnaryClientInterceptor()                            │      │
+│  │  - StreamClientInterceptor()                           │      │
+│  │  - extractPropagated() / injectPropagated()            │      │
+│  └────────────────────────────────────────────────────────┘      │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ## Core Concepts
@@ -160,6 +161,7 @@ func (qn *QueryNode) Search(ctx context.Context, req *SearchRequest) {
 | `(*Logger) With(fields...)` | Add fields (immediately encoded), returns new Logger |
 | `(*Logger) WithLazy(fields...)` | Add fields (lazily encoded), returns new Logger |
 | `Level()` | Get current log level |
+| `Log(ctx, level, msg, fields...)` | Log at specified level |
 | `Debug/Info/Warn/Error(ctx, msg, fields...)` | Log a message |
 
 **Performance Optimization:**
@@ -258,7 +260,7 @@ atomicLevel := mlog.GetAtomicLevel()
 Returns immediately when log level is disabled, avoiding field processing:
 
 ```go
-func log(ctx context.Context, level Level, msg string, fields ...Field) {
+func Log(ctx context.Context, level Level, msg string, fields ...Field) {
     if !globalLevel.Enabled(level) {
         return  // Fast return, zero overhead
     }
@@ -382,6 +384,7 @@ mloggrpc.UnaryServerInterceptor("datanode")
 | `GetPropagated(ctx)` | Get propagated fields |
 | `SetLevel(level)` | Set log level |
 | `GetLevel()` | Get current log level |
+| `GetAtomicLevel()` | Get AtomicLevel for custom config integration |
 
 **Logger Type:**
 
@@ -428,7 +431,7 @@ Complete list of field constructors (corresponding to zap):
 | **String** | `String`, `Stringp`, `Strings`, `ByteString`, `ByteStrings`, `Stringer` |
 | **Bool** | `Bool`, `Boolp`, `Bools` |
 | **Int** | `Int`, `Intp`, `Ints`, `Int8/16/32/64` and their `p`/`s` variants |
-| **Uint** | `Uint`, `Uintp`, `Uints`, `Uint8/16/32/64` and their `p`/`s` variants, `Uintptr` |
+| **Uint** | `Uint`, `Uintp`, `Uints`, `Uint8/16/32/64` and their `p`/`s` variants, `Uintptr`, `Uintptrp`, `Uintptrs` |
 | **Float** | `Float32`, `Float32p`, `Float32s`, `Float64`, `Float64p`, `Float64s` |
 | **Complex** | `Complex64`, `Complex64p`, `Complex64s`, `Complex128`, `Complex128p`, `Complex128s` |
 | **Time** | `Time`, `Timep`, `Times`, `Duration`, `Durationp`, `Durations` |
