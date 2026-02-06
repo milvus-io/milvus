@@ -230,39 +230,34 @@ func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *
 	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 	currentConfig := latestAssignment.ReplicateConfiguration
 
-	// Construct the standalone primary configuration from existing meta
-	// This configuration makes the current cluster a standalone primary with no replication
+	// Force promote requires current config to exist (secondary must have been configured)
+	if currentConfig == nil {
+		return nil, status.NewInvaildArgument("force promote requires existing replicate configuration; current cluster has no configuration")
+	}
+
+	// Get the current cluster from existing config directly (don't construct a new one)
+	var currentCluster *commonpb.MilvusCluster
+	for _, cluster := range currentConfig.GetClusters() {
+		if cluster.GetClusterId() == currentClusterID {
+			currentCluster = cluster
+			break
+		}
+	}
+	if currentCluster == nil {
+		return nil, status.NewInvaildArgument("force promote requires current cluster in existing configuration; cluster %s not found in config", currentClusterID)
+	}
+
+	// Get pchannels from PChannelView for validation
 	pchannels := lo.MapToSlice(latestAssignment.PChannelView.Channels, func(_ channel.ChannelID, ch *channel.PChannelMeta) string {
 		return ch.Name()
 	})
 	// Sort pchannels for consistent ordering (map iteration order is randomized)
 	sort.Strings(pchannels)
-	// ConnectionParam is required by validator. Try to get it from the current config if available,
-	// otherwise use a placeholder (not used for standalone primary with no topology).
-	var connectionParam *commonpb.ConnectionParam
-	if currentConfig != nil {
-		for _, cluster := range currentConfig.GetClusters() {
-			if cluster.GetClusterId() == currentClusterID {
-				connectionParam = cluster.GetConnectionParam()
-				break
-			}
-		}
-	}
-	if connectionParam == nil {
-		// Use placeholder if no current config exists (shouldn't happen for force promote)
-		connectionParam = &commonpb.ConnectionParam{
-			Uri:   "http://localhost:19530",
-			Token: "",
-		}
-	}
+
+	// Construct the standalone primary configuration using the current cluster from existing config
+	// This configuration makes the current cluster a standalone primary with no replication
 	forcePromoteConfig := &commonpb.ReplicateConfiguration{
-		Clusters: []*commonpb.MilvusCluster{
-			{
-				ClusterId:       currentClusterID,
-				Pchannels:       pchannels,
-				ConnectionParam: connectionParam,
-			},
-		},
+		Clusters:             []*commonpb.MilvusCluster{currentCluster},
 		CrossClusterTopology: nil, // No topology means standalone primary
 	}
 

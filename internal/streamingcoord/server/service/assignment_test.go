@@ -1332,6 +1332,104 @@ func TestHandleForcePromoteValidatorError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestHandleForcePromoteNoCurrentConfig(t *testing.T) {
+	// Covers handleForcePromote when current config is nil
+	resource.InitForTest()
+
+	broadcast.ResetBroadcaster()
+	snmanager.ResetStreamingNodeManager()
+
+	mw := mock_streaming.NewMockWALAccesser(t)
+	mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan").Maybe()
+	streaming.SetWALForTest(mw)
+
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}).Maybe()
+	b.EXPECT().Close().Return().Maybe()
+	// Return assignment with nil ReplicateConfiguration
+	b.EXPECT().GetLatestChannelAssignment().Return(&balancer.WatchChannelAssignmentsCallbackParam{
+		PChannelView: &channel.PChannelView{
+			Channels: map[channel.ChannelID]*channel.PChannelMeta{
+				{Name: "by-dev-1"}: channel.NewPChannelMeta("by-dev-1", types.AccessModeRW),
+			},
+		},
+		ReplicateConfiguration: nil, // No config exists
+	}, nil).Maybe()
+	balance.Register(b)
+
+	// WithSecondaryClusterResourceKey succeeds
+	mba := mock_broadcaster.NewMockBroadcastAPI(t)
+	mba.EXPECT().Close().Return().Maybe()
+
+	mb := mock_broadcaster.NewMockBroadcaster(t)
+	mb.EXPECT().WithSecondaryClusterResourceKey(mock.Anything).Return(mba, nil).Maybe()
+	mb.EXPECT().Close().Return().Maybe()
+	broadcast.Register(mb)
+
+	as := NewAssignmentService()
+	_, err := as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{
+		Configuration: &commonpb.ReplicateConfiguration{},
+		ForcePromote:  true,
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "force promote requires existing replicate configuration")
+}
+
+func TestHandleForcePromoteClusterNotFound(t *testing.T) {
+	// Covers handleForcePromote when current cluster is not found in config
+	resource.InitForTest()
+
+	broadcast.ResetBroadcaster()
+	snmanager.ResetStreamingNodeManager()
+
+	mw := mock_streaming.NewMockWALAccesser(t)
+	mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan").Maybe()
+	streaming.SetWALForTest(mw)
+
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}).Maybe()
+	b.EXPECT().Close().Return().Maybe()
+	// Return config with different cluster ID (not "by-dev")
+	b.EXPECT().GetLatestChannelAssignment().Return(&balancer.WatchChannelAssignmentsCallbackParam{
+		PChannelView: &channel.PChannelView{
+			Channels: map[channel.ChannelID]*channel.PChannelMeta{
+				{Name: "by-dev-1"}: channel.NewPChannelMeta("by-dev-1", types.AccessModeRW),
+			},
+		},
+		ReplicateConfiguration: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "other-cluster", Pchannels: []string{"other-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://other:19530", Token: "other"}},
+			},
+		},
+	}, nil).Maybe()
+	balance.Register(b)
+
+	// WithSecondaryClusterResourceKey succeeds
+	mba := mock_broadcaster.NewMockBroadcastAPI(t)
+	mba.EXPECT().Close().Return().Maybe()
+
+	mb := mock_broadcaster.NewMockBroadcaster(t)
+	mb.EXPECT().WithSecondaryClusterResourceKey(mock.Anything).Return(mba, nil).Maybe()
+	mb.EXPECT().Close().Return().Maybe()
+	broadcast.Register(mb)
+
+	as := NewAssignmentService()
+	_, err := as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{
+		Configuration: &commonpb.ReplicateConfiguration{},
+		ForcePromote:  true,
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "force promote requires current cluster in existing configuration")
+}
+
 func TestSecondValidateNonSameError(t *testing.T) {
 	// Covers line 111: second validateReplicateConfiguration returns non-same error
 	resource.InitForTest()
