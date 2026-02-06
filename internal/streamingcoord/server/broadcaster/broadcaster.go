@@ -32,12 +32,6 @@ type Broadcaster interface {
 	// Ack acknowledges the message at the specified vchannel.
 	Ack(ctx context.Context, msg message.ImmutableMessage) error
 
-	// FixIncompleteBroadcastsForForcePromote fixes incomplete broadcasts for force promote.
-	// It marks incomplete AlterReplicateConfig messages with ignore=true before supplementing
-	// them to remaining vchannels. This ensures old incomplete messages don't overwrite
-	// the force promote configuration.
-	FixIncompleteBroadcastsForForcePromote(ctx context.Context) error
-
 	// Close closes the broadcaster.
 	Close()
 }

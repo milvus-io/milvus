@@ -62,18 +62,6 @@ func StartBroadcastWithSecondaryClusterResourceKey(ctx context.Context) (broadca
 	return broadcaster.WithSecondaryClusterResourceKey(ctx)
 }
 
-// FixIncompleteBroadcastsForForcePromote fixes incomplete broadcasts for force promote.
-// It marks incomplete AlterReplicateConfig messages with ignore=true before supplementing
-// them to remaining vchannels. This ensures old incomplete messages don't overwrite
-// the force promote configuration.
-func FixIncompleteBroadcastsForForcePromote(ctx context.Context) error {
-	broadcaster, err := singleton.GetWithContext(ctx)
-	if err != nil {
-		return err
-	}
-	return broadcaster.FixIncompleteBroadcastsForForcePromote(ctx)
-}
-
 // Release releases the broadcaster.
 func Release() {
 	if !singleton.Ready() {

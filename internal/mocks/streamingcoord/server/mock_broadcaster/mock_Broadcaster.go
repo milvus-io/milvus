@@ -104,52 +104,6 @@ func (_c *MockBroadcaster_Close_Call) RunAndReturn(run func()) *MockBroadcaster_
 	return _c
 }
 
-// FixIncompleteBroadcastsForForcePromote provides a mock function with given fields: ctx
-func (_m *MockBroadcaster) FixIncompleteBroadcastsForForcePromote(ctx context.Context) error {
-	ret := _m.Called(ctx)
-
-	if len(ret) == 0 {
-		panic("no return value specified for FixIncompleteBroadcastsForForcePromote")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
-		r0 = rf(ctx)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockBroadcaster_FixIncompleteBroadcastsForForcePromote_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FixIncompleteBroadcastsForForcePromote'
-type MockBroadcaster_FixIncompleteBroadcastsForForcePromote_Call struct {
-	*mock.Call
-}
-
-// FixIncompleteBroadcastsForForcePromote is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockBroadcaster_Expecter) FixIncompleteBroadcastsForForcePromote(ctx interface{}) *MockBroadcaster_FixIncompleteBroadcastsForForcePromote_Call {
-	return &MockBroadcaster_FixIncompleteBroadcastsForForcePromote_Call{Call: _e.mock.On("FixIncompleteBroadcastsForForcePromote", ctx)}
-}
-
-func (_c *MockBroadcaster_FixIncompleteBroadcastsForForcePromote_Call) Run(run func(ctx context.Context)) *MockBroadcaster_FixIncompleteBroadcastsForForcePromote_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
-	})
-	return _c
-}
-
-func (_c *MockBroadcaster_FixIncompleteBroadcastsForForcePromote_Call) Return(_a0 error) *MockBroadcaster_FixIncompleteBroadcastsForForcePromote_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockBroadcaster_FixIncompleteBroadcastsForForcePromote_Call) RunAndReturn(run func(context.Context) error) *MockBroadcaster_FixIncompleteBroadcastsForForcePromote_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // LegacyAck provides a mock function with given fields: ctx, broadcastID, vchannel
 func (_m *MockBroadcaster) LegacyAck(ctx context.Context, broadcastID uint64, vchannel string) error {
 	ret := _m.Called(ctx, broadcastID, vchannel)

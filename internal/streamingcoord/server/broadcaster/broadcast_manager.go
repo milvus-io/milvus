@@ -8,7 +8,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
@@ -88,6 +87,9 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 		ackScheduler:       ackScheduler,
 	}
 
+	// Set the broadcast task manager reference for accessing incomplete tasks.
+	ackScheduler.bm = m
+
 	// add the pending ack callback tasks into the ack scheduler.
 	ackScheduler.Initialize(pendingAckCallbackTasks, tombstoneIDs, m)
 	m.SetLogger(logger)
@@ -109,14 +111,15 @@ type broadcastTaskManager struct {
 
 // WithResourceKeys acquires the resource keys for the broadcast task.
 func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
-	id, err := resource.Resource().IDAllocator().Allocate(ctx)
-	if err != nil {
-		return nil, errors.Wrapf(err, "allocate new id failed")
-	}
-
 	startLockInstant := time.Now()
 	resourceKeys = bm.appendSharedClusterRK(resourceKeys...)
 	guards := bm.resourceKeyLocker.Lock(resourceKeys...)
+
+	id, err := resource.Resource().IDAllocator().Allocate(ctx)
+	if err != nil {
+		guards.Unlock()
+		return nil, errors.Wrapf(err, "allocate new id failed")
+	}
 
 	if err := bm.checkClusterRole(ctx); err != nil {
 		// unlock the guards if the cluster role is not primary.
@@ -346,23 +349,15 @@ func (bm *broadcastTaskManager) removeBroadcastTask(broadcastID uint64) {
 	delete(bm.tasks, broadcastID)
 }
 
-// FixIncompleteBroadcastsForForcePromote fixes incomplete broadcasts for force promote.
-// Per design doc, there are two types of incomplete messages:
-// - BroadcastMessage: Strategy is "Advance" - supplement missing VChannels with the BroadcastMessage
-// - AlterReplicateConfig messages additionally need ignore=true marking to prevent old config overwriting
-func (bm *broadcastTaskManager) FixIncompleteBroadcastsForForcePromote(ctx context.Context) error {
-	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return status.NewOnShutdownError("broadcaster is closing")
-	}
-	defer bm.lifetime.Done()
-
+// getIncompleteBroadcastTasks returns all incomplete broadcast tasks that have pending messages.
+// Tasks in PENDING or REPLICATED state with pending messages are considered incomplete.
+func (bm *broadcastTaskManager) getIncompleteBroadcastTasks() []*broadcastTask {
 	bm.mu.Lock()
-	// Collect ALL incomplete broadcast tasks (not just AlterReplicateConfig)
-	var alterReplicateConfigTasks []*broadcastTask
-	var otherBroadcastTasks []*broadcastTask
+	defer bm.mu.Unlock()
+
+	var result []*broadcastTask
 	for _, task := range bm.tasks {
 		state := task.State()
-		// Only consider tasks that are pending or replicated and have pending messages
 		if state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING &&
 			state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED {
 			continue
@@ -371,90 +366,7 @@ func (bm *broadcastTaskManager) FixIncompleteBroadcastsForForcePromote(ctx conte
 		if len(msgs) == 0 {
 			continue
 		}
-		// Separate AlterReplicateConfig from other broadcast messages
-		if task.IsAlterReplicateConfigMessage() {
-			alterReplicateConfigTasks = append(alterReplicateConfigTasks, task)
-		} else {
-			otherBroadcastTasks = append(otherBroadcastTasks, task)
-		}
+		result = append(result, task)
 	}
-	bm.mu.Unlock()
-
-	totalTasks := len(alterReplicateConfigTasks) + len(otherBroadcastTasks)
-	if totalTasks == 0 {
-		bm.Logger().Info("No incomplete broadcasts to fix for force promote")
-		return nil
-	}
-
-	bm.Logger().Info("Fixing incomplete broadcasts for force promote",
-		zap.Int("alterReplicateConfigTasks", len(alterReplicateConfigTasks)),
-		zap.Int("otherBroadcastTasks", len(otherBroadcastTasks)))
-
-	// Mark AlterReplicateConfig tasks with ignore=true (to prevent old config overwriting force promote config)
-	for _, task := range alterReplicateConfigTasks {
-		bm.Logger().Info("Marking AlterReplicateConfig task with ignore=true",
-			zap.Uint64("broadcastID", task.Header().BroadcastID))
-
-		if err := task.MarkIgnoreAndSave(ctx); err != nil {
-			bm.Logger().Error("Failed to mark task with ignore",
-				zap.Uint64("broadcastID", task.Header().BroadcastID),
-				zap.Error(err))
-			return errors.Wrapf(err, "failed to mark task %d with ignore", task.Header().BroadcastID)
-		}
-	}
-
-	// Collect pending messages from ALL incomplete tasks for supplementation
-	var pendingMessages []message.MutableMessage
-	// From AlterReplicateConfig tasks (already marked with ignore=true)
-	for _, task := range alterReplicateConfigTasks {
-		msgs := task.PendingBroadcastMessages()
-		if len(msgs) > 0 {
-			bm.Logger().Info("Supplementing AlterReplicateConfig messages to remaining vchannels",
-				zap.Uint64("broadcastID", task.Header().BroadcastID),
-				zap.Int("pendingVChannels", len(msgs)))
-			pendingMessages = append(pendingMessages, msgs...)
-		}
-	}
-	// From other broadcast tasks (supplement without marking)
-	for _, task := range otherBroadcastTasks {
-		msgs := task.PendingBroadcastMessages()
-		if len(msgs) > 0 {
-			bm.Logger().Info("Supplementing broadcast messages to remaining vchannels",
-				zap.Uint64("broadcastID", task.Header().BroadcastID),
-				zap.String("messageType", task.msg.MessageType().String()),
-				zap.Int("pendingVChannels", len(msgs)))
-			pendingMessages = append(pendingMessages, msgs...)
-		}
-	}
-
-	if len(pendingMessages) == 0 {
-		bm.Logger().Info("No pending messages to supplement")
-		return nil
-	}
-
-	// Append pending messages to their respective vchannels
-	appendResults := streaming.WAL().AppendMessages(ctx, pendingMessages...)
-
-	// Check for errors and count successes
-	var lastResultErr error
-	supplementCount := 0
-	failureCount := 0
-	for i, result := range appendResults.Responses {
-		if result.Error != nil {
-			bm.Logger().Warn("Failed to supplement message",
-				zap.String("vchannel", pendingMessages[i].VChannel()),
-				zap.Error(result.Error))
-			failureCount++
-			lastResultErr = result.Error
-			continue
-		}
-		supplementCount++
-	}
-
-	bm.Logger().Info("Completed fixing incomplete broadcasts for force promote",
-		zap.Int("supplementCount", supplementCount),
-		zap.Int("failureCount", failureCount),
-		zap.Int("totalPending", len(pendingMessages)))
-
-	return lastResultErr
+	return result
 }
