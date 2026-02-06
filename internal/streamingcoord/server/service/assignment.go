@@ -372,24 +372,10 @@ func (s *assignmentServiceImpl) alterReplicateConfiguration(ctx context.Context,
 		return err
 	}
 
-	// Check if this is a force promote by looking at the message header
-	isForcePromote := header.ForcePromote
-
-	// For force promote: DDL fixing FIRST, then save meta
-	// This ensures incomplete broadcasts are supplemented with ignore=true before
-	// the force promote configuration is saved
-	if isForcePromote {
-		log.Ctx(ctx).Info("Force promote callback, fixing incomplete broadcasts first")
-
-		if err := broadcast.FixIncompleteBroadcastsForForcePromote(ctx); err != nil {
-			log.Ctx(ctx).Warn("Failed to fix incomplete broadcasts for force promote", zap.Error(err))
-			return err
-		}
-
-		log.Ctx(ctx).Info("Completed fixing incomplete broadcasts, now updating configuration")
-	}
-
 	// Update the configuration
+	// For force promote, incomplete broadcasts are already fixed by ackCallbackScheduler
+	// before this callback is invoked.
+
 	return balancer.UpdateReplicateConfiguration(ctx, result)
 }
 
