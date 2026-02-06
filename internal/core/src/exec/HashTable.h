@@ -14,7 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #pragma once
+#ifdef __SSE2__
 #include <emmintrin.h>
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#endif
 #include <algorithm>
 #include <cstdint>
 #include <cstring>

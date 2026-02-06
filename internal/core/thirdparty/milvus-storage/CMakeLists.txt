@@ -50,12 +50,20 @@ if ( NOT milvus-storage_POPULATED )
         # Strategy: create an IMPORTED target with the Conan target name
         # (AWS::aws-sdk-cpp-identity-management) that wraps Homebrew's AWS SDK.
         # This way milvus-storage's unmodified CMakeLists.txt links correctly.
-        if(EXISTS "/opt/homebrew/lib/cmake/AWSSDK")
-            set(AWSSDK_DIR "/opt/homebrew/lib/cmake/AWSSDK")
-        elseif(EXISTS "/usr/local/lib/cmake/AWSSDK")
-            set(AWSSDK_DIR "/usr/local/lib/cmake/AWSSDK")
+        execute_process(
+            COMMAND brew --prefix
+            OUTPUT_VARIABLE _HOMEBREW_PREFIX
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+        if(NOT _HOMEBREW_PREFIX)
+            set(_HOMEBREW_PREFIX "/opt/homebrew")
+        endif()
+        if(EXISTS "${_HOMEBREW_PREFIX}/lib/cmake/AWSSDK")
+            set(AWSSDK_DIR "${_HOMEBREW_PREFIX}/lib/cmake/AWSSDK")
         else()
-            message(FATAL_ERROR "AWS SDK cmake config not found in Homebrew. "
+            message(FATAL_ERROR "AWS SDK cmake config not found in Homebrew "
+                "(searched ${_HOMEBREW_PREFIX}/lib/cmake/AWSSDK). "
                 "Install with: brew install aws-sdk-cpp")
         endif()
         find_package(AWSSDK REQUIRED COMPONENTS core s3 identity-management)
