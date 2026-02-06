@@ -46,7 +46,7 @@ func (b *TxnBuffer) HandleImmutableMessages(msgs []message.ImmutableMessage, ts 
 			alterMsg := message.MustAsImmutableAlterReplicateConfigMessageV2(msg)
 			header := alterMsg.Header()
 			if header.ForcePromote && !header.Ignore {
-				b.RollbackAllUncommittedTxn()
+				b.rollbackAllUncommittedTxn()
 			}
 		}
 
@@ -203,10 +203,10 @@ func (b *TxnBuffer) clearExpiredTxn(ts uint64) {
 	}
 }
 
-// RollbackAllUncommittedTxn rolls back all uncommitted transactions in the buffer.
+// rollbackAllUncommittedTxn rolls back all uncommitted transactions in the buffer.
 // This is used during force promote to ensure no in-flight transactions from the
 // old replication topology are left pending.
-func (b *TxnBuffer) RollbackAllUncommittedTxn() {
+func (b *TxnBuffer) rollbackAllUncommittedTxn() {
 	if len(b.builders) == 0 {
 		return
 	}
