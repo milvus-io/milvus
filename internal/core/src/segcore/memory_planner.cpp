@@ -19,7 +19,6 @@
 #include "common/OpContext.h"
 #include "milvus-storage/common/metadata.h"
 #include "segcore/memory_planner.h"
-#include <gtest/gtest.h>
 #include <memory>
 #include <vector>
 #include <arrow/record_batch.h>
