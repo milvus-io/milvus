@@ -4031,9 +4031,11 @@ class TestMinHashBulkImport(TestMilvusClientV2Base):
             if not minio_client.bucket_exists(self.bucket_name):
                 raise Exception(f"MinIO bucket '{self.bucket_name}' doesn't exist")
 
-            # Upload file
+            # Upload file with unique prefix to avoid parallel test conflicts
+            import uuid
+            unique_prefix = str(uuid.uuid4())[:8]
             filename = os.path.basename(local_file_path)
-            minio_file_path = os.path.join(self.REMOTE_DATA_PATH, filename)
+            minio_file_path = os.path.join(self.REMOTE_DATA_PATH, unique_prefix, filename)
             minio_client.fput_object(self.bucket_name, minio_file_path, local_file_path)
 
             log.info(f"Uploaded file to MinIO: {minio_file_path}")
