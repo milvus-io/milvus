@@ -123,7 +123,7 @@ message LoadTextIndexInfo {
   bool enable_mmap = 9;
   int64 index_size = 10;
   int32 current_scalar_index_version = 11;
-  string warmup_policy = 12;  // "disable" or "sync", empty means use global config
+  string warmup_policy = 12;  // "disable", "sync", or "async"; empty means use global config
 }
 
 message LoadJsonKeyIndexInfo {
@@ -138,5 +138,5 @@ message LoadJsonKeyIndexInfo {
   bool enable_mmap = 9;
   string mmap_dir_path = 10;
   int64 stats_size = 11;
-  string warmup_policy = 12;  // "disable" or "sync", empty means use global config
+  string warmup_policy = 12;  // "disable", "sync", or "async"; empty means use global config
 }

@@ -274,6 +274,7 @@ const (
 	WarmupVectorIndexKey = "warmup.vectorIndex"
 	WarmupDisable        = "disable"
 	WarmupSync           = "sync"
+	WarmupAsync          = "async"
 )
 
 const (
@@ -357,8 +358,8 @@ func IsCollectionWarmupKey(key string) bool {
 
 // ValidateWarmupPolicy validates that the warmup policy value is valid
 func ValidateWarmupPolicy(value string) error {
-	if value != WarmupDisable && value != WarmupSync {
-		return fmt.Errorf("invalid warmup policy: %s, must be '%s' or '%s'", value, WarmupDisable, WarmupSync)
+	if value != WarmupDisable && value != WarmupSync && value != WarmupAsync {
+		return fmt.Errorf("invalid warmup policy: %s, must be '%s', '%s' or '%s'", value, WarmupDisable, WarmupSync, WarmupAsync)
 	}
 	return nil
 }
