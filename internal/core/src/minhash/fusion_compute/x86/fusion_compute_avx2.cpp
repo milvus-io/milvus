@@ -14,7 +14,6 @@
 
 #include "fusion_compute_avx2.h"
 
-#include <emmintrin.h>
 #include <immintrin.h>
 #include <xmmintrin.h>
 
