@@ -1,0 +1,51 @@
+# Milvus Standalone for FileResource E2E Testing
+# Image: master branch latest build
+# MinIO: in-cluster with LoadBalancer for test file upload
+
+apiVersion: milvus.io/v1beta1
+kind: Milvus
+metadata:
+  name: file-resource-test
+  namespace: chaos-testing
+  labels:
+    app: milvus
+spec:
+  mode: standalone
+  config:
+    minio:
+      bucketName: file-resource-test
+      rootPath: files
+  components:
+    image: harbor.milvus.io/milvus/milvus:master-20260206-cd509c8b-amd64
+    version: "2.7.0"
+
+    standalone:
+      replicas: 1
+      serviceType: LoadBalancer
+      resources:
+        limits:
+          cpu: '2'
+          memory: 8Gi
+        requests:
+          cpu: '2'
+          memory: 8Gi
+  dependencies:
+    etcd:
+      inCluster:
+        values:
+          replicaCount: 1
+        deletionPolicy: Delete
+        pvcDeletion: true
+    storage:
+      inCluster:
+        values:
+          mode: standalone
+          resources:
+            requests:
+              memory: 100Mi
+          persistence:
+            size: 20Gi
+          service:
+            type: LoadBalancer
+        deletionPolicy: Delete
+        pvcDeletion: true
