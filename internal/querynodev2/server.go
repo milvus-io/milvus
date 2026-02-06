@@ -32,6 +32,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"path"
 	"plugin"
 	"strings"
 	"sync"
@@ -77,6 +78,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+const queryCoordResourceLimitFlagKey = "querycoord/failed_load/resource_limit"
 
 // make sure QueryNode implements types.QueryNode
 var _ types.QueryNode = (*QueryNode)(nil)
@@ -415,49 +418,60 @@ func (node *QueryNode) Stop() error {
 			// Integration test is still using it, Remove it in future.
 			timeoutCh := time.After(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second))
 
-		outer:
-			for (node.manager != nil && !node.manager.Segment.Empty()) ||
-				(node.pipelineManager != nil && node.pipelineManager.Num() != 0) {
-				var (
-					sealedSegments  = []segments.Segment{}
-					growingSegments = []segments.Segment{}
-					channelNum      = 0
-				)
-				if node.manager != nil {
-					sealedSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed), segments.WithoutLevel(datapb.SegmentLevel_L0))
-					growingSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing), segments.WithoutLevel(datapb.SegmentLevel_L0))
-				}
-				if node.pipelineManager != nil {
-					channelNum = node.pipelineManager.Num()
-				}
-				if len(sealedSegments) == 0 && len(growingSegments) == 0 && channelNum == 0 {
-					break outer
-				}
+			if !node.shouldSkipGracefulStop(log) {
+				lastResourceCheck := time.Now().Add(-time.Minute)
+			outer:
+				for (node.manager != nil && !node.manager.Segment.Empty()) ||
+					(node.pipelineManager != nil && node.pipelineManager.Num() != 0) {
+					if time.Since(lastResourceCheck) >= time.Minute {
+						lastResourceCheck = time.Now()
+						if node.shouldSkipGracefulStop(log) {
+							log.Warn("resource limit flag detected during migration, skip graceful stop",
+								zap.Int64("ServerID", node.GetNodeID()))
+							break outer
+						}
+					}
+					var (
+						sealedSegments  = []segments.Segment{}
+						growingSegments = []segments.Segment{}
+						channelNum      = 0
+					)
+					if node.manager != nil {
+						sealedSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed), segments.WithoutLevel(datapb.SegmentLevel_L0))
+						growingSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing), segments.WithoutLevel(datapb.SegmentLevel_L0))
+					}
+					if node.pipelineManager != nil {
+						channelNum = node.pipelineManager.Num()
+					}
+					if len(sealedSegments) == 0 && len(growingSegments) == 0 && channelNum == 0 {
+						break outer
+					}
 
-				select {
-				case <-timeoutCh:
-					log.Warn("migrate data timed out", zap.Int64("ServerID", node.GetNodeID()),
-						zap.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
-							return s.ID()
-						})),
-						zap.Int64s("growingSegments", lo.Map(growingSegments, func(t segments.Segment, i int) int64 {
-							return t.ID()
-						})),
-						zap.Int("channelNum", channelNum),
-					)
-					break outer
-				case <-time.After(time.Second):
-					metrics.StoppingBalanceSegmentNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(float64(len(sealedSegments)))
-					metrics.StoppingBalanceChannelNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(float64(channelNum))
-					log.Info("migrate data...", zap.Int64("ServerID", node.GetNodeID()),
-						zap.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
-							return s.ID()
-						})),
-						zap.Int64s("growingSegments", lo.Map(growingSegments, func(t segments.Segment, i int) int64 {
-							return t.ID()
-						})),
-						zap.Int("channelNum", channelNum),
-					)
+					select {
+					case <-timeoutCh:
+						log.Warn("migrate data timed out", zap.Int64("ServerID", node.GetNodeID()),
+							zap.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
+								return s.ID()
+							})),
+							zap.Int64s("growingSegments", lo.Map(growingSegments, func(t segments.Segment, i int) int64 {
+								return t.ID()
+							})),
+							zap.Int("channelNum", channelNum),
+						)
+						break outer
+					case <-time.After(time.Second):
+						metrics.StoppingBalanceSegmentNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(float64(len(sealedSegments)))
+						metrics.StoppingBalanceChannelNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(float64(channelNum))
+						log.Info("migrate data...", zap.Int64("ServerID", node.GetNodeID()),
+							zap.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
+								return s.ID()
+							})),
+							zap.Int64s("growingSegments", lo.Map(growingSegments, func(t segments.Segment, i int) int64 {
+								return t.ID()
+							})),
+							zap.Int("channelNum", channelNum),
+						)
+					}
 				}
 			}
 
@@ -496,6 +510,25 @@ func (node *QueryNode) Stop() error {
 // UpdateStateCode updata the state of query node, which can be initializing, healthy, and abnormal
 func (node *QueryNode) UpdateStateCode(code commonpb.StateCode) {
 	node.lifetime.SetState(code)
+}
+
+func (node *QueryNode) shouldSkipGracefulStop(log *log.MLogger) bool {
+	if node.etcdCli == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+	key := path.Join(paramtable.Get().EtcdCfg.MetaRootPath.GetValue(), queryCoordResourceLimitFlagKey)
+	resp, err := node.etcdCli.Get(ctx, key)
+	if err != nil {
+		log.Warn("failed to get resource limit flag", zap.String("key", key), zap.Error(err))
+		return false
+	}
+	if resp.Count == 0 {
+		return false
+	}
+	log.Warn("resource limit flag detected, skip graceful stop", zap.String("key", key))
+	return true
 }
 
 // SetEtcdClient assigns parameter client to its member etcdCli
