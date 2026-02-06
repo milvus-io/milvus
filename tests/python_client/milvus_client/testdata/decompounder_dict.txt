@@ -1,0 +1,4 @@
+bank
+note
+fire
+work
