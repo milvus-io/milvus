@@ -1,4 +1,4 @@
-FROM golang:1.24.11 as builder
+FROM golang:1.24.12 as builder
 
 # Define a build argument with an empty default value
 ARG CUSTOM_GOPROXY=""
