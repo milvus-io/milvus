@@ -56,6 +56,16 @@ Here's a list of verified OS types where Milvus can successfully build and run:
 - MacOS (x86_64)
 - MacOS (Apple Silicon)
 
+### Troubleshooting
+
+#### Error downloading file https://ftp.gnu.org/pub/gnu/gcc/gcc-9.1.0/gcc-9.1.0.tar.gz
+
+If you encounter a download error for `libiberty` (part of GCC) like `HTTPSConnectionPool... Max retries exceeded`, it is likely due to the instability of `ftp.gnu.org`.
+
+**Workaround:**
+1. Retry the build command. The download might succeed on a subsequent attempt or failover to a mirror.
+2. If the issue persists, you might need to manually check if `ftp.gnu.org` is accessible or configure a different mirror if you are managing the Conan recipe locally.
+
 ### Compiler Setup
 
 You can use Vscode to integrate C++ and Go together. Please replace user.settings file with below configs:
@@ -99,7 +109,7 @@ Linux systems (Recommend Ubuntu 20.04 or later):
 go: >= 1.21
 cmake: >= 3.18
 gcc: 12
-conan: 1.61
+conan: 1.64.1
 ```
 
 MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
@@ -108,7 +118,7 @@ MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
 go: >= 1.21
 cmake: >= 3.18
 llvm: >= 15
-conan: 1.61
+conan: 1.64.1
 ```
 
 MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
@@ -117,7 +127,7 @@ MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
 go: >= 1.21 (Arch=ARM64)
 cmake: >= 3.18
 llvm: >= 15
-conan: 1.61
+conan: 1.64.1
 ```
 
 #### Installing Dependencies
@@ -159,7 +169,7 @@ Install Conan
 pip install conan==1.64.1
 ```
 
-Note: Conan version 2.x is not currently supported, please use version 1.61.
+Note: Conan version 2.x is not currently supported, please use version 1.64.1.
 
 #### Go
 
@@ -438,7 +448,7 @@ A: Python 3.12 has removed the imp module, please downgrade to 3.11 for now.
 
 Q: Conan: Unrecognized arguments: — install-folder conan
 
-A: The version is not correct. Please change to 1.61 for now.
+A: The version is not correct. Please change to 1.64.1 for now.
 
 ---
 

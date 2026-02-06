@@ -44,6 +44,7 @@ FetchContent_Declare(
         knowhere
         GIT_REPOSITORY  ${GIT_REPOSITORY}
         GIT_TAG         ${KNOWHERE_VERSION}
+        GIT_SHALLOW     TRUE
         SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-src
         BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-build
         DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH} )
