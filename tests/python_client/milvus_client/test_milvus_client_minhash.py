@@ -4191,13 +4191,13 @@ class TestMinHashBulkImport(TestMilvusClientV2Base):
     @pytest.mark.parametrize("file_type", ["PARQUET", "JSON"])
     def test_minhash_bulk_import_with_output_field_negative(self, minio_host, minio_bucket, file_type):
         """
-        target: test bulk import fails when providing MinHash output field
+        target: test bulk import rejects data containing function output field
         method:
             1. Create collection with MinHash function
-            2. Generate import data containing minhash_signature field (output field)
+            2. Generate import data containing minhash_signature field (function output)
             3. Bulk import
-            4. Verify import fails
-        expected: import should fail - cannot provide function output field
+            4. Verify import fails with proper error message
+        expected: import should fail - cannot provide function output field in import data
         """
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
@@ -4221,18 +4221,14 @@ class TestMinHashBulkImport(TestMilvusClientV2Base):
         log.info(f"Collection '{collection_name}' created with MinHash function")
 
         # Step 2: Create a schema WITHOUT function to bypass client-side validation
-        # This allows us to include the minhash_signature field in the data
-        # Use CollectionSchema directly because MilvusClient.create_schema() doesn't set primary_field correctly
-        # which is required by LocalBulkWriter
         from pymilvus import CollectionSchema, FieldSchema
-        invalid_schema = CollectionSchema(fields=[
+        file_schema = CollectionSchema(fields=[
             FieldSchema(name=default_primary_key_field_name, dtype=DataType.INT64, is_primary=True),
             FieldSchema(name=default_text_field_name, dtype=DataType.VARCHAR, max_length=65535),
             FieldSchema(name=default_minhash_field_name, dtype=DataType.BINARY_VECTOR, dim=default_dim),
         ])
-        # Note: NOT adding the function to this schema
 
-        # Generate binary vector data
+        # Generate random binary vector data
         def gen_binary_vector(dim):
             return bytes([random.randint(0, 255) for _ in range(dim // 8)])
 
@@ -4240,22 +4236,23 @@ class TestMinHashBulkImport(TestMilvusClientV2Base):
         data = [{
             default_primary_key_field_name: i,
             default_text_field_name: texts[i],
-            default_minhash_field_name: gen_binary_vector(default_dim),  # Incorrectly providing signature
+            default_minhash_field_name: gen_binary_vector(default_dim),
         } for i in range(nb)]
 
-        batch_files = self.gen_file_with_local_bulk_writer(invalid_schema, data, file_type)
+        batch_files = self.gen_file_with_local_bulk_writer(file_schema, data, file_type)
 
         # Step 3: Upload to MinIO
         import os
         local_file = batch_files[0][0]
         remote_files = self.upload_to_minio(local_file)
 
-        # Step 4: Bulk import - should fail
+        # Step 4: Bulk import - should fail because function output field is provided
         result = self.call_bulkinsert(collection_name, remote_files, expect_fail=True)
 
-        # Verify import failed
         assert result["state"] == "Failed", \
             f"Import should have failed when providing function output field, but got: {result['state']}"
-        log.info(f"Import correctly failed with reason: {result['reason']}")
+        assert "output by function" in result["reason"], \
+            f"Error should mention 'output by function', got: {result['reason']}"
+        log.info(f"Import correctly failed: {result['reason']}")
 
         self.drop_collection(client, collection_name)
