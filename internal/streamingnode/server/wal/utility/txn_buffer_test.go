@@ -207,7 +207,7 @@ func TestRollbackAllUncommittedTxn(t *testing.T) {
 	assert.Greater(t, b.Bytes(), 0)
 
 	// Rollback all uncommitted transactions
-	b.RollbackAllUncommittedTxn()
+	b.rollbackAllUncommittedTxn()
 
 	// Verify all transactions are rolled back
 	assert.Len(t, b.builders, 0)
@@ -218,7 +218,7 @@ func TestRollbackAllUncommittedTxn_Empty(t *testing.T) {
 	b := NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 
 	// Rollback on empty buffer should be a no-op
-	b.RollbackAllUncommittedTxn()
+	b.rollbackAllUncommittedTxn()
 	assert.Len(t, b.builders, 0)
 	assert.Equal(t, 0, b.Bytes())
 }
