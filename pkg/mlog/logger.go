@@ -184,9 +184,9 @@ func (l *Logger) Level() Level {
 	return GetLevel()
 }
 
-// log is the internal logging method for Logger.
+// Log logs a message at the specified level.
 // It optimizes by selecting the logger with more pre-encoded fields.
-func (l *Logger) log(ctx context.Context, level Level, msg string, fields ...Field) {
+func (l *Logger) Log(ctx context.Context, level Level, msg string, fields ...Field) {
 	// Early return if level is disabled
 	if !globalLevel.Enabled(level) {
 		return
@@ -245,20 +245,20 @@ func (l *Logger) log(ctx context.Context, level Level, msg string, fields ...Fie
 
 // Debug logs a message at debug level.
 func (l *Logger) Debug(ctx context.Context, msg string, fields ...Field) {
-	l.log(ctx, DebugLevel, msg, fields...)
+	l.Log(ctx, DebugLevel, msg, fields...)
 }
 
 // Info logs a message at info level.
 func (l *Logger) Info(ctx context.Context, msg string, fields ...Field) {
-	l.log(ctx, InfoLevel, msg, fields...)
+	l.Log(ctx, InfoLevel, msg, fields...)
 }
 
 // Warn logs a message at warn level.
 func (l *Logger) Warn(ctx context.Context, msg string, fields ...Field) {
-	l.log(ctx, WarnLevel, msg, fields...)
+	l.Log(ctx, WarnLevel, msg, fields...)
 }
 
 // Error logs a message at error level.
 func (l *Logger) Error(ctx context.Context, msg string, fields ...Field) {
-	l.log(ctx, ErrorLevel, msg, fields...)
+	l.Log(ctx, ErrorLevel, msg, fields...)
 }
