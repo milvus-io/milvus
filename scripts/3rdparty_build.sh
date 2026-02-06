@@ -88,6 +88,11 @@ export CONAN_REVISIONS_ENABLED=1
 export CXXFLAGS="-Wno-error=address -Wno-error=deprecated-declarations -include cstdint"
 export CFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"
 
+# In case any conan package (e.g. google-cloud-cpp) built from source requires
+# a minimum CMake version lower than 3.5, which cmake 3.31+ rejects by default.
+# Same workaround as in core_build.sh (added in #46029).
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
+
 # Determine the Conan remote URL, using the environment variable if set, otherwise defaulting
 CONAN_ARTIFACTORY_URL="${CONAN_ARTIFACTORY_URL:-https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local}"
 

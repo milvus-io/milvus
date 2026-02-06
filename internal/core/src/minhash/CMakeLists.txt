@@ -57,7 +57,7 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64)|(ARM64)")
 endif()
 
 target_link_libraries(milvus_minhash PUBLIC
-    xxhash::xxhash
+    xxHash::xxHash
     OpenSSL::SSL
 )
 
