@@ -18,6 +18,31 @@
 
 namespace milvus {
 
+/**
+ * Get a thread-local GEOS context handle for thread-safe operations.
+ *
+ * GEOS context handles are NOT thread-safe - concurrent operations on the same
+ * context can cause crashes or data corruption. This function provides each thread
+ * with its own context that is lazily initialized and automatically cleaned up
+ * when the thread exits.
+ *
+ * Use this instead of segment_->get_ctx() when thread safety is required.
+ */
+inline GEOSContextHandle_t
+GetThreadLocalGEOSContext() {
+    thread_local struct ThreadLocalContext {
+        GEOSContextHandle_t ctx;
+        ThreadLocalContext() : ctx(GEOS_init_r()) {
+        }
+        ~ThreadLocalContext() {
+            if (ctx) {
+                GEOS_finish_r(ctx);
+            }
+        }
+    } tls;
+    return tls.ctx;
+}
+
 class Geometry {
  public:
     // Default constructor creates invalid geometry
