@@ -396,6 +396,19 @@ mloggrpc.UnaryServerInterceptor("datanode")
 | `(*Logger) Info(ctx, msg, fields...)` | Log at Info level |
 | `(*Logger) Warn(ctx, msg, fields...)` | Log at Warn level |
 | `(*Logger) Error(ctx, msg, fields...)` | Log at Error level |
+| `(*Logger) Log(ctx, level, msg, fields...)` | Log at specified level |
+
+**Rate-Limited Functions (package-level and Logger):**
+
+| Function | Description |
+|----------|-------------|
+| `RatedDebug(ctx, limit, msg, fields...)` | Rate-limited log at Debug level |
+| `RatedInfo(ctx, limit, msg, fields...)` | Rate-limited log at Info level |
+| `RatedWarn(ctx, limit, msg, fields...)` | Rate-limited log at Warn level |
+| `RatedError(ctx, limit, msg, fields...)` | Rate-limited log at Error level |
+| `RatedLog(ctx, level, limit, msg, fields...)` | Rate-limited log at specified level |
+
+Rate-limited functions use per-call-site `rate.Limiter` (lazy-initialized via `sync.Map`). When a log entry is suppressed, an `_ignored` count field is attached to the next allowed entry.
 
 ### mlog/grpc Package
 
@@ -462,3 +475,55 @@ mlog.Info(ctx, "segment loaded",
     mlog.Int64(mlog.KeySegmentID, 67890),
 )
 ```
+
+## Benchmark Report
+
+**Environment**: Intel Core i7-8700 @ 3.20GHz, Linux amd64, Go 1.24
+
+### Baseline: Native zap.Logger
+
+| Benchmark | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| ZapInfo | 367 | 0 | 0 |
+| ZapInfoWithFields (3 fields) | 605 | 192 | 1 |
+| ZapInfoWithCaller | 1015 | 272 | 2 |
+| ZapInfoWithCaller+Fields | 1296 | 465 | 3 |
+| ZapInfoDisabledLevel | 6.2 | 0 | 0 |
+
+### Package-Level Functions
+
+| Benchmark | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| MlogInfo | 457 | 32 | 2 |
+| MlogInfoWithFields (3 fields) | 686 | 224 | 3 |
+| MlogInfoWithContextFields | 419 | 0 | 0 |
+| MlogInfoWithContext+CallFields | 638 | 192 | 1 |
+| MlogInfoDisabledLevel | 2.6 | 0 | 0 |
+| MlogInfoNilContext | 483 | 64 | 1 |
+
+### Logger Methods
+
+| Benchmark | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| LoggerInfo | 432 | 16 | 1 |
+| LoggerInfoWithFields (3 fields) | 661 | 208 | 2 |
+| LoggerInfoWithContextFields | 472 | 0 | 0 |
+| LoggerInfoDisabledLevel | 2.9 | 0 | 0 |
+
+### Rate-Limited Functions
+
+| Benchmark | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| RatedInfoAllowed | 967 | 280 | 4 |
+| RatedInfoSuppressed | 501 | 248 | 2 |
+| RatedInfoDisabledLevel | 2.8 | 0 | 0 |
+| LoggerRatedInfoAllowed | 933 | 264 | 3 |
+| LoggerRatedInfoSuppressed | 507 | 248 | 2 |
+
+### Key Takeaways
+
+1. **mlog vs zap (no caller)**: `mlog.Info` adds ~90ns (24%) overhead over bare `zap.Info` without caller, primarily from context lookup and atomic load of the global logger.
+2. **Zero allocation with context fields**: When fields are pre-encoded via `WithFields`, `MlogInfoWithContextFields` achieves 0 allocs at 419ns — faster than native `zap.Info` with 3 fields (605ns, 1 alloc).
+3. **Disabled level is extremely fast**: ~2.6ns with 0 allocs, 2.4x faster than zap's 6.2ns, because mlog returns before calling into zap.
+4. **Rate limiting (allowed)**: ~960ns total, with overhead from `runtime.Caller(1)` + `sync.Map` lookup + `rate.Limiter.Allow()`.
+5. **Rate limiting (suppressed)**: ~500ns, skips log encoding entirely, only performs atomic operations and `runtime.Caller`.
