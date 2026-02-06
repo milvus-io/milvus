@@ -828,7 +828,8 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		return err
 	}
 	mmapEnabled := isDataMmapEnable(fieldSchema)
-	fieldWarmupPolicy := getFieldWarmupPolicy(fieldSchema)
+	autoWarmup := isAutoWarmup(collection.Schema().GetProperties())
+	fieldWarmupPolicy := getFieldWarmupPolicy(fieldSchema, autoWarmup)
 
 	req := &segcore.LoadFieldDataRequest{
 		Fields: []segcore.LoadFieldDataInfo{{
@@ -980,6 +981,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	loadInfo *querypb.SegmentLoadInfo,
 	indexInfo *querypb.FieldIndexInfo,
 	f func(c *LoadIndexInfo) error,
+	autoWarmup bool,
 ) error {
 	// 1.
 	loadIndexInfo, err := newLoadIndexInfo(ctx)
@@ -1017,7 +1019,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 			zap.Int64("fieldID", indexInfo.GetFieldID()),
 			zap.String("warmup", existingWarmup))
 	} else {
-		warmupPolicy := getIndexWarmupPolicy(fieldSchema, indexInfo)
+		warmupPolicy := getIndexWarmupPolicy(fieldSchema, indexInfo, autoWarmup)
 		log.Ctx(ctx).Info("warmup policy from getIndexWarmupPolicy",
 			zap.Int64("segmentID", loadInfo.GetSegmentID()),
 			zap.Int64("fieldID", indexInfo.GetFieldID()),
@@ -1104,6 +1106,7 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 	tr *timerecord.TimeRecorder,
 	fieldType schemapb.DataType,
 ) error {
+	autoWarmup := isAutoWarmup(s.collection.Schema().GetProperties())
 	err := GetCLoadInfoWithFunc(ctx, fieldSchema,
 		s.LoadInfo(), indexInfo, func(loadIndexInfo *LoadIndexInfo) error {
 			newLoadIndexInfoSpan := tr.RecordSpan()
@@ -1135,7 +1138,7 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 				zap.Duration("updateIndexInfoSpan", updateIndexInfoSpan),
 			)
 			return nil
-		})
+		}, autoWarmup)
 	if err != nil {
 		log.Warn("load index failed", zap.Error(err))
 	}
@@ -1158,7 +1161,8 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 	// Text match index mmap config is based on the raw data mmap.
 	enableMmap := isDataMmapEnable(f)
 	// Text match index should based on scala field's warmup policy like mmap
-	warmupPolicy := getScalarDataWarmupPolicy(f)
+	autoWarmup := isAutoWarmup(s.collection.Schema().GetProperties())
+	warmupPolicy := getScalarDataWarmupPolicy(f, autoWarmup)
 	cgoProto := &indexcgopb.LoadTextIndexInfo{
 		FieldID:      textLogs.GetFieldID(),
 		Version:      textLogs.GetVersion(),
@@ -1220,7 +1224,8 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 	}
 
 	// JSON key stats should based on scala field's warmup policy
-	warmupPolicy := getScalarDataWarmupPolicy(f)
+	autoWarmup := isAutoWarmup(s.collection.Schema().GetProperties())
+	warmupPolicy := getScalarDataWarmupPolicy(f, autoWarmup)
 
 	cgoProto := &indexcgopb.LoadJsonKeyIndexInfo{
 		FieldID:      jsonKeyStats.GetFieldID(),

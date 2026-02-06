@@ -23,6 +23,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
@@ -324,14 +325,18 @@ func isGrowingMmapEnable() bool {
 }
 
 // getFieldWarmupPolicy returns the warmup policy for field data loading.
-// Priority: field TypeParams (propagated from collection-level by QueryCoord) > global config
-func getFieldWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
+// Priority: field TypeParams (propagated from collection-level by QueryCoord) > auto-warmup for non-PKI > global config
+func getFieldWarmupPolicy(fieldSchema *schemapb.FieldSchema, autoWarmup bool) string {
 	// Check field TypeParams (collection-level warmup.scalarField/warmup.vectorField
 	// is propagated to field TypeParams by QueryCoord)
 	policy, exist := common.GetWarmupPolicy(fieldSchema.GetTypeParams()...)
 
 	if exist {
 		return policy
+	}
+	// Auto-warmup for non-PKI: vectorField is NOT affected
+	if autoWarmup && !typeutil.IsVectorType(fieldSchema.GetDataType()) {
+		return common.WarmupSync
 	}
 	// Fall back to global config
 	if typeutil.IsVectorType(fieldSchema.GetDataType()) {
@@ -341,13 +346,17 @@ func getFieldWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
 }
 
 // getIndexWarmupPolicy returns the warmup policy for index loading.
-// Priority: index params (propagated from collection-level by QueryCoord) > global config
-func getIndexWarmupPolicy(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo) string {
+// Priority: index params (propagated from collection-level by QueryCoord) > auto-warmup for non-PKI > global config
+func getIndexWarmupPolicy(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo, autoWarmup bool) string {
 	// Check index params (collection-level warmup.scalarIndex/warmup.vectorIndex
 	// is propagated to index params by QueryCoord)
 	policy, exist := common.GetWarmupPolicy(indexInfo.IndexParams...)
 	if exist {
 		return policy
+	}
+	// Auto-warmup for non-PKI: applies to both scalar and vector indexes
+	if autoWarmup {
+		return common.WarmupSync
 	}
 	// Fall back to global config
 	if typeutil.IsVectorType(fieldSchema.GetDataType()) {
@@ -357,12 +366,32 @@ func getIndexWarmupPolicy(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.
 }
 
 // getScalarDataWarmupPolicy returns the warmup policy for scalar data, but also include json key stats and text match.
-// Priority: field TypeParams (propagated from collection-level by QueryCoord) > global config
-func getScalarDataWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
+// Priority: field TypeParams (propagated from collection-level by QueryCoord) > auto-warmup for non-PKI > global config
+func getScalarDataWarmupPolicy(fieldSchema *schemapb.FieldSchema, autoWarmup bool) string {
 	// Check field TypeParams (collection-level warmup.scalarField is propagated
 	policy, exist := common.GetWarmupPolicy(fieldSchema.GetTypeParams()...)
 	if exist {
 		return policy
 	}
+	// Auto-warmup for non-PKI: scalar data always gets sync warmup
+	if autoWarmup {
+		return common.WarmupSync
+	}
 	return params.Params.QueryNodeCfg.TieredWarmupScalarField.GetValue()
+}
+
+// isAutoWarmup checks if auto-warmup should be applied for a collection.
+// Returns true when the AutoWarmup config is enabled AND the collection
+// does NOT have partition key isolation.
+func isAutoWarmup(collectionProperties []*commonpb.KeyValuePair) bool {
+	if !params.Params.QueryNodeCfg.AutoWarmup.GetAsBool() {
+		return false
+	}
+	isPKI, _ := common.IsPartitionKeyIsolationKvEnabled(collectionProperties...)
+	if !isPKI {
+		log.Info("auto-warmup is enabled for non-partitionkey-isolated collection")
+		return true
+	}
+	log.Info("auto-warmup is disabled for partitionkey-isolated collection")
+	return false
 }

@@ -1761,7 +1761,7 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 					return nil, nil
 				}).Await()
 				return nil
-			})
+			}, false)
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to estimate logical resource usage of index, collection %d, segment %d, indexBuildID %d",
 					loadInfo.GetCollectionID(),
@@ -1947,7 +1947,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 					return nil, nil
 				}).Await()
 				return nil
-			})
+			}, false)
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to estimate loading resource usage of index, collection %d, segment %d, indexBuildID %d",
 					loadInfo.GetCollectionID(),
