@@ -23,6 +23,7 @@ import (
 	"math"
 	"path"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -83,6 +84,20 @@ type CompactionMeta interface {
 
 var _ CompactionMeta = (*meta)(nil)
 
+// LockedAllocationList provides a thread-safe container for a segment's allocations slice.
+// It utilizes an RWMutex to allow concurrent reads while protecting writes.
+type LockedAllocationList struct {
+	sync.RWMutex
+	allocations []*Allocation
+}
+
+// NewLockedAllocationList creates a new instance of LockedAllocationList.
+func NewLockedAllocationList() *LockedAllocationList {
+	return &LockedAllocationList{
+		allocations: make([]*Allocation, 0),
+	}
+}
+
 type meta struct {
 	ctx     context.Context
 	catalog metastore.DataCoordCatalog
@@ -91,6 +106,11 @@ type meta struct {
 
 	segMu    lock.RWMutex
 	segments *SegmentsInfo // segment id to segment info
+
+	// Separate lock for high-frequency Allocation updates (allocationMu)
+	allocationMu lock.RWMutex
+	// allocations maps SegmentID to its thread-safe list of active Allocations.
+	allocations map[UniqueID]*LockedAllocationList
 
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
@@ -184,6 +204,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		ctx:                ctx,
 		catalog:            catalog,
 		collections:        typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		allocations:        make(map[UniqueID]*LockedAllocationList),
 		segments:           NewSegmentsInfo(),
 		channelCPs:         newChannelCps(),
 		indexMeta:          im,
@@ -1447,38 +1468,173 @@ func (m *meta) GetRealSegmentsForChannel(channel string) []*SegmentInfo {
 	return m.segments.GetRealSegmentsForChannel(channel)
 }
 
-// AddAllocation add allocation in segment
-func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
-	log.Ctx(m.ctx).Debug("meta update: add allocation",
-		zap.Int64("segmentID", segmentID),
-		zap.Any("allocation", allocation))
+// getSegmentsMap returns the underlying map of segment info.
+// This hides the nested structure m.segments.segments.
+func (m *meta) getSegmentsMap() map[UniqueID]*SegmentInfo {
+	if m.segments == nil {
+		return nil
+	}
+	return m.segments.segments
+}
+
+// updateLastExpireTime updates the LastExpireTime of a SegmentInfo, ensuring it is monotonically increasing.
+// This function handles the logic for updating the field based on new allocations or cleanup results.
+func (m *meta) updateLastExpireTime(segmentID UniqueID, expireTime Timestamp) {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
-	curSegInfo := m.segments.GetSegment(segmentID)
-	if curSegInfo == nil {
-		// TODO: Error handling.
-		log.Ctx(m.ctx).Error("meta update: add allocation failed - segment not found", zap.Int64("segmentID", segmentID))
-		return errors.New("meta update: add allocation failed - segment not found")
+
+	segmentsMap := m.getSegmentsMap()
+
+	if segmentsMap == nil {
+		return
 	}
-	// As we use global segment lastExpire to guarantee data correctness after restart
-	// there is no need to persist allocation to meta store, only update allocation in-memory meta.
-	m.segments.AddAllocation(segmentID, allocation)
-	log.Ctx(m.ctx).Info("meta update: add allocation - complete", zap.Int64("segmentID", segmentID))
+
+	if segment, ok := segmentsMap[segmentID]; ok {
+		// Get the current LastExpireTime safely
+		currentExpireTime := segment.GetLastExpireTime()
+
+		// Only update if the new time is strictly greater (Monotonically Increasing)
+		if expireTime > currentExpireTime {
+			// Apply the option to clone and set the new maximum time.
+			segmentsMap[segmentID] = segment.ShadowClone(SetExpireTime(expireTime))
+		}
+	}
+}
+
+// AddAllocation adds a new Allocation to the segment's list in a thread-safe manner.
+// This function handles the initialization of the list if it doesn't exist.
+func (m *meta) AddAllocation(segmentID UniqueID, alloc *Allocation) error {
+	// 1. Get the list pointer (RLock for map lookup).
+	m.allocationMu.RLock()
+	list := m.allocations[segmentID]
+	m.allocationMu.RUnlock()
+
+	if list == nil {
+		// 2. The list doesn't exist, initialize it (Write Lock for map modification).
+		m.allocationMu.Lock()
+		// Double-check locking pattern to avoid redundant creation
+		if list = m.allocations[segmentID]; list == nil {
+			list = NewLockedAllocationList()
+			m.allocations[segmentID] = list
+		}
+		m.allocationMu.Unlock()
+	}
+
+	// 3. Acquire Write Lock for the list content and append the new allocation.
+	list.Lock()
+	defer list.Unlock()
+
+	list.allocations = append(list.allocations, alloc)
+	m.updateLastExpireTime(segmentID, alloc.ExpireTime)
 	return nil
+}
+
+// GetAllocations retrieves all active Allocations for a given segmentID.
+// It returns the internal slice directly, protected by RLock.
+//
+// WARNING: The returned slice is a direct reference to the internal data structure.
+// The caller must treat this slice as strictly READ-ONLY. Any attempt to modify
+// the slice content (e.g., changing an Allocation field) or slice structure
+// (e.g., using append or re-slicing) can lead to data corruption in the meta system.
+func (m *meta) GetAllocations(segmentID UniqueID) []*Allocation {
+	// 1. Get the list pointer (RLock for map lookup).
+	m.allocationMu.RLock()
+	list := m.allocations[segmentID]
+	m.allocationMu.RUnlock()
+
+	if list == nil {
+		return nil
+	}
+
+	// 2. Acquire Read Lock for the list content (allows concurrent reads).
+	list.RLock()
+	defer list.RUnlock()
+
+	// 3. Return the internal slice directly, without copying.
+	return list.allocations
+}
+
+// ExpireAllocationsByTimestamp removes all allocations for a segment whose ExpireTime is less than or
+// equal to the provided timestamp, protected by a Write Lock.
+// It returns the list of removed allocations and updates the segment's LastExpireTime
+// based on the maximum ExpireTime remaining in the list.
+func (m *meta) ExpireAllocationsByTimestamp(segmentID UniqueID, expireTime Timestamp) []*Allocation {
+	// 1. Get the list pointer (RLock for map lookup).
+	m.allocationMu.RLock()
+	list, ok := m.allocations[segmentID]
+	m.allocationMu.RUnlock()
+
+	if !ok || list == nil {
+		return nil
+	}
+
+	// 2. Acquire Write Lock for the list content as we are modifying the slice.
+	list.Lock()
+	defer list.Unlock()
+
+	if len(list.allocations) == 0 {
+		return nil
+	}
+
+	removedAllocs := make([]*Allocation, 0)
+	newAllocs := make([]*Allocation, 0, len(list.allocations))
+
+	// Initialize maxExpireTime for the remaining allocations
+	var maxExpireTime Timestamp = 0
+
+	// 3. Filter, collect removed allocations, and find the max ExpireTime of remaining allocations.
+	for _, alloc := range list.allocations {
+		// Condition: Remove if alloc.ExpireTime is less than or equal to the provided timestamp
+		if alloc.ExpireTime <= expireTime {
+			removedAllocs = append(removedAllocs, alloc)
+		} else {
+			newAllocs = append(newAllocs, alloc)
+			// Update maxExpireTime for the remaining allocations
+			if alloc.ExpireTime > maxExpireTime {
+				maxExpireTime = alloc.ExpireTime
+			}
+		}
+	}
+
+	// 4. Replace the old slice with the new filtered slice.
+	list.allocations = newAllocs
+
+	// 5. Only call updateLastExpireTime if maxExpireTime > 0.
+	// This respects the monotonic nature of updateLastExpireTime.
+	if maxExpireTime > 0 {
+		m.updateLastExpireTime(segmentID, maxExpireTime)
+	}
+
+	return removedAllocs
+}
+
+// RemoveSegmentAllocations deletes the entire list of allocations for a segment ID
+// and returns the removed allocations for cleanup/logging.
+func (m *meta) RemoveSegmentAllocations(sid UniqueID) []*Allocation {
+	// 1. Acquire Write Lock to safely modify the map structure.
+	m.allocationMu.Lock()
+	defer m.allocationMu.Unlock()
+
+	list, ok := m.allocations[sid]
+	if !ok {
+		return nil
+	}
+
+	// 2. Acquire Write Lock on the list to safely read its contents before deletion.
+	list.Lock()
+	removedAllocs := list.allocations
+	list.Unlock()
+
+	// 3. Delete the list pointer from the map.
+	delete(m.allocations, sid)
+
+	return removedAllocs
 }
 
 func (m *meta) SetRowCount(segmentID UniqueID, rowCount int64) {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
 	m.segments.SetRowCount(segmentID, rowCount)
-}
-
-// SetAllocations set Segment allocations, will overwrite ALL original allocations
-// Note that allocations is not persisted in KV store
-func (m *meta) SetAllocations(segmentID UniqueID, allocations []*Allocation) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
-	m.segments.SetAllocations(segmentID, allocations)
 }
 
 // SetLastExpire set lastExpire time for segment

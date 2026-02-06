@@ -34,6 +34,49 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
+// NewSegmentInfoWithAllocs helper function for tests
+func NewSegmentInfoWithAllocs(segment *SegmentInfo, allocs []*Allocation) *SegmentInfoWithAllocations {
+	return &SegmentInfoWithAllocations{
+		SegmentInfo: segment,
+		Allocations: allocs,
+	}
+}
+
+func TestAllocatePolicyL1(t *testing.T) {
+	// Original setup of SegmentInfo objects (must remain the same)
+	s1 := NewSegmentInfo(&datapb.SegmentInfo{ID: 1, MaxRowNum: 1000, NumOfRows: 500})
+	s2 := NewSegmentInfo(&datapb.SegmentInfo{ID: 2, MaxRowNum: 1000, NumOfRows: 900})
+	s3 := NewSegmentInfo(&datapb.SegmentInfo{ID: 3, MaxRowNum: 1000, NumOfRows: 0}) // Empty segment
+
+	// Allocations for s1
+	alloc1 := getAllocation(100)
+	alloc2 := getAllocation(50)
+
+	// Allocations for s2: CRITICAL FIX - Reduce Allocations to 70 rows.
+	// Segment 2 total rows become 970 (900 + 70).
+	// This ensures S2 is below the assumed default SegmentSealProportion threshold (e.g., 980), preventing it from being skipped by AllocatePolicyL1.
+	alloc3 := getAllocation(70)
+
+	// NEW STEP: Convert SegmentInfo to SegmentInfoWithAllocations
+	// The order must keep S2 before S3 as AllocatePolicyL1 iterates sequentially.
+	segments := []*SegmentInfoWithAllocations{
+		NewSegmentInfoWithAllocs(s2, []*Allocation{alloc3}),         // Total Rows: 970. Free: 30
+		NewSegmentInfoWithAllocs(s1, []*Allocation{alloc1, alloc2}), // Total Rows: 650. Free: 350
+		NewSegmentInfoWithAllocs(s3, nil),                           // Total Rows: 0. Free: 1000
+	}
+
+	// Test Case 1: Fit into s2 (900+70+10 = 980)
+	newAllocs, existedAllocs := AllocatePolicyL1(segments, 10, 1000, datapb.SegmentLevel_L1)
+
+	// Assert that the allocation went to an existing segment
+	assert.Empty(t, newAllocs)
+	assert.Len(t, existedAllocs, 1)
+
+	// Assert that Segment 2 was correctly selected
+	assert.Equal(t, int64(3), existedAllocs[0].SegmentID)
+	assert.Equal(t, int64(10), existedAllocs[0].NumOfRows)
+}
+
 func TestUpperLimitCalBySchema(t *testing.T) {
 	type testCase struct {
 		schema    *schemapb.CollectionSchema
