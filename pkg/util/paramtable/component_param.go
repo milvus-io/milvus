@@ -3285,6 +3285,7 @@ type queryNodeConfig struct {
 	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
 	TieredLoadingTimeoutMs          ParamItem `refreshable:"false"`
 	StorageUsageTrackingEnabled     ParamItem `refreshable:"false"`
+	AutoWarmup                      ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -3725,6 +3726,16 @@ If set to 0, time based eviction is disabled.`,
 		Export: false,
 	}
 	p.TieredLoadingTimeoutMs.Init(base.mgr)
+
+	p.AutoWarmup = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.warmup.autoWarmup",
+		Version:      "2.6.10",
+		DefaultValue: "false",
+		Doc:          `When enabled, forces vectorIndex, scalarField, and scalarIndex warmup to sync for collections without partition key isolation. vectorField is not affected.`,
+		Forbidden:    true,
+		Export:       false,
+	}
+	p.AutoWarmup.Init(base.mgr)
 
 	p.EnableDisk = ParamItem{
 		Key:          "queryNode.enableDisk",
