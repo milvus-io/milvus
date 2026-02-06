@@ -347,9 +347,9 @@ func (bm *broadcastTaskManager) removeBroadcastTask(broadcastID uint64) {
 }
 
 // FixIncompleteBroadcastsForForcePromote fixes incomplete broadcasts for force promote.
-// It marks incomplete AlterReplicateConfig messages with ignore=true before supplementing
-// them to remaining vchannels. This ensures old incomplete messages don't overwrite
-// the force promote configuration.
+// Per design doc, there are two types of incomplete messages:
+// - BroadcastMessage: Strategy is "Advance" - supplement missing VChannels with the BroadcastMessage
+// - AlterReplicateConfig messages additionally need ignore=true marking to prevent old config overwriting
 func (bm *broadcastTaskManager) FixIncompleteBroadcastsForForcePromote(ctx context.Context) error {
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("broadcaster is closing")
@@ -357,32 +357,41 @@ func (bm *broadcastTaskManager) FixIncompleteBroadcastsForForcePromote(ctx conte
 	defer bm.lifetime.Done()
 
 	bm.mu.Lock()
-	// Collect tasks that need fixing (AlterReplicateConfig messages with pending vchannels)
-	tasksToFix := make([]*broadcastTask, 0)
+	// Collect ALL incomplete broadcast tasks (not just AlterReplicateConfig)
+	var alterReplicateConfigTasks []*broadcastTask
+	var otherBroadcastTasks []*broadcastTask
 	for _, task := range bm.tasks {
 		state := task.State()
 		// Only consider tasks that are pending or replicated and have pending messages
-		if (state == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING ||
-			state == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED) &&
-			task.IsAlterReplicateConfigMessage() {
-			msgs := task.PendingBroadcastMessages()
-			if len(msgs) > 0 {
-				tasksToFix = append(tasksToFix, task)
-			}
+		if state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING &&
+			state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED {
+			continue
+		}
+		msgs := task.PendingBroadcastMessages()
+		if len(msgs) == 0 {
+			continue
+		}
+		// Separate AlterReplicateConfig from other broadcast messages
+		if task.IsAlterReplicateConfigMessage() {
+			alterReplicateConfigTasks = append(alterReplicateConfigTasks, task)
+		} else {
+			otherBroadcastTasks = append(otherBroadcastTasks, task)
 		}
 	}
 	bm.mu.Unlock()
 
-	if len(tasksToFix) == 0 {
-		bm.Logger().Info("No incomplete AlterReplicateConfig broadcasts to fix for force promote")
+	totalTasks := len(alterReplicateConfigTasks) + len(otherBroadcastTasks)
+	if totalTasks == 0 {
+		bm.Logger().Info("No incomplete broadcasts to fix for force promote")
 		return nil
 	}
 
-	bm.Logger().Info("Fixing incomplete AlterReplicateConfig broadcasts for force promote",
-		zap.Int("taskCount", len(tasksToFix)))
+	bm.Logger().Info("Fixing incomplete broadcasts for force promote",
+		zap.Int("alterReplicateConfigTasks", len(alterReplicateConfigTasks)),
+		zap.Int("otherBroadcastTasks", len(otherBroadcastTasks)))
 
-	// Mark each task with ignore=true and save to catalog
-	for _, task := range tasksToFix {
+	// Mark AlterReplicateConfig tasks with ignore=true (to prevent old config overwriting force promote config)
+	for _, task := range alterReplicateConfigTasks {
 		bm.Logger().Info("Marking AlterReplicateConfig task with ignore=true",
 			zap.Uint64("broadcastID", task.Header().BroadcastID))
 
@@ -394,20 +403,32 @@ func (bm *broadcastTaskManager) FixIncompleteBroadcastsForForcePromote(ctx conte
 		}
 	}
 
-	// Now supplement the marked messages to remaining vchannels
+	// Collect pending messages from ALL incomplete tasks for supplementation
 	var pendingMessages []message.MutableMessage
-	for _, task := range tasksToFix {
+	// From AlterReplicateConfig tasks (already marked with ignore=true)
+	for _, task := range alterReplicateConfigTasks {
 		msgs := task.PendingBroadcastMessages()
 		if len(msgs) > 0 {
-			bm.Logger().Info("Supplementing marked messages to remaining vchannels",
+			bm.Logger().Info("Supplementing AlterReplicateConfig messages to remaining vchannels",
 				zap.Uint64("broadcastID", task.Header().BroadcastID),
+				zap.Int("pendingVChannels", len(msgs)))
+			pendingMessages = append(pendingMessages, msgs...)
+		}
+	}
+	// From other broadcast tasks (supplement without marking)
+	for _, task := range otherBroadcastTasks {
+		msgs := task.PendingBroadcastMessages()
+		if len(msgs) > 0 {
+			bm.Logger().Info("Supplementing broadcast messages to remaining vchannels",
+				zap.Uint64("broadcastID", task.Header().BroadcastID),
+				zap.String("messageType", task.msg.MessageType().String()),
 				zap.Int("pendingVChannels", len(msgs)))
 			pendingMessages = append(pendingMessages, msgs...)
 		}
 	}
 
 	if len(pendingMessages) == 0 {
-		bm.Logger().Info("No pending messages to supplement after marking")
+		bm.Logger().Info("No pending messages to supplement")
 		return nil
 	}
 
@@ -420,7 +441,7 @@ func (bm *broadcastTaskManager) FixIncompleteBroadcastsForForcePromote(ctx conte
 	failureCount := 0
 	for i, result := range appendResults.Responses {
 		if result.Error != nil {
-			bm.Logger().Warn("Failed to supplement marked message",
+			bm.Logger().Warn("Failed to supplement message",
 				zap.String("vchannel", pendingMessages[i].VChannel()),
 				zap.Error(result.Error))
 			failureCount++
