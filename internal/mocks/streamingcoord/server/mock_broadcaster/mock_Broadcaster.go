@@ -150,53 +150,6 @@ func (_c *MockBroadcaster_FixIncompleteBroadcastsForForcePromote_Call) RunAndRet
 	return _c
 }
 
-// GetPendingBroadcastMessages provides a mock function with no fields
-func (_m *MockBroadcaster) GetPendingBroadcastMessages() []message.MutableMessage {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetPendingBroadcastMessages")
-	}
-
-	var r0 []message.MutableMessage
-	if rf, ok := ret.Get(0).(func() []message.MutableMessage); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]message.MutableMessage)
-		}
-	}
-
-	return r0
-}
-
-// MockBroadcaster_GetPendingBroadcastMessages_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPendingBroadcastMessages'
-type MockBroadcaster_GetPendingBroadcastMessages_Call struct {
-	*mock.Call
-}
-
-// GetPendingBroadcastMessages is a helper method to define mock.On call
-func (_e *MockBroadcaster_Expecter) GetPendingBroadcastMessages() *MockBroadcaster_GetPendingBroadcastMessages_Call {
-	return &MockBroadcaster_GetPendingBroadcastMessages_Call{Call: _e.mock.On("GetPendingBroadcastMessages")}
-}
-
-func (_c *MockBroadcaster_GetPendingBroadcastMessages_Call) Run(run func()) *MockBroadcaster_GetPendingBroadcastMessages_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockBroadcaster_GetPendingBroadcastMessages_Call) Return(_a0 []message.MutableMessage) *MockBroadcaster_GetPendingBroadcastMessages_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockBroadcaster_GetPendingBroadcastMessages_Call) RunAndReturn(run func() []message.MutableMessage) *MockBroadcaster_GetPendingBroadcastMessages_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // LegacyAck provides a mock function with given fields: ctx, broadcastID, vchannel
 func (_m *MockBroadcaster) LegacyAck(ctx context.Context, broadcastID uint64, vchannel string) error {
 	ret := _m.Called(ctx, broadcastID, vchannel)
