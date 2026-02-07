@@ -214,7 +214,7 @@ func TestGetFieldWarmupPolicy(t *testing.T) {
 			TypeParams: []*commonpb.KeyValuePair{
 				{Key: common.WarmupKey, Value: common.WarmupSync},
 			},
-		})
+		}, false)
 		assert.Equal(t, common.WarmupSync, policy)
 	})
 
@@ -226,7 +226,7 @@ func TestGetFieldWarmupPolicy(t *testing.T) {
 			TypeParams: []*commonpb.KeyValuePair{
 				{Key: common.WarmupKey, Value: common.WarmupDisable},
 			},
-		})
+		}, false)
 		assert.Equal(t, common.WarmupDisable, policy)
 	})
 
@@ -235,7 +235,7 @@ func TestGetFieldWarmupPolicy(t *testing.T) {
 		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key)
 		policy := getFieldWarmupPolicy(&schemapb.FieldSchema{
 			DataType: schemapb.DataType_String,
-		})
+		}, false)
 		assert.Equal(t, common.WarmupSync, policy)
 	})
 
@@ -244,7 +244,35 @@ func TestGetFieldWarmupPolicy(t *testing.T) {
 		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.Key)
 		policy := getFieldWarmupPolicy(&schemapb.FieldSchema{
 			DataType: schemapb.DataType_FloatVector,
-		})
+		}, false)
+		assert.Equal(t, common.WarmupDisable, policy)
+	})
+
+	t.Run("autoWarmup forces sync for scalar field", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key, common.WarmupDisable)
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key)
+		policy := getFieldWarmupPolicy(&schemapb.FieldSchema{
+			DataType: schemapb.DataType_String,
+		}, true)
+		assert.Equal(t, common.WarmupSync, policy)
+	})
+
+	t.Run("autoWarmup does NOT affect vector field", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.Key, common.WarmupDisable)
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.Key)
+		policy := getFieldWarmupPolicy(&schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+		}, true)
+		assert.Equal(t, common.WarmupDisable, policy)
+	})
+
+	t.Run("collection-level warmup takes priority over autoWarmup", func(t *testing.T) {
+		policy := getFieldWarmupPolicy(&schemapb.FieldSchema{
+			DataType: schemapb.DataType_String,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.WarmupKey, Value: common.WarmupDisable},
+			},
+		}, true)
 		assert.Equal(t, common.WarmupDisable, policy)
 	})
 }
@@ -260,6 +288,7 @@ func TestGetIndexWarmupPolicy(t *testing.T) {
 					{Key: common.WarmupKey, Value: common.WarmupSync},
 				},
 			},
+			false,
 		)
 		assert.Equal(t, common.WarmupSync, policy)
 	})
@@ -274,6 +303,7 @@ func TestGetIndexWarmupPolicy(t *testing.T) {
 					{Key: common.WarmupKey, Value: common.WarmupDisable},
 				},
 			},
+			false,
 		)
 		assert.Equal(t, common.WarmupDisable, policy)
 	})
@@ -284,6 +314,7 @@ func TestGetIndexWarmupPolicy(t *testing.T) {
 		policy := getIndexWarmupPolicy(
 			&schemapb.FieldSchema{DataType: schemapb.DataType_String},
 			&querypb.FieldIndexInfo{},
+			false,
 		)
 		assert.Equal(t, common.WarmupSync, policy)
 	})
@@ -294,7 +325,121 @@ func TestGetIndexWarmupPolicy(t *testing.T) {
 		policy := getIndexWarmupPolicy(
 			&schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector},
 			&querypb.FieldIndexInfo{},
+			false,
 		)
 		assert.Equal(t, common.WarmupDisable, policy)
+	})
+
+	t.Run("autoWarmup forces sync for scalar index", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.Key, common.WarmupDisable)
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.Key)
+		policy := getIndexWarmupPolicy(
+			&schemapb.FieldSchema{DataType: schemapb.DataType_String},
+			&querypb.FieldIndexInfo{},
+			true,
+		)
+		assert.Equal(t, common.WarmupSync, policy)
+	})
+
+	t.Run("autoWarmup forces sync for vector index", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.Key, common.WarmupDisable)
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.Key)
+		policy := getIndexWarmupPolicy(
+			&schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector},
+			&querypb.FieldIndexInfo{},
+			true,
+		)
+		assert.Equal(t, common.WarmupSync, policy)
+	})
+
+	t.Run("collection-level warmup takes priority over autoWarmup for index", func(t *testing.T) {
+		policy := getIndexWarmupPolicy(
+			&schemapb.FieldSchema{DataType: schemapb.DataType_String},
+			&querypb.FieldIndexInfo{
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.WarmupKey, Value: common.WarmupDisable},
+				},
+			},
+			true,
+		)
+		assert.Equal(t, common.WarmupDisable, policy)
+	})
+}
+
+func TestGetScalarDataWarmupPolicy(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("field TypeParams has warmup", func(t *testing.T) {
+		policy := getScalarDataWarmupPolicy(&schemapb.FieldSchema{
+			DataType: schemapb.DataType_String,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.WarmupKey, Value: common.WarmupSync},
+			},
+		}, false)
+		assert.Equal(t, common.WarmupSync, policy)
+	})
+
+	t.Run("fallback to global config", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key, common.WarmupSync)
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key)
+		policy := getScalarDataWarmupPolicy(&schemapb.FieldSchema{
+			DataType: schemapb.DataType_String,
+		}, false)
+		assert.Equal(t, common.WarmupSync, policy)
+	})
+
+	t.Run("autoWarmup forces sync", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key, common.WarmupDisable)
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key)
+		policy := getScalarDataWarmupPolicy(&schemapb.FieldSchema{
+			DataType: schemapb.DataType_String,
+		}, true)
+		assert.Equal(t, common.WarmupSync, policy)
+	})
+
+	t.Run("collection-level warmup takes priority over autoWarmup", func(t *testing.T) {
+		policy := getScalarDataWarmupPolicy(&schemapb.FieldSchema{
+			DataType: schemapb.DataType_String,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.WarmupKey, Value: common.WarmupDisable},
+			},
+		}, true)
+		assert.Equal(t, common.WarmupDisable, policy)
+	})
+}
+
+func TestIsAutoWarmup(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("config disabled", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.AutoWarmup.Key, "false")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.AutoWarmup.Key)
+		result := isAutoWarmup(nil)
+		assert.False(t, result)
+	})
+
+	t.Run("config enabled, no PKI", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.AutoWarmup.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.AutoWarmup.Key)
+		result := isAutoWarmup(nil)
+		assert.True(t, result)
+	})
+
+	t.Run("config enabled, with PKI", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.AutoWarmup.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.AutoWarmup.Key)
+		result := isAutoWarmup([]*commonpb.KeyValuePair{
+			{Key: common.PartitionKeyIsolationKey, Value: "true"},
+		})
+		assert.False(t, result)
+	})
+
+	t.Run("config enabled, PKI explicitly false", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.AutoWarmup.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.AutoWarmup.Key)
+		result := isAutoWarmup([]*commonpb.KeyValuePair{
+			{Key: common.PartitionKeyIsolationKey, Value: "false"},
+		})
+		assert.True(t, result)
 	})
 }
