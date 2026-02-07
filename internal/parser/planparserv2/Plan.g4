@@ -181,7 +181,7 @@ fragment HexadecimalFractionalConstant:
 fragment HexadecimalDigitSequence: HexadecimalDigit+;
 fragment BinaryExponentPart: [pP] [+-]? DigitSequence;
 fragment EscapeSequence:
-	'\\' ['"?abfnrtv\\]
+	'\\' ["%'?\\_abfnrtv]
 	| '\\' OctalDigit OctalDigit? OctalDigit?
 	| '\\x' HexadecimalDigitSequence
 	| UniversalCharacterName;
