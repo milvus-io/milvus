@@ -2667,6 +2667,12 @@ func ConcatStructFieldName(structName string, fieldName string) string {
 	return fmt.Sprintf("%s[%s]", structName, fieldName)
 }
 
+// IsStructSubField checks if a field name follows the "structName[fieldName]" convention,
+// indicating it is a sub-field within a StructArrayField.
+func IsStructSubField(fieldName string) bool {
+	return strings.Contains(fieldName, "[")
+}
+
 func ExtractStructFieldName(fieldName string) (string, error) {
 	parts := strings.Split(fieldName, "[")
 	if len(parts) == 1 {
