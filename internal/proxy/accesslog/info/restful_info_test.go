@@ -277,6 +277,165 @@ func (s *RestfulAccessInfoSuite) TestTemplateValueLength() {
 	s.Equal(`map[store_id:2]`, Get(s.info, "$template_value_length")[0])
 }
 
+func (s *RestfulAccessInfoSuite) TestExprTemplateValues() {
+	// Test when request is nil or doesn't have template values
+	s.info.req = nil
+	s.Equal(NotAny, s.info.ExprTemplateValues())
+
+	// Test with request that has no ExprTemplateValues field set (nil)
+	s.info.req = &milvuspb.QueryRequest{
+		Expr: "id > 0",
+	}
+	// When ExprTemplateValues is nil but the request supports it, it returns "map[]"
+	s.Equal("map[]", s.info.ExprTemplateValues())
+
+	// Test with LongData array
+	exprTemplValuesLong := map[string]*schemapb.TemplateValue{
+		"store_id": {
+			Val: &schemapb.TemplateValue_ArrayVal{
+				ArrayVal: &schemapb.TemplateArrayValue{
+					Data: &schemapb.TemplateArrayValue_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
+			},
+		},
+	}
+	s.info.req = &milvuspb.SearchRequest{
+		Dsl:                "store_id in {store_id}",
+		ExprTemplateValues: exprTemplValuesLong,
+	}
+	result := s.info.ExprTemplateValues()
+	s.Contains(result, "store_id")
+	s.NotEqual(NotAny, result)
+
+	// Test with StringData array
+	exprTemplValuesString := map[string]*schemapb.TemplateValue{
+		"name": {
+			Val: &schemapb.TemplateValue_ArrayVal{
+				ArrayVal: &schemapb.TemplateArrayValue{
+					Data: &schemapb.TemplateArrayValue_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"Alice", "Bob", "Charlie"},
+						},
+					},
+				},
+			},
+		},
+	}
+	s.info.req = &milvuspb.QueryRequest{
+		Expr:               "name in {name}",
+		ExprTemplateValues: exprTemplValuesString,
+	}
+	result = s.info.ExprTemplateValues()
+	s.Contains(result, "name")
+	s.NotEqual(NotAny, result)
+
+	// Test with BoolData array
+	exprTemplValuesBool := map[string]*schemapb.TemplateValue{
+		"is_active": {
+			Val: &schemapb.TemplateValue_ArrayVal{
+				ArrayVal: &schemapb.TemplateArrayValue{
+					Data: &schemapb.TemplateArrayValue_BoolData{
+						BoolData: &schemapb.BoolArray{
+							Data: []bool{true, false, true},
+						},
+					},
+				},
+			},
+		},
+	}
+	s.info.req = &milvuspb.QueryRequest{
+		Expr:               "is_active in {is_active}",
+		ExprTemplateValues: exprTemplValuesBool,
+	}
+	result = s.info.ExprTemplateValues()
+	s.Contains(result, "is_active")
+	s.NotEqual(NotAny, result)
+
+	// Test with DoubleData array
+	exprTemplValuesDouble := map[string]*schemapb.TemplateValue{
+		"price": {
+			Val: &schemapb.TemplateValue_ArrayVal{
+				ArrayVal: &schemapb.TemplateArrayValue{
+					Data: &schemapb.TemplateArrayValue_DoubleData{
+						DoubleData: &schemapb.DoubleArray{
+							Data: []float64{9.99, 19.99, 29.99},
+						},
+					},
+				},
+			},
+		},
+	}
+	s.info.req = &milvuspb.SearchRequest{
+		Dsl:                "price in {price}",
+		ExprTemplateValues: exprTemplValuesDouble,
+	}
+	result = s.info.ExprTemplateValues()
+	s.Contains(result, "price")
+	s.NotEqual(NotAny, result)
+
+	// Test with multiple template values
+	exprTemplValuesMultiple := map[string]*schemapb.TemplateValue{
+		"store_id": {
+			Val: &schemapb.TemplateValue_ArrayVal{
+				ArrayVal: &schemapb.TemplateArrayValue{
+					Data: &schemapb.TemplateArrayValue_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
+			},
+		},
+		"category": {
+			Val: &schemapb.TemplateValue_ArrayVal{
+				ArrayVal: &schemapb.TemplateArrayValue{
+					Data: &schemapb.TemplateArrayValue_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"electronics", "books"},
+						},
+					},
+				},
+			},
+		},
+	}
+	s.info.req = &milvuspb.QueryRequest{
+		Expr:               "store_id in {store_id} and category in {category}",
+		ExprTemplateValues: exprTemplValuesMultiple,
+	}
+	result = s.info.ExprTemplateValues()
+	s.Contains(result, "store_id")
+	s.Contains(result, "category")
+	s.NotEqual(NotAny, result)
+
+	// Test with single value (non-array)
+	exprTemplValuesSingle := map[string]*schemapb.TemplateValue{
+		"threshold": {
+			Val: &schemapb.TemplateValue_Int64Val{
+				Int64Val: 100,
+			},
+		},
+	}
+	s.info.req = &milvuspb.SearchRequest{
+		Dsl:                "count > {threshold}",
+		ExprTemplateValues: exprTemplValuesSingle,
+	}
+	result = s.info.ExprTemplateValues()
+	s.Contains(result, "threshold")
+	s.NotEqual(NotAny, result)
+
+	// Test with empty template values map
+	s.info.req = &milvuspb.QueryRequest{
+		Expr:               "id > 0",
+		ExprTemplateValues: map[string]*schemapb.TemplateValue{},
+	}
+	result = s.info.ExprTemplateValues()
+	s.Equal("map[]", result)
+}
+
 func TestRestfulAccessInfo(t *testing.T) {
 	suite.Run(t, new(RestfulAccessInfoSuite))
 }
