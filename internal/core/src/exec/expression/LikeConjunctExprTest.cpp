@@ -249,7 +249,8 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
             load_index_info.field_id = field_id.get();
             load_index_info.field_type = DataType::VARCHAR;
             load_index_info.enable_mmap = true;
-            load_index_info.mmap_dir_path = "/tmp/test-like-conjunct-mmap-dir";
+            load_index_info.mmap_dir_path =
+                GetTestTempPath("test-like-conjunct-mmap-dir");
             load_index_info.index_id = index_id;
             load_index_info.index_build_id = field_index_build_id;
             load_index_info.index_version = index_version;

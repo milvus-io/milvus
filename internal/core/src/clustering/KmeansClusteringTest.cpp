@@ -186,7 +186,7 @@ test_run() {
     auto index_meta =
         gen_index_meta(segment_id, field_id, index_build_id, index_version);
 
-    std::string root_path = "/tmp/test-kmeans-clustering/";
+    std::string root_path = GetTestTempPath("test-kmeans-clustering");
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);

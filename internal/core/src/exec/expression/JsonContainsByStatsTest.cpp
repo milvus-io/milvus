@@ -106,7 +106,7 @@ BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
             .storage_type = "local",
         });
 
-    auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
+    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
                                 root_path,
                                 collection_id,
                                 partition_id,
@@ -181,7 +181,8 @@ TEST(JsonContainsByStatsTest, BasicContainsAnyOnArray) {
     const int64_t field_id = json_fid.get();
     const int64_t build_id = 5001;
     const int64_t version_id = 1;
-    const std::string root_path = "/tmp/test-json-contains-by-stats";
+    const std::string root_path =
+        GetTestTempPath("test-json-contains-by-stats");
 
     auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
                                           json_fid,

@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <unordered_set>
@@ -62,11 +63,45 @@ get_default_local_storage_config() {
     return storage_config;
 }
 
+// Get test temporary path base, supporting parallel execution via MILVUS_TEST_LOCAL_PATH env var
+// Returns the base path for test temporary files (either from env var or default /tmp/)
+inline std::string
+GetTestTempBasePath() {
+    const char* env_path = std::getenv("MILVUS_TEST_LOCAL_PATH");
+    if (env_path != nullptr && env_path[0] != '\0') {
+        std::string path(env_path);
+        if (path.back() != '/') {
+            path += '/';
+        }
+        return path;
+    }
+    return "/tmp/";
+}
+
+// Get test temporary path with a specific subdirectory
+// Example: GetTestTempPath("test-bitmap-index") returns "/tmp/test-bitmap-index/" or
+//          "/tmp/milvus/local_data_shard0/test-bitmap-index/" when sharding is enabled
+inline std::string
+GetTestTempPath(const std::string& subdir) {
+    std::string base = GetTestTempBasePath();
+    std::string result = base + subdir;
+    if (result.back() != '/') {
+        result += '/';
+    }
+    return result;
+}
+
+// Get mmap path for tests (convenience wrapper)
+inline std::string
+GetTestMmapPath() {
+    return GetTestTempPath("test_mmap_manager");
+}
+
 inline MmapConfig
 get_default_mmap_config() {
     MmapConfig mmap_config = {
         .cache_read_ahead_policy = "willneed",
-        .mmap_path = "/tmp/test_mmap_manager/",
+        .mmap_path = GetTestMmapPath(),
         .disk_limit =
             uint64_t(2) * uint64_t(1024) * uint64_t(1024) * uint64_t(1024),
         .fix_file_size = uint64_t(4) * uint64_t(1024) * uint64_t(1024),

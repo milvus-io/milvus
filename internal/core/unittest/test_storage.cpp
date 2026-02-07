@@ -88,7 +88,7 @@ TEST_F(StorageTest, InitLocalChunkManagerSingleton) {
 TEST_F(StorageTest, GetLocalUsedSize) {
     int64_t size = 0;
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    EXPECT_EQ(lcm->GetRootPath(), "/tmp/milvus/local_data/");
+    // Note: Root path may vary when running with MILVUS_TEST_LOCAL_PATH env var (parallel sharding)
     string test_dir =
         lcm->GetRootPath() + "tmp" +
         // add random number to avoid dir conflict

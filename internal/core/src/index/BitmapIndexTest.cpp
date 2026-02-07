@@ -36,6 +36,8 @@
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
 #include "index/IndexStats.h"
+#include "test_utils/indexbuilder_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 #include "index/Meta.h"
 #include "indexbuilder/IndexCreatorBase.h"
 #include "indexbuilder/IndexFactory.h"
@@ -168,8 +170,8 @@ class BitmapIndexTest : public testing::Test {
 
         auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
-        auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
-                                    "/tmp/test-bitmap-index/",
+        auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
+                                    GetTestTempPath("test-bitmap-index"),
                                     collection_id,
                                     partition_id,
                                     segment_id,
@@ -209,12 +211,13 @@ class BitmapIndexTest : public testing::Test {
 
         if (is_mmap_) {
             config["enable_mmap"] = "true";
-            config["mmap_filepath"] = fmt::format("/{}/{}/{}/{}/{}",
-                                                  "/tmp/test-bitmap-index/",
-                                                  collection_id,
-                                                  1,
-                                                  segment_id,
-                                                  field_id);
+            config["mmap_filepath"] =
+                fmt::format("{}{}/{}/{}/{}",
+                            GetTestTempPath("test-bitmap-index"),
+                            collection_id,
+                            1,
+                            segment_id,
+                            field_id);
             ;
         }
         config[milvus::LOAD_PRIORITY] =
@@ -251,7 +254,7 @@ class BitmapIndexTest : public testing::Test {
         int64_t partition_id = 2;
         int64_t segment_id = 3;
         int64_t field_id = 101;
-        std::string root_path = "/tmp/test-bitmap-index/";
+        std::string root_path = GetTestTempPath("test-bitmap-index");
 
         storage::StorageConfig storage_config;
         storage_config.storage_type = "local";

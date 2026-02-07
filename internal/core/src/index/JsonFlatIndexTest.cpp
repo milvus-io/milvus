@@ -110,7 +110,7 @@ class JsonFlatIndexTest : public ::testing::Test {
         index_meta_ =
             gen_index_meta(segment_id, field_id, index_build_id, index_version);
 
-        std::string root_path = "/tmp/test-json-flat-index/";
+        std::string root_path = GetTestTempPath("test-json-flat-index");
         auto storage_config = gen_local_storage_config(root_path);
         cm_ = storage::CreateChunkManager(storage_config);
         fs_ = storage::InitArrowFileSystem(storage_config);
@@ -192,7 +192,7 @@ class JsonFlatIndexTest : public ::testing::Test {
     void
     TearDown() override {
         cm_w_.reset();
-        boost::filesystem::remove_all("/tmp/test-json-flat-index/");
+        boost::filesystem::remove_all(GetTestTempPath("test-json-flat-index"));
     }
 
     storage::FieldDataMeta field_meta_;

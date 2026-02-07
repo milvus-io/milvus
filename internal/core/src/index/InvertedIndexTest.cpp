@@ -131,7 +131,7 @@ test_run() {
         }
     }
 
-    std::string root_path = "/tmp/test-inverted-index/";
+    std::string root_path = GetTestTempPath("test-inverted-index");
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
@@ -534,7 +534,7 @@ test_string() {
         default_value->set_string_data("20");
     }
 
-    std::string root_path = "/tmp/test-inverted-index/";
+    std::string root_path = GetTestTempPath("test-inverted-index");
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);

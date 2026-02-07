@@ -107,7 +107,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     auto index_meta = gen_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
 
-    std::string root_path = "/tmp/test-inverted-index/";
+    std::string root_path = GetTestTempPath("test-inverted-index");
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
@@ -231,7 +231,8 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
         load_index_info.field_id = field_id.get();
         load_index_info.field_type = DataType::VARCHAR;
         load_index_info.enable_mmap = true;
-        load_index_info.mmap_dir_path = "/tmp/test-ngram-index-mmap-dir";
+        load_index_info.mmap_dir_path =
+            GetTestTempPath("test-ngram-index-mmap-dir");
         load_index_info.index_id = index_id;
         load_index_info.index_build_id = index_build_id;
         load_index_info.index_version = index_version;
@@ -432,7 +433,7 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
     auto index_meta = gen_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
 
-    std::string root_path = "/tmp/test-inverted-index/";
+    std::string root_path = GetTestTempPath("test-inverted-index");
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
@@ -511,7 +512,8 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
         load_index_info.field_id = field_id.get();
         load_index_info.field_type = DataType::VARCHAR;
         load_index_info.enable_mmap = true;
-        load_index_info.mmap_dir_path = "/tmp/test-ngram-index-mmap-dir";
+        load_index_info.mmap_dir_path =
+            GetTestTempPath("test-ngram-index-mmap-dir");
         load_index_info.index_id = index_id;
         load_index_info.index_build_id = index_build_id;
         load_index_info.index_version = index_version;
