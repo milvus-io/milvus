@@ -343,12 +343,21 @@ install_rocky_deps() {
     case "$rocky_version" in
         8)
             print_info "Installing GCC toolset for Rocky 8..."
-            sudo dnf install -y gcc-toolset-12
+            sudo dnf install -y gcc-toolset-12 gcc-toolset-12-libatomic-devel gcc-toolset-12-libstdc++-devel
             sudo dnf install -y "${base_packages[@]}"
+            sudo dnf install -y atlas-devel
 
             # Enable GCC toolset
             echo "source /opt/rh/gcc-toolset-12/enable" | sudo tee /etc/profile.d/gcc-toolset-12.sh
             source /opt/rh/gcc-toolset-12/enable
+
+            # Create libstdc++.a symlink for static linking (needed by conan packages like ninja)
+            local gcc12_libstdcxx="/opt/rh/gcc-toolset-12/root/usr/lib/gcc/x86_64-redhat-linux/12/libstdc++.a"
+            local system_gcc_dir="/usr/lib/gcc/x86_64-redhat-linux/8"
+            if [ -f "$gcc12_libstdcxx" ] && [ -d "$system_gcc_dir" ] && [ ! -f "$system_gcc_dir/libstdc++.a" ]; then
+                print_info "Creating libstdc++.a symlink for static linking..."
+                sudo ln -s "$gcc12_libstdcxx" "$system_gcc_dir/libstdc++.a"
+            fi
 
             # Install LLVM toolset for clang-format
             sudo dnf install -y llvm-toolset
@@ -379,6 +388,16 @@ install_rocky_deps() {
 
     # Install Conan
     install_conan
+
+    # Configure Conan profile to match the active GCC toolset
+    local gcc_ver
+    gcc_ver=$(gcc -dumpversion 2>/dev/null | cut -d. -f1)
+    if [ -n "$gcc_ver" ]; then
+        print_info "Configuring Conan profile for GCC ${gcc_ver}..."
+        conan profile new default --detect --force 2>/dev/null || true
+        conan profile update settings.compiler.version="$gcc_ver" default
+        conan profile update settings.compiler.libcxx=libstdc++11 default
+    fi
 
     # Install Rust
     install_rust
