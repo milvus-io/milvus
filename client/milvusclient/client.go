@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -71,8 +72,13 @@ func New(ctx context.Context, config *ClientConfig) (*Client, error) {
 		currentDB: config.DBName,
 	}
 
-	// Parse remote address.
-	addr := c.config.getParsedAddress()
+	// pass through address if scheme is not tcp, http or https
+	// user-defined resolver will handle the scheme
+	addr := c.config.Address
+	// for http(s) scheme, use parsed address
+	if slices.Contains([]string{"tcp", "http", "https"}, c.config.parsedAddress.Scheme) {
+		addr = c.config.getParsedAddress()
+	}
 
 	// parse authentication parameters
 	c.parseAuthentication()
