@@ -297,9 +297,14 @@ func (r *recoveryStorageImpl) updateCheckpoint(msg message.ImmutableMessage) {
 
 // The incoming message id is always sorted with timetick.
 func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
-	if funcutil.IsControlChannel(msg.VChannel()) && msg.MessageType() != message.MessageTypeAlterReplicateConfig && msg.MessageType() != message.MessageTypeAlterWAL {
-		// message on control channel except AlterReplicateConfig message is just used to determine the DDL/DCL order,
-		// will not affect the recovery storage, so skip it.
+	if funcutil.IsControlChannel(msg.VChannel()) && msg.MessageType() != message.MessageTypeAlterReplicateConfig && !msg.MessageType().IsBroadcastToAll() {
+		// Messages on the control channel are generally just used to determine DDL/DCL order
+		// and do not affect recovery storage, so skip them.
+		// Exceptions:
+		// - AlterReplicateConfig: needs to update replication checkpoint
+		// - BroadcastToAll messages (FlushAll, AlterWAL, etc.): need to be processed on all channels,
+		//   e.g. FlushAll must mark all growing segments as flushed, otherwise after restart
+		//   those segments would be incorrectly treated as growing.
 		return
 	}
 
