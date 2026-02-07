@@ -22,65 +22,6 @@ func (_m *MockCSegment) EXPECT() *MockCSegment_Expecter {
 	return &MockCSegment_Expecter{mock: &_m.Mock}
 }
 
-// AddFieldDataInfo provides a mock function with given fields: ctx, request
-func (_m *MockCSegment) AddFieldDataInfo(ctx context.Context, request *segcore.AddFieldDataInfoRequest) (*segcore.AddFieldDataInfoResult, error) {
-	ret := _m.Called(ctx, request)
-
-	if len(ret) == 0 {
-		panic("no return value specified for AddFieldDataInfo")
-	}
-
-	var r0 *segcore.AddFieldDataInfoResult
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *segcore.AddFieldDataInfoRequest) (*segcore.AddFieldDataInfoResult, error)); ok {
-		return rf(ctx, request)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *segcore.AddFieldDataInfoRequest) *segcore.AddFieldDataInfoResult); ok {
-		r0 = rf(ctx, request)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*segcore.AddFieldDataInfoResult)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *segcore.AddFieldDataInfoRequest) error); ok {
-		r1 = rf(ctx, request)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockCSegment_AddFieldDataInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddFieldDataInfo'
-type MockCSegment_AddFieldDataInfo_Call struct {
-	*mock.Call
-}
-
-// AddFieldDataInfo is a helper method to define mock.On call
-//   - ctx context.Context
-//   - request *segcore.AddFieldDataInfoRequest
-func (_e *MockCSegment_Expecter) AddFieldDataInfo(ctx interface{}, request interface{}) *MockCSegment_AddFieldDataInfo_Call {
-	return &MockCSegment_AddFieldDataInfo_Call{Call: _e.mock.On("AddFieldDataInfo", ctx, request)}
-}
-
-func (_c *MockCSegment_AddFieldDataInfo_Call) Run(run func(ctx context.Context, request *segcore.AddFieldDataInfoRequest)) *MockCSegment_AddFieldDataInfo_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*segcore.AddFieldDataInfoRequest))
-	})
-	return _c
-}
-
-func (_c *MockCSegment_AddFieldDataInfo_Call) Return(_a0 *segcore.AddFieldDataInfoResult, _a1 error) *MockCSegment_AddFieldDataInfo_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockCSegment_AddFieldDataInfo_Call) RunAndReturn(run func(context.Context, *segcore.AddFieldDataInfoRequest) (*segcore.AddFieldDataInfoResult, error)) *MockCSegment_AddFieldDataInfo_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // Delete provides a mock function with given fields: ctx, request
 func (_m *MockCSegment) Delete(ctx context.Context, request *segcore.DeleteRequest) (*segcore.DeleteResult, error) {
 	ret := _m.Called(ctx, request)

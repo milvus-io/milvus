@@ -47,15 +47,7 @@ type RetrieveSegmentResult struct {
 func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, req *querypb.QueryRequest) ([]RetrieveSegmentResult, error) {
 	resultCh := make(chan RetrieveSegmentResult, len(segments))
 
-	anySegIsLazyLoad := func() bool {
-		for _, seg := range segments {
-			if seg.IsLazyLoad() {
-				return true
-			}
-		}
-		return false
-	}()
-	plan.SetIgnoreNonPk(!anySegIsLazyLoad && len(segments) > 1 && req.GetReq().GetLimit() != typeutil.Unlimited && plan.ShouldIgnoreNonPk())
+	plan.SetIgnoreNonPk(len(segments) > 1 && req.GetReq().GetLimit() != typeutil.Unlimited && plan.ShouldIgnoreNonPk())
 
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {

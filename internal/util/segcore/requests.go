@@ -118,10 +118,6 @@ func (req *cLoadFieldDataRequest) Release() {
 	C.DeleteLoadFieldDataInfo(req.cLoadFieldDataInfo)
 }
 
-type AddFieldDataInfoRequest = LoadFieldDataRequest
-
-type AddFieldDataInfoResult struct{}
-
 type ReopenRequest struct {
 	LoadInfo *querypb.SegmentLoadInfo
 }

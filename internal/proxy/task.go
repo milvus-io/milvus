@@ -1343,18 +1343,9 @@ func hasWarmupProp(props ...*commonpb.KeyValuePair) bool {
 	return false
 }
 
-func hasLazyLoadProp(props ...*commonpb.KeyValuePair) bool {
-	for _, p := range props {
-		if p.GetKey() == common.LazyLoadEnableKey {
-			return true
-		}
-	}
-	return false
-}
-
 func hasPropInDeletekeys(keys []string) string {
 	for _, key := range keys {
-		if key == common.MmapEnabledKey || key == common.LazyLoadEnableKey || common.IsWarmupKey(key) {
+		if key == common.MmapEnabledKey || common.IsWarmupKey(key) {
 			return key
 		}
 	}
@@ -1405,16 +1396,15 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 
 	if len(t.GetProperties()) > 0 {
 		hasMmap := hasMmapProp(t.Properties...)
-		hasLazyLoad := hasLazyLoadProp(t.Properties...)
 		hasWarmup := hasWarmupProp(t.Properties...)
-		if hasMmap || hasLazyLoad || hasWarmup {
+		if hasMmap || hasWarmup {
 			loaded, err := isCollectionLoaded(ctx, t.mixCoord, t.CollectionID)
 			if err != nil {
 				return err
 			}
 			if loaded {
 				// keeping the original error msg here for compatibility
-				if hasMmap || hasLazyLoad {
+				if hasMmap {
 					return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
 				}
 				if hasWarmup {

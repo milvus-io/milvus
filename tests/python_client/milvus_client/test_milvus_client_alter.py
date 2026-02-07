@@ -225,7 +225,7 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         target: test alter collection
         method:
             1. alter collection properties after load
-            verify alter successfully if trying to altering lazyload.enabled, mmap.enabled or collection.ttl.seconds
+            verify alter successfully if trying to altering mmap.enabled or collection.ttl.seconds
             2. alter collection properties after release
             verify alter successfully
             3. drop collection properties after load
@@ -244,8 +244,6 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
                  ct.err_msg: "can not alter mmap properties if collection loaded"}
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True},
                                          check_task=CheckTasks.err_res, check_items=error)
-        self.alter_collection_properties(client, collection_name, properties={"lazyload.enabled": True},
-                                         check_task=CheckTasks.err_res, check_items=error)
         error = {ct.err_code: 999,
                  ct.err_msg: "dynamic schema cannot supported to be disabled: invalid parameter"}
         self.alter_collection_properties(client, collection_name, properties={"dynamicfield.enabled": False},
@@ -253,8 +251,6 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         error = {ct.err_code: 999,
                  ct.err_msg: "can not delete mmap properties if collection loaded"}
         self.drop_collection_properties(client, collection_name, property_keys=["mmap.enabled"],
-                                        check_task=CheckTasks.err_res, check_items=error)
-        self.drop_collection_properties(client, collection_name, property_keys=["lazyload.enabled"],
                                         check_task=CheckTasks.err_res, check_items=error)
         # TODO                                
         error = {ct.err_code: 999,
@@ -271,13 +267,12 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         res2 = self.describe_collection(client, collection_name)[0]
         assert {'mmap.enabled': 'True'}.items() <= res2.get('properties', {}).items()
         self.alter_collection_properties(client, collection_name,
-                                         properties={"collection.ttl.seconds": 100, "lazyload.enabled": True})
+                                         properties={"collection.ttl.seconds": 100})
         res2 = self.describe_collection(client, collection_name)[0]
-        assert {'mmap.enabled': 'True', 'collection.ttl.seconds': '100', 'lazyload.enabled': 'True'}.items()  \
+        assert {'mmap.enabled': 'True', 'collection.ttl.seconds': '100'}.items()  \
                 <= res2.get('properties', {}).items()
         self.drop_collection_properties(client, collection_name,
-                                        property_keys=["mmap.enabled", "lazyload.enabled",
-                                                       "collection.ttl.seconds"])
+                                        property_keys=["mmap.enabled", "collection.ttl.seconds"])
         res3 = self.describe_collection(client, collection_name)[0]
         assert len(res1.get('properties', {})) == 1
 
