@@ -237,6 +237,7 @@ var (
 	FlushedSegmentFileNum = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
 			Name:      "flushed_segment_file_num",
 			Help:      "the num of files for flushed segment",
 			Buckets:   buckets,
