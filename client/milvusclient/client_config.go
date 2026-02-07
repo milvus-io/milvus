@@ -75,7 +75,7 @@ type RetryRateLimitOption struct {
 func (cfg *ClientConfig) parse() error {
 	// Prepend default fake tcp:// scheme for remote address.
 	address := cfg.Address
-	if _, err := url.Parse(address); err != nil {
+	if parts := strings.Split(address, "://"); len(parts) != 2 {
 		address = fmt.Sprintf("tcp://%s", address)
 	}
 
