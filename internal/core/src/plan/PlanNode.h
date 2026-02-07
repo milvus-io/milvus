@@ -600,6 +600,140 @@ class AggregationNode : public PlanNode {
     const RowTypePtr output_type_;
 };
 
+/// Sort order specification for ORDER BY
+struct SortOrder {
+    bool ascending;    // true = ASC (default), false = DESC
+    bool nulls_first;  // true = NULLS FIRST, false = NULLS LAST (default)
+
+    SortOrder(bool asc = true, bool nulls_first_val = false)
+        : ascending(asc), nulls_first(nulls_first_val) {
+    }
+
+    /// Standard sort orders
+    static SortOrder
+    kAscNullsFirst() {
+        return SortOrder(true, true);
+    }
+    static SortOrder
+    kAscNullsLast() {
+        return SortOrder(true, false);
+    }
+    static SortOrder
+    kDescNullsFirst() {
+        return SortOrder(false, true);
+    }
+    static SortOrder
+    kDescNullsLast() {
+        return SortOrder(false, false);
+    }
+};
+
+/**
+ * @brief Plan node for ORDER BY operations
+ *
+ * Represents the logical plan for sorting query results by one or more fields.
+ * The physical operator (PhyQueryOrderByNode) uses SortBuffer for execution.
+ *
+ * Pipeline position:
+ *   FilterBitsNode → ProjectNode → OrderByNode
+ *   FilterBitsNode → ProjectNode → AggregationNode → OrderByNode
+ */
+class OrderByNode : public PlanNode {
+ public:
+    /**
+     * @brief Construct an OrderByNode
+     *
+     * @param id Plan node ID
+     * @param sorting_keys Fields to sort by (in order of priority)
+     * @param sorting_orders Sort direction and null handling per key
+     * @param limit Maximum rows to return (-1 for unlimited)
+     * @param sources Source plan nodes
+     *
+     * @note Offset is NOT supported at segment level. In distributed queries,
+     *       offset must be applied at the proxy reduce level after k-way merge.
+     *       Segments should use (offset + limit) as the limit parameter.
+     */
+    OrderByNode(const PlanNodeId& id,
+                std::vector<expr::FieldAccessTypeExprPtr>&& sorting_keys,
+                std::vector<SortOrder>&& sorting_orders,
+                int64_t limit,
+                std::vector<PlanNodePtr> sources)
+        : PlanNode(id),
+          sorting_keys_(std::move(sorting_keys)),
+          sorting_orders_(std::move(sorting_orders)),
+          limit_(limit),
+          sources_(std::move(sources)) {
+        AssertInfo(
+            sorting_keys_.size() == sorting_orders_.size(),
+            "Number of sorting keys ({}) must match number of sort orders ({})",
+            sorting_keys_.size(),
+            sorting_orders_.size());
+        AssertInfo(!sorting_keys_.empty(),
+                   "OrderByNode requires at least one sorting key");
+
+        // OrderByNode always requires a source node that produces data to sort.
+        AssertInfo(!sources_.empty() && sources_[0]->output_type(),
+                   "OrderByNode requires a source node with valid output type");
+        output_type_ = sources_[0]->output_type();
+    }
+
+    RowTypePtr
+    output_type() const override {
+        return output_type_;
+    }
+
+    std::vector<PlanNodePtr>
+    sources() const override {
+        return sources_;
+    }
+
+    std::string_view
+    name() const override {
+        return "OrderBy";
+    }
+
+    std::string
+    ToString() const override {
+        std::vector<std::string> key_strs;
+        key_strs.reserve(sorting_keys_.size());
+        for (size_t i = 0; i < sorting_keys_.size(); ++i) {
+            key_strs.push_back(fmt::format(
+                "{} {} {}",
+                sorting_keys_[i]->name(),
+                sorting_orders_[i].ascending ? "ASC" : "DESC",
+                sorting_orders_[i].nulls_first ? "NULLS FIRST" : "NULLS LAST"));
+        }
+        return fmt::format("OrderByNode:[keys=[{}], limit={}]",
+                           fmt::join(key_strs, ", "),
+                           limit_);
+    }
+
+    /// Get the sorting key expressions
+    const std::vector<expr::FieldAccessTypeExprPtr>&
+    SortingKeys() const {
+        return sorting_keys_;
+    }
+
+    /// Get the sort orders (one per key)
+    const std::vector<SortOrder>&
+    SortingOrders() const {
+        return sorting_orders_;
+    }
+
+    /// Get the limit (-1 means unlimited)
+    int64_t
+    Limit() const {
+        return limit_;
+    }
+
+ private:
+    const std::vector<expr::FieldAccessTypeExprPtr> sorting_keys_;
+    const std::vector<SortOrder> sorting_orders_;
+    const int64_t limit_;
+    const std::vector<PlanNodePtr> sources_;
+    RowTypePtr output_type_;
+};
+
 enum class ExecutionStrategy {
     // Process splits as they come in any available driver.
     kUngrouped,

@@ -601,6 +601,42 @@ ProtoParser::RetrievePlanNodeFromProto(
                     std::move(project_id_list),
                     std::move(project_name_list),
                     std::move(project_type_list));
+                sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+            }
+
+            // 4. Build OrderByNode if needed
+            auto order_by_field_count = query.order_by_fields_size();
+            if (order_by_field_count > 0) {
+                std::vector<expr::FieldAccessTypeExprPtr> sorting_keys;
+                std::vector<plan::SortOrder> sorting_orders;
+                sorting_keys.reserve(order_by_field_count);
+                sorting_orders.reserve(order_by_field_count);
+
+                for (int i = 0; i < order_by_field_count; i++) {
+                    auto& order_by_field = query.order_by_fields(i);
+                    auto input_field_id = order_by_field.field_id();
+                    AssertInfo(input_field_id > 0,
+                               "input field_id to order by must be positive, "
+                               "but is:{}",
+                               input_field_id);
+                    auto field_id = FieldId(input_field_id);
+                    auto field_type = schema->GetFieldType(field_id);
+                    auto field_name = schema->GetFieldName(field_id);
+
+                    sorting_keys.emplace_back(
+                        std::make_shared<const expr::FieldAccessTypeExpr>(
+                            field_type, field_name, field_id));
+                    sorting_orders.emplace_back(
+                        plan::SortOrder(order_by_field.ascending(),
+                                        order_by_field.nulls_first()));
+                }
+
+                plannode = std::make_shared<plan::OrderByNode>(
+                    milvus::plan::GetNextPlanNodeId(),
+                    std::move(sorting_keys),
+                    std::move(sorting_orders),
+                    query.limit(),
+                    sources);
             }
             node->plannodes_ = plannode;
             node->limit_ = query.limit();
