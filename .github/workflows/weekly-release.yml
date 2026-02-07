@@ -24,7 +24,7 @@ jobs:
       TAG_PREFIX: "master-"
     steps:
     - name: Checkout code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v6
       with:
         fetch-depth: '0'
 
@@ -40,7 +40,7 @@ jobs:
         docker tag "${IMAGE_REPO}/${DEV}:${{ env.tag }}" "${IMAGE_REPO}/${WEEKLY}:${{ env.tag }}"
 
     - name: Log in to Docker Hub
-      uses: docker/login-action@v1
+      uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKERHUB_USER }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}

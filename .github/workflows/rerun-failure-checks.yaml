@@ -25,14 +25,14 @@ jobs:
           fi
       - name: Create Comment for Non-Org Member
         if: "github.event_name == 'issue_comment' && steps.is_organization_member.outputs.is-member == 'false'"
-        uses: actions-cool/issues-helper@v2.5.0       
+        uses: actions-cool/issues-helper@v3       
         with:
           actions: 'create-comment'
           token: ${{ secrets.GITHUB_TOKEN }}
           issue-number: ${{ github.event.issue.number }}
           body: |
             Hello ${{ github.event.sender.login }}, you are not in the organization, so you do not have the permission to rerun the workflow, please contact `@milvus-io/milvus-maintainers` for help.
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
       - name: Rerun Failure Checks
         if: "github.event_name == 'issue_comment' && steps.is_organization_member.outputs.is-member == 'true'"
         uses: zymap/bot@master
