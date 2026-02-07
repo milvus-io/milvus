@@ -219,6 +219,94 @@ func Test_convertEscapeSingle(t *testing.T) {
 	}
 }
 
+func Test_prepareSpecialEscapeCharactersForConvertingEscapeSingle(t *testing.T) {
+	escapeCharacters := map[byte]bool{'%': true, '_': true}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "escaped percent gets extra backslash",
+			input:    `hello\%world`,
+			expected: `hello\\%world`,
+		},
+		{
+			name:     "escaped underscore gets extra backslash",
+			input:    `hello\_world`,
+			expected: `hello\\_world`,
+		},
+		{
+			name:     "double backslash before percent stays unchanged",
+			input:    `hello\\%world`,
+			expected: `hello\\%world`,
+		},
+		{
+			name:     "double backslash before underscore stays unchanged",
+			input:    `hello\\_world`,
+			expected: `hello\\_world`,
+		},
+		{
+			name:     "regular backslash escape unchanged",
+			input:    `hello\nworld`,
+			expected: `hello\nworld`,
+		},
+		{
+			name:     "no escape characters",
+			input:    `hello world`,
+			expected: `hello world`,
+		},
+		{
+			name:     "empty string",
+			input:    ``,
+			expected: ``,
+		},
+		{
+			name:     "only escaped percent",
+			input:    `\%`,
+			expected: `\\%`,
+		},
+		{
+			name:     "only escaped underscore",
+			input:    `\_`,
+			expected: `\\_`,
+		},
+		{
+			name:     "multiple escaped specials",
+			input:    `\%foo\_bar\%`,
+			expected: `\\%foo\\_bar\\%`,
+		},
+		{
+			name:     "trailing backslash",
+			input:    `hello\`,
+			expected: `hello\`,
+		},
+		{
+			name:     "triple backslash before percent",
+			input:    `hello\\\%world`,
+			expected: `hello\\\\%world`,
+		},
+		{
+			name:     "percent without backslash unchanged",
+			input:    `hello%world`,
+			expected: `hello%world`,
+		},
+		{
+			name:     "underscore without backslash unchanged",
+			input:    `hello_world`,
+			expected: `hello_world`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := prepareSpecialEscapeCharactersForConvertingEscapeSingle(tt.input, escapeCharacters)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func Test_canBeComparedDataType(t *testing.T) {
 	type testCases struct {
 		left     schemapb.DataType
