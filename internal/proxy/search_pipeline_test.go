@@ -4149,3 +4149,148 @@ func (s *SearchPipelineSuite) TestNewRequeryOperator_WithHighlighterNoDynamicFie
 	// Verify only translated output fields are included (no dynamic fields added)
 	s.Equal([]string{"title"}, reqOp.outputFieldNames)
 }
+
+// TestPickFieldDataWithNullableSparseVector tests pickFieldData with nullable sparse vector fields.
+// This test ensures that when reordering query results (which may return in different order than requested),
+// nullable sparse vectors are correctly handled using FieldDataIdxComputer to map row indices to data indices.
+func (s *SearchPipelineSuite) TestPickFieldDataWithNullableSparseVector() {
+	// Scenario: Search returns IDs [3, 1, 2], but Query returns them in order [1, 2, 3]
+	// with a nullable sparse vector where row 1 (middle) is null.
+	// pickFieldData should correctly reorder the data to match search result order.
+
+	// Search result IDs (the order we want)
+	searchIDs := &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: []int64{3, 1, 2}, // Want this order in final result
+			},
+		},
+	}
+
+	// Query returns data in different order: [1, 2, 3]
+	// pkOffset maps each PK to its position in the query result
+	pkOffset := map[any]int{
+		int64(1): 0, // PK 1 is at index 0 in query result
+		int64(2): 1, // PK 2 is at index 1 in query result
+		int64(3): 2, // PK 3 is at index 2 in query result
+	}
+
+	// Create sparse vector data for 3 rows, but row index 1 (PK=2) is null
+	// ValidData: [true, false, true] means row 0 and 2 have data, row 1 is null
+	// Contents only has 2 entries (for the non-null rows)
+	sparseContent0, _ := testutils.GenerateSparseFloatVectorsData(1)
+	sparseContent2, _ := testutils.GenerateSparseFloatVectorsData(1)
+
+	queryFields := []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "pk",
+			FieldId:   100,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{1, 2, 3}, // Query result order
+						},
+					},
+				},
+			},
+		},
+		{
+			Type:      schemapb.DataType_SparseFloatVector,
+			FieldName: "sparse_vec",
+			FieldId:   101,
+			ValidData: []bool{true, false, true}, // Row 1 is null
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 700,
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      700,
+							Contents: [][]byte{sparseContent0[0], sparseContent2[0]}, // Only 2 entries for non-null rows
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Call pickFieldData - this should NOT panic
+	result, err := pickFieldData(searchIDs, pkOffset, queryFields, 12345)
+	s.NoError(err)
+	s.NotNil(result)
+	s.Len(result, 2)
+
+	// Verify PK field is reordered correctly: [3, 1, 2]
+	pkData := result[0].GetScalars().GetLongData().GetData()
+	s.Equal([]int64{3, 1, 2}, pkData)
+
+	// Verify sparse vector ValidData is reordered correctly
+	// Original ValidData: [true, false, true] for rows [1, 2, 3]
+	// After reorder to [3, 1, 2]: ValidData should be [true, true, false]
+	sparseValidData := result[1].GetValidData()
+	s.Equal([]bool{true, true, false}, sparseValidData)
+
+	// Verify sparse vector Contents has correct number of entries (2 non-null values)
+	sparseContents := result[1].GetVectors().GetSparseFloatVector().GetContents()
+	s.Len(sparseContents, 2)
+}
+
+// TestPickFieldDataWithAllNullSparseVector tests pickFieldData when all sparse vector values are null.
+func (s *SearchPipelineSuite) TestPickFieldDataWithAllNullSparseVector() {
+	searchIDs := &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: []int64{2, 1},
+			},
+		},
+	}
+
+	pkOffset := map[any]int{
+		int64(1): 0,
+		int64(2): 1,
+	}
+
+	queryFields := []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "pk",
+			FieldId:   100,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{1, 2},
+						},
+					},
+				},
+			},
+		},
+		{
+			Type:      schemapb.DataType_SparseFloatVector,
+			FieldName: "sparse_vec",
+			FieldId:   101,
+			ValidData: []bool{false, false}, // All null
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 700,
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      700,
+							Contents: [][]byte{}, // Empty - all null
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := pickFieldData(searchIDs, pkOffset, queryFields, 12345)
+	s.NoError(err)
+	s.NotNil(result)
+
+	// All should still be null after reorder
+	sparseValidData := result[1].GetValidData()
+	s.Equal([]bool{false, false}, sparseValidData)
+	s.Len(result[1].GetVectors().GetSparseFloatVector().GetContents(), 0)
+}
