@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"net/url"
-	"regexp"
 	"strings"
 	"time"
 
@@ -21,8 +20,6 @@ const (
 	disableDynamicSchema
 	disableParitionKey
 )
-
-var regexValidScheme = regexp.MustCompile(`^https?:\/\/`)
 
 // DefaultGrpcOpts is GRPC options for milvus client.
 var DefaultGrpcOpts = []grpc.DialOption{
@@ -78,7 +75,7 @@ type RetryRateLimitOption struct {
 func (cfg *ClientConfig) parse() error {
 	// Prepend default fake tcp:// scheme for remote address.
 	address := cfg.Address
-	if !regexValidScheme.MatchString(address) {
+	if parts := strings.Split(address, "://"); len(parts) != 2 {
 		address = fmt.Sprintf("tcp://%s", address)
 	}
 
