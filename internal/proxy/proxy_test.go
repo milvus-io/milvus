@@ -2665,6 +2665,23 @@ func TestProxy(t *testing.T) {
 		updateResp, err = proxy.UpdateCredential(rootCtx, updateCredentialReq)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, updateResp.ErrorCode)
+
+		// maintainer mode - bypass old password verification and RBAC checks
+		paramtable.Get().Save(Params.CommonCfg.MaintainerModeEnabled.Key, "true")
+		defer paramtable.Get().Reset(Params.CommonCfg.MaintainerModeEnabled.Key)
+		updateCredentialReq.OldPassword = crypto.Base64Encode("wrong_password")
+		updateCredentialReq.NewPassword = crypto.Base64Encode(newPassword)
+		updateResp, err = proxy.UpdateCredential(ctx, updateCredentialReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, updateResp.ErrorCode)
+
+		// maintainer mode disabled
+		paramtable.Get().Reset(Params.CommonCfg.SuperUsers.Key)
+		paramtable.Get().Reset(Params.CommonCfg.MaintainerModeEnabled.Key)
+		updateCredentialReq.OldPassword = crypto.Base64Encode("wrong_password")
+		updateCredentialReq.NewPassword = crypto.Base64Encode(newPassword)
+		updateResp, _ = proxy.UpdateCredential(ctx, updateCredentialReq)
+		assert.Equal(t, int32(1400), updateResp.Code)
 	})
 
 	t.Run("credential GET api", func(t *testing.T) {
