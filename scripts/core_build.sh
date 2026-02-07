@@ -193,7 +193,18 @@ if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
 fi
 source ${ROOT_DIR}/scripts/setenv.sh
 
-CMAKE_GENERATOR="Unix Makefiles"
+# Use Ninja if available for faster builds, fallback to Unix Makefiles
+if command -v ninja &> /dev/null; then
+    CMAKE_GENERATOR="Ninja"
+    # If ninja is available but build dir has Makefile (not build.ninja), clean it
+    if [[ -f "${BUILD_OUTPUT_DIR}/Makefile" && ! -f "${BUILD_OUTPUT_DIR}/build.ninja" ]]; then
+        echo "Detected Makefile build but ninja is available, cleaning build directory..."
+        rm -rf "${BUILD_OUTPUT_DIR}"
+        mkdir -p "${BUILD_OUTPUT_DIR}"
+    fi
+else
+    CMAKE_GENERATOR="Unix Makefiles"
+fi
 
 # build with diskann index if OS is ubuntu or rocky or amzn
 if [ -f /etc/os-release ]; then
@@ -219,7 +230,7 @@ arch=$(uname -m)
 CMAKE_CMD="cmake \
 ${CMAKE_EXTRA_ARGS} \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
--DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
+-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX} \
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
 -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
 -DCMAKE_LIBRARY_ARCHITECTURE=${arch} \
@@ -243,11 +254,15 @@ echo "CC $CC"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD} -G "${CMAKE_GENERATOR}"
 
-set
-
 if [[ ${RUN_CPPLINT} == "ON" ]]; then
+  if [ "$CMAKE_GENERATOR" = "Ninja" ]; then
+    BUILD_CMD="ninja"
+  else
+    BUILD_CMD="make"
+  fi
+
   # cpplint check
-  make lint
+  ${BUILD_CMD} lint
   if [ $? -ne 0 ]; then
     echo "ERROR! cpplint check failed"
     exit 1
@@ -255,7 +270,7 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
   echo "cpplint check passed!"
 
   # clang-format check
-  make check-clang-format
+  ${BUILD_CMD} check-clang-format
   if [ $? -ne 0 ]; then
     echo "ERROR! clang-format check failed"
     exit 1
@@ -263,7 +278,11 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
   echo "clang-format check passed!"
 else
   # compile and build
-  make -j ${jobs} install || exit 1
+  if [ "$CMAKE_GENERATOR" = "Ninja" ]; then
+    ninja -j ${jobs} install || exit 1
+  else
+    make -j ${jobs} install || exit 1
+  fi
 fi
 
 if command -v ccache &> /dev/null

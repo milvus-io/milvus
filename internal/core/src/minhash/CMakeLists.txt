@@ -10,6 +10,11 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
 # MinHash module build configuration
+
+# Find required packages (cmake_find_package modules from conan)
+find_package(xxHash REQUIRED)
+find_package(OpenSSL REQUIRED)
+
 add_source_at_current_directory_recursively()
 
 # Separate SIMD implementation files from main source
@@ -39,7 +44,7 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
     target_sources(milvus_minhash PRIVATE ${AVX512_SOURCES})
     message(STATUS "Building with AVX512 support")
 
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64)|(ARM64)")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64)|(ARM64)|(arm64)")
     # Unconditionally compile NEON variant
     set(NEON_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/fusion_compute/arm/fusion_compute_neon.cpp
@@ -47,17 +52,21 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64)|(ARM64)")
     target_sources(milvus_minhash PRIVATE ${NEON_SOURCES})
     message(STATUS "Building with NEON support")
 
-    # Unconditionally compile SVE variant
-    set(SVE_SOURCES
-        ${CMAKE_CURRENT_SOURCE_DIR}/fusion_compute/arm/fusion_compute_sve.cpp
-    )
-    set_source_files_properties(${SVE_SOURCES} PROPERTIES COMPILE_FLAGS "-march=armv8-a+sve")
-    target_sources(milvus_minhash PRIVATE ${SVE_SOURCES})
-    message(STATUS "Building with SVE support")
+    # SVE is only supported on Linux aarch64, not on macOS (Apple Silicon doesn't have SVE)
+    if(NOT APPLE)
+        set(SVE_SOURCES
+            ${CMAKE_CURRENT_SOURCE_DIR}/fusion_compute/arm/fusion_compute_sve.cpp
+        )
+        set_source_files_properties(${SVE_SOURCES} PROPERTIES COMPILE_FLAGS "-march=armv8-a+sve")
+        target_sources(milvus_minhash PRIVATE ${SVE_SOURCES})
+        message(STATUS "Building with SVE support")
+    else()
+        message(STATUS "SVE support disabled on macOS (Apple Silicon doesn't have SVE)")
+    endif()
 endif()
 
 target_link_libraries(milvus_minhash PUBLIC
-    xxhash::xxhash
+    xxHash::xxhash
     OpenSSL::SSL
 )
 

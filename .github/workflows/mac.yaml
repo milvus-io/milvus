@@ -93,7 +93,7 @@ jobs:
           if [[ ! -d "/var/tmp/ccache" ]];then
             mkdir -p /var/tmp/ccache
           fi
-          brew install libomp ninja openblas ccache pkg-config
+          brew install libomp ninja openblas ccache pkg-config aws-sdk-cpp
           BREW_PREFIX=$(brew --prefix)
           # Install llvm@17 explicitly as a stable version
           brew install llvm@17
