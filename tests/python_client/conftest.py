@@ -1,4 +1,5 @@
 import logging
+import os
 
 import pytest
 import functools
@@ -523,3 +524,60 @@ def binary_id_collection(request, connect):
 #         msg = "The execution of the test case fails and the test exits..."
 #         log.error(msg)
 #         pytest.exit(msg)
+
+
+# ---------------------------------------------------------------------------
+# FileResource test fixtures
+# ---------------------------------------------------------------------------
+
+# Test data content generated at runtime (no files committed to git)
+_FILE_RESOURCE_DATA = {
+    "jieba/jieba_dict.txt": "向量数据库 5 n\n语义搜索 5 n\n全文检索 5 n\n",
+    "synonyms/synonyms.txt": "向量, 矢量, vector\n搜索, 检索, 查询\n数据库, DB\n",
+    "stopwords/stop_words.txt": "的\n是\n在\n了\n和\n",
+    "decompounder/decompounder_dict.txt": "bank\nnote\nfire\nwork\n",
+}
+
+
+def _generate_file_resource_testdata(tmpdir):
+    """Generate test data files in a temporary directory and return a
+    mapping of {minio_remote_path: local_file_path}."""
+    files = {}
+    for remote_path, content in _FILE_RESOURCE_DATA.items():
+        local_path = os.path.join(tmpdir, remote_path.replace("/", "_"))
+        with open(local_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        files[remote_path] = local_path
+    return files
+
+
+@pytest.fixture(scope="module")
+def minio_client(request):
+    """Create a MinIO client for file resource tests."""
+    from minio import Minio
+    minio_host = request.config.getoption("--minio_host")
+    return Minio(f"{minio_host}:9000", access_key="minioadmin",
+                 secret_key="minioadmin", secure=False)
+
+
+@pytest.fixture(scope="module")
+def file_resource_env(request, minio_client, tmp_path_factory):
+    """Generate testdata, upload to MinIO for file resource tests.
+
+    Files are uploaded to the bucket root (no rootPath prefix) because
+    AddFileResource's Exist check uses RemoteChunkManager which does NOT
+    prepend minio.rootPath.
+
+    Returns a dict with keys: bucket.
+    """
+    bucket = request.config.getoption("--minio_bucket")
+
+    if not minio_client.bucket_exists(bucket):
+        minio_client.make_bucket(bucket)
+
+    tmpdir = str(tmp_path_factory.mktemp("file_resource_testdata"))
+    files = _generate_file_resource_testdata(tmpdir)
+    for remote_rel, local_path in files.items():
+        minio_client.fput_object(bucket, remote_rel, local_path)
+
+    yield {"bucket": bucket}

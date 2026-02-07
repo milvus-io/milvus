@@ -1218,3 +1218,37 @@ class TestMilvusClientV2Base(Base):
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        collection_name=collection_name, **kwargs).run()
         return res, check_result
+
+    # ====================== FileResource ======================
+    @trace()
+    def add_file_resource(self, client, name, path, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.add_file_resource, name, path], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       name=name, path=path, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def remove_file_resource(self, client, name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.remove_file_resource, name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       name=name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def list_file_resources(self, client, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.list_file_resources], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       **kwargs).run()
+        return res, check_result
