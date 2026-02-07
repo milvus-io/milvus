@@ -393,7 +393,7 @@ queryCoord:
   autoHandoff: true
   autoBalance: true # Switch value to control if to automatically balance the memory usage among query nodes by distributing segment loading and releasing operations evenly.
   autoBalanceChannel: true # Enable auto balance channel
-  balancer: ScoreBasedBalancer # auto balancer used for segments on queryNodes
+  balancer: ChannelLevelScoreBalancer # auto balancer used for segments on queryNodes
   globalRowCountFactor: 0.1 # the weight used when balancing segments among queryNodes
   scoreUnbalanceTolerationFactor: 0.05 # the least value for unbalanced extent between from and to nodes when doing balance
   reverseUnBalanceTolerationFactor: 1.3 # the largest value for unbalanced extent between from and to nodes after doing balance
@@ -437,7 +437,7 @@ queryCoord:
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   enableStoppingBalance: true # whether enable stopping balance
   stoppingBalanceAssignPolicy: ScoreBased # assign policy for stopping balance, options: RoundRobin, RowCount, ScoreBased
-  channelExclusiveNodeFactor: 4 # the least node number for enable channel's exclusive mode
+  channelExclusiveNodeFactor: 1 # the least node number for enable channel's exclusive mode
   collectionObserverInterval: 200 # the interval of collection observer
   checkExecutedFlagInterval: 100 # the interval of check executed flag to force to pull dist
   updateCollectionLoadStatusInterval: 5 # 5m, max interval of updating collection loaded status for check health
