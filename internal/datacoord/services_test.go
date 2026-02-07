@@ -372,6 +372,157 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 	s.EqualValues(datapb.SegmentLevel_L0, segment.GetLevel())
 }
 
+func (s *ServerSuite) TestSaveBinlogPath_DropL0Segment() {
+	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
+
+	// Test case 1: Drop L0 segment that doesn't exist (already compacted/gc'ed)
+	// This should return success, not an error
+	s.Run("drop non-existent L0 segment returns success", func() {
+		ctx := context.Background()
+		resp, err := s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+			Base: &commonpb.MsgBase{
+				Timestamp: uint64(time.Now().Unix()),
+			},
+			SegmentID:    999, // non-existent segment
+			PartitionID:  1,
+			CollectionID: 0,
+			SegLevel:     datapb.SegmentLevel_L0,
+			Channel:      "ch1",
+			Dropped:      true,
+		})
+		s.NoError(err)
+		s.EqualValues(commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	// Test case 2: Drop L0 segment that exists
+	s.Run("drop existing L0 segment", func() {
+		// First create the L0 segment
+		ctx := context.Background()
+		resp, err := s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+			Base: &commonpb.MsgBase{
+				Timestamp: uint64(time.Now().Unix()),
+			},
+			SegmentID:    100,
+			PartitionID:  1,
+			CollectionID: 0,
+			SegLevel:     datapb.SegmentLevel_L0,
+			Channel:      "ch1",
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 1,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogPath:    "/by-dev/test/0/1/100/1/1",
+							EntriesNum: 5,
+						},
+					},
+				},
+			},
+			CheckPoints: []*datapb.CheckPoint{
+				{
+					SegmentID: 100,
+					Position: &msgpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{1, 2, 3},
+						Timestamp:   0,
+					},
+					NumOfRows: 5,
+				},
+			},
+		})
+		s.NoError(err)
+		s.EqualValues(commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		segment := s.testServer.meta.GetHealthySegment(context.TODO(), 100)
+		s.NotNil(segment)
+
+		// Now drop the L0 segment
+		resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+			Base: &commonpb.MsgBase{
+				Timestamp: uint64(time.Now().Unix()),
+			},
+			SegmentID:    100,
+			PartitionID:  1,
+			CollectionID: 0,
+			SegLevel:     datapb.SegmentLevel_L0,
+			Channel:      "ch1",
+			Dropped:      true,
+		})
+		s.NoError(err)
+		s.EqualValues(commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// Verify segment is now dropped
+		segment = s.testServer.meta.GetSegment(context.TODO(), 100)
+		s.NotNil(segment)
+		s.Equal(commonpb.SegmentState_Dropped, segment.GetState())
+	})
+
+	// Test case 3: Drop L0 segment that is already dropped (idempotent)
+	s.Run("drop already dropped L0 segment returns success", func() {
+		// Create and then drop the segment first
+		ctx := context.Background()
+		resp, err := s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+			Base: &commonpb.MsgBase{
+				Timestamp: uint64(time.Now().Unix()),
+			},
+			SegmentID:    101,
+			PartitionID:  1,
+			CollectionID: 0,
+			SegLevel:     datapb.SegmentLevel_L0,
+			Channel:      "ch1",
+		})
+		s.NoError(err)
+		s.EqualValues(commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// Drop it
+		resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+			Base: &commonpb.MsgBase{
+				Timestamp: uint64(time.Now().Unix()),
+			},
+			SegmentID:    101,
+			PartitionID:  1,
+			CollectionID: 0,
+			SegLevel:     datapb.SegmentLevel_L0,
+			Channel:      "ch1",
+			Dropped:      true,
+		})
+		s.NoError(err)
+		s.EqualValues(commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// Try to drop again - should return success
+		resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+			Base: &commonpb.MsgBase{
+				Timestamp: uint64(time.Now().Unix()),
+			},
+			SegmentID:    101,
+			PartitionID:  1,
+			CollectionID: 0,
+			SegLevel:     datapb.SegmentLevel_L0,
+			Channel:      "ch1",
+			Dropped:      true,
+		})
+		s.NoError(err)
+		s.EqualValues(commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	// Test case 4: Drop non-L0 segment that doesn't exist should return error
+	s.Run("drop non-existent non-L0 segment returns error", func() {
+		ctx := context.Background()
+		resp, err := s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+			Base: &commonpb.MsgBase{
+				Timestamp: uint64(time.Now().Unix()),
+			},
+			SegmentID:    998, // non-existent segment
+			CollectionID: 0,
+			SegLevel:     datapb.SegmentLevel_L1,
+			Channel:      "ch1",
+			Dropped:      true,
+		})
+		s.NoError(err)
+		s.ErrorIs(merr.Error(resp), merr.ErrSegmentNotFound)
+	})
+}
+
 func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 

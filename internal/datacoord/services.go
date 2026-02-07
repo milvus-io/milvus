@@ -590,43 +590,69 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 	operators := []UpdateOperator{}
 
-	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
-		operators = append(operators, CreateL0Operator(req.GetCollectionID(), req.GetPartitionID(), req.GetSegmentID(), req.GetChannel()))
-	} else {
+	// Handle dropped segments first for all levels
+	if req.GetDropped() {
 		segment := s.meta.GetSegment(ctx, req.GetSegmentID())
-		// validate level one segment
 		if segment == nil {
+			if req.GetSegLevel() == datapb.SegmentLevel_L0 {
+				// Might happen if L0 segment is compacted and gced already
+				log.Warn("try to drop L0 segment which doesn't exist", zap.Int64("segmentID", req.GetSegmentID()))
+				return merr.Success(), nil
+			}
 			err := merr.WrapErrSegmentNotFound(req.GetSegmentID())
-			log.Warn("failed to get segment", zap.Error(err))
+			log.Warn("failed to get segment when dropping", zap.Error(err))
 			return merr.Status(err), nil
 		}
-
 		if segment.State == commonpb.SegmentState_Dropped {
-			log.Info("save to dropped segment, ignore this request")
+			log.Info("segment already dropped, ignore this request")
 			return merr.Success(), nil
 		}
 
-		if !isSegmentHealthy(segment) {
+		// For non-L0 segments, also check segment health before dropping
+		if req.GetSegLevel() != datapb.SegmentLevel_L0 && !isSegmentHealthy(segment) {
 			err := merr.WrapErrSegmentNotFound(req.GetSegmentID())
-			log.Warn("failed to get segment, the segment not healthy", zap.Error(err))
+			log.Warn("failed to drop segment, the segment not healthy", zap.Error(err))
 			return merr.Status(err), nil
 		}
 
-		// Set storage version
-		operators = append(operators, SetStorageVersion(req.GetSegmentID(), req.GetStorageVersion()))
-
-		// Set segment state
-		if req.GetDropped() {
-			// segmentManager manages growing segments
-			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
-			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Dropped))
-		} else if req.GetFlushed() {
-			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
-			if enableSortCompaction() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
-				operators = append(operators, SetSegmentIsInvisible(req.GetSegmentID(), true))
+		// Drop segment from segmentManager and mark as dropped
+		s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
+		operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Dropped))
+	} else {
+		// Not dropping, handle normal create/update logic
+		if req.GetSegLevel() == datapb.SegmentLevel_L0 {
+			operators = append(operators, CreateL0Operator(req.GetCollectionID(), req.GetPartitionID(), req.GetSegmentID(), req.GetChannel()))
+		} else {
+			segment := s.meta.GetSegment(ctx, req.GetSegmentID())
+			// validate level one segment
+			if segment == nil {
+				err := merr.WrapErrSegmentNotFound(req.GetSegmentID())
+				log.Warn("failed to get segment", zap.Error(err))
+				return merr.Status(err), nil
 			}
-			// set segment to SegmentState_Flushed
-			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Flushed))
+
+			if segment.State == commonpb.SegmentState_Dropped {
+				log.Info("save to dropped segment, ignore this request")
+				return merr.Success(), nil
+			}
+
+			if !isSegmentHealthy(segment) {
+				err := merr.WrapErrSegmentNotFound(req.GetSegmentID())
+				log.Warn("failed to get segment, the segment not healthy", zap.Error(err))
+				return merr.Status(err), nil
+			}
+
+			// Set storage version
+			operators = append(operators, SetStorageVersion(req.GetSegmentID(), req.GetStorageVersion()))
+
+			// Set segment state for flushed
+			if req.GetFlushed() {
+				s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
+				if enableSortCompaction() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
+					operators = append(operators, SetSegmentIsInvisible(req.GetSegmentID(), true))
+				}
+				operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Flushed))
+			}
 		}
 	}
 
