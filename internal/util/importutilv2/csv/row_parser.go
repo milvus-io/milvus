@@ -454,6 +454,12 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string, useElem
 			return nil, r.wrapTypeError(obj, field)
 		}
 		return wkbValue, nil
+	case schemapb.DataType_Mol:
+		pickleValue, err := pkgcommon.ConvertSMILESToPickle(obj)
+		if err != nil {
+			return nil, r.wrapTypeError(obj, field)
+		}
+		return pickleValue, nil
 	case schemapb.DataType_Timestamptz:
 		tz, err := timestamptz.ValidateAndReturnUnixMicroTz(obj, r.timezone)
 		if err != nil {
