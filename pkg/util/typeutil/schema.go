@@ -725,6 +725,11 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 			FieldId:   fieldData.FieldId,
 			IsDynamic: fieldData.IsDynamic,
 		}
+		// Preserve ValidData tracking for nullable fields so that
+		// downstream assembly can correctly mark null vs non-null values.
+		if len(fieldData.GetValidData()) > 0 {
+			fd.ValidData = make([]bool, 0, topK)
+		}
 		switch fieldType := fieldData.Field.(type) {
 		case *schemapb.FieldData_Scalars:
 			scalarField := fieldData.GetScalars()
