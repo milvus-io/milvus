@@ -135,6 +135,8 @@ WarmupPolicyToString(CacheWarmupPolicy policy) {
     switch (policy) {
         case CacheWarmupPolicy_Sync:
             return "sync";
+        case CacheWarmupPolicy_Async:
+            return "async";
         case CacheWarmupPolicy_Disable:
             return "disable";
         default:
