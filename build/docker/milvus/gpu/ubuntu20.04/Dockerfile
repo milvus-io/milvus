@@ -30,3 +30,5 @@ RUN groupadd -r milvus && useradd -r -g milvus milvus && \
     mkdir -p /var/lib/milvus && \
     chown -R milvus:milvus /milvus /var/lib/milvus
 USER milvus:milvus
+
+CMD ["milvus", "run", "standalone"]
