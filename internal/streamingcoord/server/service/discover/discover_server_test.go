@@ -19,8 +19,8 @@ import (
 
 func TestAssignmentDiscover(t *testing.T) {
 	mc := mock_manager.NewMockManagerClient(t)
-	mc.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{
-		1: {ServerID: 1, Address: "localhost:1"},
+	mc.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
+		1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}, ResourceGroup: "rg1"},
 	}, nil)
 	resource.InitForTest(resource.OptStreamingManagerClient(mc))
 	b := mock_balancer.NewMockBalancer(t)

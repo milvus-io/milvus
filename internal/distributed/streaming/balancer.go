@@ -36,7 +36,7 @@ func (b balancerImpl) ListStreamingNode(ctx context.Context) ([]types.StreamingN
 	}
 	nodeInfos := make([]types.StreamingNodeInfo, 0, len(nodes))
 	for _, node := range nodes {
-		nodeInfos = append(nodeInfos, *node)
+		nodeInfos = append(nodeInfos, node.StreamingNodeInfo)
 	}
 	return nodeInfos, nil
 }
