@@ -110,6 +110,9 @@ type searchTask struct {
 	userRequestedPkFieldExplicitly bool
 
 	storageCost segcore.StorageCost
+
+	// joinSpecs holds parsed JOIN clauses for post-search enrichment
+	joinSpecs []*JoinSpec
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -202,6 +205,33 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug("translate output fields",
 		zap.Strings("output fields", t.translatedOutputFields))
+
+	// Parse JOIN clause if specified
+	joinClause, _ := funcutil.TryGetAttrByKeyFromRepeatedKV(JoinKey, t.request.GetSearchParams())
+	if joinClause != "" {
+		joinSpecs, err := ParseMultipleJoinSpecs(joinClause)
+		if err != nil {
+			log.Warn("failed to parse JOIN clause", zap.String("join", joinClause), zap.Error(err))
+			return err
+		}
+
+		// Validate each join spec
+		for _, spec := range joinSpecs {
+			if err := spec.Validate(ctx, t.request.GetDbName(), t.schema); err != nil {
+				log.Warn("JOIN validation failed", zap.String("join", spec.String()), zap.Error(err))
+				return err
+			}
+			// Extract output fields for this join
+			spec.ExtractJoinOutputFields(t.request.GetOutputFields())
+		}
+
+		t.joinSpecs = joinSpecs
+		log.Debug("parsed JOIN clauses", zap.Int("count", len(joinSpecs)))
+
+		// For now, JOIN execution is not implemented - return unimplemented error
+		return merr.WrapErrServiceUnimplemented(
+			fmt.Errorf("JOIN clause parsing successful, but execution is not yet implemented. Parsed %d JOIN clause(s)", len(joinSpecs)))
+	}
 
 	if t.SearchRequest.GetIsAdvanced() {
 		if len(t.request.GetSubReqs()) > defaultMaxSearchRequest {
