@@ -3100,13 +3100,20 @@ func (c *Core) ListFileResources(ctx context.Context, req *milvuspb.ListFileReso
 		}, nil
 	}
 
+	resources, _ := c.meta.ListFileResource(ctx)
 	ctxLog.Debug(method + " success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	return &milvuspb.ListFileResourcesResponse{
-		Status:    merr.Success(),
-		Resources: []*milvuspb.FileResourceInfo{},
+		Status: merr.Success(),
+		Resources: lo.Map(resources, func(resource *internalpb.FileResourceInfo, _ int) *milvuspb.FileResourceInfo {
+			return &milvuspb.FileResourceInfo{
+				Id:   resource.Id,
+				Name: resource.Name,
+				Path: resource.Path,
+			}
+		}),
 	}, nil
 }
 
