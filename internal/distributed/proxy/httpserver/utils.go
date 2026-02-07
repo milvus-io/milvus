@@ -368,14 +368,18 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 		return merr.ErrMissingRequiredParameters, reallyDataArray, validDataMap
 	}
 
-	fieldNames := make([]string, 0, len(collSchema.Fields))
+	fieldNamesMap := make(map[string]bool)
 	for _, field := range collSchema.Fields {
 		if field.IsDynamic {
 			continue
 		}
-		fieldNames = append(fieldNames, field.Name)
+		fieldNamesMap[field.Name] = true
+		validDataMap[field.Name] = make([]bool, 0, len(dataResultArray))
 	}
-
+	for _, structArrayField := range collSchema.StructArrayFields {
+		validDataMap[structArrayField.Name] = make([]bool, 0, len(dataResultArray))
+		fieldNamesMap[structArrayField.Name] = true
+	}
 	for _, data := range dataResultArray {
 		reallyData := map[string]interface{}{}
 		if data.Type == gjson.JSON {
@@ -661,11 +665,19 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					return merr.WrapErrParameterInvalid("", schemapb.DataType_name[int32(fieldType)], "fieldName: "+fieldName), reallyDataArray, validDataMap
 				}
 			}
+			for _, structArrayField := range collSchema.StructArrayFields {
+				validDataMap[structArrayField.Name] = append(validDataMap[structArrayField.Name], true)
+				jsonData := data.Get(structArrayField.Name)
+				structFieldDatas, err := assembleStructArrayField(jsonData, structArrayField)
+				if err != nil {
+					return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(schemapb.DataType_Array)], schemapb.DataType_name[int32(schemapb.DataType_Array)], "fieldName: "+structArrayField.Name), reallyDataArray, validDataMap
+				}
+				reallyData[structArrayField.Name] = structFieldDatas
+			}
 
 			// fill dynamic schema
-
 			for mapKey, mapValue := range data.Map() {
-				if !containsString(fieldNames, mapKey) {
+				if !fieldNamesMap[mapKey] {
 					if collSchema.EnableDynamicField {
 						if mapKey == common.MetaFieldName {
 							return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("use the invalid field name(%s) when enable dynamicField", mapKey)), nil, nil
@@ -909,6 +921,54 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			IsDynamic: field.IsDynamic,
 		}
 	}
+
+	for _, structArrayField := range sch.StructArrayFields {
+		fieldData[structArrayField.Name] = &schemapb.FieldData{
+			Type:      schemapb.DataType_ArrayOfStruct,
+			FieldName: structArrayField.Name,
+			FieldId:   structArrayField.FieldID,
+		}
+		structSubFieldsData := make(map[string]*schemapb.FieldData)
+		for _, subField := range structArrayField.Fields {
+			subFieldName, err := typeutil.ExtractStructFieldName(subField.Name)
+			if err != nil {
+				return nil, merr.WrapErrParameterInvalidMsg(err.Error())
+			}
+			structSubFieldsData[subFieldName] = &schemapb.FieldData{
+				FieldName: subFieldName,
+				FieldId:   subField.FieldID,
+			}
+			if subField.ElementType == schemapb.DataType_FloatVector {
+				structSubFieldsData[subFieldName].Type = schemapb.DataType_ArrayOfVector
+				dim, _ := getDim(subField)
+				structSubFieldsData[subFieldName].Field = &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_VectorArray{
+							VectorArray: &schemapb.VectorArray{
+								Dim:         dim,
+								ElementType: subField.ElementType,
+								Data:        make([]*schemapb.VectorField, 0, rowsLen),
+							},
+						},
+					},
+				}
+			} else {
+				structSubFieldsData[subFieldName].Type = schemapb.DataType_Array
+				structSubFieldsData[subFieldName].Field = &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{
+								ElementType: subField.ElementType,
+								Data:        make([]*schemapb.ScalarField, 0, rowsLen),
+							},
+						},
+					},
+				}
+			}
+		}
+		nameColumns[structArrayField.Name] = structSubFieldsData
+	}
+
 	if len(nameDims) == 0 && len(sch.Functions) == 0 && !partialUpdate {
 		return nil, fmt.Errorf("collection: %s has no vector field or functions", sch.Name)
 	}
@@ -1017,6 +1077,31 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			}
 
 			delete(set, field.Name)
+		}
+		for _, structArrayField := range sch.StructArrayFields {
+			candi, ok := set[structArrayField.Name]
+			if !ok {
+				continue
+			}
+			singleStructMap, ok := candi.v.Interface().(map[string]any)
+			if !ok {
+				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid data type for struct array field: %s", structArrayField.Name))
+			}
+			existingStructMap, ok := nameColumns[structArrayField.Name].(map[string]*schemapb.FieldData)
+			if !ok {
+				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid column type for struct array field: %s", structArrayField.Name))
+			}
+			for name, singleFieldData := range singleStructMap {
+				switch singleFieldData.(type) {
+				case *schemapb.ScalarField:
+					existingStructMap[name].Field.(*schemapb.FieldData_Scalars).Scalars.Data.(*schemapb.ScalarField_ArrayData).ArrayData.Data = append(existingStructMap[name].Field.(*schemapb.FieldData_Scalars).Scalars.Data.(*schemapb.ScalarField_ArrayData).ArrayData.Data, singleFieldData.(*schemapb.ScalarField))
+				case *schemapb.VectorField:
+					existingStructMap[name].Field.(*schemapb.FieldData_Vectors).Vectors.Data.(*schemapb.VectorField_VectorArray).VectorArray.Data = append(existingStructMap[name].Field.(*schemapb.FieldData_Vectors).Vectors.Data.(*schemapb.VectorField_VectorArray).VectorArray.Data, singleFieldData.(*schemapb.VectorField))
+				default:
+					return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid type(%T) of field(%s)", singleFieldData, structArrayField.Name))
+				}
+			}
+			nameColumns[structArrayField.Name] = existingStructMap
 		}
 		// if is not dynamic, but pass more field, will throw err in /internal/distributed/proxy/httpserver/utils.go@checkAndSetData
 		if isDynamic {
@@ -1268,6 +1353,17 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					},
 				},
 			}
+		case schemapb.DataType_ArrayOfStruct:
+			columnMap := column.(map[string]*schemapb.FieldData)
+			fields := make([]*schemapb.FieldData, 0, len(columnMap))
+			for _, fieldData := range columnMap {
+				fields = append(fields, fieldData)
+			}
+			colData.Field = &schemapb.FieldData_StructArrays{
+				StructArrays: &schemapb.StructArrayField{
+					Fields: fields,
+				},
+			}
 		default:
 			return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", colData.Type, name)
 		}
@@ -1291,6 +1387,25 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 		})
 	}
 	return columns, nil
+}
+
+func serializeEmbeddingListFloatVectors(vectorStr string, dataType schemapb.DataType, dimension, bytesLen int64, fpArrayToBytesFunc func([]float32) []byte) ([][]byte, error) {
+	var embeddingFloat32Values [][][]float32
+	err := json.Unmarshal([]byte(vectorStr), &embeddingFloat32Values)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], vectorStr, err.Error())
+	}
+	fp32Values := typeutil.FlattenEmbeddingList(embeddingFloat32Values)
+	values := make([][]byte, 0, len(fp32Values))
+	for _, vectorArray := range fp32Values {
+		if int64(len(vectorArray))%dimension != 0 {
+			return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], vectorStr,
+				fmt.Sprintf("dimension: %d, but length of []float: %d is not divisible by dimension: %d", dimension, len(vectorArray), dimension))
+		}
+		vectorBytes := fpArrayToBytesFunc(vectorArray)
+		values = append(values, vectorBytes)
+	}
+	return values, nil
 }
 
 func serializeFloatVectors(vectorStr string, dataType schemapb.DataType, dimension, bytesLen int64, fpArrayToBytesFunc func([]float32) []byte) ([][]byte, error) {
@@ -1375,28 +1490,53 @@ func serializeInt8Vectors(vectorStr string, dataType schemapb.DataType, dimensio
 	return values, nil
 }
 
-func convertQueries2Placeholder(body string, dataType schemapb.DataType, dimension int64) (*commonpb.PlaceholderValue, error) {
+func convertQueries2Placeholder(body string, dataType schemapb.DataType, dimension int64, isEmbeddingList bool) (*commonpb.PlaceholderValue, error) {
 	var valueType commonpb.PlaceholderType
 	var values [][]byte
 	var err error
 	switch dataType {
 	case schemapb.DataType_FloatVector:
-		valueType = commonpb.PlaceholderType_FloatVector
-		values, err = serializeFloatVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension*4, typeutil.Float32ArrayToBytes)
+		if isEmbeddingList {
+			valueType = commonpb.PlaceholderType_EmbListFloatVector
+			values, err = serializeEmbeddingListFloatVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension*4, typeutil.Float32ArrayToBytes)
+		} else {
+			valueType = commonpb.PlaceholderType_FloatVector
+			values, err = serializeFloatVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension*4, typeutil.Float32ArrayToBytes)
+		}
 	case schemapb.DataType_BinaryVector:
-		valueType = commonpb.PlaceholderType_BinaryVector
+		if isEmbeddingList {
+			valueType = commonpb.PlaceholderType_EmbListBinaryVector
+		} else {
+			valueType = commonpb.PlaceholderType_BinaryVector
+		}
 		values, err = serializeByteVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension/8)
 	case schemapb.DataType_Float16Vector:
-		valueType = commonpb.PlaceholderType_Float16Vector
+		if isEmbeddingList {
+			valueType = commonpb.PlaceholderType_EmbListFloat16Vector
+		} else {
+			valueType = commonpb.PlaceholderType_Float16Vector
+		}
 		values, err = serializeFloatOrByteVectors(gjson.Get(body, HTTPRequestData), dataType, dimension, typeutil.Float32ArrayToFloat16Bytes)
 	case schemapb.DataType_BFloat16Vector:
-		valueType = commonpb.PlaceholderType_BFloat16Vector
+		if isEmbeddingList {
+			valueType = commonpb.PlaceholderType_EmbListBFloat16Vector
+		} else {
+			valueType = commonpb.PlaceholderType_BFloat16Vector
+		}
 		values, err = serializeFloatOrByteVectors(gjson.Get(body, HTTPRequestData), dataType, dimension, typeutil.Float32ArrayToBFloat16Bytes)
 	case schemapb.DataType_SparseFloatVector:
-		valueType = commonpb.PlaceholderType_SparseFloatVector
+		if isEmbeddingList {
+			valueType = commonpb.PlaceholderType_EmbListSparseFloatVector
+		} else {
+			valueType = commonpb.PlaceholderType_SparseFloatVector
+		}
 		values, err = serializeSparseFloatVectors(gjson.Get(body, HTTPRequestData).Array(), dataType)
 	case schemapb.DataType_Int8Vector:
-		valueType = commonpb.PlaceholderType_Int8Vector
+		if isEmbeddingList {
+			valueType = commonpb.PlaceholderType_EmbListInt8Vector
+		} else {
+			valueType = commonpb.PlaceholderType_Int8Vector
+		}
 		values, err = serializeInt8Vectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, typeutil.Int8ArrayToBytes)
 	case schemapb.DataType_VarChar:
 		valueType = commonpb.PlaceholderType_VarChar
@@ -1458,6 +1598,74 @@ func genDynamicFields(fields []string, list []*schemapb.FieldData) []string {
 	return dynamicFields
 }
 
+func getRowsNumForStructArrayField(fieldData *schemapb.StructArrayField) int64 {
+	if fieldData == nil || fieldData.GetFields() == nil || len(fieldData.GetFields()) == 0 {
+		return 0
+	}
+	firstSubField := fieldData.GetFields()[0]
+	switch firstSubField.GetType() {
+	case schemapb.DataType_Array:
+		return int64(len(firstSubField.GetScalars().GetArrayData().GetData()))
+	case schemapb.DataType_ArrayOfVector:
+		return int64(len(firstSubField.GetVectors().GetFloatVector().GetData())) / firstSubField.GetVectors().GetDim()
+	}
+	return 0
+}
+
+// extractFieldDataValue extracts a single value from FieldData at the given index
+func extractFieldDataValue(subField *schemapb.FieldData, idx int64) interface{} {
+	switch subField.GetType() {
+	case schemapb.DataType_Bool:
+		if idx < int64(len(subField.GetScalars().GetBoolData().GetData())) {
+			return subField.GetScalars().GetBoolData().GetData()[idx]
+		}
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		if idx < int64(len(subField.GetScalars().GetIntData().GetData())) {
+			return subField.GetScalars().GetIntData().GetData()[idx]
+		}
+	case schemapb.DataType_Int64:
+		if idx < int64(len(subField.GetScalars().GetLongData().GetData())) {
+			return subField.GetScalars().GetLongData().GetData()[idx]
+		}
+	case schemapb.DataType_Float:
+		if idx < int64(len(subField.GetScalars().GetFloatData().GetData())) {
+			return subField.GetScalars().GetFloatData().GetData()[idx]
+		}
+	case schemapb.DataType_Double:
+		if idx < int64(len(subField.GetScalars().GetDoubleData().GetData())) {
+			return subField.GetScalars().GetDoubleData().GetData()[idx]
+		}
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		if idx < int64(len(subField.GetScalars().GetStringData().GetData())) {
+			return subField.GetScalars().GetStringData().GetData()[idx]
+		}
+	case schemapb.DataType_FloatVector:
+		dim := subField.GetVectors().GetDim()
+		start := int(idx * dim)
+		end := int((idx + 1) * dim)
+		data := subField.GetVectors().GetFloatVector().GetData()
+		if end <= len(data) {
+			return data[start:end]
+		}
+	}
+	return nil
+}
+
+// assembleStructArrayFieldToJson assembles a StructArrayField into a nested JSON structure
+// fieldName is used as the root field, and subFields are nested under it
+// idx is the target row index in each subField of the StructArrayField
+// Returns: {fieldName: {subField1: value1, subField2: value2, ...}}
+func assembleStructArrayFieldToJson(fieldData *schemapb.StructArrayField, idx int64) map[string]interface{} {
+	// Create the nested structure with subFields as children of fieldName
+	subFieldsData := make(map[string]interface{})
+
+	for _, subField := range fieldData.GetFields() {
+		value := extractFieldDataValue(subField, idx)
+		subFieldsData[subField.GetFieldName()] = value
+	}
+	return subFieldsData
+}
+
 func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
 	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema,
 ) ([]map[string]interface{}, error) {
@@ -1503,6 +1711,8 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				rowsNum = int64(len(fieldDataList[0].GetVectors().GetSparseFloatVector().GetContents()))
 			case schemapb.DataType_Int8Vector:
 				rowsNum = int64(len(fieldDataList[0].GetVectors().GetInt8Vector())) / fieldDataList[0].GetVectors().GetDim()
+			case schemapb.DataType_ArrayOfStruct:
+				rowsNum = getRowsNumForStructArrayField(fieldDataList[0].GetStructArrays())
 			default:
 				return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", fieldDataList[0].GetType(), fieldDataList[0].GetFieldName())
 			}
@@ -1657,6 +1867,9 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 						continue
 					}
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetGeometryWktData().Data[i]
+				case schemapb.DataType_ArrayOfStruct:
+					structArrayJson := assembleStructArrayFieldToJson(fieldDataList[j].GetStructArrays(), i)
+					row[fieldDataList[j].FieldName] = structArrayJson
 				default:
 					row[fieldDataList[j].GetFieldName()] = ""
 				}
