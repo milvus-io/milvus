@@ -35,14 +35,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+
+	retry "github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
 
 // implementation assertion
 var _ kv.MetaKv = (*EmbedEtcdKV)(nil)
 
 const (
-	defaultRetryCount    = 3
-	defaultRetryInterval = 1 * time.Second
+	defaultRetryCount       = 3
+	defaultRetryInterval    = 1 * time.Second
+	defaultMaxSleepInterval = 2 * time.Second
 )
 
 // EmbedEtcdKV use embedded Etcd instance as a KV storage
@@ -55,25 +58,22 @@ type EmbedEtcdKV struct {
 	requestTimeout time.Duration
 }
 
-func retry(attempts int, sleep time.Duration, fn func() error) error {
-	for i := 0; ; i++ {
-		err := fn()
-		if err == nil || i >= (attempts-1) {
-			return err
-		}
-		time.Sleep(sleep)
-	}
-}
-
 // NewEmbededEtcdKV creates a new etcd kv.
 func NewEmbededEtcdKV(cfg *embed.Config, rootPath string, options ...Option) (*EmbedEtcdKV, error) {
 	var e *embed.Etcd
 	var err error
 
-	err = retry(defaultRetryCount, defaultRetryInterval, func() error {
-		e, err = embed.StartEtcd(cfg)
-		return err
-	})
+	ctx := context.TODO()
+	err = retry.Do(
+		ctx,
+		func() error {
+			e, err = embed.StartEtcd(cfg)
+			return err
+		},
+		retry.Attempts(defaultRetryCount),
+		retry.Sleep(defaultRetryInterval),
+		retry.MaxSleepTime(defaultMaxSleepInterval))
+
 	if err != nil {
 		return nil, err
 	}
@@ -93,16 +93,22 @@ func NewEmbededEtcdKV(cfg *embed.Config, rootPath string, options ...Option) (*E
 		requestTimeout: opt.requestTimeout,
 	}
 	// wait until embed etcd is ready with retry mechanism
-	err = retry(defaultRetryCount, defaultRetryInterval, func() error {
-		select {
-		case <-e.Server.ReadyNotify():
-			log.Info("Embedded etcd is ready!")
-			return nil
-		case <-time.After(60 * time.Second):
-			e.Server.Stop() // trigger a shutdown
-			return errors.New("Embedded etcd took too long to start")
-		}
-	})
+	err = retry.Do(
+		ctx,
+		func() error {
+			select {
+			case <-e.Server.ReadyNotify():
+				log.Info("Embedded etcd is ready!")
+				return nil
+			case <-time.After(60 * time.Second):
+				e.Server.Stop() // trigger a shutdown
+				return errors.New("Embedded etcd took too long to start")
+			}
+		},
+		retry.Attempts(defaultRetryCount),
+		retry.Sleep(defaultRetryInterval),
+		retry.MaxSleepTime(defaultMaxSleepInterval))
+
 	if err != nil {
 		return nil, err
 	}
