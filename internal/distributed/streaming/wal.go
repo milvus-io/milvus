@@ -3,7 +3,6 @@ package streaming
 import (
 	"context"
 	"sync"
-	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -93,13 +92,11 @@ func (w *walAccesserImpl) ControlChannel() string {
 // RawAppend writes a record to the log.
 func (w *walAccesserImpl) RawAppend(ctx context.Context, msg message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error) {
 	assertValidMessage(msg)
-	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return nil, ErrWALAccesserClosed
-	}
-	defer w.lifetime.Done()
 
 	msg = applyOpt(msg, opts...)
-	return w.appendToWAL(ctx, msg)
+
+	resp := w.AppendMessages(ctx, msg)
+	return resp.Responses[0].AppendResult, resp.Responses[0].Error
 }
 
 // Read returns a scanner for reading records from the wal.
@@ -135,49 +132,6 @@ func (w *walAccesserImpl) Read(ctx context.Context, opts ReadOption) Scanner {
 // Broadcast returns a broadcast for broadcasting records to the wal.
 func (w *walAccesserImpl) Broadcast() Broadcast {
 	return broadcast{w}
-}
-
-func (w *walAccesserImpl) Txn(ctx context.Context, opts TxnOption) (Txn, error) {
-	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return nil, ErrWALAccesserClosed
-	}
-
-	if opts.VChannel == "" {
-		w.lifetime.Done()
-		return nil, status.NewInvaildArgument("vchannel is required")
-	}
-	if opts.Keepalive != 0 && opts.Keepalive < 1*time.Millisecond {
-		w.lifetime.Done()
-		return nil, status.NewInvaildArgument("ttl must be greater than or equal to 1ms")
-	}
-
-	// Create a new transaction, send the begin txn message.
-	beginTxn, err := message.NewBeginTxnMessageBuilderV2().
-		WithVChannel(opts.VChannel).
-		WithHeader(&message.BeginTxnMessageHeader{
-			KeepaliveMilliseconds: opts.Keepalive.Milliseconds(),
-		}).
-		WithBody(&message.BeginTxnMessageBody{}).
-		BuildMutable()
-	if err != nil {
-		w.lifetime.Done()
-		return nil, err
-	}
-
-	appendResult, err := w.appendToWAL(ctx, beginTxn)
-	if err != nil {
-		w.lifetime.Done()
-		return nil, err
-	}
-
-	// Create new transaction success.
-	return &txnImpl{
-		mu:              sync.Mutex{},
-		state:           message.TxnStateInFlight,
-		opts:            opts,
-		txnCtx:          appendResult.TxnCtx,
-		walAccesserImpl: w,
-	}, nil
 }
 
 // Close closes all the wal accesser.

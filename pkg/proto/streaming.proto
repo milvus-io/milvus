@@ -339,6 +339,7 @@ enum StreamingCode {
     STREAMING_CODE_REPLICATE_VIOLATION    = 13; // replicate violation
     STREAMING_CODE_WALNAME_MISMATCH       = 14; // walName mismatch
     STREAMING_CODE_SCHEMA_VERSION_MISMATCH = 15; // wrong schema version
+    STREAMING_CODE_RATE_LIMIT_REJECTED    = 16; // rate limit rejected
     STREAMING_CODE_UNKNOWN                   = 999;  // unknown error
 }
 
@@ -421,6 +422,7 @@ message ProduceResponse {
         CreateProducerResponse create  = 1;
         ProduceMessageResponse produce = 2;
         CloseProducerResponse close    = 3;
+        ProduceRateLimitResponse rate_limit = 4;
     }
 }
 
@@ -440,6 +442,19 @@ message ProduceMessageResponse {
         ProduceMessageResponseResult result = 2;
         StreamingError error                = 3;
     }
+}
+
+enum WALRateLimitState {
+    WAL_RATE_LIMIT_STATE_UNKNOWN = 0;  // should never used.
+    WAL_RATE_LIMIT_STATE_NORMAL = 1;   // recover to normal produce rate.
+    WAL_RATE_LIMIT_STATE_SLOWDOWN = 2; // slowdown the produce rate.
+    WAL_RATE_LIMIT_STATE_REJECT = 3;   // reject the produce request.
+}
+
+// ProduceRateLimitResponse is the response to ask the client to slowdown/reject/recover the produce rate.
+message ProduceRateLimitResponse {
+    WALRateLimitState state = 1; // the state of the rate limit.
+    int64 rate = 2; // the rate to slowdown current produce rate, bytes/s.
 }
 
 // ProduceMessageResponseResult is the result of the produce message streaming
