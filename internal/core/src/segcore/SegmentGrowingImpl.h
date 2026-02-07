@@ -358,7 +358,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     virtual void
     BulkGetJsonData(milvus::OpContext* op_ctx,
                     FieldId field_id,
-                    std::function<void(milvus::Json, size_t, bool)> fn,
+                    const std::function<void(milvus::Json, size_t, bool)>& fn,
                     const int64_t* offsets,
                     int64_t count) const override;
 
@@ -387,8 +387,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
               &insert_record_,
               [this](const std::vector<PkType>& pks,
                      const Timestamp* timestamps,
-                     std::function<void(const SegOffset offset,
-                                        const Timestamp ts)> callback) {
+                     const std::function<void(const SegOffset offset,
+                                              const Timestamp ts)>& callback) {
                   this->search_batch_pks(pks, timestamps, false, callback);
               },
               segment_id) {

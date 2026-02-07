@@ -178,15 +178,15 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     }
 
     const TargetBitmap
-    Range(std::string value, OpType op) override {
+    Range(const std::string& value, OpType op) override {
         ThrowInfo(ErrorCode::NotImplemented,
                   "Range not supported for JsonKeyStats");
     }
 
     const TargetBitmap
-    Range(std::string lower_bound_value,
+    Range(const std::string& lower_bound_value,
           bool lb_inclusive,
-          std::string upper_bound_value,
+          const std::string& upper_bound_value,
           bool ub_inclusive) override {
         ThrowInfo(ErrorCode::NotImplemented,
                   "Range not supported for JsonKeyStats");

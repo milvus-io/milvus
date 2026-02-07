@@ -404,7 +404,7 @@ VectorMemIndex<T>::Build(const Config& config) {
     bool nullable = false;
     int64_t total_valid_rows = 0;
     int64_t total_num_rows = 0;
-    for (auto data : field_datas) {
+    for (const auto& data : field_datas) {
         auto num_rows = data->get_num_rows();
         auto valid_rows = data->get_valid_rows();
         total_valid_rows += valid_rows;
@@ -417,7 +417,7 @@ VectorMemIndex<T>::Build(const Config& config) {
     if (nullable) {
         valid_data.reset(new bool[total_num_rows]);
         int64_t chunk_offset = 0;
-        for (auto data : field_datas) {
+        for (const auto& data : field_datas) {
             auto rows = data->get_num_rows();
             // Copy valid data from FieldData (bitmap format to bool array)
             auto src_bitmap = data->ValidData();
@@ -432,7 +432,7 @@ VectorMemIndex<T>::Build(const Config& config) {
     if (!IndexIsSparse(GetIndexType())) {
         int64_t dim = 0;
         int64_t total_size = 0;
-        for (auto data : field_datas) {
+        for (const auto& data : field_datas) {
             AssertInfo(dim == 0 || dim == data->get_dim(),
                        "inconsistent dim value between field datas!");
             dim = data->get_dim();
@@ -451,7 +451,7 @@ VectorMemIndex<T>::Build(const Config& config) {
         // For embedding list index, elem_type_ is not NONE
         if (elem_type_ == DataType::NONE) {
             // TODO: avoid copying
-            for (auto data : field_datas) {
+            for (auto& data : field_datas) {
                 auto valid_size = data->DataSize();
                 std::memcpy(buf.get() + offset, data->Data(), valid_size);
                 offset += valid_size;
@@ -461,7 +461,7 @@ VectorMemIndex<T>::Build(const Config& config) {
             offsets.reserve(total_num_rows + 1);
             offsets.push_back(lim_offset);
             auto bytes_per_vec = vector_bytes_per_element(elem_type_, dim);
-            for (auto data : field_datas) {
+            for (auto& data : field_datas) {
                 auto vec_array_data =
                     dynamic_cast<FieldData<VectorArray>*>(data.get());
                 AssertInfo(vec_array_data != nullptr,
@@ -507,7 +507,7 @@ VectorMemIndex<T>::Build(const Config& config) {
     } else {
         // sparse
         int64_t dim = 0;
-        for (auto field_data : field_datas) {
+        for (const auto& field_data : field_datas) {
             dim = std::max(
                 dim,
                 std::dynamic_pointer_cast<FieldData<SparseFloatVector>>(
@@ -517,7 +517,7 @@ VectorMemIndex<T>::Build(const Config& config) {
         std::vector<knowhere::sparse::SparseRow<SparseValueType>> vec(
             total_valid_rows);
         int64_t offset = 0;
-        for (auto field_data : field_datas) {
+        for (const auto& field_data : field_datas) {
             auto ptr = static_cast<
                 const knowhere::sparse::SparseRow<SparseValueType>*>(
                 field_data->Data());

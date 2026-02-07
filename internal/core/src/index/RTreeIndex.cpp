@@ -460,7 +460,7 @@ RTreeIndex<T>::NotIn(size_t n, const T* values) {
 
 template <typename T>
 const TargetBitmap
-RTreeIndex<T>::Range(T value, OpType op) {
+RTreeIndex<T>::Range(const T& value, OpType op) {
     ThrowInfo(ErrorCode::NotImplemented,
               "Range(value, op) not supported for RTreeIndex");
     return {};
@@ -468,9 +468,9 @@ RTreeIndex<T>::Range(T value, OpType op) {
 
 template <typename T>
 const TargetBitmap
-RTreeIndex<T>::Range(T lower_bound_value,
+RTreeIndex<T>::Range(const T& lower_bound_value,
                      bool lb_inclusive,
-                     T upper_bound_value,
+                     const T& upper_bound_value,
                      bool ub_inclusive) {
     ThrowInfo(ErrorCode::NotImplemented,
               "Range(lower, upper) not supported for RTreeIndex");
