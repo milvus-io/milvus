@@ -1656,6 +1656,17 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 static_cast<std::string*>(data));
             break;
         }
+        case DataType::MOL: {
+            // dst must have at least count elements; the callback's offset
+            // parameter is guaranteed to be in [0, count)
+            bulk_subscript_ptr_impl<std::string>(
+                op_ctx,
+                column.get(),
+                seg_offsets,
+                count,
+                static_cast<std::string*>(data));
+            break;
+        }
         case DataType::ARRAY: {
             // dst must have at least count elements; the callback's index
             // parameter is guaranteed to be in [0, count)
@@ -2071,6 +2082,16 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
                                                  ret->mutable_scalars()
                                                      ->mutable_geometry_data()
                                                      ->mutable_data());
+            break;
+        }
+
+        case DataType::MOL: {
+            bulk_subscript_ptr_impl<std::string>(
+                op_ctx,
+                column.get(),
+                seg_offsets,
+                count,
+                ret->mutable_scalars()->mutable_mol_data()->mutable_data());
             break;
         }
 
