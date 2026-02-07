@@ -226,7 +226,7 @@ CSearch(CSegmentInterface c_segment,
         uint64_t timestamp,
         CSearchResult* result) {
     auto future = AsyncSearch(
-        {}, c_segment, c_plan, c_placeholder_group, timestamp, 0, 0);
+        {}, c_segment, c_plan, c_placeholder_group, timestamp, 0, 0, 0);
     auto futurePtr = static_cast<milvus::futures::IFuture*>(
         static_cast<void*>(static_cast<CFuture*>(future)));
 
@@ -252,8 +252,15 @@ CRetrieve(CSegmentInterface c_segment,
           CRetrievePlan c_plan,
           uint64_t timestamp,
           CRetrieveResult** result) {
-    auto future = AsyncRetrieve(
-        {}, c_segment, c_plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE, false, 0, 0);
+    auto future = AsyncRetrieve({},
+                                c_segment,
+                                c_plan,
+                                timestamp,
+                                DEFAULT_MAX_OUTPUT_SIZE,
+                                false,
+                                0,
+                                0,
+                                0);
     auto futurePtr = static_cast<milvus::futures::IFuture*>(
         static_cast<void*>(static_cast<CFuture*>(future)));
 
