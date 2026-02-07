@@ -630,14 +630,6 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
 		return err
 	}
-
-	// Validate warmup policy if specified in field TypeParams
-	if warmupPolicy, exist := common.GetWarmupPolicy(field.GetTypeParams()...); exist {
-		if err = common.ValidateWarmupPolicy(warmupPolicy); err != nil {
-			return merr.WrapErrParameterInvalidMsg("invalid warmup policy for field %s: %s", field.Name, err.Error())
-		}
-	}
-
 	return nil
 }
 
@@ -686,27 +678,12 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	if field.GetNullable() {
 		return fmt.Errorf("nullable is not supported for fields in struct array now, fieldName = %s", field.Name)
 	}
-
-	// Validate warmup policy if specified in field TypeParams
-	if warmupPolicy, exist := common.GetWarmupPolicy(field.GetTypeParams()...); exist {
-		if err = common.ValidateWarmupPolicy(warmupPolicy); err != nil {
-			return merr.WrapErrParameterInvalidMsg("invalid warmup policy for field %s: %s", field.Name, err.Error())
-		}
-	}
-
 	return nil
 }
 
 func ValidateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema, schema *schemapb.CollectionSchema) error {
 	if len(structArrayField.Fields) == 0 {
 		return fmt.Errorf("struct array field %s has no sub-fields", structArrayField.Name)
-	}
-
-	// Validate warmup policy if specified in struct field TypeParams
-	if warmupPolicy, exist := common.GetWarmupPolicy(structArrayField.GetTypeParams()...); exist {
-		if err := common.ValidateWarmupPolicy(warmupPolicy); err != nil {
-			return merr.WrapErrParameterInvalidMsg("invalid warmup policy for struct field %s: %s", structArrayField.Name, err.Error())
-		}
 	}
 
 	for _, subField := range structArrayField.Fields {
@@ -756,6 +733,11 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 		}
 	}
 
+	return nil
+}
+
+func validateMOLField(coll *schemapb.CollectionSchema) error {
+	// MOL field is supported when used with MolFingerprint function
 	return nil
 }
 
@@ -907,6 +889,13 @@ func checkFunctionOutputField(fSchema *schemapb.FunctionSchema, fields []*schema
 		if fields[0].GetDataType() != schemapb.DataType_BinaryVector {
 			return fmt.Errorf("MinHash function output field must be a BinaryVector field, but got %s", fields[0].DataType.String())
 		}
+	case schemapb.FunctionType_MolFingerprint:
+		if len(fields) != 1 {
+			return fmt.Errorf("MolFingerprint function only need 1 output field, but got %d", len(fields))
+		}
+		if fields[0].GetDataType() != schemapb.DataType_BinaryVector {
+			return fmt.Errorf("MolFingerprint function output field must be a BinaryVector field, but got %s", fields[0].DataType.String())
+		}
 	default:
 		return errors.New("check output field for unknown function type")
 	}
@@ -931,6 +920,11 @@ func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 	case schemapb.FunctionType_MinHash:
 		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
 			return fmt.Errorf("MinHash function input field must be a VARCHAR/TEXT field, got %d field with type %s",
+				len(fields), fields[0].DataType.String())
+		}
+	case schemapb.FunctionType_MolFingerprint:
+		if len(fields) != 1 || fields[0].DataType != schemapb.DataType_Mol {
+			return fmt.Errorf("MolFingerprint function input field must be a MOL field, got %d field with type %s",
 				len(fields), fields[0].DataType.String())
 		}
 	default:
@@ -980,6 +974,9 @@ func checkFunctionBasicParams(function *schemapb.FunctionSchema) error {
 		}
 	case schemapb.FunctionType_MinHash:
 		// MinHash function can accept optional params
+		return nil
+	case schemapb.FunctionType_MolFingerprint:
+		// MolFingerprint function can accept optional params (fingerprint_type, fingerprint_size, radius, etc.)
 		return nil
 	default:
 		return errors.New("check function params with unknown function type")
@@ -1210,7 +1207,7 @@ func validateFieldDataColumns(columns []*schemapb.FieldData, schema *schemaInfo)
 
 	// Count expected columns
 	for _, field := range schema.CollectionSchema.GetFields() {
-		if !(typeutil.IsBM25FunctionOutputField(field, schema.CollectionSchema) || typeutil.IsMinHashFunctionOutputField(field, schema.CollectionSchema)) {
+		if !(typeutil.IsBM25FunctionOutputField(field, schema.CollectionSchema) || typeutil.IsMinHashFunctionOutputField(field, schema.CollectionSchema) || typeutil.IsMolFingerprintFunctionOutputField(field, schema.CollectionSchema)) {
 			expectColumnNum++
 		}
 	}
@@ -1408,11 +1405,6 @@ func ValidateCollectionName(entity string) error {
 		return nil
 	}
 	return validateName(entity, "collection name")
-}
-
-// ValidateSnapshotName validates snapshot name using standard naming rules.
-func ValidateSnapshotName(snapshotName string) error {
-	return validateName(snapshotName, "snapshot name")
 }
 
 func ValidateObjectType(entity string) error {
@@ -1867,12 +1859,12 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 		if fieldSchema.GetDefaultValue() != nil && fieldSchema.IsPrimaryKey {
 			return merr.WrapErrParameterInvalidMsg("primary key can't be with default value")
 		}
-		if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && needAutoGenPk && inInsert) || typeutil.IsBM25FunctionOutputField(fieldSchema, schema) || typeutil.IsMinHashFunctionOutputField(fieldSchema, schema) {
+		if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && needAutoGenPk && inInsert) || typeutil.IsBM25FunctionOutputField(fieldSchema, schema) || typeutil.IsMinHashFunctionOutputField(fieldSchema, schema) || typeutil.IsMolFingerprintFunctionOutputField(fieldSchema, schema) {
 			// when inInsert, no need to pass when pk is autoid and SkipAutoIDCheck is false
 			autoGenFieldNum++
 		}
 		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
-			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && needAutoGenPk && inInsert) || typeutil.IsBM25FunctionOutputField(fieldSchema, schema) || typeutil.IsMinHashFunctionOutputField(fieldSchema, schema) {
+			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && needAutoGenPk && inInsert) || typeutil.IsBM25FunctionOutputField(fieldSchema, schema) || typeutil.IsMinHashFunctionOutputField(fieldSchema, schema) || typeutil.IsMolFingerprintFunctionOutputField(fieldSchema, schema) {
 				// autoGenField
 				continue
 			}
@@ -2083,7 +2075,7 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 
 		if _, ok := dataNameMap[fieldSchema.GetName()]; !ok {
 			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && skipPkFieldCheck) ||
-				typeutil.IsBM25FunctionOutputField(fieldSchema, schema) || typeutil.IsMinHashFunctionOutputField(fieldSchema, schema) ||
+				typeutil.IsBM25FunctionOutputField(fieldSchema, schema) || typeutil.IsMinHashFunctionOutputField(fieldSchema, schema) || typeutil.IsMolFingerprintFunctionOutputField(fieldSchema, schema) ||
 				(skipDynamicFieldCheck && fieldSchema.GetIsDynamic()) {
 				// autoGenField
 				continue

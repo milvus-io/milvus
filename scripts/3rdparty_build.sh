@@ -91,7 +91,7 @@ fi
 pushd ${BUILD_OUTPUT_DIR}
 
 export CONAN_REVISIONS_ENABLED=1
-export CXXFLAGS="-Wno-error=address -Wno-error=deprecated-declarations -include cstdint"
+export CXXFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"
 export CFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"
 # Allow CMake 4.x to build packages with old cmake_minimum_required versions (< 3.5)
 export CMAKE_POLICY_VERSION_MINIMUM=3.5

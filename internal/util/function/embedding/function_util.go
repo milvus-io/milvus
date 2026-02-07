@@ -26,14 +26,39 @@ const (
 	ClusterIDKey string = "cluster_id"
 )
 
-// Determine whether the column corresponding to outputIDs has functions other than BM25 and MinHash.
+// Determine whether the column corresponding to outputIDs has functions other than BM25, MinHash, and MolFingerprint.
+// These functions are processed locally in pipeline, not by FunctionExecutor during insert.
 // If outputIDs is empty, check all cols.
 func HasNonBM25AndMinHashFunctions(functions []*schemapb.FunctionSchema, outputIDs []int64) bool {
 	for _, fSchema := range functions {
 		switch fSchema.GetType() {
+		case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash, schemapb.FunctionType_MolFingerprint, schemapb.FunctionType_Unknown:
+			// Skip BM25, MinHash, MolFingerprint (local functions), and Unknown functions
+		default:
+			if len(outputIDs) == 0 {
+				return true
+			}
+			for _, id := range outputIDs {
+				for _, fOutputID := range fSchema.GetOutputFieldIds() {
+					if fOutputID == id {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+// HasFunctionsForSearch checks if there are functions that need FunctionExecutor for search.
+// MolFingerprint needs search processing to convert SMILES to fingerprint vectors.
+func HasFunctionsForSearch(functions []*schemapb.FunctionSchema, outputIDs []int64) bool {
+	for _, fSchema := range functions {
+		switch fSchema.GetType() {
 		case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash, schemapb.FunctionType_Unknown:
 			// Skip BM25, MinHash, and Unknown functions
-		default:
+		case schemapb.FunctionType_TextEmbedding, schemapb.FunctionType_MolFingerprint:
+			// TextEmbedding and MolFingerprint need search processing
 			if len(outputIDs) == 0 {
 				return true
 			}
