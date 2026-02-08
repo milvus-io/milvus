@@ -365,13 +365,18 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, b
 
 	// Set LoadPriority based on balance type:
 	// - Stopping balance (node draining): HIGH priority to quickly move data off stopping nodes
+	// - Normal balance with offline source node: HIGH priority (effectively recovery)
 	// - Normal balance: LOW priority to avoid interfering with user operations
 	loadPriority := commonpb.LoadPriority_LOW
 	if isStoppingBalance {
 		loadPriority = commonpb.LoadPriority_HIGH
 	}
 	for i := range segmentPlans {
-		segmentPlans[i].LoadPriority = loadPriority
+		if !isStoppingBalance && segmentPlans[i].From > 0 && b.isSourceNodeOffline(segmentPlans[i].From) {
+			segmentPlans[i].LoadPriority = commonpb.LoadPriority_HIGH
+		} else {
+			segmentPlans[i].LoadPriority = loadPriority
+		}
 	}
 
 	segmentTasks := make([]task.Task, 0)
@@ -396,6 +401,18 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, b
 	}
 
 	return segmentTasks, channelTasks
+}
+
+// isSourceNodeOffline checks if a node's heartbeat is stale, indicating it is
+// likely crashed/unreachable. dist_handler updates heartbeat every DistPullInterval
+// (default 500ms). A stale heartbeat (> 2x interval) means the node has missed
+// multiple heartbeat cycles and is effectively offline.
+func (b *BalanceChecker) isSourceNodeOffline(nodeID int64) bool {
+	node := b.nodeManager.Get(nodeID)
+	if node == nil {
+		return true
+	}
+	return time.Since(node.LastHeartbeat()) > 2*Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond)
 }
 
 // processBalanceQueue processes balance queue with common logic for both normal and stopping balance.

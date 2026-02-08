@@ -44,11 +44,12 @@ func createMockPriorityQueue() *assign.PriorityQueue {
 
 // Helper function to create a test BalanceChecker
 func createTestBalanceChecker() *BalanceChecker {
+	paramtable.Init()
 	metaInstance := &meta.Meta{
 		CollectionManager: meta.NewCollectionManager(nil),
 	}
 	targetMgr := meta.NewTargetManager(nil, nil)
-	nodeMgr := &session.NodeManager{}
+	nodeMgr := session.NewNodeManager()
 	dist := meta.NewDistributionManager(nodeMgr)
 	scheduler := task.NewScheduler(context.Background(), nil, nil, nil, nil, nil, nil)
 
@@ -589,6 +590,11 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_NormalBalanceLowPriorit
 	}
 	replicaIDs := []int64{101}
 
+	// Add source node with recent heartbeat so it's not considered offline
+	fromNode := session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1})
+	fromNode.SetLastHeartbeat(time.Now())
+	checker.nodeManager.Add(fromNode)
+
 	// Create mock replica
 	mockReplica := &meta.Replica{}
 
@@ -637,6 +643,89 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_NormalBalanceLowPriorit
 	assert.Len(t, capturedPlans, 1)
 	assert.Equal(t, commonpb.LoadPriority_LOW, capturedPlans[0].LoadPriority,
 		"Normal balance should use LOW priority")
+}
+
+func TestBalanceChecker_IsSourceNodeOffline(t *testing.T) {
+	checker := createTestBalanceChecker()
+
+	// Case 1: Node not in NodeManager → offline
+	assert.True(t, checker.isSourceNodeOffline(999), "Node not in NodeManager should be offline")
+
+	// Case 2: Node with recent heartbeat → not offline
+	healthyNode := session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 11})
+	healthyNode.SetLastHeartbeat(time.Now())
+	checker.nodeManager.Add(healthyNode)
+	assert.False(t, checker.isSourceNodeOffline(11), "Node with recent heartbeat should not be offline")
+
+	// Case 3: Node with stale heartbeat → offline
+	staleNode := session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 12})
+	staleNode.SetLastHeartbeat(time.Now().Add(-5 * time.Second))
+	checker.nodeManager.Add(staleNode)
+	assert.True(t, checker.isSourceNodeOffline(12), "Node with stale heartbeat should be offline")
+}
+
+func TestBalanceChecker_GenerateBalanceTasksFromReplicas_StaleNodeHighPriority(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+	config := balanceConfig{
+		segmentTaskTimeout: 30 * time.Second,
+		channelTaskTimeout: 30 * time.Second,
+	}
+	replicaIDs := []int64{101}
+
+	// Add source node with stale heartbeat (simulating crashed node)
+	staleNode := session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1})
+	staleNode.SetLastHeartbeat(time.Now().Add(-5 * time.Second))
+	checker.nodeManager.Add(staleNode)
+
+	// Create mock replica
+	mockReplica := &meta.Replica{}
+
+	// Mock ReplicaManager.Get
+	mockReplicaGet := mockey.Mock(mockey.GetMethod(checker.meta.ReplicaManager, "Get")).Return(mockReplica).Build()
+	defer mockReplicaGet.UnPatch()
+
+	// Create mock balance plans
+	segmentPlan := assign.SegmentAssignPlan{
+		Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1}},
+		Replica: mockReplica,
+		From:    1,
+		To:      2,
+	}
+
+	mockBalancer := mockey.Mock((*balance.BalancerFactory).GetBalancer).To(func(*balance.BalancerFactory) balance.Balance {
+		return balance.NewScoreBasedBalancer(nil, nil, nil, nil, nil)
+	}).Build()
+	defer mockBalancer.UnPatch()
+
+	// Mock balancer.BalanceReplica
+	mockBalanceReplica := mockey.Mock((*balance.ScoreBasedBalancer).BalanceReplica).Return(
+		[]assign.SegmentAssignPlan{segmentPlan},
+		[]assign.ChannelAssignPlan{},
+	).Build()
+	defer mockBalanceReplica.UnPatch()
+
+	// Capture the plans to verify LoadPriority
+	var capturedPlans []assign.SegmentAssignPlan
+	mockCreateSegmentTasks := mockey.Mock(balance.CreateSegmentTasksFromPlans).To(
+		func(ctx context.Context, source task.Source, timeout time.Duration, plans []assign.SegmentAssignPlan) []task.Task {
+			capturedPlans = plans
+			return []task.Task{}
+		}).Build()
+	defer mockCreateSegmentTasks.UnPatch()
+
+	// Mock balance.PrintNewBalancePlans
+	mockPrintPlans := mockey.Mock(balance.PrintNewBalancePlans).Return().Build()
+	defer mockPrintPlans.UnPatch()
+
+	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
+	// Call with isStoppingBalance=false, but source node has stale heartbeat
+	checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, false)
+
+	// Verify LoadPriority is set to HIGH because source node is offline
+	assert.Len(t, capturedPlans, 1)
+	assert.Equal(t, commonpb.LoadPriority_HIGH, capturedPlans[0].LoadPriority,
+		"Balance from offline node should use HIGH priority")
 }
 
 // =============================================================================
