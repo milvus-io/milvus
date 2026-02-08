@@ -1344,7 +1344,7 @@ func (s *DistributionSuite) TestSyncTargetVersion_RedundantGrowingLogic() {
 	type testCase struct {
 		tag                       string
 		growingSegments           []SegmentEntry
-		sealedInTarget            []int64
+		sealedSegmentRowCount     map[int64]int64
 		droppedInTarget           []int64
 		expectedRedundantSegments []int64
 	}
@@ -1356,7 +1356,7 @@ func (s *DistributionSuite) TestSyncTargetVersion_RedundantGrowingLogic() {
 				{SegmentID: 1, PartitionID: 1},
 				{SegmentID: 2, PartitionID: 1},
 			},
-			sealedInTarget:            []int64{1}, // segment 1 becomes sealed
+			sealedSegmentRowCount:     map[int64]int64{1: 100}, // segment 1 becomes sealed with row count 100
 			droppedInTarget:           []int64{},
 			expectedRedundantSegments: []int64{1},
 		},
@@ -1366,7 +1366,7 @@ func (s *DistributionSuite) TestSyncTargetVersion_RedundantGrowingLogic() {
 				{SegmentID: 1, PartitionID: 1},
 				{SegmentID: 2, PartitionID: 1},
 			},
-			sealedInTarget:            []int64{},
+			sealedSegmentRowCount:     map[int64]int64{},
 			droppedInTarget:           []int64{2}, // segment 2 is dropped
 			expectedRedundantSegments: []int64{2},
 		},
@@ -1377,8 +1377,8 @@ func (s *DistributionSuite) TestSyncTargetVersion_RedundantGrowingLogic() {
 				{SegmentID: 2, PartitionID: 1},
 				{SegmentID: 3, PartitionID: 1},
 			},
-			sealedInTarget:            []int64{1, 2},
-			droppedInTarget:           []int64{3},
+			sealedSegmentRowCount:     map[int64]int64{1: 100, 2: 200}, // segments 1, 2 become sealed
+			droppedInTarget:           []int64{3},                      // segment 3 is dropped
 			expectedRedundantSegments: []int64{1, 2, 3},
 		},
 		{
@@ -1387,7 +1387,7 @@ func (s *DistributionSuite) TestSyncTargetVersion_RedundantGrowingLogic() {
 				{SegmentID: 1, PartitionID: 1},
 				{SegmentID: 2, PartitionID: 1},
 			},
-			sealedInTarget:            []int64{},
+			sealedSegmentRowCount:     map[int64]int64{},
 			droppedInTarget:           []int64{},
 			expectedRedundantSegments: []int64{},
 		},
@@ -1402,10 +1402,11 @@ func (s *DistributionSuite) TestSyncTargetVersion_RedundantGrowingLogic() {
 			s.dist.AddGrowing(tc.growingSegments...)
 
 			// Call SyncTargetVersion to trigger redundant growing segment logic
+			// Use v2.6 format (SealedSegmentRowCount) instead of v2.5 format (SealedInTarget)
 			s.dist.SyncTargetVersion(&querypb.SyncAction{
-				TargetVersion:   1000,
-				SealedInTarget:  tc.sealedInTarget,
-				DroppedInTarget: tc.droppedInTarget,
+				TargetVersion:         1000,
+				SealedSegmentRowCount: tc.sealedSegmentRowCount,
+				DroppedInTarget:       tc.droppedInTarget,
 			}, []int64{1})
 
 			// Verify redundant segments have correct target version
