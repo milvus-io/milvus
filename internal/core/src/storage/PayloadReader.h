@@ -102,9 +102,8 @@ class PayloadReader {
         if (payload_buf_) {
             return DataType::NONE;
         }
-        if (field_data_) {
-            return field_data_->get_data_type();
-        }
+        // field_data_ must be non-null here due to the AssertInfo above
+        return field_data_->get_data_type();
     }
 
  private:

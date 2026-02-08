@@ -34,7 +34,7 @@ is_special(char c) {
 std::string
 translate_pattern_match_to_regex(const std::string& pattern) {
     std::string r;
-    r.reserve(2 * pattern.size());
+    r.reserve(8 * pattern.size());
     bool escape_mode = false;
     for (char c : pattern) {
         if (escape_mode) {
@@ -47,9 +47,9 @@ translate_pattern_match_to_regex(const std::string& pattern) {
             if (c == '\\') {
                 escape_mode = true;
             } else if (c == '%') {
-                r += "[\\s\\S]*";
+                r += "(.|\n)*";
             } else if (c == '_') {
-                r += "[\\s\\S]";
+                r += "(.|\n)";
             } else {
                 if (is_special(c)) {
                     r += '\\';
@@ -57,6 +57,12 @@ translate_pattern_match_to_regex(const std::string& pattern) {
                 r += c;
             }
         }
+    }
+    // Trailing backslash is a parse error - nothing to escape
+    if (escape_mode) {
+        ThrowInfo(ExprInvalid,
+                  "Invalid LIKE pattern: trailing backslash with nothing "
+                  "to escape");
     }
     return r;
 }
@@ -80,6 +86,12 @@ extract_fixed_prefix_from_pattern(const std::string& pattern) {
                 prefix += c;
             }
         }
+    }
+    // Trailing backslash is a parse error - nothing to escape
+    if (escape_mode) {
+        ThrowInfo(ExprInvalid,
+                  "Invalid LIKE pattern: trailing backslash with nothing "
+                  "to escape");
     }
     return prefix;
 }

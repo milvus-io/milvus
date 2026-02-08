@@ -17,7 +17,7 @@ use crate::data_type::TantivyDataType;
 
 use crate::error::{Result, TantivyBindingError};
 use crate::index_writer::TantivyValue;
-use crate::util::c_ptr_to_str;
+use crate::util::{c_ptr_to_str, ptr_len_to_str};
 
 const BATCH_SIZE: usize = 4096;
 
@@ -213,6 +213,22 @@ impl IndexWriterWrapperImpl {
         let mut document = TantivyDocument::default();
         for element in datas {
             let data = c_ptr_to_str(*element)?;
+            document.add_field_value(self.field, data);
+        }
+
+        self.add_document(document, offset)
+    }
+
+    pub fn add_array_keywords_with_len(
+        &mut self,
+        ptrs: &[*const u8],
+        lens: &[usize],
+        offset: Option<i64>,
+    ) -> Result<()> {
+        debug_assert_eq!(ptrs.len(), lens.len());
+        let mut document = TantivyDocument::default();
+        for i in 0..ptrs.len() {
+            let data = ptr_len_to_str(ptrs[i], lens[i])?;
             document.add_field_value(self.field, data);
         }
 

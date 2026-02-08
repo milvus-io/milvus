@@ -232,9 +232,15 @@ RustResult tantivy_range_query_keyword(void *ptr,
                                        bool ub_inclusive,
                                        void *bitset);
 
-RustResult tantivy_prefix_query_keyword(void *ptr, const char *prefix, void *bitset);
+RustResult tantivy_prefix_query_keyword(void *ptr,
+                                        const uint8_t *prefix,
+                                        uintptr_t prefix_len,
+                                        void *bitset);
 
-RustResult tantivy_regex_query(void *ptr, const char *pattern, void *bitset);
+RustResult tantivy_regex_query(void *ptr,
+                               const uint8_t *pattern,
+                               uintptr_t pattern_len,
+                               void *bitset);
 
 RustResult tantivy_json_term_query_i64(void *ptr,
                                        const char *json_path,
@@ -294,12 +300,14 @@ RustResult tantivy_json_range_query_keyword(void *ptr,
 
 RustResult tantivy_json_regex_query(void *ptr,
                                     const char *json_path,
-                                    const char *pattern,
+                                    const uint8_t *pattern,
+                                    uintptr_t pattern_len,
                                     void *bitset);
 
 RustResult tantivy_json_prefix_query(void *ptr,
                                      const char *json_path,
-                                     const char *prefix,
+                                     const uint8_t *prefix,
+                                     uintptr_t prefix_len,
                                      void *bitset);
 
 RustResult tantivy_ngram_match_query(void *ptr,
@@ -411,9 +419,11 @@ RustResult tantivy_index_add_bools_by_single_segment_writer(void *ptr,
                                                             const bool *array,
                                                             uintptr_t len);
 
-RustResult tantivy_index_add_string(void *ptr, const char *s, int64_t offset);
+RustResult tantivy_index_add_string(void *ptr, const uint8_t *s, uintptr_t len, int64_t offset);
 
-RustResult tantivy_index_add_string_by_single_segment_writer(void *ptr, const char *s);
+RustResult tantivy_index_add_string_by_single_segment_writer(void *ptr,
+                                                             const uint8_t *s,
+                                                             uintptr_t len);
 
 RustResult tantivy_index_add_json_key_stats_data_by_batch(void *ptr,
                                                           const char *const *keys,
@@ -492,12 +502,14 @@ RustResult tantivy_index_add_array_bools_by_single_segment_writer(void *ptr,
                                                                   uintptr_t len);
 
 RustResult tantivy_index_add_array_keywords(void *ptr,
-                                            const char *const *array,
+                                            const uint8_t *const *array,
+                                            const uintptr_t *str_lens,
                                             uintptr_t len,
                                             int64_t offset);
 
 RustResult tantivy_index_add_array_keywords_by_single_segment_writer(void *ptr,
-                                                                     const char *const *array,
+                                                                     const uint8_t *const *array,
+                                                                     const uintptr_t *str_lens,
                                                                      uintptr_t len);
 
 RustResult tantivy_create_text_writer(const char *field_name,

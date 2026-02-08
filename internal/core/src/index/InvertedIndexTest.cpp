@@ -29,17 +29,23 @@
 #include <utility>
 #include <variant>
 #include <vector>
+#include <chrono>
+#include <iomanip>
+#include <iostream>
+#include <random>
 
 #include "bitset/bitset.h"
 #include "bitset/detail/proxy.h"
 #include "common/Consts.h"
 #include "common/FieldDataInterface.h"
 #include "common/Tracer.h"
+#include "common/RegexQuery.h"
 #include "common/TracerBase.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
 #include "index/Index.h"
+#include "index/InvertedIndexTantivy.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
 #include "index/IndexStats.h"
@@ -863,9 +869,9 @@ test_string() {
         }
 
         {
-            ASSERT_TRUE(real_index->SupportRegexQuery());
+            ASSERT_TRUE(real_index->SupportPatternQuery());
             auto prefix = data[0];
-            auto bitset = real_index->RegexQuery(prefix + "(.|\n)*");
+            auto bitset = real_index->PatternQuery(prefix + "(.|\n)*");
             ASSERT_EQ(cnt, bitset.size());
             size_t start = 0;
             if (has_lack_binlog_row_) {
@@ -940,4 +946,610 @@ TEST(InvertedIndex, HasLackBinlogRows) {
     test_run<double, DataType::DOUBLE, DataType::NONE, true, true, true>();
 
     test_string<true, true, true>();
+}
+
+// ============== Unified Pattern Matching Consistency Tests ==============
+// These tests verify that ALL THREE execution paths produce identical results:
+// 1. RE2 regex (RegexMatcher) - used for sealed segments without index
+// 2. LikePatternMatcher - used for growing data (brute-force scan)
+// 3. Tantivy index - used for sealed segments with inverted index
+//
+// This is critical for query correctness across different segment states.
+
+namespace {
+
+// Helper to build Tantivy index for testing
+std::unique_ptr<index::InvertedIndexTantivy<std::string>>
+BuildTantivyStringIndex(const std::vector<std::string>& data) {
+    auto index = std::make_unique<index::InvertedIndexTantivy<std::string>>();
+    index->BuildWithRawDataForUT(data.size(), data.data(), Config());
+    return index;
+}
+
+// Verify all three matchers agree for a pattern against test data
+void
+VerifyPatternMatchConsistency(
+    const std::string& pattern,
+    const std::vector<std::string>& test_data,
+    index::InvertedIndexTantivy<std::string>* tantivy_index,
+    const std::string& test_category) {
+    PatternMatchTranslator translator;
+    auto regex_pattern = translator(pattern);
+
+    RegexMatcher re2_matcher(regex_pattern);
+    LikePatternMatcher like_matcher(pattern);
+    auto tantivy_result =
+        tantivy_index->PatternMatch(pattern, proto::plan::OpType::Match);
+
+    for (size_t i = 0; i < test_data.size(); i++) {
+        bool re2_result = re2_matcher(test_data[i]);
+        bool like_result = like_matcher(test_data[i]);
+        bool tantivy_bit = tantivy_result[i];
+
+        EXPECT_EQ(re2_result, like_result)
+            << test_category << " - RE2/LikePatternMatcher mismatch:\n"
+            << "  pattern=\"" << pattern << "\"\n"
+            << "  data=\"" << test_data[i] << "\" (len=" << test_data[i].size()
+            << ")\n"
+            << "  RE2=" << re2_result << ", Like=" << like_result;
+
+        EXPECT_EQ(re2_result, tantivy_bit)
+            << test_category << " - RE2/Tantivy mismatch:\n"
+            << "  pattern=\"" << pattern << "\"\n"
+            << "  data=\"" << test_data[i] << "\" (len=" << test_data[i].size()
+            << ")\n"
+            << "  RE2=" << re2_result << ", Tantivy=" << tantivy_bit;
+    }
+}
+
+}  // namespace
+
+// ============== Comprehensive Pattern Matching Consistency Test ==============
+// This single test verifies consistency across ALL THREE execution paths:
+// 1. RE2 regex (RegexMatcher) - sealed segments without index
+// 2. LikePatternMatcher - growing data brute-force scan
+// 3. Tantivy index - sealed segments with inverted index
+
+TEST(PatternMatchConsistency, AllMatchersMustAgree) {
+    // Comprehensive test data covering all scenarios
+    std::vector<std::string> test_data = {
+        // Basic strings
+        "hello",
+        "world",
+        "hello world",
+        "HELLO",
+        "hello123",
+        "123hello",
+        "h3ll0",
+        "test",
+        "testing",
+        "tested",
+        "tester",
+        "apple",
+        "application",
+        "apply",
+        "banana",
+
+        // Overlapping pattern test data
+        "a",
+        "aa",
+        "aaa",
+        "aaaa",
+        "aaaaa",
+        "aba",
+        "abba",
+        "aab",
+        "baa",
+        "abab",
+        "ababab",
+        "abc",
+        "abcbc",
+        "abcab",
+        "xaax",
+        "xaaax",
+        "ab",
+        "ba",
+
+        // UTF-8 test data (2-byte, 3-byte, 4-byte)
+        "café",                       // 2-byte UTF-8 (é)
+        "\xE4\xBD\xA0\xE5\xA5\xBD",   // 你好 (3-byte UTF-8)
+        "test\xE4\xBD\xA0test",       // Mixed ASCII and CJK
+        "\xF0\x9F\x98\x80",           // 😀 (4-byte UTF-8)
+        "emoji\xF0\x9F\x98\x80test",  // Mixed with emoji
+        "a\xC3\xA9"
+        "b",                 // aéb
+        "\xC3\xA9\xC3\xA9",  // éé (consecutive 2-byte)
+        "normal",
+
+        // Special characters for escape tests
+        "100%",
+        "50%off",
+        "file_name",
+        "file_name.txt",
+        "path\\to\\file",
+        "%percent%",
+        "_underscore_",
+        "back\\slash",
+
+        // Edge cases
+        "",      // Empty string
+        "   ",   // Whitespace
+        "\t\n",  // Tab and newline
+        "123",   // Numbers only
+        "!@#$",  // Special chars
+    };
+
+    // Build Tantivy index with all test data
+    auto tantivy_index = BuildTantivyStringIndex(test_data);
+
+    // Comprehensive pattern list covering all scenarios
+    std::vector<std::string> patterns = {
+        // Basic patterns
+        "hello",   // Exact match
+        "hello%",  // Prefix match
+        "%world",  // Suffix match
+        "%llo%",   // Inner match
+        "h_llo",   // Single char wildcard
+        "h%o",     // Prefix + suffix with gap
+        "%",       // Match all
+        "test%",   // Prefix
+        "%ing",    // Suffix
+        "%est%",   // Inner
+
+        // Overlapping patterns (key regression tests)
+        "%aa%aa%",     // Two overlapping "aa"
+        "%aa%aa%aa%",  // Three overlapping "aa"
+        "%ab%ba%",     // Different overlapping segments
+        "%ab%ab%",     // Same segment twice
+        "%ab%ab%ab%",  // Same segment three times
+        "a%aa",        // Prefix with repeated suffix
+        "aa%a",        // Repeated prefix with suffix
+        "%a%a%",       // Single char segments
+        "%a%a%a%",     // Three single char segments
+        "a%a",         // Simple overlapping
+
+        // UTF-8 patterns
+        "caf_",                // Underscore matches 2-byte UTF-8
+        "%\xE4\xBD\xA0%",      // Contains 你
+        "a_b",                 // Single UTF-8 char in middle
+        "%\xF0\x9F\x98\x80%",  // Contains emoji
+        "\xE4\xBD\xA0%",       // Starts with 你
+        "%\xE5\xA5\xBD",       // Ends with 好
+
+        // Escape sequences
+        "100\\%",            // Literal %
+        "%\\%",              // Ends with %
+        "\\%%",              // Starts with %
+        "file\\_name%",      // Literal _
+        "%\\\\%",            // Contains backslash
+        "\\%percent\\%",     // Literal % on both sides
+        "\\_underscore\\_",  // Literal _ on both sides
+
+        // Edge case patterns
+        "_",    // Single char
+        "__",   // Two chars
+        "___",  // Three chars
+        "%%",   // Multiple percent
+        "_%",   // One char then anything
+        "%_",   // Anything then one char
+        "",     // Empty pattern
+    };
+
+    int total_tests = 0;
+    int passed_tests = 0;
+
+    for (const auto& pattern : patterns) {
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(pattern);
+
+        RegexMatcher re2_matcher(regex_pattern);
+        LikePatternMatcher like_matcher(pattern);
+        auto tantivy_result =
+            tantivy_index->PatternMatch(pattern, proto::plan::OpType::Match);
+
+        for (size_t i = 0; i < test_data.size(); i++) {
+            total_tests++;
+
+            bool re2_result = re2_matcher(test_data[i]);
+            bool like_result = like_matcher(test_data[i]);
+            bool tantivy_bit = tantivy_result[i];
+
+            // All three must agree
+            bool all_agree =
+                (re2_result == like_result) && (re2_result == tantivy_bit);
+
+            if (all_agree) {
+                passed_tests++;
+            }
+
+            EXPECT_EQ(re2_result, like_result)
+                << "RE2/LikePatternMatcher MISMATCH:\n"
+                << "  Pattern: \"" << pattern << "\"\n"
+                << "  Data: \"" << test_data[i]
+                << "\" (len=" << test_data[i].size() << ")\n"
+                << "  RE2=" << re2_result << ", Like=" << like_result;
+
+            EXPECT_EQ(re2_result, tantivy_bit)
+                << "RE2/Tantivy MISMATCH:\n"
+                << "  Pattern: \"" << pattern << "\"\n"
+                << "  Data: \"" << test_data[i]
+                << "\" (len=" << test_data[i].size() << ")\n"
+                << "  RE2=" << re2_result << ", Tantivy=" << tantivy_bit;
+        }
+    }
+
+    // Summary
+    std::cout << "Pattern Match Consistency: " << passed_tests << "/"
+              << total_tests << " tests passed across all three matchers\n";
+}
+
+// Test OpType-specific matching (PrefixMatch, PostfixMatch, InnerMatch)
+TEST(PatternMatchConsistency, OpTypeMatchersMustAgree) {
+    std::vector<std::string> test_data = {
+        "hello",
+        "hello world",
+        "world hello",
+        "say hello there",
+        "helloworld",
+        "worldhello",
+        "HELLO",
+        "Hello",
+        "test",
+        "testing",
+        "pretest",
+        "pretesting",
+    };
+
+    auto tantivy_index = BuildTantivyStringIndex(test_data);
+
+    std::vector<std::string> search_terms = {"hello", "test", "world"};
+
+    for (const auto& term : search_terms) {
+        // Test PrefixMatch (equivalent to "term%")
+        {
+            std::string like_pattern = term + "%";
+            PatternMatchTranslator translator;
+            RegexMatcher re2_matcher(translator(like_pattern));
+            LikePatternMatcher like_matcher(like_pattern);
+            auto tantivy_result = tantivy_index->PatternMatch(
+                term, proto::plan::OpType::PrefixMatch);
+
+            for (size_t i = 0; i < test_data.size(); i++) {
+                bool re2_result = re2_matcher(test_data[i]);
+                bool like_result = like_matcher(test_data[i]);
+                bool tantivy_bit = tantivy_result[i];
+
+                EXPECT_EQ(re2_result, like_result)
+                    << "PrefixMatch RE2/Like mismatch: term=\"" << term
+                    << "\", data=\"" << test_data[i] << "\"";
+                EXPECT_EQ(re2_result, tantivy_bit)
+                    << "PrefixMatch RE2/Tantivy mismatch: term=\"" << term
+                    << "\", data=\"" << test_data[i] << "\"";
+            }
+        }
+
+        // Test PostfixMatch (equivalent to "%term")
+        {
+            std::string like_pattern = "%" + term;
+            PatternMatchTranslator translator;
+            RegexMatcher re2_matcher(translator(like_pattern));
+            LikePatternMatcher like_matcher(like_pattern);
+            auto tantivy_result = tantivy_index->PatternMatch(
+                term, proto::plan::OpType::PostfixMatch);
+
+            for (size_t i = 0; i < test_data.size(); i++) {
+                bool re2_result = re2_matcher(test_data[i]);
+                bool like_result = like_matcher(test_data[i]);
+                bool tantivy_bit = tantivy_result[i];
+
+                EXPECT_EQ(re2_result, like_result)
+                    << "PostfixMatch RE2/Like mismatch: term=\"" << term
+                    << "\", data=\"" << test_data[i] << "\"";
+                EXPECT_EQ(re2_result, tantivy_bit)
+                    << "PostfixMatch RE2/Tantivy mismatch: term=\"" << term
+                    << "\", data=\"" << test_data[i] << "\"";
+            }
+        }
+
+        // Test InnerMatch (equivalent to "%term%")
+        {
+            std::string like_pattern = "%" + term + "%";
+            PatternMatchTranslator translator;
+            RegexMatcher re2_matcher(translator(like_pattern));
+            LikePatternMatcher like_matcher(like_pattern);
+            auto tantivy_result = tantivy_index->PatternMatch(
+                term, proto::plan::OpType::InnerMatch);
+
+            for (size_t i = 0; i < test_data.size(); i++) {
+                bool re2_result = re2_matcher(test_data[i]);
+                bool like_result = like_matcher(test_data[i]);
+                bool tantivy_bit = tantivy_result[i];
+
+                EXPECT_EQ(re2_result, like_result)
+                    << "InnerMatch RE2/Like mismatch: term=\"" << term
+                    << "\", data=\"" << test_data[i] << "\"";
+                EXPECT_EQ(re2_result, tantivy_bit)
+                    << "InnerMatch RE2/Tantivy mismatch: term=\"" << term
+                    << "\", data=\"" << test_data[i] << "\"";
+            }
+        }
+    }
+}
+
+// Test special byte handling consistency (tabs, newlines, CRLF)
+TEST(PatternMatchConsistency, SpecialByteHandling) {
+    std::vector<std::string> test_data;
+
+    test_data.push_back("helloworld");
+    test_data.push_back("hello world");
+    test_data.push_back("ab");
+    test_data.push_back("a\tb");    // Tab character
+    test_data.push_back("a\nb");    // Newline character
+    test_data.push_back("a\r\nb");  // CRLF
+
+    auto tantivy_index = BuildTantivyStringIndex(test_data);
+
+    std::vector<std::string> patterns = {
+        "hello%",
+        "%world",
+        "hello%world",
+        "a%b",
+        "a__b",
+        "%",
+    };
+
+    for (const auto& pattern : patterns) {
+        VerifyPatternMatchConsistency(
+            pattern, test_data, tantivy_index.get(), "SpecialByte");
+    }
+}
+
+// Test NUL byte (\x00) handling consistency across all three matchers.
+// NUL is a valid UTF-8 character (U+0000) and must be handled correctly
+// in data strings, patterns, and wildcard matching.
+TEST(PatternMatchConsistency, NulByteHandling) {
+    using namespace std::string_literals;
+
+    std::vector<std::string> test_data;
+
+    // Strings without NUL (for baseline comparison)
+    test_data.push_back("ab");
+    test_data.push_back("hello");
+    test_data.push_back("");
+
+    // Strings with embedded NUL bytes
+    test_data.push_back("a\0b"s);     // NUL in middle
+    test_data.push_back("\0hello"s);  // NUL at start
+    test_data.push_back("hello\0"s);  // NUL at end
+    test_data.push_back("a\0\0b"s);   // Double NUL
+    test_data.push_back("\0"s);       // Just NUL
+    test_data.push_back("\0\0"s);     // Two NULs
+    test_data.push_back("a\0b\0c"s);  // Multiple NULs interleaved
+    test_data.push_back("he\0llo"s);  // NUL inside word
+
+    auto tantivy_index = BuildTantivyStringIndex(test_data);
+
+    std::vector<std::string> patterns = {
+        // Patterns that use % wildcard with NUL data
+        "%",       // Match everything
+        "a%b",     // Should match "a\0b"
+        "a%",      // Should match "a\0b", "a\0\0b", "a\0b\0c"
+        "%b",      // Should match "a\0b"
+        "a%c",     // Should match "a\0b\0c"
+        "hello%",  // Should match "hello\0"
+        "%hello",  // Should match "\0hello"
+
+        // Patterns that use _ wildcard (matches one UTF-8 char, including NUL)
+        "a_b",     // _ should match NUL: "a\0b"
+        "_hello",  // _ should match NUL: "\0hello"
+        "hello_",  // _ should match NUL: "hello\0"
+        "a__b",    // __ should match \0\0: "a\0\0b"
+        "_",       // Should match single NUL: "\0"
+        "__",      // Should match two NULs: "\0\0"
+
+        // Exact match patterns (no wildcards)
+        "ab",  // Should match "ab" but not "a\0b"
+
+        // Patterns with NUL as literal character
+        "a\0b"s,  // Exact match with NUL
+        "a\0%"s,  // NUL in pattern followed by %
+        "%\0b"s,  // % followed by NUL
+        "\0%"s,   // NUL at start of pattern
+        "%\0"s,   // NUL at end of pattern
+        "%\0%"s,  // NUL surrounded by %
+        "a\0_"s,  // NUL followed by _
+    };
+
+    for (const auto& pattern : patterns) {
+        VerifyPatternMatchConsistency(
+            pattern, test_data, tantivy_index.get(), "NulByte");
+    }
+}
+
+// ============== Performance Benchmark: Tantivy Index vs Brute-Force ==============
+// Compares query time for index-based vs brute-force pattern matching:
+// - Tantivy inverted index: single PatternMatch() call returns bitset for ALL rows
+// - RE2/Boost/LikePatternMatcher: iterate over each string individually
+// Run with: --gtest_filter="*IndexBenchmark*"
+
+namespace {
+
+std::vector<std::string>
+GenerateBenchStrings(size_t count, size_t avg_len, unsigned seed = 42) {
+    std::mt19937 rng(seed);
+    std::uniform_int_distribution<int> char_dist('a', 'z');
+    std::uniform_int_distribution<int> len_dist(avg_len / 2, avg_len * 3 / 2);
+    std::vector<std::string> result;
+    result.reserve(count);
+    for (size_t i = 0; i < count; i++) {
+        size_t len = len_dist(rng);
+        std::string s;
+        s.reserve(len);
+        for (size_t j = 0; j < len; j++) s += static_cast<char>(char_dist(rng));
+        result.push_back(std::move(s));
+    }
+    return result;
+}
+
+struct BenchRes {
+    double us;
+    int64_t count;
+};
+
+template <typename Fn>
+BenchRes
+TimeBench(Fn&& fn, int warmup, int iters) {
+    volatile int64_t total = 0;
+    for (int w = 0; w < warmup; w++) total += fn();
+    total = 0;
+    auto t0 = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < iters; i++) total += fn();
+    double us = std::chrono::duration<double, std::micro>(
+                    std::chrono::high_resolution_clock::now() - t0)
+                    .count() /
+                iters;
+    return {us, total / iters};
+}
+
+void
+PrintRow(const std::string& name, double us, int64_t matches) {
+    std::cout << "  " << std::left << std::setw(25) << name << std::right
+              << std::setw(12) << std::fixed << std::setprecision(0) << us
+              << " us" << std::setw(12) << matches << "\n";
+}
+
+void
+PrintHeader(const std::string& title) {
+    std::cout << "\n  " << title << "\n"
+              << "  " << std::string(60, '-') << "\n"
+              << std::left << "  " << std::setw(25) << "Matcher" << std::right
+              << std::setw(15) << "total(us)" << std::setw(12) << "matches"
+              << "\n"
+              << "  " << std::string(60, '-') << "\n";
+}
+
+}  // namespace
+
+TEST(IndexBenchmark, TantivyVsBruteForce) {
+    const size_t N = 100000;
+    auto data = GenerateBenchStrings(N, 50);
+    auto tantivy_index = BuildTantivyStringIndex(data);
+
+    std::vector<std::pair<std::string, std::string>> patterns = {
+        {"prefix: abc%", "abc%"},
+        {"suffix: %xyz", "%xyz"},
+        {"inner: %hello%", "%hello%"},
+        {"complex: %ab%cd%ef%", "%ab%cd%ef%"},
+        {"exact: abcdefghij", "abcdefghij"},
+        {"single-char: a_c_e_g", "a_c_e_g"},
+        {"multi-seg: %a%b%c%d%", "%a%b%c%d%"},
+        {"mixed: test%_abc%", "test%_abc%"},
+    };
+
+    std::cout << "\n====== Tantivy Index vs Brute-Force (" << N
+              << " strings, avg 50 bytes) ======\n";
+
+    PatternMatchTranslator translator;
+    const int W = 3, I = 10;
+
+    for (const auto& pc : patterns) {
+        const auto& name = pc.first;
+        const auto& pattern = pc.second;
+        auto rp = translator(pattern);
+        RegexMatcher re2(rp);
+        BoostRegexMatcher boost(rp);
+        LikePatternMatcher like(pattern);
+
+        auto re2_r = TimeBench(
+            [&]() {
+                int64_t c = 0;
+                for (const auto& s : data) c += re2(s) ? 1 : 0;
+                return c;
+            },
+            W,
+            I);
+        auto boost_r = TimeBench(
+            [&]() {
+                int64_t c = 0;
+                for (const auto& s : data) c += boost(s) ? 1 : 0;
+                return c;
+            },
+            W,
+            I);
+        auto like_r = TimeBench(
+            [&]() {
+                int64_t c = 0;
+                for (const auto& s : data) c += like(s) ? 1 : 0;
+                return c;
+            },
+            W,
+            I);
+        auto tantivy_r = TimeBench(
+            [&]() {
+                auto r = tantivy_index->PatternMatch(
+                    pattern, proto::plan::OpType::Match);
+                return static_cast<int64_t>(r.count());
+            },
+            W,
+            I);
+
+        PrintHeader(name);
+        PrintRow("RE2 (brute-force)", re2_r.us, re2_r.count);
+        PrintRow("Boost (brute-force)", boost_r.us, boost_r.count);
+        PrintRow("LikePatternMatcher", like_r.us, like_r.count);
+        PrintRow("Tantivy (index)", tantivy_r.us, tantivy_r.count);
+    }
+}
+
+TEST(IndexBenchmark, TantivyDataScaling) {
+    PatternMatchTranslator translator;
+    std::string pattern = "%abc%def%";
+    auto rp = translator(pattern);
+
+    std::vector<size_t> sizes = {1000, 10000, 100000};
+    const int W = 3, I = 10;
+
+    std::cout << "\n====== Data Size Scaling (pattern: %abc%def%) ======\n"
+              << std::left << "  " << std::setw(10) << "N" << std::right
+              << std::setw(15) << "RE2(us)" << std::setw(18) << "LikePat(us)"
+              << std::setw(18) << "Tantivy(us)"
+              << "\n"
+              << "  " << std::string(60, '-') << "\n";
+
+    for (size_t N : sizes) {
+        auto data = GenerateBenchStrings(N, 50);
+        auto ti = BuildTantivyStringIndex(data);
+        RegexMatcher re2(rp);
+        LikePatternMatcher like(pattern);
+
+        auto re2_r = TimeBench(
+            [&]() {
+                int64_t c = 0;
+                for (const auto& s : data) c += re2(s) ? 1 : 0;
+                return c;
+            },
+            W,
+            I);
+        auto like_r = TimeBench(
+            [&]() {
+                int64_t c = 0;
+                for (const auto& s : data) c += like(s) ? 1 : 0;
+                return c;
+            },
+            W,
+            I);
+        auto tantivy_r = TimeBench(
+            [&]() {
+                auto r = ti->PatternMatch(pattern, proto::plan::OpType::Match);
+                return static_cast<int64_t>(r.count());
+            },
+            W,
+            I);
+
+        std::cout << "  " << std::left << std::setw(10) << N << std::right
+                  << std::setw(12) << std::fixed << std::setprecision(0)
+                  << re2_r.us << " us" << std::setw(15) << like_r.us << " us"
+                  << std::setw(15) << tantivy_r.us << " us"
+                  << "\n";
+    }
 }

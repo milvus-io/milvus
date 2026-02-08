@@ -197,7 +197,50 @@ class BitmapIndex : public ScalarIndex<T> {
 
     bool
     SupportPatternMatch() const override {
-        return SupportRegexQuery();
+        return std::is_same_v<T, std::string>;
+    }
+
+    bool
+    SupportPatternQuery() const override {
+        return std::is_same_v<T, std::string>;
+    }
+
+    const TargetBitmap
+    PatternQuery(const std::string& pattern) override {
+        if constexpr (!std::is_same_v<T, std::string>) {
+            ThrowInfo(ErrorCode::OpTypeInvalid,
+                      "pattern query only supported for string type");
+            return TargetBitmap{};
+        } else {
+            AssertInfo(is_built_, "index has not been built");
+
+            LikePatternMatcher matcher(pattern);
+            TargetBitmap res(total_num_rows_, false);
+            if (is_mmap_) {
+                for (const auto& [key, bitmap] : bitmap_info_map_) {
+                    if (matcher(key)) {
+                        for (const auto& v : bitmap) {
+                            res.set(v);
+                        }
+                    }
+                }
+            } else if (build_mode_ == BitmapIndexBuildMode::ROARING) {
+                for (const auto& [key, bitmap] : data_) {
+                    if (matcher(key)) {
+                        for (const auto& v : bitmap) {
+                            res.set(v);
+                        }
+                    }
+                }
+            } else {
+                for (const auto& [key, bitset] : bitsets_) {
+                    if (matcher(key)) {
+                        res |= bitset;
+                    }
+                }
+            }
+            return res;
+        }
     }
 
     const TargetBitmap
@@ -212,9 +255,7 @@ class BitmapIndex : public ScalarIndex<T> {
                 return Query(std::move(dataset));
             }
             case proto::plan::OpType::Match: {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(pattern);
-                return RegexQuery(regex_pattern);
+                return PatternQuery(pattern);
             }
             default:
                 ThrowInfo(ErrorCode::OpTypeInvalid,
@@ -222,14 +263,6 @@ class BitmapIndex : public ScalarIndex<T> {
                           op);
         }
     }
-
-    bool
-    SupportRegexQuery() const override {
-        return std::is_same_v<T, std::string>;
-    }
-
-    const TargetBitmap
-    RegexQuery(const std::string& regex_pattern) override;
 
  public:
     int64_t

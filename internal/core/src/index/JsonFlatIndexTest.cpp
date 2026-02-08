@@ -292,21 +292,21 @@ TEST_F(JsonFlatIndexTest, TestPrefixMatchQuery) {
     ASSERT_FALSE(result[2]);  // Charlie doesn't start with A
 }
 
-TEST_F(JsonFlatIndexTest, TestRegexQuery) {
+TEST_F(JsonFlatIndexTest, TestPatternQuery) {
     auto json_flat_index =
         dynamic_cast<index::JsonFlatIndex*>(json_index_.get());
     ASSERT_NE(json_flat_index, nullptr);
 
     std::string json_path = "/profile/name/first";
     auto executor = json_flat_index->create_executor<std::string>(json_path);
-    auto result = executor->RegexQuery("[AB].*ice");
+    auto result = executor->PatternQuery("[AB].*ice");
     ASSERT_EQ(result.size(), json_data_.size());
     ASSERT_TRUE(result[0]);   // Alice matches [AB].*ice
     ASSERT_FALSE(result[1]);  // Bob doesn't match [AB].*ice
     ASSERT_FALSE(result[2]);  // Charlie doesn't match [AB].*ice
 
     // Test another regex pattern
-    auto result2 = executor->RegexQuery("B.b");
+    auto result2 = executor->PatternQuery("B.b");
     ASSERT_EQ(result2.size(), json_data_.size());
     ASSERT_FALSE(result2[0]);  // Alice doesn't match B.b
     ASSERT_TRUE(result2[1]);   // Bob matches B.b

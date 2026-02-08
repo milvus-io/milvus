@@ -7,6 +7,7 @@ use crate::{
     error::Result,
     index_reader_c::SetBitsetFn,
     index_writer::IndexWriterWrapper,
+    ptr_to_str,
     util::{create_binding, free_binding},
     TantivyIndexVersion,
 };
@@ -408,21 +409,23 @@ pub extern "C" fn tantivy_index_add_bools_by_single_segment_writer(
 #[no_mangle]
 pub extern "C" fn tantivy_index_add_string(
     ptr: *mut c_void,
-    s: *const c_char,
+    s: *const u8,
+    len: usize,
     offset: i64,
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
-    let s = cstr_to_str!(s);
+    let s = ptr_to_str!(s, len);
     unsafe { (*real).add::<&str>(s, Some(offset)).into() }
 }
 
 #[no_mangle]
 pub extern "C" fn tantivy_index_add_string_by_single_segment_writer(
     ptr: *mut c_void,
-    s: *const c_char,
+    s: *const u8,
+    len: usize,
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
-    let s = cstr_to_str!(s);
+    let s = ptr_to_str!(s, len);
     unsafe { (*real).add::<&str>(s, None).into() }
 }
 
@@ -692,26 +695,32 @@ pub extern "C" fn tantivy_index_add_array_bools_by_single_segment_writer(
 #[no_mangle]
 pub extern "C" fn tantivy_index_add_array_keywords(
     ptr: *mut c_void,
-    array: *const *const c_char,
+    array: *const *const u8,
+    str_lens: *const usize,
     len: usize,
     offset: i64,
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
-        let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_keywords(arr, Some(offset)).into()
+        let ptrs = convert_to_rust_slice!(array, len);
+        let lens = convert_to_rust_slice!(str_lens, len);
+        (*real)
+            .add_array_keywords_with_len(ptrs, lens, Some(offset))
+            .into()
     }
 }
 
 #[no_mangle]
 pub extern "C" fn tantivy_index_add_array_keywords_by_single_segment_writer(
     ptr: *mut c_void,
-    array: *const *const c_char,
+    array: *const *const u8,
+    str_lens: *const usize,
     len: usize,
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
-        let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_keywords(arr, None).into()
+        let ptrs = convert_to_rust_slice!(array, len);
+        let lens = convert_to_rust_slice!(str_lens, len);
+        (*real).add_array_keywords_with_len(ptrs, lens, None).into()
     }
 }
