@@ -2088,6 +2088,12 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	}
 	defer broadcaster.Close()
 
+	// check if snapshot name already exists
+	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetName()); err == nil {
+		log.Warn("CreateSnapshot failed: snapshot name already exists")
+		return merr.Status(merr.WrapErrParameterInvalidMsg("snapshot name %s already exists", req.GetName())), nil
+	}
+
 	// Broadcast CreateSnapshot message via DDL framework
 	// Snapshot ID is allocated in the callback
 	if _, err := broadcaster.Broadcast(ctx, message.NewCreateSnapshotMessageBuilderV2().
@@ -2115,12 +2121,6 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 	}
 	log.Info("receive DropSnapshot request")
 
-	// Check if snapshot exists - if not, return success (idempotent)
-	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetName()); err != nil {
-		log.Info("DropSnapshot: snapshot not found, returning success (idempotent)")
-		return merr.Success(), nil
-	}
-
 	// Start broadcast with exclusive snapshot lock to prevent concurrent drop/restore
 	// No collection lock needed - dropping snapshot only affects snapshot metadata
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
@@ -2132,6 +2132,12 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 		return merr.Status(err), nil
 	}
 	defer broadcaster.Close()
+
+	// Check if snapshot exists - if not, return success (idempotent)
+	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetName()); err != nil {
+		log.Info("DropSnapshot: snapshot not found, returning success (idempotent)")
+		return merr.Success(), nil
+	}
 
 	// Broadcast DropSnapshot message via DDL framework
 	if _, err := broadcaster.Broadcast(ctx, message.NewDropSnapshotMessageBuilderV2().

@@ -2835,7 +2835,6 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
     """
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/47101")
     def test_snapshot_concurrent_create_same_name(self):
         """
         target: verify only one concurrent create with same name succeeds
@@ -2853,7 +2852,9 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
 
         def create_snapshot_thread():
             try:
-                self.create_snapshot(client, collection_name, snapshot_name)
+                # Directly call client method to bypass ResponseChecker framework
+                # This allows us to capture the real MilvusException with original error message
+                client.create_snapshot(collection_name, snapshot_name)
                 results.append("success")
             except Exception as e:
                 errors.append(str(e))
