@@ -16,8 +16,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Exit immediately for non zero status
-set -e
+# Note: This script is sourced by other scripts, so we don't set -e here
+# to avoid affecting the calling script's error handling behavior
 
 SOURCE="${BASH_SOURCE[0]}"
 # fix on zsh environment
