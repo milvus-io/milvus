@@ -7,6 +7,8 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+
 	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 
 	mock "github.com/stretchr/testify/mock"
@@ -205,17 +207,17 @@ func (_c *MockReplicateService_GetReplicateConfiguration_Call) RunAndReturn(run 
 	return _c
 }
 
-// UpdateReplicateConfiguration provides a mock function with given fields: ctx, config
-func (_m *MockReplicateService) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
-	ret := _m.Called(ctx, config)
+// UpdateReplicateConfiguration provides a mock function with given fields: ctx, req
+func (_m *MockReplicateService) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) error {
+	ret := _m.Called(ctx, req)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateReplicateConfiguration")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *commonpb.ReplicateConfiguration) error); ok {
-		r0 = rf(ctx, config)
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateReplicateConfigurationRequest) error); ok {
+		r0 = rf(ctx, req)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -230,14 +232,14 @@ type MockReplicateService_UpdateReplicateConfiguration_Call struct {
 
 // UpdateReplicateConfiguration is a helper method to define mock.On call
 //   - ctx context.Context
-//   - config *commonpb.ReplicateConfiguration
-func (_e *MockReplicateService_Expecter) UpdateReplicateConfiguration(ctx interface{}, config interface{}) *MockReplicateService_UpdateReplicateConfiguration_Call {
-	return &MockReplicateService_UpdateReplicateConfiguration_Call{Call: _e.mock.On("UpdateReplicateConfiguration", ctx, config)}
+//   - req *milvuspb.UpdateReplicateConfigurationRequest
+func (_e *MockReplicateService_Expecter) UpdateReplicateConfiguration(ctx interface{}, req interface{}) *MockReplicateService_UpdateReplicateConfiguration_Call {
+	return &MockReplicateService_UpdateReplicateConfiguration_Call{Call: _e.mock.On("UpdateReplicateConfiguration", ctx, req)}
 }
 
-func (_c *MockReplicateService_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, config *commonpb.ReplicateConfiguration)) *MockReplicateService_UpdateReplicateConfiguration_Call {
+func (_c *MockReplicateService_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest)) *MockReplicateService_UpdateReplicateConfiguration_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*commonpb.ReplicateConfiguration))
+		run(args[0].(context.Context), args[1].(*milvuspb.UpdateReplicateConfigurationRequest))
 	})
 	return _c
 }
@@ -247,7 +249,7 @@ func (_c *MockReplicateService_UpdateReplicateConfiguration_Call) Return(_a0 err
 	return _c
 }
 
-func (_c *MockReplicateService_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *commonpb.ReplicateConfiguration) error) *MockReplicateService_UpdateReplicateConfiguration_Call {
+func (_c *MockReplicateService_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *milvuspb.UpdateReplicateConfigurationRequest) error) *MockReplicateService_UpdateReplicateConfiguration_Call {
 	_c.Call.Return(run)
 	return _c
 }

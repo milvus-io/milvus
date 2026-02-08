@@ -12,12 +12,15 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/producer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/mock_client"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_producer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/mock_handler"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	pulsar2 "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
@@ -257,4 +260,503 @@ func createReplicateCreateCollectionMessages() []message.ReplicateMutableMessage
 		replicateMsgs = append(replicateMsgs, message.MustNewReplicateMessage("primary", immutableMsg.IntoImmutableMessageProto()))
 	}
 	return replicateMsgs
+}
+
+func newReplicateService(t *testing.T, c *mock_client.MockClient, h *mock_handler.MockHandlerClient) *replicateService {
+	p := mock_producer.NewMockProducer(t)
+	p.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{
+		MessageID: walimplstest.NewTestMessageID(1),
+		TimeTick:  1,
+	}, nil).Maybe()
+	p.EXPECT().IsAvailable().Return(true).Maybe()
+	p.EXPECT().Available().Return(make(chan struct{})).Maybe()
+	h.EXPECT().CreateProducer(mock.Anything, mock.Anything).Return(p, nil).Maybe()
+	return &replicateService{
+		walAccesserImpl: &walAccesserImpl{
+			lifetime:             typeutil.NewLifetime(),
+			clusterID:            "by-dev",
+			streamingCoordClient: c,
+			handlerClient:        h,
+			producers:            make(map[string]*producer.ResumableProducer),
+		},
+	}
+}
+
+func TestReplicateServiceUpdateConfiguration(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+		h := mock_handler.NewMockHandlerClient(t)
+
+		as.EXPECT().UpdateReplicateConfiguration(mock.Anything, mock.Anything).Return(nil)
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+
+		req := &milvuspb.UpdateReplicateConfigurationRequest{}
+		err := rs.UpdateReplicateConfiguration(context.Background(), req)
+		assert.NoError(t, err)
+	})
+
+	t.Run("closed_lifetime", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		h := mock_handler.NewMockHandlerClient(t)
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+		rs.lifetime.SetState(typeutil.LifetimeStateStopped)
+		rs.lifetime.Wait()
+
+		req := &milvuspb.UpdateReplicateConfigurationRequest{}
+		err := rs.UpdateReplicateConfiguration(context.Background(), req)
+		assert.Error(t, err)
+	})
+}
+
+func TestReplicateServiceGetCheckpoint(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		h := mock_handler.NewMockHandlerClient(t)
+
+		expectedCheckpoint := &wal.ReplicateCheckpoint{
+			ClusterID: "primary",
+			PChannel:  "primary-rootcoord-dml_0",
+			TimeTick:  100,
+		}
+		h.EXPECT().GetReplicateCheckpoint(mock.Anything, "test-channel").Return(expectedCheckpoint, nil)
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+
+		checkpoint, err := rs.GetReplicateCheckpoint(context.Background(), "test-channel")
+		assert.NoError(t, err)
+		assert.Equal(t, expectedCheckpoint, checkpoint)
+	})
+
+	t.Run("error", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		h := mock_handler.NewMockHandlerClient(t)
+
+		h.EXPECT().GetReplicateCheckpoint(mock.Anything, "bad-channel").Return(nil, errors.New("not found"))
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+
+		_, err := rs.GetReplicateCheckpoint(context.Background(), "bad-channel")
+		assert.Error(t, err)
+	})
+
+	t.Run("closed_lifetime", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		h := mock_handler.NewMockHandlerClient(t)
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+		rs.lifetime.SetState(typeutil.LifetimeStateStopped)
+		rs.lifetime.Wait()
+
+		_, err := rs.GetReplicateCheckpoint(context.Background(), "test-channel")
+		assert.Error(t, err)
+	})
+}
+
+func TestReplicateServiceAppendClosed(t *testing.T) {
+	c := mock_client.NewMockClient(t)
+	h := mock_handler.NewMockHandlerClient(t)
+
+	rs := &replicateService{
+		walAccesserImpl: &walAccesserImpl{
+			lifetime:             typeutil.NewLifetime(),
+			clusterID:            "by-dev",
+			streamingCoordClient: c,
+			handlerClient:        h,
+			producers:            make(map[string]*producer.ResumableProducer),
+		},
+	}
+	rs.lifetime.SetState(typeutil.LifetimeStateStopped)
+	rs.lifetime.Wait()
+
+	replicateMsgs := createReplicateCreateCollectionMessages()
+	_, err := rs.Append(context.Background(), replicateMsgs[0])
+	assert.Error(t, err)
+}
+
+func TestReplicateServiceAlterReplicateConfigMessage(t *testing.T) {
+	replicateConfig := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "primary", Pchannels: []string{"primary-rootcoord-dml_0", "primary-rootcoord-dml_1"}},
+			{ClusterId: "by-dev", Pchannels: []string{"by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1"}},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
+			{SourceClusterId: "primary", TargetClusterId: "by-dev"},
+		},
+	}
+
+	t.Run("alter_config_current_cluster_in_new_config", func(t *testing.T) {
+		// New config includes the current cluster "by-dev" => overwriteAlterReplicateConfigMessage returns nil immediately
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+		h := mock_handler.NewMockHandlerClient(t)
+
+		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(replicateutil.MustNewConfigHelper(
+			"by-dev", replicateConfig,
+		), nil)
+
+		rs := newReplicateService(t, c, h)
+
+		// Build an AlterReplicateConfig message where the new config includes by-dev
+		newConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "primary", Pchannels: []string{"primary-rootcoord-dml_0", "primary-rootcoord-dml_1"}},
+				{ClusterId: "by-dev", Pchannels: []string{"by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1"}},
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "primary", TargetClusterId: "by-dev"},
+			},
+		}
+		replicateMsgs := createReplicateAlterConfigMessages(newConfig)
+		for _, msg := range replicateMsgs {
+			_, err := rs.Append(context.Background(), msg)
+			assert.NoError(t, err)
+		}
+	})
+
+	t.Run("alter_config_current_cluster_removed", func(t *testing.T) {
+		// New config does NOT include "by-dev" => overwriteAlterReplicateConfigMessage overwrites header
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+		h := mock_handler.NewMockHandlerClient(t)
+
+		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(replicateutil.MustNewConfigHelper(
+			"by-dev", replicateConfig,
+		), nil)
+
+		rs := newReplicateService(t, c, h)
+
+		// Build an AlterReplicateConfig message where the new config does NOT include by-dev
+		newConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "primary", Pchannels: []string{"primary-rootcoord-dml_0", "primary-rootcoord-dml_1"}},
+			},
+		}
+		replicateMsgs := createReplicateAlterConfigMessages(newConfig)
+		for _, msg := range replicateMsgs {
+			_, err := rs.Append(context.Background(), msg)
+			assert.NoError(t, err)
+		}
+	})
+
+	t.Run("primary_cluster_rejects_replicate", func(t *testing.T) {
+		// If the current cluster is primary, it should reject replicate messages
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+		h := mock_handler.NewMockHandlerClient(t)
+
+		// Config where by-dev is the primary
+		primaryConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "by-dev", Pchannels: []string{"by-dev-rootcoord-dml_0"}},
+			},
+		}
+		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(replicateutil.MustNewConfigHelper(
+			"by-dev", primaryConfig,
+		), nil)
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+
+		replicateMsgs := createReplicateCreateCollectionMessages()
+		_, err := rs.Append(context.Background(), replicateMsgs[0])
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "primary cluster cannot receive replicate message")
+	})
+
+	t.Run("unmapped_vchannel_error", func(t *testing.T) {
+		// Message has a vchannel whose pchannel is NOT in the source cluster's mapping
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+		h := mock_handler.NewMockHandlerClient(t)
+
+		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(replicateutil.MustNewConfigHelper(
+			"by-dev", replicateConfig,
+		), nil)
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+
+		// Create a message with an unmapped vchannel
+		msg := message.NewCreateDatabaseMessageBuilderV2().
+			WithHeader(&message.CreateDatabaseMessageHeader{}).
+			WithBody(&message.CreateDatabaseMessageBody{}).
+			WithVChannel("primary-unknown-dml_0_1v0").
+			MustBuildMutable()
+		immutableMsg := msg.WithLastConfirmedUseMessageID().WithTimeTick(1).IntoImmutableMessage(pulsar2.NewPulsarID(
+			pulsar.NewMessageID(1, 2, 3, 4),
+		))
+		replicateMsg := message.MustNewReplicateMessage("primary", immutableMsg.IntoImmutableMessageProto())
+		_, err := rs.Append(context.Background(), replicateMsg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get target channel")
+	})
+
+	t.Run("alter_config_invalid_topology_error", func(t *testing.T) {
+		// AlterReplicateConfig message with invalid topology triggers non-ErrCurrentClusterNotFound error
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+		h := mock_handler.NewMockHandlerClient(t)
+
+		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(replicateutil.MustNewConfigHelper(
+			"by-dev", replicateConfig,
+		), nil)
+
+		rs := newReplicateService(t, c, h)
+
+		// Build an AlterReplicateConfig message with invalid topology (references nonexistent cluster)
+		invalidConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "by-dev", Pchannels: []string{"by-dev-rootcoord-dml_0"}},
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "by-dev", TargetClusterId: "nonexistent"},
+			},
+		}
+		replicateMsgs := createReplicateAlterConfigMessages(invalidConfig)
+		_, err := rs.Append(context.Background(), replicateMsgs[0])
+		assert.Error(t, err)
+	})
+
+	t.Run("source_cluster_not_found", func(t *testing.T) {
+		// If the source cluster is not in the config
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+		h := mock_handler.NewMockHandlerClient(t)
+
+		// Config without the "primary" cluster (source)
+		cfg := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "other-primary", Pchannels: []string{"other-rootcoord-dml_0", "other-rootcoord-dml_1"}},
+				{ClusterId: "by-dev", Pchannels: []string{"by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1"}},
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "other-primary", TargetClusterId: "by-dev"},
+			},
+		}
+		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(replicateutil.MustNewConfigHelper(
+			"by-dev", cfg,
+		), nil)
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+
+		// The replicate message has source cluster "primary" which is not in config
+		replicateMsgs := createReplicateCreateCollectionMessages()
+		_, err := rs.Append(context.Background(), replicateMsgs[0])
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "source cluster primary not found")
+	})
+}
+
+func TestReplicateServiceControlChannel(t *testing.T) {
+	replicateConfig := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "primary", Pchannels: []string{"primary-rootcoord-dml_0", "primary-rootcoord-dml_1"}},
+			{ClusterId: "by-dev", Pchannels: []string{"by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1"}},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
+			{SourceClusterId: "primary", TargetClusterId: "by-dev"},
+		},
+	}
+
+	t.Run("control_channel_valid", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+		h := mock_handler.NewMockHandlerClient(t)
+
+		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(replicateutil.MustNewConfigHelper(
+			"by-dev", replicateConfig,
+		), nil)
+		as.EXPECT().GetLatestAssignments(mock.Anything).Return(&types.VersionedStreamingNodeAssignments{
+			CChannel: &streamingpb.CChannelAssignment{
+				Meta: &streamingpb.CChannelMeta{
+					Pchannel: "by-dev-rootcoord-dml_0",
+				},
+			},
+		}, nil)
+
+		rs := newReplicateService(t, c, h)
+
+		// Create a non-broadcast message on the control channel
+		// primary-rootcoord-dml_0_vcchan maps to by-dev-rootcoord-dml_0_vcchan
+		replicateMsgs := createReplicateControlChannelMessages()
+		for _, msg := range replicateMsgs {
+			_, err := rs.Append(context.Background(), msg)
+			assert.NoError(t, err)
+		}
+	})
+
+	t.Run("control_channel_invalid_pchannel", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+		h := mock_handler.NewMockHandlerClient(t)
+
+		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(replicateutil.MustNewConfigHelper(
+			"by-dev", replicateConfig,
+		), nil)
+		// Return a different pchannel than expected
+		as.EXPECT().GetLatestAssignments(mock.Anything).Return(&types.VersionedStreamingNodeAssignments{
+			CChannel: &streamingpb.CChannelAssignment{
+				Meta: &streamingpb.CChannelMeta{
+					Pchannel: "by-dev-rootcoord-dml_99",
+				},
+			},
+		}, nil)
+
+		rs := newReplicateService(t, c, h)
+
+		replicateMsgs := createReplicateControlChannelMessages()
+		_, err := rs.Append(context.Background(), replicateMsgs[0])
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid control channel")
+	})
+
+	t.Run("control_channel_get_assignments_error", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+		h := mock_handler.NewMockHandlerClient(t)
+
+		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(replicateutil.MustNewConfigHelper(
+			"by-dev", replicateConfig,
+		), nil)
+		as.EXPECT().GetLatestAssignments(mock.Anything).Return(nil, errors.New("assignments unavailable"))
+
+		rs := newReplicateService(t, c, h)
+
+		replicateMsgs := createReplicateControlChannelMessages()
+		_, err := rs.Append(context.Background(), replicateMsgs[0])
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "assignments unavailable")
+	})
+}
+
+func TestReplicateServiceGetConfigError(t *testing.T) {
+	c := mock_client.NewMockClient(t)
+	as := mock_client.NewMockAssignmentService(t)
+	c.EXPECT().Assignment().Return(as).Maybe()
+	h := mock_handler.NewMockHandlerClient(t)
+
+	as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, errors.New("config unavailable"))
+
+	rs := &replicateService{
+		walAccesserImpl: &walAccesserImpl{
+			lifetime:             typeutil.NewLifetime(),
+			clusterID:            "by-dev",
+			streamingCoordClient: c,
+			handlerClient:        h,
+			producers:            make(map[string]*producer.ResumableProducer),
+		},
+	}
+
+	replicateMsgs := createReplicateCreateCollectionMessages()
+	_, err := rs.Append(context.Background(), replicateMsgs[0])
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "config unavailable")
+}
+
+func createReplicateAlterConfigMessages(newConfig *commonpb.ReplicateConfiguration) []message.ReplicateMutableMessage {
+	alterMsg := message.NewAlterReplicateConfigMessageBuilderV2().
+		WithHeader(&message.AlterReplicateConfigMessageHeader{
+			ReplicateConfiguration: newConfig,
+		}).
+		WithBody(&message.AlterReplicateConfigMessageBody{}).
+		WithBroadcast([]string{"primary-rootcoord-dml_0_1v0", "primary-rootcoord-dml_1_1v1"}).
+		MustBuildBroadcast()
+	msgs := alterMsg.WithBroadcastID(200).SplitIntoMutableMessage()
+	replicateMsgs := make([]message.ReplicateMutableMessage, 0, len(msgs))
+	for _, msg := range msgs {
+		immutableMsg := msg.WithLastConfirmedUseMessageID().WithTimeTick(1).IntoImmutableMessage(pulsar2.NewPulsarID(
+			pulsar.NewMessageID(1, 2, 3, 4),
+		))
+		replicateMsgs = append(replicateMsgs, message.MustNewReplicateMessage("primary", immutableMsg.IntoImmutableMessageProto()))
+	}
+	return replicateMsgs
+}
+
+func createReplicateControlChannelMessages() []message.ReplicateMutableMessage {
+	// Create a non-broadcast message on the control channel (vchannel ends with "_vcchan")
+	msg := message.NewCreateDatabaseMessageBuilderV2().
+		WithHeader(&message.CreateDatabaseMessageHeader{}).
+		WithBody(&message.CreateDatabaseMessageBody{}).
+		WithVChannel("primary-rootcoord-dml_0_vcchan").
+		MustBuildMutable()
+	immutableMsg := msg.WithLastConfirmedUseMessageID().WithTimeTick(1).IntoImmutableMessage(pulsar2.NewPulsarID(
+		pulsar.NewMessageID(1, 2, 3, 4),
+	))
+	replicateMsg := message.MustNewReplicateMessage("primary", immutableMsg.IntoImmutableMessageProto())
+	return []message.ReplicateMutableMessage{replicateMsg}
 }

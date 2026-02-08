@@ -7050,13 +7050,17 @@ func (node *Proxy) UpdateReplicateConfiguration(ctx context.Context, req *milvus
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	log.Ctx(ctx).Info("UpdateReplicateConfiguration received", replicateutil.ConfigLogFields(req.GetReplicateConfiguration())...)
-	err := streaming.WAL().Replicate().UpdateReplicateConfiguration(ctx, req.GetReplicateConfiguration())
+	log := log.Ctx(ctx).With(
+		replicateutil.ConfigLogField(req.GetReplicateConfiguration()),
+		zap.Bool("forcePromote", req.GetForcePromote()),
+	)
+	log.Info("UpdateReplicateConfiguration received")
+	err := streaming.WAL().Replicate().UpdateReplicateConfiguration(ctx, req)
 	if err != nil {
-		log.Ctx(ctx).Warn("UpdateReplicateConfiguration fail", zap.Error(err))
+		log.Warn("UpdateReplicateConfiguration fail", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	log.Ctx(ctx).Info("UpdateReplicateConfiguration success", replicateutil.ConfigLogFields(req.GetReplicateConfiguration())...)
+	log.Info("UpdateReplicateConfiguration success")
 	return merr.Status(nil), nil
 }
 

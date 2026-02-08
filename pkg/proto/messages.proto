@@ -230,6 +230,8 @@ message DropPartitionMessageHeader {
 // AlterReplicateConfigMessageHeader is the header of alter replicate configuration message.
 message AlterReplicateConfigMessageHeader {
     common.ReplicateConfiguration replicate_configuration = 1;
+    bool force_promote = 2;  // indicates this is a forced promote to primary
+    bool ignore = 3;         // if true, this message should be ignored during processing
 }
 
 // AlterReplicateConfigMessageBody is the body of alter replicate configuration message.

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sort"
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -17,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service/discover"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -66,7 +68,16 @@ func (s *assignmentServiceImpl) AssignmentDiscover(server streamingpb.StreamingC
 func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context, req *streamingpb.UpdateReplicateConfigurationRequest) (*streamingpb.UpdateReplicateConfigurationResponse, error) {
 	config := req.GetConfiguration()
 
-	log.Ctx(ctx).Info("UpdateReplicateConfiguration received", replicateutil.ConfigLogFields(config)...)
+	log.Ctx(ctx).Info("UpdateReplicateConfiguration received",
+		zap.Bool("forcePromote", req.GetForcePromote()),
+		replicateutil.ConfigLogField(config),
+	)
+
+	// Force promote path - promotes secondary cluster to standalone primary
+	// Check this BEFORE normal validation since force promote requires empty config
+	if req.GetForcePromote() {
+		return s.handleForcePromote(ctx, config)
+	}
 
 	// check if the configuration is same.
 	// so even if current cluster is not primary, we can still make a idempotent success result.
@@ -181,13 +192,154 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 	return b, nil
 }
 
+// handleForcePromote handles force promote logic for replicate configuration.
+// It promotes a secondary cluster to standalone primary immediately without waiting for CDC replication.
+func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *commonpb.ReplicateConfiguration) (*streamingpb.UpdateReplicateConfigurationResponse, error) {
+	log.Ctx(ctx).Warn("Force promote replicate configuration requested")
+
+	// VALIDATION 1: Force promote requires empty cluster and topology fields
+	// The configuration will be constructed from the current cluster's existing meta
+	if config.Clusters != nil || config.CrossClusterTopology != nil {
+		return nil, status.NewInvaildArgument(
+			"force promote requires empty cluster and topology fields; it promotes the cluster to primary automatically")
+	}
+
+	// Use WithSecondaryClusterResourceKey to:
+	// 1. Acquire exclusive cluster-level resource key
+	// 2. Verify the cluster is secondary (not primary)
+	broadcaster, err := broadcast.StartBroadcastWithSecondaryClusterResourceKey(ctx)
+	if err != nil {
+		if errors.Is(err, broadcast.ErrNotSecondary) {
+			return nil, status.NewInvaildArgument("force promote can only be used on secondary clusters, current cluster is primary")
+		}
+		return nil, err
+	}
+	defer broadcaster.Close()
+
+	// Validate and construct force promote configuration
+	forcePromoteConfig, pchannels, err := s.validateForcePromoteConfiguration(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Config is same (already standalone primary), no-op
+	if forcePromoteConfig == nil {
+		return &streamingpb.UpdateReplicateConfigurationResponse{}, nil
+	}
+
+	// Create the AlterReplicateConfigMessage with force promote flag
+	controlChannel := streaming.WAL().ControlChannel()
+	broadcastPChannels := lo.Map(pchannels, func(pchannel string, _ int) string {
+		if funcutil.IsOnPhysicalChannel(controlChannel, pchannel) {
+			return controlChannel
+		}
+		return pchannel
+	})
+
+	msg := message.NewAlterReplicateConfigMessageBuilderV2().
+		WithHeader(&message.AlterReplicateConfigMessageHeader{
+			ReplicateConfiguration: forcePromoteConfig,
+			ForcePromote:           true, // marks as force promote
+		}).
+		WithBody(&message.AlterReplicateConfigMessageBody{}).
+		WithBroadcast(broadcastPChannels, message.OptBuildBroadcastAckSyncUp()). // Disable fast DDL ack
+		MustBuildBroadcast()
+
+	// Use Broadcast() to broadcast the message
+	// The ACK callback will handle DDL fixing and meta saving
+	_, err = broadcaster.Broadcast(ctx, msg)
+	if err != nil {
+		log.Ctx(ctx).Error("Failed to broadcast force promote AlterReplicateConfigMessage", zap.Error(err))
+		return nil, err
+	}
+
+	log.Ctx(ctx).Info("Force promote replicate configuration broadcast completed successfully")
+	return &streamingpb.UpdateReplicateConfigurationResponse{}, nil
+}
+
+// validateForcePromoteConfiguration validates the current cluster state and constructs
+// the force promote configuration. It returns the new config and the list of pchannels.
+func (s *assignmentServiceImpl) validateForcePromoteConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, []string, error) {
+	balancer, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	latestAssignment, err := balancer.GetLatestChannelAssignment()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+	currentConfig := latestAssignment.ReplicateConfiguration
+
+	// Force promote requires current config to exist (secondary must have been configured)
+	if currentConfig == nil {
+		return nil, nil, status.NewInvaildArgument("force promote requires existing replicate configuration; current cluster has no configuration")
+	}
+
+	// Get the current cluster from existing config directly (don't construct a new one)
+	var currentCluster *commonpb.MilvusCluster
+	for _, cluster := range currentConfig.GetClusters() {
+		if cluster.GetClusterId() == currentClusterID {
+			currentCluster = cluster
+			break
+		}
+	}
+	if currentCluster == nil {
+		return nil, nil, status.NewInvaildArgument("force promote requires current cluster in existing configuration; cluster %s not found in config", currentClusterID)
+	}
+
+	// Get pchannels from PChannelView for validation
+	pchannels := lo.MapToSlice(latestAssignment.PChannelView.Channels, func(_ channel.ChannelID, ch *channel.PChannelMeta) string {
+		return ch.Name()
+	})
+	// Sort pchannels for consistent ordering (map iteration order is randomized)
+	sort.Strings(pchannels)
+
+	// Construct the standalone primary configuration using the current cluster from existing config
+	// This configuration makes the current cluster a standalone primary with no replication
+	forcePromoteConfig := &commonpb.ReplicateConfiguration{
+		Clusters:             []*commonpb.MilvusCluster{currentCluster},
+		CrossClusterTopology: nil, // No topology means standalone primary
+	}
+
+	// Double check if configuration is same (already standalone primary)
+	if proto.Equal(forcePromoteConfig, currentConfig) {
+		log.Ctx(ctx).Info("configuration is same in force promote, ignored")
+		return nil, nil, nil
+	}
+
+	// Validate the configuration using existing validator
+	validator := replicateutil.NewReplicateConfigValidator(forcePromoteConfig, currentConfig, currentClusterID, pchannels)
+	if err := validator.Validate(); err != nil {
+		log.Ctx(ctx).Warn("Force promote replicate configuration validation failed", zap.Error(err))
+		return nil, nil, err
+	}
+
+	return forcePromoteConfig, pchannels, nil
+}
+
 // alterReplicateConfiguration puts the replicate configuration into the balancer.
 // It's a callback function of the broadcast service.
 func (s *assignmentServiceImpl) alterReplicateConfiguration(ctx context.Context, result message.BroadcastResultAlterReplicateConfigMessageV2) error {
+	header := result.Message.Header()
+
+	// Check ignore field first - skip all processing if true
+	// This is used for incomplete switchover messages that should be ignored after force promote
+	if header.Ignore {
+		log.Ctx(ctx).Info("AlterReplicateConfig message has ignore flag set, skipping processing",
+			zap.Bool("forcePromote", header.ForcePromote))
+		return nil
+	}
+
 	balancer, err := balance.GetWithContext(ctx)
 	if err != nil {
 		return err
 	}
+
+	// Update the configuration
+	// For force promote, incomplete broadcasts are already fixed by ackCallbackScheduler
+	// before this callback is invoked.
 	return balancer.UpdateReplicateConfiguration(ctx, result)
 }
 
