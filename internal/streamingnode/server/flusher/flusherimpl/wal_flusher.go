@@ -247,8 +247,8 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		}()
 	}
 
-	// wal flusher will not handle the control channel message.
-	if funcutil.IsControlChannel(msg.VChannel()) && !msg.MessageType().IsBroadcastToAll() {
+	// wal flusher will not handle the control channel message unless it's a pchannel-level message.
+	if funcutil.IsControlChannel(msg.VChannel()) && !msg.IsPChannelLevel() {
 		return nil
 	}
 
