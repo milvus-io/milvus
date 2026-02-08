@@ -30,7 +30,7 @@ func (r *lockAppendInterceptor) acquireLockGuard(_ context.Context, msg message.
 	// Acquire the write lock for the vchannel.
 	vchannel := msg.VChannel()
 	if msg.MessageType().IsExclusiveRequired() {
-		if vchannel == "" || vchannel == r.channel.Name {
+		if vchannel == "" || vchannel == r.channel.Name || msg.IsPChannelLevel() {
 			r.glock.Lock()
 			return func() {
 				// fail all transactions at all vchannels.

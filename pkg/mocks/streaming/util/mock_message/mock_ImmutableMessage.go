@@ -304,6 +304,51 @@ func (_c *MockImmutableMessage_IntoMessageProto_Call) RunAndReturn(run func() *m
 	return _c
 }
 
+// IsPChannelLevel provides a mock function with no fields
+func (_m *MockImmutableMessage) IsPChannelLevel() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsPChannelLevel")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockImmutableMessage_IsPChannelLevel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsPChannelLevel'
+type MockImmutableMessage_IsPChannelLevel_Call struct {
+	*mock.Call
+}
+
+// IsPChannelLevel is a helper method to define mock.On call
+func (_e *MockImmutableMessage_Expecter) IsPChannelLevel() *MockImmutableMessage_IsPChannelLevel_Call {
+	return &MockImmutableMessage_IsPChannelLevel_Call{Call: _e.mock.On("IsPChannelLevel")}
+}
+
+func (_c *MockImmutableMessage_IsPChannelLevel_Call) Run(run func()) *MockImmutableMessage_IsPChannelLevel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockImmutableMessage_IsPChannelLevel_Call) Return(_a0 bool) *MockImmutableMessage_IsPChannelLevel_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImmutableMessage_IsPChannelLevel_Call) RunAndReturn(run func() bool) *MockImmutableMessage_IsPChannelLevel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsPersisted provides a mock function with no fields
 func (_m *MockImmutableMessage) IsPersisted() bool {
 	ret := _m.Called()
@@ -575,6 +620,51 @@ func (_c *MockImmutableMessage_MessageTypeWithVersion_Call) Return(_a0 message.M
 }
 
 func (_c *MockImmutableMessage_MessageTypeWithVersion_Call) RunAndReturn(run func() message.MessageTypeWithVersion) *MockImmutableMessage_MessageTypeWithVersion_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PChannel provides a mock function with no fields
+func (_m *MockImmutableMessage) PChannel() string {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for PChannel")
+	}
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// MockImmutableMessage_PChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PChannel'
+type MockImmutableMessage_PChannel_Call struct {
+	*mock.Call
+}
+
+// PChannel is a helper method to define mock.On call
+func (_e *MockImmutableMessage_Expecter) PChannel() *MockImmutableMessage_PChannel_Call {
+	return &MockImmutableMessage_PChannel_Call{Call: _e.mock.On("PChannel")}
+}
+
+func (_c *MockImmutableMessage_PChannel_Call) Run(run func()) *MockImmutableMessage_PChannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockImmutableMessage_PChannel_Call) Return(_a0 string) *MockImmutableMessage_PChannel_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImmutableMessage_PChannel_Call) RunAndReturn(run func() string) *MockImmutableMessage_PChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
