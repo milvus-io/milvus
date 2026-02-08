@@ -54,6 +54,29 @@
 namespace milvus {
 namespace exec {
 
+SegmentExpr::~SegmentExpr() {
+    // record accumulated json filter latencies as segment-level metrics.
+    // latencies are accumulated in microseconds and converted to milliseconds for Observe.
+    // this avoids per-batch metric overhead and provides more meaningful
+    // segment-level measurements.
+    if (json_filter_bruteforce_latency_us_ > 0) {
+        milvus::monitor::internal_json_filter_latency_bruteforce.Observe(
+            json_filter_bruteforce_latency_us_ / 1000.0);
+    }
+    if (json_filter_stats_latency_us_ > 0) {
+        milvus::monitor::internal_json_filter_latency_json_stats.Observe(
+            json_filter_stats_latency_us_ / 1000.0);
+    }
+    if (json_stats_shredding_latency_us_ > 0) {
+        milvus::monitor::internal_json_stats_latency_shredding.Observe(
+            json_stats_shredding_latency_us_ / 1000.0);
+    }
+    if (json_stats_shared_latency_us_ > 0) {
+        milvus::monitor::internal_json_stats_latency_shared.Observe(
+            json_stats_shared_latency_us_ / 1000.0);
+    }
+}
+
 void
 ExprSet::Eval(int32_t begin,
               int32_t end,

@@ -102,7 +102,7 @@ BsonInvertedIndexTranslator::get_cells(
     {
         milvus::ScopedTimer timer(
             "bson_inverted_index_load",
-            [](double /*ms*/) {
+            [](double /*us*/) {
                 // no specific metric defined for bson inverted index load yet
             },
             milvus::ScopedTimer::LogLevel::Info);
