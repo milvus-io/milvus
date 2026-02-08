@@ -16,7 +16,10 @@
 #include <simdjson.h>
 #include <stddef.h>
 #include <cstdint>
+#include <chrono>
+#include <iomanip>
 #include <iostream>
+#include <random>
 #include <map>
 #include <memory>
 #include <optional>
@@ -49,6 +52,8 @@
 #include "index/IndexStats.h"
 #include "index/Meta.h"
 #include "index/NgramInvertedIndex.h"
+#include "index/InvertedIndexTantivy.h"
+#include "common/RegexQuery.h"
 #include "index/Utils.h"
 #include "pb/common.pb.h"
 #include "pb/plan.pb.h"
@@ -75,6 +80,8 @@
 #include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
+#include "milvus-storage/common/config.h"
+#include "milvus-storage/filesystem/fs.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -111,6 +118,13 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
+
+    // Initialize ArrowFileSystemSingleton for AppendIndexV2 which
+    // loads the filesystem from the singleton rather than FileManagerContext.
+    auto arrow_fs_conf = milvus_storage::ArrowFileSystemConfig();
+    arrow_fs_conf.storage_type = "local";
+    arrow_fs_conf.root_path = root_path;
+    milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(arrow_fs_conf);
 
     size_t nb = data.size();
 
@@ -436,6 +450,13 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
+
+    // Initialize ArrowFileSystemSingleton for AppendIndexV2 which
+    // loads the filesystem from the singleton rather than FileManagerContext.
+    auto arrow_fs_conf = milvus_storage::ArrowFileSystemConfig();
+    arrow_fs_conf.storage_type = "local";
+    arrow_fs_conf.root_path = root_path;
+    milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(arrow_fs_conf);
 
     size_t nb = data.size();
 
@@ -1270,6 +1291,879 @@ TEST(NgramIndex, TestJsonNonLikeExpressionsWithNgram) {
         EXPECT_FALSE(result[0]);
         for (size_t i = 1; i < nb; i++) {
             EXPECT_TRUE(result[i]);
+        }
+    }
+}
+
+// ============== Ngram Index Pattern Matching Consistency Tests ==============
+// These tests verify that ngram index pattern matching produces the same results
+// as RE2 and LikePatternMatcher. Ngram index uses a two-phase approach:
+// 1. Phase 1: Use ngram matching to get candidate rows (may have false positives)
+// 2. Phase 2: Use LikePatternMatcher to filter candidates (exact matching)
+// The final result must be consistent with direct RE2/LikePatternMatcher matching.
+
+TEST(NgramPatternMatchConsistency, MatchersMustAgree) {
+    // Test data - strings that are long enough for ngram matching (min_gram=2)
+    boost::container::vector<std::string> test_data = {
+        "hello",      "hello world",  "world hello", "say hello there",
+        "helloworld", "worldhello",   "testing",     "tested",
+        "tester",     "test case",    "application", "apple pie",
+        "pineapple",  "banana split", "aaaa",        "aaa",
+        "aaab",       "abaa",         "abab",        "ababab",
+        "xaax",       "xaaax",
+    };
+
+    // Patterns to test - all have segments >= 2 chars for ngram
+    std::vector<std::pair<std::string, proto::plan::OpType>> test_cases = {
+        // PrefixMatch tests
+        {"hello", proto::plan::OpType::PrefixMatch},
+        {"test", proto::plan::OpType::PrefixMatch},
+        {"app", proto::plan::OpType::PrefixMatch},
+        {"ab", proto::plan::OpType::PrefixMatch},
+
+        // PostfixMatch tests
+        {"world", proto::plan::OpType::PostfixMatch},
+        {"ing", proto::plan::OpType::PostfixMatch},
+        {"ple", proto::plan::OpType::PostfixMatch},
+        {"ab", proto::plan::OpType::PostfixMatch},
+
+        // InnerMatch tests
+        {"ello", proto::plan::OpType::InnerMatch},
+        {"test", proto::plan::OpType::InnerMatch},
+        {"app", proto::plan::OpType::InnerMatch},
+        {"aa", proto::plan::OpType::InnerMatch},
+        {"ab", proto::plan::OpType::InnerMatch},
+
+        // Match (LIKE pattern) tests - patterns with segments >= 2 chars
+        {"hello%", proto::plan::OpType::Match},
+        {"%world", proto::plan::OpType::Match},
+        {"%ello%", proto::plan::OpType::Match},
+        {"test%ing", proto::plan::OpType::Match},
+        {"%aa%aa%", proto::plan::OpType::Match},  // Overlapping pattern
+        {"ab%ab", proto::plan::OpType::Match},
+        {"%ab%ab%", proto::plan::OpType::Match},
+    };
+
+    for (const auto& [pattern, op_type] : test_cases) {
+        // Compute expected results using RE2 and LikePatternMatcher
+        std::vector<bool> re2_results;
+        std::vector<bool> like_results;
+
+        PatternMatchTranslator translator;
+        std::string like_pattern;
+
+        // Convert to LIKE pattern based on op_type
+        switch (op_type) {
+            case proto::plan::OpType::PrefixMatch:
+                like_pattern = pattern + "%";
+                break;
+            case proto::plan::OpType::PostfixMatch:
+                like_pattern = "%" + pattern;
+                break;
+            case proto::plan::OpType::InnerMatch:
+                like_pattern = "%" + pattern + "%";
+                break;
+            case proto::plan::OpType::Match:
+                like_pattern = pattern;
+                break;
+            default:
+                continue;
+        }
+
+        auto regex_pattern = translator(like_pattern);
+        RegexMatcher re2_matcher(regex_pattern);
+        LikePatternMatcher like_matcher(like_pattern);
+
+        for (const auto& data : test_data) {
+            re2_results.push_back(re2_matcher(data));
+            like_results.push_back(like_matcher(data));
+        }
+
+        // Verify RE2 and LikePatternMatcher agree
+        for (size_t i = 0; i < test_data.size(); i++) {
+            EXPECT_EQ(re2_results[i], like_results[i])
+                << "RE2/LikePatternMatcher mismatch for ngram test:\n"
+                << "  pattern=\"" << pattern
+                << "\", op_type=" << static_cast<int>(op_type) << "\n"
+                << "  like_pattern=\"" << like_pattern << "\"\n"
+                << "  data=\"" << test_data[i] << "\"\n"
+                << "  RE2=" << re2_results[i] << ", Like=" << like_results[i];
+        }
+
+        // Test with ngram index
+        test_ngram_with_data(test_data, pattern, op_type, like_results);
+    }
+}
+
+TEST(NgramPatternMatchConsistency, OverlappingPatterns) {
+    // Test data specifically for overlapping patterns
+    boost::container::vector<std::string> test_data = {
+        "aa",
+        "aaa",
+        "aaaa",
+        "aaaaa",
+        "aaaaaa",
+        "ab",
+        "aba",
+        "abab",
+        "ababab",
+        "abba",
+        "aab",
+        "baa",
+        "xaax",
+        "xaaax",
+        "xaaaax",
+        "abcabc",
+        "abcabcabc",
+    };
+
+    // Overlapping patterns with segments >= 2 chars
+    std::vector<std::string> patterns = {
+        "%aa%aa%",     // Two overlapping "aa"
+        "%aa%aa%aa%",  // Three overlapping "aa"
+        "%ab%ab%",     // Two "ab"
+        "%ab%ab%ab%",  // Three "ab"
+        "aa%aa",       // Prefix and suffix both "aa"
+        "ab%ab",       // Prefix and suffix both "ab"
+        "%abc%abc%",   // Two "abc"
+    };
+
+    for (const auto& pattern : patterns) {
+        // Compute expected results
+        std::vector<bool> expected_results;
+
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(pattern);
+        RegexMatcher re2_matcher(regex_pattern);
+        LikePatternMatcher like_matcher(pattern);
+
+        for (const auto& data : test_data) {
+            bool re2_result = re2_matcher(data);
+            bool like_result = like_matcher(data);
+
+            // RE2 and LikePatternMatcher must agree
+            EXPECT_EQ(re2_result, like_result)
+                << "RE2/LikePatternMatcher mismatch for overlapping pattern:\n"
+                << "  pattern=\"" << pattern << "\"\n"
+                << "  data=\"" << data << "\"\n"
+                << "  RE2=" << re2_result << ", Like=" << like_result;
+
+            expected_results.push_back(like_result);
+        }
+
+        // Test with ngram index
+        test_ngram_with_data(
+            test_data, pattern, proto::plan::OpType::Match, expected_results);
+    }
+}
+
+TEST(NgramPatternMatchConsistency, UTF8Patterns) {
+    // UTF-8 test data with strings long enough for ngram
+    boost::container::vector<std::string> test_data = {
+        "café latte",    // 2-byte UTF-8
+        "hello café",    // Mixed
+        "你好世界",      // 3-byte UTF-8 (Chinese)
+        "test你好test",  // Mixed ASCII and Chinese
+        "emoji😀test",    // 4-byte UTF-8 (emoji)
+        "normal text",
+        "café café",  // Repeated UTF-8
+        "你好你好",   // Repeated Chinese
+    };
+
+    // Patterns with UTF-8 characters (segments must be >= 2 chars)
+    std::vector<std::pair<std::string, proto::plan::OpType>> test_cases = {
+        {"café", proto::plan::OpType::PrefixMatch},
+        {"café", proto::plan::OpType::InnerMatch},
+        {"你好", proto::plan::OpType::PrefixMatch},
+        {"你好", proto::plan::OpType::InnerMatch},
+        {"%café%", proto::plan::OpType::Match},
+        {"%你好%", proto::plan::OpType::Match},
+        {"%café%café%", proto::plan::OpType::Match},  // Overlapping UTF-8
+        {"%你好%你好%", proto::plan::OpType::Match},  // Overlapping Chinese
+    };
+
+    for (const auto& [pattern, op_type] : test_cases) {
+        // Compute expected results
+        std::vector<bool> expected_results;
+
+        PatternMatchTranslator translator;
+        std::string like_pattern;
+
+        switch (op_type) {
+            case proto::plan::OpType::PrefixMatch:
+                like_pattern = pattern + "%";
+                break;
+            case proto::plan::OpType::PostfixMatch:
+                like_pattern = "%" + pattern;
+                break;
+            case proto::plan::OpType::InnerMatch:
+                like_pattern = "%" + pattern + "%";
+                break;
+            case proto::plan::OpType::Match:
+                like_pattern = pattern;
+                break;
+            default:
+                continue;
+        }
+
+        auto regex_pattern = translator(like_pattern);
+        RegexMatcher re2_matcher(regex_pattern);
+        LikePatternMatcher like_matcher(like_pattern);
+
+        for (const auto& data : test_data) {
+            bool re2_result = re2_matcher(data);
+            bool like_result = like_matcher(data);
+
+            EXPECT_EQ(re2_result, like_result)
+                << "RE2/LikePatternMatcher UTF-8 mismatch:\n"
+                << "  pattern=\"" << pattern << "\"\n"
+                << "  data=\"" << data << "\"\n"
+                << "  RE2=" << re2_result << ", Like=" << like_result;
+
+            expected_results.push_back(like_result);
+        }
+
+        // Test with ngram index
+        test_ngram_with_data(test_data, pattern, op_type, expected_results);
+    }
+}
+
+TEST(NgramPatternMatchConsistency, EscapeSequences) {
+    // Test data with special characters
+    boost::container::vector<std::string> test_data = {
+        "100% complete",
+        "50% off sale",
+        "file_name.txt",
+        "path\\to\\file",
+        "normal text",
+        "%percent%",
+        "_underscore_",
+        "test\\escape",
+    };
+
+    // Patterns with escape sequences (segments >= 2 chars)
+    std::vector<std::string> patterns = {
+        "%100\\%%",   // Contains literal %
+        "%file\\_%",  // Contains literal _
+        "%\\\\%",     // Contains backslash
+    };
+
+    for (const auto& pattern : patterns) {
+        std::vector<bool> expected_results;
+
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(pattern);
+        RegexMatcher re2_matcher(regex_pattern);
+        LikePatternMatcher like_matcher(pattern);
+
+        for (const auto& data : test_data) {
+            bool re2_result = re2_matcher(data);
+            bool like_result = like_matcher(data);
+
+            EXPECT_EQ(re2_result, like_result)
+                << "RE2/LikePatternMatcher escape mismatch:\n"
+                << "  pattern=\"" << pattern << "\"\n"
+                << "  data=\"" << data << "\"\n"
+                << "  RE2=" << re2_result << ", Like=" << like_result;
+
+            expected_results.push_back(like_result);
+        }
+
+        // Test with ngram index.
+        // Pattern %\\\\% has literal segment "\" (1 byte) < min_gram(2),
+        // so the ngram index correctly cannot handle it and forwards to
+        // brute-force matching.
+        bool forward_to_br = (pattern == "%\\\\%");
+        test_ngram_with_data(test_data,
+                             pattern,
+                             proto::plan::OpType::Match,
+                             expected_results,
+                             forward_to_br);
+    }
+}
+
+// ============== Performance Benchmark: Ngram vs Tantivy vs Brute-Force ==============
+// Run with: --gtest_filter="*NgramBenchmark*"
+
+TEST(NgramBenchmark, NgramVsTantivyVsBruteForce) {
+    // Generate random strings
+    const size_t N = 10000;
+    std::mt19937 rng(42);
+    std::uniform_int_distribution<int> char_dist('a', 'z');
+    std::uniform_int_distribution<int> len_dist(40, 120);
+    boost::container::vector<std::string> data;
+    data.reserve(N);
+    for (size_t i = 0; i < N; i++) {
+        size_t len = len_dist(rng);
+        std::string s;
+        s.reserve(len);
+        for (size_t j = 0; j < len; j++) s += static_cast<char>(char_dist(rng));
+        data.push_back(std::move(s));
+    }
+
+    // --- Ngram Index Setup ---
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t index_build_id = 4000;
+    int64_t index_version = 4000;
+
+    auto schema = std::make_shared<Schema>();
+    auto field_id = schema->AddDebugField("ngram", DataType::VARCHAR);
+
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      field_id.get(),
+                                                      DataType::VARCHAR,
+                                                      DataType::NONE,
+                                                      false);
+    auto index_meta = gen_index_meta(
+        segment_id, field_id.get(), index_build_id, index_version);
+
+    std::string root_path = "/tmp/test-ngram-bench/";
+    auto storage_config = gen_local_storage_config(root_path);
+    auto cm = CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+
+    auto arrow_fs_conf = milvus_storage::ArrowFileSystemConfig();
+    arrow_fs_conf.storage_type = "local";
+    arrow_fs_conf.root_path = root_path;
+    milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(arrow_fs_conf);
+
+    auto field_data =
+        storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
+    field_data->FillFieldData(data.data(), data.size());
+
+    auto segment = CreateSealedSegment(schema);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                          partition_id,
+                                                          segment_id,
+                                                          field_id.get(),
+                                                          {field_data},
+                                                          cm);
+    segment->LoadFieldData(field_data_info);
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    insert_data.SetFieldDataMeta(field_meta);
+    insert_data.SetTimestamps(0, 100);
+    auto serialized_bytes = insert_data.Serialize(storage::Remote);
+
+    auto log_path = fmt::format("{}/{}/{}/{}/{}",
+                                collection_id,
+                                partition_id,
+                                segment_id,
+                                field_id.get(),
+                                0);
+    auto cm_w = ChunkManagerWrapper(cm);
+    cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
+
+    storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
+    std::vector<std::string> index_files;
+
+    // Build ngram index
+    {
+        Config config;
+        config[milvus::index::INDEX_TYPE] = milvus::index::INVERTED_INDEX_TYPE;
+        config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+        auto ngram_params = index::NgramParams{
+            .loading_index = false, .min_gram = 2, .max_gram = 4};
+        auto index =
+            std::make_shared<index::NgramInvertedIndex>(ctx, ngram_params);
+        index->Build(config);
+        auto result = index->Upload();
+        index_files = result->GetIndexFiles();
+    }
+
+    // Load ngram index
+    Config load_config;
+    load_config[milvus::index::INDEX_FILES] = index_files;
+    load_config[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::HIGH;
+    auto load_ngram_params =
+        index::NgramParams{.loading_index = true, .min_gram = 2, .max_gram = 4};
+    auto ngram_index =
+        std::make_unique<index::NgramInvertedIndex>(ctx, load_ngram_params);
+    ngram_index->Load(milvus::tracer::TraceContext{}, load_config);
+
+    // Build Tantivy index for comparison
+    std::vector<std::string> data_vec(data.begin(), data.end());
+    auto tantivy_index =
+        std::make_unique<index::InvertedIndexTantivy<std::string>>();
+    tantivy_index->BuildWithRawDataForUT(
+        data_vec.size(), data_vec.data(), Config());
+
+    // --- Benchmark Patterns ---
+    struct BenchPattern {
+        std::string name;
+        std::string term;
+        std::string like_pattern;
+        proto::plan::OpType op_type;
+    };
+
+    std::vector<BenchPattern> bench_patterns = {
+        {"LIKE: %ab%cd%ef%",
+         "%ab%cd%ef%",
+         "%ab%cd%ef%",
+         proto::plan::OpType::Match},
+        {"LIKE: %ab%cd%", "%ab%cd%", "%ab%cd%", proto::plan::OpType::Match},
+        {"LIKE: abc%xyz%", "abc%xyz%", "abc%xyz%", proto::plan::OpType::Match},
+        {"PREFIX: abc", "abc", "abc%", proto::plan::OpType::PrefixMatch},
+        {"INNER: hello", "hello", "%hello%", proto::plan::OpType::InnerMatch},
+        {"SUFFIX: xyz", "xyz", "%xyz", proto::plan::OpType::PostfixMatch},
+    };
+
+    const int W = 3, I = 5;
+    std::cout << "\n====== Ngram vs Tantivy vs Brute-Force (" << N
+              << " strings, avg 80 bytes) ======\n";
+
+    for (const auto& bp : bench_patterns) {
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(bp.like_pattern);
+        RegexMatcher re2(regex_pattern);
+        LikePatternMatcher like(bp.like_pattern);
+
+        // RE2 brute-force
+        double re2_us;
+        int64_t re2_cnt;
+        {
+            volatile int64_t total = 0;
+            for (int w = 0; w < W; w++)
+                for (const auto& s : data_vec) total += re2(s) ? 1 : 0;
+            total = 0;
+            auto t0 = std::chrono::high_resolution_clock::now();
+            for (int i = 0; i < I; i++)
+                for (const auto& s : data_vec) total += re2(s) ? 1 : 0;
+            re2_us = std::chrono::duration<double, std::micro>(
+                         std::chrono::high_resolution_clock::now() - t0)
+                         .count() /
+                     I;
+            re2_cnt = total / I;
+        }
+
+        // LikePatternMatcher brute-force
+        double like_us;
+        int64_t like_cnt;
+        {
+            volatile int64_t total = 0;
+            for (int w = 0; w < W; w++)
+                for (const auto& s : data_vec) total += like(s) ? 1 : 0;
+            total = 0;
+            auto t0 = std::chrono::high_resolution_clock::now();
+            for (int i = 0; i < I; i++)
+                for (const auto& s : data_vec) total += like(s) ? 1 : 0;
+            like_us = std::chrono::duration<double, std::micro>(
+                          std::chrono::high_resolution_clock::now() - t0)
+                          .count() /
+                      I;
+            like_cnt = total / I;
+        }
+
+        // Tantivy index
+        double tantivy_us;
+        int64_t tantivy_cnt;
+        {
+            volatile int64_t total = 0;
+            for (int w = 0; w < W; w++) {
+                auto r = tantivy_index->PatternMatch(bp.term, bp.op_type);
+                total += r.count();
+            }
+            total = 0;
+            auto t0 = std::chrono::high_resolution_clock::now();
+            for (int i = 0; i < I; i++) {
+                auto r = tantivy_index->PatternMatch(bp.term, bp.op_type);
+                total += r.count();
+            }
+            tantivy_us = std::chrono::duration<double, std::micro>(
+                             std::chrono::high_resolution_clock::now() - t0)
+                             .count() /
+                         I;
+            tantivy_cnt = total / I;
+        }
+
+        // Ngram index
+        double ngram_us;
+        int64_t ngram_cnt;
+        {
+            volatile int64_t total = 0;
+            for (int w = 0; w < W; w++) {
+                exec::SegmentExpr se(std::move(std::vector<exec::ExprPtr>{}),
+                                     "SegmentExpr",
+                                     nullptr,
+                                     segment.get(),
+                                     field_id,
+                                     {},
+                                     DataType::VARCHAR,
+                                     N,
+                                     8192,
+                                     0);
+                auto result =
+                    ngram_index->ExecuteQueryForUT(bp.term, bp.op_type, &se);
+                if (result.has_value())
+                    total += result.value().count();
+            }
+            total = 0;
+            auto t0 = std::chrono::high_resolution_clock::now();
+            for (int i = 0; i < I; i++) {
+                exec::SegmentExpr se(std::move(std::vector<exec::ExprPtr>{}),
+                                     "SegmentExpr",
+                                     nullptr,
+                                     segment.get(),
+                                     field_id,
+                                     {},
+                                     DataType::VARCHAR,
+                                     N,
+                                     8192,
+                                     0);
+                auto result =
+                    ngram_index->ExecuteQueryForUT(bp.term, bp.op_type, &se);
+                if (result.has_value())
+                    total += result.value().count();
+            }
+            ngram_us = std::chrono::duration<double, std::micro>(
+                           std::chrono::high_resolution_clock::now() - t0)
+                           .count() /
+                       I;
+            ngram_cnt = total / I;
+        }
+
+        // Print results
+        std::cout << "\n  " << bp.name << "\n"
+                  << "  " << std::string(65, '-') << "\n"
+                  << std::left << "  " << std::setw(30) << "Matcher"
+                  << std::right << std::setw(15) << "total(us)" << std::setw(12)
+                  << "matches"
+                  << "\n"
+                  << "  " << std::string(65, '-') << "\n";
+        auto row = [](const std::string& n, double us, int64_t m) {
+            std::cout << "  " << std::left << std::setw(30) << n << std::right
+                      << std::setw(12) << std::fixed << std::setprecision(0)
+                      << us << " us" << std::setw(12) << m << "\n";
+        };
+        // Measure Phase 1 filtering ratio
+        int64_t phase1_cnt = -1;
+        {
+            auto total_count = static_cast<size_t>(ngram_index->Count());
+            if (ngram_index->CanHandleLiteral(bp.term, bp.op_type)) {
+                TargetBitmap candidates(total_count, true);
+                ngram_index->ExecutePhase1(bp.term, bp.op_type, candidates);
+                phase1_cnt = candidates.count();
+            }
+        }
+
+        row("RE2 (brute-force)", re2_us, re2_cnt);
+        row("LikePatternMatcher", like_us, like_cnt);
+        row("Tantivy (index)", tantivy_us, tantivy_cnt);
+        row("Ngram (index+verify)", ngram_us, ngram_cnt);
+        if (phase1_cnt >= 0) {
+            std::cout << "  >> Phase1 filter: " << N << " -> " << phase1_cnt
+                      << " candidates (" << std::fixed << std::setprecision(1)
+                      << (100.0 * phase1_cnt / N) << "% remain, "
+                      << std::setprecision(1) << (100.0 * (N - phase1_cnt) / N)
+                      << "% filtered)\n";
+        } else {
+            std::cout << "  >> Ngram can't handle (literal < min_gram)\n";
+        }
+    }
+}
+
+// Benchmark focusing on ngram filtering effectiveness and worst cases
+TEST(NgramBenchmark, NgramFilteringEffectiveness) {
+    // Generate data with controlled characteristics
+    const size_t N = 10000;
+    std::mt19937 rng(42);
+    std::uniform_int_distribution<int> char_dist('a', 'z');
+    std::uniform_int_distribution<int> len_dist(40, 120);
+    boost::container::vector<std::string> data;
+    data.reserve(N);
+    for (size_t i = 0; i < N; i++) {
+        size_t len = len_dist(rng);
+        std::string s;
+        s.reserve(len);
+        for (size_t j = 0; j < len; j++) s += static_cast<char>(char_dist(rng));
+        data.push_back(std::move(s));
+    }
+
+    // --- Reuse same ngram index setup ---
+    int64_t collection_id = 1, partition_id = 2, segment_id = 3;
+    int64_t index_build_id = 5000, index_version = 5000;
+
+    auto schema = std::make_shared<Schema>();
+    auto field_id = schema->AddDebugField("ngram2", DataType::VARCHAR);
+
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      field_id.get(),
+                                                      DataType::VARCHAR,
+                                                      DataType::NONE,
+                                                      false);
+    auto index_meta = gen_index_meta(
+        segment_id, field_id.get(), index_build_id, index_version);
+
+    std::string root_path = "/tmp/test-ngram-filter/";
+    auto storage_config = gen_local_storage_config(root_path);
+    auto cm = CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+
+    auto arrow_fs_conf = milvus_storage::ArrowFileSystemConfig();
+    arrow_fs_conf.storage_type = "local";
+    arrow_fs_conf.root_path = root_path;
+    milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(arrow_fs_conf);
+
+    auto field_data =
+        storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
+    field_data->FillFieldData(data.data(), data.size());
+
+    auto segment = CreateSealedSegment(schema);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                          partition_id,
+                                                          segment_id,
+                                                          field_id.get(),
+                                                          {field_data},
+                                                          cm);
+    segment->LoadFieldData(field_data_info);
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    insert_data.SetFieldDataMeta(field_meta);
+    insert_data.SetTimestamps(0, 100);
+    auto serialized_bytes = insert_data.Serialize(storage::Remote);
+
+    auto log_path = fmt::format("{}/{}/{}/{}/{}",
+                                collection_id,
+                                partition_id,
+                                segment_id,
+                                field_id.get(),
+                                0);
+    auto cm_w = ChunkManagerWrapper(cm);
+    cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
+
+    storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
+    std::vector<std::string> index_files;
+
+    {
+        Config config;
+        config[milvus::index::INDEX_TYPE] = milvus::index::INVERTED_INDEX_TYPE;
+        config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+        auto ngram_params = index::NgramParams{
+            .loading_index = false, .min_gram = 2, .max_gram = 4};
+        auto index =
+            std::make_shared<index::NgramInvertedIndex>(ctx, ngram_params);
+        index->Build(config);
+        auto result = index->Upload();
+        index_files = result->GetIndexFiles();
+    }
+
+    Config load_config;
+    load_config[milvus::index::INDEX_FILES] = index_files;
+    load_config[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::HIGH;
+    auto load_ngram_params =
+        index::NgramParams{.loading_index = true, .min_gram = 2, .max_gram = 4};
+    auto ngram_index =
+        std::make_unique<index::NgramInvertedIndex>(ctx, load_ngram_params);
+    ngram_index->Load(milvus::tracer::TraceContext{}, load_config);
+
+    std::vector<std::string> data_vec(data.begin(), data.end());
+
+    // Count expected matches for each pattern using brute-force
+    auto count_matches = [&](const std::string& like_pattern) -> int64_t {
+        LikePatternMatcher matcher(like_pattern);
+        int64_t cnt = 0;
+        for (const auto& s : data_vec)
+            if (matcher(s))
+                cnt++;
+        return cnt;
+    };
+
+    struct FilterCase {
+        std::string name;
+        std::string term;          // for ngram index
+        std::string like_pattern;  // for brute-force
+        proto::plan::OpType op_type;
+        std::string reason;  // why filtering is good or bad
+    };
+
+    // min_gram=2, max_gram=4, 26 chars, random strings of len 40-120
+
+    std::vector<FilterCase> cases = {
+        // ===== Good cases: ngram filters well =====
+        {"LIKE %xyz%def%ghi%",
+         "%xyz%def%ghi%",
+         "%xyz%def%ghi%",
+         proto::plan::OpType::Match,
+         "3 rare trigrams => excellent filtering"},
+
+        {"LIKE %abcdef%",
+         "%abcdef%",
+         "%abcdef%",
+         proto::plan::OpType::Match,
+         "6-char literal => many ngram terms => good"},
+
+        {"PREFIX: qzx",
+         "qzx",
+         "qzx%",
+         proto::plan::OpType::PrefixMatch,
+         "Rare trigram prefix"},
+
+        // ===== Bad cases: ngram can't handle =====
+        {"LIKE %a%b%c%",
+         "%a%b%c%",
+         "%a%b%c%",
+         proto::plan::OpType::Match,
+         "All segments 1-char < min_gram=2 => FALLBACK"},
+
+        {"LIKE %a%bc%",
+         "%a%bc%",
+         "%a%bc%",
+         proto::plan::OpType::Match,
+         "Segment 'a' is 1-char < min_gram=2 => FALLBACK"},
+
+        {"LIKE _%_%_%",
+         "_%_%_%",
+         "_%_%_%",
+         proto::plan::OpType::Match,
+         "Only underscores, no literals => FALLBACK"},
+
+        {"SUFFIX: a",
+         "a",
+         "%a",
+         proto::plan::OpType::PostfixMatch,
+         "1-char literal < min_gram=2 => FALLBACK"},
+
+        // ===== Weak cases: ngram handles but filters poorly =====
+        {"LIKE %ab%",
+         "%ab%",
+         "%ab%",
+         proto::plan::OpType::Match,
+         "2-char literal => only 1 bigram => weak filter"},
+
+        {"INNER: ab",
+         "ab",
+         "%ab%",
+         proto::plan::OpType::InnerMatch,
+         "Common bigram 'ab' => very high posting list"},
+
+        {"INNER: th",
+         "th",
+         "%th%",
+         proto::plan::OpType::InnerMatch,
+         "Common bigram => poor selectivity"},
+
+        {"LIKE %ab%cd%",
+         "%ab%cd%",
+         "%ab%cd%",
+         proto::plan::OpType::Match,
+         "Two common bigrams => moderate filter"},
+
+        // ===== Control: strong filtering =====
+        {"INNER: qzxw",
+         "qzxw",
+         "%qzxw%",
+         proto::plan::OpType::InnerMatch,
+         "Very rare 4-gram => near-zero candidates"},
+
+        {"LIKE %mnop%qrst%",
+         "%mnop%qrst%",
+         "%mnop%qrst%",
+         proto::plan::OpType::Match,
+         "Two 4-char rare literals => strong filter"},
+    };
+
+    std::cout << "\n====== Ngram Filtering Effectiveness (N=" << N
+              << ", min_gram=2, max_gram=4) ======\n"
+              << "\n  " << std::left << std::setw(28) << "Pattern" << std::right
+              << std::setw(8) << "Handle?" << std::setw(10) << "Phase1"
+              << std::setw(10) << "Final" << std::setw(10) << "Filter%"
+              << std::setw(12) << "Ngram(us)" << std::setw(12) << "Like(us)"
+              << "  Reason\n"
+              << "  " << std::string(100, '-') << "\n";
+
+    const int W = 3, I = 5;
+    for (const auto& fc : cases) {
+        bool can_handle = ngram_index->CanHandleLiteral(fc.term, fc.op_type);
+        int64_t final_matches = count_matches(fc.like_pattern);
+
+        int64_t phase1_cnt = -1;
+        if (can_handle) {
+            auto total_count = static_cast<size_t>(ngram_index->Count());
+            TargetBitmap candidates(total_count, true);
+            ngram_index->ExecutePhase1(fc.term, fc.op_type, candidates);
+            phase1_cnt = candidates.count();
+        }
+
+        // Benchmark: Ngram full query (Phase1 + Phase2)
+        double ngram_us = 0;
+        if (can_handle) {
+            for (int w = 0; w < W; w++) {
+                exec::SegmentExpr se(std::move(std::vector<exec::ExprPtr>{}),
+                                     "SegmentExpr",
+                                     nullptr,
+                                     segment.get(),
+                                     field_id,
+                                     {},
+                                     DataType::VARCHAR,
+                                     N,
+                                     8192,
+                                     0);
+                ngram_index->ExecuteQueryForUT(fc.term, fc.op_type, &se);
+            }
+            auto t0 = std::chrono::high_resolution_clock::now();
+            for (int i = 0; i < I; i++) {
+                exec::SegmentExpr se(std::move(std::vector<exec::ExprPtr>{}),
+                                     "SegmentExpr",
+                                     nullptr,
+                                     segment.get(),
+                                     field_id,
+                                     {},
+                                     DataType::VARCHAR,
+                                     N,
+                                     8192,
+                                     0);
+                ngram_index->ExecuteQueryForUT(fc.term, fc.op_type, &se);
+            }
+            ngram_us = std::chrono::duration<double, std::micro>(
+                           std::chrono::high_resolution_clock::now() - t0)
+                           .count() /
+                       I;
+        }
+
+        // Benchmark: LikePatternMatcher brute-force
+        double like_us;
+        {
+            LikePatternMatcher matcher(fc.like_pattern);
+            for (int w = 0; w < W; w++)
+                for (const auto& s : data_vec) matcher(s);
+            auto t0 = std::chrono::high_resolution_clock::now();
+            for (int i = 0; i < I; i++)
+                for (const auto& s : data_vec) matcher(s);
+            like_us = std::chrono::duration<double, std::micro>(
+                          std::chrono::high_resolution_clock::now() - t0)
+                          .count() /
+                      I;
+        }
+
+        // Print row
+        std::cout << "  " << std::left << std::setw(28) << fc.name
+                  << std::right;
+        if (can_handle) {
+            double filter_pct = 100.0 * (N - phase1_cnt) / N;
+            std::cout << std::setw(8) << "YES" << std::setw(10) << phase1_cnt
+                      << std::setw(10) << final_matches << std::fixed
+                      << std::setprecision(1) << std::setw(9) << filter_pct
+                      << "%" << std::setw(11) << std::setprecision(0)
+                      << ngram_us << "us" << std::setw(11) << like_us << "us"
+                      << "  " << fc.reason << "\n";
+        } else {
+            std::cout << std::setw(8) << "NO" << std::setw(10) << "N/A"
+                      << std::setw(10) << final_matches << std::setw(10)
+                      << "N/A" << std::setw(12) << "FALLBACK" << std::setw(11)
+                      << std::fixed << std::setprecision(0) << like_us << "us"
+                      << "  " << fc.reason << "\n";
         }
     }
 }

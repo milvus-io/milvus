@@ -63,20 +63,23 @@ UnaryCompare(const T& get_value, const U& val, proto::plan::OpType op_type) {
                           std::is_same_v<U, std::string_view>) {
                 return milvus::query::Match(get_value, val, op_type);
             } else {
-                return false;
+                ThrowInfo(OpTypeInvalid,
+                          "PrefixMatch/PostfixMatch/InnerMatch only supports "
+                          "string type");
             }
         case proto::plan::Match:
             if constexpr (std::is_same_v<U, std::string> ||
                           std::is_same_v<U, std::string_view>) {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(val);
-                RegexMatcher matcher(regex_pattern);
+                LikePatternMatcher matcher(val);
                 return matcher(get_value);
             } else {
-                return false;
+                ThrowInfo(OpTypeInvalid,
+                          "Match operation only supports string type");
             }
         default:
-            return false;
+            ThrowInfo(OpTypeInvalid,
+                      fmt::format("unsupported op_type:{} for UnaryCompare",
+                                  op_type));
     }
 }
 
@@ -95,12 +98,15 @@ struct UnaryElementFuncForMatch {
             "this override operator() of UnaryElementFuncForMatch does "
             "not support FilterType::random");
 
-        PatternMatchTranslator translator;
-        auto regex_pattern = translator(val);
-        RegexMatcher matcher(regex_pattern);
-
-        for (int i = 0; i < size; ++i) {
-            res[i] = matcher(src[i]);
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            LikePatternMatcher matcher(val);
+            for (int i = 0; i < size; ++i) {
+                res[i] = matcher(src[i]);
+            }
+        } else {
+            ThrowInfo(OpTypeInvalid,
+                      "Match operation only supports string type");
         }
     }
 
@@ -112,19 +118,23 @@ struct UnaryElementFuncForMatch {
                const TargetBitmap& bitmap_input,
                int start_cursor,
                const int32_t* offsets = nullptr) {
-        PatternMatchTranslator translator;
-        auto regex_pattern = translator(val);
-        RegexMatcher matcher(regex_pattern);
-        bool has_bitmap_input = !bitmap_input.empty();
-        for (int i = 0; i < size; ++i) {
-            if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
-                continue;
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            LikePatternMatcher matcher(val);
+            bool has_bitmap_input = !bitmap_input.empty();
+            for (int i = 0; i < size; ++i) {
+                if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
+                    continue;
+                }
+                if constexpr (filter_type == FilterType::random) {
+                    res[i] = matcher(src[offsets ? offsets[i] : i]);
+                } else {
+                    res[i] = matcher(src[i]);
+                }
             }
-            if constexpr (filter_type == FilterType::random) {
-                res[i] = matcher(src[offsets ? offsets[i] : i]);
-            } else {
-                res[i] = matcher(src[i]);
-            }
+        } else {
+            ThrowInfo(OpTypeInvalid,
+                      "Match operation only supports string type");
         }
     }
 };
@@ -353,6 +363,14 @@ struct UnaryElementFuncForArray {
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();
+        // Pre-construct LikePatternMatcher before the loop to avoid
+        // re-parsing the pattern on every row.
+        [[maybe_unused]] std::optional<LikePatternMatcher> matcher;
+        if constexpr (op == proto::plan::OpType::Match) {
+            if constexpr (std::is_same_v<ValueType, std::string>) {
+                matcher.emplace(val);
+            }
+        }
         for (int i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
@@ -403,18 +421,22 @@ struct UnaryElementFuncForArray {
                 UnaryArrayCompare(milvus::query::Match(array_data, val, op));
             } else if constexpr (op == proto::plan::OpType::Match) {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                    res[i] = false;
-                } else {
+                    ThrowInfo(OpTypeInvalid,
+                              "Match operation is not supported for nested "
+                              "Array type");
+                } else if constexpr (std::is_same_v<GetType,
+                                                    std::string_view> ||
+                                     std::is_same_v<GetType, std::string>) {
                     if (index >= src[offset].length()) {
                         res[i] = false;
                         continue;
                     }
-                    PatternMatchTranslator translator;
-                    auto regex_pattern = translator(val);
-                    RegexMatcher matcher(regex_pattern);
                     auto array_data =
                         src[offset].template get_data<GetType>(index);
-                    res[i] = matcher(array_data);
+                    res[i] = (*matcher)(array_data);
+                } else {
+                    ThrowInfo(OpTypeInvalid,
+                              "Match operation only supports string type");
                 }
             } else {
                 ThrowInfo(OpTypeInvalid,
@@ -448,7 +470,7 @@ struct UnaryIndexFuncForMatch {
 
             if (!index->HasRawData()) {
                 ThrowInfo(Unsupported,
-                          "index don't support regex query and don't have "
+                          "index don't support pattern match and don't have "
                           "raw data");
             }
             // retrieve raw data to do brute force query, may be very slow.
@@ -467,9 +489,7 @@ struct UnaryIndexFuncForMatch {
                 }
                 return res;
             } else {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(val);
-                RegexMatcher matcher(regex_pattern);
+                LikePatternMatcher matcher(val);
                 for (int64_t i = 0; i < cnt; i++) {
                     auto raw = index->Reverse_Lookup(i);
                     if (!raw.has_value()) {
@@ -611,9 +631,7 @@ BatchUnaryCompare(const T* src,
         case proto::plan::Match: {
             if constexpr (std::is_same_v<U, std::string> ||
                           std::is_same_v<U, std::string_view>) {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(val);
-                RegexMatcher matcher(regex_pattern);
+                LikePatternMatcher matcher(val);
                 for (int i = 0; i < size; ++i) {
                     res[i] = matcher(src[i]);
                 }
@@ -917,7 +935,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     std::optional<VectorPtr>
     ExecNgramMatch(EvalCtx& context);
 
-    std::pair<std::string, std::string>
+    static std::pair<std::string, std::string>
     SplitAtFirstSlashDigit(std::string input);
 
  private:

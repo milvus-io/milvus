@@ -180,19 +180,25 @@ class ScalarIndex : public IndexBase {
     virtual int64_t
     Size() = 0;
 
+    // Whether this index can execute a LIKE-pattern query internally
+    // (e.g., tantivy regex_query). When true, the framework calls
+    // PatternQuery() directly instead of falling back to brute-force scan.
     virtual bool
-    SupportRegexQuery() const {
+    SupportPatternQuery() const {
         return false;
     }
 
+    // Whether the framework should *attempt* to use PatternQuery() for
+    // Match operations. Inverted indexes return false here because they
+    // handle Match via PatternMatch() dispatch instead.
     virtual bool
-    TryUseRegexQuery() const {
+    TryUsePatternQuery() const {
         return true;
     }
 
     virtual const TargetBitmap
-    RegexQuery(const std::string& pattern) {
-        ThrowInfo(Unsupported, "regex query is not supported");
+    PatternQuery(const std::string& pattern) {
+        ThrowInfo(Unsupported, "pattern query is not supported");
     }
 
     virtual void

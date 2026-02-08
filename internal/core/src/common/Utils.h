@@ -88,12 +88,7 @@ PrefixMatch(const std::string_view str, const std::string_view prefix) {
     if (prefix.length() > str.length()) {
         return false;
     }
-    auto ret = strncmp(str.data(), prefix.data(), prefix.length());
-    if (ret != 0) {
-        return false;
-    }
-
-    return true;
+    return memcmp(str.data(), prefix.data(), prefix.length()) == 0;
 }
 
 inline DatasetPtr
@@ -126,20 +121,8 @@ PostfixMatch(const std::string_view str, const std::string_view postfix) {
         return false;
     }
 
-    int offset = str.length() - postfix.length();
-    auto ret = strncmp(str.data() + offset, postfix.data(), postfix.length());
-    if (ret != 0) {
-        return false;
-    }
-    //
-    //    int i = postfix.length() - 1;
-    //    int j = str.length() - 1;
-    //    for (; i >= 0; i--, j--) {
-    //        if (postfix[i] != str[j]) {
-    //            return false;
-    //        }
-    //    }
-    return true;
+    size_t offset = str.length() - postfix.length();
+    return memcmp(str.data() + offset, postfix.data(), postfix.length()) == 0;
 }
 
 inline bool

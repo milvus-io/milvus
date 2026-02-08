@@ -511,11 +511,11 @@ InvertedIndexTantivy<std::string>::Query(const DatasetPtr& dataset) {
 
 template <typename T>
 const TargetBitmap
-InvertedIndexTantivy<T>::RegexQuery(const std::string& regex_pattern) {
-    tracer::AutoSpan span("InvertedIndexTantivy::RegexQuery",
+InvertedIndexTantivy<T>::PatternQuery(const std::string& pattern) {
+    tracer::AutoSpan span("InvertedIndexTantivy::PatternQuery",
                           tracer::GetRootSpan());
     TargetBitmap bitset(Count());
-    wrapper_->regex_query(regex_pattern, &bitset);
+    wrapper_->regex_query(pattern, &bitset);
     return bitset;
 }
 

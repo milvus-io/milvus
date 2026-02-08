@@ -12,6 +12,8 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include <cstddef>
+#include <atomic>
+#include <condition_variable>
 #include <mutex>
 #include <set>
 #include <string>
@@ -250,18 +252,36 @@ TEST(ThreadLocalGEOSContextTest, DifferentThreadsGetDifferentContexts) {
     std::mutex mutex;
     std::set<GEOSContextHandle_t> contexts;
 
-    auto worker = [&mutex, &contexts]() {
+    constexpr int num_threads = 4;
+    // Use a barrier to ensure all threads are alive simultaneously,
+    // preventing OS thread-id reuse that would cause thread_local
+    // storage to return the same pointer.
+    std::atomic<int> ready_count{0};
+    std::mutex barrier_mutex;
+    std::condition_variable barrier_cv;
+
+    auto worker = [&]() {
         GEOSContextHandle_t ctx = GetThreadLocalGEOSContext();
 
         // Verify context is valid by using it
         Geometry point(ctx, "POINT(5 5)");
         EXPECT_TRUE(point.IsValid());
 
-        std::lock_guard<std::mutex> lock(mutex);
-        contexts.insert(ctx);
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            contexts.insert(ctx);
+        }
+
+        // Signal ready and wait for all threads to arrive
+        ready_count.fetch_add(1);
+        {
+            std::unique_lock<std::mutex> lock(barrier_mutex);
+            barrier_cv.wait(lock,
+                            [&] { return ready_count.load() >= num_threads; });
+        }
+        barrier_cv.notify_all();
     };
 
-    constexpr int num_threads = 4;
     std::vector<std::thread> threads;
     threads.reserve(num_threads);
 
