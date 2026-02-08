@@ -219,19 +219,22 @@ KmeansClustering::IsDataSkew(
             num_in_each_centroid.begin(), num_in_each_centroid.end(), 0) /
         (num_in_each_centroid.size());
     if (num_in_each_centroid.front() <= min_cluster_ratio * avg_size) {
-        LOG_INFO(msg_header_ + "minimum cluster too small: {}, avg: {}",
+        LOG_INFO("{}minimum cluster too small: {}, avg: {}",
+                 msg_header_,
                  num_in_each_centroid.front(),
                  avg_size);
         return true;
     }
     if (num_in_each_centroid.back() >= max_cluster_ratio * avg_size) {
-        LOG_INFO(msg_header_ + "maximum cluster too large: {}, avg: {}",
+        LOG_INFO("{}maximum cluster too large: {}, avg: {}",
+                 msg_header_,
                  num_in_each_centroid.back(),
                  avg_size);
         return true;
     }
     if (num_in_each_centroid.back() * dim * sizeof(T) >= max_cluster_size) {
-        LOG_INFO(msg_header_ + "maximum cluster size too large: {}B",
+        LOG_INFO("{}maximum cluster size too large: {}B",
+                 msg_header_,
                  num_in_each_centroid.back() * dim * sizeof(T));
         return true;
     }
@@ -257,7 +260,7 @@ KmeansClustering::StreamingAssignandUpload(
     std::unique_ptr<uint8_t[]> data = std::make_unique<uint8_t[]>(byte_size);
     centroid_stats.SerializeToArray(data.get(), byte_size);
     std::unordered_map<std::string, int64_t> remote_paths_to_size;
-    LOG_INFO(msg_header_ + "start upload cluster centroids file");
+    LOG_INFO("{}start upload cluster centroids file", msg_header_);
     AddClusteringResultFiles(
         file_manager_->GetChunkManager().get(),
         data.get(),
@@ -269,9 +272,9 @@ KmeansClustering::StreamingAssignandUpload(
     cluster_result_.centroid_file_size =
         remote_paths_to_size.at(cluster_result_.centroid_path);
     remote_paths_to_size.clear();
-    LOG_INFO(msg_header_ + "upload cluster centroids file done");
+    LOG_INFO("{}upload cluster centroids file done", msg_header_);
 
-    LOG_INFO(msg_header_ + "start upload cluster id mapping file");
+    LOG_INFO("{}start upload cluster id mapping file", msg_header_);
     std::vector<int64_t> num_vectors_each_centroid(num_clusters, 0);
 
     auto serializeIdMappingAndUpload = [&](const int64_t segment_id,
@@ -338,12 +341,12 @@ KmeansClustering::StreamingAssignandUpload(
         }
     }
     if (IsDataSkew<T>(config, dim, num_vectors_each_centroid)) {
-        LOG_INFO(msg_header_ + "data skew! skip clustering");
+        LOG_INFO("{}data skew! skip clustering", msg_header_);
         // skip clustering, nothing takes affect
         throw SegcoreError(ErrorCode::ClusterSkip,
                            "data skew! skip clustering");
     }
-    LOG_INFO(msg_header_ + "upload cluster id mapping file done");
+    LOG_INFO("{}upload cluster id mapping file done", msg_header_);
     cluster_result_.id_mappings = std::move(remote_paths_to_size);
     is_runned_ = true;
 }
@@ -409,9 +412,9 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
         trained_segments_num = segment_ids.size();
     }
     if (train_num < num_clusters) {
-        LOG_WARN(msg_header_ +
-                     "kmeans train num: {} less than num_clusters: {}, skip "
-                     "clustering",
+        LOG_WARN("{}kmeans train num: {} less than num_clusters: {}, skip "
+                 "clustering",
+                 msg_header_,
                  train_num,
                  num_clusters);
         throw SegcoreError(ErrorCode::ClusterSkip,
@@ -423,7 +426,8 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
                               2 /* log level: info */);
     // if data_num larger than max_train_size, we need to sample to make train data fits in memory
     // otherwise just load all the data for kmeans training
-    LOG_INFO(msg_header_ + "pull and sample {}GB data out of {}GB data",
+    LOG_INFO("{}pull and sample {}GB data out of {}GB data",
+             msg_header_,
              train_size_final / 1024.0 / 1024.0 / 1024.0,
              data_size / 1024.0 / 1024.0 / 1024.0);
     auto buf = std::make_unique<uint8_t[]>(train_size_final);
@@ -439,7 +443,8 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
     auto dataset = GenDataset(train_num, dim, buf.release());
     dataset->SetIsOwner(true);
 
-    LOG_INFO(msg_header_ + "train data num: {}, dim: {}, num_clusters: {}",
+    LOG_INFO("{}train data num: {}, dim: {}, num_clusters: {}",
+             msg_header_,
              train_num,
              dim,
              num_clusters);
