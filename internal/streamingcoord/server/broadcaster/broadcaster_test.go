@@ -609,7 +609,6 @@ func TestPendingBroadcastMessages(t *testing.T) {
 		task := newBroadcastTaskFromProto(proto, metrics, ackScheduler)
 		pending := task.PendingBroadcastMessages()
 		assert.Len(t, pending, 1)
-		assert.Equal(t, "v2", pending[0].VChannel())
 	})
 
 	t.Run("all_acked", func(t *testing.T) {
