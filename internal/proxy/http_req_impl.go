@@ -74,7 +74,8 @@ func hideSensitive(configs map[string]string) {
 	}
 }
 
-func getConfigs(configs map[string]string) gin.HandlerFunc {
+func getConfigs(configFunc func() map[string]string) gin.HandlerFunc {
+	configs := configFunc()
 	hideSensitive(configs)
 	return func(c *gin.Context) {
 		bs, err := json.Marshal(configs)

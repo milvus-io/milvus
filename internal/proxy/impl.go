@@ -6676,12 +6676,12 @@ func DeregisterSubLabel(subLabel string) {
 func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	// Cluster request that executed by proxy
 	router.GET(http.ClusterInfoPath, getClusterInfo(node))
-	router.GET(http.ClusterConfigsPath, getConfigs(paramtable.Get().GetConfigsView()))
+	router.GET(http.ClusterConfigsPath, getConfigs(paramtable.Get().GetConfigsView))
 	router.GET(http.ClusterClientsPath, getConnectedClients)
 	router.GET(http.ClusterDependenciesPath, getDependencies)
 
 	// Hook request that executed by proxy
-	router.GET(http.HookConfigsPath, getConfigs(paramtable.GetHookParams().GetAll()))
+	router.GET(http.HookConfigsPath, getConfigs(paramtable.GetHookParams().GetAll))
 
 	// Slow query request that executed by proxy
 	router.GET(http.SlowQueryPath, getSlowQuery(node))
