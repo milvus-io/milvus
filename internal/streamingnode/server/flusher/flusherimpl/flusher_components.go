@@ -114,7 +114,7 @@ func (impl *flusherComponents) WhenDropCollection(vchannel string) {
 // HandleMessage handles the plain message.
 func (impl *flusherComponents) HandleMessage(ctx context.Context, msg message.ImmutableMessage) error {
 	vchannel := msg.VChannel()
-	if vchannel == "" || msg.MessageType().IsBroadcastToAll() {
+	if vchannel == "" || msg.IsPChannelLevel() || funcutil.IsPhysicalChannel(vchannel) {
 		return impl.broadcastToAllDataSyncService(ctx, msg)
 	}
 	if _, ok := impl.dataServices[vchannel]; !ok {
