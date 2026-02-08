@@ -671,41 +671,23 @@ func TestSortByControlChannelTimeTick(t *testing.T) {
 	metrics := newBroadcasterMetrics()
 	ackScheduler := newAckCallbackScheduler(log.With())
 
-	// Create tasks with different control channel time ticks
-	// Use "_vcchan" suffix for control channel (funcutil.IsControlChannel)
-	msg1 := createNewBroadcastMsg([]string{"by-dev-1_vcchan", "v1"}).WithBroadcastID(1)
-	proto1 := createNewWaitAckBroadcastTaskFromMessage(msg1,
-		streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
-		[]byte{0x01, 0x01})
-	// Manually set the control channel checkpoint with timetick=30
-	proto1.AckedCheckpoints[0] = &streamingpb.AckedCheckpoint{
-		MessageId:              walimplstest.NewTestMessageID(1).IntoProto(),
-		LastConfirmedMessageId: walimplstest.NewTestMessageID(1).IntoProto(),
-		TimeTick:               30,
+	// Use single-vchannel (control channel only) tasks to avoid proto round-trip ordering issues
+	makeTask := func(broadcastID uint64, vchannel string, timeTick uint64) *broadcastTask {
+		msg := createNewBroadcastMsg([]string{vchannel}).WithBroadcastID(broadcastID)
+		p := createNewWaitAckBroadcastTaskFromMessage(msg,
+			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
+			[]byte{0x01})
+		p.AckedCheckpoints[0] = &streamingpb.AckedCheckpoint{
+			MessageId:              walimplstest.NewTestMessageID(int64(broadcastID)).IntoProto(),
+			LastConfirmedMessageId: walimplstest.NewTestMessageID(int64(broadcastID)).IntoProto(),
+			TimeTick:               timeTick,
+		}
+		return newBroadcastTaskFromProto(p, metrics, ackScheduler)
 	}
-	task1 := newBroadcastTaskFromProto(proto1, metrics, ackScheduler)
 
-	msg2 := createNewBroadcastMsg([]string{"by-dev-2_vcchan", "v2"}).WithBroadcastID(2)
-	proto2 := createNewWaitAckBroadcastTaskFromMessage(msg2,
-		streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
-		[]byte{0x01, 0x01})
-	proto2.AckedCheckpoints[0] = &streamingpb.AckedCheckpoint{
-		MessageId:              walimplstest.NewTestMessageID(2).IntoProto(),
-		LastConfirmedMessageId: walimplstest.NewTestMessageID(2).IntoProto(),
-		TimeTick:               10,
-	}
-	task2 := newBroadcastTaskFromProto(proto2, metrics, ackScheduler)
-
-	msg3 := createNewBroadcastMsg([]string{"by-dev-3_vcchan", "v3"}).WithBroadcastID(3)
-	proto3 := createNewWaitAckBroadcastTaskFromMessage(msg3,
-		streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
-		[]byte{0x01, 0x01})
-	proto3.AckedCheckpoints[0] = &streamingpb.AckedCheckpoint{
-		MessageId:              walimplstest.NewTestMessageID(3).IntoProto(),
-		LastConfirmedMessageId: walimplstest.NewTestMessageID(3).IntoProto(),
-		TimeTick:               20,
-	}
-	task3 := newBroadcastTaskFromProto(proto3, metrics, ackScheduler)
+	task1 := makeTask(1, "by-dev-1_vcchan", 30)
+	task2 := makeTask(2, "by-dev-2_vcchan", 10)
+	task3 := makeTask(3, "by-dev-3_vcchan", 20)
 
 	tasks := []*broadcastTask{task1, task3, task2}
 	sortByControlChannelTimeTick(tasks)
