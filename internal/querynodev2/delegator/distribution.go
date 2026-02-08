@@ -443,7 +443,7 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 		syncedByCoord:         true,
 	}
 
-	sealedSet := typeutil.NewUniqueSet(action.GetSealedInTarget()...)
+	sealedSet := typeutil.NewUniqueSet(lo.Keys(action.GetSealedSegmentRowCount())...)
 	droppedSet := typeutil.NewUniqueSet(action.GetDroppedInTarget()...)
 	redundantGrowings := make([]int64, 0)
 	for _, s := range d.growingSegments {
@@ -495,7 +495,7 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 		zap.Bool("serviceable", d.queryView.Serviceable()),
 		zap.Float64("loadedRatio", d.queryView.GetLoadedRatio()),
 		zap.Int("growingSegmentNum", len(action.GetGrowingInTarget())),
-		zap.Int("sealedSegmentNum", len(action.GetSealedInTarget())),
+		zap.Int("sealedSegmentNum", len(action.GetSealedSegmentRowCount())),
 	)
 }
 
