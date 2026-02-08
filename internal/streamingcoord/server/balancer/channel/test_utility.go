@@ -7,4 +7,5 @@ import "github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 
 func ResetStaticPChannelStatsManager() {
 	StaticPChannelStatsManager = syncutil.NewFuture[*PchannelStatsManager]()
+	singleton = syncutil.NewFuture[*ChannelManager]()
 }

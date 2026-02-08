@@ -64,6 +64,14 @@ func TestChannelManager(t *testing.T) {
 	assert.NotNil(t, m)
 	assert.NoError(t, err)
 
+	// Test getClusterChannels and singleton GetClusterChannels.
+	cc := m.getClusterChannels()
+	assert.Equal(t, []string{"test-channel"}, cc.Channels)
+	assert.NotEmpty(t, cc.ControlChannel)
+	assert.True(t, strings.HasPrefix(cc.ControlChannel, "test"))
+	singletonCC := GetClusterChannels()
+	assert.Equal(t, cc, singletonCC)
+
 	// Test update non exist pchannel
 	modified, err := m.AssignPChannels(ctx, map[ChannelID]types.PChannelInfoAssigned{newChannelID("non-exist-channel"): {
 		Channel: types.PChannelInfo{
