@@ -412,11 +412,12 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
         trained_segments_num = segment_ids.size();
     }
     if (train_num < num_clusters) {
-        LOG_WARN("{}kmeans train num: {} less than num_clusters: {}, skip "
-                 "clustering",
-                 msg_header_,
-                 train_num,
-                 num_clusters);
+        LOG_WARN(
+            "{}kmeans train num: {} less than num_clusters: {}, skip "
+            "clustering",
+            msg_header_,
+            train_num,
+            num_clusters);
         throw SegcoreError(ErrorCode::ClusterSkip,
                            "sample data num less than num clusters");
     }
