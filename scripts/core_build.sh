@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Exit immediately if a command exits with non-zero status
+set -e
+
 # Licensed to the LF AI & Data foundation under one
 # or more contributor license agreements. See the NOTICE file
 # distributed with this work for additional information
@@ -219,7 +222,7 @@ pushd ${BUILD_OUTPUT_DIR}
 
 # Remove make cache since build.sh -l use default variables
 # Force update the variables each time
-make rebuild_cache >/dev/null 2>&1
+make rebuild_cache >/dev/null 2>&1 || true
 
 CPU_ARCH=$(get_cpu_arch $CPU_TARGET)
 
