@@ -65,17 +65,27 @@ func TestHideSensitive(t *testing.T) {
 	}
 }
 
-func TestGetConfigs(t *testing.T) {
+func TestGetUpdatedConfigs(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 
 	configs := map[string]string{"key": "value"}
-	handler := getConfigs(configs)
+	handler := getConfigs(func() map[string]string { return configs })
 	handler(c)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "key")
 	assert.Contains(t, w.Body.String(), "value")
+	
+	configs["key"] = "value2"
+	configs["new_key"] = "new_value"
+	handler(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "key")
+	assert.Contains(t, w.Body.String(), "value2")
+	assert.Contains(t, w.Body.String(), "new_key")
+	assert.Contains(t, w.Body.String(), "new_value")
 }
 
 func TestGetClusterInfo(t *testing.T) {
