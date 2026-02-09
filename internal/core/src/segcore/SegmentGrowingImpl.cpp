@@ -2306,7 +2306,7 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
     } else {
         auto vec_base = insert_record_.get_data_base(field_id);
         if (vec_base != nullptr) {
-            const auto& valid_data_vec = vec_base->get_valid_data();
+            auto valid_data_vec = vec_base->get_valid_data();
             bool is_mapping_storage = vec_base->is_mapping_storage();
             if (!valid_data_vec.empty()) {
                 result.valid_data = std::make_unique<bool[]>(count);
