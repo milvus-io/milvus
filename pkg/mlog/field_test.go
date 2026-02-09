@@ -442,122 +442,241 @@ func TestStringerField(t *testing.T) {
 func TestFieldHelperFunctions(t *testing.T) {
 	// FieldNodeID
 	f := FieldNodeID(123)
-	assert.Equal(t, KeyNodeID, f.Key)
+	assert.Equal(t, keyNodeID, f.Key)
 	assert.Equal(t, int64(123), f.Integer)
 
 	// FieldModule
 	f = FieldModule("querynode")
-	assert.Equal(t, KeyModule, f.Key)
+	assert.Equal(t, keyModule, f.Key)
 	assert.Equal(t, "querynode", f.String)
 
 	// FieldTraceID
 	f = FieldTraceID("trace-123")
-	assert.Equal(t, KeyTraceID, f.Key)
+	assert.Equal(t, keyTraceID, f.Key)
 	assert.Equal(t, "trace-123", f.String)
 
 	// FieldSpanID
 	f = FieldSpanID("span-456")
-	assert.Equal(t, KeySpanID, f.Key)
+	assert.Equal(t, keySpanID, f.Key)
 	assert.Equal(t, "span-456", f.String)
 
 	// FieldDbID
 	f = FieldDbID(100)
-	assert.Equal(t, KeyDbID, f.Key)
+	assert.Equal(t, keyDbID, f.Key)
 	assert.Equal(t, int64(100), f.Integer)
 
 	// FieldDbName
 	f = FieldDbName("default")
-	assert.Equal(t, KeyDbName, f.Key)
+	assert.Equal(t, keyDbName, f.Key)
 	assert.Equal(t, "default", f.String)
 
 	// FieldCollectionID
 	f = FieldCollectionID(200)
-	assert.Equal(t, KeyCollectionID, f.Key)
+	assert.Equal(t, keyCollectionID, f.Key)
 	assert.Equal(t, int64(200), f.Integer)
 
 	// FieldCollectionName
 	f = FieldCollectionName("my_collection")
-	assert.Equal(t, KeyCollectionName, f.Key)
+	assert.Equal(t, keyCollectionName, f.Key)
 	assert.Equal(t, "my_collection", f.String)
 
 	// FieldPartitionID
 	f = FieldPartitionID(300)
-	assert.Equal(t, KeyPartitionID, f.Key)
+	assert.Equal(t, keyPartitionID, f.Key)
 	assert.Equal(t, int64(300), f.Integer)
 
 	// FieldPartitionName
 	f = FieldPartitionName("partition_0")
-	assert.Equal(t, KeyPartitionName, f.Key)
+	assert.Equal(t, keyPartitionName, f.Key)
 	assert.Equal(t, "partition_0", f.String)
 
 	// FieldSegmentID
 	f = FieldSegmentID(400)
-	assert.Equal(t, KeySegmentID, f.Key)
+	assert.Equal(t, keySegmentID, f.Key)
 	assert.Equal(t, int64(400), f.Integer)
+
+	// FieldIndexID
+	f = FieldIndexID(500)
+	assert.Equal(t, keyIndexID, f.Key)
+	assert.Equal(t, int64(500), f.Integer)
+
+	// FieldFieldID
+	f = FieldFieldID(600)
+	assert.Equal(t, keyFieldID, f.Key)
+	assert.Equal(t, int64(600), f.Integer)
+
+	// FieldTaskID
+	f = FieldTaskID(700)
+	assert.Equal(t, keyTaskID, f.Key)
+	assert.Equal(t, int64(700), f.Integer)
+
+	// FieldBroadcastID
+	f = FieldBroadcastID(800)
+	assert.Equal(t, keyBroadcastID, f.Key)
+	assert.Equal(t, int64(800), f.Integer)
+
+	// FieldJobID
+	f = FieldJobID(900)
+	assert.Equal(t, keyJobID, f.Key)
+	assert.Equal(t, int64(900), f.Integer)
+
+	// FieldBuildID
+	f = FieldBuildID(1000)
+	assert.Equal(t, keyBuildID, f.Key)
+	assert.Equal(t, int64(1000), f.Integer)
 
 	// FieldVChannel
 	f = FieldVChannel("vchan_0")
-	assert.Equal(t, KeyVChannel, f.Key)
+	assert.Equal(t, keyVChannel, f.Key)
 	assert.Equal(t, "vchan_0", f.String)
 
 	// FieldPChannel
 	f = FieldPChannel("pchan_0")
-	assert.Equal(t, KeyPChannel, f.Key)
+	assert.Equal(t, keyPChannel, f.Key)
 	assert.Equal(t, "pchan_0", f.String)
 
 	// FieldMessageID
 	msgID := testObjectMarshaler{value: "msg-123"}
 	f = FieldMessageID(msgID)
-	assert.Equal(t, KeyMessageID, f.Key)
+	assert.Equal(t, keyMessageID, f.Key)
 
 	// FieldMessage
 	msg := testObjectMarshaler{value: "message content"}
 	f = FieldMessage(msg)
-	assert.Equal(t, KeyMessage, f.Key)
+	assert.Equal(t, keyMessage, f.Key)
 }
 
 func TestWellKnownKeysFormat(t *testing.T) {
 	// All well-known keys should be lowercase with underscores for readability
 	// and gRPC metadata compatibility
-	assert.Equal(t, "node_id", KeyNodeID)
-	assert.Equal(t, "module", KeyModule)
-	assert.Equal(t, "trace_id", KeyTraceID)
-	assert.Equal(t, "span_id", KeySpanID)
-	assert.Equal(t, "db_id", KeyDbID)
-	assert.Equal(t, "db_name", KeyDbName)
-	assert.Equal(t, "collection_id", KeyCollectionID)
-	assert.Equal(t, "collection_name", KeyCollectionName)
-	assert.Equal(t, "partition_id", KeyPartitionID)
-	assert.Equal(t, "partition_name", KeyPartitionName)
-	assert.Equal(t, "segment_id", KeySegmentID)
-	assert.Equal(t, "vchannel", KeyVChannel)
-	assert.Equal(t, "pchannel", KeyPChannel)
-	assert.Equal(t, "message_id", KeyMessageID)
-	assert.Equal(t, "message", KeyMessage)
+	assert.Equal(t, "node_id", keyNodeID)
+	assert.Equal(t, "module", keyModule)
+	assert.Equal(t, "trace_id", keyTraceID)
+	assert.Equal(t, "span_id", keySpanID)
+	assert.Equal(t, "db_id", keyDbID)
+	assert.Equal(t, "db_name", keyDbName)
+	assert.Equal(t, "collection_id", keyCollectionID)
+	assert.Equal(t, "collection_name", keyCollectionName)
+	assert.Equal(t, "partition_id", keyPartitionID)
+	assert.Equal(t, "partition_name", keyPartitionName)
+	assert.Equal(t, "segment_id", keySegmentID)
+	assert.Equal(t, "index_id", keyIndexID)
+	assert.Equal(t, "field_id", keyFieldID)
+	assert.Equal(t, "task_id", keyTaskID)
+	assert.Equal(t, "broadcast_id", keyBroadcastID)
+	assert.Equal(t, "job_id", keyJobID)
+	assert.Equal(t, "build_id", keyBuildID)
+	assert.Equal(t, "vchannel", keyVChannel)
+	assert.Equal(t, "pchannel", keyPChannel)
+	assert.Equal(t, "message_id", keyMessageID)
+	assert.Equal(t, "message", keyMessage)
 }
 
 func TestPropagatedStringConvertsKeyToLowercase(t *testing.T) {
 	// Keys with mixed case should be converted to lowercase
-	f := PropagatedString("CollectionName", "my_collection")
+	f := propagatedStringField("CollectionName", "my_collection")
 	assert.Equal(t, "collectionname", f.Key, "key should be lowercase")
 	assert.Equal(t, "my_collection", getPropagatedValue(&f))
 }
 
 func TestPropagatedInt64ConvertsKeyToLowercase(t *testing.T) {
 	// Keys with mixed case should be converted to lowercase
-	f := PropagatedInt64("CollectionId", 12345)
+	f := propagatedInt64Field("CollectionId", 12345)
 	assert.Equal(t, "collectionid", f.Key, "key should be lowercase")
 	assert.Equal(t, "12345", getPropagatedValue(&f))
 }
 
 func TestPropagatedStringAlreadyLowercaseKey(t *testing.T) {
 	// Already lowercase keys should remain unchanged
-	f := PropagatedString("collectionname", "my_collection")
+	f := propagatedStringField("collectionname", "my_collection")
 	assert.Equal(t, "collectionname", f.Key)
 }
 
 func TestPropagatedInt64AlreadyLowercaseKey(t *testing.T) {
 	// Already lowercase keys should remain unchanged
-	f := PropagatedInt64("collectionid", 12345)
+	f := propagatedInt64Field("collectionid", 12345)
 	assert.Equal(t, "collectionid", f.Key)
+}
+
+// Test OptPropagated on int64 FieldXXX functions
+func TestFieldXXXOptpropagatedInt64Field(t *testing.T) {
+	tests := []struct {
+		name string
+		fn   func(...FieldOption) Field
+		key  string
+	}{
+		{"FieldDbID", func(opts ...FieldOption) Field { return FieldDbID(100, opts...) }, keyDbID},
+		{"FieldCollectionID", func(opts ...FieldOption) Field { return FieldCollectionID(200, opts...) }, keyCollectionID},
+		{"FieldPartitionID", func(opts ...FieldOption) Field { return FieldPartitionID(300, opts...) }, keyPartitionID},
+		{"FieldSegmentID", func(opts ...FieldOption) Field { return FieldSegmentID(400, opts...) }, keySegmentID},
+		{"FieldIndexID", func(opts ...FieldOption) Field { return FieldIndexID(500, opts...) }, keyIndexID},
+		{"FieldFieldID", func(opts ...FieldOption) Field { return FieldFieldID(600, opts...) }, keyFieldID},
+		{"FieldTaskID", func(opts ...FieldOption) Field { return FieldTaskID(700, opts...) }, keyTaskID},
+		{"FieldBroadcastID", func(opts ...FieldOption) Field { return FieldBroadcastID(800, opts...) }, keyBroadcastID},
+		{"FieldJobID", func(opts ...FieldOption) Field { return FieldJobID(900, opts...) }, keyJobID},
+		{"FieldBuildID", func(opts ...FieldOption) Field { return FieldBuildID(1000, opts...) }, keyBuildID},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+"_without_opt", func(t *testing.T) {
+			f := tt.fn()
+			assert.Equal(t, tt.key, f.Key)
+			assert.False(t, isPropagatedField(&f), "field without OptPropagated should not be propagated")
+		})
+
+		t.Run(tt.name+"_with_opt", func(t *testing.T) {
+			f := tt.fn(OptPropagated())
+			assert.Equal(t, tt.key, f.Key)
+			assert.True(t, isPropagatedField(&f), "field with OptPropagated should be propagated")
+		})
+	}
+}
+
+// Test OptPropagated on string FieldXXX functions
+func TestFieldXXXOptpropagatedStringField(t *testing.T) {
+	tests := []struct {
+		name string
+		fn   func(...FieldOption) Field
+		key  string
+	}{
+		{"FieldDbName", func(opts ...FieldOption) Field { return FieldDbName("default", opts...) }, keyDbName},
+		{"FieldCollectionName", func(opts ...FieldOption) Field { return FieldCollectionName("my_col", opts...) }, keyCollectionName},
+		{"FieldPartitionName", func(opts ...FieldOption) Field { return FieldPartitionName("part_0", opts...) }, keyPartitionName},
+		{"FieldVChannel", func(opts ...FieldOption) Field { return FieldVChannel("vchan_0", opts...) }, keyVChannel},
+		{"FieldPChannel", func(opts ...FieldOption) Field { return FieldPChannel("pchan_0", opts...) }, keyPChannel},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+"_without_opt", func(t *testing.T) {
+			f := tt.fn()
+			assert.Equal(t, tt.key, f.Key)
+			assert.False(t, isPropagatedField(&f), "field without OptPropagated should not be propagated")
+		})
+
+		t.Run(tt.name+"_with_opt", func(t *testing.T) {
+			f := tt.fn(OptPropagated())
+			assert.Equal(t, tt.key, f.Key)
+			assert.True(t, isPropagatedField(&f), "field with OptPropagated should be propagated")
+		})
+	}
+}
+
+// Test that OptPropagated preserves the value for propagation
+func TestOptPropagatedPreservesValue(t *testing.T) {
+	// String value
+	f := FieldCollectionName("my_collection", OptPropagated())
+	assert.Equal(t, "my_collection", getPropagatedValue(&f))
+
+	// Int64 value
+	f = FieldCollectionID(12345, OptPropagated())
+	assert.Equal(t, "12345", getPropagatedValue(&f))
+}
+
+// Test that FieldXXX without options retains backward compatibility
+func TestFieldXXXBackwardCompatibility(t *testing.T) {
+	// These should produce identical results as before
+	assert.Equal(t, Int64(keyNodeID, 123), FieldNodeID(123))
+	assert.Equal(t, String(keyModule, "proxy"), FieldModule("proxy"))
+	assert.Equal(t, String(keyTraceID, "t1"), FieldTraceID("t1"))
+	assert.Equal(t, Int64(keyCollectionID, 456), FieldCollectionID(456))
 }

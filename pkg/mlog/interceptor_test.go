@@ -1,6 +1,6 @@
 //go:build test
 
-package grpc
+package mlog
 
 import (
 	"context"
@@ -10,8 +10,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
-
-	"github.com/milvus-io/milvus/pkg/v2/mlog"
 )
 
 func Test_extractPropagatedFromMetadata(t *testing.T) {
@@ -24,7 +22,7 @@ func Test_extractPropagatedFromMetadata(t *testing.T) {
 
 	ctx = extractPropagated(ctx)
 
-	props := mlog.GetPropagated(ctx)
+	props := GetPropagated(ctx)
 	assert.Len(t, props, 2)
 	assert.Equal(t, "my_collection", props["collectionname"])
 	assert.Equal(t, "12345", props["collectionid"])
@@ -39,7 +37,7 @@ func Test_extractPropagatedIgnoresNonPrefixedKeys(t *testing.T) {
 
 	ctx = extractPropagated(ctx)
 
-	props := mlog.GetPropagated(ctx)
+	props := GetPropagated(ctx)
 	assert.Len(t, props, 1)
 	assert.Equal(t, "value", props["propagated"])
 }
@@ -48,7 +46,7 @@ func Test_extractPropagatedNoMetadata(t *testing.T) {
 	ctx := context.Background()
 	ctx = extractPropagated(ctx)
 
-	props := mlog.GetPropagated(ctx)
+	props := GetPropagated(ctx)
 	assert.Nil(t, props)
 }
 
@@ -58,23 +56,23 @@ func Test_extractPropagatedEmptyMetadata(t *testing.T) {
 
 	ctx = extractPropagated(ctx)
 
-	props := mlog.GetPropagated(ctx)
+	props := GetPropagated(ctx)
 	assert.Nil(t, props)
 }
 
 func Test_injectPropagatedToMetadata(t *testing.T) {
 	ctx := context.Background()
-	ctx = mlog.WithFields(ctx,
-		mlog.PropagatedString("collectionName", "my_collection"),
-		mlog.PropagatedInt64("collectionId", 12345),
+	ctx = WithFields(ctx,
+		propagatedStringField("collectionName", "my_collection"),
+		propagatedInt64Field("collectionId", 12345),
 	)
 
 	ctx = injectPropagated(ctx)
 
 	md, ok := metadata.FromOutgoingContext(ctx)
 	assert.True(t, ok)
-	assert.Equal(t, []string{"my_collection"}, md.Get(MetadataPrefix+"collectionName"))
-	assert.Equal(t, []string{"12345"}, md.Get(MetadataPrefix+"collectionId"))
+	assert.Equal(t, []string{"my_collection"}, md.Get(MetadataPrefix+"collectionname"))
+	assert.Equal(t, []string{"12345"}, md.Get(MetadataPrefix+"collectionid"))
 }
 
 func Test_injectPropagatedNoPropagatedFields(t *testing.T) {
@@ -88,7 +86,7 @@ func Test_injectPropagatedNoPropagatedFields(t *testing.T) {
 func Test_injectPropagatedAppendsToExistingMetadata(t *testing.T) {
 	ctx := context.Background()
 	ctx = metadata.AppendToOutgoingContext(ctx, "existing-key", "existing-value")
-	ctx = mlog.WithFields(ctx, mlog.PropagatedString("new-key", "new-value"))
+	ctx = WithFields(ctx, propagatedStringField("new-key", "new-value"))
 
 	ctx = injectPropagated(ctx)
 
@@ -102,9 +100,9 @@ func TestRoundTripPropagation(t *testing.T) {
 	// Simulate client side: create context with propagated fields
 	// Note: use lowercase keys since gRPC normalizes metadata keys to lowercase
 	clientCtx := context.Background()
-	clientCtx = mlog.WithFields(clientCtx,
-		mlog.PropagatedString("collectionname", "test_collection"),
-		mlog.PropagatedInt64("collectionid", 99999),
+	clientCtx = WithFields(clientCtx,
+		propagatedStringField("collectionname", "test_collection"),
+		propagatedInt64Field("collectionid", 99999),
 	)
 
 	// Client injects into outgoing metadata
@@ -118,7 +116,7 @@ func TestRoundTripPropagation(t *testing.T) {
 	serverCtx = extractPropagated(serverCtx)
 
 	// Verify propagated fields are preserved
-	props := mlog.GetPropagated(serverCtx)
+	props := GetPropagated(serverCtx)
 	assert.Len(t, props, 2)
 	assert.Equal(t, "test_collection", props["collectionname"])
 	assert.Equal(t, "99999", props["collectionid"])
@@ -146,7 +144,7 @@ func TestUnaryServerInterceptorExtractsFields(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "response", resp)
 
-	props := mlog.GetPropagated(handlerCtx)
+	props := GetPropagated(handlerCtx)
 	assert.Equal(t, "value", props["key"])
 }
 
@@ -154,7 +152,7 @@ func TestUnaryClientInterceptorInjectsFields(t *testing.T) {
 	interceptor := UnaryClientInterceptor()
 
 	ctx := context.Background()
-	ctx = mlog.WithFields(ctx, mlog.PropagatedString("key", "value"))
+	ctx = WithFields(ctx, propagatedStringField("key", "value"))
 
 	var invokerCtx context.Context
 	invoker := func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, opts ...grpc.CallOption) error {
@@ -199,7 +197,7 @@ func TestStreamServerInterceptorExtractsFields(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Verify the wrapped stream has the extracted context
-	props := mlog.GetPropagated(handlerStream.Context())
+	props := GetPropagated(handlerStream.Context())
 	assert.Equal(t, "value", props["key"])
 }
 
@@ -223,7 +221,7 @@ func TestStreamServerInterceptorWrappedStreamContext(t *testing.T) {
 	assert.NoError(t, err)
 
 	// The handler receives a wrappedStream with the updated context
-	props := mlog.GetPropagated(handlerStream.Context())
+	props := GetPropagated(handlerStream.Context())
 	assert.Len(t, props, 2)
 	assert.Equal(t, "1", props["a"])
 	assert.Equal(t, "2", props["b"])
@@ -233,7 +231,7 @@ func TestStreamClientInterceptorInjectsFields(t *testing.T) {
 	interceptor := StreamClientInterceptor()
 
 	ctx := context.Background()
-	ctx = mlog.WithFields(ctx, mlog.PropagatedString("key", "value"))
+	ctx = WithFields(ctx, propagatedStringField("key", "value"))
 
 	var streamerCtx context.Context
 	streamer := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
@@ -251,7 +249,7 @@ func TestStreamClientInterceptorInjectsFields(t *testing.T) {
 
 func TestRegularFieldsNotPropagated(t *testing.T) {
 	ctx := context.Background()
-	ctx = mlog.WithFields(ctx, mlog.String("regular", "value"))
+	ctx = WithFields(ctx, String("regular", "value"))
 
 	ctx = injectPropagated(ctx)
 
@@ -273,13 +271,13 @@ func Test_extractPropagatedWithTraceContext(t *testing.T) {
 	ctx = extractPropagated(ctx)
 
 	// Verify TraceID and SpanID are added as fields (not propagated)
-	fields := mlog.FieldsFromContext(ctx)
+	fields := FieldsFromContext(ctx)
 	fieldMap := make(map[string]string)
 	for _, f := range fields {
 		fieldMap[f.Key] = f.String
 	}
-	assert.Equal(t, "0102030405060708090a0b0c0d0e0f10", fieldMap[mlog.KeyTraceID])
-	assert.Equal(t, "0102030405060708", fieldMap[mlog.KeySpanID])
+	assert.Equal(t, "0102030405060708090a0b0c0d0e0f10", fieldMap[keyTraceID])
+	assert.Equal(t, "0102030405060708", fieldMap[keySpanID])
 }
 
 func Test_extractPropagatedWithTraceContextAndMetadata(t *testing.T) {
@@ -301,18 +299,18 @@ func Test_extractPropagatedWithTraceContextAndMetadata(t *testing.T) {
 	ctx = extractPropagated(ctx)
 
 	// Verify all fields are present
-	fields := mlog.FieldsFromContext(ctx)
+	fields := FieldsFromContext(ctx)
 	assert.Len(t, fields, 3)
 
 	fieldMap := make(map[string]string)
 	for _, f := range fields {
 		fieldMap[f.Key] = f.String
 	}
-	assert.Equal(t, "0102030405060708090a0b0c0d0e0f10", fieldMap[mlog.KeyTraceID])
-	assert.Equal(t, "0102030405060708", fieldMap[mlog.KeySpanID])
+	assert.Equal(t, "0102030405060708090a0b0c0d0e0f10", fieldMap[keyTraceID])
+	assert.Equal(t, "0102030405060708", fieldMap[keySpanID])
 
 	// Propagated field should be accessible via GetPropagated
-	props := mlog.GetPropagated(ctx)
+	props := GetPropagated(ctx)
 	assert.Equal(t, "my_collection", props["collectionname"])
 }
 
@@ -321,7 +319,7 @@ func Test_extractPropagatedNoTraceContext(t *testing.T) {
 	ctx = extractPropagated(ctx)
 
 	// No fields should be added without trace context or metadata
-	fields := mlog.FieldsFromContext(ctx)
+	fields := FieldsFromContext(ctx)
 	assert.Nil(t, fields)
 }
 
@@ -333,12 +331,12 @@ func Test_extractPropagatedWithExtraFields(t *testing.T) {
 
 	// Pass extra fields to extractPropagated
 	ctx = extractPropagated(ctx,
-		mlog.String(mlog.KeyModule, "proxy"),
-		mlog.Int64("custom", 123),
+		String(keyModule, "proxy"),
+		Int64("custom", 123),
 	)
 
 	// Verify all fields are present in a single WithFields call
-	fields := mlog.FieldsFromContext(ctx)
+	fields := FieldsFromContext(ctx)
 	assert.Len(t, fields, 3) // key, module, custom
 
 	fieldMap := make(map[string]any)
@@ -349,10 +347,10 @@ func Test_extractPropagatedWithExtraFields(t *testing.T) {
 			fieldMap[f.Key] = f.Integer
 		}
 	}
-	assert.Equal(t, "proxy", fieldMap[mlog.KeyModule])
+	assert.Equal(t, "proxy", fieldMap[keyModule])
 	assert.Equal(t, int64(123), fieldMap["custom"])
 
-	props := mlog.GetPropagated(ctx)
+	props := GetPropagated(ctx)
 	assert.Equal(t, "value", props["key"])
 }
 
@@ -360,9 +358,9 @@ func Test_extractPropagatedOnlyExtraFields(t *testing.T) {
 	ctx := context.Background()
 
 	// Only extra fields, no metadata or trace context
-	ctx = extractPropagated(ctx, mlog.String(mlog.KeyModule, "datanode"))
+	ctx = extractPropagated(ctx, String(keyModule, "datanode"))
 
-	fields := mlog.FieldsFromContext(ctx)
+	fields := FieldsFromContext(ctx)
 	assert.Len(t, fields, 1)
 	assert.Equal(t, "datanode", fields[0].String)
 }
@@ -382,12 +380,12 @@ func TestUnaryServerInterceptorWithModule(t *testing.T) {
 	assert.Equal(t, "response", resp)
 
 	// Verify module field is added
-	fields := mlog.FieldsFromContext(handlerCtx)
+	fields := FieldsFromContext(handlerCtx)
 	fieldMap := make(map[string]string)
 	for _, f := range fields {
 		fieldMap[f.Key] = f.String
 	}
-	assert.Equal(t, "proxy", fieldMap[mlog.KeyModule])
+	assert.Equal(t, "proxy", fieldMap[keyModule])
 }
 
 func TestUnaryServerInterceptorModuleWithMetadata(t *testing.T) {
@@ -408,14 +406,14 @@ func TestUnaryServerInterceptorModuleWithMetadata(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Verify both module and propagated fields are present
-	fields := mlog.FieldsFromContext(handlerCtx)
+	fields := FieldsFromContext(handlerCtx)
 	fieldMap := make(map[string]string)
 	for _, f := range fields {
 		fieldMap[f.Key] = f.String
 	}
-	assert.Equal(t, "querynode", fieldMap[mlog.KeyModule])
+	assert.Equal(t, "querynode", fieldMap[keyModule])
 
-	props := mlog.GetPropagated(handlerCtx)
+	props := GetPropagated(handlerCtx)
 	assert.Equal(t, "my_collection", props["collectionname"])
 }
 
@@ -435,12 +433,12 @@ func TestStreamServerInterceptorWithModule(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Verify module field is added
-	fields := mlog.FieldsFromContext(handlerStream.Context())
+	fields := FieldsFromContext(handlerStream.Context())
 	fieldMap := make(map[string]string)
 	for _, f := range fields {
 		fieldMap[f.Key] = f.String
 	}
-	assert.Equal(t, "datanode", fieldMap[mlog.KeyModule])
+	assert.Equal(t, "datanode", fieldMap[keyModule])
 }
 
 func TestStreamServerInterceptorModuleWithMetadata(t *testing.T) {
@@ -462,13 +460,13 @@ func TestStreamServerInterceptorModuleWithMetadata(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Verify both module and propagated fields are present
-	fields := mlog.FieldsFromContext(handlerStream.Context())
+	fields := FieldsFromContext(handlerStream.Context())
 	fieldMap := make(map[string]string)
 	for _, f := range fields {
 		fieldMap[f.Key] = f.String
 	}
-	assert.Equal(t, "streamingnode", fieldMap[mlog.KeyModule])
+	assert.Equal(t, "streamingnode", fieldMap[keyModule])
 
-	props := mlog.GetPropagated(handlerStream.Context())
+	props := GetPropagated(handlerStream.Context())
 	assert.Equal(t, "value", props["key"])
 }
