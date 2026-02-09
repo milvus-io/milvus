@@ -2148,6 +2148,10 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_SnapshotReference(t *testing.
 	mockParseSegID := mockey.Mock(storage.ParseSegmentIDByBinlog).Return(int64(1001), nil).Build()
 	defer mockParseSegID.UnPatch()
 
+	// Mock IsRefIndexLoadedForCollection to return true (RefIndex is loaded)
+	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
+	defer mockIsRefIndexLoaded.UnPatch()
+
 	// Mock GetSnapshotBySegment to return snapshot IDs (makes segment referenced)
 	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).Return([]int64{1, 2}).Build()
 	defer mockGetSnapshotBySegment.UnPatch()
@@ -2402,6 +2406,10 @@ func TestGarbageCollector_recycleUnusedTextIndexFiles_SnapshotReference(t *testi
 		}).Build()
 	defer mockWalk.UnPatch()
 
+	// Mock IsRefIndexLoadedForCollection to return true (RefIndex is loaded)
+	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
+	defer mockIsRefIndexLoaded.UnPatch()
+
 	// Mock GetSnapshotBySegment to return snapshot IDs (segment is protected)
 	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).
 		Return([]int64{1, 2}).Build()
@@ -2485,6 +2493,10 @@ func TestGarbageCollector_recycleUnusedJSONIndexFiles_SnapshotReference(t *testi
 		}).Build()
 	defer mockWalk.UnPatch()
 
+	// Mock IsRefIndexLoadedForCollection to return true (RefIndex is loaded)
+	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
+	defer mockIsRefIndexLoaded.UnPatch()
+
 	// Mock GetSnapshotBySegment to return snapshot IDs (segment is protected)
 	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).
 		Return([]int64{1, 2}).Build()
@@ -2496,4 +2508,227 @@ func TestGarbageCollector_recycleUnusedJSONIndexFiles_SnapshotReference(t *testi
 	// Verify - files should NOT be removed
 	assert.Empty(t, removedFiles,
 		"JSON index files should not be removed when segment is referenced by snapshot")
+}
+
+// TestGarbageCollector_recycleUnusedBinlogFiles_SkipWhenRefIndexNotLoaded tests that binlog GC
+// is skipped when IsRefIndexLoadedForCollection returns false (startup window).
+func TestGarbageCollector_recycleUnusedBinlogFiles_SkipWhenRefIndexNotLoaded(t *testing.T) {
+	ctx := context.Background()
+
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
+
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1001,
+			CollectionID:  100,
+			PartitionID:   10,
+			State:         commonpb.SegmentState_Flushed,
+			InsertChannel: "ch1",
+		},
+	}
+
+	meta := &meta{
+		catalog:      &datacoord.Catalog{},
+		snapshotMeta: &snapshotMeta{},
+		indexMeta:    &indexMeta{},
+		segments: &SegmentsInfo{
+			segments: map[int64]*SegmentInfo{1001: segment},
+		},
+		channelCPs: newChannelCps(),
+	}
+
+	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: 0,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	removedFiles := []string{}
+	mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).To(func(cm *storage.LocalChunkManager, ctx context.Context, filePath string) error {
+		removedFiles = append(removedFiles, filePath)
+		return nil
+	}).Build()
+	defer mockRemove.UnPatch()
+
+	chunkInfo := &storage.ChunkObjectInfo{
+		FilePath:   "gc/segments/insert_logs/1001/0/1",
+		ModifyTime: time.Now().Add(-time.Hour),
+	}
+	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(func(cm *storage.LocalChunkManager, ctx context.Context, prefix string, recursive bool, fn storage.ChunkObjectWalkFunc) error {
+		fn(chunkInfo)
+		return nil
+	}).Build()
+	defer mockWalk.UnPatch()
+
+	mockParseSegID := mockey.Mock(storage.ParseSegmentIDByBinlog).Return(int64(1001), nil).Build()
+	defer mockParseSegID.UnPatch()
+
+	// Mock IsRefIndexLoadedForCollection to return false (RefIndex not loaded yet)
+	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(false).Build()
+	defer mockIsRefIndexLoaded.UnPatch()
+
+	// Do NOT mock GetSnapshotBySegment - it should not be called
+
+	gc.recycleUnusedBinlogFiles(ctx)
+
+	assert.Empty(t, removedFiles, "binlog files should not be removed when RefIndex is not loaded")
+}
+
+// TestGarbageCollector_recycleUnusedTextIndexFiles_SkipWhenRefIndexNotLoaded tests that text index GC
+// is skipped when IsRefIndexLoadedForCollection returns false (startup window).
+func TestGarbageCollector_recycleUnusedTextIndexFiles_SkipWhenRefIndexNotLoaded(t *testing.T) {
+	ctx := context.Background()
+
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1001,
+			CollectionID:  100,
+			PartitionID:   10,
+			State:         commonpb.SegmentState_Flushed,
+			InsertChannel: "ch1",
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				101: {
+					FieldID:    101,
+					Version:    2,
+					BuildID:    401,
+					Files:      []string{"file1"},
+					LogSize:    1024,
+					MemorySize: 2048,
+				},
+			},
+		},
+	}
+
+	meta := &meta{
+		catalog:      &datacoord.Catalog{},
+		snapshotMeta: &snapshotMeta{},
+		segments: &SegmentsInfo{
+			segments: map[int64]*SegmentInfo{1001: segment},
+		},
+		channelCPs: newChannelCps(),
+	}
+
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
+
+	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: 0,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	removedFiles := []string{}
+	mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, filePath string) error {
+			removedFiles = append(removedFiles, filePath)
+			return nil
+		}).Build()
+	defer mockRemove.UnPatch()
+
+	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
+			recursive bool, fn storage.ChunkObjectWalkFunc) error {
+			if strings.Contains(prefix, "text_index") {
+				chunkInfo := &storage.ChunkObjectInfo{
+					FilePath:   "gc/text_index/401/1/100/10/1001/101/file1",
+					ModifyTime: time.Now().Add(-time.Hour),
+				}
+				fn(chunkInfo)
+			}
+			return nil
+		}).Build()
+	defer mockWalk.UnPatch()
+
+	// Mock IsRefIndexLoadedForCollection to return false (RefIndex not loaded yet)
+	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(false).Build()
+	defer mockIsRefIndexLoaded.UnPatch()
+
+	// Do NOT mock GetSnapshotBySegment - it should not be called
+
+	gc.recycleUnusedTextIndexFiles(ctx, nil)
+
+	assert.Empty(t, removedFiles, "text index files should not be removed when RefIndex is not loaded")
+}
+
+// TestGarbageCollector_recycleUnusedJSONIndexFiles_SkipWhenRefIndexNotLoaded tests that JSON index GC
+// is skipped when IsRefIndexLoadedForCollection returns false (startup window).
+func TestGarbageCollector_recycleUnusedJSONIndexFiles_SkipWhenRefIndexNotLoaded(t *testing.T) {
+	ctx := context.Background()
+
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1002,
+			CollectionID:  100,
+			PartitionID:   10,
+			State:         commonpb.SegmentState_Flushed,
+			InsertChannel: "ch1",
+			JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+				102: {
+					FieldID:    102,
+					Version:    2,
+					BuildID:    402,
+					Files:      []string{"json_file1"},
+					LogSize:    512,
+					MemorySize: 1024,
+				},
+			},
+		},
+	}
+
+	meta := &meta{
+		catalog:      &datacoord.Catalog{},
+		snapshotMeta: &snapshotMeta{},
+		segments: &SegmentsInfo{
+			segments: map[int64]*SegmentInfo{1002: segment},
+		},
+		channelCPs: newChannelCps(),
+	}
+
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
+
+	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: 0,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	removedFiles := []string{}
+	mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, filePath string) error {
+			removedFiles = append(removedFiles, filePath)
+			return nil
+		}).Build()
+	defer mockRemove.UnPatch()
+
+	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
+			recursive bool, fn storage.ChunkObjectWalkFunc) error {
+			if strings.Contains(prefix, "json_index") {
+				chunkInfo := &storage.ChunkObjectInfo{
+					FilePath:   "gc/json_index/402/1/100/10/1002/102/json_file1",
+					ModifyTime: time.Now().Add(-time.Hour),
+				}
+				fn(chunkInfo)
+			}
+			return nil
+		}).Build()
+	defer mockWalk.UnPatch()
+
+	// Mock IsRefIndexLoadedForCollection to return false (RefIndex not loaded yet)
+	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(false).Build()
+	defer mockIsRefIndexLoaded.UnPatch()
+
+	// Do NOT mock GetSnapshotBySegment - it should not be called
+
+	gc.recycleUnusedJSONIndexFiles(ctx, nil)
+
+	assert.Empty(t, removedFiles, "JSON index files should not be removed when RefIndex is not loaded")
 }

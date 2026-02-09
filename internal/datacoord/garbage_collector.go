@@ -586,6 +586,14 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 		if segment != nil {
 			snapshotMeta := gc.meta.GetSnapshotMeta()
 			if snapshotMeta != nil {
+				// If RefIndex is not loaded yet, skip to avoid incorrectly deleting snapshot-referenced files
+				if !snapshotMeta.IsRefIndexLoadedForCollection(segment.GetCollectionID()) {
+					logger.Info("skip GC binlog files since snapshot RefIndex is not loaded yet",
+						zap.Int64("segmentID", segmentID),
+						zap.Int64("collectionID", segment.GetCollectionID()))
+					valid++
+					return true
+				}
 				if snapshotIDs := snapshotMeta.GetSnapshotBySegment(ctx, segment.GetCollectionID(), segmentID); len(snapshotIDs) > 0 {
 					logger.Info("skip GC binlog files since segment is referenced by snapshot",
 						zap.Int64("segmentID", segmentID),
@@ -1264,6 +1272,13 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context, sig
 		// Check if segment is referenced by any snapshot before deleting text index files
 		snapshotMeta := gc.meta.GetSnapshotMeta()
 		if snapshotMeta != nil {
+			// If RefIndex is not loaded yet, skip to avoid incorrectly deleting snapshot-referenced files
+			if !snapshotMeta.IsRefIndexLoadedForCollection(seg.GetCollectionID()) {
+				log.Info("skip GC text index files since snapshot RefIndex is not loaded yet",
+					zap.Int64("segmentID", seg.GetID()),
+					zap.Int64("collectionID", seg.GetCollectionID()))
+				continue
+			}
 			if snapshotIDs := snapshotMeta.GetSnapshotBySegment(ctx, seg.GetCollectionID(), seg.GetID()); len(snapshotIDs) > 0 {
 				log.Info("skip GC text index files since segment is referenced by snapshot",
 					zap.Int64("segmentID", seg.GetID()),
@@ -1453,6 +1468,13 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 		// Check if segment is referenced by any snapshot before deleting JSON index files
 		snapshotMeta := gc.meta.GetSnapshotMeta()
 		if snapshotMeta != nil {
+			// If RefIndex is not loaded yet, skip to avoid incorrectly deleting snapshot-referenced files
+			if !snapshotMeta.IsRefIndexLoadedForCollection(seg.GetCollectionID()) {
+				log.Info("skip GC JSON index files since snapshot RefIndex is not loaded yet",
+					zap.Int64("segmentID", seg.GetID()),
+					zap.Int64("collectionID", seg.GetCollectionID()))
+				continue
+			}
 			if snapshotIDs := snapshotMeta.GetSnapshotBySegment(ctx, seg.GetCollectionID(), seg.GetID()); len(snapshotIDs) > 0 {
 				log.Info("skip GC JSON index files since segment is referenced by snapshot",
 					zap.Int64("segmentID", seg.GetID()),
