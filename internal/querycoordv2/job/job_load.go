@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -84,22 +85,23 @@ func NewLoadCollectionJob(
 
 func (job *LoadCollectionJob) Execute() error {
 	req := job.result.Message.Header()
-	vchannels := job.result.GetVChannelsWithoutControlChannel()
-
 	log := log.Ctx(job.ctx).With(zap.Int64("collectionID", req.GetCollectionId()))
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionId())
+
+	collInfo, err := job.broker.DescribeCollection(job.ctx, req.GetCollectionId())
+	if errors.Is(err, merr.ErrCollectionNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
 
 	// 1. create replica if not exist
 	if _, err := utils.SpawnReplicasWithReplicaConfig(job.ctx, job.meta, meta.SpawnWithReplicaConfigParams{
 		CollectionID: req.GetCollectionId(),
-		Channels:     vchannels,
+		Channels:     collInfo.GetVirtualChannelNames(),
 		Configs:      req.GetReplicas(),
 	}); err != nil {
-		return err
-	}
-
-	collInfo, err := job.broker.DescribeCollection(job.ctx, req.GetCollectionId())
-	if err != nil {
 		return err
 	}
 
