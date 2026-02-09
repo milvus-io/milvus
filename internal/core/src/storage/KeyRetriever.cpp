@@ -1,5 +1,6 @@
 #include "storage/KeyRetriever.h"
 
+#include <cstdlib>
 #include <exception>
 
 #include "PluginInterface.h"
@@ -44,7 +45,12 @@ EncodeKeyMetadata(int64_t ez_id, int64_t collection_id, std::string key) {
 
 std::shared_ptr<CPluginContext>
 DecodeKeyMetadata(std::string key_metadata) {
-    auto context = std::make_shared<CPluginContext>();
+    auto context = std::shared_ptr<CPluginContext>(
+        new CPluginContext(), [](CPluginContext* ctx) {
+            free(const_cast<char*>(ctx->key));
+            delete ctx;
+        });
+    context->key = nullptr;
     try {
         auto first_pos = key_metadata.find("_");
         if (first_pos == std::string::npos) {
@@ -59,7 +65,8 @@ DecodeKeyMetadata(std::string key_metadata) {
         context->ez_id = std::stoll(key_metadata.substr(0, first_pos));
         context->collection_id = std::stoll(
             key_metadata.substr(first_pos + 1, second_pos - (first_pos + 1)));
-        context->key = key_metadata.substr(second_pos + 1).c_str();
+        auto key_str = key_metadata.substr(second_pos + 1);
+        context->key = strdup(key_str.c_str());
     } catch (const std::exception& e) {
         LOG_WARN("failed to decode key metadata, reason: {}", e.what());
         return nullptr;
