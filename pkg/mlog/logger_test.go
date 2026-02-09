@@ -238,7 +238,7 @@ func TestInitNodeSetsNodeId(t *testing.T) {
 	var entry map[string]interface{}
 	err := json.Unmarshal(buf.Bytes(), &entry)
 	require.NoError(t, err)
-	assert.Equal(t, float64(12345), entry[KeyNodeID])
+	assert.Equal(t, float64(12345), entry[keyNodeID])
 }
 
 func TestInitNodeFieldIncludedInAllLogs(t *testing.T) {
@@ -265,7 +265,7 @@ func TestInitNodeFieldIncludedInAllLogs(t *testing.T) {
 		var entry map[string]interface{}
 		err := json.Unmarshal(line, &entry)
 		require.NoError(t, err)
-		assert.Equal(t, float64(99), entry[KeyNodeID], "nodeId should be in all log entries")
+		assert.Equal(t, float64(99), entry[keyNodeID], "nodeId should be in all log entries")
 	}
 }
 
@@ -867,4 +867,106 @@ func TestGlobalLogNoCachedLoggerWithFields(t *testing.T) {
 	err := json.Unmarshal(buf.Bytes(), &entry)
 	require.NoError(t, err)
 	assert.Equal(t, "manual_value", entry["manual_field"])
+}
+
+func TestDPanicLogsAtDPanicLevel(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := createTestLogger(buf)
+	Init(logger)
+	defer resetLogger()
+
+	ctx := context.Background()
+	DPanic(ctx, "dpanic message")
+
+	var entry map[string]interface{}
+	err := json.Unmarshal(buf.Bytes(), &entry)
+	require.NoError(t, err)
+	assert.Equal(t, "dpanic", entry["level"])
+	assert.Equal(t, "dpanic message", entry["msg"])
+}
+
+func TestPanicLogsAtPanicLevel(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := createTestLogger(buf)
+	Init(logger)
+	defer resetLogger()
+
+	ctx := context.Background()
+	assert.Panics(t, func() {
+		Panic(ctx, "panic message")
+	})
+
+	var entry map[string]interface{}
+	err := json.Unmarshal(buf.Bytes(), &entry)
+	require.NoError(t, err)
+	assert.Equal(t, "panic", entry["level"])
+	assert.Equal(t, "panic message", entry["msg"])
+}
+
+func TestDPanicIncludesFields(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := createTestLogger(buf)
+	Init(logger)
+	defer resetLogger()
+
+	ctx := context.Background()
+	ctx = WithFields(ctx, String("trace_id", "trace123"))
+	DPanic(ctx, "dpanic with fields", String("key", "value"))
+
+	var entry map[string]interface{}
+	err := json.Unmarshal(buf.Bytes(), &entry)
+	require.NoError(t, err)
+	assert.Equal(t, "dpanic", entry["level"])
+	assert.Equal(t, "trace123", entry["trace_id"])
+	assert.Equal(t, "value", entry["key"])
+}
+
+func TestDPanicNilContext(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := createTestLogger(buf)
+	Init(logger)
+	defer resetLogger()
+
+	DPanic(nil, "dpanic nil ctx")
+
+	var entry map[string]interface{}
+	err := json.Unmarshal(buf.Bytes(), &entry)
+	require.NoError(t, err)
+	assert.Equal(t, true, entry["_ctx_nil"])
+}
+
+func TestLoggerDPanic(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := createTestLogger(buf)
+	Init(logger)
+	defer resetLogger()
+
+	componentLogger := With(String("module", "test"))
+	ctx := context.Background()
+	componentLogger.DPanic(ctx, "component dpanic")
+
+	var entry map[string]interface{}
+	err := json.Unmarshal(buf.Bytes(), &entry)
+	require.NoError(t, err)
+	assert.Equal(t, "dpanic", entry["level"])
+	assert.Equal(t, "test", entry["module"])
+}
+
+func TestLoggerPanic(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := createTestLogger(buf)
+	Init(logger)
+	defer resetLogger()
+
+	componentLogger := With(String("module", "test"))
+	ctx := context.Background()
+	assert.Panics(t, func() {
+		componentLogger.Panic(ctx, "component panic")
+	})
+
+	var entry map[string]interface{}
+	err := json.Unmarshal(buf.Bytes(), &entry)
+	require.NoError(t, err)
+	assert.Equal(t, "panic", entry["level"])
+	assert.Equal(t, "test", entry["module"])
 }

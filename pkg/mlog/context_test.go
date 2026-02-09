@@ -108,10 +108,10 @@ func TestWithFieldsDoesNotMutateParent(t *testing.T) {
 	assert.Len(t, parentFields, 1)
 }
 
-// Tests for PropagatedString/PropagatedInt64
+// Tests for propagatedStringField/propagatedInt64Field
 
 func TestPropagatedStringField(t *testing.T) {
-	f := PropagatedString("key", "value")
+	f := propagatedStringField("key", "value")
 	assert.Equal(t, "key", f.Key)
 	assert.Equal(t, zapcore.ObjectMarshalerType, f.Type)
 	assert.True(t, isPropagatedField(&f))
@@ -119,7 +119,7 @@ func TestPropagatedStringField(t *testing.T) {
 }
 
 func TestPropagatedInt64Field(t *testing.T) {
-	f := PropagatedInt64("key", 12345)
+	f := propagatedInt64Field("key", 12345)
 	assert.Equal(t, "key", f.Key)
 	assert.Equal(t, zapcore.ObjectMarshalerType, f.Type)
 	assert.True(t, isPropagatedField(&f))
@@ -127,7 +127,7 @@ func TestPropagatedInt64Field(t *testing.T) {
 }
 
 func TestPropagatedInt64NegativeValue(t *testing.T) {
-	f := PropagatedInt64("offset", -100)
+	f := propagatedInt64Field("offset", -100)
 	assert.Equal(t, "-100", getPropagatedValue(&f))
 }
 
@@ -142,8 +142,8 @@ func TestRegularFieldIsNotPropagated(t *testing.T) {
 func TestWithFieldsPropagatedAddsFieldsToContext(t *testing.T) {
 	ctx := context.Background()
 	ctx = WithFields(ctx,
-		PropagatedString(KeyCollectionName, "my_collection"),
-		PropagatedInt64(KeyCollectionID, 12345),
+		propagatedStringField(keyCollectionName, "my_collection"),
+		propagatedInt64Field(keyCollectionID, 12345),
 	)
 
 	fields := FieldsFromContext(ctx)
@@ -153,20 +153,20 @@ func TestWithFieldsPropagatedAddsFieldsToContext(t *testing.T) {
 func TestWithFieldsPropagatedFieldsAreAccessibleViaGetPropagated(t *testing.T) {
 	ctx := context.Background()
 	ctx = WithFields(ctx,
-		PropagatedString(KeyCollectionName, "my_collection"),
-		PropagatedInt64(KeyCollectionID, 12345),
+		propagatedStringField(keyCollectionName, "my_collection"),
+		propagatedInt64Field(keyCollectionID, 12345),
 	)
 
 	props := GetPropagated(ctx)
 	assert.Len(t, props, 2)
-	assert.Equal(t, "my_collection", props[KeyCollectionName])
-	assert.Equal(t, "12345", props[KeyCollectionID])
+	assert.Equal(t, "my_collection", props[keyCollectionName])
+	assert.Equal(t, "12345", props[keyCollectionID])
 }
 
 func TestWithFieldsPropagatedAccumulates(t *testing.T) {
 	ctx := context.Background()
-	ctx = WithFields(ctx, PropagatedString("a", "1"))
-	ctx = WithFields(ctx, PropagatedString("b", "2"))
+	ctx = WithFields(ctx, propagatedStringField("a", "1"))
+	ctx = WithFields(ctx, propagatedStringField("b", "2"))
 
 	props := GetPropagated(ctx)
 	assert.Len(t, props, 2)
@@ -179,8 +179,8 @@ func TestWithFieldsPropagatedAccumulates(t *testing.T) {
 
 func TestWithFieldsPropagatedDoesNotMutateParent(t *testing.T) {
 	ctx := context.Background()
-	parentCtx := WithFields(ctx, PropagatedString("a", "1"))
-	_ = WithFields(parentCtx, PropagatedString("b", "2"))
+	parentCtx := WithFields(ctx, propagatedStringField("a", "1"))
+	_ = WithFields(parentCtx, propagatedStringField("b", "2"))
 
 	props := GetPropagated(parentCtx)
 	assert.Len(t, props, 1)
@@ -190,7 +190,7 @@ func TestWithFieldsPropagatedDoesNotMutateParent(t *testing.T) {
 func TestWithFieldsCombinesRegularAndPropagated(t *testing.T) {
 	ctx := context.Background()
 	ctx = WithFields(ctx, String("local", "value"))
-	ctx = WithFields(ctx, PropagatedString("propagated", "pvalue"))
+	ctx = WithFields(ctx, propagatedStringField("propagated", "pvalue"))
 
 	fields := FieldsFromContext(ctx)
 	assert.Len(t, fields, 2)
@@ -220,7 +220,7 @@ func TestGetPropagatedOnlyRegularFields(t *testing.T) {
 }
 
 func TestWithFieldsNilContextWithPropagated(t *testing.T) {
-	ctx := WithFields(nil, PropagatedString("key", "value"))
+	ctx := WithFields(nil, propagatedStringField("key", "value"))
 	assert.NotNil(t, ctx)
 
 	fields := FieldsFromContext(ctx)
@@ -272,8 +272,8 @@ func TestWithFieldsDeduplicatesMultipleKeys(t *testing.T) {
 
 func TestWithFieldsPropagatedDeduplicatesByKey(t *testing.T) {
 	ctx := context.Background()
-	ctx = WithFields(ctx, PropagatedString("key", "value1"))
-	ctx = WithFields(ctx, PropagatedString("key", "value2")) // same key
+	ctx = WithFields(ctx, propagatedStringField("key", "value1"))
+	ctx = WithFields(ctx, propagatedStringField("key", "value2")) // same key
 
 	fields := FieldsFromContext(ctx)
 	assert.Len(t, fields, 1, "duplicate key should be deduplicated")
@@ -285,7 +285,7 @@ func TestWithFieldsPropagatedDeduplicatesByKey(t *testing.T) {
 func TestMixedFieldsAndPropagatedDeduplication(t *testing.T) {
 	ctx := context.Background()
 	ctx = WithFields(ctx, String("shared", "from_fields"))
-	ctx = WithFields(ctx, PropagatedString("shared", "from_propagated"))
+	ctx = WithFields(ctx, propagatedStringField("shared", "from_propagated"))
 
 	fields := FieldsFromContext(ctx)
 	assert.Len(t, fields, 1, "same key from different sources should deduplicate")

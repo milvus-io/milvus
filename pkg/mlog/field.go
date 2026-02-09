@@ -134,10 +134,10 @@ func (p propagatedInt64) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	return nil
 }
 
-// PropagatedString creates a string field that will be propagated via RPC.
+// propagatedStringField creates a string field that will be propagated via RPC.
 // The field is logged and transmitted in gRPC metadata.
 // The key is automatically converted to lowercase for gRPC metadata compatibility.
-func PropagatedString(key string, val string) Field {
+func propagatedStringField(key string, val string) Field {
 	return Field{
 		Key:       strings.ToLower(key),
 		Type:      zapcore.ObjectMarshalerType,
@@ -145,10 +145,10 @@ func PropagatedString(key string, val string) Field {
 	}
 }
 
-// PropagatedInt64 creates an int64 field that will be propagated via RPC.
+// propagatedInt64Field creates an int64 field that will be propagated via RPC.
 // The value is converted to string for transmission.
 // The key is automatically converted to lowercase for gRPC metadata compatibility.
-func PropagatedInt64(key string, val int64) Field {
+func propagatedInt64Field(key string, val int64) Field {
 	return Field{
 		Key:       strings.ToLower(key),
 		Type:      zapcore.ObjectMarshalerType,

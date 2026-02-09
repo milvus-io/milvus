@@ -35,7 +35,7 @@ func Init(logger *zap.Logger) {
 // Call this once at process startup.
 func InitNode(logger *zap.Logger, nodeId int64) {
 	// Add nodeId to the logger directly, so all derived loggers include it
-	field := Int64(KeyNodeID, nodeId)
+	field := Int64(keyNodeID, nodeId)
 	globalLogger.Store(logger.WithOptions(zap.AddCallerSkip(1)).With(field))
 }
 
@@ -107,6 +107,34 @@ func Error(ctx context.Context, msg string, fields ...Field) {
 	}
 	logger, fields := prepareLog(ctx, fields)
 	logger.Error(msg, fields...)
+}
+
+// DPanic logs a message at dpanic level.
+// In development mode, the logger then panics. (See DPanicLevel for details.)
+func DPanic(ctx context.Context, msg string, fields ...Field) {
+	if !globalLevel.Enabled(DPanicLevel) {
+		return
+	}
+	logger, fields := prepareLog(ctx, fields)
+	logger.DPanic(msg, fields...)
+}
+
+// Panic logs a message at panic level, then panics.
+func Panic(ctx context.Context, msg string, fields ...Field) {
+	if !globalLevel.Enabled(PanicLevel) {
+		return
+	}
+	logger, fields := prepareLog(ctx, fields)
+	logger.Panic(msg, fields...)
+}
+
+// Fatal logs a message at fatal level, then calls os.Exit(1).
+func Fatal(ctx context.Context, msg string, fields ...Field) {
+	if !globalLevel.Enabled(FatalLevel) {
+		return
+	}
+	logger, fields := prepareLog(ctx, fields)
+	logger.Fatal(msg, fields...)
 }
 
 // Logger is a component-level logger with pre-configured fields.
@@ -273,4 +301,32 @@ func (l *Logger) Error(ctx context.Context, msg string, fields ...Field) {
 	}
 	logger, fields := l.prepareLog(ctx, fields)
 	logger.Error(msg, fields...)
+}
+
+// DPanic logs a message at dpanic level.
+// In development mode, the logger then panics. (See DPanicLevel for details.)
+func (l *Logger) DPanic(ctx context.Context, msg string, fields ...Field) {
+	if !globalLevel.Enabled(DPanicLevel) {
+		return
+	}
+	logger, fields := l.prepareLog(ctx, fields)
+	logger.DPanic(msg, fields...)
+}
+
+// Panic logs a message at panic level, then panics.
+func (l *Logger) Panic(ctx context.Context, msg string, fields ...Field) {
+	if !globalLevel.Enabled(PanicLevel) {
+		return
+	}
+	logger, fields := l.prepareLog(ctx, fields)
+	logger.Panic(msg, fields...)
+}
+
+// Fatal logs a message at fatal level, then calls os.Exit(1).
+func (l *Logger) Fatal(ctx context.Context, msg string, fields ...Field) {
+	if !globalLevel.Enabled(FatalLevel) {
+		return
+	}
+	logger, fields := l.prepareLog(ctx, fields)
+	logger.Fatal(msg, fields...)
 }
