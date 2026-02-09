@@ -15,7 +15,8 @@ lindera-cc-cedict = ["lindera/cc-cedict"]
 
 [profile.release]
 opt-level = 3
-debug = true
+debug = false
+strip = true
 lto = true
 debug-assertions = false
 codegen-units = 1
