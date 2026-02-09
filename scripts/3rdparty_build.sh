@@ -88,9 +88,9 @@ if [[ -f "$HOME/.local/bin/conan" ]]; then
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
-# Ensure conan version matches the required version (1.66.0)
+# Ensure conan version matches the required version (2.25.1)
 # CI Docker images may have an older version pre-installed
-REQUIRED_CONAN_VERSION="1.66.0"
+REQUIRED_CONAN_VERSION="2.25.1"
 CURRENT_CONAN_VERSION=$(conan --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
 if [[ "${CURRENT_CONAN_VERSION}" != "${REQUIRED_CONAN_VERSION}" ]]; then
     echo "Conan version mismatch: ${CURRENT_CONAN_VERSION} != ${REQUIRED_CONAN_VERSION}, upgrading..."
@@ -111,7 +111,6 @@ SAVED_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 unset LD_PRELOAD
 unset LD_LIBRARY_PATH
 
-export CONAN_REVISIONS_ENABLED=1
 export CXXFLAGS="-Wno-error=address -Wno-error=deprecated-declarations -include cstdint"
 export CFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"
 # LLVM from Homebrew doesn't set TARGET_OS_OSX=1 (unlike Apple's clang), which causes
@@ -125,11 +124,13 @@ fi
 export CMAKE_POLICY_VERSION_MINIMUM=3.5
 
 # Determine the Conan remote URL, using the environment variable if set, otherwise defaulting
-CONAN_ARTIFACTORY_URL="${CONAN_ARTIFACTORY_URL:-https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local}"
+# Always ensure the default-conan-local2 remote is the highest priority (index 0) to avoid conflicts with other remotes that may have the same packages
+CONAN_ARTIFACTORY_URL="${CONAN_ARTIFACTORY_URL:-https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local2}"
 
-if [[ ! `conan remote list` == *default-conan-local* ]]; then
-    conan remote add default-conan-local $CONAN_ARTIFACTORY_URL
+if conan remote list | grep -q default-conan-local2; then
+    conan remote remove default-conan-local2
 fi
+conan remote add default-conan-local2 $CONAN_ARTIFACTORY_URL --index 0
 
 # Install a conan pre_build hook that sets LD_LIBRARY_PATH (Linux) or
 # DYLD_LIBRARY_PATH (macOS) before each package build. This ensures that
@@ -137,7 +138,7 @@ fi
 # when invoked during downstream package builds (opentelemetry-cpp, googleapis).
 # Use "conan config home" to get the correct conan home directory, as ~ may
 # differ from the conan home in CI containers.
-CONAN_HOME_DIR=$(conan config home 2>/dev/null || echo "${CONAN_USER_HOME:-$HOME}/.conan")
+CONAN_HOME_DIR=$(conan config home 2>/dev/null || echo "${CONAN_HOME:-$HOME/.conan2}")
 mkdir -p "$CONAN_HOME_DIR/hooks"
 cat > "$CONAN_HOME_DIR/hooks/fix_shared_lib_env.py" << 'HOOK_EOF'
 import os, platform
@@ -150,10 +151,11 @@ def pre_build(output, conanfile, **kwargs):
     to avoid polluting the conan process environment."""
     dep_lib_dirs = []
     try:
-        for _, dep in conanfile.deps_cpp_info.dependencies:
-            for p in dep.lib_paths:
-                if os.path.isdir(p):
-                    dep_lib_dirs.append(p)
+        for dep in conanfile.dependencies.values():
+            if dep.package_folder:
+                lib_dir = os.path.join(dep.package_folder, "lib")
+                if os.path.isdir(lib_dir):
+                    dep_lib_dirs.append(lib_dir)
     except Exception:
         return
     if not dep_lib_dirs:
@@ -174,7 +176,6 @@ def post_build(output, conanfile, **kwargs):
             os.environ[env_var] = old_val
     _saved_env.clear()
 HOOK_EOF
-conan config set hooks.fix_shared_lib_env 2>/dev/null
 
 unameOut="$(uname -s)"
 case "${unameOut}" in
@@ -184,7 +185,7 @@ case "${unameOut}" in
     export CMAKE_CXX_COMPILER_LAUNCHER=ccache
     echo "Using CXX: $CXX"
     echo "Using CC: $CC"
-    CONAN_ARGS="--install-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=17 -u"
+    CONAN_ARGS="--output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=17 -u"
 
     # On macOS, Conan packages with shared libraries (protobuf, grpc) produce
     # binaries (protoc, grpc_cpp_plugin) whose install rpaths don't include
@@ -195,7 +196,6 @@ case "${unameOut}" in
     # each package's binaries right after it is built (before the manifest is
     # sealed), so every tool binary works the first time it is invoked.
     mkdir -p "$CONAN_HOME_DIR/hooks"
-    conan config set hooks.fix_macos_rpaths 2>/dev/null
     cat > "$CONAN_HOME_DIR/hooks/fix_macos_rpaths.py" << 'HOOK_EOF'
 import os, platform, subprocess, stat
 
@@ -210,10 +210,11 @@ def post_package(output, conanfile, conanfile_path, **kwargs):
         return
     dep_lib_dirs = []
     try:
-        for _, dep in conanfile.deps_cpp_info.dependencies:
-            for p in dep.lib_paths:
-                if os.path.isdir(p):
-                    dep_lib_dirs.append(p)
+        for dep in conanfile.dependencies.values():
+            if dep.package_folder:
+                lib_dir = os.path.join(dep.package_folder, "lib")
+                if os.path.isdir(lib_dir):
+                    dep_lib_dirs.append(lib_dir)
     except Exception:
         return
     if not dep_lib_dirs:
@@ -246,9 +247,9 @@ HOOK_EOF
     export CPU_TARGET=avx
     GCC_VERSION=`gcc -dumpversion`
     if [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
-      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.cppstd=17 -u || { echo 'conan install failed'; exit 1; }
+      conan install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.cppstd=17 || { echo 'conan install failed'; exit 1; }
     else
-      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -s compiler.cppstd=17 -u || { echo 'conan install failed'; exit 1; }
+      conan install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -s compiler.cppstd=17 || { echo 'conan install failed'; exit 1; }
     fi
     ;;
   *)

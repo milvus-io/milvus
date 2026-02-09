@@ -33,10 +33,62 @@ include_directories(
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
     ${BSONCXX_INCLUDE_DIR}
-    ${CONAN_INCLUDE_DIRS}
     ${MILVUS_COMMON_INCLUDE_DIR}
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
+
+# Interface library to propagate Conan include directories to object libraries.
+# In Conan 1, conan_basic_setup() set global include dirs. In Conan 2, includes
+# are per-target, so object libraries need explicit linkage to get include paths.
+add_library(milvus_conan_deps INTERFACE)
+target_link_libraries(milvus_conan_deps INTERFACE
+    protobuf::libprotobuf
+    glog::glog
+    gflags
+    Folly::folly
+    RocksDB::rocksdb-shared
+    arrow::arrow
+    gRPC::grpc++
+    opentelemetry-cpp::opentelemetry-cpp
+    google-cloud-cpp::google-cloud-cpp
+    prometheus-cpp::prometheus-cpp
+    yaml-cpp
+    nlohmann_json::nlohmann_json
+    fmt::fmt-header-only
+    re2::re2
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    CURL::libcurl
+    ZLIB::ZLIB
+    lz4::lz4
+    zstd::libzstd_static
+    Snappy::snappy
+    roaring::roaring
+    marisa::marisa
+    GEOS::geos_c
+    ICU::uc
+    xxHash::xxhash
+    TBB::tbb
+    libsodium::libsodium
+    double-conversion::double-conversion
+    xsimd
+    unordered_dense::unordered_dense
+    abseil::abseil
+    rapidjson
+    simde::simde
+    LibLZMA::LibLZMA
+    RdKafka::rdkafka++
+    googleapis::googleapis
+    boost::boost
+    libavrocpp::libavrocpp
+    benchmark::benchmark_main
+    aws-sdk-cpp::aws-sdk-cpp
+    Azure::azure-core
+)
+# Azure SDK recipe doesn't set includedirs on components, add manually
+if(azure-sdk-for-cpp_PACKAGE_FOLDER_RELEASE)
+    target_include_directories(milvus_conan_deps INTERFACE "${azure-sdk-for-cpp_PACKAGE_FOLDER_RELEASE}/include")
+endif()
 
 add_subdirectory( pb )
 add_subdirectory( config )
@@ -85,7 +137,48 @@ set(LINK_TARGETS
     milvus-common
     bsoncxx
     ${OpenMP_CXX_FLAGS}
-    ${CONAN_LIBS}
+    protobuf::libprotobuf
+    glog::glog
+    gflags
+    Folly::folly
+    RocksDB::rocksdb-shared
+    arrow::arrow
+    gRPC::grpc++
+    opentelemetry-cpp::opentelemetry-cpp
+    google-cloud-cpp::google-cloud-cpp
+    prometheus-cpp::prometheus-cpp
+    yaml-cpp
+    nlohmann_json::nlohmann_json
+    fmt::fmt-header-only
+    re2::re2
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    CURL::libcurl
+    ZLIB::ZLIB
+    lz4::lz4
+    zstd::libzstd_static
+    Snappy::snappy
+    roaring::roaring
+    marisa::marisa
+    GEOS::geos_c
+    ICU::uc
+    xxHash::xxhash
+    TBB::tbb
+    libsodium::libsodium
+    double-conversion::double-conversion
+    xsimd
+    unordered_dense::unordered_dense
+    abseil::abseil
+    rapidjson
+    simde::simde
+    LibLZMA::LibLZMA
+    RdKafka::rdkafka++
+    googleapis::googleapis
+    boost::boost
+    libavrocpp::libavrocpp
+    benchmark::benchmark_main
+    aws-sdk-cpp::aws-sdk-cpp
+    Azure::azure-core
     )
 
 if(USE_OPENDAL)
