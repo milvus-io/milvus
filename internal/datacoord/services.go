@@ -2121,6 +2121,12 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 	}
 	log.Info("receive DropSnapshot request")
 
+	// Check if snapshot exists - if not, return success (idempotent)
+	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetName()); err != nil {
+		log.Info("DropSnapshot: snapshot not found, returning success (idempotent)", zap.Error(err))
+		return merr.Success(), nil
+	}
+
 	// Start broadcast with exclusive snapshot lock to prevent concurrent drop/restore
 	// No collection lock needed - dropping snapshot only affects snapshot metadata
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
@@ -2133,9 +2139,9 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 	}
 	defer broadcaster.Close()
 
-	// Check if snapshot exists - if not, return success (idempotent)
+	// Double-check after acquiring lock - another goroutine may have dropped it
 	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetName()); err != nil {
-		log.Info("DropSnapshot: snapshot not found, returning success (idempotent)")
+		log.Info("DropSnapshot: snapshot not found after lock, returning success (idempotent)", zap.Error(err))
 		return merr.Success(), nil
 	}
 

@@ -660,8 +660,8 @@ func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Completed() {
 	s.copyMeta.IncrementRestoreRef(snapshotName)
 	s.Equal(int32(1), s.copyMeta.GetRestoreRefCount(snapshotName))
 
-	// Execute: Update job to Completed
-	err := s.checker.updateJobStateAndReleaseRef(jobID, snapshotName,
+	// Execute: Update job to Completed via atomic meta method
+	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
 	s.NoError(err)
 
@@ -688,8 +688,8 @@ func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Failed() {
 	s.copyMeta.IncrementRestoreRef(snapshotName)
 	s.Equal(int32(1), s.copyMeta.GetRestoreRefCount(snapshotName))
 
-	// Execute: Update job to Failed
-	err := s.checker.updateJobStateAndReleaseRef(jobID, snapshotName,
+	// Execute: Update job to Failed via atomic meta method
+	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
 	s.NoError(err)
 
@@ -716,8 +716,8 @@ func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Executing() {
 	s.copyMeta.IncrementRestoreRef(snapshotName)
 	s.Equal(int32(1), s.copyMeta.GetRestoreRefCount(snapshotName))
 
-	// Execute: Update job to Executing (non-terminal state)
-	err := s.checker.updateJobStateAndReleaseRef(jobID, snapshotName,
+	// Execute: Update job to Executing (non-terminal state) via atomic meta method
+	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting))
 	s.NoError(err)
 

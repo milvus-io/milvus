@@ -107,6 +107,9 @@ func (t *SnapshotRestoreRefTracker) DecrementRestoreRef(snapshotName string) {
 		if t.refCount[snapshotName] == 0 {
 			delete(t.refCount, snapshotName)
 		}
+	} else {
+		log.Warn("attempted to decrement snapshot restore ref that is already zero or does not exist",
+			zap.String("snapshot", snapshotName))
 	}
 }
 
@@ -383,15 +386,22 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 	copySegmentMeta.jobs = jobs
 	copySegmentMeta.tasks = tasks
 
-	// Rebuild snapshot restore reference counts from restored jobs
-	// This ensures crash recovery: if DataCoord restarts with active restore jobs,
-	// the reference counts are reconstructed to prevent snapshot deletion
+	// Rebuild snapshot restore reference counts from non-terminal restored jobs.
+	// Only Pending and Executing jobs need ref tracking — terminal jobs (Completed/Failed)
+	// already had their refs released before the crash, so re-incrementing them would
+	// cause a permanent leak (no code path exists to decrement them again).
 	for _, job := range restoredJobs {
+		state := job.GetState()
+		if state == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
+			state == datapb.CopySegmentJobState_CopySegmentJobFailed {
+			continue
+		}
 		snapshotName := job.GetSnapshotName()
 		copySegmentMeta.IncrementRestoreRef(snapshotName)
-		log.Info("rebuilt snapshot restore ref count from job",
+		log.Info("rebuilt snapshot restore ref count from active job",
 			zap.String("snapshot", snapshotName),
-			zap.Int64("jobID", job.GetJobId()))
+			zap.Int64("jobID", job.GetJobId()),
+			zap.String("state", state.String()))
 	}
 
 	return copySegmentMeta, nil
@@ -535,27 +545,43 @@ func (m *copySegmentMeta) CountJobBy(ctx context.Context, filters ...CopySegment
 // Returns:
 //   - error: If update fails
 func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error {
-	// Update job state first
-	err := m.UpdateJob(ctx, jobID, actions...)
-	if err != nil {
-		return err
-	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	// Check if job transitioned to terminal state
-	job := m.GetJob(ctx, jobID)
-	if job == nil {
+	job, ok := m.jobs[jobID]
+	if !ok {
 		return nil
 	}
 
-	if job.GetState() == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
-		job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed {
+	// Record previous state BEFORE update to detect actual state transitions
+	previousState := job.GetState()
 
-		// Release snapshot reference immediately
-		m.DecrementRestoreRef(job.GetSnapshotName())
+	// Apply update under the same lock to prevent TOCTOU race
+	updatedJob := job.Clone()
+	for _, action := range actions {
+		action(updatedJob)
+	}
+	err := m.catalog.SaveCopySegmentJob(ctx, updatedJob.(*copySegmentJob).CopySegmentJob)
+	if err != nil {
+		return err
+	}
+	m.jobs[updatedJob.GetJobId()] = updatedJob
+
+	newState := updatedJob.GetState()
+	isTerminal := newState == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
+		newState == datapb.CopySegmentJobState_CopySegmentJobFailed
+	wasTerminal := previousState == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
+		previousState == datapb.CopySegmentJobState_CopySegmentJobFailed
+
+	// Only decrement on actual transition TO terminal state (not if already terminal)
+	// This prevents double-decrement when multiple paths try to fail the same job
+	if isTerminal && !wasTerminal {
+		m.restoreRefTracker.DecrementRestoreRef(updatedJob.GetSnapshotName())
 		log.Info("released snapshot reference on job completion",
 			zap.Int64("jobID", jobID),
-			zap.String("snapshot", job.GetSnapshotName()),
-			zap.String("state", job.GetState().String()))
+			zap.String("snapshot", updatedJob.GetSnapshotName()),
+			zap.String("previousState", previousState.String()),
+			zap.String("newState", newState.String()))
 	}
 
 	return nil

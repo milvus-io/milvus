@@ -127,50 +127,6 @@ func NewCopySegmentChecker(
 	}
 }
 
-// updateJobStateAndReleaseRef updates job state and releases snapshot reference
-// if the job transitions to a terminal state (Completed/Failed).
-//
-// This ensures snapshot references are released immediately when restore jobs finish,
-// while Job records are retained for audit purposes (3 hours).
-//
-// Parameters:
-//   - jobID: The job to update
-//   - snapshotName: Snapshot name for reference counting
-//   - actions: State update actions to apply
-//
-// Returns:
-//   - error: If update fails
-func (c *copySegmentChecker) updateJobStateAndReleaseRef(
-	jobID int64,
-	snapshotName string,
-	actions ...UpdateCopySegmentJobAction,
-) error {
-	// Update job state first
-	err := c.copyMeta.UpdateJob(c.ctx, jobID, actions...)
-	if err != nil {
-		return err
-	}
-
-	// Check if job transitioned to terminal state
-	job := c.copyMeta.GetJob(c.ctx, jobID)
-	if job == nil {
-		return nil
-	}
-
-	if job.GetState() == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
-		job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed {
-
-		// Release snapshot reference immediately
-		c.copyMeta.DecrementRestoreRef(snapshotName)
-		log.Info("released snapshot reference on job completion",
-			zap.Int64("jobID", jobID),
-			zap.String("snapshot", snapshotName),
-			zap.String("state", job.GetState().String()))
-	}
-
-	return nil
-}
-
 // Start begins the background checker loop that drives job state transitions.
 //
 // This runs in a goroutine and periodically checks all copy segment jobs,
@@ -345,10 +301,11 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 	idMappings := job.GetIdMappings()
 	if len(idMappings) == 0 {
 		log.Warn("no id mappings to copy, mark job as completed")
-		c.updateJobStateAndReleaseRef(job.GetJobId(),
-			job.GetSnapshotName(),
+		if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted),
-			UpdateCopyJobReason("no segments to copy"))
+			UpdateCopyJobReason("no segments to copy")); err != nil {
+			log.Warn("failed to update empty job state to Completed", zap.Error(err))
+		}
 		return
 	}
 
@@ -487,9 +444,11 @@ func (c *copySegmentChecker) checkCopyingJob(job CopySegmentJob) {
 		log.Warn("copy segment job has failed tasks",
 			zap.Int("failedTasks", failedTasks),
 			zap.Int("totalTasks", totalTasks))
-		c.updateJobStateAndReleaseRef(job.GetJobId(), job.GetSnapshotName(),
+		if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-			UpdateCopyJobReason(fmt.Sprintf("%d/%d tasks failed", failedTasks, totalTasks)))
+			UpdateCopyJobReason(fmt.Sprintf("%d/%d tasks failed", failedTasks, totalTasks))); err != nil {
+			log.Warn("failed to update job state to Failed", zap.Error(err))
+		}
 		return
 	}
 
@@ -568,7 +527,7 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 
 	// Step 3: Update job state to Completed
 	completeTs := uint64(time.Now().UnixNano())
-	err := c.updateJobStateAndReleaseRef(job.GetJobId(), job.GetSnapshotName(),
+	err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted),
 		UpdateCopyJobCompleteTs(completeTs),
 		UpdateCopyJobTotalRows(totalRows))
@@ -664,9 +623,12 @@ func (c *copySegmentChecker) tryTimeoutJob(job CopySegmentJob) {
 	log.Warn("copy segment job timeout",
 		zap.Int64("jobID", job.GetJobId()),
 		zap.Time("timeoutTime", timeoutTime))
-	c.updateJobStateAndReleaseRef(job.GetJobId(), job.GetSnapshotName(),
+	if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-		UpdateCopyJobReason("timeout"))
+		UpdateCopyJobReason("timeout")); err != nil {
+		log.Warn("failed to update timed-out job state to Failed",
+			zap.Int64("jobID", job.GetJobId()), zap.Error(err))
+	}
 }
 
 // checkGC performs garbage collection for completed/failed jobs.

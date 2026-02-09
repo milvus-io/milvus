@@ -944,3 +944,143 @@ func TestSnapshotRestoreRefTracker_UnderflowProtection(t *testing.T) {
 	tracker.DecrementRestoreRef(snapshotName)
 	assert.Equal(t, int32(0), tracker.GetRestoreRefCount(snapshotName))
 }
+
+// TestNewCopySegmentMeta_CrashRecoveryRefFiltering verifies that terminal jobs
+// (Completed/Failed) do not get their ref counts re-incremented during crash recovery.
+// Before the fix, ALL persisted jobs got IncrementRestoreRef, causing permanent ref leaks
+// for terminal jobs (no code path decrements them again).
+func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_CrashRecoveryRefFiltering() {
+	catalog := mocks.NewDataCoordCatalog(s.T())
+
+	restoredJobs := []*datapb.CopySegmentJob{
+		{
+			JobId:        100,
+			CollectionId: 1,
+			SnapshotName: "snap_active",
+			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
+		},
+		{
+			JobId:        200,
+			CollectionId: 1,
+			SnapshotName: "snap_active",
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		},
+		{
+			JobId:        300,
+			CollectionId: 1,
+			SnapshotName: "snap_done",
+			State:        datapb.CopySegmentJobState_CopySegmentJobCompleted,
+		},
+		{
+			JobId:        400,
+			CollectionId: 1,
+			SnapshotName: "snap_done",
+			State:        datapb.CopySegmentJobState_CopySegmentJobFailed,
+		},
+	}
+
+	catalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(restoredJobs, nil)
+	catalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+
+	broker := broker.NewMockBroker(s.T())
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	s.NoError(err)
+
+	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil)
+	s.NoError(err)
+
+	// Only active (Pending+Executing) jobs should contribute to ref count
+	// snap_active: 2 active jobs => ref count = 2
+	s.Equal(int32(2), copyMeta.GetRestoreRefCount("snap_active"))
+
+	// snap_done: 2 terminal jobs (Completed+Failed) => ref count = 0
+	s.Equal(int32(0), copyMeta.GetRestoreRefCount("snap_done"))
+}
+
+// TestUpdateJobStateAndReleaseRef_DoubleDecrementProtection verifies that calling
+// UpdateJobStateAndReleaseRef multiple times on the same job only decrements once.
+// Before the fix, multiple callers (checker + task) could both transition the same job
+// to Failed, each triggering a decrement.
+func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_DoubleDecrementProtection() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+
+	snapshotName := "snap_double"
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        500,
+			CollectionId: s.collectionID,
+			SnapshotName: snapshotName,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.copyMeta.AddJob(context.TODO(), job)
+	s.copyMeta.IncrementRestoreRef(snapshotName)
+	s.Equal(int32(1), s.copyMeta.GetRestoreRefCount(snapshotName))
+
+	// First call: Executing → Failed (should decrement)
+	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 500,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+		UpdateCopyJobReason("task failed"))
+	s.NoError(err)
+	s.Equal(int32(0), s.copyMeta.GetRestoreRefCount(snapshotName))
+
+	// Second call: Failed → Failed (should NOT decrement again)
+	err = s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 500,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+		UpdateCopyJobReason("timeout"))
+	s.NoError(err)
+	// Ref count should still be 0, not -1 or underflow
+	s.Equal(int32(0), s.copyMeta.GetRestoreRefCount(snapshotName))
+}
+
+// TestUpdateJobStateAndReleaseRef_NotFound verifies that updating a non-existent
+// job is a no-op and does not error.
+func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_NotFound() {
+	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 999,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
+	s.NoError(err)
+}
+
+// TestUpdateJobStateAndReleaseRef_CatalogError verifies that if the catalog save fails,
+// the ref count is NOT decremented (preserving consistency).
+func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_CatalogError() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(errors.New("catalog error")).Once()
+
+	snapshotName := "snap_err"
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        600,
+			CollectionId: s.collectionID,
+			SnapshotName: snapshotName,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.copyMeta.AddJob(context.TODO(), job)
+	s.copyMeta.IncrementRestoreRef(snapshotName)
+	s.Equal(int32(1), s.copyMeta.GetRestoreRefCount(snapshotName))
+
+	// Update fails at catalog layer
+	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), 600,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
+	s.Error(err)
+
+	// Ref count should NOT be decremented (job state didn't actually change)
+	s.Equal(int32(1), s.copyMeta.GetRestoreRefCount(snapshotName))
+
+	// Job should still be in Executing state
+	savedJob := s.copyMeta.GetJob(context.TODO(), 600)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, savedJob.GetState())
+}
