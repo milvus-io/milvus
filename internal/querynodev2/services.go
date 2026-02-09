@@ -1383,6 +1383,18 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				})
 			})
 		case querypb.SyncType_UpdateVersion:
+			// Version compatibility check: reject messages with inconsistent sealed segment fields
+			// In v2.6, SealedInTarget and SealedSegmentRowCount have consistent keys (same length)
+			// A mismatch indicates the message is from v2.5 which lacks SealedSegmentRowCount
+			if len(action.GetSealedInTarget()) != len(action.GetSealedSegmentRowCount()) {
+				log.Warn("Reject syncTargetVersion from older version Coordinator",
+					zap.String("channel", req.GetChannel()),
+					zap.Int("sealedInTarget", len(action.GetSealedInTarget())),
+					zap.Int("sealedSegmentRowCount", len(action.GetSealedSegmentRowCount())),
+				)
+				continue
+			}
+
 			log.Info("sync action",
 				zap.Int64("TargetVersion", action.GetTargetVersion()),
 				zap.Time("checkPoint", tsoutil.PhysicalTime(action.GetCheckpoint().GetTimestamp())),
