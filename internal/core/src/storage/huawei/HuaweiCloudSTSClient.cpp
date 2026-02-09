@@ -102,36 +102,52 @@ HuaweiCloudSTSCredentialsClient::GetAssumeRoleWithWebIdentityCredentials(
 
     STSAssumeRoleWithWebIdentityResult result;
 
-    auto awsResult = GetResourceWithAWSWebServiceResult(httpRequest);
-    auto responseCode = awsResult.GetResponseCode();
-    if (responseCode != Aws::Http::HttpResponseCode::OK &&
-        responseCode != Aws::Http::HttpResponseCode::CREATED) {
-        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
-                           "Failed to get credentials token from Huawei Cloud "
-                           "STS, response code: "
-                               << static_cast<int>(responseCode));
-        return result;
-    }
+    try {
+        // Stage 1: Get IAM token via OIDC id-token endpoint
+        auto awsResult = GetResourceWithAWSWebServiceResult(httpRequest);
+        auto responseCode = awsResult.GetResponseCode();
+        if (responseCode != Aws::Http::HttpResponseCode::OK &&
+            responseCode != Aws::Http::HttpResponseCode::CREATED) {
+            AWS_LOGSTREAM_WARN(
+                STS_RESOURCE_CLIENT_LOG_TAG,
+                "Failed to get credentials token from Huawei Cloud "
+                "STS, response code: "
+                    << static_cast<int>(responseCode));
+            return result;
+        }
 
-    auto responseHeaders = awsResult.GetHeaderValueCollection();
-    auto subjectTokenIter = responseHeaders.find("x-subject-token");
-    if (subjectTokenIter == responseHeaders.end()) {
-        AWS_LOGSTREAM_WARN(
+        auto responseHeaders = awsResult.GetHeaderValueCollection();
+        auto subjectTokenIter = responseHeaders.find("x-subject-token");
+        if (subjectTokenIter == responseHeaders.end()) {
+            AWS_LOGSTREAM_WARN(
+                STS_RESOURCE_CLIENT_LOG_TAG,
+                "No x-subject-token in huawei cloud sts response headers");
+            return result;
+        }
+
+        // Stage 2: Exchange IAM token for temporary AK/SK credentials
+        const Aws::String subjectToken = subjectTokenIter->second;
+        auto stsResult = callHuaweiCloudSTS(subjectToken, request);
+        if (!stsResult.success) {
+            AWS_LOGSTREAM_WARN(
+                STS_RESOURCE_CLIENT_LOG_TAG,
+                "Failed to get credentials from Huawei Cloud STS: "
+                    << stsResult.errorMessage);
+            return result;
+        }
+
+        result.creds = stsResult.credentials;
+        result.success = true;
+    } catch (const std::exception& e) {
+        AWS_LOGSTREAM_ERROR(
             STS_RESOURCE_CLIENT_LOG_TAG,
-            "No x-subject-token in huawei cloud sts response headers");
-        return result;
+            "Exception during Huawei Cloud STS credential retrieval: "
+                << e.what());
+    } catch (...) {
+        AWS_LOGSTREAM_ERROR(
+            STS_RESOURCE_CLIENT_LOG_TAG,
+            "Unknown exception during Huawei Cloud STS credential retrieval");
     }
-
-    const Aws::String subjectToken = subjectTokenIter->second;
-    auto stsResult = callHuaweiCloudSTS(subjectToken, request);
-    if (!stsResult.success) {
-        AWS_LOGSTREAM_WARN(STS_RESOURCE_CLIENT_LOG_TAG,
-                           "Failed to get credentials from Huawei Cloud STS: "
-                               << stsResult.errorMessage);
-        return result;
-    }
-
-    result.creds = stsResult.credentials;
     return result;
 }
 
@@ -171,10 +187,23 @@ HuaweiCloudSTSCredentialsClient::callHuaweiCloudSTS(
     req->AddContentBody(body);
 
     auto resp = m_httpClient->MakeRequest(req);
+    STSCallResult result;
+    if (!resp) {
+        result.errorMessage =
+            "Null response from Huawei Cloud STS HTTP request";
+        return result;
+    }
+    auto httpResponseCode = resp->GetResponseCode();
+    if (httpResponseCode != Aws::Http::HttpResponseCode::OK &&
+        httpResponseCode != Aws::Http::HttpResponseCode::CREATED) {
+        result.errorMessage =
+            "Huawei Cloud STS security token request failed with HTTP code: " +
+            std::to_string(static_cast<int>(httpResponseCode));
+        return result;
+    }
     std::ostringstream oss;
     oss << resp->GetResponseBody().rdbuf();
     Aws::String credentialsStr = oss.str();
-    STSCallResult result;
     if (credentialsStr.empty()) {
         result.errorMessage = "Get an empty credential from Huawei Cloud STS";
         return result;
