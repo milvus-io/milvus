@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
@@ -349,11 +350,19 @@ func (sm *snapshotManager) CreateSnapshot(
 	sm.createSnapshotMu.Lock()
 	defer sm.createSnapshotMu.Unlock()
 
+	tr := timerecord.NewTimeRecorder("CreateSnapshot")
+	collectionIDStr := strconv.FormatInt(collectionID, 10)
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID), zap.String("name", name))
 	log.Info("create snapshot request received", zap.String("description", description))
 
+	recordCreateFailure := func(errType string) {
+		metrics.DataCoordSnapshotOperationErrorsTotal.WithLabelValues(metrics.SnapshotCreateOp, errType).Inc()
+		metrics.DataCoordSnapshotOperationLatency.WithLabelValues(collectionIDStr, metrics.FailLabel, metrics.SnapshotCreateOp).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	}
+
 	// Validate snapshot name uniqueness (protected by createSnapshotMu)
 	if _, err := sm.snapshotMeta.GetSnapshot(ctx, name); err == nil {
+		recordCreateFailure("name_conflict")
 		return 0, merr.WrapErrParameterInvalidMsg("snapshot name %s already exists", name)
 	}
 
@@ -361,6 +370,7 @@ func (sm *snapshotManager) CreateSnapshot(
 	snapshotID, err := sm.allocator.AllocID(ctx)
 	if err != nil {
 		log.Error("failed to allocate snapshot ID", zap.Error(err))
+		recordCreateFailure("internal")
 		return 0, err
 	}
 
@@ -368,6 +378,7 @@ func (sm *snapshotManager) CreateSnapshot(
 	snapshotData, err := sm.handler.GenSnapshot(ctx, collectionID)
 	if err != nil {
 		log.Error("failed to generate snapshot", zap.Error(err))
+		recordCreateFailure("internal")
 		return 0, err
 	}
 
@@ -379,10 +390,14 @@ func (sm *snapshotManager) CreateSnapshot(
 	// Save to storage
 	if err := sm.snapshotMeta.SaveSnapshot(ctx, snapshotData); err != nil {
 		log.Error("failed to save snapshot", zap.Error(err))
+		recordCreateFailure("internal")
 		return 0, err
 	}
 
-	log.Info("snapshot created successfully", zap.Int64("snapshotID", snapshotID))
+	snapshotSize := computeSnapshotSizeBytes(snapshotData)
+	metrics.DataCoordSnapshotSizeBytes.WithLabelValues(collectionIDStr).Observe(float64(snapshotSize))
+	metrics.DataCoordSnapshotOperationLatency.WithLabelValues(collectionIDStr, metrics.SuccessLabel, metrics.SnapshotCreateOp).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	log.Info("snapshot created successfully", zap.Int64("snapshotID", snapshotID), zap.Int64("snapshotSizeBytes", snapshotSize))
 	return snapshotID, nil
 }
 
@@ -391,19 +406,25 @@ func (sm *snapshotManager) CreateSnapshot(
 func (sm *snapshotManager) DropSnapshot(ctx context.Context, name string) error {
 	log := log.Ctx(ctx).With(zap.String("snapshot", name))
 	log.Info("drop snapshot request received")
+	tr := timerecord.NewTimeRecorder("DropSnapshot")
 
 	// Check if snapshot exists first (idempotent)
-	if _, err := sm.snapshotMeta.GetSnapshot(ctx, name); err != nil {
+	info, err := sm.snapshotMeta.GetSnapshot(ctx, name)
+	if err != nil {
 		log.Info("snapshot not found, skip drop (idempotent)")
 		return nil
 	}
+	collectionIDStr := strconv.FormatInt(info.GetCollectionId(), 10)
 
 	// Delete snapshot
 	if err := sm.snapshotMeta.DropSnapshot(ctx, name); err != nil {
 		log.Error("failed to drop snapshot", zap.Error(err))
+		metrics.DataCoordSnapshotOperationErrorsTotal.WithLabelValues(metrics.SnapshotDropOp, "internal").Inc()
+		metrics.DataCoordSnapshotOperationLatency.WithLabelValues(collectionIDStr, metrics.FailLabel, metrics.SnapshotDropOp).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return err
 	}
 
+	metrics.DataCoordSnapshotOperationLatency.WithLabelValues(collectionIDStr, metrics.SuccessLabel, metrics.SnapshotDropOp).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	log.Info("snapshot dropped successfully")
 	return nil
 }
@@ -521,15 +542,24 @@ func (sm *snapshotManager) RestoreSnapshot(
 	rollback RollbackFunc,
 	validateResources ValidateResourcesFunc,
 ) (int64, error) {
+	tr := timerecord.NewTimeRecorder("RestoreSnapshot")
+	collectionIDStr := "unknown"
+
 	log := log.Ctx(ctx).With(
 		zap.String("snapshotName", snapshotName),
 		zap.String("targetCollection", targetCollectionName),
 		zap.String("targetDb", targetDbName),
 	)
 
+	recordRestoreFailure := func(errType string) {
+		metrics.DataCoordSnapshotOperationErrorsTotal.WithLabelValues(metrics.SnapshotRestoreOp, errType).Inc()
+		metrics.DataCoordSnapshotOperationLatency.WithLabelValues(collectionIDStr, metrics.FailLabel, metrics.SnapshotRestoreOp).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	}
+
 	// Phase 1: Read snapshot data
 	snapshotData, err := sm.ReadSnapshotData(ctx, snapshotName)
 	if err != nil {
+		recordRestoreFailure("read_snapshot")
 		return 0, fmt.Errorf("failed to read snapshot data: %w", err)
 	}
 	log.Info("snapshot data loaded",
@@ -540,14 +570,17 @@ func (sm *snapshotManager) RestoreSnapshot(
 	// CMEK-encrypted collections can only be restored to databases with matching encryption zone
 	if err := sm.validateCMEKCompatibility(ctx, snapshotData, targetDbName); err != nil {
 		log.Warn("CMEK compatibility validation failed", zap.Error(err))
+		recordRestoreFailure("cmek_validation")
 		return 0, err
 	}
 
 	// Phase 2: Restore collection and partitions
 	collectionID, err := sm.RestoreCollection(ctx, snapshotData, targetCollectionName, targetDbName)
 	if err != nil {
+		recordRestoreFailure("restore_collection")
 		return 0, fmt.Errorf("failed to restore collection: %w", err)
 	}
+	collectionIDStr = strconv.FormatInt(collectionID, 10)
 	log.Info("collection and partitions restored", zap.Int64("collectionID", collectionID))
 
 	// Phase 3: Restore indexes
@@ -557,11 +590,22 @@ func (sm *snapshotManager) RestoreSnapshot(
 		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
 			log.Error("rollback failed", zap.Error(rollbackErr))
 		}
+		recordRestoreFailure("restore_indexes")
 		return 0, fmt.Errorf("failed to restore indexes: %w", err)
 	}
 	log.Info("indexes restored", zap.Int("indexCount", len(snapshotData.Indexes)))
 
-	// Phase 4: Pre-allocate job ID and broadcast restore message
+	// Phase 4: Validate resources
+	if err := validateResources(ctx, collectionID, snapshotData); err != nil {
+		log.Error("resource validation failed, rolling back", zap.Error(err))
+		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
+			log.Error("rollback failed", zap.Error(rollbackErr))
+		}
+		recordRestoreFailure("validate_resources")
+		return 0, fmt.Errorf("resource validation failed: %w", err)
+	}
+
+	// Phase 5: Pre-allocate job ID and broadcast restore message
 	// Pre-allocating jobID ensures idempotency when WAL is replayed after restart
 	jobID, err := sm.allocator.AllocID(ctx)
 	if err != nil {
@@ -569,6 +613,7 @@ func (sm *snapshotManager) RestoreSnapshot(
 		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
 			log.Error("rollback failed", zap.Error(rollbackErr))
 		}
+		recordRestoreFailure("alloc_job_id")
 		return 0, fmt.Errorf("failed to allocate job ID: %w", err)
 	}
 	log.Info("pre-allocated job ID for restore", zap.Int64("jobID", jobID))
@@ -580,6 +625,7 @@ func (sm *snapshotManager) RestoreSnapshot(
 		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
 			log.Error("rollback failed", zap.Error(rollbackErr))
 		}
+		recordRestoreFailure("start_broadcaster")
 		return 0, fmt.Errorf("failed to start broadcaster for restore message: %w", err)
 	}
 	defer func() {
@@ -621,9 +667,11 @@ func (sm *snapshotManager) RestoreSnapshot(
 		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
 			log.Error("rollback failed", zap.Error(rollbackErr))
 		}
+		recordRestoreFailure("broadcast")
 		return 0, fmt.Errorf("failed to broadcast restore message: %w", err)
 	}
 
+	metrics.DataCoordSnapshotOperationLatency.WithLabelValues(collectionIDStr, metrics.SuccessLabel, metrics.SnapshotRestoreOp).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	log.Info("restore snapshot completed", zap.Int64("collectionID", collectionID), zap.Int64("jobID", jobID))
 	return jobID, nil
 }
@@ -1237,6 +1285,40 @@ func (sm *snapshotManager) calculateProgress(job CopySegmentJob) int32 {
 		return int32((job.GetCopiedSegments() * 100) / job.GetTotalSegments())
 	}
 	return 100
+}
+
+// computeSnapshotSizeBytes calculates the total storage size of a snapshot by
+// summing LogSize from all binlog types and SerializedSize from index files.
+func computeSnapshotSizeBytes(snapshotData *SnapshotData) int64 {
+	if snapshotData == nil {
+		return 0
+	}
+	sumFieldBinlogSize := func(fieldBinlogs []*datapb.FieldBinlog) int64 {
+		var size int64
+		for _, fb := range fieldBinlogs {
+			for _, b := range fb.GetBinlogs() {
+				size += b.GetLogSize()
+			}
+		}
+		return size
+	}
+	var totalSize int64
+	for _, seg := range snapshotData.Segments {
+		totalSize += sumFieldBinlogSize(seg.GetBinlogs())
+		totalSize += sumFieldBinlogSize(seg.GetDeltalogs())
+		totalSize += sumFieldBinlogSize(seg.GetStatslogs())
+		totalSize += sumFieldBinlogSize(seg.GetBm25Statslogs())
+		for _, textIndex := range seg.GetTextIndexFiles() {
+			totalSize += textIndex.GetLogSize()
+		}
+		for _, jsonIndex := range seg.GetJsonKeyIndexFiles() {
+			totalSize += jsonIndex.GetLogSize()
+		}
+		for _, indexFile := range seg.GetIndexFiles() {
+			totalSize += int64(indexFile.GetSerializedSize())
+		}
+	}
+	return totalSize
 }
 
 // calculateTimeCost computes the time cost in milliseconds.
