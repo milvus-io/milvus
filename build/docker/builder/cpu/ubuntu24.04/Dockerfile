@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
 
 # Ubuntu 24.04 ships GCC 13 by default, no upgrade needed
 
-RUN pip3 install --break-system-packages conan==1.66.0
+RUN pip3 install --break-system-packages conan==2.25.1
 
 RUN echo "target arch $TARGETARCH"
 RUN wget -qO- "https://cmake.org/files/v3.31/cmake-3.31.8-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local

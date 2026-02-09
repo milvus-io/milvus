@@ -22,6 +22,7 @@ list(FILTER SOURCE_FILES EXCLUDE REGEX "fusion_compute/x86/.*")
 list(FILTER SOURCE_FILES EXCLUDE REGEX "fusion_compute/arm/.*")
 
 add_library(milvus_minhash OBJECT ${SOURCE_FILES})
+target_link_libraries(milvus_minhash PUBLIC milvus_conan_deps)
 
 # Build strategy: Compile all SIMD variants unconditionally
 # This ensures build/deploy machine separation - binary contains all variants

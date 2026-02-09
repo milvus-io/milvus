@@ -14,7 +14,7 @@
 # Update KNOWHERE_VERSION for the first occurrence
 milvus_add_pkg_config("knowhere")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( KNOWHERE_VERSION b20270cf507d6d3fb943a9c1d89a4093762a7b53 )
+set( KNOWHERE_VERSION 7f9ca8b7ffc345dcdb2dfdec4ff28fa2bf57a6cd )
 set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
@@ -39,7 +39,6 @@ if ( MILVUS_GPU_VERSION STREQUAL "ON" )
     set(WITH_CUVS ON CACHE BOOL "" FORCE )
 endif ()
 
-set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} )
 FetchContent_Declare(
         knowhere
         GIT_REPOSITORY  ${GIT_REPOSITORY}

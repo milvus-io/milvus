@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install conan==1.66.0
+RUN pip3 install conan==2.25.1
 
 # Install openblas
 # RUN wget https://github.com/xianyi/OpenBLAS/archive/v0.3.21.tar.gz && \
