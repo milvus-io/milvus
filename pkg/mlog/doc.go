@@ -24,13 +24,13 @@
 //
 //	// Attach fields that propagate across RPC calls
 //	ctx = mlog.WithFields(ctx,
-//	    mlog.PropagatedString(mlog.KeyCollectionName, "my_collection"),
-//	    mlog.PropagatedInt64(mlog.KeyCollectionID, 12345),
+//	    mlog.FieldCollectionName("my_collection", mlog.OptPropagated()),
+//	    mlog.FieldCollectionID(12345, mlog.OptPropagated()),
 //	)
 //
 //	// Use gRPC interceptors to automatically propagate fields
-//	// Server side: mloggrpc.UnaryServerInterceptor("modulename")
-//	// Client side: mloggrpc.UnaryClientInterceptor()
+//	// Server side: mlog.UnaryServerInterceptor("modulename")
+//	// Client side: mlog.UnaryClientInterceptor()
 //
 // Runtime log level changes:
 //

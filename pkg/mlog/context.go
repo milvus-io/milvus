@@ -19,7 +19,7 @@ type logContext struct {
 
 // WithFields attaches fields to context. Fields accumulate across calls.
 // Duplicate keys are deduplicated, with later values overriding earlier ones.
-// Fields created with PropagatedString/PropagatedInt64 will be propagated via RPC.
+// Fields created with OptPropagated() will be propagated via RPC.
 func WithFields(ctx context.Context, fields ...Field) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -72,7 +72,7 @@ func (lc *logContext) withFields(ctx context.Context, fields []Field) context.Co
 }
 
 // GetPropagated returns propagated fields for gRPC transmission.
-// Only fields created with PropagatedString/PropagatedInt64 are included.
+// Only fields created with OptPropagated() are included.
 // Values are serialized as strings.
 func GetPropagated(ctx context.Context) map[string]string {
 	lc := getLogContext(ctx)
