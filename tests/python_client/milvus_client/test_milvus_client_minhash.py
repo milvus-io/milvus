@@ -1298,8 +1298,6 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         method: try to create MinHash function with INT64 input field
         expected: error raised during collection creation - input must be VARCHAR
         """
-        from pymilvus.exceptions import ParamError, MilvusException
-
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
 
@@ -1316,12 +1314,10 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
             params={"num_hashes": default_num_hashes, "shingle_size": default_shingle_size},
         ))
 
-        # PyMilvus validates client-side, raises ParamError
-        with pytest.raises((ParamError, MilvusException)) as exc_info:
-            client.create_collection(collection_name, schema=schema)
-
-        error_msg = str(exc_info.value).lower()
-        assert "varchar" in error_msg or "type" in error_msg or "string" in error_msg
+        self.create_collection(client, collection_name, schema=schema,
+                               check_task=CheckTasks.err_res,
+                               check_items={"err_code": 65535,
+                                             "err_msg": "VARCHAR"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_minhash_invalid_output_field_type(self):
@@ -1330,8 +1326,6 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         method: try to create MinHash function with FLOAT_VECTOR output field
         expected: error raised during collection creation - output must be BINARY_VECTOR
         """
-        from pymilvus.exceptions import ParamError, MilvusException
-
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
 
@@ -1348,12 +1342,10 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
             params={"num_hashes": default_num_hashes, "shingle_size": default_shingle_size},
         ))
 
-        # PyMilvus validates client-side, raises ParamError
-        with pytest.raises((ParamError, MilvusException)) as exc_info:
-            client.create_collection(collection_name, schema=schema)
-
-        error_msg = str(exc_info.value).lower()
-        assert "binary" in error_msg or "type" in error_msg or "vector" in error_msg
+        self.create_collection(client, collection_name, schema=schema,
+                               check_task=CheckTasks.err_res,
+                               check_items={"err_code": 65535,
+                                             "err_msg": "BinaryVector"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_minhash_dim_not_multiple_of_32(self):
@@ -1362,8 +1354,6 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         method: try to create MinHash function where num_hashes*32 != field dim
         expected: error raised - dimension mismatch
         """
-        from pymilvus.exceptions import ParamError, MilvusException
-
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
 
@@ -1380,12 +1370,10 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
             params={"num_hashes": 3, "shingle_size": default_shingle_size},  # 3*32=96 != 128
         ))
 
-        # PyMilvus validates client-side, raises ParamError for dimension mismatch
-        with pytest.raises((ParamError, MilvusException)) as exc_info:
-            client.create_collection(collection_name, schema=schema)
-
-        error_msg = str(exc_info.value).lower()
-        assert "dim" in error_msg or "mismatch" in error_msg or "num_hashes" in error_msg
+        self.create_collection(client, collection_name, schema=schema,
+                               check_task=CheckTasks.err_res,
+                               check_items={"err_code": 65535,
+                                             "err_msg": "does not match expected dim"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="Server bug: allows BIN_FLAT index on MinHash function output field")
@@ -1477,8 +1465,6 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         method: try to insert MinHash signature directly
         expected: error raised - cannot insert to function output field
         """
-        from pymilvus.exceptions import ParamError, MilvusException
-
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
 
@@ -1517,8 +1503,10 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         }]
 
         # Error should occur during insert - cannot provide function output field
-        with pytest.raises((ParamError, MilvusException)):
-            client.insert(collection_name, rows)
+        self.insert(client, collection_name, rows,
+                    check_task=CheckTasks.err_res,
+                    check_items={"err_code": 1,
+                                 "err_msg": "unexpected function output field"})
 
         client.drop_collection(collection_name)
 
@@ -1529,8 +1517,6 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         method: try to insert without text field
         expected: error raised - required field missing
         """
-        from pymilvus.exceptions import ParamError, MilvusException
-
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
 
@@ -1564,8 +1550,10 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         rows = [{default_primary_key_field_name: 1}]  # Missing text field
 
         # Error should occur during insert - missing required field
-        with pytest.raises((ParamError, MilvusException)):
-            client.insert(collection_name, rows)
+        self.insert(client, collection_name, rows,
+                    check_task=CheckTasks.err_res,
+                    check_items={"err_code": 1,
+                                 "err_msg": "missed an field"})
 
         client.drop_collection(collection_name)
 
@@ -1577,8 +1565,6 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         method: try to create function with invalid num_hashes
         expected: error raised during collection creation
         """
-        from pymilvus.exceptions import ParamError, MilvusException
-
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
 
@@ -1595,9 +1581,10 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
             params={"num_hashes": invalid_num_hashes, "shingle_size": default_shingle_size},
         ))
 
-        # PyMilvus or server validates num_hashes, raises error
-        with pytest.raises((ParamError, MilvusException)):
-            client.create_collection(collection_name, schema=schema)
+        self.create_collection(client, collection_name, schema=schema,
+                               check_task=CheckTasks.err_res,
+                               check_items={"err_code": 65535,
+                                             "err_msg": "num_hashes"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_shingle_size", [0, -1, "xyz"])
