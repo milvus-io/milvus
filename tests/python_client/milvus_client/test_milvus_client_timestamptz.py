@@ -1131,25 +1131,83 @@ class TestMilvusClientTimestamptzInvalid(TestMilvusClientV2Base):
 
 
 COLLECTION_NAME = "test_timestamptz" + cf.gen_unique_str("_")
-ROWS = [{default_primary_key_field_name: 0, default_vector_field_name: [1,2,3], default_timestamp_field_name: "0000-01-01 00:00:00"},
-        {default_primary_key_field_name: 1, default_vector_field_name: [4,5,6], default_timestamp_field_name: "9999-12-31T23:59:59"},
-        {default_primary_key_field_name: 2, default_vector_field_name: [7,8,9], default_timestamp_field_name: "1970-01-01T00:00:00+01:00"},
-        {default_primary_key_field_name: 3, default_vector_field_name: [10,11,12], default_timestamp_field_name: "2000-01-01T00:00:00+01:00"},
-        {default_primary_key_field_name: 4, default_vector_field_name: [13,14,15], default_timestamp_field_name: "2024-02-29T00:00:00+03:00"}]
+
+# ---------------------------------------------------------------------------
+# Per-test data – each test owns a non-overlapping 10-PK slot so that
+# parallel execution never causes cross-test interference.
+# ---------------------------------------------------------------------------
+
+# test_edge_case: pk 0-9 (uses 0-3)
+EDGE_CASE_ROWS = [
+    {default_primary_key_field_name: 0, default_vector_field_name: [1, 2, 3], default_timestamp_field_name: "0000-01-01 00:00:00"},
+    {default_primary_key_field_name: 1, default_vector_field_name: [4, 5, 6], default_timestamp_field_name: "9999-12-31T23:59:59"},
+    {default_primary_key_field_name: 2, default_vector_field_name: [7, 8, 9], default_timestamp_field_name: "1970-01-01T00:00:00+01:00"},
+    {default_primary_key_field_name: 3, default_vector_field_name: [10, 11, 12], default_timestamp_field_name: "2000-01-01T00:00:00+01:00"}]
+
+# test_Feb_29: pk 10-19 (uses 10)
+FEB29_ROWS = [
+    {default_primary_key_field_name: 10, default_vector_field_name: [13, 14, 15], default_timestamp_field_name: "2024-02-29T00:00:00+03:00"}]
+
+# test_partial_update: pk 20-29 (base rows 20-24 inserted by fixture; test mutates this range only)
+PARTIAL_UPDATE_BASE_ROWS = [
+    {default_primary_key_field_name: 20, default_vector_field_name: [1, 2, 3], default_timestamp_field_name: "0000-01-01 00:00:00"},
+    {default_primary_key_field_name: 21, default_vector_field_name: [4, 5, 6], default_timestamp_field_name: "9999-12-31T23:59:59"},
+    {default_primary_key_field_name: 22, default_vector_field_name: [7, 8, 9], default_timestamp_field_name: "1970-01-01T00:00:00+01:00"},
+    {default_primary_key_field_name: 23, default_vector_field_name: [10, 11, 12], default_timestamp_field_name: "2000-01-01T00:00:00+01:00"},
+    {default_primary_key_field_name: 24, default_vector_field_name: [13, 14, 15], default_timestamp_field_name: "2024-02-29T00:00:00+03:00"}]
+
+# test_query: pk 30-39 (uses 30-35)
+QUERY_ROWS = [
+    {default_primary_key_field_name: 30, default_vector_field_name: [1, 2, 3], default_timestamp_field_name: "1970-01-01 00:00:00"},
+    {default_primary_key_field_name: 31, default_vector_field_name: [4, 5, 6], default_timestamp_field_name: "2021-02-28T00:00:00Z"},
+    {default_primary_key_field_name: 32, default_vector_field_name: [7, 8, 9], default_timestamp_field_name: "2025-05-25T23:46:05"},
+    {default_primary_key_field_name: 33, default_vector_field_name: [10, 11, 12], default_timestamp_field_name: "2025-05-30T23:46:05+05:30"},
+    {default_primary_key_field_name: 34, default_vector_field_name: [13, 14, 15], default_timestamp_field_name: "2025-10-05 12:56:34"},
+    {default_primary_key_field_name: 35, default_vector_field_name: [16, 17, 18], default_timestamp_field_name: "9999-12-31T23:46:05"}]
+
+# test_different_time_expressions: pk 40-49 (uses 40-47, inserted with Asia/Shanghai tz)
+TIME_EXPR_ROWS = [
+    {default_primary_key_field_name: 40, default_vector_field_name: [1, 2, 3], default_timestamp_field_name: "2024-12-31 22:00:00Z"},
+    {default_primary_key_field_name: 41, default_vector_field_name: [4, 5, 6], default_timestamp_field_name: "2024-12-31 22:00:00"},
+    {default_primary_key_field_name: 42, default_vector_field_name: [7, 8, 9], default_timestamp_field_name: "2024-12-31T22:00:00"},
+    {default_primary_key_field_name: 43, default_vector_field_name: [10, 11, 12], default_timestamp_field_name: "2024-12-31T22:00:00+08:00"},
+    {default_primary_key_field_name: 44, default_vector_field_name: [13, 14, 15], default_timestamp_field_name: "2024-12-31T22:00:00-08:00"},
+    {default_primary_key_field_name: 45, default_vector_field_name: [16, 17, 18], default_timestamp_field_name: "2024-12-31T22:00:00Z"},
+    {default_primary_key_field_name: 46, default_vector_field_name: [19, 20, 21], default_timestamp_field_name: "2024-12-31 22:00:00+08:00"},
+    {default_primary_key_field_name: 47, default_vector_field_name: [22, 23, 24], default_timestamp_field_name: "2024-12-31 22:00:00-08:00"}]
+
+# test_different_timezone_query: pk 50-59 (uses 50-57, inserted with Asia/Shanghai tz)
+TZ_QUERY_ROWS = [
+    {default_primary_key_field_name: 50, default_vector_field_name: [1, 2, 3], default_timestamp_field_name: "2024-12-31 22:00:00Z"},
+    {default_primary_key_field_name: 51, default_vector_field_name: [4, 5, 6], default_timestamp_field_name: "2024-12-31 22:00:00"},
+    {default_primary_key_field_name: 52, default_vector_field_name: [7, 8, 9], default_timestamp_field_name: "2024-12-31T22:00:00"},
+    {default_primary_key_field_name: 53, default_vector_field_name: [10, 11, 12], default_timestamp_field_name: "2024-12-31T22:00:00+08:00"},
+    {default_primary_key_field_name: 54, default_vector_field_name: [13, 14, 15], default_timestamp_field_name: "2024-12-31T22:00:00-08:00"},
+    {default_primary_key_field_name: 55, default_vector_field_name: [16, 17, 18], default_timestamp_field_name: "2024-12-31T22:00:00Z"},
+    {default_primary_key_field_name: 56, default_vector_field_name: [19, 20, 21], default_timestamp_field_name: "2024-12-31 22:00:00+08:00"},
+    {default_primary_key_field_name: 57, default_vector_field_name: [22, 23, 24], default_timestamp_field_name: "2024-12-31 22:00:00-08:00"}]
+
+
 @pytest.mark.xdist_group("TestMilvusClientTimestamptz")
 class TestMilvusClientTimestamptz(TestMilvusClientV2Base):
     """
     #########################################################
-    Init collection with timestamptz so all the tests can use the same collection
-    This aims to save time for the tests
-    Also, timestamptz is difficult to compare the results,
-    so we need to init the collection with pre-defined data
+    Timestamptz tests sharing a single collection.
+    Each test owns a non-overlapping PK range so tests can
+    run in parallel without data interference.
+    All data is inserted once in the module-scoped fixture.
     #########################################################
     """
-    @pytest.fixture(scope="module", autouse=True)
+    @pytest.fixture(scope="class", autouse=True)
     def prepare_timestamptz_collection(self, request):
         """
-        Prepare timestamptz collection for the tests
+        Create the shared collection and insert ALL test data once.
+
+        Scoped to **class** so the setup only runs when at least one test
+        in this class is collected (e.g. skipped entirely under ``-m L0``).
+
+        - UTC batch  (pk 0-39): naive timestamps interpreted as UTC.
+        - Shanghai batch (pk 40-59): naive timestamps interpreted as Asia/Shanghai.
         """
         default_dim = 3
         client = self._client()
@@ -1162,10 +1220,20 @@ class TestMilvusClientTimestamptz(TestMilvusClientV2Base):
         index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_timestamp_field_name, index_type="AUTOINDEX")
-        client.create_collection(collection_name, schema=schema, 
-                               consistency_level="Strong", index_params=index_params)
-        
-        self.insert(client, collection_name, ROWS)
+        client.create_collection(collection_name, schema=schema,
+                                 consistency_level="Strong", index_params=index_params)
+
+        # --- UTC batch (naive timestamps → UTC) ---
+        self.alter_collection_properties(client, collection_name,
+                                         properties={"timezone": "UTC"})
+        utc_rows = EDGE_CASE_ROWS + FEB29_ROWS + PARTIAL_UPDATE_BASE_ROWS + QUERY_ROWS
+        self.insert(client, collection_name, utc_rows)
+
+        # --- Asia/Shanghai batch (naive timestamps → +08:00) ---
+        self.alter_collection_properties(client, collection_name,
+                                         properties={"timezone": "Asia/Shanghai"})
+        shanghai_rows = TIME_EXPR_ROWS + TZ_QUERY_ROWS
+        self.insert(client, collection_name, shanghai_rows)
 
         def teardown():
             try:
@@ -1175,8 +1243,11 @@ class TestMilvusClientTimestamptz(TestMilvusClientV2Base):
                 pass
         request.addfinalizer(teardown)
 
+    # ------------------------------------------------------------------
+    #  Tests – each one touches only its own PK range
+    # ------------------------------------------------------------------
+
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.order(0)
     def test_milvus_client_timestamptz_edge_case(self):
         """
         target:  Test timestamptz edge case can be successfully queried
@@ -1185,15 +1256,15 @@ class TestMilvusClientTimestamptz(TestMilvusClientV2Base):
         collection_name = COLLECTION_NAME
         client.load_collection(collection_name)
 
-        rows = cf.convert_timestamptz(ROWS[:4], default_timestamp_field_name, "UTC")
-        self.query(client, collection_name, filter=f"0 <= {default_primary_key_field_name} <= 3",
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: rows,
-                                         "pk_name": default_primary_key_field_name})
-        
+        expected = cf.convert_timestamptz(EDGE_CASE_ROWS, default_timestamp_field_name, "UTC")
+        self.query(client, collection_name,
+                   filter=f"0 <= {default_primary_key_field_name} <= 3",
+                   timezone="UTC",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: expected,
+                                "pk_name": default_primary_key_field_name})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.order(1)
     def test_milvus_client_timestamptz_Feb_29(self):
         """
         target:  Milvus can query input data with Feb 29 on a leap year
@@ -1202,16 +1273,15 @@ class TestMilvusClientTimestamptz(TestMilvusClientV2Base):
         collection_name = COLLECTION_NAME
         client.load_collection(collection_name)
 
-        row = [ROWS[4].copy()]
-        row = cf.convert_timestamptz(row, default_timestamp_field_name, "UTC")
-        self.query(client, collection_name, filter=f"{default_primary_key_field_name} == 4",
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: row,
-                                         "pk_name": default_primary_key_field_name})
+        expected = cf.convert_timestamptz(FEB29_ROWS, default_timestamp_field_name, "UTC")
+        self.query(client, collection_name,
+                   filter=f"{default_primary_key_field_name} == 10",
+                   timezone="UTC",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: expected,
+                                "pk_name": default_primary_key_field_name})
 
-    
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.order(2)
     def test_milvus_client_timestamptz_partial_update(self):
         """
         target:  Milvus can partial update timestamptz field
@@ -1220,94 +1290,92 @@ class TestMilvusClientTimestamptz(TestMilvusClientV2Base):
         collection_name = COLLECTION_NAME
         client.load_collection(collection_name)
 
-        # partial update these rows to set up for query with filters
-        # pk:5 does not exist in the collection so include all fields
-        rows = [{default_primary_key_field_name: 0, default_timestamp_field_name: "1970-01-01 00:00:00"},
-                {default_primary_key_field_name: 1, default_timestamp_field_name: "2021-02-28T00:00:00Z"},
-                {default_primary_key_field_name: 2, default_timestamp_field_name: "2025-05-25T23:46:05"},
-                {default_primary_key_field_name: 3, default_timestamp_field_name:"2025-05-30T23:46:05+05:30"},
-                {default_primary_key_field_name: 4, default_timestamp_field_name: "2025-10-05 12:56:34"},
-                {default_primary_key_field_name: 5, default_vector_field_name: [16,17,18], default_timestamp_field_name: "9999-12-31T23:46:05"}]
-        
-        # Because partial update does NOT support different fields 
-        # The last row will be inserted
-        self.upsert(client, collection_name, rows[:-1], partial_update=True)
-        self.insert(client, collection_name, rows[-1])
-        
+        # Partial update pk 20-24 (only pk + timestamp; vectors are kept from fixture).
+        update_rows = [
+            {default_primary_key_field_name: 20, default_timestamp_field_name: "1970-01-01 00:00:00"},
+            {default_primary_key_field_name: 21, default_timestamp_field_name: "2021-02-28T00:00:00Z"},
+            {default_primary_key_field_name: 22, default_timestamp_field_name: "2025-05-25T23:46:05"},
+            {default_primary_key_field_name: 23, default_timestamp_field_name: "2025-05-30T23:46:05+05:30"},
+            {default_primary_key_field_name: 24, default_timestamp_field_name: "2025-10-05 12:56:34"}]
+        self.upsert(client, collection_name, update_rows, partial_update=True)
+
+        expected_update = cf.convert_timestamptz(update_rows, default_timestamp_field_name, "Asia/Shanghai")
+        self.query(client, collection_name,
+                   filter=f"20 <= {default_primary_key_field_name} <= 24",
+                   timezone="Asia/Shanghai",
+                   output_fields=[default_timestamp_field_name],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: expected_update,
+                                "pk_name": default_primary_key_field_name})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.order(3)
     def test_milvus_client_timestamptz_query(self):
         """
-        target:  Milvus can query rows with timestamptz field
+        target:  Milvus can query rows with timestamptz field using various operators
         """
         client = self._client()
         collection_name = COLLECTION_NAME
         client.load_collection(collection_name)
 
-        rows = [{default_primary_key_field_name: 0, default_vector_field_name: [1,2,3], default_timestamp_field_name: "1970-01-01 00:00:00"},
-                {default_primary_key_field_name: 1, default_vector_field_name: [4,5,6], default_timestamp_field_name: "2021-02-28T00:00:00Z"},
-                {default_primary_key_field_name: 2, default_vector_field_name: [7,8,9], default_timestamp_field_name: "2025-05-25T23:46:05"},
-                {default_primary_key_field_name: 3, default_vector_field_name: [10,11,12], default_timestamp_field_name:"2025-05-30T23:46:05+05:30"},
-                {default_primary_key_field_name: 4, default_vector_field_name: [13,14,15], default_timestamp_field_name: "2025-10-05 12:56:34"},
-                {default_primary_key_field_name: 5, default_vector_field_name: [16,17,18], default_timestamp_field_name: "9999-12-31T23:46:05"}]
-        
+        pk = default_primary_key_field_name
+        ts = default_timestamp_field_name
+        pk_range = f"30 <= {pk} <= 35"
 
-        UTC_time_row = cf.convert_timestamptz(rows, default_timestamp_field_name, "UTC")
-        shanghai_time_row = cf.convert_timestamptz(UTC_time_row, default_timestamp_field_name, "Asia/Shanghai")
-        self.query(client, collection_name, filter=default_search_exp,
-                            timezone="Asia/Shanghai",
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: shanghai_time_row,
-                                         "pk_name": default_primary_key_field_name})
+        UTC_time_row = cf.convert_timestamptz(QUERY_ROWS, ts, "UTC")
+        shanghai_time_row = cf.convert_timestamptz(UTC_time_row, ts, "Asia/Shanghai")
+
+        # all rows
+        self.query(client, collection_name,
+                   filter=pk_range,
+                   timezone="Asia/Shanghai",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: shanghai_time_row,
+                                "pk_name": pk})
         # >=
-        expr = f"{default_timestamp_field_name} >= ISO '2025-05-30T23:46:05+05:30'"
+        expr = f"{pk_range} and {ts} >= ISO '2025-05-30T23:46:05+05:30'"
         self.query(client, collection_name, filter=expr,
-                            timezone="Asia/Shanghai",
-                            check_task=CheckTasks.check_query_results,
-                            check_items={exp_res: shanghai_time_row[3:],
-                                         "pk_name": default_primary_key_field_name})
+                   timezone="Asia/Shanghai",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: shanghai_time_row[3:],
+                                "pk_name": pk})
         # ==
-        expr = f"{default_timestamp_field_name} == ISO '9999-12-31T23:46:05Z'"
+        expr = f"{pk_range} and {ts} == ISO '9999-12-31T23:46:05Z'"
         self.query(client, collection_name, filter=expr,
-                    timezone="Asia/Shanghai",
-                    check_task=CheckTasks.check_query_results,
-                    check_items={exp_res: [shanghai_time_row[-1]],
-                                    "pk_name": default_primary_key_field_name})
-        
+                   timezone="Asia/Shanghai",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [shanghai_time_row[-1]],
+                                "pk_name": pk})
         # <=
-        expr = f"{default_timestamp_field_name} <= ISO '2025-01-01T00:00:00+08:00'"
+        expr = f"{pk_range} and {ts} <= ISO '2025-01-01T00:00:00+08:00'"
         self.query(client, collection_name, filter=expr,
-                    timezone="Asia/Shanghai",
-                    check_task=CheckTasks.check_query_results,
-                    check_items={exp_res: shanghai_time_row[:2],
-                                    "pk_name": default_primary_key_field_name})
+                   timezone="Asia/Shanghai",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: shanghai_time_row[:2],
+                                "pk_name": pk})
         # !=
-        expr = f"{default_timestamp_field_name} != ISO '9999-12-31T23:46:05Z'"
+        expr = f"{pk_range} and {ts} != ISO '9999-12-31T23:46:05Z'"
         self.query(client, collection_name, filter=expr,
-                    timezone="Asia/Shanghai",
-                    check_task=CheckTasks.check_query_results,
-                    check_items={exp_res: shanghai_time_row[:-1],
-                                    "pk_name": default_primary_key_field_name})
+                   timezone="Asia/Shanghai",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: shanghai_time_row[:-1],
+                                "pk_name": pk})
         # INTERVAL
-        expr = f"{default_timestamp_field_name} - INTERVAL 'P3D' >= ISO '1970-01-01T00:00:00Z'"
+        expr = f"{pk_range} and {ts} - INTERVAL 'P3D' >= ISO '1970-01-01T00:00:00Z'"
         self.query(client, collection_name, filter=expr,
-                    timezone="Asia/Shanghai",
-                    check_task=CheckTasks.check_query_results,
-                    check_items={exp_res: shanghai_time_row[1:],
-                                    "pk_name": default_primary_key_field_name})
-        
+                   timezone="Asia/Shanghai",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: shanghai_time_row[1:],
+                                "pk_name": pk})
+
         # lower < tz < upper
         # BUG: https://github.com/milvus-io/milvus/issues/44600
-        # expr = f"ISO '2025-01-01T00:00:00+08:00' < {default_timestamp_field_name} < ISO '2026-10-05T12:56:34+08:00'"
+        # expr = f"{pk_range} and ISO '2025-01-01T00:00:00+08:00' < {ts} < ISO '2026-10-05T12:56:34+08:00'"
         # self.query(client, collection_name, filter=expr,
         #             check_task=CheckTasks.check_query_results,
         #             check_items={exp_res: shanghai_time_row,
-        #                             "pk_name": default_primary_key_field_name})
-
+        #                             "pk_name": pk})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.order(4)
     def test_milvus_client_timestamptz_different_time_expressions(self):
         """
         target:  Milvus can query rows with different time expressions
@@ -1316,26 +1384,14 @@ class TestMilvusClientTimestamptz(TestMilvusClientV2Base):
         collection_name = COLLECTION_NAME
         client.load_collection(collection_name)
 
-        self.alter_collection_properties(client, collection_name, properties={"timezone": "Asia/Shanghai"})
-        rows = [{default_primary_key_field_name: 0, default_vector_field_name: [1,2,3], default_timestamp_field_name: "2024-12-31 22:00:00Z"},
-                {default_primary_key_field_name: 1, default_vector_field_name: [4,5,6], default_timestamp_field_name: "2024-12-31 22:00:00"},
-                {default_primary_key_field_name: 2, default_vector_field_name: [7,8,9], default_timestamp_field_name: "2024-12-31T22:00:00"},
-                {default_primary_key_field_name: 3, default_vector_field_name: [10,11,12], default_timestamp_field_name: "2024-12-31T22:00:00+08:00"},
-                {default_primary_key_field_name: 4, default_vector_field_name: [13,14,15], default_timestamp_field_name: "2024-12-31T22:00:00-08:00"},
-                {default_primary_key_field_name: 5, default_vector_field_name: [16,17,18], default_timestamp_field_name: "2024-12-31T22:00:00Z"},
-                {default_primary_key_field_name: 6, default_vector_field_name: [19,20,21], default_timestamp_field_name: "2024-12-31 22:00:00+08:00"},
-                {default_primary_key_field_name: 7, default_vector_field_name: [22,23,24], default_timestamp_field_name: "2024-12-31 22:00:00-08:00"}]
-        self.upsert(client, collection_name, rows)
+        expected_rows = cf.convert_timestamptz(TIME_EXPR_ROWS, default_timestamp_field_name, "Asia/Shanghai")
+        self.query(client, collection_name,
+                   filter=f"40 <= {default_primary_key_field_name} <= 47",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: expected_rows,
+                                "pk_name": default_primary_key_field_name})
 
-        expected_rows = cf.convert_timestamptz(rows, default_timestamp_field_name, "Asia/Shanghai")
-        self.query(client, collection_name, filter=f"{default_primary_key_field_name} <= 7",
-                    check_task=CheckTasks.check_query_results,
-                    check_items={exp_res: expected_rows,
-                                    "pk_name": default_primary_key_field_name})
-
-    
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.order(5)
     def test_milvus_client_timestamptz_different_timezone_query(self):
         """
         target:  Milvus can query rows with different time expressions with filter
@@ -1344,50 +1400,62 @@ class TestMilvusClientTimestamptz(TestMilvusClientV2Base):
         collection_name = COLLECTION_NAME
         client.load_collection(collection_name)
 
+        pk = default_primary_key_field_name
+        ts = default_timestamp_field_name
+        pk_range = f"50 <= {pk} <= 57"
+
         """
         # To test different timezone query, we need to query the same timestamp in different timezone
-        # For reference: 
-        #    2024-12-31T22:00:00Z 
-        # == 2024-12-31T17:00:00-05:00 
-        # == 2025-01-01T06:00:00+08:00 
-        # == 2024-12-31 17:00:00 (with NY timezone) 
+        # For reference:
+        #    2024-12-31T22:00:00Z
+        # == 2024-12-31T17:00:00-05:00
+        # == 2025-01-01T06:00:00+08:00
+        # == 2024-12-31 17:00:00 (with NY timezone)
         # == 2025-01-01 06:00:00 (with SH timezone)
         # these are all the same time in different timezone
         """
-        
-        # filter: UTC, timezone: None, expected: 2025-01-01T06:00:00+08:00
-        expected_rows = [{default_primary_key_field_name: 0, default_vector_field_name: [1,2,3], default_timestamp_field_name: "2025-01-01T06:00:00+08:00"},
-                         {default_primary_key_field_name: 5, default_vector_field_name: [16,17,18], default_timestamp_field_name: "2025-01-01T06:00:00+08:00"}]  
-        self.query(client, collection_name, filter=f"{default_timestamp_field_name} == ISO '2024-12-31T22:00:00Z'", 
-                    check_task=CheckTasks.check_query_results,
-                    check_items={exp_res: expected_rows,
-                                    "pk_name": default_primary_key_field_name})
 
-        # filter: America/New_York, timezone: Asia/Shanghai, expected: No result 
-        # because Asia/Shanghai will apply to filter time, so it will be 2024-12-31T17:00:00+08:00 Does not exist in the collection
+        # filter: UTC, timezone: None (collection default=Asia/Shanghai), expected: +08:00
+        # pk 50 and 55 both have "...22:00:00Z" → 2024-12-31 22:00:00 UTC
+        expected_rows = [
+            {pk: 50, default_vector_field_name: [1, 2, 3], ts: "2025-01-01T06:00:00+08:00"},
+            {pk: 55, default_vector_field_name: [16, 17, 18], ts: "2025-01-01T06:00:00+08:00"}]
+        self.query(client, collection_name,
+                   filter=f"{pk_range} and {ts} == ISO '2024-12-31T22:00:00Z'",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: expected_rows,
+                                "pk_name": pk})
+
+        # filter: naive "17:00:00", timezone: Asia/Shanghai → interpreted as 17:00:00+08:00 = 09:00 UTC
+        # No row has 09:00 UTC → empty result
         expected_rows = []
-        self.query(client, collection_name, filter=f"{default_timestamp_field_name} == ISO '2024-12-31 17:00:00'", 
-                    timezone="Asia/Shanghai",
-                    check_task=CheckTasks.check_query_results,
-                    check_items={exp_res: expected_rows,
-                                    "pk_name": default_primary_key_field_name})
+        self.query(client, collection_name,
+                   filter=f"{pk_range} and {ts} == ISO '2024-12-31 17:00:00'",
+                   timezone="Asia/Shanghai",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: expected_rows,
+                                "pk_name": pk})
 
-        # filter: America/New_York, timezone: America/New_York, expected: 2024-12-31T17:00:00-05:00
-        # because America/New_York will apply to filter time, so it will be 2024-12-31T17:00:00-05:00
-        expected_rows = [{default_primary_key_field_name: 0, default_vector_field_name: [1,2,3], default_timestamp_field_name: "2024-12-31T17:00:00-05:00"},
-                         {default_primary_key_field_name: 5, default_vector_field_name: [16,17,18], default_timestamp_field_name: "2024-12-31T17:00:00-05:00"}]  
-        self.query(client, collection_name, filter=f"{default_timestamp_field_name} == ISO '2024-12-31 17:00:00'",
-                    timezone="America/New_York",
-                    check_task=CheckTasks.check_query_results,
-                    check_items={exp_res: expected_rows,
-                                    "pk_name": default_primary_key_field_name})
+        # filter: naive "17:00:00", timezone: America/New_York → interpreted as 17:00:00-05:00 = 22:00 UTC
+        # Matches pk 50 and 55
+        expected_rows = [
+            {pk: 50, default_vector_field_name: [1, 2, 3], ts: "2024-12-31T17:00:00-05:00"},
+            {pk: 55, default_vector_field_name: [16, 17, 18], ts: "2024-12-31T17:00:00-05:00"}]
+        self.query(client, collection_name,
+                   filter=f"{pk_range} and {ts} == ISO '2024-12-31 17:00:00'",
+                   timezone="America/New_York",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: expected_rows,
+                                "pk_name": pk})
 
-        # filter: Asia/Shanghai, timezone: Asia/Shanghai, expected: 2024-12-31T17:00:00+08:00
-        # because Asia/Shanghai is the same as the filter time, so it will be 2024-12-31T17:00:00+08:00
-        expected_rows = [{default_primary_key_field_name: 0, default_vector_field_name: [1,2,3], default_timestamp_field_name: "2025-01-01T06:00:00+08:00"},
-                         {default_primary_key_field_name: 5, default_vector_field_name: [16,17,18], default_timestamp_field_name: "2025-01-01T06:00:00+08:00"}]  
-        self.query(client, collection_name, filter=f"{default_timestamp_field_name} == ISO '2025-01-01 06:00:00'",
-                    timezone="Asia/Shanghai",
-                    check_task=CheckTasks.check_query_results,
-                    check_items={exp_res: expected_rows,
-                                    "pk_name": default_primary_key_field_name})
+        # filter: naive "06:00:00", timezone: Asia/Shanghai → interpreted as 06:00:00+08:00 = 22:00 UTC
+        # Matches pk 50 and 55
+        expected_rows = [
+            {pk: 50, default_vector_field_name: [1, 2, 3], ts: "2025-01-01T06:00:00+08:00"},
+            {pk: 55, default_vector_field_name: [16, 17, 18], ts: "2025-01-01T06:00:00+08:00"}]
+        self.query(client, collection_name,
+                   filter=f"{pk_range} and {ts} == ISO '2025-01-01 06:00:00'",
+                   timezone="Asia/Shanghai",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: expected_rows,
+                                "pk_name": pk})
