@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -29,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -639,4 +642,118 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_UpdateSegmentStates() {
 	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted, updatedJob.GetState())
 	s.Equal(int64(100), updatedJob.GetTotalRows())
+}
+
+func (s *CopySegmentCheckerSuite) TestLogJobStats_SnapshotRestoreJobMetrics() {
+	registry := prometheus.NewRegistry()
+	metrics.RegisterDataCoord(registry)
+	defer metrics.DataCoordSnapshotRestoreJobsTotal.Reset()
+	defer metrics.CopySegmentJobs.Reset()
+
+	// Create jobs: one snapshot restore job (pending), one regular copy job (executing)
+	snapshotJob := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        201,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
+			SnapshotName: "test_snapshot",
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	regularJob := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        202,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			SnapshotName: "",
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+
+	jobs := []CopySegmentJob{snapshotJob, regularJob}
+	s.checker.LogJobStats(jobs)
+
+	// Verify snapshot restore jobs: 1 pending, 0 executing (regular job filtered out)
+	pendingVal := testutil.ToFloat64(metrics.DataCoordSnapshotRestoreJobsTotal.WithLabelValues(
+		datapb.CopySegmentJobState_CopySegmentJobPending.String()))
+	s.Equal(float64(1), pendingVal)
+
+	executingVal := testutil.ToFloat64(metrics.DataCoordSnapshotRestoreJobsTotal.WithLabelValues(
+		datapb.CopySegmentJobState_CopySegmentJobExecuting.String()))
+	s.Equal(float64(0), executingVal)
+}
+
+func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_SnapshotRestoreProgressRatio() {
+	registry := prometheus.NewRegistry()
+	metrics.RegisterDataCoord(registry)
+	defer metrics.DataCoordSnapshotRestoreProgressRatio.Reset()
+
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	// Create a snapshot restore job with 4 segments
+	idMappings := []*datapb.CopySegmentIDMapping{
+		{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
+		{SourceSegmentId: 2, TargetSegmentId: 102, PartitionId: 10},
+		{SourceSegmentId: 3, TargetSegmentId: 103, PartitionId: 10},
+		{SourceSegmentId: 4, TargetSegmentId: 104, PartitionId: 10},
+	}
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:          s.jobID,
+			CollectionId:   s.collectionID,
+			State:          datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			IdMappings:     idMappings,
+			TotalSegments:  4,
+			CopiedSegments: 0,
+			SnapshotName:   "progress_snap",
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+
+	err := s.copyMeta.AddJob(context.TODO(), job)
+	s.NoError(err)
+
+	// Create task 1: completed with 2 segments
+	task1 := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	task1.task.Store(&datapb.CopySegmentTask{
+		TaskId:       301,
+		JobId:        s.jobID,
+		CollectionId: s.collectionID,
+		NodeId:       NullNodeID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		IdMappings:   idMappings[:2],
+	})
+	err = s.copyMeta.AddTask(context.TODO(), task1)
+	s.NoError(err)
+
+	// Create task 2: in progress with 2 segments
+	task2 := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	task2.task.Store(&datapb.CopySegmentTask{
+		TaskId:       302,
+		JobId:        s.jobID,
+		CollectionId: s.collectionID,
+		NodeId:       NullNodeID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		IdMappings:   idMappings[2:],
+	})
+	err = s.copyMeta.AddTask(context.TODO(), task2)
+	s.NoError(err)
+
+	// Run checkCopyingJob
+	s.checker.checkCopyingJob(job)
+
+	// Verify progress ratio: 2 completed out of 4 = 0.5
+	ratio := testutil.ToFloat64(metrics.DataCoordSnapshotRestoreProgressRatio.WithLabelValues(
+		"100", "progress_snap"))
+	s.Equal(0.5, ratio)
 }

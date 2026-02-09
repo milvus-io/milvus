@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/protobuf/proto"
@@ -31,7 +33,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -1780,4 +1784,328 @@ func TestSnapshotManager_RestoreCollection_SchemaNameAndDbName(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, targetCollectionName, schema.Name, "schema.Name should be updated to target collection name")
 	assert.Equal(t, targetDbName, schema.DbName, "schema.DbName should be updated to target database name")
+}
+
+// --- Test Snapshot Metrics ---
+
+func TestSnapshotManager_CreateSnapshot_MetricsOnSuccess(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	metrics.RegisterDataCoord(registry)
+	defer metrics.DataCoordSnapshotOperationLatency.Reset()
+	defer metrics.DataCoordSnapshotOperationErrorsTotal.Reset()
+	defer metrics.DataCoordSnapshotSizeBytes.Reset()
+
+	ctx := context.Background()
+
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{CollectionId: 100},
+		Segments:     []*datapb.SegmentDescription{{SegmentId: 1, NumOfRows: 100}},
+	}
+
+	// Mock AllocID and GenSnapshot using mockey (no mockery EXPECT)
+	mockAllocID := mockey.Mock(mockey.GetMethod(&allocator.MockAllocator{}, "AllocID")).Return(int64(1001), nil).Build()
+	defer mockAllocID.UnPatch()
+	mockGenSnapshot := mockey.Mock(mockey.GetMethod(&NMockHandler{}, "GenSnapshot")).Return(snapshotData, nil).Build()
+	defer mockGenSnapshot.UnPatch()
+
+	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
+		return nil, errors.New("not found")
+	}).Build()
+	defer mockGetSnapshot.UnPatch()
+
+	mockSaveSnapshot := mockey.Mock((*snapshotMeta).SaveSnapshot).Return(nil).Build()
+	defer mockSaveSnapshot.UnPatch()
+
+	sm := NewSnapshotManager(nil, &snapshotMeta{}, nil, &allocator.MockAllocator{}, &NMockHandler{}, nil, nil)
+
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snap_metric", "desc")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1001), snapshotID)
+
+	// Verify duration metric was recorded (histogram observations)
+	count := testutil.CollectAndCount(metrics.DataCoordSnapshotOperationLatency)
+	assert.Greater(t, count, 0)
+}
+
+func TestSnapshotManager_CreateSnapshot_MetricsOnNameConflict(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	metrics.RegisterDataCoord(registry)
+	defer metrics.DataCoordSnapshotOperationLatency.Reset()
+	defer metrics.DataCoordSnapshotOperationErrorsTotal.Reset()
+
+	ctx := context.Background()
+
+	// Mock GetSnapshot returns success (name exists)
+	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
+		return &datapb.SnapshotInfo{Name: name}, nil
+	}).Build()
+	defer mockGetSnapshot.UnPatch()
+
+	sm := NewSnapshotManager(nil, &snapshotMeta{}, nil, nil, nil, nil, nil)
+
+	_, err := sm.CreateSnapshot(ctx, 100, "existing_snap", "desc")
+	assert.Error(t, err)
+
+	// Verify error counter incremented for name_conflict
+	errCount := testutil.ToFloat64(metrics.DataCoordSnapshotOperationErrorsTotal.WithLabelValues(metrics.SnapshotCreateOp, "name_conflict"))
+	assert.Equal(t, float64(1), errCount)
+
+	// Verify duration metric was recorded
+	durCount := testutil.CollectAndCount(metrics.DataCoordSnapshotOperationLatency)
+	assert.Greater(t, durCount, 0)
+}
+
+func TestSnapshotManager_CreateSnapshot_MetricsOnAllocIDFailure(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	metrics.RegisterDataCoord(registry)
+	defer metrics.DataCoordSnapshotOperationLatency.Reset()
+	defer metrics.DataCoordSnapshotOperationErrorsTotal.Reset()
+
+	ctx := context.Background()
+
+	// Mock AllocID to return error using mockey (no mockery EXPECT)
+	mockAllocID := mockey.Mock(mockey.GetMethod(&allocator.MockAllocator{}, "AllocID")).Return(int64(0), errors.New("alloc failed")).Build()
+	defer mockAllocID.UnPatch()
+
+	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
+		return nil, errors.New("not found")
+	}).Build()
+	defer mockGetSnapshot.UnPatch()
+
+	sm := NewSnapshotManager(nil, &snapshotMeta{}, nil, &allocator.MockAllocator{}, nil, nil, nil)
+
+	_, err := sm.CreateSnapshot(ctx, 200, "new_snap", "desc")
+	assert.Error(t, err)
+
+	// Verify error counter incremented for internal
+	errCount := testutil.ToFloat64(metrics.DataCoordSnapshotOperationErrorsTotal.WithLabelValues(metrics.SnapshotCreateOp, "internal"))
+	assert.Equal(t, float64(1), errCount)
+}
+
+func TestSnapshotManager_CreateSnapshot_MetricsSizeOnSuccess(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	metrics.RegisterDataCoord(registry)
+	defer metrics.DataCoordSnapshotSizeBytes.Reset()
+	defer metrics.DataCoordSnapshotOperationLatency.Reset()
+	defer metrics.DataCoordSnapshotOperationErrorsTotal.Reset()
+
+	ctx := context.Background()
+
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{CollectionId: 100},
+		Segments: []*datapb.SegmentDescription{
+			{
+				SegmentId: 1,
+				NumOfRows: 100,
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 100,
+						Binlogs: []*datapb.Binlog{
+							{LogSize: 1024 * 1024}, // 1MB
+							{LogSize: 2048 * 1024}, // 2MB
+						},
+					},
+				},
+				Deltalogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 0,
+						Binlogs: []*datapb.Binlog{
+							{LogSize: 512 * 1024}, // 512KB
+						},
+					},
+				},
+				IndexFiles: []*indexpb.IndexFilePathInfo{
+					{SerializedSize: 4 * 1024 * 1024}, // 4MB
+				},
+			},
+		},
+	}
+
+	mockAllocID := mockey.Mock(mockey.GetMethod(&allocator.MockAllocator{}, "AllocID")).Return(int64(1001), nil).Build()
+	defer mockAllocID.UnPatch()
+	mockGenSnapshot := mockey.Mock(mockey.GetMethod(&NMockHandler{}, "GenSnapshot")).Return(snapshotData, nil).Build()
+	defer mockGenSnapshot.UnPatch()
+
+	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
+		return nil, errors.New("not found")
+	}).Build()
+	defer mockGetSnapshot.UnPatch()
+
+	mockSaveSnapshot := mockey.Mock((*snapshotMeta).SaveSnapshot).Return(nil).Build()
+	defer mockSaveSnapshot.UnPatch()
+
+	sm := NewSnapshotManager(nil, &snapshotMeta{}, nil, &allocator.MockAllocator{}, &NMockHandler{}, nil, nil)
+
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snap_size", "desc")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1001), snapshotID)
+
+	// Verify snapshot size histogram was observed
+	sizeCount := testutil.CollectAndCount(metrics.DataCoordSnapshotSizeBytes)
+	assert.Greater(t, sizeCount, 0)
+}
+
+func TestComputeSnapshotSizeBytes(t *testing.T) {
+	t.Run("nil snapshot data", func(t *testing.T) {
+		size := computeSnapshotSizeBytes(nil)
+		assert.Equal(t, int64(0), size)
+	})
+
+	t.Run("empty segments", func(t *testing.T) {
+		data := &SnapshotData{
+			Segments: []*datapb.SegmentDescription{},
+		}
+		size := computeSnapshotSizeBytes(data)
+		assert.Equal(t, int64(0), size)
+	})
+
+	t.Run("binlogs only", func(t *testing.T) {
+		data := &SnapshotData{
+			Segments: []*datapb.SegmentDescription{
+				{
+					Binlogs: []*datapb.FieldBinlog{
+						{
+							FieldID: 100,
+							Binlogs: []*datapb.Binlog{
+								{LogSize: 1000},
+								{LogSize: 2000},
+							},
+						},
+						{
+							FieldID: 101,
+							Binlogs: []*datapb.Binlog{
+								{LogSize: 3000},
+							},
+						},
+					},
+				},
+			},
+		}
+		size := computeSnapshotSizeBytes(data)
+		assert.Equal(t, int64(6000), size)
+	})
+
+	t.Run("all binlog types", func(t *testing.T) {
+		data := &SnapshotData{
+			Segments: []*datapb.SegmentDescription{
+				{
+					Binlogs: []*datapb.FieldBinlog{
+						{Binlogs: []*datapb.Binlog{{LogSize: 1000}}},
+					},
+					Deltalogs: []*datapb.FieldBinlog{
+						{Binlogs: []*datapb.Binlog{{LogSize: 200}}},
+					},
+					Statslogs: []*datapb.FieldBinlog{
+						{Binlogs: []*datapb.Binlog{{LogSize: 300}}},
+					},
+					Bm25Statslogs: []*datapb.FieldBinlog{
+						{Binlogs: []*datapb.Binlog{{LogSize: 400}}},
+					},
+				},
+			},
+		}
+		size := computeSnapshotSizeBytes(data)
+		assert.Equal(t, int64(1900), size)
+	})
+
+	t.Run("text and json index files", func(t *testing.T) {
+		data := &SnapshotData{
+			Segments: []*datapb.SegmentDescription{
+				{
+					TextIndexFiles: map[int64]*datapb.TextIndexStats{
+						100: {LogSize: 500},
+						101: {LogSize: 600},
+					},
+					JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
+						102: {LogSize: 700},
+					},
+				},
+			},
+		}
+		size := computeSnapshotSizeBytes(data)
+		assert.Equal(t, int64(1800), size)
+	})
+
+	t.Run("index files", func(t *testing.T) {
+		data := &SnapshotData{
+			Segments: []*datapb.SegmentDescription{
+				{
+					IndexFiles: []*indexpb.IndexFilePathInfo{
+						{SerializedSize: 10000},
+						{SerializedSize: 20000},
+					},
+				},
+			},
+		}
+		size := computeSnapshotSizeBytes(data)
+		assert.Equal(t, int64(30000), size)
+	})
+
+	t.Run("multiple segments combined", func(t *testing.T) {
+		data := &SnapshotData{
+			Segments: []*datapb.SegmentDescription{
+				{
+					Binlogs: []*datapb.FieldBinlog{
+						{Binlogs: []*datapb.Binlog{{LogSize: 1000}}},
+					},
+					IndexFiles: []*indexpb.IndexFilePathInfo{
+						{SerializedSize: 5000},
+					},
+				},
+				{
+					Binlogs: []*datapb.FieldBinlog{
+						{Binlogs: []*datapb.Binlog{{LogSize: 2000}}},
+					},
+					Deltalogs: []*datapb.FieldBinlog{
+						{Binlogs: []*datapb.Binlog{{LogSize: 500}}},
+					},
+					TextIndexFiles: map[int64]*datapb.TextIndexStats{
+						100: {LogSize: 300},
+					},
+				},
+			},
+		}
+		// Segment 1: 1000 (binlog) + 5000 (index) = 6000
+		// Segment 2: 2000 (binlog) + 500 (deltalog) + 300 (text index) = 2800
+		// Total: 8800
+		size := computeSnapshotSizeBytes(data)
+		assert.Equal(t, int64(8800), size)
+	})
+
+	t.Run("nil segments in snapshot data", func(t *testing.T) {
+		data := &SnapshotData{
+			Segments: nil,
+		}
+		size := computeSnapshotSizeBytes(data)
+		assert.Equal(t, int64(0), size)
+	})
+}
+
+func TestSnapshotManager_DropSnapshot_MetricsOnError(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	metrics.RegisterDataCoord(registry)
+	defer metrics.DataCoordSnapshotOperationErrorsTotal.Reset()
+
+	ctx := context.Background()
+
+	// GetSnapshot returns info (exists)
+	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
+		return &datapb.SnapshotInfo{Name: name}, nil
+	}).Build()
+	defer mockGetSnapshot.UnPatch()
+
+	// DropSnapshot fails
+	mockDropSnapshot := mockey.Mock((*snapshotMeta).DropSnapshot).To(func(sm *snapshotMeta, ctx context.Context, name string) error {
+		return errors.New("drop failed")
+	}).Build()
+	defer mockDropSnapshot.UnPatch()
+
+	sm := NewSnapshotManager(nil, &snapshotMeta{}, nil, nil, nil, nil, nil)
+
+	err := sm.DropSnapshot(ctx, "failing_snap")
+	assert.Error(t, err)
+
+	// Verify error counter incremented for drop internal
+	errCount := testutil.ToFloat64(metrics.DataCoordSnapshotOperationErrorsTotal.WithLabelValues(metrics.SnapshotDropOp, "internal"))
+	assert.Equal(t, float64(1), errCount)
 }

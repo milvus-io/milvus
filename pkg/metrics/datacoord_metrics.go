@@ -380,6 +380,65 @@ var (
 			Buckets:   longTaskBuckets,
 		})
 
+	// Snapshot inventory metrics
+
+	DataCoordSnapshotTotal = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "snapshot_total",
+			Help:      "total number of snapshots",
+		}, []string{collectionIDLabelName, databaseLabelName})
+
+	// Snapshot operation metrics
+
+	DataCoordSnapshotOperationLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "snapshot_operation_latency",
+			Help:      "latency of snapshot operations in milliseconds",
+			Buckets:   longTaskBuckets,
+		}, []string{collectionIDLabelName, statusLabelName, snapshotOpLabelName})
+
+	DataCoordSnapshotRestoreProgressRatio = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "snapshot_restore_progress_ratio",
+			Help:      "restore progress ratio (0.0 to 1.0)",
+		}, []string{jobIDLabelName, snapshotNameLabelName})
+
+	DataCoordSnapshotRestoreJobsTotal = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "snapshot_restore_jobs_total",
+			Help:      "number of snapshot restore jobs by state",
+		}, []string{TaskStateLabel})
+
+	// Snapshot storage metrics
+
+	DataCoordSnapshotSizeBytes = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "snapshot_size_bytes",
+			Help:      "storage size of snapshot data in bytes",
+			Buckets:   prometheus.ExponentialBuckets(1024*1024, 4, 10),
+			// Buckets: 1MB, 4MB, 16MB, 64MB, 256MB, 1GB, 4GB, 16GB, 64GB, 256GB
+		}, []string{collectionIDLabelName})
+
+	// Snapshot error metrics
+
+	DataCoordSnapshotOperationErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "snapshot_operation_errors_total",
+			Help:      "total snapshot operation errors",
+		}, []string{snapshotOpLabelName, snapshotErrTypeLabelName})
+
 	DataCoordTaskExecuteLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -458,6 +517,12 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(IndexStatsTaskNum)
 	registry.MustRegister(TaskVersion)
 	registry.MustRegister(TaskNumInGlobalScheduler)
+	registry.MustRegister(DataCoordSnapshotTotal)
+	registry.MustRegister(DataCoordSnapshotOperationLatency)
+	registry.MustRegister(DataCoordSnapshotSizeBytes)
+	registry.MustRegister(DataCoordSnapshotRestoreProgressRatio)
+	registry.MustRegister(DataCoordSnapshotRestoreJobsTotal)
+	registry.MustRegister(DataCoordSnapshotOperationErrorsTotal)
 	registerStreamingCoord(registry)
 }
 
