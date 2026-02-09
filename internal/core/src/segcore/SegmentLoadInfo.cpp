@@ -150,6 +150,48 @@ SegmentLoadInfo::CheckIndexHasRawData(const LoadIndexInfo& load_index_info) {
     return request.has_raw_data;
 }
 
+std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>
+SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
+    const proto::segcore::TextIndexStats& text_index_stats,
+    FieldId field_id) const {
+    auto info = std::make_shared<proto::indexcgo::LoadTextIndexInfo>();
+
+    info->set_fieldid(text_index_stats.fieldid());
+    info->set_version(text_index_stats.version());
+    info->set_buildid(text_index_stats.buildid());
+    for (const auto& f : text_index_stats.files()) {
+        info->add_files(f);
+    }
+
+    const auto& field_meta = schema_->operator[](field_id);
+    *info->mutable_schema() = field_meta.ToProto();
+
+    info->set_collectionid(GetCollectionID());
+    info->set_partitionid(GetPartitionID());
+    info->set_load_priority(GetPriority());
+
+    // Text match index mmap config is based on the scalar field mmap
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    auto [field_has_setting, field_mmap_enabled] =
+        schema_->MmapEnabled(field_id);
+    bool enable_mmap = field_has_setting
+                           ? field_mmap_enabled
+                           : mmap_config.GetScalarFieldEnableMmap();
+    info->set_enable_mmap(enable_mmap);
+    info->set_index_size(text_index_stats.memory_size());
+    info->set_current_scalar_index_version(
+        text_index_stats.current_scalar_index_version());
+
+    // Text match index warmup policy based on scalar field's warmup
+    auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
+        field_id, /*is_vector=*/false, /*is_index=*/false);
+    if (field_has_warmup) {
+        info->set_warmup_policy(field_warmup_policy);
+    }
+
+    return info;
+}
+
 void
 SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
     // Get current index IDs from converted cache
@@ -376,6 +418,62 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
     }
 }
 
+void
+SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
+                                        SegmentLoadInfo& new_info) {
+    // Build current text indexed fields (fields with loaded text index stats)
+    std::set<FieldId> current_text_indexed;
+    for (const auto& [field_id, stats] : GetTextStatsLogs()) {
+        current_text_indexed.insert(FieldId(field_id));
+    }
+    // Also include text indexes created from raw data
+    for (const auto& field_id : created_text_indexes_) {
+        current_text_indexed.insert(field_id);
+    }
+
+    // Build new text indexed info (like Go textIndexedInfo)
+    // Keep higher version if duplicate field_id
+    std::unordered_map<FieldId, const proto::segcore::TextIndexStats*>
+        new_text_indexed;
+    for (const auto& [field_id, stats] : new_info.GetTextStatsLogs()) {
+        auto fid = FieldId(field_id);
+        auto it = new_text_indexed.find(fid);
+        if (it == new_text_indexed.end() ||
+            stats.version() > it->second->version()) {
+            new_text_indexed[fid] = &stats;
+        }
+    }
+
+    // Find text indexes to load: in new_info but not in current
+    // Convert TextIndexStats -> LoadTextIndexInfo using new_info's context
+    for (const auto& [field_id, stats] : new_text_indexed) {
+        if (current_text_indexed.find(field_id) == current_text_indexed.end()) {
+            diff.text_indexes_to_load[field_id] =
+                new_info.ConvertTextIndexStatsToLoadTextIndexInfo(*stats,
+                                                                  field_id);
+        }
+    }
+
+    // Find text indexes to create: enable_match fields without pre-built index
+    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+        if (!field_meta.enable_match()) {
+            continue;
+        }
+        // Skip if has pre-built index in new_info
+        if (new_text_indexed.find(field_id) != new_text_indexed.end()) {
+            continue;
+        }
+        // Skip if already created from raw data
+        if (created_text_indexes_.find(field_id) !=
+            created_text_indexes_.end()) {
+            continue;
+        }
+        diff.text_indexes_to_create.insert(field_id);
+    }
+}
+
+// std::unique_ptr<typename Tp>
+
 LoadDiff
 SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
     LoadDiff diff;
@@ -385,6 +483,9 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
 
     // Compute fields that need to be reloaded due to index raw data changes
     ComputeDiffReloadFields(diff, new_info);
+
+    // Compute text index changes
+    ComputeDiffTextIndexes(diff, new_info);
 
     // Handle field data changes
     // Note: Updates can only happen within the same category:
@@ -423,6 +524,9 @@ SegmentLoadInfo::GetLoadDiff() {
 
     // Handle index changes
     empty_info.ComputeDiffIndexes(diff, *this);
+
+    // Handle text index changes
+    empty_info.ComputeDiffTextIndexes(diff, *this);
 
     // Handle field data changes
     // Note: Updates can only happen within the same category:

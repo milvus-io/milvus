@@ -171,9 +171,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                     milvus::OpContext* op_ctx = nullptr) override;
 
     void
-    LoadTextIndex(
-        std::unique_ptr<milvus::proto::indexcgo::LoadTextIndexInfo> info_proto,
-        milvus::OpContext* op_ctx = nullptr) override;
+    LoadTextIndex(milvus::OpContext* op_ctx,
+                  std::shared_ptr<milvus::proto::indexcgo::LoadTextIndexInfo>
+                      info_proto) override;
 
     void
     RemoveJsonStats(FieldId field_id) override {
@@ -1079,6 +1079,19 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     ReloadColumns(const std::vector<FieldId>& field_ids_to_reload,
                   milvus::OpContext* op_ctx = nullptr);
+
+    /**
+     * @brief Load text indexes in batch
+     *
+     * @param op_ctx The operation context
+     * @param text_indices_to_load a map from field id to text indexes to load
+     */
+    void
+    LoadBatchTextIndexes(
+        milvus::OpContext* op_ctx,
+        std::unordered_map<FieldId,
+                           std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>>&
+            text_indexes_to_load);
 
     /**
      * @brief Apply load differences to update segment load information
