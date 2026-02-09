@@ -14,22 +14,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <assert.h>
 #include <glog/logging.h>
+#include <string.h>
 #include <any>
 #include <cstdint>
+#include <initializer_list>
+#include <iosfwd>
+#include <map>
 #include <string>
+#include <string_view>
+#include <utility>
+
 #include "common/Array.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
-#include "common/FieldMeta.h"
-#include "common/Geometry.h"
+#include "common/FieldDataInterface.h"
 #include "common/Json.h"
-#include "fmt/format.h"
+#include "common/TypeTraits.h"
+#include "common/VectorArray.h"
+#include "fmt/core.h"
+#include "knowhere/sparse_utils.h"
+#include "log/Log.h"
 #include "nlohmann/json.hpp"
+#include "nlohmann/json_fwd.hpp"
 #include "storage/Event.h"
 #include "storage/PayloadReader.h"
+#include "storage/PayloadStream.h"
 #include "storage/PayloadWriter.h"
-#include "log/Log.h"
 
 namespace milvus::storage {
 

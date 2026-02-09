@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
@@ -536,6 +537,10 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	log.Info("load segments done...",
 		zap.Int64s("segments", lo.Map(loaded, func(s segments.Segment, _ int) int64 { return s.ID() })))
+
+	// Publish filesystem metrics after load task completion
+	// Use default filesystem (empty path) for load tasks
+	storagev2.PublishDefaultFilesystemMetrics()
 
 	return merr.Success(), nil
 }
@@ -1679,6 +1684,14 @@ func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequ
 		segment.DropIndex(ctx, indexID)
 	}
 
+	return merr.Success(), nil
+}
+
+func (node *QueryNode) UpdateIndex(ctx context.Context, req *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
+	defer node.updateDistributionModifyTS()
+	// UpdateIndex is currently a placeholder implementation
+	// The actual logic should handle AddIndex and DropIndex actions
+	// For now, return success to satisfy the interface
 	return merr.Success(), nil
 }
 

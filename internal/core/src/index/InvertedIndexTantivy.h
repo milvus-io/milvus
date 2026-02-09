@@ -11,17 +11,35 @@
 
 #pragma once
 
-#include <cstddef>
-#include <vector>
 #include <folly/SharedMutex.h>
+#include <stdint.h>
+#include <cstddef>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
 #include "common/RegexQuery.h"
-#include "index/Index.h"
-#include "storage/FileManager.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "fmt/core.h"
+#include "index/IndexStats.h"
+#include "index/Meta.h"
+#include "index/ScalarIndex.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "rust-array.h"
 #include "storage/DiskFileManagerImpl.h"
+#include "storage/FileManager.h"
 #include "storage/MemFileManagerImpl.h"
 #include "tantivy-binding.h"
 #include "tantivy-wrapper.h"
-#include "index/StringIndex.h"
 
 namespace milvus::index {
 

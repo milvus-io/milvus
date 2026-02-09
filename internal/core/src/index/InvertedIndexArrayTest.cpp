@@ -9,20 +9,39 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRAN_TIES OR CON_DITION_S OF AN_Y KIN_D, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <boost/container/vector.hpp>
 #include <gtest/gtest.h>
-#include <regex>
+#include <nlohmann/json.hpp>
+#include <stdint.h>
+#include <cstddef>
+#include <memory>
+#include <string>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
-#include "cachinglayer/Manager.h"
-#include "pb/plan.pb.h"
-#include "index/InvertedIndexTantivy.h"
+#include "bitset/bitset.h"
+#include "common/Consts.h"
+#include "common/PrometheusClient.h"
 #include "common/Schema.h"
-
-#include "test_utils/cachinglayer_test_utils.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "index/InvertedIndexTantivy.h"
+#include "knowhere/comp/index_param.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "plan/PlanNode.h"
+#include "query/ExecPlanNodeVisitor.h"
+#include "query/PlanProto.h"
+#include "query/Utils.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/Types.h"
+#include "segcore/storagev1translator/ChunkTranslator.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
-#include "query/PlanProto.h"
-#include "query/ExecPlanNodeVisitor.h"
-
+#include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;

@@ -11,6 +11,8 @@
 
 #include "SkipIndex.h"
 
+#include <any>
+
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
 

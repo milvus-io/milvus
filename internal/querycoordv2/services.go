@@ -508,13 +508,31 @@ func (s *Server) refreshCollection(ctx context.Context, collectionID int64) erro
 		return merr.WrapErrCollectionNotLoaded(collectionID, "collection not fully loaded")
 	}
 
-	// Pull the latest target.
-	readyCh, err := s.targetObserver.UpdateNextTarget(collectionID)
-	if err != nil {
+	// Set a placeholder notifier BEFORE updating the target to avoid a race condition.
+	// Without this, the segment checker might run between UpdateNextTarget and SetNotifierCollectionOp,
+	// see the new segments in next target, but think IsRefreshed() is true (because the notifier
+	// hasn't been set yet), and incorrectly assign LOW priority to import segments.
+	placeholderCh := make(chan struct{})
+	if err := s.meta.CollectionManager.UpdateCollection(ctx, collectionID, meta.SetNotifierCollectionOp(placeholderCh)); err != nil {
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			return nil
+		}
 		return err
 	}
 
+	// Pull the latest target.
+	readyCh, err := s.targetObserver.UpdateNextTarget(collectionID)
+	if err != nil {
+		// On failure, close the placeholder channel so IsRefreshed() returns true
+		close(placeholderCh)
+		return err
+	}
+
+	// Replace the placeholder with the real readyCh from target observer
 	err = s.meta.CollectionManager.UpdateCollection(ctx, collectionID, meta.SetNotifierCollectionOp(readyCh))
+	// Close the placeholder channel (no one is waiting on it, but good practice)
+	close(placeholderCh)
+
 	// if collection already released, treat as success
 	if errors.Is(err, merr.ErrCollectionNotFound) {
 		return nil

@@ -15,7 +15,9 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include <string>
 
+#include "gtest/gtest.h"
 #include "storage/ThreadPool.h"
 
 namespace milvus {

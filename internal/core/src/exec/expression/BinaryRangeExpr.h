@@ -17,15 +17,35 @@
 #pragma once
 
 #include <fmt/core.h>
+#include <simdjson.h>
+#include <stdint.h>
+#include <cstddef>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
-#include "common/EasyAssert.h"
+#include "bitset/bitset.h"
+#include "bitset/common.h"
+#include "cachinglayer/CacheSlot.h"
+#include "common/Array.h"
+#include "common/Json.h"
+#include "common/OpContext.h"
 #include "common/Types.h"
 #include "common/Vector.h"
-#include "exec/expression/Expr.h"
+#include "common/protobuf_utils.h"
 #include "exec/expression/Element.h"
-#include "segcore/SegmentInterface.h"
-#include "cachinglayer/CacheSlot.h"
+#include "exec/expression/EvalCtx.h"
+#include "exec/expression/Expr.h"
+#include "expr/ITypeExpr.h"
+#include "index/ScalarIndex.h"
 #include "index/json_stats/bson_inverted.h"
+#include "pb/plan.pb.h"
+#include "segcore/SegmentInterface.h"
+#include "simdjson/error.h"
 
 namespace milvus {
 namespace exec {

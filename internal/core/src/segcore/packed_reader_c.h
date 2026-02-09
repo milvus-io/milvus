@@ -18,8 +18,14 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
+
+#include "common/common_type_c.h"
 #include "common/type_c.h"
-#include <arrow/c/abi.h>
+
+// Forward declarations for Arrow C Data Interface structs
+struct ArrowSchema;
+struct ArrowArray;
 
 typedef void* CPackedReader;
 typedef void* CArrowArray;

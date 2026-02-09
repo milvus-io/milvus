@@ -9,15 +9,31 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <memory>
-#include <regex>
+#include <string>
+#include <tuple>
 #include <vector>
 
+#include "bitset/bitset.h"
+#include "common/IndexMeta.h"
+#include "common/Schema.h"
 #include "common/Types.h"
-#include "query/Plan.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
+#include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
+#include "query/Plan.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
 

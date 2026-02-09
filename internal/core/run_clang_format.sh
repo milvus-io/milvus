@@ -16,7 +16,6 @@ formatThis() {
 
 formatThis "${CorePath}/src"
 formatThis "${CorePath}/unittest"
-formatThis "${CorePath}/unittest/bench"
 formatThis "${CorePath}/thirdparty/tantivy"
 
 ${CorePath}/build-support/add_cpp_license.sh ${CorePath}/build-support/cpp_license.txt ${CorePath}

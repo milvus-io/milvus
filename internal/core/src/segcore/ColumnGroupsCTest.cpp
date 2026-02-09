@@ -14,9 +14,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <gtest/gtest.h>
+#include <memory>
 #include <vector>
-#include <cstring>
+
+#include "gtest/gtest.h"
 #include "segcore/column_groups_c.h"
 
 TEST(CColumnSplits, TestCColumnSplits) {

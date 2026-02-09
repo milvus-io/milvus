@@ -14,13 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstddef>
 #include <mutex>
-#include "common/init_c.h"
+
 #include "common/Common.h"
 #include "common/Tracer.h"
-#include "storage/ThreadPool.h"
-#include "log/Log.h"
+#include "common/init_c.h"
 #include "exec/expression/ExprCache.h"
+#include "storage/ThreadPool.h"
 
 std::once_flag traceFlag;
 std::once_flag cpuNumFlag;

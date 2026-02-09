@@ -10,18 +10,27 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "common/ChunkWriter.h"
+
 #include <cstdint>
 #include <memory>
 #include <tuple>
 #include <utility>
 #include <vector>
+
+#include "NamedType/underlying_functionalities.hpp"
 #include "arrow/array/array_binary.h"
-#include "arrow/array/array_primitive.h"
+#include "arrow/array/array_nested.h"
 #include "arrow/record_batch.h"
-#include "arrow/type_fwd.h"
+#include "arrow/result.h"
+#include "common/Array.h"
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
 #include "common/Types.h"
+#include "glog/logging.h"
+#include "knowhere/operands.h"
+#include "log/Log.h"
+#include "simdjson/base.h"
 #include "simdjson/padded_string.h"
 #include "storage/FileWriter.h"
 

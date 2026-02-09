@@ -695,6 +695,65 @@ func (_c *MixCoord_AlterCollectionFunction_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// AlterCollectionSchema provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) AlterCollectionSchema(_a0 context.Context, _a1 *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AlterCollectionSchema")
+	}
+
+	var r0 *milvuspb.AlterCollectionSchemaResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionSchemaRequest) *milvuspb.AlterCollectionSchemaResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.AlterCollectionSchemaResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AlterCollectionSchemaRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_AlterCollectionSchema_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterCollectionSchema'
+type MixCoord_AlterCollectionSchema_Call struct {
+	*mock.Call
+}
+
+// AlterCollectionSchema is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AlterCollectionSchemaRequest
+func (_e *MixCoord_Expecter) AlterCollectionSchema(_a0 interface{}, _a1 interface{}) *MixCoord_AlterCollectionSchema_Call {
+	return &MixCoord_AlterCollectionSchema_Call{Call: _e.mock.On("AlterCollectionSchema", _a0, _a1)}
+}
+
+func (_c *MixCoord_AlterCollectionSchema_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AlterCollectionSchemaRequest)) *MixCoord_AlterCollectionSchema_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AlterCollectionSchemaRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_AlterCollectionSchema_Call) Return(_a0 *milvuspb.AlterCollectionSchemaResponse, _a1 error) *MixCoord_AlterCollectionSchema_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_AlterCollectionSchema_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error)) *MixCoord_AlterCollectionSchema_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AlterDatabase provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) AlterDatabase(_a0 context.Context, _a1 *rootcoordpb.AlterDatabaseRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1222,6 +1281,65 @@ func (_c *MixCoord_CheckQueryNodeDistribution_Call) Return(_a0 *commonpb.Status,
 }
 
 func (_c *MixCoord_CheckQueryNodeDistribution_Call) RunAndReturn(run func(context.Context, *querypb.CheckQueryNodeDistributionRequest) (*commonpb.Status, error)) *MixCoord_CheckQueryNodeDistribution_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ClientHeartbeat provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) ClientHeartbeat(_a0 context.Context, _a1 *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ClientHeartbeat")
+	}
+
+	var r0 *milvuspb.ClientHeartbeatResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ClientHeartbeatRequest) *milvuspb.ClientHeartbeatResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ClientHeartbeatResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ClientHeartbeatRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_ClientHeartbeat_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClientHeartbeat'
+type MixCoord_ClientHeartbeat_Call struct {
+	*mock.Call
+}
+
+// ClientHeartbeat is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ClientHeartbeatRequest
+func (_e *MixCoord_Expecter) ClientHeartbeat(_a0 interface{}, _a1 interface{}) *MixCoord_ClientHeartbeat_Call {
+	return &MixCoord_ClientHeartbeat_Call{Call: _e.mock.On("ClientHeartbeat", _a0, _a1)}
+}
+
+func (_c *MixCoord_ClientHeartbeat_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ClientHeartbeatRequest)) *MixCoord_ClientHeartbeat_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ClientHeartbeatRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_ClientHeartbeat_Call) Return(_a0 *milvuspb.ClientHeartbeatResponse, _a1 error) *MixCoord_ClientHeartbeat_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_ClientHeartbeat_Call) RunAndReturn(run func(context.Context, *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error)) *MixCoord_ClientHeartbeat_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1989,6 +2107,65 @@ func (_c *MixCoord_DeactivateChecker_Call) Return(_a0 *commonpb.Status, _a1 erro
 }
 
 func (_c *MixCoord_DeactivateChecker_Call) RunAndReturn(run func(context.Context, *querypb.DeactivateCheckerRequest) (*commonpb.Status, error)) *MixCoord_DeactivateChecker_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteClientCommand provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) DeleteClientCommand(_a0 context.Context, _a1 *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteClientCommand")
+	}
+
+	var r0 *milvuspb.DeleteClientCommandResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteClientCommandRequest) *milvuspb.DeleteClientCommandResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DeleteClientCommandResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DeleteClientCommandRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_DeleteClientCommand_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteClientCommand'
+type MixCoord_DeleteClientCommand_Call struct {
+	*mock.Call
+}
+
+// DeleteClientCommand is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DeleteClientCommandRequest
+func (_e *MixCoord_Expecter) DeleteClientCommand(_a0 interface{}, _a1 interface{}) *MixCoord_DeleteClientCommand_Call {
+	return &MixCoord_DeleteClientCommand_Call{Call: _e.mock.On("DeleteClientCommand", _a0, _a1)}
+}
+
+func (_c *MixCoord_DeleteClientCommand_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DeleteClientCommandRequest)) *MixCoord_DeleteClientCommand_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DeleteClientCommandRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_DeleteClientCommand_Call) Return(_a0 *milvuspb.DeleteClientCommandResponse, _a1 error) *MixCoord_DeleteClientCommand_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_DeleteClientCommand_Call) RunAndReturn(run func(context.Context, *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error)) *MixCoord_DeleteClientCommand_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3453,6 +3630,65 @@ func (_c *MixCoord_GetChannelRecoveryInfo_Call) Return(_a0 *datapb.GetChannelRec
 }
 
 func (_c *MixCoord_GetChannelRecoveryInfo_Call) RunAndReturn(run func(context.Context, *datapb.GetChannelRecoveryInfoRequest) (*datapb.GetChannelRecoveryInfoResponse, error)) *MixCoord_GetChannelRecoveryInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetClientTelemetry provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) GetClientTelemetry(_a0 context.Context, _a1 *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetClientTelemetry")
+	}
+
+	var r0 *milvuspb.GetClientTelemetryResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetClientTelemetryRequest) *milvuspb.GetClientTelemetryResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetClientTelemetryResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetClientTelemetryRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetClientTelemetry_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetClientTelemetry'
+type MixCoord_GetClientTelemetry_Call struct {
+	*mock.Call
+}
+
+// GetClientTelemetry is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetClientTelemetryRequest
+func (_e *MixCoord_Expecter) GetClientTelemetry(_a0 interface{}, _a1 interface{}) *MixCoord_GetClientTelemetry_Call {
+	return &MixCoord_GetClientTelemetry_Call{Call: _e.mock.On("GetClientTelemetry", _a0, _a1)}
+}
+
+func (_c *MixCoord_GetClientTelemetry_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetClientTelemetryRequest)) *MixCoord_GetClientTelemetry_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetClientTelemetryRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetClientTelemetry_Call) Return(_a0 *milvuspb.GetClientTelemetryResponse, _a1 error) *MixCoord_GetClientTelemetry_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetClientTelemetry_Call) RunAndReturn(run func(context.Context, *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error)) *MixCoord_GetClientTelemetry_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -7224,6 +7460,65 @@ func (_c *MixCoord_OperateUserRole_Call) Return(_a0 *commonpb.Status, _a1 error)
 }
 
 func (_c *MixCoord_OperateUserRole_Call) RunAndReturn(run func(context.Context, *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error)) *MixCoord_OperateUserRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PushClientCommand provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) PushClientCommand(_a0 context.Context, _a1 *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PushClientCommand")
+	}
+
+	var r0 *milvuspb.PushClientCommandResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.PushClientCommandRequest) *milvuspb.PushClientCommandResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.PushClientCommandResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.PushClientCommandRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_PushClientCommand_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PushClientCommand'
+type MixCoord_PushClientCommand_Call struct {
+	*mock.Call
+}
+
+// PushClientCommand is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.PushClientCommandRequest
+func (_e *MixCoord_Expecter) PushClientCommand(_a0 interface{}, _a1 interface{}) *MixCoord_PushClientCommand_Call {
+	return &MixCoord_PushClientCommand_Call{Call: _e.mock.On("PushClientCommand", _a0, _a1)}
+}
+
+func (_c *MixCoord_PushClientCommand_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.PushClientCommandRequest)) *MixCoord_PushClientCommand_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.PushClientCommandRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_PushClientCommand_Call) Return(_a0 *milvuspb.PushClientCommandResponse, _a1 error) *MixCoord_PushClientCommand_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_PushClientCommand_Call) RunAndReturn(run func(context.Context, *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error)) *MixCoord_PushClientCommand_Call {
 	_c.Call.Return(run)
 	return _c
 }

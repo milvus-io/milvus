@@ -152,24 +152,20 @@ class TestMilvusClientSnapshotCreateInvalid(TestMilvusClientV2Base):
                              check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="BUG: SDK and server both accept whitespace-only snapshot names")
     def test_snapshot_create_whitespace_name(self):
         """
         target: test create snapshot with whitespace-only name
         method: create snapshot with name containing only spaces
-        expected: should raise exception
+        expected: should raise exception with "snapshot name should be not empty"
 
-        NOTE: This test documents a BUG - both SDK and server accept whitespace-only names.
-        SDK's validate_str() doesn't strip whitespace before checking.
+        Fixed in PR #47096: Server now validates snapshot names using standard naming rules.
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
 
-        # BUG: SDK and server both accept whitespace-only names
-        # Expected: should raise error like "snapshot_name must be a non-empty string"
-        # Actual: creates a snapshot with name " " (space)
-        error = {ct.err_code: 1, ct.err_msg: "snapshot_name"}
+        # Server validates snapshot name and rejects whitespace-only names
+        error = {ct.err_code: 1100, ct.err_msg: "snapshot name should be not empty"}
         self.create_snapshot(client, collection_name, " ",
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -251,19 +247,18 @@ class TestMilvusClientSnapshotDropInvalid(TestMilvusClientV2Base):
                            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="BUG: SDK and server both accept whitespace-only snapshot names")
     def test_snapshot_drop_whitespace_name(self):
         """
         target: test drop snapshot with whitespace-only name
         method: drop snapshot with name containing only spaces
-        expected: should raise exception
+        expected: should raise exception with "snapshot name should be not empty"
 
-        NOTE: This test documents a BUG - both SDK and server accept whitespace-only names.
+        Fixed in PR #47096: Server now validates snapshot names using standard naming rules.
         """
         client = self._client()
 
-        # BUG: SDK and server both accept whitespace-only names
-        error = {ct.err_code: 1, ct.err_msg: "snapshot_name"}
+        # Server validates snapshot name and rejects whitespace-only names
+        error = {ct.err_code: 1100, ct.err_msg: "snapshot name should be not empty"}
         self.drop_snapshot(client, " ",
                            check_task=CheckTasks.err_res, check_items=error)
 
@@ -1293,12 +1288,13 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
             log.warning("No length limit found up to 1024 characters - this may be a bug")
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="BUG: start_time is always 0 - server doesn't set start_time field")
     def test_snapshot_restore_progress_tracking(self):
         """
         target: verify restore progress is correctly reported
         method: monitor progress during restore
         expected: progress should go from 0 to 100, start_time should be set
+
+        Fixed in PR #47096: Server now correctly sets start_time from RestoreSnapshotJob.StartedAt.
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1486,12 +1482,13 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="BUG: list_snapshots() fails after dropping source collection - server returns 'collection not found[collection=0]'")
     def test_snapshot_list_after_drop_collection(self):
         """
         target: test listing snapshots after source collection is dropped
         method: create snapshot, drop collection, list snapshots
         expected: snapshot should still be listable (snapshot is independent)
+
+        Fixed in PR #47096: Server now handles empty collection_name by listing all snapshots.
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()

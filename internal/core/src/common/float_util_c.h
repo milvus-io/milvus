@@ -20,6 +20,7 @@
 #include <limits>
 #include <type_traits>
 #include <folly/Hash.h>
+#include <stdbool.h>
 
 namespace milvus {
 

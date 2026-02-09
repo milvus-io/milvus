@@ -42,10 +42,12 @@ func (provider *baseSemanticHighlightProvider) maxBatch() int {
 }
 
 type SemanticHighlight struct {
-	fieldNames map[int64]string
-	fieldIDs   []int64
-	provider   semanticHighlightProvider
-	queries    []string
+	fieldNames        map[int64]string // schema field: FieldID -> fieldName
+	fieldIDs          []int64          // schema field IDs for highlight processing
+	dynamicFieldNames []string         // dynamic field names (fields not in schema)
+	dynamicFieldID    int64            // $meta field's FieldID
+	provider          semanticHighlightProvider
+	queries           []string
 }
 
 const (
@@ -55,7 +57,7 @@ const (
 
 func NewSemanticHighlight(collSchema *schemapb.CollectionSchema, params []*commonpb.KeyValuePair, conf map[string]string, extraInfo *models.ModelExtraInfo) (*SemanticHighlight, error) {
 	queries := []string{}
-	inputField := []string{}
+	inputFields := []string{}
 	for _, param := range params {
 		switch param.Key {
 		case queryKeyName:
@@ -63,7 +65,7 @@ func NewSemanticHighlight(collSchema *schemapb.CollectionSchema, params []*commo
 				return nil, fmt.Errorf("Parse queries failed, err: %v", err)
 			}
 		case inputFieldKeyName:
-			if err := json.Unmarshal([]byte(param.Value), &inputField); err != nil {
+			if err := json.Unmarshal([]byte(param.Value), &inputFields); err != nil {
 				return nil, fmt.Errorf("Parse input_field failed, err: %v", err)
 			}
 		}
@@ -73,28 +75,39 @@ func NewSemanticHighlight(collSchema *schemapb.CollectionSchema, params []*commo
 		return nil, fmt.Errorf("queries is required")
 	}
 
-	if len(inputField) == 0 {
+	if len(inputFields) == 0 {
 		return nil, fmt.Errorf("input_field is required")
 	}
 
 	fieldIDMap := make(map[string]*schemapb.FieldSchema)
 	fieldIDNameMap := make(map[int64]string)
+	var dynamicFieldID int64 = -1
 	for _, field := range collSchema.Fields {
 		fieldIDMap[field.Name] = field
 		fieldIDNameMap[field.FieldID] = field.Name
+		if field.IsDynamic {
+			dynamicFieldID = field.FieldID
+		}
 	}
 
 	fieldIDs := []int64{}
-	for _, fieldName := range inputField {
+	dynamicFieldNames := []string{}
+	for _, fieldName := range inputFields {
 		field, ok := fieldIDMap[fieldName]
-		if !ok {
-			return nil, fmt.Errorf("input_field %s not found", fieldName)
+		if ok {
+			// schema field found
+			if field.DataType != schemapb.DataType_VarChar && field.DataType != schemapb.DataType_Text {
+				return nil, fmt.Errorf("input_field %s is not a VarChar or Text field", fieldName)
+			}
+			fieldIDs = append(fieldIDs, field.FieldID)
+		} else {
+			// field not in schema, check if dynamic field is enabled
+			if !collSchema.EnableDynamicField {
+				return nil, fmt.Errorf("input_field %s not found in schema", fieldName)
+			}
+			// Non-schema fields are dynamic fields
+			dynamicFieldNames = append(dynamicFieldNames, fieldName)
 		}
-		if field.DataType != schemapb.DataType_VarChar && field.DataType != schemapb.DataType_Text {
-			return nil, fmt.Errorf("input_field %s is not a VarChar or Text field", fieldName)
-		}
-
-		fieldIDs = append(fieldIDs, field.FieldID)
 	}
 
 	// TODO: support other providers if have more providers
@@ -103,15 +116,50 @@ func NewSemanticHighlight(collSchema *schemapb.CollectionSchema, params []*commo
 		return nil, err
 	}
 
-	return &SemanticHighlight{fieldNames: fieldIDNameMap, fieldIDs: fieldIDs, provider: provider, queries: queries}, nil
+	return &SemanticHighlight{
+		fieldNames:        fieldIDNameMap,
+		fieldIDs:          fieldIDs,
+		dynamicFieldNames: dynamicFieldNames,
+		dynamicFieldID:    dynamicFieldID,
+		provider:          provider,
+		queries:           queries,
+	}, nil
 }
 
+// FieldIDs returns schema field IDs for highlight processing (not including $meta)
 func (highlight *SemanticHighlight) FieldIDs() []int64 {
+	return highlight.fieldIDs
+}
+
+// RequiredFieldIDs returns all field IDs required for highlight processing (including $meta if has dynamic fields)
+func (highlight *SemanticHighlight) RequiredFieldIDs() []int64 {
+	if highlight.HasDynamicFields() && highlight.dynamicFieldID > 0 {
+		// Create a new slice to avoid mutating the original fieldIDs slice
+		result := make([]int64, len(highlight.fieldIDs)+1)
+		copy(result, highlight.fieldIDs)
+		result[len(highlight.fieldIDs)] = highlight.dynamicFieldID
+		return result
+	}
 	return highlight.fieldIDs
 }
 
 func (highlight *SemanticHighlight) GetFieldName(id int64) string {
 	return highlight.fieldNames[id]
+}
+
+// DynamicFieldNames returns the list of dynamic field names
+func (highlight *SemanticHighlight) DynamicFieldNames() []string {
+	return highlight.dynamicFieldNames
+}
+
+// HasDynamicFields returns true if there are any dynamic fields
+func (highlight *SemanticHighlight) HasDynamicFields() bool {
+	return len(highlight.dynamicFieldNames) > 0
+}
+
+// DynamicFieldID returns the $meta field ID
+func (highlight *SemanticHighlight) DynamicFieldID() int64 {
+	return highlight.dynamicFieldID
 }
 
 func (highlight *SemanticHighlight) processOneQuery(ctx context.Context, query string, documents []string) ([][]string, [][]float32, error) {

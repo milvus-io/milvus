@@ -16,25 +16,18 @@
 
 #pragma once
 
-#include <memory>
+#include <stdint.h>
+#include <map>
 #include <string>
-#include <mutex>
-#include <shared_mutex>
 
-#include "common/JsonCastType.h"
+#include "arrow/util/macros.h"
 #include "common/Types.h"
-#include "common/type_c.h"
+#include "common/protobuf_utils.h"
+#include "common/resource_c.h"
 #include "index/Index.h"
-#include "index/ScalarIndex.h"
-#include "index/VectorIndex.h"
 #include "index/IndexInfo.h"
-#include "storage/Types.h"
+#include "index/ScalarIndex.h"
 #include "storage/FileManager.h"
-#include "index/StringIndexMarisa.h"
-#include "index/ScalarIndexSort.h"
-#include "index/StringIndexMarisa.h"
-#include "index/BoolIndex.h"
-#include "segcore/load_index_c.h"
 
 namespace milvus::index {
 

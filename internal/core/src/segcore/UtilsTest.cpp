@@ -9,17 +9,28 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <gtest/gtest.h>
-
+#include <folly/CancellationToken.h>
+#include <folly/FBVector.h>
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "common/EasyAssert.h"
+#include "common/OffsetMapping.h"
 #include "common/OpContext.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
+#include "pb/schema.pb.h"
+#include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/DeletedRecord.h"
 #include "segcore/InsertRecord.h"

@@ -456,6 +456,10 @@ func (s *mixCoordImpl) AlterCollectionField(ctx context.Context, req *milvuspb.A
 	return s.rootcoordServer.AlterCollectionField(ctx, req)
 }
 
+func (s *mixCoordImpl) AlterCollectionSchema(ctx context.Context, req *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	return s.rootcoordServer.AlterCollectionSchema(ctx, req)
+}
+
 func (s *mixCoordImpl) AddCollectionFunction(ctx context.Context, req *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
 	return s.rootcoordServer.AddCollectionFunction(ctx, req)
 }
@@ -1278,4 +1282,22 @@ func (s *mixCoordImpl) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.
 
 func (s *mixCoordImpl) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
 	return s.datacoordServer.ListSnapshots(ctx, req)
+}
+
+// Client Telemetry methods - forwarded to rootcoord
+
+func (s *mixCoordImpl) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
+	return s.rootcoordServer.ClientHeartbeat(ctx, req)
+}
+
+func (s *mixCoordImpl) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error) {
+	return s.rootcoordServer.GetClientTelemetry(ctx, req)
+}
+
+func (s *mixCoordImpl) PushClientCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
+	return s.rootcoordServer.PushClientCommand(ctx, req)
+}
+
+func (s *mixCoordImpl) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
+	return s.rootcoordServer.DeleteClientCommand(ctx, req)
 }

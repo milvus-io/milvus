@@ -9,15 +9,22 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <assert.h>
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <random>
-#include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
-#include "segcore/ConcurrentVector.h"
-#include "segcore/SegmentGrowing.h"
+#include "common/OffsetMapping.h"
+#include "gtest/gtest.h"
 #include "segcore/AckResponder.h"
+#include "segcore/ConcurrentVector.h"
+#include "segcore/SegcoreConfig.h"
 
 using namespace milvus::segcore;
 using std::vector;

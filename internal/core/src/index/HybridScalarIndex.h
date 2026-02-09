@@ -16,15 +16,21 @@
 
 #pragma once
 
-#include <map>
+#include <stdint.h>
+#include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
+#include "common/FieldData.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "index/IndexStats.h"
 #include "index/ScalarIndex.h"
-#include "index/BitmapIndex.h"
-#include "index/ScalarIndexSort.h"
-#include "index/StringIndexMarisa.h"
-#include "index/InvertedIndexTantivy.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
 #include "storage/FileManager.h"
 #include "storage/MemFileManagerImpl.h"
 
@@ -188,6 +194,9 @@ class HybridScalarIndex : public ScalarIndex<T> {
     ScalarIndexType
     SelectIndexBuildType(size_t n, const T* values);
 
+    ScalarIndexType
+    SelectIndexTypeByCardinality(size_t cardinality);
+
     BinarySet
     SerializeIndexType();
 
@@ -206,6 +215,8 @@ class HybridScalarIndex : public ScalarIndex<T> {
  public:
     bool is_built_{false};
     int32_t bitmap_index_cardinality_limit_;
+    ScalarIndexType low_cardinality_index_type_;
+    ScalarIndexType high_cardinality_index_type_;
     proto::schema::DataType field_type_;
     ScalarIndexType internal_index_type_;
     std::shared_ptr<ScalarIndex<T>> internal_index_{nullptr};

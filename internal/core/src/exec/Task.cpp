@@ -15,13 +15,28 @@
 // limitations under the License.
 
 #include "Task.h"
-#include "common/Tracer.h"
-#include "fmt/format.h"
 
+#include <assert.h>
 #include <boost/lexical_cast.hpp>
-#include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include "log/Log.h"
+#include <folly/ExceptionWrapper.h>
+#include <folly/Try.h>
+#include <folly/futures/Future.h>
+#include <stddef.h>
+#include <ios>
+#include <limits>
+#include <stdexcept>
+#include <type_traits>
+
+#include "boost/detail/basic_pointerbuf.hpp"
+#include "boost/uuid/random_generator.hpp"
+#include "common/EasyAssert.h"
+#include "common/Exception.h"
+#include "common/Tracer.h"
+#include "exec/QueryContext.h"
+#include "fmt/core.h"
+#include "folly/futures/Future.h"
+
 namespace milvus {
 namespace exec {
 

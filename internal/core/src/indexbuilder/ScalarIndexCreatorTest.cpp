@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <knowhere/comp/index_param.h>
 
+#include "common/CDataType.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
 #define private public

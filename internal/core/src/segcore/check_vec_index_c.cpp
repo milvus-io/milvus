@@ -10,8 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <string>
+
 #include "check_vec_index_c.h"
-#include "common/Types.h"
+#include "knowhere/comp/index_param.h"
 #include "knowhere/comp/knowhere_check.h"
 
 bool

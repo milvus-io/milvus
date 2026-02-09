@@ -15,8 +15,18 @@
 // limitations under the License.
 
 #include "GroupingSet.h"
+
+#include <cstddef>
+
+#include "common/BitUtil.h"
+#include "common/EasyAssert.h"
 #include "common/Utils.h"
-#include "SumAggregateBase.h"
+#include "exec/HashTable.h"
+#include "exec/VectorHasher.h"
+#include "exec/operator/query-agg/Aggregate.h"
+#include "exec/operator/query-agg/AggregateInfo.h"
+#include "exec/operator/query-agg/RowContainer.h"
+#include "folly/Range.h"
 
 namespace milvus {
 namespace exec {

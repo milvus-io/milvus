@@ -13,17 +13,27 @@
 // limitations under the License.
 
 #include <arrow/c/bridge.h>
+#include <exception>
 #include <memory>
+#include <string>
+#include <vector>
+
+#include "PluginInterface.h"
+#include "arrow/result.h"
+#include "arrow/status.h"
 #include "common/EasyAssert.h"
-#include "storage/loon_ffi/ffi_reader_c.h"
 #include "common/common_type_c.h"
+#include "milvus-storage/column_groups.h"
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/ffi_internal/bridge.h"
+#include "milvus-storage/manifest.h"
+#include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
-#include "storage/loon_ffi/util.h"
-#include "storage/PluginLoader.h"
-#include "storage/KeyRetriever.h"
 #include "monitor/scope_metric.h"
+#include "storage/KeyRetriever.h"
+#include "storage/PluginLoader.h"
+#include "storage/loon_ffi/ffi_reader_c.h"
+#include "storage/loon_ffi/util.h"
 
 /**
  * @brief Creates a Loon reader with optional CMEK decryption support.

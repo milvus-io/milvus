@@ -30,8 +30,8 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         schema, _ = self.create_schema(client)
         schema.add_field(pk_field_name, datatype=DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(vector_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field(content_field_name, datatype=DataType.VARCHAR, max_length=100)
+        schema.add_field(vector_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        schema.add_field(content_field_name, datatype=DataType.VARCHAR, max_length=100, nullable=True)
 
         # Check if this test case requires JSON field
         build_params = params.get("params", None)
@@ -146,7 +146,7 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
 
         # Add the scalar field with appropriate parameters
         if scalar_field_type == DataType.VARCHAR:
-            schema.add_field("scalar_field", datatype=scalar_field_type, max_length=1000)
+            schema.add_field("scalar_field", datatype=scalar_field_type, max_length=1000, nullable=True)
         elif scalar_field_type == DataType.ARRAY:
             schema.add_field("scalar_field", datatype=scalar_field_type,
                              element_type=DataType.VARCHAR, max_capacity=10, max_length=100)

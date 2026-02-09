@@ -2457,3 +2457,66 @@ func TestProxy_GetReplicateConfiguration_Error(t *testing.T) {
 	assert.Error(t, merr.Error(resp.GetStatus()))
 	assert.Nil(t, resp.GetConfiguration())
 }
+
+func TestHybridSearchRequestExprLogger_String(t *testing.T) {
+	t.Run("empty requests", func(t *testing.T) {
+		logger := &hybridSearchRequestExprLogger{
+			req: &milvuspb.HybridSearchRequest{
+				Requests: []*milvuspb.SearchRequest{},
+			},
+		}
+		result := logger.String()
+		assert.Equal(t, "", result)
+	})
+
+	t.Run("single request", func(t *testing.T) {
+		logger := &hybridSearchRequestExprLogger{
+			req: &milvuspb.HybridSearchRequest{
+				Requests: []*milvuspb.SearchRequest{
+					{Dsl: "id > 100"},
+				},
+			},
+		}
+		result := logger.String()
+		assert.Equal(t, "[No.0 req, expr: id > 100]", result)
+	})
+
+	t.Run("multiple requests", func(t *testing.T) {
+		logger := &hybridSearchRequestExprLogger{
+			req: &milvuspb.HybridSearchRequest{
+				Requests: []*milvuspb.SearchRequest{
+					{Dsl: "id > 100"},
+					{Dsl: "name == 'test'"},
+					{Dsl: "age < 30"},
+				},
+			},
+		}
+		result := logger.String()
+		expected := "[No.0 req, expr: id > 100][No.1 req, expr: name == 'test'][No.2 req, expr: age < 30]"
+		assert.Equal(t, expected, result)
+	})
+
+	t.Run("request with empty dsl", func(t *testing.T) {
+		logger := &hybridSearchRequestExprLogger{
+			req: &milvuspb.HybridSearchRequest{
+				Requests: []*milvuspb.SearchRequest{
+					{Dsl: ""},
+				},
+			},
+		}
+		result := logger.String()
+		assert.Equal(t, "[No.0 req, expr: ]", result)
+	})
+
+	t.Run("nil sub request in slice", func(t *testing.T) {
+		logger := &hybridSearchRequestExprLogger{
+			req: &milvuspb.HybridSearchRequest{
+				Requests: []*milvuspb.SearchRequest{
+					nil,
+				},
+			},
+		}
+		result := logger.String()
+		assert.Equal(t, "[No.0 req, expr: ]", result)
+	})
+}

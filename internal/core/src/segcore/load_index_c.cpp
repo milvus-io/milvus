@@ -11,31 +11,54 @@
 
 #include "segcore/load_index_c.h"
 
+#include <folly/ExceptionWrapper.h>
+#include <stdlib.h>
+#include <string.h>
+#include <chrono>
+#include <cstdint>
+#include <exception>
+#include <iosfwd>
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <unordered_set>
+#include <utility>
+#include <variant>
+#include <vector>
+
+#include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
-#include "common/Consts.h"
-#include "common/FieldMeta.h"
+#include "cachinglayer/Utils.h"
 #include "common/EasyAssert.h"
-#include "common/JsonCastType.h"
+#include "common/FieldMeta.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
 #include "common/type_c.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
+#include "index/IndexInfo.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
+#include "knowhere/binaryset.h"
+#include "knowhere/utils.h"
 #include "log/Log.h"
-#include "storage/FileManager.h"
-#include "segcore/Types.h"
-#include "storage/Util.h"
-#include "storage/RemoteChunkManagerSingleton.h"
-#include "storage/LocalChunkManagerSingleton.h"
-#include "pb/cgo_msg.pb.h"
-#include "knowhere/index/index_static.h"
-#include "knowhere/comp/knowhere_check.h"
-#include "cachinglayer/Manager.h"
-#include "segcore/storagev1translator/SealedIndexTranslator.h"
-#include "segcore/storagev1translator/V1SealedIndexTranslator.h"
-#include "segcore/Utils.h"
 #include "monitor/scope_metric.h"
+#include "nlohmann/json.hpp"
+#include "opentelemetry/trace/span.h"
+#include "pb/cgo_msg.pb.h"
+#include "pb/schema.pb.h"
+#include "segcore/Types.h"
+#include "segcore/Utils.h"
+#include "segcore/storagev1translator/V1SealedIndexTranslator.h"
+#include "storage/FileManager.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
 
 bool
 IsLoadWithDisk(const char* index_type, int index_engine_version) {

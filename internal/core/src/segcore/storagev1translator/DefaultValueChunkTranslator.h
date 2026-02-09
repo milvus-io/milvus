@@ -11,16 +11,21 @@
 
 #pragma once
 
-#include <string>
-#include <vector>
+#include <stdint.h>
+#include <cstddef>
+#include <memory>
 #include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 #include "common/Chunk.h"
-#include "common/FieldMeta.h"
 #include "common/ChunkWriter.h"
 #include "common/Types.h"
+#include "common/FieldMeta.h"
+#include "common/OpContext.h"
 #include "mmap/Types.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
 

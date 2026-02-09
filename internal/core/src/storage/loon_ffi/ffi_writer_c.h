@@ -20,8 +20,6 @@ extern "C" {
 
 #include "common/common_type_c.h"
 #include "common/type_c.h"
-#include <arrow/c/abi.h>
-#include "milvus-storage/ffi_c.h"
 
 /**
  * @brief Retrieves encryption parameters from the cipher plugin for CMEK (Customer Managed Encryption Keys).

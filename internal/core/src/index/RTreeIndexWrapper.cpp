@@ -9,16 +9,32 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "common/EasyAssert.h"
-#include "log/Log.h"
-#include "pb/plan.pb.h"
+#include <nlohmann/json.hpp>
+#include <algorithm>
+#include <exception>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
+#include <iterator>
+#include <map>
 #include <mutex>
-#include <nlohmann/json.hpp>
-#include "common/FieldDataInterface.h"
-#include "RTreeIndexWrapper.h"
+
 #include "RTreeIndexSerialization.h"
+#include "RTreeIndexWrapper.h"
+#include "boost/container/vector.hpp"
+#include "boost/geometry/index/detail/predicates.hpp"
+#include "boost/geometry/index/detail/rtree/node/node_elements.hpp"
+#include "boost/geometry/index/detail/rtree/node/variant_visitor.hpp"
+#include "boost/geometry/index/predicates.hpp"
+#include "boost/variant/detail/apply_visitor_unary.hpp"
+#include "common/EasyAssert.h"
+#include "common/FieldDataInterface.h"
+#include "fmt/core.h"
+#include "geos_c.h"
+#include "glog/logging.h"
+#include "log/Log.h"
+#include "nlohmann/json_fwd.hpp"
+#include "pb/plan.pb.h"
 
 namespace milvus::index {
 

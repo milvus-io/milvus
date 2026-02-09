@@ -15,11 +15,20 @@
 // limitations under the License.
 
 #include "index/json_stats/utils.h"
-#include <boost/filesystem.hpp>
+
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <nlohmann/json.hpp>
+#include <stdint.h>
+#include <initializer_list>
+
+#include "arrow/array/builder_binary.h"
+#include "arrow/array/builder_primitive.h"
+#include "common/Consts.h"
 #include "milvus-storage/common/constants.h"
+#include "nlohmann/detail/iterators/iter_impl.hpp"
+#include "nlohmann/detail/iterators/iteration_proxy.hpp"
+#include "nlohmann/json_fwd.hpp"
 
 namespace milvus::index {
 

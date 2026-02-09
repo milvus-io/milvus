@@ -33,6 +33,7 @@ import (
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/util/bm25"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -168,7 +169,7 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, msg *m
 		stats[outputFieldID] = storage.NewBM25Stats()
 	}
 	stats[outputFieldID].AppendBytes(sparseArray.GetContents()...)
-	msg.FieldsData = append(msg.FieldsData, delegator.BuildSparseFieldData(outputField, sparseArray))
+	msg.FieldsData = append(msg.FieldsData, bm25.BuildSparseFieldData(outputField, sparseArray))
 	return nil
 }
 

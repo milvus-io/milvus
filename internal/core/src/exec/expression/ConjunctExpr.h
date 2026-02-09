@@ -17,14 +17,25 @@
 #pragma once
 
 #include <fmt/core.h>
+#include <stdint.h>
+#include <algorithm>
+#include <cstddef>
+#include <iterator>
+#include <memory>
+#include <optional>
 #include <set>
+#include <string>
+#include <utility>
+#include <vector>
 
-#include "common/EasyAssert.h"
 #include "common/OpContext.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "common/Vector.h"
+#include "common/protobuf_utils.h"
+#include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
-#include "segcore/SegmentInterface.h"
+#include "expr/ITypeExpr.h"
 
 namespace milvus {
 namespace exec {

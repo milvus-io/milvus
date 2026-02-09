@@ -9,10 +9,26 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <math.h>
 #include <algorithm>
+#include <exception>
+#include <iterator>
+#include <memory>
 
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Utils.h"
+#include "index/Utils.h"
+#include "index/VectorIndex.h"
+#include "knowhere/expected.h"
+#include "mmap/ChunkedColumnInterface.h"
+#include "nlohmann/json.hpp"
 #include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
+#include "query/helper.h"
+#include "segcore/ConcurrentVector.h"
 
 namespace milvus::query {
 

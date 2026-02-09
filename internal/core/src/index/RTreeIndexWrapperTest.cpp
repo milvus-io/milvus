@@ -10,10 +10,20 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
+#include <memory>
+#include <string>
+#include <utility>
 #include <vector>
+
 #include "RTreeIndexWrapper.h"
 #include "common/Geometry.h"
+#include "geos_c.h"
+#include "gtest/gtest.h"
+#include "pb/plan.pb.h"
 
 class RTreeIndexWrapperTest : public ::testing::Test {
  protected:

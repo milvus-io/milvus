@@ -17,16 +17,32 @@
 #pragma once
 
 #include <fmt/core.h>
-#include <boost/variant.hpp>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
+#include "bitset/bitset.h"
+#include "bitset/common.h"
+#include "cachinglayer/CacheSlot.h"
 #include "common/EasyAssert.h"
 #include "common/OpContext.h"
+#include "common/Schema.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "common/Vector.h"
+#include "common/protobuf_utils.h"
 #include "common/type_c.h"
+#include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
-#include "segcore/SegmentInterface.h"
+#include "expr/ITypeExpr.h"
+#include "index/Index.h"
+#include "pb/plan.pb.h"
 #include "segcore/SegmentChunkReader.h"
+#include "segcore/SegmentInterface.h"
 
 namespace milvus {
 namespace exec {

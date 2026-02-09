@@ -339,6 +339,17 @@ func (c *Client) AlterCollectionField(ctx context.Context, request *milvuspb.Alt
 	})
 }
 
+func (c *Client) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest, opts ...grpc.CallOption) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	request = typeutil.Clone(request)
+	commonpbutil.UpdateMsgBase(
+		request.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.AlterCollectionSchemaResponse, error) {
+		return client.RootCoordClient.AlterCollectionSchema(ctx, request)
+	})
+}
+
 func (c *Client) AddCollectionFunction(ctx context.Context, request *milvuspb.AddCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	request = typeutil.Clone(request)
 	commonpbutil.UpdateMsgBase(
@@ -2071,5 +2082,33 @@ func (c *Client) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRe
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.ListRestoreSnapshotJobsResponse, error) {
 		return client.ListRestoreSnapshotJobs(ctx, req)
+	})
+}
+
+// ClientHeartbeat handles client telemetry heartbeat requests
+func (c *Client) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest, opts ...grpc.CallOption) (*milvuspb.ClientHeartbeatResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.ClientHeartbeatResponse, error) {
+		return client.RootCoordClient.ClientHeartbeat(ctx, req, opts...)
+	})
+}
+
+// GetClientTelemetry retrieves client telemetry data
+func (c *Client) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClientTelemetryRequest, opts ...grpc.CallOption) (*milvuspb.GetClientTelemetryResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.GetClientTelemetryResponse, error) {
+		return client.RootCoordClient.GetClientTelemetry(ctx, req, opts...)
+	})
+}
+
+// PushClientCommand pushes a command to clients
+func (c *Client) PushClientCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.PushClientCommandResponse, error) {
+		return client.RootCoordClient.PushClientCommand(ctx, req, opts...)
+	})
+}
+
+// DeleteClientCommand deletes a client command
+func (c *Client) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.DeleteClientCommandResponse, error) {
+		return client.RootCoordClient.DeleteClientCommand(ctx, req, opts...)
 	})
 }

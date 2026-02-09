@@ -7,6 +7,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
+from pymilvus import Function, FunctionType
 
 prefix = "client_insert"
 epsilon = ct.epsilon
@@ -522,6 +523,46 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_upsert_bm25_sparse_vector_field(self):
+        """
+        target: test upsert with functional sparse vector field
+        method: create collection with functional sparse vector field,
+        insert data with functional sparse vector field,
+        upsert data with functional sparse vector field
+        expected: upsert failed with errors
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("text", DataType.VARCHAR, max_length=256, enable_analyzer=True, nullable=True)
+        schema.add_field("text_sparse_emb", DataType.SPARSE_FLOAT_VECTOR, nullable=False )
+
+        bm25_function = Function(
+            name=f"text",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["text_sparse_emb"],
+            params={},
+        )
+        schema.add_function(bm25_function)
+        self.create_collection(client, collection_name, schema=schema)
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        # 3. upsert data
+        new_rows = [{
+            default_primary_key_field_name: i,
+            "text": "hello world",
+            "text_sparse_emb": cf.gen_sparse_vectors(1, dim=128),
+        } for i in range(10)]
+        error = {ct.err_code: 999,
+                 ct.err_msg: "Attempt to insert an unexpected function output field `text_sparse_emb` to collection"}
+        self.upsert(client, collection_name, new_rows,
+                    check_task=CheckTasks.err_res, check_items=error)
+        
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_upsert_duplicate_pk_int64(self):
         """
@@ -1767,5 +1808,42 @@ class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
             res = self.query(client, collection_name, filter=f'{ct.default_int64_field_name} >= 0',
                              output_fields=[ct.default_count_output])[0]
             assert res[0][ct.default_count_output] == ct.default_nb
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_upsert_nullable_vector_field_for_times(self):
+        """
+        target: test upsert with nullable vector field for times
+        method: create collection with nullable vector field, insert data with nullable vector field, upsert data with nullable vector field
+        expected: upsert successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=32, nullable=True)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, nullable=True)
+        schema.add_field(default_float_field_name, DataType.FLOAT, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        # 3. upsert data for 10 times
+        for i in range(10):
+            rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+            self.upsert(client, collection_name, rows)
+            if i % 3 == 0:
+                self.flush(client, collection_name)
+            # 4. query output all fields and assert all the field values
+            self.query(client, collection_name, filter=default_search_exp,
+                       output_fields=["*"],
+                       check_task=CheckTasks.check_query_results,
+                       check_items={exp_res: rows,
+                                    "with_vec": True,
+                                    "pk_name": default_primary_key_field_name})
 
         self.drop_collection(client, collection_name)

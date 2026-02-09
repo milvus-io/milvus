@@ -78,7 +78,7 @@ jobs:
       - name: Setup Go environment
         uses: actions/setup-go@v4
         with:
-          go-version: '1.24.11'
+          go-version: '1.24.12'
           cache: false
       - name: Download Caches
         uses: ./.github/actions/macos-cache-restore
@@ -93,7 +93,7 @@ jobs:
           if [[ ! -d "/var/tmp/ccache" ]];then
             mkdir -p /var/tmp/ccache
           fi
-          brew install libomp ninja openblas ccache pkg-config
+          brew install libomp ninja openblas ccache pkg-config aws-sdk-cpp
           BREW_PREFIX=$(brew --prefix)
           # Install llvm@17 explicitly as a stable version
           brew install llvm@17

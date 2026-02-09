@@ -16,18 +16,16 @@
 
 #pragma once
 
-#include <vector>
-#include <memory>
-
 #include <arrow/api.h>
-#include <arrow/io/api.h>
+#include <stdint.h>
+#include <memory>
+#include <optional>
+#include <vector>
 
+#include "arrow/io/interfaces.h"
 #include "storage/Types.h"
 
 namespace milvus::storage {
-
-class PayloadOutputStream;
-class PayloadInputStream;
 
 struct Payload {
     DataType data_type;

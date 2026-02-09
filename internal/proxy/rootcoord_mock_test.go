@@ -1169,6 +1169,10 @@ func (coord *MixCoordMock) AlterCollectionField(ctx context.Context, request *mi
 	return &commonpb.Status{}, nil
 }
 
+func (coord *MixCoordMock) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest, opts ...grpc.CallOption) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	return &milvuspb.AlterCollectionSchemaResponse{}, nil
+}
+
 func (coord *MixCoordMock) AddCollectionFunction(ctx context.Context, request *milvuspb.AddCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, nil
 }
@@ -1732,6 +1736,22 @@ func (coord *MixCoordMock) BackupEzk(ctx context.Context, req *internalpb.Backup
 	return &internalpb.BackupEzkResponse{
 		Status: merr.Success(),
 	}, nil
+}
+
+func (coord *MixCoordMock) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest, opts ...grpc.CallOption) (*milvuspb.ClientHeartbeatResponse, error) {
+	return &milvuspb.ClientHeartbeatResponse{}, nil
+}
+
+func (coord *MixCoordMock) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error) {
+	return &milvuspb.DeleteClientCommandResponse{}, nil
+}
+
+func (coord *MixCoordMock) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClientTelemetryRequest, opts ...grpc.CallOption) (*milvuspb.GetClientTelemetryResponse, error) {
+	return &milvuspb.GetClientTelemetryResponse{}, nil
+}
+
+func (coord *MixCoordMock) PushClientCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error) {
+	return &milvuspb.PushClientCommandResponse{}, nil
 }
 
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)

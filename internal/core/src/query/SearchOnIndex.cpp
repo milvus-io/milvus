@@ -10,9 +10,24 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SearchOnIndex.h"
-#include "Utils.h"
-#include "exec/operator/Utils.h"
+
+#include <algorithm>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <vector>
+
 #include "CachedSearchIterator.h"
+#include "Utils.h"
+#include "common/Consts.h"
+#include "common/OffsetMapping.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Types.h"
+#include "exec/operator/Utils.h"
+#include "index/VectorIndex.h"
+#include "knowhere/dataset.h"
+#include "query/helper.h"
 
 namespace milvus::query {
 void

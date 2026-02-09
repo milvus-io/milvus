@@ -1036,6 +1036,65 @@ func (_c *MockProxy_CheckHealth_Call) RunAndReturn(run func(context.Context, *mi
 	return _c
 }
 
+// ClientHeartbeat provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ClientHeartbeat(_a0 context.Context, _a1 *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ClientHeartbeat")
+	}
+
+	var r0 *milvuspb.ClientHeartbeatResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ClientHeartbeatRequest) *milvuspb.ClientHeartbeatResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ClientHeartbeatResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ClientHeartbeatRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ClientHeartbeat_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClientHeartbeat'
+type MockProxy_ClientHeartbeat_Call struct {
+	*mock.Call
+}
+
+// ClientHeartbeat is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ClientHeartbeatRequest
+func (_e *MockProxy_Expecter) ClientHeartbeat(_a0 interface{}, _a1 interface{}) *MockProxy_ClientHeartbeat_Call {
+	return &MockProxy_ClientHeartbeat_Call{Call: _e.mock.On("ClientHeartbeat", _a0, _a1)}
+}
+
+func (_c *MockProxy_ClientHeartbeat_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ClientHeartbeatRequest)) *MockProxy_ClientHeartbeat_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ClientHeartbeatRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ClientHeartbeat_Call) Return(_a0 *milvuspb.ClientHeartbeatResponse, _a1 error) *MockProxy_ClientHeartbeat_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ClientHeartbeat_Call) RunAndReturn(run func(context.Context, *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error)) *MockProxy_ClientHeartbeat_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ComputePhraseMatchSlop provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) ComputePhraseMatchSlop(_a0 context.Context, _a1 *milvuspb.ComputePhraseMatchSlopRequest) (*milvuspb.ComputePhraseMatchSlopResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1904,6 +1963,65 @@ func (_c *MockProxy_Delete_Call) Return(_a0 *milvuspb.MutationResult, _a1 error)
 }
 
 func (_c *MockProxy_Delete_Call) RunAndReturn(run func(context.Context, *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error)) *MockProxy_Delete_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteClientCommand provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DeleteClientCommand(_a0 context.Context, _a1 *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteClientCommand")
+	}
+
+	var r0 *milvuspb.DeleteClientCommandResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteClientCommandRequest) *milvuspb.DeleteClientCommandResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DeleteClientCommandResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DeleteClientCommandRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_DeleteClientCommand_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteClientCommand'
+type MockProxy_DeleteClientCommand_Call struct {
+	*mock.Call
+}
+
+// DeleteClientCommand is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DeleteClientCommandRequest
+func (_e *MockProxy_Expecter) DeleteClientCommand(_a0 interface{}, _a1 interface{}) *MockProxy_DeleteClientCommand_Call {
+	return &MockProxy_DeleteClientCommand_Call{Call: _e.mock.On("DeleteClientCommand", _a0, _a1)}
+}
+
+func (_c *MockProxy_DeleteClientCommand_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DeleteClientCommandRequest)) *MockProxy_DeleteClientCommand_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DeleteClientCommandRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_DeleteClientCommand_Call) Return(_a0 *milvuspb.DeleteClientCommandResponse, _a1 error) *MockProxy_DeleteClientCommand_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_DeleteClientCommand_Call) RunAndReturn(run func(context.Context, *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error)) *MockProxy_DeleteClientCommand_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3306,6 +3424,65 @@ func (_c *MockProxy_GetAddress_Call) Return(_a0 string) *MockProxy_GetAddress_Ca
 }
 
 func (_c *MockProxy_GetAddress_Call) RunAndReturn(run func() string) *MockProxy_GetAddress_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetClientTelemetry provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetClientTelemetry(_a0 context.Context, _a1 *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetClientTelemetry")
+	}
+
+	var r0 *milvuspb.GetClientTelemetryResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetClientTelemetryRequest) *milvuspb.GetClientTelemetryResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetClientTelemetryResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetClientTelemetryRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_GetClientTelemetry_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetClientTelemetry'
+type MockProxy_GetClientTelemetry_Call struct {
+	*mock.Call
+}
+
+// GetClientTelemetry is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetClientTelemetryRequest
+func (_e *MockProxy_Expecter) GetClientTelemetry(_a0 interface{}, _a1 interface{}) *MockProxy_GetClientTelemetry_Call {
+	return &MockProxy_GetClientTelemetry_Call{Call: _e.mock.On("GetClientTelemetry", _a0, _a1)}
+}
+
+func (_c *MockProxy_GetClientTelemetry_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetClientTelemetryRequest)) *MockProxy_GetClientTelemetry_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetClientTelemetryRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_GetClientTelemetry_Call) Return(_a0 *milvuspb.GetClientTelemetryResponse, _a1 error) *MockProxy_GetClientTelemetry_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_GetClientTelemetry_Call) RunAndReturn(run func(context.Context, *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error)) *MockProxy_GetClientTelemetry_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -6889,6 +7066,65 @@ func (_c *MockProxy_OperateUserRole_Call) Return(_a0 *commonpb.Status, _a1 error
 }
 
 func (_c *MockProxy_OperateUserRole_Call) RunAndReturn(run func(context.Context, *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error)) *MockProxy_OperateUserRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PushClientCommand provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) PushClientCommand(_a0 context.Context, _a1 *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PushClientCommand")
+	}
+
+	var r0 *milvuspb.PushClientCommandResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.PushClientCommandRequest) *milvuspb.PushClientCommandResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.PushClientCommandResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.PushClientCommandRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_PushClientCommand_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PushClientCommand'
+type MockProxy_PushClientCommand_Call struct {
+	*mock.Call
+}
+
+// PushClientCommand is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.PushClientCommandRequest
+func (_e *MockProxy_Expecter) PushClientCommand(_a0 interface{}, _a1 interface{}) *MockProxy_PushClientCommand_Call {
+	return &MockProxy_PushClientCommand_Call{Call: _e.mock.On("PushClientCommand", _a0, _a1)}
+}
+
+func (_c *MockProxy_PushClientCommand_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.PushClientCommandRequest)) *MockProxy_PushClientCommand_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.PushClientCommandRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_PushClientCommand_Call) Return(_a0 *milvuspb.PushClientCommandResponse, _a1 error) *MockProxy_PushClientCommand_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_PushClientCommand_Call) RunAndReturn(run func(context.Context, *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error)) *MockProxy_PushClientCommand_Call {
 	_c.Call.Return(run)
 	return _c
 }

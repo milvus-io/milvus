@@ -10,7 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <memory>
+#include <string>
+
+#include "gtest/gtest.h"
+#include "storage/MmapChunkManager.h"
 #include "storage/MmapManager.h"
+
 /*
 checking register function of mmap chunk manager
 */

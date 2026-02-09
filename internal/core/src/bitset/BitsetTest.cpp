@@ -10,27 +10,31 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-
-#include <cassert>
+#include <stdio.h>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
-#include <optional>
+#include <memory>
 #include <random>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "bitset/bitset.h"
+#include "bitset/common.h"
 #include "bitset/detail/bit_wise.h"
-#include "bitset/detail/element_wise.h"
 #include "bitset/detail/element_vectorized.h"
+#include "bitset/detail/element_wise.h"
 #include "bitset/detail/platform/dynamic.h"
 #include "bitset/detail/platform/vectorized_ref.h"
+#include "gtest/gtest.h"
 
 #if defined(__x86_64__)
+#include "bitset/detail/platform/x86/avx2-decl.h"
 #include "bitset/detail/platform/x86/avx2.h"
 #include "bitset/detail/platform/x86/avx512.h"
 #include "bitset/detail/platform/x86/instruction_set.h"

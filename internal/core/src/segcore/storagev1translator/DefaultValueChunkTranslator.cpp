@@ -11,9 +11,24 @@
 
 #include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
 
+#include <assert.h>
+#include <algorithm>
+#include <cstdint>
+#include <filesystem>
+
+#include "arrow/api.h"
+#include "arrow/array/builder_base.h"
+#include "arrow/array/builder_binary.h"
+#include "common/Array.h"
+#include "common/Chunk.h"
 #include "common/ChunkWriter.h"
+#include "common/EasyAssert.h"
+#include "common/Json.h"
 #include "common/Types.h"
-#include "segcore/Utils.h"
+#include "common/protobuf_utils.h"
+#include "fmt/core.h"
+#include "mmap/Types.h"
+#include "pb/schema.pb.h"
 #include "segcore/Utils.h"
 #include "storage/Util.h"
 

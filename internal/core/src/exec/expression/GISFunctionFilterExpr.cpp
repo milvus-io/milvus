@@ -10,14 +10,33 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "GISFunctionFilterExpr.h"
+
+#include <fmt/core.h>
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <cstdlib>
+#include <iosfwd>
+#include <string_view>
+
+#include "bitset/bitset.h"
+#include "bitset/detail/element_vectorized.h"
 #include "common/EasyAssert.h"
 #include "common/Geometry.h"
+#include "common/GeometryCache.h"
+#include "common/OpContext.h"
 #include "common/PreparedGeometry.h"
 #include "common/Types.h"
+#include "geos_c.h"
+#include "index/Index.h"
+#include "index/Meta.h"
+#include "index/ScalarIndex.h"
+#include "knowhere/dataset.h"
 #include "pb/plan.pb.h"
-#include <cmath>
-#include <fmt/core.h>
+#include "pb/schema.pb.h"
+#include "storage/MmapManager.h"
+#include "storage/Types.h"
+
 namespace milvus {
 namespace exec {
 

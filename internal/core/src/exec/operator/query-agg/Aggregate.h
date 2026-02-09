@@ -10,10 +10,20 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 #pragma once
 
-#include "common/Types.h"
-#include "plan/PlanNode.h"
-#include "exec/QueryContext.h"
 #include <folly/Synchronized.h>
+#include <stdint.h>
+#include <functional>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "common/EasyAssert.h"
+#include "common/Types.h"
+#include "common/Vector.h"
+#include "common/protobuf_utils.h"
+#include "exec/QueryContext.h"
+#include "folly/Range.h"
 
 namespace milvus {
 namespace exec {

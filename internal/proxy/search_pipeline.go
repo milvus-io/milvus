@@ -360,6 +360,13 @@ func newRequeryOperator(t *searchTask, _ map[string]any) (operator, error) {
 	for _, orderByField := range t.orderByFields {
 		outputFieldNames.Insert(orderByField.OutputFieldName)
 	}
+	// Add highlight dynamic fields to requery output
+	if t.highlighter != nil {
+		highlightDynFields := t.highlighter.DynamicFieldNames()
+		if len(highlightDynFields) > 0 {
+			outputFieldNames.Insert(highlightDynFields...)
+		}
+	}
 	return &requeryOperator{
 		traceCtx:           t.TraceCtx(),
 		outputFieldNames:   outputFieldNames.Collect(),

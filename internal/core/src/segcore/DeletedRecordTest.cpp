@@ -9,21 +9,38 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
-
-#include <boost/format.hpp>
+#include <stddef.h>
+#include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
+#include "bitset/bitset.h"
+#include "common/Common.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "exec/expression/function/FunctionFactory.h"
+#include "gtest/gtest.h"
+#include "index/NgramInvertedIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "query/Utils.h"
+#include "segcore/AckResponder.h"
+#include "segcore/ConcurrentVector.h"
 #include "segcore/DeletedRecord.h"
+#include "segcore/InsertRecord.h"
 #include "segcore/Record.h"
+#include "segcore/SegmentSealed.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
-#include "exec/expression/function/FunctionFactory.h"
 
 using namespace milvus;
 using namespace milvus::segcore;

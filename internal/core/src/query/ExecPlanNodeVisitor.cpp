@@ -11,21 +11,26 @@
 
 #include "query/ExecPlanNodeVisitor.h"
 
+#include <algorithm>
+#include <atomic>
 #include <memory>
+#include <string>
 #include <utility>
 
-#include "expr/ITypeExpr.h"
-#include "query/PlanImpl.h"
-#include "query/SubSearchResult.h"
-#include "query/Utils.h"
-#include "segcore/SegmentGrowing.h"
-#include "common/Json.h"
-#include "log/Log.h"
-#include "plan/PlanNode.h"
+#include "common/Tracer.h"
+#include "common/protobuf_utils.h"
 #include "exec/Task.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
+#include "google/protobuf/message.h"
+#include "log/Log.h"
+#include "opentelemetry/trace/span.h"
+#include "pb/schema.pb.h"
+#include "plan/PlanNode.h"
+#include "query/PlanImpl.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
-#include "common/Tracer.h"
+
 namespace milvus::query {
 
 static SearchResult

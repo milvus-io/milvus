@@ -16,18 +16,22 @@
 
 #pragma once
 
-#include <string>
-#include <optional>
+#include <exception>
 #include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+
+#include <boost/filesystem/path.hpp>
 
 #include "common/Consts.h"
-#include "boost/filesystem/path.hpp"
+#include "common/type_c.h"
+#include "filemanager/FileManager.h"
 #include "log/Log.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/properties.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "filemanager/FileManager.h"
 
 namespace milvus::storage {
 

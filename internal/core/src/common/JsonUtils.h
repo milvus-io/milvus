@@ -12,7 +12,8 @@
 #pragma once
 #include <string>
 #include <vector>
-#include "simdjson/dom.h"
+
+#include "simdjson/dom/element.h"
 
 namespace milvus {
 

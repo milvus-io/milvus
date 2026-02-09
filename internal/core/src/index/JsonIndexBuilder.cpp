@@ -9,10 +9,20 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <simdjson.h>
 #include <string>
 #include <string_view>
+#include <type_traits>
+
+#include "common/FieldDataInterface.h"
+#include "common/Json.h"
+#include "common/JsonCastType.h"
 #include "common/JsonUtils.h"
+#include "folly/FBVector.h"
 #include "index/JsonIndexBuilder.h"
+#include "pb/schema.pb.h"
+#include "simdjson/dom/array.h"
+#include "simdjson/dom/element.h"
 #include "simdjson/error.h"
 
 namespace milvus::index {

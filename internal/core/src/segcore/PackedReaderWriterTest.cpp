@@ -14,20 +14,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <gtest/gtest.h>
-#include "milvus-storage/common/constants.h"
-#include "segcore/packed_writer_c.h"
-#include "segcore/packed_reader_c.h"
-#include "segcore/arrow_fs_c.h"
-#include <arrow/c/bridge.h>
-#include <arrow/c/helpers.h>
-#include <arrow/array.h>
-#include <arrow/record_batch.h>
+#include <arrow/array/array_base.h>
 #include <arrow/array/builder_primitive.h>
-#include "arrow/table_builder.h"
-#include "arrow/type_fwd.h"
+#include <arrow/c/abi.h>
+#include <arrow/c/bridge.h>
+#include <arrow/record_batch.h>
+#include <arrow/result.h>
+#include <arrow/status.h>
+#include <arrow/type.h>
 #include <arrow/util/key_value_metadata.h>
+#include <cstdint>
+#include <memory>
 #include <numeric>
+#include <string>
+#include <vector>
+
+#include "common/common_type_c.h"
+#include "gtest/gtest.h"
+#include "milvus-storage/common/constants.h"
+#include "segcore/arrow_fs_c.h"
+#include "segcore/column_groups_c.h"
+#include "segcore/packed_reader_c.h"
+#include "segcore/packed_writer_c.h"
 
 TEST(CPackedTest, PackedWriterAndReader) {
     std::vector<int64_t> test_data(5);

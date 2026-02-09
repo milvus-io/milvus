@@ -15,12 +15,17 @@
 // limitations under the License.
 
 #pragma once
-#include "common/Types.h"
-#include "exec/VectorHasher.h"
+#include <stdint.h>
+#include <memory>
+#include <utility>
+#include <vector>
+
 #include "AggregateInfo.h"
-#include "exec/HashTable.h"
-#include "plan/PlanNode.h"
 #include "RowContainer.h"
+#include "common/Types.h"
+#include "common/Vector.h"
+#include "exec/HashTable.h"
+#include "exec/VectorHasher.h"
 
 namespace milvus {
 namespace exec {

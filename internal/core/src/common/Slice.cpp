@@ -15,8 +15,20 @@
 // limitations under the License.
 
 #include "common/Slice.h"
+
+#include <string.h>
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <initializer_list>
+#include <map>
+#include <memory>
+#include <utility>
+#include <vector>
+
 #include "common/Common.h"
-#include "log/Log.h"
+#include "knowhere/binaryset.h"
+#include "nlohmann/json.hpp"
 
 namespace milvus {
 

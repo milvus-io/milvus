@@ -16,15 +16,18 @@
 
 #pragma once
 
+#include <stdint.h>
+#include <cstddef>
 #include <map>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <utility>
 
-#include "common/EasyAssert.h"
 #include "common/Consts.h"
+#include "common/EasyAssert.h"
 #include "common/Types.h"
+#include "knowhere/comp/index_param.h"
+#include "pb/schema.pb.h"
 
 namespace milvus {
 using TypeParams = std::map<std::string, std::string>;

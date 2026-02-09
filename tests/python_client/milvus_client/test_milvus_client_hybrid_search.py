@@ -346,25 +346,23 @@ class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field(default_vector_field_name+"new", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        schema.add_field(default_vector_field_name+"new", DataType.FLOAT_VECTOR, dim=dim, nullable=True)
         schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
         index_params.add_index(default_vector_field_name+"new", metric_type="L2")
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
-        rng = np.random.default_rng(seed=19530)
-        rows = [
-            {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_vector_field_name+"new": list(rng.random((1, default_dim))[0]),
-             default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = cf.gen_row_data_by_schema(ct.default_nb, schema=schema)
         self.insert(client, collection_name, rows)
         # 3. hybrid search
-        vectors_to_search = rng.random((1, default_dim))
+        vectors_to_search = cf.gen_vectors(1, dim=dim)
         insert_ids = [i for i in range(default_nb)]
-        sub_search1 = AnnSearchRequest(vectors_to_search, default_vector_field_name, {"level": 1}, 20, expr="id>=0")
-        sub_search2 = AnnSearchRequest(vectors_to_search, default_vector_field_name+"new", {"level": 1}, 20, expr="id>=0")
+        sub_search1 = AnnSearchRequest(vectors_to_search, default_vector_field_name,
+                                       {"level": 1}, 20, expr="id>=0")
+        sub_search2 = AnnSearchRequest(vectors_to_search, default_vector_field_name+"new",
+                                       {"level": 1}, 20, expr="id>=0")
         ranker = WeightedRanker(0.2, 0.8)
         self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker, limit=default_limit,
                            check_task=CheckTasks.check_search_results,

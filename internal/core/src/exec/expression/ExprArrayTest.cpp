@@ -14,22 +14,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cstdint>
+#include <functional>
+#include <map>
 #include <memory>
-#include <regex>
+#include <string>
+#include <string_view>
+#include <tuple>
 #include <vector>
 
+#include "bitset/bitset.h"
+#include "common/Array.h"
+#include "common/Consts.h"
+#include "common/IndexMeta.h"
+#include "common/Schema.h"
 #include "common/Types.h"
+#include "common/Utils.h"
+#include "common/Vector.h"
+#include "common/protobuf_utils.h"
+#include "exec/expression/EvalCtx.h"
 #include "expr/ITypeExpr.h"
-#include "index/IndexFactory.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
-#include "query/Plan.h"
-#include "query/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
+#include "query/Plan.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "query/Utils.h"
+#include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
-#include "simdjson/padded_string.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 

@@ -10,7 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "MinHashHook.h"
+
 #include "fusion_compute/fusion_compute_native.h"
+#include "glog/logging.h"
 #include "log/Log.h"
 
 #if defined(__x86_64__) || defined(_M_X64)
@@ -25,12 +27,18 @@
 
 #if defined(__aarch64__) || defined(_M_ARM64)
 #include "fusion_compute/arm/fusion_compute_neon.h"
+#ifndef __APPLE__
+// SVE is only supported on Linux aarch64, not on macOS (Apple Silicon doesn't have SVE)
 #include "fusion_compute/arm/fusion_compute_sve.h"
+#endif
 #ifdef _MSC_VER
 #include <processthreadsapi.h>
+#elif defined(__APPLE__)
+// macOS doesn't have sys/auxv.h - use sysctlbyname for CPU feature detection
+#include <sys/sysctl.h>
 #else
-#include <sys/auxv.h>
 #include <asm/hwcap.h>
+#include <sys/auxv.h>
 #endif
 #endif
 
@@ -86,6 +94,9 @@ cpu_support_sve() {
 #ifdef _MSC_VER
     // Windows ARM doesn't expose SVE via IsProcessorFeaturePresent
     return false;
+#elif defined(__APPLE__)
+    // Apple Silicon doesn't support SVE
+    return false;
 #else
     unsigned long hwcap = getauxval(AT_HWCAP);
     return (hwcap & HWCAP_SVE) != 0;
@@ -96,6 +107,9 @@ bool
 cpu_support_neon() {
 #ifdef _MSC_VER
     return IsProcessorFeaturePresent(PF_ARM_V8_INSTRUCTIONS_AVAILABLE);
+#elif defined(__APPLE__)
+    // All Apple Silicon chips support NEON (ASIMD)
+    return true;
 #else
     unsigned long hwcap = getauxval(AT_HWCAP);
     return (hwcap & HWCAP_ASIMD) != 0;
@@ -128,11 +142,15 @@ minhash_hook_init() {
         LOG_INFO("MinHash initialized with native (scalar) instruction set");
     }
 #elif defined(__aarch64__) || defined(_M_ARM64)
+#ifndef __APPLE__
+    // SVE is only available on Linux aarch64
     if (cpu_support_sve()) {
         linear_and_find_min_impl = linear_and_find_min_sve;
         linear_and_find_min_batch8_impl = linear_and_find_min_batch8_sve;
         LOG_INFO("MinHash initialized with SVE instruction set");
-    } else if (cpu_support_neon()) {
+    } else
+#endif
+        if (cpu_support_neon()) {
         linear_and_find_min_impl = linear_and_find_min_neon;
         linear_and_find_min_batch8_impl = linear_and_find_min_batch8_neon;
         LOG_INFO("MinHash initialized with NEON instruction set");

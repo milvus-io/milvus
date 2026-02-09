@@ -162,6 +162,10 @@ func (m *GrpcQueryNodeClient) DropIndex(ctx context.Context, in *querypb.DropInd
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcQueryNodeClient) UpdateIndex(ctx context.Context, in *querypb.UpdateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcQueryNodeClient) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

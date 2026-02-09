@@ -15,9 +15,18 @@
 // limitations under the License.
 
 #pragma once
+#include <stdint.h>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "common/Promise.h"
+#include "common/Vector.h"
+#include "common/protobuf_utils.h"
+#include "exec/Driver.h"
 #include "exec/operator/Operator.h"
 #include "exec/operator/query-agg/GroupingSet.h"
-#include "common/Types.h"
+#include "plan/PlanNode.h"
 
 namespace milvus {
 namespace exec {

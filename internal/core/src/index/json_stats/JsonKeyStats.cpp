@@ -14,28 +14,59 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <boost/uuid/random_generator.hpp>
-#include <boost/uuid/uuid_io.hpp>
-
 #include <nlohmann/json.hpp>
+#include <string.h>
+#include <chrono>
+#include <cstdint>
+#include <exception>
+#include <filesystem>
+#include <initializer_list>
+#include <iosfwd>
+#include <unordered_set>
+#include <variant>
+
+#include "NamedType/named_type_impl.hpp"
+#include "NamedType/underlying_functionalities.hpp"
+#include "arrow/api.h"
+#include "boost/filesystem/operations.hpp"
+#include "bsoncxx/builder/basic/document.hpp"
+#include "bsoncxx/document/value.hpp"
+#include "bsoncxx/document/view.hpp"
+#include "cachinglayer/Manager.h"
+#include "cachinglayer/Translator.h"
+#include "common/Consts.h"
+#include "common/FieldDataInterface.h"
+#include "common/FieldMeta.h"
+#include "common/GroupChunk.h"
+#include "common/Json.h"
+#include "common/Tracer.h"
+#include "common/jsmn.h"
+#include "fmt/core.h"
+#include "index/Utils.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "index/json_stats/bson_builder.h"
-#include "index/InvertedIndexUtil.h"
-#include "index/Utils.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "storage/LocalChunkManagerSingleton.h"
-#include "storage/MmapManager.h"
-#include "storage/Util.h"
-#include "common/bson_view.h"
-#include "mmap/ChunkedColumnGroup.h"
-#include "milvus-storage/format/parquet/file_reader.h"
+#include "index/json_stats/parquet_writer.h"
+#include "milvus-storage/common/config.h"
 #include "milvus-storage/common/constants.h"
-#include "segcore/storagev1translator/ChunkTranslator.h"
-#include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
-#include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "milvus-storage/common/metadata.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/format/parquet/file_reader.h"
+#include "mmap/ChunkedColumnGroup.h"
+#include "mmap/Types.h"
+#include "nlohmann/detail/iterators/iteration_proxy.hpp"
+#include "nlohmann/json_fwd.hpp"
+#include "parquet/metadata.h"
 #include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
-#include "cachinglayer/Manager.h"
-#include "segcore/Utils.h"
+#include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/FileManager.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/MemFileManagerImpl.h"
+#include "storage/MmapManager.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 
 namespace milvus::index {
 

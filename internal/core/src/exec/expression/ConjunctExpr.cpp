@@ -15,11 +15,18 @@
 // limitations under the License.
 
 #include "ConjunctExpr.h"
-#include "UnaryExpr.h"
-#include "LikeConjunctExpr.h"
 
 #include <algorithm>
+
+#include "LikeConjunctExpr.h"
+#include "UnaryExpr.h"
+#include "common/EasyAssert.h"
+#include "common/Tracer.h"
 #include "common/ValueOp.h"
+#include "exec/QueryContext.h"
+#include "exec/expression/Utils.h"
+#include "fmt/core.h"
+#include "opentelemetry/trace/span.h"
 
 namespace milvus {
 namespace exec {

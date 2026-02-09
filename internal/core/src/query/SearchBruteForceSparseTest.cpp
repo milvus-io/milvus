@@ -10,14 +10,35 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <stdint.h>
+#include <algorithm>
+#include <functional>
+#include <limits>
 #include <map>
-#include <random>
+#include <memory>
+#include <string>
+#include <tuple>
+#include <vector>
 
+#include "bitset/bitset.h"
+#include "common/BitsetView.h"
+#include "common/Consts.h"
+#include "common/QueryInfo.h"
+#include "common/Types.h"
 #include "common/Utils.h"
-
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/config.h"
+#include "knowhere/index/index_node.h"
+#include "knowhere/sparse_utils.h"
 #include "query/SearchBruteForce.h"
+#include "query/SubSearchResult.h"
+#include "query/helper.h"
+#include "segcore/Collection.h"
 #include "test_utils/Constants.h"
-#include "test_utils/Distance.h"
 #include "test_utils/DataGen.h"
 
 using namespace milvus;

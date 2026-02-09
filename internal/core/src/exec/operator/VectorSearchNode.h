@@ -16,13 +16,22 @@
 
 #pragma once
 
+#include <stdint.h>
 #include <memory>
 #include <string>
 
+#include "common/Promise.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Types.h"
+#include "common/Vector.h"
+#include "common/protobuf_utils.h"
 #include "exec/Driver.h"
-#include "exec/expression/Expr.h"
-#include "exec/operator/Operator.h"
 #include "exec/QueryContext.h"
+#include "exec/operator/Operator.h"
+#include "plan/PlanNode.h"
+#include "query/PlanImpl.h"
+#include "segcore/SegmentInterface.h"
 
 namespace milvus {
 namespace exec {

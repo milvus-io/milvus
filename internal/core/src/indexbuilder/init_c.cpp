@@ -9,10 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <stdlib.h>
 #include <string.h>
+#include <string>
+
 #include "common/EasyAssert.h"
 #include "config/ConfigKnowhere.h"
-#include "fmt/core.h"
 #include "indexbuilder/init_c.h"
 
 void

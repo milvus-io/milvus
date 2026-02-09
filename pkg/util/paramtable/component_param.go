@@ -4018,7 +4018,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MmapVectorIndex = ParamItem{
 		Key:          "queryNode.mmap.vectorIndex",
 		Version:      "2.4.7",
-		DefaultValue: "true",
+		DefaultValue: "false",
 		Formatter: func(originValue string) string {
 			if p.MmapEnabled.GetAsBool() {
 				return "true"
@@ -4033,7 +4033,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MmapScalarField = ParamItem{
 		Key:          "queryNode.mmap.scalarField",
 		Version:      "2.4.7",
-		DefaultValue: "true",
+		DefaultValue: "false",
 		Formatter: func(originValue string) string {
 			if p.MmapEnabled.GetAsBool() {
 				return "true"
@@ -4048,7 +4048,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MmapScalarIndex = ParamItem{
 		Key:          "queryNode.mmap.scalarIndex",
 		Version:      "2.4.7",
-		DefaultValue: "true",
+		DefaultValue: "false",
 		Formatter: func(originValue string) string {
 			if p.MmapEnabled.GetAsBool() {
 				return "true"
@@ -4082,7 +4082,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.GrowingMmapEnabled = ParamItem{
 		Key:          "queryNode.mmap.growingMmapEnabled",
 		Version:      "2.4.6",
-		DefaultValue: "true",
+		DefaultValue: "false",
 		FallbackKeys: []string{"queryNode.growingMmapEnabled"},
 		Doc: `Enable memory mapping (mmap) to optimize the handling of growing raw data.
 By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized.
@@ -4678,6 +4678,7 @@ type dataCoordConfig struct {
 	L0CompactionTriggerInterval               ParamItem `refreshable:"false"`
 	GlobalCompactionInterval                  ParamItem `refreshable:"false"`
 	CompactionExpiryTolerance                 ParamItem `refreshable:"true"`
+	BackfillCompactionTriggerInterval         ParamItem `refreshable:"true"`
 
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
@@ -4693,7 +4694,9 @@ type dataCoordConfig struct {
 	SyncSegmentsInterval    ParamItem `refreshable:"false"`
 
 	// Index related configuration
-	IndexMemSizeEstimateMultiplier ParamItem `refreshable:"true"`
+	IndexMemSizeEstimateMultiplier      ParamItem `refreshable:"true"`
+	HybridIndexLowCardinalityIndexType  ParamItem `refreshable:"true"`
+	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
 
 	// Clustering Compaction
 	ClusteringCompactionEnable                 ParamItem `refreshable:"true"`
@@ -4767,6 +4770,7 @@ type dataCoordConfig struct {
 	ClusteringCompactionSlotUsage ParamItem `refreshable:"true"`
 	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
 	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
+	BackfillCompactionSlotUsage   ParamItem `refreshable:"true"`
 	IndexTaskSlotUsage            ParamItem `refreshable:"true"`
 	ScalarIndexTaskSlotUsage      ParamItem `refreshable:"true"`
 	StatsTaskSlotUsage            ParamItem `refreshable:"true"`
@@ -5260,6 +5264,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.CompactionExpiryTolerance.Init(base.mgr)
 
+	p.BackfillCompactionTriggerInterval = ParamItem{
+		Key:          "dataCoord.compaction.backfill.triggerInterval",
+		Version:      "2.6.2",
+		Doc:          "The time interval in seconds for trigger backfill compaction",
+		DefaultValue: "20",
+		Export:       true,
+	}
+	p.BackfillCompactionTriggerInterval.Init(base.mgr)
+
 	p.MixCompactionTriggerInterval = ParamItem{
 		Key:          "dataCoord.compaction.mix.triggerInterval",
 		Version:      "2.4.15",
@@ -5339,6 +5352,24 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.IndexMemSizeEstimateMultiplier.Init(base.mgr)
+
+	p.HybridIndexLowCardinalityIndexType = ParamItem{
+		Key:          "dataCoord.index.hybridIndex.lowCardinalityIndexType",
+		Version:      "2.6.10",
+		DefaultValue: "BITMAP",
+		Doc:          "Index type for low cardinality fields in hybrid index. Does not apply to Array types (always BITMAP).",
+		Export:       false,
+	}
+	p.HybridIndexLowCardinalityIndexType.Init(base.mgr)
+
+	p.HybridIndexHighCardinalityIndexType = ParamItem{
+		Key:          "dataCoord.index.hybridIndex.highCardinalityIndexType",
+		Version:      "2.6.10",
+		DefaultValue: "STL_SORT",
+		Doc:          "Index type for high cardinality fields in hybrid index. Does not apply to Array types (always INVERTED).",
+		Export:       false,
+	}
+	p.HybridIndexHighCardinalityIndexType.Init(base.mgr)
 
 	p.ClusteringCompactionEnable = ParamItem{
 		Key:          "dataCoord.compaction.clustering.enable",
@@ -5906,6 +5937,23 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Export:       true,
 	}
 	p.L0DeleteCompactionSlotUsage.Init(base.mgr)
+
+	p.BackfillCompactionSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.backfillCompactionUsage",
+		Version:      "2.6.9",
+		Doc:          "slot usage of backfill compaction task.",
+		DefaultValue: "1",
+		PanicIfEmpty: false,
+		Export:       true,
+		Formatter: func(value string) string {
+			slot := getAsInt(value)
+			if slot < 1 {
+				return "1"
+			}
+			return strconv.Itoa(slot)
+		},
+	}
+	p.BackfillCompactionSlotUsage.Init(base.mgr)
 
 	p.IndexTaskSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.indexTaskSlotUsage",

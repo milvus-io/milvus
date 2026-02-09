@@ -11,28 +11,28 @@
 
 #pragma once
 
-#include <sys/types.h>
+#include <unistd.h>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
-#include "arrow/array/array_base.h"
-#include "arrow/record_batch.h"
-#include "common/Array.h"
-#include "common/File.h"
-#include "common/VectorArray.h"
-#include "common/ChunkTarget.h"
-#include "common/EasyAssert.h"
-#include "common/FieldDataInterface.h"
-#include "common/Json.h"
-#include "common/Span.h"
-#include "knowhere/sparse_utils.h"
-#include "simdjson/common_defs.h"
-#include "sys/mman.h"
-#include "common/Types.h"
+
 #include "cachinglayer/Utils.h"
+#include "common/Array.h"
+#include "common/EasyAssert.h"
+#include "common/Span.h"
+#include "common/TypeTraits.h"
+#include "common/Types.h"
+#include "common/VectorArray.h"
+#include "folly/FBVector.h"
+#include "knowhere/sparse_utils.h"
+#include "sys/mman.h"
 
 namespace milvus {
 constexpr uint64_t MMAP_STRING_PADDING = 1;

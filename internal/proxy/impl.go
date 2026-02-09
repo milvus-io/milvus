@@ -3289,14 +3289,14 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 }
 
 type hybridSearchRequestExprLogger struct {
-	*milvuspb.HybridSearchRequest
+	req *milvuspb.HybridSearchRequest
 }
 
-// Key implements Stringer interface for lazy logging.
-func (l *hybridSearchRequestExprLogger) Key() string {
+// String implements Stringer interface for lazy logging.
+func (l *hybridSearchRequestExprLogger) String() string {
 	builder := &strings.Builder{}
 
-	for idx, subReq := range l.Requests {
+	for idx, subReq := range l.req.Requests {
 		builder.WriteString(fmt.Sprintf("[No.%d req, expr: %s]", idx, subReq.GetDsl()))
 	}
 
@@ -3350,7 +3350,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		zap.Any("OutputFields", request.OutputFields),
 		zap.String("ConsistencyLevel", request.GetConsistencyLevel().String()),
 		zap.Bool("useDefaultConsistency", request.GetUseDefaultConsistency()),
-		zap.Stringer("dsls", &hybridSearchRequestExprLogger{HybridSearchRequest: request}),
+		zap.Stringer("dsls", &hybridSearchRequestExprLogger{req: request}),
 	)
 
 	succeeded := false
@@ -6718,6 +6718,15 @@ func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	// Collection requests
 	router.GET(http.CollectionListPath, listCollection(node))
 	router.GET(http.CollectionDescPath, describeCollection(node))
+
+	// Telemetry and command management API (with authentication middleware)
+	telemetryAuth := TelemetryAuthMiddleware()
+	router.GET(http.TelemetryClientsPath, telemetryAuth, getTelemetryClients(node))
+	router.GET(http.TelemetryClientsPath+"/:clientId", telemetryAuth, getTelemetryClientMetrics(node))
+	router.GET(http.TelemetryClientsPath+"/:clientId/config", telemetryAuth, getTelemetryClientConfig(node))
+	router.GET(http.TelemetryClientHistoryPath, telemetryAuth, getTelemetryClientHistory(node))
+	router.POST(http.TelemetryCommandsPath, telemetryAuth, postTelemetryCommand(node))
+	router.DELETE(http.TelemetryCommandsPath+"/:commandId", telemetryAuth, deleteTelemetryCommand(node))
 }
 
 func (node *Proxy) CreatePrivilegeGroup(ctx context.Context, req *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error) {
@@ -7175,4 +7184,53 @@ func (node *Proxy) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.Com
 		IsMatch: resp.GetIsMatch(),
 		Slops:   resp.GetSlops(),
 	}, nil
+}
+
+// =============================================================================
+// Client Telemetry RPC Handlers
+// =============================================================================
+
+// ClientHeartbeat handles client telemetry heartbeat requests.
+// Forwards the heartbeat to rootcoord for storage and command management.
+func (node *Proxy) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.ClientHeartbeatResponse{Status: merr.Status(err)}, nil
+	}
+
+	// Forward to rootcoord for processing and storage
+	return node.mixCoord.ClientHeartbeat(ctx, req)
+}
+
+// GetClientTelemetry retrieves client telemetry data from rootcoord.
+func (node *Proxy) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.GetClientTelemetryResponse{Status: merr.Status(err)}, nil
+	}
+
+	// Forward to rootcoord
+	resp, err := node.mixCoord.GetClientTelemetry(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp, nil
+}
+
+// PushClientCommand pushes a command to rootcoord for distribution to clients.
+func (node *Proxy) PushClientCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.PushClientCommandResponse{Status: merr.Status(err)}, nil
+	}
+
+	// Forward to rootcoord
+	return node.mixCoord.PushClientCommand(ctx, req)
+}
+
+// DeleteClientCommand deletes a client command at rootcoord.
+func (node *Proxy) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.DeleteClientCommandResponse{Status: merr.Status(err)}, nil
+	}
+	// Forward to rootcoord
+	return node.mixCoord.DeleteClientCommand(ctx, req)
 }

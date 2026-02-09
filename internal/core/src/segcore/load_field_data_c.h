@@ -15,13 +15,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <stdint.h>
+#include <stdbool.h>
+
+#include "common/common_type_c.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <stdlib.h>
-
-#include "common/type_c.h"
 
 typedef void* CLoadFieldDataInfo;
 

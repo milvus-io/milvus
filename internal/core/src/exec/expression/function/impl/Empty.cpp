@@ -14,13 +14,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstddef>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "bitset/bitset.h"
+#include "common/EasyAssert.h"
+#include "common/Types.h"
+#include "common/Vector.h"
+#include "exec/expression/function/FunctionFactory.h"
 #include "exec/expression/function/FunctionImplUtils.h"
 #include "exec/expression/function/impl/StringFunctions.h"
-
-#include <boost/variant/get.hpp>
-#include <string>
-#include "common/EasyAssert.h"
-#include "exec/expression/function/FunctionFactory.h"
 
 namespace milvus {
 namespace exec {

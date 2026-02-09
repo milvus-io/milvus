@@ -160,16 +160,20 @@ const (
 
 	DropRatioBuildKey = "drop_ratio_build"
 
-	IsSparseKey               = "is_sparse"
-	AutoIndexName             = "AUTOINDEX"
-	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
-	IgnoreGrowing             = "ignore_growing"
-	ConsistencyLevel          = "consistency_level"
-	HintsKey                  = "hints"
+	IsSparseKey                       = "is_sparse"
+	AutoIndexName                     = "AUTOINDEX"
+	BitmapCardinalityLimitKey         = "bitmap_cardinality_limit"
+	HybridLowCardinalityIndexTypeKey  = "hybrid_low_cardinality_index_type"
+	HybridHighCardinalityIndexTypeKey = "hybrid_high_cardinality_index_type"
+	IgnoreGrowing                     = "ignore_growing"
+	ConsistencyLevel                  = "consistency_level"
+	HintsKey                          = "hints"
 
 	JSONCastTypeKey     = "json_cast_type"
 	JSONPathKey         = "json_path"
 	JSONCastFunctionKey = "json_cast_function"
+
+	SchemaVersionConsistencyProportionKey = "schema_version_consistency_proportion"
 )
 
 // expr query params

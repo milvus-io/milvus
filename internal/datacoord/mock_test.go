@@ -353,6 +353,10 @@ func (m *mockMixCoord) AlterCollectionField(ctx context.Context, request *milvus
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockMixCoord) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockMixCoord) AddCollectionFunction(ctx context.Context, request *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
@@ -1014,6 +1018,22 @@ func (s *mockMixCoord) GetRestoreSnapshotState(ctx context.Context, req *datapb.
 }
 
 func (s *mockMixCoord) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) PushClientCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
 	panic("implement me")
 }
 

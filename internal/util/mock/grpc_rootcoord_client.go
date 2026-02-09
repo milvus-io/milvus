@@ -274,6 +274,10 @@ func (m *GrpcRootCoordClient) AlterCollectionField(ctx context.Context, in *milv
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) AlterCollectionSchema(ctx context.Context, in *milvuspb.AlterCollectionSchemaRequest, opts ...grpc.CallOption) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	return &milvuspb.AlterCollectionSchemaResponse{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) AddCollectionFunction(ctx context.Context, in *milvuspb.AddCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
@@ -340,4 +344,20 @@ func (m *GrpcRootCoordClient) RemoveFileResource(ctx context.Context, in *milvus
 
 func (m *GrpcRootCoordClient) ListFileResources(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*milvuspb.ListFileResourcesResponse, error) {
 	return &milvuspb.ListFileResourcesResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) ClientHeartbeat(ctx context.Context, in *milvuspb.ClientHeartbeatRequest, opts ...grpc.CallOption) (*milvuspb.ClientHeartbeatResponse, error) {
+	return &milvuspb.ClientHeartbeatResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) DeleteClientCommand(ctx context.Context, in *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error) {
+	return &milvuspb.DeleteClientCommandResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) GetClientTelemetry(ctx context.Context, in *milvuspb.GetClientTelemetryRequest, opts ...grpc.CallOption) (*milvuspb.GetClientTelemetryResponse, error) {
+	return &milvuspb.GetClientTelemetryResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) PushClientCommand(ctx context.Context, in *milvuspb.PushClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error) {
+	return &milvuspb.PushClientCommandResponse{}, m.Err
 }

@@ -30,6 +30,7 @@ const (
 	RootCoord_DropCollection_FullMethodName                = "/milvus.proto.rootcoord.RootCoord/DropCollection"
 	RootCoord_TruncateCollection_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/TruncateCollection"
 	RootCoord_AddCollectionField_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/AddCollectionField"
+	RootCoord_AlterCollectionSchema_FullMethodName         = "/milvus.proto.rootcoord.RootCoord/AlterCollectionSchema"
 	RootCoord_HasCollection_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/HasCollection"
 	RootCoord_DescribeCollection_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/DescribeCollection"
 	RootCoord_DescribeCollectionInternal_FullMethodName    = "/milvus.proto.rootcoord.RootCoord/DescribeCollectionInternal"
@@ -89,6 +90,10 @@ const (
 	RootCoord_AddFileResource_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/AddFileResource"
 	RootCoord_RemoveFileResource_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/RemoveFileResource"
 	RootCoord_ListFileResources_FullMethodName             = "/milvus.proto.rootcoord.RootCoord/ListFileResources"
+	RootCoord_ClientHeartbeat_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/ClientHeartbeat"
+	RootCoord_GetClientTelemetry_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/GetClientTelemetry"
+	RootCoord_PushClientCommand_FullMethodName             = "/milvus.proto.rootcoord.RootCoord/PushClientCommand"
+	RootCoord_DeleteClientCommand_FullMethodName           = "/milvus.proto.rootcoord.RootCoord/DeleteClientCommand"
 )
 
 // RootCoordClient is the client API for RootCoord service.
@@ -126,6 +131,13 @@ type RootCoordClient interface {
 	//
 	// @return Status
 	AddCollectionField(ctx context.Context, in *milvuspb.AddCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// *
+	// @brief This method is used to add/drop collection field/function.
+	//
+	// @param AlterCollectionSchemaRequest, field schema is going to be added.
+	//
+	// @return AlterCollectionSchemaResponse
+	AlterCollectionSchema(ctx context.Context, in *milvuspb.AlterCollectionSchemaRequest, opts ...grpc.CallOption) (*milvuspb.AlterCollectionSchemaResponse, error)
 	// *
 	// @brief This method is used to test collection existence.
 	//
@@ -224,6 +236,11 @@ type RootCoordClient interface {
 	AddFileResource(ctx context.Context, in *milvuspb.AddFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	RemoveFileResource(ctx context.Context, in *milvuspb.RemoveFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ListFileResources(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*milvuspb.ListFileResourcesResponse, error)
+	// Client Telemetry RPCs (forwarded to rootcoord implementation)
+	ClientHeartbeat(ctx context.Context, in *milvuspb.ClientHeartbeatRequest, opts ...grpc.CallOption) (*milvuspb.ClientHeartbeatResponse, error)
+	GetClientTelemetry(ctx context.Context, in *milvuspb.GetClientTelemetryRequest, opts ...grpc.CallOption) (*milvuspb.GetClientTelemetryResponse, error)
+	PushClientCommand(ctx context.Context, in *milvuspb.PushClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error)
+	DeleteClientCommand(ctx context.Context, in *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error)
 }
 
 type rootCoordClient struct {
@@ -291,6 +308,15 @@ func (c *rootCoordClient) TruncateCollection(ctx context.Context, in *milvuspb.T
 func (c *rootCoordClient) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, RootCoord_AddCollectionField_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) AlterCollectionSchema(ctx context.Context, in *milvuspb.AlterCollectionSchemaRequest, opts ...grpc.CallOption) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	out := new(milvuspb.AlterCollectionSchemaResponse)
+	err := c.cc.Invoke(ctx, RootCoord_AlterCollectionSchema_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -828,6 +854,42 @@ func (c *rootCoordClient) ListFileResources(ctx context.Context, in *milvuspb.Li
 	return out, nil
 }
 
+func (c *rootCoordClient) ClientHeartbeat(ctx context.Context, in *milvuspb.ClientHeartbeatRequest, opts ...grpc.CallOption) (*milvuspb.ClientHeartbeatResponse, error) {
+	out := new(milvuspb.ClientHeartbeatResponse)
+	err := c.cc.Invoke(ctx, RootCoord_ClientHeartbeat_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) GetClientTelemetry(ctx context.Context, in *milvuspb.GetClientTelemetryRequest, opts ...grpc.CallOption) (*milvuspb.GetClientTelemetryResponse, error) {
+	out := new(milvuspb.GetClientTelemetryResponse)
+	err := c.cc.Invoke(ctx, RootCoord_GetClientTelemetry_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) PushClientCommand(ctx context.Context, in *milvuspb.PushClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error) {
+	out := new(milvuspb.PushClientCommandResponse)
+	err := c.cc.Invoke(ctx, RootCoord_PushClientCommand_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) DeleteClientCommand(ctx context.Context, in *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error) {
+	out := new(milvuspb.DeleteClientCommandResponse)
+	err := c.cc.Invoke(ctx, RootCoord_DeleteClientCommand_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RootCoordServer is the server API for RootCoord service.
 // All implementations should embed UnimplementedRootCoordServer
 // for forward compatibility
@@ -863,6 +925,13 @@ type RootCoordServer interface {
 	//
 	// @return Status
 	AddCollectionField(context.Context, *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error)
+	// *
+	// @brief This method is used to add/drop collection field/function.
+	//
+	// @param AlterCollectionSchemaRequest, field schema is going to be added.
+	//
+	// @return AlterCollectionSchemaResponse
+	AlterCollectionSchema(context.Context, *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error)
 	// *
 	// @brief This method is used to test collection existence.
 	//
@@ -961,6 +1030,11 @@ type RootCoordServer interface {
 	AddFileResource(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error)
 	RemoveFileResource(context.Context, *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error)
 	ListFileResources(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error)
+	// Client Telemetry RPCs (forwarded to rootcoord implementation)
+	ClientHeartbeat(context.Context, *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error)
+	GetClientTelemetry(context.Context, *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error)
+	PushClientCommand(context.Context, *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error)
+	DeleteClientCommand(context.Context, *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error)
 }
 
 // UnimplementedRootCoordServer should be embedded to have forward compatible implementations.
@@ -987,6 +1061,9 @@ func (UnimplementedRootCoordServer) TruncateCollection(context.Context, *milvusp
 }
 func (UnimplementedRootCoordServer) AddCollectionField(context.Context, *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AddCollectionField not implemented")
+}
+func (UnimplementedRootCoordServer) AlterCollectionSchema(context.Context, *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AlterCollectionSchema not implemented")
 }
 func (UnimplementedRootCoordServer) HasCollection(context.Context, *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HasCollection not implemented")
@@ -1165,6 +1242,18 @@ func (UnimplementedRootCoordServer) RemoveFileResource(context.Context, *milvusp
 func (UnimplementedRootCoordServer) ListFileResources(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListFileResources not implemented")
 }
+func (UnimplementedRootCoordServer) ClientHeartbeat(context.Context, *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ClientHeartbeat not implemented")
+}
+func (UnimplementedRootCoordServer) GetClientTelemetry(context.Context, *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetClientTelemetry not implemented")
+}
+func (UnimplementedRootCoordServer) PushClientCommand(context.Context, *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PushClientCommand not implemented")
+}
+func (UnimplementedRootCoordServer) DeleteClientCommand(context.Context, *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteClientCommand not implemented")
+}
 
 // UnsafeRootCoordServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to RootCoordServer will
@@ -1299,6 +1388,24 @@ func _RootCoord_AddCollectionField_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RootCoordServer).AddCollectionField(ctx, req.(*milvuspb.AddCollectionFieldRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_AlterCollectionSchema_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.AlterCollectionSchemaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).AlterCollectionSchema(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_AlterCollectionSchema_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).AlterCollectionSchema(ctx, req.(*milvuspb.AlterCollectionSchemaRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2365,6 +2472,78 @@ func _RootCoord_ListFileResources_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RootCoord_ClientHeartbeat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.ClientHeartbeatRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).ClientHeartbeat(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_ClientHeartbeat_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).ClientHeartbeat(ctx, req.(*milvuspb.ClientHeartbeatRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_GetClientTelemetry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.GetClientTelemetryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).GetClientTelemetry(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_GetClientTelemetry_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).GetClientTelemetry(ctx, req.(*milvuspb.GetClientTelemetryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_PushClientCommand_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.PushClientCommandRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).PushClientCommand(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_PushClientCommand_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).PushClientCommand(ctx, req.(*milvuspb.PushClientCommandRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_DeleteClientCommand_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.DeleteClientCommandRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).DeleteClientCommand(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_DeleteClientCommand_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).DeleteClientCommand(ctx, req.(*milvuspb.DeleteClientCommandRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RootCoord_ServiceDesc is the grpc.ServiceDesc for RootCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2399,6 +2578,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AddCollectionField",
 			Handler:    _RootCoord_AddCollectionField_Handler,
+		},
+		{
+			MethodName: "AlterCollectionSchema",
+			Handler:    _RootCoord_AlterCollectionSchema_Handler,
 		},
 		{
 			MethodName: "HasCollection",
@@ -2635,6 +2818,22 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListFileResources",
 			Handler:    _RootCoord_ListFileResources_Handler,
+		},
+		{
+			MethodName: "ClientHeartbeat",
+			Handler:    _RootCoord_ClientHeartbeat_Handler,
+		},
+		{
+			MethodName: "GetClientTelemetry",
+			Handler:    _RootCoord_GetClientTelemetry_Handler,
+		},
+		{
+			MethodName: "PushClientCommand",
+			Handler:    _RootCoord_PushClientCommand_Handler,
+		},
+		{
+			MethodName: "DeleteClientCommand",
+			Handler:    _RootCoord_DeleteClientCommand_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -456,12 +456,12 @@ class ResponseChecker:
             if len(hits) == 0:
                 continue
             if check_items.get("limit", None) is not None \
-                    and ((len(hits) != check_items["limit"]) or (len(ids) != check_items["limit"])):
+                    and ((len(hits) != check_items["limit"]) or (len(set(ids)) != check_items["limit"])):
                 log.error("search_results_check: limit(topK) searched (%d) "
                           "is not equal with expected (%d)"
                           % (len(hits), check_items["limit"]))
                 assert len(hits) == check_items["limit"]
-                assert len(ids) == check_items["limit"]
+                assert len(set(ids)) == check_items["limit"]
             if check_items.get("ids", None) is not None:
                 ids_match = pc.list_contain_check(ids, list(check_items["ids"]))
                 if not ids_match:
@@ -578,13 +578,16 @@ class ResponseChecker:
                 vector_field = check_items.get('vector_field', 'vector')
                 if vector_type == DataType.FLOAT16_VECTOR:
                     for single_query_result in query_res:
-                        single_query_result[vector_field] = np.frombuffer(single_query_result[vector_field][0], dtype=np.float16).tolist()
+                        if single_query_result[vector_field]:
+                            single_query_result[vector_field] = np.frombuffer(single_query_result[vector_field][0], dtype=np.float16).tolist()
                 if vector_type == DataType.BFLOAT16_VECTOR:
                     for single_query_result in query_res:
-                        single_query_result[vector_field] = np.frombuffer(single_query_result[vector_field][0], dtype=bfloat16).tolist()
+                        if single_query_result[vector_field]:
+                            single_query_result[vector_field] = np.frombuffer(single_query_result[vector_field][0], dtype=bfloat16).tolist()
                 if vector_type == DataType.INT8_VECTOR:
                     for single_query_result in query_res:
-                        single_query_result[vector_field] = np.frombuffer(single_query_result[vector_field][0], dtype=np.int8).tolist()
+                        if single_query_result[vector_field]:
+                            single_query_result[vector_field] = np.frombuffer(single_query_result[vector_field][0], dtype=np.int8).tolist()
             if isinstance(query_res, list):
                 debug_mode = check_items.get("debug_mode", False)
                 if debug_mode is True:

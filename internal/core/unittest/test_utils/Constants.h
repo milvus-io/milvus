@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include <stdint.h>
+#include <cstdint>
 
 constexpr int64_t TestChunkSize = 32 * 1024;
 constexpr char TestLocalPath[] = "/tmp/milvus/local_data/";

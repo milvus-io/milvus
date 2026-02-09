@@ -19,16 +19,25 @@
 #include <bsoncxx/builder/basic/document.hpp>
 #include <bsoncxx/builder/basic/kvp.hpp>
 #include <bsoncxx/document/view.hpp>
-#include <bsoncxx/types/bson_value/view.hpp>
 #include <bsoncxx/json.hpp>
 #include <bsoncxx/types.hpp>
-#include <string>
-#include <vector>
+#include <bsoncxx/types/bson_value/view.hpp>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <iomanip>
+#include <limits>
 #include <optional>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <vector>
 
+#include "common/EasyAssert.h"
 #include "fmt/format.h"
 #include "log/Log.h"
-#include "common/EasyAssert.h"
 
 template <>
 struct fmt::formatter<bsoncxx::type> : fmt::formatter<std::string> {

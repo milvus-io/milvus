@@ -10,13 +10,18 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <stdint.h>
+#include <chrono>
+#include <memory>
 
-#include "folly/init/Init.h"
-#include "common/type_c.h"
+#include "cachinglayer/Manager.h"
+#include "common/common_type_c.h"
 #include "exec/expression/function/init_c.h"
-#include "test_utils/Constants.h"
+#include "folly/init/Init.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "storage/MmapManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "test_utils/Constants.h"
 #include "test_utils/storage_test_utils.h"
 
 int
