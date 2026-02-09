@@ -245,11 +245,17 @@ TextMatchIndex::BuildIndexFromFieldData(
                 if (!data->is_valid(i)) {
                     std::unique_lock<folly::SharedMutex> lock(mutex_);
                     null_offset_.push_back(offset);
+                    // add empty array doc to register offset in tantivy,
+                    // same as AddNullSealed
+                    std::string empty = "";
+                    wrapper_->add_array_data(&empty, 0, offset);
+                } else {
+                    wrapper_->add_data(
+                        static_cast<const std::string*>(data->RawValue(i)),
+                        1,
+                        offset);
                 }
-                wrapper_->add_data(
-                    static_cast<const std::string*>(data->RawValue(i)),
-                    data->is_valid(i) ? 1 : 0,
-                    offset++);
+                offset++;
             }
         }
     } else {

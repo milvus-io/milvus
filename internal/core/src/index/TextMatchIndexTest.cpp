@@ -267,9 +267,9 @@ TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
     using Index = index::TextMatchIndex;
 
     // Helper to create a nullable FieldData<std::string> batch.
-    auto make_batch = [](const std::vector<std::string>& texts,
-                         const std::vector<bool>& valids)
-        -> milvus::FieldDataPtr {
+    auto make_batch =
+        [](const std::vector<std::string>& texts,
+           const std::vector<bool>& valids) -> milvus::FieldDataPtr {
         auto fd = storage::CreateFieldData(
             DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
         // Pack valid bits into uint8_t array (LSB first).
@@ -280,8 +280,7 @@ TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
                 valid_bytes[i >> 3] |= (1u << (i & 7));
             }
         }
-        fd->FillFieldData(
-            texts.data(), valid_bytes.data(), texts.size(), 0);
+        fd->FillFieldData(texts.data(), valid_bytes.data(), texts.size(), 0);
         return fd;
     };
 
@@ -378,8 +377,8 @@ TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
 TEST(TextMatch, BuildIndexFromFieldDataSingleBatchNullable) {
     using Index = index::TextMatchIndex;
 
-    auto fd = storage::CreateFieldData(
-        DataType::VARCHAR, DataType::NONE, true, 1, 4);
+    auto fd =
+        storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, true, 1, 4);
     std::vector<std::string> texts = {"alpha", "", "beta", ""};
     std::vector<bool> valids = {true, false, true, false};
     size_t byte_count = (texts.size() + 7) / 8;
