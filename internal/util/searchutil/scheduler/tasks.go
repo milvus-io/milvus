@@ -3,8 +3,8 @@ package scheduler
 import "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 
 const (
-	schedulePolicyNameFIFO            = "fifo"
-	schedulePolicyNameUserTaskPolling = "user-task-polling"
+	SchedulePolicyNameFIFO            = "fifo"
+	SchedulePolicyNameUserTaskPolling = "user-task-polling"
 )
 
 // NewScheduler create a scheduler by policyName.
@@ -12,11 +12,11 @@ func NewScheduler(policyName string) Scheduler {
 	switch policyName {
 	case "":
 		fallthrough
-	case schedulePolicyNameFIFO:
+	case SchedulePolicyNameFIFO:
 		return newScheduler(
 			newFIFOPolicy(),
 		)
-	case schedulePolicyNameUserTaskPolling:
+	case SchedulePolicyNameUserTaskPolling:
 		return newScheduler(
 			newUserTaskPollingPolicy(),
 		)
@@ -108,4 +108,18 @@ type Task interface {
 	NQ() int64
 
 	SearchResult() *internalpb.SearchResults
+}
+
+// taskWrapper is a wrapper of Task that can be used to add a callback when task is done.
+type taskWrapper struct {
+	Task
+	callbackWhenDone func()
+}
+
+// Done notify the task finished.
+func (t *taskWrapper) Done(err error) {
+	if t.callbackWhenDone != nil {
+		t.callbackWhenDone()
+	}
+	t.Task.Done(err)
 }
