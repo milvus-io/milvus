@@ -132,9 +132,9 @@ const FieldMeta FieldMeta::RowIdMeta(
 const ArrowSchemaPtr
 Schema::ConvertToArrowSchema() const {
     arrow::FieldVector arrow_fields;
-    arrow_fields.reserve(fields_.size());
-    for (const auto& field : fields_) {
-        const auto& meta = field.second;
+    arrow_fields.reserve(field_ids_.size());
+    for (const auto& field_id : field_ids_) {
+        const auto& meta = fields_.at(field_id);
         int dim = IsVectorDataType(meta.get_data_type()) &&
                           !IsSparseFloatVectorDataType(meta.get_data_type())
                       ? meta.get_dim()
