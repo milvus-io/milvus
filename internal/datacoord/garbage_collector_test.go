@@ -2082,3 +2082,418 @@ func TestGarbageCollector_recycleUnusedSegIndexes_SnapshotReference(t *testing.T
 	assert.True(t, removeSegmentIndexCalled)
 	assert.Equal(t, int64(402), removedBuildID)
 }
+
+// TestGarbageCollector_recycleUnusedBinlogFiles_SnapshotReference tests that binlog files of segments
+// referenced by snapshots are not garbage collected
+func TestGarbageCollector_recycleUnusedBinlogFiles_SnapshotReference(t *testing.T) {
+	ctx := context.Background()
+
+	// Create storage manager
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
+
+	// Create segment that exists in meta (will pass checker for insert logs)
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1001,
+			CollectionID:  100,
+			PartitionID:   10,
+			State:         commonpb.SegmentState_Flushed,
+			InsertChannel: "ch1",
+		},
+	}
+
+	// Create meta with segment
+	meta := &meta{
+		catalog:      &datacoord.Catalog{},
+		snapshotMeta: &snapshotMeta{},
+		indexMeta:    &indexMeta{},
+		segments: &SegmentsInfo{
+			segments: map[int64]*SegmentInfo{
+				1001: segment,
+			},
+		},
+		channelCPs: newChannelCps(),
+	}
+
+	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: 0,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	// Track if Remove is called
+	removeCalledPaths := []string{}
+	mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).To(func(cm *storage.LocalChunkManager, ctx context.Context, filePath string) error {
+		removeCalledPaths = append(removeCalledPaths, filePath)
+		return nil
+	}).Build()
+	defer mockRemove.UnPatch()
+
+	// Mock WalkWithPrefix to return a file from this segment
+	chunkInfo := &storage.ChunkObjectInfo{
+		FilePath:   "gc/segments/insert_logs/1001/0/1",
+		ModifyTime: time.Now().Add(-time.Hour),
+	}
+
+	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(func(cm *storage.LocalChunkManager, ctx context.Context, prefix string, recursive bool, fn storage.ChunkObjectWalkFunc) error {
+		fn(chunkInfo)
+		return nil
+	}).Build()
+	defer mockWalk.UnPatch()
+
+	// Mock ParseSegmentIDByBinlog
+	mockParseSegID := mockey.Mock(storage.ParseSegmentIDByBinlog).Return(int64(1001), nil).Build()
+	defer mockParseSegID.UnPatch()
+
+	// Mock GetSnapshotBySegment to return snapshot IDs (makes segment referenced)
+	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).Return([]int64{1, 2}).Build()
+	defer mockGetSnapshotBySegment.UnPatch()
+
+	// Execute
+	gc.recycleUnusedBinlogFiles(ctx)
+
+	// Verify - Remove should NOT be called because segment is protected by snapshot reference
+	assert.Empty(t, removeCalledPaths, "binlog files of snapshot-referenced segments should not be removed")
+}
+
+// TestGarbageCollector_recycleDroppedSegments_SnapshotMetaNil tests that GC handles nil snapshotMeta gracefully
+func TestGarbageCollector_recycleDroppedSegments_SnapshotMetaNil(t *testing.T) {
+	// Setup
+	ctx := context.Background()
+
+	// Create storage manager
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
+
+	// Create necessary components
+	catalog := &datacoord.Catalog{}
+	handler := &ServerHandler{}
+
+	// Create meta with nil snapshotMeta
+	meta := &meta{
+		catalog:      catalog,
+		snapshotMeta: nil, // nil snapshot meta
+		segments: &SegmentsInfo{
+			segments: make(map[int64]*SegmentInfo),
+		},
+		channelCPs: newChannelCps(),
+	}
+
+	// Create garbage collector
+	gc := newGarbageCollector(meta, handler, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: time.Hour * 24,
+		dropTolerance:    0, // Set to 0 to immediately consider segments for GC
+	})
+
+	// Add dropped segment to meta
+	droppedSegment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1003,
+			CollectionID:  100,
+			PartitionID:   10,
+			State:         commonpb.SegmentState_Dropped,
+			DroppedAt:     uint64(time.Now().Add(-time.Hour).UnixNano()),
+			InsertChannel: "ch1",
+		},
+	}
+
+	meta.segments.segments[1003] = droppedSegment
+
+	// Setup mocks
+	mockGetSnapshotMeta := mockey.Mock(meta.GetSnapshotMeta).Return(nil).Build()
+	defer mockGetSnapshotMeta.UnPatch()
+
+	mockListLoadedSegments := mockey.Mock((*ServerHandler).ListLoadedSegments).Return([]int64{}, nil).Build()
+	defer mockListLoadedSegments.UnPatch()
+
+	mockListChannelCP := mockey.Mock((*datacoord.Catalog).ListChannelCheckpoint).Return(map[string]*msgpb.MsgPosition{}, nil).Build()
+	defer mockListChannelCP.UnPatch()
+
+	mockListIndexes := mockey.Mock((*datacoord.Catalog).ListIndexes).Return([]*model.Index{}, nil).Build()
+	defer mockListIndexes.UnPatch()
+
+	mockListSegmentIndexes := mockey.Mock((*datacoord.Catalog).ListSegmentIndexes).Return([]*model.SegmentIndex{}, nil).Build()
+	defer mockListSegmentIndexes.UnPatch()
+
+	mockChannelExists := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true).Build()
+	defer mockChannelExists.UnPatch()
+
+	dropSegmentCalled := false
+	mockDropSegment := mockey.Mock((*datacoord.Catalog).DropSegment).To(func(c *datacoord.Catalog, ctx context.Context, segment *datapb.SegmentInfo) error {
+		dropSegmentCalled = true
+		return nil
+	}).Build()
+	defer mockDropSegment.UnPatch()
+
+	mockRemoveObjectFiles := mockey.Mock((*garbageCollector).removeObjectFiles).Return(nil).Build()
+	defer mockRemoveObjectFiles.UnPatch()
+
+	// Execute - should not panic with nil snapshotMeta
+	assert.NotPanics(t, func() {
+		gc.recycleDroppedSegments(ctx, nil)
+	})
+
+	// Verify - segment should be dropped (GC'd) since snapshotMeta is nil
+	assert.True(t, dropSegmentCalled, "DropSegment should be called")
+}
+
+// TestGarbageCollector_recycleUnusedIndexFiles_SnapshotReference tests that index files referenced
+// by snapshots are not garbage collected
+func TestGarbageCollector_recycleUnusedIndexFiles_SnapshotReference(t *testing.T) {
+	// Setup
+	ctx := context.Background()
+
+	// Create storage manager
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
+
+	// Create necessary components
+	catalog := &datacoord.Catalog{}
+	handler := &ServerHandler{}
+
+	// Mock snapshotMeta
+	smMeta := &snapshotMeta{}
+
+	// Create meta
+	meta := &meta{
+		catalog:      catalog,
+		snapshotMeta: smMeta,
+		indexMeta:    &indexMeta{},
+		segments: &SegmentsInfo{
+			segments: make(map[int64]*SegmentInfo),
+		},
+		channelCPs: newChannelCps(),
+	}
+
+	// Create garbage collector
+	gc := newGarbageCollector(meta, handler, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: time.Hour * 24,
+		dropTolerance:    0,
+	})
+
+	buildID := int64(401)
+	collectionID := int64(100)
+	indexID := int64(301)
+
+	// Setup mock for WalkWithPrefix to find index directory
+	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(func(cm *storage.LocalChunkManager, ctx context.Context, prefix string, recursive bool, fn storage.ChunkObjectWalkFunc) error {
+		if strings.Contains(prefix, "indexes") {
+			chunkInfo := &storage.ChunkObjectInfo{
+				FilePath:   fmt.Sprintf("gc/indexes/%d/1/", buildID),
+				ModifyTime: time.Now().Add(-time.Hour),
+			}
+			fn(chunkInfo)
+		}
+		return nil
+	}).Build()
+	defer mockWalk.UnPatch()
+
+	// Mock CheckCleanSegmentIndex
+	segIdx := &model.SegmentIndex{
+		BuildID:      buildID,
+		CollectionID: collectionID,
+		IndexID:      indexID,
+	}
+	mockCheckClean := mockey.Mock((*indexMeta).CheckCleanSegmentIndex).Return(true, segIdx).Build()
+	defer mockCheckClean.UnPatch()
+
+	// Mock GetSnapshotMeta
+	mockGetSnapMeta := mockey.Mock(meta.GetSnapshotMeta).Return(smMeta).Build()
+	defer mockGetSnapMeta.UnPatch()
+
+	// Mock IsRefIndexLoadedForCollection
+	mockIsRefLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
+	defer mockIsRefLoaded.UnPatch()
+
+	// Mock GetSnapshotByIndex to return snapshot IDs (index is referenced)
+	mockGetSnapshotByIndex := mockey.Mock((*snapshotMeta).GetSnapshotByIndex).Return([]int64{1, 2}).Build()
+	defer mockGetSnapshotByIndex.UnPatch()
+
+	removeWithPrefixCalled := false
+	mockRemoveWithPrefix := mockey.Mock((*storage.LocalChunkManager).RemoveWithPrefix).To(func(cm *storage.LocalChunkManager, ctx context.Context, prefix string) error {
+		removeWithPrefixCalled = true
+		return nil
+	}).Build()
+	defer mockRemoveWithPrefix.UnPatch()
+
+	// Execute
+	gc.recycleUnusedIndexFiles(ctx)
+
+	// Verify - RemoveWithPrefix should NOT be called because index is referenced by snapshot
+	assert.False(t, removeWithPrefixCalled, "RemoveWithPrefix should not be called for index files referenced by snapshot")
+}
+
+func TestGarbageCollector_recycleUnusedTextIndexFiles_SnapshotReference(t *testing.T) {
+	ctx := context.Background()
+
+	// Create segment with TextStatsLogs
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1001,
+			CollectionID:  100,
+			PartitionID:   10,
+			State:         commonpb.SegmentState_Flushed,
+			InsertChannel: "ch1",
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				101: {
+					FieldID:    101,
+					Version:    2, // Current version
+					BuildID:    401,
+					Files:      []string{"file1"},
+					LogSize:    1024,
+					MemorySize: 2048,
+				},
+			},
+		},
+	}
+
+	// Create meta
+	meta := &meta{
+		catalog:      &datacoord.Catalog{},
+		snapshotMeta: &snapshotMeta{},
+		segments: &SegmentsInfo{
+			segments: map[int64]*SegmentInfo{1001: segment},
+		},
+		channelCPs: newChannelCps(),
+	}
+
+	// Create storage manager
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
+
+	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: 0,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	// Track Remove calls
+	removedFiles := []string{}
+	mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, filePath string) error {
+			removedFiles = append(removedFiles, filePath)
+			return nil
+		}).Build()
+	defer mockRemove.UnPatch()
+
+	// Mock WalkWithPrefix to simulate text index files
+	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
+			recursive bool, fn storage.ChunkObjectWalkFunc) error {
+			if strings.Contains(prefix, "text_index") {
+				chunkInfo := &storage.ChunkObjectInfo{
+					FilePath:   "gc/text_index/401/1/100/10/1001/101/file1",
+					ModifyTime: time.Now().Add(-time.Hour),
+				}
+				fn(chunkInfo)
+			}
+			return nil
+		}).Build()
+	defer mockWalk.UnPatch()
+
+	// Mock GetSnapshotBySegment to return snapshot IDs (segment is protected)
+	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).
+		Return([]int64{1, 2}).Build()
+	defer mockGetSnapshotBySegment.UnPatch()
+
+	// Execute
+	gc.recycleUnusedTextIndexFiles(ctx, nil)
+
+	// Verify - files should NOT be removed
+	assert.Empty(t, removedFiles,
+		"text index files should not be removed when segment is referenced by snapshot")
+}
+
+func TestGarbageCollector_recycleUnusedJSONIndexFiles_SnapshotReference(t *testing.T) {
+	ctx := context.Background()
+
+	// Create segment with JsonKeyStats
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1002,
+			CollectionID:  100,
+			PartitionID:   10,
+			State:         commonpb.SegmentState_Flushed,
+			InsertChannel: "ch1",
+			JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+				102: {
+					FieldID:    102,
+					Version:    2,
+					BuildID:    402,
+					Files:      []string{"json_file1"},
+					LogSize:    512,
+					MemorySize: 1024,
+				},
+			},
+		},
+	}
+
+	// Create meta
+	meta := &meta{
+		catalog:      &datacoord.Catalog{},
+		snapshotMeta: &snapshotMeta{},
+		segments: &SegmentsInfo{
+			segments: map[int64]*SegmentInfo{1002: segment},
+		},
+		channelCPs: newChannelCps(),
+	}
+
+	// Create storage manager
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
+
+	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: 0,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	// Track Remove calls
+	removedFiles := []string{}
+	mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, filePath string) error {
+			removedFiles = append(removedFiles, filePath)
+			return nil
+		}).Build()
+	defer mockRemove.UnPatch()
+
+	// Mock WalkWithPrefix to simulate JSON index files
+	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
+			recursive bool, fn storage.ChunkObjectWalkFunc) error {
+			if strings.Contains(prefix, "json_index") {
+				chunkInfo := &storage.ChunkObjectInfo{
+					FilePath:   "gc/json_index/402/1/100/10/1002/102/json_file1",
+					ModifyTime: time.Now().Add(-time.Hour),
+				}
+				fn(chunkInfo)
+			}
+			return nil
+		}).Build()
+	defer mockWalk.UnPatch()
+
+	// Mock GetSnapshotBySegment to return snapshot IDs (segment is protected)
+	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).
+		Return([]int64{1, 2}).Build()
+	defer mockGetSnapshotBySegment.UnPatch()
+
+	// Execute
+	gc.recycleUnusedJSONIndexFiles(ctx, nil)
+
+	// Verify - files should NOT be removed
+	assert.Empty(t, removedFiles,
+		"JSON index files should not be removed when segment is referenced by snapshot")
+}
