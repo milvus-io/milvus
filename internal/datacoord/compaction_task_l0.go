@@ -39,7 +39,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-var _ CompactionTask = (*l0CompactionTask)(nil)
+var (
+	_ CompactionTask = (*l0CompactionTask)(nil)
+	errFastFinishL0 = errors.New("fast finish l0 compaction")
+)
 
 type l0CompactionTask struct {
 	taskProto atomic.Value // *datapb.CompactionTask
@@ -100,6 +103,30 @@ func (t *l0CompactionTask) processPipelining() bool {
 	var err error
 	t.plan, err = t.BuildCompactionRequest()
 	if err != nil {
+		// Check if this is a fast finish case (no target segments to compact with)
+		// Fast finish plan only contains L0 input segments, no target L1/L2 segments
+		if errors.Is(err, errFastFinishL0) {
+			log.Info("l0CompactionTask fast finish: no target segments, directly marking L0 segments as dropped",
+				zap.Int64("planID", t.GetTaskProto().GetPlanID()))
+
+			// Save segment meta with empty output segments (marks L0 input segments as dropped)
+			if err := t.saveSegmentMeta(); err != nil {
+				log.Warn("l0CompactionTask failed to save segment meta", zap.Error(err))
+				err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
+				if err != nil {
+					log.Warn("l0CompactionTask failed to updateAndSaveTaskMeta", zap.Error(err))
+				}
+				return false
+			}
+
+			// Transition to completed state
+			if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed)); err != nil {
+				log.Warn("l0CompactionTask failed to save task completed state", zap.Error(err))
+				return false
+			}
+			return t.processCompleted()
+		}
+
 		log.Warn("l0CompactionTask failed to build compaction request", zap.Error(err))
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
 		if err != nil {
@@ -354,9 +381,8 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 
 	sealedSegments, sealedSegBinlogs := t.selectSealedSegment()
 	if len(sealedSegments) == 0 {
-		// TODO fast finish l0 segment, just drop l0 segment
-		log.Info("l0Compaction available non-L0 Segments is empty ")
-		return nil, errors.Errorf("Selected zero L1/L2 segments for the position=%v", taskProto.GetPos())
+		log.Info("l0Compaction available non-L0 Segments is empty, fast finish l0 segment, just drop l0 segment")
+		return nil, errFastFinishL0
 	}
 
 	for _, seg := range sealedSegments {
