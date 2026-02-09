@@ -1,5 +1,7 @@
 #include "storage/KeyRetriever.h"
 
+#include <cstdlib>
+#include <cstring>
 #include <exception>
 
 #include "PluginInterface.h"
@@ -44,7 +46,6 @@ EncodeKeyMetadata(int64_t ez_id, int64_t collection_id, std::string key) {
 
 std::shared_ptr<CPluginContext>
 DecodeKeyMetadata(std::string key_metadata) {
-    auto context = std::make_shared<CPluginContext>();
     try {
         auto first_pos = key_metadata.find("_");
         if (first_pos == std::string::npos) {
@@ -56,15 +57,23 @@ DecodeKeyMetadata(std::string key_metadata) {
             return nullptr;
         }
 
+        auto context = std::shared_ptr<CPluginContext>(
+            new CPluginContext{0, 0, nullptr}, [](CPluginContext* ctx) {
+                free(const_cast<char*>(ctx->key));
+                delete ctx;
+            });
         context->ez_id = std::stoll(key_metadata.substr(0, first_pos));
         context->collection_id = std::stoll(
             key_metadata.substr(first_pos + 1, second_pos - (first_pos + 1)));
-        context->key = key_metadata.substr(second_pos + 1).c_str();
+        context->key = strdup(key_metadata.substr(second_pos + 1).c_str());
+        if (context->key == nullptr) {
+            return nullptr;
+        }
+        return context;
     } catch (const std::exception& e) {
         LOG_WARN("failed to decode key metadata, reason: {}", e.what());
         return nullptr;
     }
-    return context;
 }
 
 }  // namespace milvus::storage
