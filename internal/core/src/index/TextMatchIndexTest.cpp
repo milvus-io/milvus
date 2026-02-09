@@ -258,6 +258,172 @@ TEST(TextMatch, Index) {
     }
 }
 
+// Regression test: BuildIndexFromFieldData with multiple FieldData batches
+// and nullable fields must record correct global offsets in null_offset_.
+// Previously, null_offset_.push_back(i) used the batch-local index instead
+// of the global accumulated offset, causing wrong null tracking for all
+// batches after the first.
+TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
+    using Index = index::TextMatchIndex;
+
+    // Helper to create a nullable FieldData<std::string> batch.
+    auto make_batch = [](const std::vector<std::string>& texts,
+                         const std::vector<bool>& valids)
+        -> milvus::FieldDataPtr {
+        auto fd = storage::CreateFieldData(
+            DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
+        // Pack valid bits into uint8_t array (LSB first).
+        size_t byte_count = (texts.size() + 7) / 8;
+        std::vector<uint8_t> valid_bytes(byte_count, 0);
+        for (size_t i = 0; i < valids.size(); i++) {
+            if (valids[i]) {
+                valid_bytes[i >> 3] |= (1u << (i & 7));
+            }
+        }
+        fd->FillFieldData(
+            texts.data(), valid_bytes.data(), texts.size(), 0);
+        return fd;
+    };
+
+    // Three batches, nulls scattered across all batches.
+    // Batch 0 (3 rows): "hello", NULL,  "world"
+    // Batch 1 (3 rows): NULL,   "foo",  NULL
+    // Batch 2 (2 rows): "bar",  NULL
+    //
+    // Global layout (8 rows total):
+    //   offset 0: "hello" (valid)
+    //   offset 1: ""      (null)
+    //   offset 2: "world" (valid)
+    //   offset 3: ""      (null)
+    //   offset 4: "foo"   (valid)
+    //   offset 5: ""      (null)
+    //   offset 6: "bar"   (valid)
+    //   offset 7: ""      (null)
+    auto batch0 = make_batch({"hello", "", "world"}, {true, false, true});
+    auto batch1 = make_batch({"", "foo", ""}, {false, true, false});
+    auto batch2 = make_batch({"bar", ""}, {true, false});
+
+    std::vector<milvus::FieldDataPtr> field_datas = {batch0, batch1, batch2};
+
+    auto index = std::make_unique<Index>(
+        200, "test_multi_batch", "milvus_tokenizer", "{}");
+    index->CreateReader(milvus::index::SetBitsetGrowing);
+    index->RegisterAnalyzer("milvus_tokenizer", "{}");
+
+    index->BuildIndexFromFieldData(field_datas, true /* nullable */);
+    index->Commit();
+    index->Reload();
+
+    // Verify null tracking: offsets 1, 3, 5, 7 should be null.
+    {
+        auto null_bits = index->IsNull();
+        ASSERT_EQ(null_bits.size(), 8);
+        ASSERT_FALSE(null_bits[0]);  // "hello"
+        ASSERT_TRUE(null_bits[1]);   // null
+        ASSERT_FALSE(null_bits[2]);  // "world"
+        ASSERT_TRUE(null_bits[3]);   // null (batch 1, row 0)
+        ASSERT_FALSE(null_bits[4]);  // "foo"
+        ASSERT_TRUE(null_bits[5]);   // null (batch 1, row 2)
+        ASSERT_FALSE(null_bits[6]);  // "bar"
+        ASSERT_TRUE(null_bits[7]);   // null (batch 2, row 1)
+    }
+
+    // Verify not-null tracking.
+    {
+        auto not_null_bits = index->IsNotNull();
+        ASSERT_EQ(not_null_bits.size(), 8);
+        ASSERT_TRUE(not_null_bits[0]);
+        ASSERT_FALSE(not_null_bits[1]);
+        ASSERT_TRUE(not_null_bits[2]);
+        ASSERT_FALSE(not_null_bits[3]);
+        ASSERT_TRUE(not_null_bits[4]);
+        ASSERT_FALSE(not_null_bits[5]);
+        ASSERT_TRUE(not_null_bits[6]);
+        ASSERT_FALSE(not_null_bits[7]);
+    }
+
+    // Verify text search still works on valid rows.
+    {
+        auto res = index->MatchQuery("hello", 1);
+        ASSERT_EQ(res.size(), 8);
+        ASSERT_TRUE(res[0]);
+        for (int i = 1; i < 8; i++) {
+            ASSERT_FALSE(res[i]) << "unexpected match at offset " << i;
+        }
+    }
+    {
+        auto res = index->MatchQuery("foo", 1);
+        ASSERT_EQ(res.size(), 8);
+        ASSERT_TRUE(res[4]);
+        for (int i = 0; i < 8; i++) {
+            if (i != 4) {
+                ASSERT_FALSE(res[i]) << "unexpected match at offset " << i;
+            }
+        }
+    }
+    {
+        auto res = index->MatchQuery("bar", 1);
+        ASSERT_EQ(res.size(), 8);
+        ASSERT_TRUE(res[6]);
+        for (int i = 0; i < 8; i++) {
+            if (i != 6) {
+                ASSERT_FALSE(res[i]) << "unexpected match at offset " << i;
+            }
+        }
+    }
+}
+
+// Regression test: BuildIndexFromFieldData with a single batch should still
+// work correctly (i == offset in this case, so the old bug was hidden).
+TEST(TextMatch, BuildIndexFromFieldDataSingleBatchNullable) {
+    using Index = index::TextMatchIndex;
+
+    auto fd = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, true, 1, 4);
+    std::vector<std::string> texts = {"alpha", "", "beta", ""};
+    std::vector<bool> valids = {true, false, true, false};
+    size_t byte_count = (texts.size() + 7) / 8;
+    std::vector<uint8_t> valid_bytes(byte_count, 0);
+    for (size_t i = 0; i < valids.size(); i++) {
+        if (valids[i]) {
+            valid_bytes[i >> 3] |= (1u << (i & 7));
+        }
+    }
+    fd->FillFieldData(texts.data(), valid_bytes.data(), texts.size(), 0);
+
+    std::vector<milvus::FieldDataPtr> field_datas = {fd};
+
+    auto index = std::make_unique<Index>(
+        200, "test_single_batch", "milvus_tokenizer", "{}");
+    index->CreateReader(milvus::index::SetBitsetGrowing);
+    index->RegisterAnalyzer("milvus_tokenizer", "{}");
+
+    index->BuildIndexFromFieldData(field_datas, true);
+    index->Commit();
+    index->Reload();
+
+    auto null_bits = index->IsNull();
+    ASSERT_EQ(null_bits.size(), 4);
+    ASSERT_FALSE(null_bits[0]);
+    ASSERT_TRUE(null_bits[1]);
+    ASSERT_FALSE(null_bits[2]);
+    ASSERT_TRUE(null_bits[3]);
+
+    auto res = index->MatchQuery("alpha", 1);
+    ASSERT_EQ(res.size(), 4);
+    ASSERT_TRUE(res[0]);
+    ASSERT_FALSE(res[1]);
+    ASSERT_FALSE(res[2]);
+    ASSERT_FALSE(res[3]);
+
+    auto res2 = index->MatchQuery("beta", 1);
+    ASSERT_EQ(res2.size(), 4);
+    ASSERT_FALSE(res2[0]);
+    ASSERT_FALSE(res2[1]);
+    ASSERT_TRUE(res2[2]);
+    ASSERT_FALSE(res2[3]);
+}
+
 TEST(TextMatch, GrowingNaive) {
     auto schema = GenTestSchema();
     auto seg = CreateGrowingSegment(schema, empty_index_meta);

@@ -244,7 +244,7 @@ TextMatchIndex::BuildIndexFromFieldData(
             for (int i = 0; i < n; i++) {
                 if (!data->is_valid(i)) {
                     std::unique_lock<folly::SharedMutex> lock(mutex_);
-                    null_offset_.push_back(i);
+                    null_offset_.push_back(offset);
                 }
                 wrapper_->add_data(
                     static_cast<const std::string*>(data->RawValue(i)),
