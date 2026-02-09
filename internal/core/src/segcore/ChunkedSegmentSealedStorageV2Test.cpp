@@ -106,7 +106,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         }
 
         std::vector<std::vector<int>> column_groups = {
-            {0, 4, 3}, {2}, {1}};  // narrow columns and wide columns
+            {0, 1, 4}, {2}, {3}};  // narrow columns and wide columns
         auto writer_memory = 16 * 1024 * 1024;
         auto storage_config = milvus_storage::StorageConfig();
 
