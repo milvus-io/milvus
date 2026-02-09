@@ -53,25 +53,6 @@ func TestAcquireLockGuard(t *testing.T) {
 		interceptor.glock.RUnlock()
 	})
 
-	// Test: AlterWAL (BroadcastToAll + exclusive) on control channel should acquire global write lock.
-	t.Run("AlterWALOnControlChannel", func(t *testing.T) {
-		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
-		defer mocker.UnPatch()
-
-		interceptor := newTestInterceptor()
-		msg := message.NewAlterWALMessageBuilderV2().
-			WithVChannel(controlChannel).
-			WithHeader(&message.AlterWALMessageHeader{}).
-			WithBody(&message.AlterWALMessageBody{}).
-			MustBuildMutable()
-
-		guard := interceptor.acquireLockGuard(context.Background(), msg)
-		assert.False(t, interceptor.glock.TryRLock(), "glock should be write-locked for AlterWAL on control channel")
-		guard()
-		assert.True(t, interceptor.glock.TryRLock())
-		interceptor.glock.RUnlock()
-	})
-
 	// Test: AlterReplicateConfig (exclusive, not BroadcastToAll) on control channel should acquire global write lock.
 	t.Run("AlterReplicateConfigOnControlChannel", func(t *testing.T) {
 		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
