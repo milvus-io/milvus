@@ -18,13 +18,19 @@ package storage
 
 import (
 	"container/heap"
+	"fmt"
 	"io"
 	"sort"
+	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader,
@@ -45,6 +51,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 		}
 	}()
 
+	phaseStart := time.Now()
 	for _, r := range rr {
 		for {
 			rec, err := r.Next()
@@ -64,11 +71,13 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 			}
 		}
 	}
+	downloadCost := time.Since(phaseStart)
 
 	if len(records) == 0 {
 		return 0, nil
 	}
 
+	phaseStart = time.Now()
 	if len(sortByFieldIDs) > 0 {
 		type keyCmp func(x, y *index) int
 		comparators := make([]keyCmp, 0, len(sortByFieldIDs))
@@ -120,7 +129,9 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 			return false
 		})
 	}
+	sortCost := time.Since(phaseStart)
 
+	phaseStart = time.Now()
 	rb := NewRecordBuilder(schema)
 	writeRecord := func() error {
 		rec := rb.Build()
@@ -148,6 +159,19 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 	if err := writeRecord(); err != nil {
 		return 0, err
 	}
+	writeCost := time.Since(phaseStart)
+	log.Info("Sort done",
+		zap.Int("recordBatches", len(records)),
+		zap.Int("validRows", len(indices)),
+		zap.Duration("downloadCost", downloadCost),
+		zap.Duration("sortCost", sortCost),
+		zap.Duration("writeCost", writeCost),
+		zap.Duration("totalCost", downloadCost+sortCost+writeCost))
+
+	nodeID := fmt.Sprint(paramtable.GetNodeID())
+	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, "Sort", "read").Observe(float64(downloadCost.Milliseconds()))
+	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, "Sort", "sort").Observe(float64(sortCost.Milliseconds()))
+	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, "Sort", "write").Observe(float64(writeCost.Milliseconds()))
 
 	return len(indices), nil
 }
