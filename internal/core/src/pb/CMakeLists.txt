@@ -13,3 +13,4 @@ find_package(Protobuf REQUIRED)
 
 add_source_at_current_directory_recursively()
 add_library(milvus_pb OBJECT ${SOURCE_FILES})
+target_link_libraries(milvus_pb PUBLIC milvus_conan_deps)

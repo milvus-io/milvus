@@ -1,3 +1,4 @@
 milvus_add_pkg_config("rdkafka")
 
-install(DIRECTORY "${CONAN_INCLUDE_DIRS_LIBRDKAFKA}/librdkafka/" DESTINATION "${CMAKE_INSTALL_PREFIX}/include/librdkafka/")
+get_target_property(_RDKAFKA_INCLUDE_DIRS RdKafka::rdkafka INTERFACE_INCLUDE_DIRECTORIES)
+install(DIRECTORY "${_RDKAFKA_INCLUDE_DIRS}/librdkafka/" DESTINATION "${CMAKE_INSTALL_PREFIX}/include/librdkafka/")

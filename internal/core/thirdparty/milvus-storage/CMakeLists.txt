@@ -28,7 +28,6 @@ else ()
     set(WITH_AZURE_FS OFF CACHE BOOL "" FORCE )
 endif ()
 
-set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} )
 FetchContent_Declare(
         milvus-storage
         GIT_REPOSITORY  ${GIT_REPOSITORY}

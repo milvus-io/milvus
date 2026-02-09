@@ -16,7 +16,6 @@ include_directories(
     ${KNOWHERE_INCLUDE_DIR}
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
-    ${CONAN_INCLUDE_DIRS}
     ${MILVUS_COMMON_INCLUDE_DIR}
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
@@ -117,8 +116,8 @@ add_executable(all_tests
         )
 
 target_link_libraries(all_tests
-        gtest
-        gmock
+        GTest::gtest
+        GTest::gmock
         milvus_core
         knowhere
         milvus-storage
@@ -158,7 +157,6 @@ endif()
 
 target_link_libraries(bitset_test
         milvus_bitset
-        gtest
-        ${CONAN_LIBS}
+        GTest::gtest
 )
 install(TARGETS bitset_test DESTINATION unittest)

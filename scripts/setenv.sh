@@ -54,18 +54,14 @@ case "${unameOut}" in
       export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$ROOT_DIR/internal/core/output/lib:$ROOT_DIR/internal/core/output/lib64"
       export RPATH=$LD_LIBRARY_PATH;;
     Darwin*)
-      # detect llvm version by valid list (supports LLVM 14-17)
-      # Note: LLVM 18 is NOT supported because Conan 1.x cannot handle the newer
-      # compiler profiles/settings that LLVM 18 requires. Until we migrate to Conan 2,
-      # please use LLVM 17 or earlier.
-      for llvm_version in 17 16 15 14 NOT_FOUND ; do
+      # detect llvm version by valid list (supports LLVM 14-18)
+      for llvm_version in 18 17 16 15 14 NOT_FOUND ; do
         if brew ls --versions llvm@${llvm_version} > /dev/null 2>&1; then
           break
         fi
       done
       if [ "${llvm_version}" = "NOT_FOUND" ] ; then
-        echo "ERROR: Valid LLVM (14-17) not installed. Run: brew install llvm@17"
-        echo "NOTE: LLVM 18 is not supported due to Conan 1.x incompatibility."
+        echo "ERROR: Valid LLVM (14-18) not installed. Run: brew install llvm@17"
         exit 1
       fi
       llvm_prefix="$(brew --prefix llvm@${llvm_version})"
