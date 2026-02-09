@@ -217,10 +217,6 @@ fi
 
 pushd ${BUILD_OUTPUT_DIR}
 
-# Remove make cache since build.sh -l use default variables
-# Force update the variables each time
-make rebuild_cache >/dev/null 2>&1
-
 CPU_ARCH=$(get_cpu_arch $CPU_TARGET)
 
 # In case any 3rdparty (e.g. libavrocpp) requires a minimum version of CMake lower than 3.5
