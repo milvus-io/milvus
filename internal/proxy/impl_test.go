@@ -39,8 +39,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	grpcmixcoordclient "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -2111,4 +2113,64 @@ func TestHybridSearchRequestExprLogger_String(t *testing.T) {
 		result := logger.String()
 		assert.Equal(t, "[No.0 req, expr: ]", result)
 	})
+}
+
+func TestProxy_GetReplicateConfiguration_Success(t *testing.T) {
+	expectedConfig := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{
+				ClusterId: "primary",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri: "http://primary:19530",
+				},
+				Pchannels: []string{"channel1"},
+			},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
+			{SourceClusterId: "primary", TargetClusterId: "secondary"},
+		},
+	}
+
+	replicateService := mock_streaming.NewMockReplicateService(t)
+	replicateService.EXPECT().GetReplicateConfiguration(mock.Anything).Return(expectedConfig, nil)
+	mockWAL := mock_streaming.NewMockWALAccesser(t)
+	mockWAL.EXPECT().Replicate().Return(replicateService)
+	streaming.SetWALForTest(mockWAL)
+	defer streaming.SetWALForTest(nil)
+
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	resp, err := node.GetReplicateConfiguration(context.Background(), &milvuspb.GetReplicateConfigurationRequest{})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp.GetStatus()))
+	assert.NotNil(t, resp.GetConfiguration())
+	assert.Equal(t, "primary", resp.GetConfiguration().GetClusters()[0].GetClusterId())
+	assert.Len(t, resp.GetConfiguration().GetCrossClusterTopology(), 1)
+}
+
+func TestProxy_GetReplicateConfiguration_Unhealthy(t *testing.T) {
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+	resp, err := node.GetReplicateConfiguration(context.Background(), &milvuspb.GetReplicateConfigurationRequest{})
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp.GetStatus()))
+}
+
+func TestProxy_GetReplicateConfiguration_Error(t *testing.T) {
+	replicateService := mock_streaming.NewMockReplicateService(t)
+	replicateService.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, errors.New("streaming error"))
+	mockWAL := mock_streaming.NewMockWALAccesser(t)
+	mockWAL.EXPECT().Replicate().Return(replicateService)
+	streaming.SetWALForTest(mockWAL)
+	defer streaming.SetWALForTest(nil)
+
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	resp, err := node.GetReplicateConfiguration(context.Background(), &milvuspb.GetReplicateConfigurationRequest{})
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp.GetStatus()))
+	assert.Nil(t, resp.GetConfiguration())
 }
