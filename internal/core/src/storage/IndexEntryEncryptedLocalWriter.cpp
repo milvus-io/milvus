@@ -29,6 +29,7 @@
 
 #include "common/EasyAssert.h"
 #include "nlohmann/json.hpp"
+#include "storage/Crc32cUtil.h"
 #include "storage/RemoteOutputStream.h"
 
 namespace milvus::storage {
@@ -39,6 +40,7 @@ IndexEntryEncryptedLocalWriter::IndexEntryEncryptedLocalWriter(
     std::shared_ptr<plugin::ICipherPlugin> cipher_plugin,
     int64_t ez_id,
     int64_t collection_id,
+    const std::string& temp_dir,
     size_t slice_size)
     : remote_path_(remote_path),
       fs_(std::move(fs)),
@@ -52,7 +54,8 @@ IndexEntryEncryptedLocalWriter::IndexEntryEncryptedLocalWriter(
     edek_ = std::move(edek);
 
     auto uuid = boost::uuids::random_generator()();
-    local_path_ = "/tmp/milvus_enc_" + boost::uuids::to_string(uuid);
+    std::string dir = temp_dir.empty() ? "/tmp" : temp_dir;
+    local_path_ = dir + "/milvus_enc_" + boost::uuids::to_string(uuid);
 
     local_fd_ = ::open(local_path_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
     AssertInfo(
@@ -76,8 +79,7 @@ IndexEntryEncryptedLocalWriter::WriteEntry(const std::string& name,
                                            size_t size) {
     AssertInfo(!finished_, "Cannot write after Finish() has been called");
     CheckDuplicateName(name);
-    EncryptAndWriteSlices(
-        name, size, reinterpret_cast<const uint8_t*>(data), size);
+    EncryptAndWriteSlices(name, reinterpret_cast<const uint8_t*>(data), size);
 }
 
 static std::string
@@ -108,12 +110,15 @@ IndexEntryEncryptedLocalWriter::WriteEntry(const std::string& name,
                               static_cast<size_t>(1));
     std::deque<std::future<std::string>> pending;
     size_t remaining = size;
+    uint32_t crc = 0;
 
     while (remaining > 0 || !pending.empty()) {
         // Fill the sliding window: read one slice from fd and submit encryption
         while (pending.size() < W && remaining > 0) {
             size_t len = std::min(remaining, slice_size_);
             auto slice_data = ReadExact(fd, len);
+            crc = Crc32cUpdate(
+                crc, reinterpret_cast<const uint8_t*>(slice_data.data()), len);
             pending.push_back(pool_.Submit([this, s = std::move(slice_data)]() {
                 auto [enc, unused_edek] =
                     cipher_plugin_->GetEncryptor(ez_id_, collection_id_);
@@ -135,12 +140,11 @@ IndexEntryEncryptedLocalWriter::WriteEntry(const std::string& name,
         }
     }
     dir_entries_.push_back(
-        {name, static_cast<uint64_t>(size), std::move(slices)});
+        {name, static_cast<uint64_t>(size), crc, std::move(slices)});
 }
 
 void
 IndexEntryEncryptedLocalWriter::EncryptAndWriteSlices(const std::string& name,
-                                                      uint64_t original_size,
                                                       const uint8_t* data,
                                                       size_t size) {
     std::vector<SliceMeta> slices;
@@ -149,10 +153,12 @@ IndexEntryEncryptedLocalWriter::EncryptAndWriteSlices(const std::string& name,
     std::deque<std::future<std::string>> pending;
     size_t remaining = size;
     size_t read_offset = 0;
+    uint32_t crc = 0;
 
     while (remaining > 0 || !pending.empty()) {
         while (pending.size() < W && remaining > 0) {
             size_t len = std::min(remaining, slice_size_);
+            crc = Crc32cUpdate(crc, data + read_offset, len);
             auto slice_data = std::string(
                 reinterpret_cast<const char*>(data + read_offset), len);
             pending.push_back(pool_.Submit([this, s = std::move(slice_data)]() {
@@ -175,15 +181,27 @@ IndexEntryEncryptedLocalWriter::EncryptAndWriteSlices(const std::string& name,
             current_offset_ += encrypted.size();
         }
     }
-    dir_entries_.push_back({name, original_size, std::move(slices)});
+    dir_entries_.push_back({name, size, crc, std::move(slices)});
 }
 
 void
 IndexEntryEncryptedLocalWriter::Finish() {
     AssertInfo(!finished_, "Finish() has already been called");
 
+    // Write __meta__ entry (encrypted, as last entry in Data Region)
+    std::string meta_str = meta_json_.dump();
+    EncryptAndWriteSlices(MILVUS_V3_META_ENTRY_NAME,
+                          reinterpret_cast<const uint8_t*>(meta_str.data()),
+                          meta_str.size());
+    // meta_entry_size is the on-disk (ciphertext) size of the meta entry
+    size_t meta_entry_size = 0;
+    const auto& meta_dir = dir_entries_.back();
+    for (const auto& s : meta_dir.slices) {
+        meta_entry_size += s.size;
+    }
+
+    // Build Directory Table JSON
     nlohmann::json dir_json;
-    dir_json["version"] = 3;
     dir_json["slice_size"] = slice_size_;
     dir_json["entries"] = nlohmann::json::array();
 
@@ -191,6 +209,7 @@ IndexEntryEncryptedLocalWriter::Finish() {
         nlohmann::json e;
         e["name"] = entry.name;
         e["original_size"] = entry.original_size;
+        e["crc32"] = Crc32cToHex(entry.crc32);
         e["slices"] = nlohmann::json::array();
         for (const auto& s : entry.slices) {
             e["slices"].push_back({{"offset", s.offset}, {"size", s.size}});
@@ -206,16 +225,25 @@ IndexEntryEncryptedLocalWriter::Finish() {
     AssertInfo(written == static_cast<ssize_t>(dir_str.size()),
                "Failed to write directory table");
 
-    uint64_t dir_size = dir_str.size();
-    written = ::write(local_fd_, &dir_size, sizeof(uint64_t));
-    AssertInfo(written == static_cast<ssize_t>(sizeof(uint64_t)),
+    // Write 32-byte Footer
+    uint8_t footer[MILVUS_V3_FOOTER_SIZE] = {};
+    uint16_t version = MILVUS_V3_FORMAT_VERSION;
+    uint32_t meta_size_u32 = static_cast<uint32_t>(meta_entry_size);
+    uint32_t dir_size_u32 = static_cast<uint32_t>(dir_str.size());
+
+    std::memcpy(footer + 0, &version, sizeof(uint16_t));
+    std::memcpy(footer + 24, &meta_size_u32, sizeof(uint32_t));
+    std::memcpy(footer + 28, &dir_size_u32, sizeof(uint32_t));
+
+    written = ::write(local_fd_, footer, MILVUS_V3_FOOTER_SIZE);
+    AssertInfo(written == static_cast<ssize_t>(MILVUS_V3_FOOTER_SIZE),
                "Failed to write footer");
 
     ::close(local_fd_);
     local_fd_ = -1;
 
     total_bytes_written_ = MILVUS_V3_MAGIC_SIZE + current_offset_ +
-                           dir_str.size() + sizeof(uint64_t);
+                           dir_str.size() + MILVUS_V3_FOOTER_SIZE;
 
     UploadLocalFile();
 

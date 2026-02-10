@@ -30,6 +30,7 @@
 
 #include "common/EasyAssert.h"
 #include "nlohmann/json.hpp"
+#include "storage/Crc32cUtil.h"
 #include "storage/PluginLoader.h"
 
 namespace milvus::storage {
@@ -46,6 +47,19 @@ IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
     reader->priority_ = priority;
     reader->ValidateMagic();
     reader->ReadFooterAndDirectory();
+
+    // Parse __meta__ entry
+    auto meta_entry = reader->ReadEntry(MILVUS_V3_META_ENTRY_NAME);
+    if (!meta_entry.data.empty()) {
+        try {
+            reader->meta_json_ = nlohmann::json::parse(meta_entry.data.begin(),
+                                                       meta_entry.data.end());
+        } catch (const nlohmann::json::parse_error& e) {
+            AssertInfo(
+                false, "Failed to parse V3 index meta JSON: {}", e.what());
+        }
+    }
+
     return reader;
 }
 
@@ -72,24 +86,41 @@ IndexEntryReader::ReadFooterAndDirectory() {
         input_->ReadAt(tail_data.data(), tail_offset, tail_size);
     AssertInfo(bytes_read == tail_size, "Failed to read file tail");
 
-    uint64_t dir_size;
-    std::memcpy(&dir_size,
-                tail_data.data() + tail_size - sizeof(uint64_t),
-                sizeof(uint64_t));
+    // Parse 32-byte Footer from the last 32 bytes
+    AssertInfo(tail_size >= MILVUS_V3_FOOTER_SIZE,
+               "File too small for V3 footer");
+    const uint8_t* footer_ptr =
+        tail_data.data() + tail_size - MILVUS_V3_FOOTER_SIZE;
 
+    uint16_t version;
+    uint32_t meta_entry_size;
+    uint32_t dir_size;
+
+    std::memcpy(&version, footer_ptr + 0, sizeof(uint16_t));
+    std::memcpy(&meta_entry_size, footer_ptr + 24, sizeof(uint32_t));
+    std::memcpy(&dir_size, footer_ptr + 28, sizeof(uint32_t));
+
+    AssertInfo(version == MILVUS_V3_FORMAT_VERSION,
+               "Unsupported V3 format version: {}",
+               version);
     AssertInfo(dir_size > 0, "Directory table size is zero");
-    AssertInfo(dir_size + MILVUS_V3_MAGIC_SIZE + sizeof(uint64_t) <=
+    AssertInfo(static_cast<size_t>(dir_size) + meta_entry_size +
+                       MILVUS_V3_FOOTER_SIZE + MILVUS_V3_MAGIC_SIZE <=
                    static_cast<size_t>(file_size_),
-               "Directory table size exceeds file size");
+               "Directory table + meta entry + footer size exceeds file size");
 
-    size_t available_dir_size = tail_size - sizeof(uint64_t);
+    // Check if we need a second read
+    size_t needed =
+        static_cast<size_t>(dir_size) + meta_entry_size + MILVUS_V3_FOOTER_SIZE;
+    size_t available_before_footer = tail_size - MILVUS_V3_FOOTER_SIZE;
 
-    if (dir_size > available_dir_size) {
-        size_t need_more = dir_size - available_dir_size;
-        size_t new_tail_size = dir_size + sizeof(uint64_t);
+    if (static_cast<size_t>(dir_size) + meta_entry_size >
+        available_before_footer) {
+        size_t new_tail_size = needed;
         size_t new_tail_offset = file_size_ - new_tail_size;
 
         std::vector<uint8_t> full_tail_data(new_tail_size);
+        size_t need_more = new_tail_size - tail_size;
 
         size_t additional_read =
             input_->ReadAt(full_tail_data.data(), new_tail_offset, need_more);
@@ -103,8 +134,9 @@ IndexEntryReader::ReadFooterAndDirectory() {
         tail_size = new_tail_size;
     }
 
+    // Parse Directory Table JSON
     const uint8_t* dir_start =
-        tail_data.data() + tail_size - sizeof(uint64_t) - dir_size;
+        tail_data.data() + tail_size - MILVUS_V3_FOOTER_SIZE - dir_size;
     const uint8_t* dir_end = dir_start + dir_size;
 
     nlohmann::json dir_json;
@@ -132,6 +164,7 @@ IndexEntryReader::ReadFooterAndDirectory() {
             EntryMeta meta;
             meta.encrypted = true;
             meta.enc.original_size = entry["original_size"].get<uint64_t>();
+            meta.enc.crc32 = Crc32cFromHex(entry["crc32"].get<std::string>());
             for (const auto& s : entry["slices"]) {
                 meta.enc.slices.push_back(
                     {s["offset"].get<uint64_t>(), s["size"].get<uint64_t>()});
@@ -148,6 +181,7 @@ IndexEntryReader::ReadFooterAndDirectory() {
             meta.encrypted = false;
             meta.plain.offset = entry["offset"].get<uint64_t>();
             meta.plain.size = entry["size"].get<uint64_t>();
+            meta.plain.crc32 = Crc32cFromHex(entry["crc32"].get<std::string>());
             std::string name = entry["name"].get<std::string>();
             entry_names_.push_back(name);
             entry_index_.emplace(std::move(name), std::move(meta));
@@ -158,6 +192,19 @@ IndexEntryReader::ReadFooterAndDirectory() {
 std::vector<std::string>
 IndexEntryReader::GetEntryNames() const {
     return entry_names_;
+}
+
+void
+IndexEntryReader::VerifyCrc32c(uint32_t expected,
+                               const uint8_t* data,
+                               size_t size,
+                               const std::string& name) {
+    uint32_t actual = Crc32cValue(data, size);
+    AssertInfo(actual == expected,
+               "CRC-32C mismatch for entry '{}': expected {}, got {}",
+               name,
+               Crc32cToHex(expected),
+               Crc32cToHex(actual));
 }
 
 Entry
@@ -197,6 +244,7 @@ IndexEntryReader::ReadPlainEntry(const EntryMeta& meta) {
         size_t n = input_->ReadAt(
             result.data.data(), MILVUS_V3_MAGIC_SIZE + pm.offset, pm.size);
         AssertInfo(n == pm.size, "Failed to read entry data");
+        VerifyCrc32c(pm.crc32, result.data.data(), pm.size, "");
         return result;
     }
 
@@ -226,6 +274,9 @@ IndexEntryReader::ReadPlainEntry(const EntryMeta& meta) {
     for (auto& f : futures) {
         f.get();
     }
+
+    // CRC verification: sequential pass over the assembled buffer
+    VerifyCrc32c(pm.crc32, result.data.data(), pm.size, "");
 
     return result;
 }
@@ -273,6 +324,9 @@ IndexEntryReader::ReadEncryptedEntry(const EntryMeta& meta) {
         f.get();
     }
 
+    // CRC verification over full plaintext buffer
+    VerifyCrc32c(em.crc32, result.data.data(), em.original_size, "");
+
     return result;
 }
 
@@ -300,35 +354,66 @@ IndexEntryReader::WritePlainEntryToFile(const EntryMeta& meta,
     auto& pool = ThreadPools::GetThreadPool(priority_);
     constexpr size_t kRangeSize = 16 * 1024 * 1024;
 
+    // Calculate number of ranges for per-range CRC
+    size_t num_ranges = (pm.size + kRangeSize - 1) / kRangeSize;
+    struct RangeCrc {
+        uint32_t crc;
+        size_t len;
+    };
+    std::vector<RangeCrc> range_crcs(num_ranges);
+
     std::vector<std::future<void>> futures;
     size_t remaining = pm.size;
     size_t file_offset = 0;
     size_t src_offset = pm.offset;
+    size_t range_idx = 0;
 
     while (remaining > 0) {
         size_t len = std::min(remaining, kRangeSize);
         size_t this_file_offset = file_offset;
         size_t this_src_offset = src_offset;
+        size_t this_range_idx = range_idx;
 
-        futures.push_back(
-            pool.Submit([this, this_src_offset, len, fd, this_file_offset]() {
-                std::vector<uint8_t> buf(len);
-                size_t n = input_->ReadAt(
-                    buf.data(), MILVUS_V3_MAGIC_SIZE + this_src_offset, len);
-                AssertInfo(n == len, "Failed to read data for file");
-                auto written = ::pwrite(fd, buf.data(), len, this_file_offset);
-                AssertInfo(written == static_cast<ssize_t>(len),
-                           "Failed to pwrite");
-            }));
+        futures.push_back(pool.Submit([this,
+                                       this_src_offset,
+                                       len,
+                                       fd,
+                                       this_file_offset,
+                                       this_range_idx,
+                                       &range_crcs]() {
+            std::vector<uint8_t> buf(len);
+            size_t n = input_->ReadAt(
+                buf.data(), MILVUS_V3_MAGIC_SIZE + this_src_offset, len);
+            AssertInfo(n == len, "Failed to read data for file");
+            auto written = ::pwrite(fd, buf.data(), len, this_file_offset);
+            AssertInfo(written == static_cast<ssize_t>(len),
+                       "Failed to pwrite");
+            range_crcs[this_range_idx] = {Crc32cValue(buf.data(), len), len};
+        }));
 
         remaining -= len;
         file_offset += len;
         src_offset += len;
+        range_idx++;
     }
 
     for (auto& f : futures) {
         f.get();
     }
+
+    // Combine per-range CRCs in order
+    uint32_t combined_crc = 0;
+    if (!range_crcs.empty()) {
+        combined_crc = range_crcs[0].crc;
+        for (size_t i = 1; i < range_crcs.size(); i++) {
+            combined_crc = Crc32cCombine(
+                combined_crc, range_crcs[i].crc, range_crcs[i].len);
+        }
+    }
+    AssertInfo(combined_crc == pm.crc32,
+               "CRC-32C mismatch for file entry: expected {}, got {}",
+               Crc32cToHex(pm.crc32),
+               Crc32cToHex(combined_crc));
 
     ::close(fd);
 }
@@ -348,41 +433,71 @@ IndexEntryReader::WriteEncryptedEntryToFile(const EntryMeta& meta,
 
     auto& pool = ThreadPools::GetThreadPool(priority_);
 
+    // Per-range CRC for crc32c_combine
+    struct RangeCrc {
+        uint32_t crc;
+        size_t len;
+    };
+    std::vector<RangeCrc> range_crcs(em.slices.size());
+
     std::vector<std::future<void>> futures;
     size_t output_offset = 0;
 
-    for (const auto& slice : em.slices) {
+    for (size_t i = 0; i < em.slices.size(); i++) {
+        const auto& slice = em.slices[i];
         size_t this_output_offset = output_offset;
         size_t remaining = em.original_size - output_offset;
         size_t plain_len = std::min(remaining, slice_size_);
         output_offset += plain_len;
 
-        futures.push_back(
-            pool.Submit([this, &slice, fd, this_output_offset, plain_len]() {
-                std::vector<uint8_t> cipher(slice.size);
-                size_t n = input_->ReadAt(cipher.data(),
-                                          MILVUS_V3_MAGIC_SIZE + slice.offset,
-                                          slice.size);
-                AssertInfo(n == slice.size, "Failed to read encrypted slice");
+        futures.push_back(pool.Submit([this,
+                                       &slice,
+                                       fd,
+                                       this_output_offset,
+                                       plain_len,
+                                       i,
+                                       &range_crcs]() {
+            std::vector<uint8_t> cipher(slice.size);
+            size_t n = input_->ReadAt(
+                cipher.data(), MILVUS_V3_MAGIC_SIZE + slice.offset, slice.size);
+            AssertInfo(n == slice.size, "Failed to read encrypted slice");
 
-                auto dec =
-                    cipher_plugin_->GetDecryptor(ez_id_, collection_id_, edek_);
-                auto plain = dec->Decrypt(cipher.data(), cipher.size());
+            auto dec =
+                cipher_plugin_->GetDecryptor(ez_id_, collection_id_, edek_);
+            auto plain = dec->Decrypt(cipher.data(), cipher.size());
 
-                AssertInfo(plain.size() == plain_len,
-                           "Decrypted size mismatch: expected {}, got {}",
-                           plain_len,
-                           plain.size());
-                auto written = ::pwrite(
-                    fd, plain.data(), plain.size(), this_output_offset);
-                AssertInfo(written == static_cast<ssize_t>(plain.size()),
-                           "Failed to pwrite");
-            }));
+            AssertInfo(plain.size() == plain_len,
+                       "Decrypted size mismatch: expected {}, got {}",
+                       plain_len,
+                       plain.size());
+            auto written =
+                ::pwrite(fd, plain.data(), plain.size(), this_output_offset);
+            AssertInfo(written == static_cast<ssize_t>(plain.size()),
+                       "Failed to pwrite");
+            range_crcs[i] = {
+                Crc32cValue(reinterpret_cast<const uint8_t*>(plain.data()),
+                            plain.size()),
+                plain.size()};
+        }));
     }
 
     for (auto& f : futures) {
         f.get();
     }
+
+    // Combine per-range CRCs in order
+    uint32_t combined_crc = 0;
+    if (!range_crcs.empty()) {
+        combined_crc = range_crcs[0].crc;
+        for (size_t i = 1; i < range_crcs.size(); i++) {
+            combined_crc = Crc32cCombine(
+                combined_crc, range_crcs[i].crc, range_crcs[i].len);
+        }
+    }
+    AssertInfo(combined_crc == em.crc32,
+               "CRC-32C mismatch for encrypted file entry: expected {}, got {}",
+               Crc32cToHex(em.crc32),
+               Crc32cToHex(combined_crc));
 
     ::close(fd);
 }

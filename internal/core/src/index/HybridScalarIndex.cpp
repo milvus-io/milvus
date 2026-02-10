@@ -413,12 +413,11 @@ void
 HybridScalarIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     AssertInfo(is_built_, "index has not been built yet");
 
-    auto meta = nlohmann::json{{"index_type",
-                                static_cast<uint8_t>(internal_index_type_)}}
-                    .dump();
-    writer->WriteEntry("HYBRID_INDEX_META", meta.data(), meta.size());
-
+    // Write internal index entries (which adds internal meta via PutMeta)
     internal_index_->WriteEntries(writer);
+
+    // Add hybrid-level meta
+    writer->PutMeta("index_type", static_cast<uint8_t>(internal_index_type_));
 
     LOG_INFO("write hybrid index entries with internal index type: {}",
              ToString(internal_index_type_));
@@ -428,11 +427,8 @@ template <typename T>
 void
 HybridScalarIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                                   const Config& config) {
-    auto meta_entry = reader.ReadEntry("HYBRID_INDEX_META");
-    auto mj =
-        nlohmann::json::parse(meta_entry.data.begin(), meta_entry.data.end());
     internal_index_type_ =
-        static_cast<ScalarIndexType>(mj["index_type"].get<uint8_t>());
+        static_cast<ScalarIndexType>(reader.GetMeta<uint8_t>("index_type"));
 
     LOG_INFO("LoadEntries hybrid index with internal index type: {}",
              ToString(internal_index_type_));

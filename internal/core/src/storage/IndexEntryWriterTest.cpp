@@ -314,10 +314,11 @@ TEST_F(IndexEntryWriterV3Test, GetEntryNames) {
     auto reader = IndexEntryReader::Open(input, file_size);
 
     auto names = reader->GetEntryNames();
-    ASSERT_EQ(names.size(), 3);
+    ASSERT_EQ(names.size(), 4);
     EXPECT_EQ(names[0], "alpha");
     EXPECT_EQ(names[1], "beta");
     EXPECT_EQ(names[2], "gamma");
+    EXPECT_EQ(names[3], "__meta__");
 }
 
 TEST_F(IndexEntryWriterV3Test, EntryNotFound) {
@@ -415,13 +416,70 @@ TEST_F(IndexEntryWriterV3Test, MixedSizeEntries) {
     auto reader = IndexEntryReader::Open(input, file_size);
 
     auto names = reader->GetEntryNames();
-    ASSERT_EQ(names.size(), 2);
+    ASSERT_EQ(names.size(), 3);
     EXPECT_EQ(names[0], "tiny_meta");
     EXPECT_EQ(names[1], "large_data");
+    EXPECT_EQ(names[2], "__meta__");
 
     auto tiny_entry = reader->ReadEntry("tiny_meta");
     VerifyPattern(tiny_entry.data, tiny_size);
 
     auto large_entry = reader->ReadEntry("large_data");
     VerifyPattern(large_entry.data, large_size);
+}
+
+TEST_F(IndexEntryWriterV3Test, SetMetaRoundtrip) {
+    const std::string file_path = kV3FilePath + "_meta";
+    auto data = GeneratePattern(256);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.PutMeta("index_type", std::string("bitmap"));
+        writer.PutMeta("build_id", 42);
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(input, file_size);
+
+    // Verify __meta__ entry is present
+    auto names = reader->GetEntryNames();
+    EXPECT_EQ(names.back(), "__meta__");
+
+    // Read and verify the meta content via GetMeta
+    EXPECT_EQ(reader->GetMeta<std::string>("index_type"), "bitmap");
+    EXPECT_EQ(reader->GetMeta<int>("build_id"), 42);
+
+    // Regular data entry should still be readable
+    auto data_entry = reader->ReadEntry("data");
+    VerifyPattern(data_entry.data, 256);
+}
+
+TEST_F(IndexEntryWriterV3Test, EmptyMetaRoundtrip) {
+    const std::string file_path = kV3FilePath + "_emptymeta";
+    auto data = GeneratePattern(128);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("entry", data.data(), data.size());
+        // No PutMeta calls - meta_json_ defaults to empty JSON object
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(input, file_size);
+
+    // __meta__ entry should exist with empty JSON object "{}"
+    auto meta_entry = reader->ReadEntry("__meta__");
+    std::string meta_str(reinterpret_cast<const char*>(meta_entry.data.data()),
+                         meta_entry.data.size());
+    EXPECT_EQ(meta_str, "{}");
+
+    auto data_entry = reader->ReadEntry("entry");
+    VerifyPattern(data_entry.data, 128);
 }

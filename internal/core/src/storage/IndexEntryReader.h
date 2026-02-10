@@ -23,7 +23,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include "common/EasyAssert.h"
 #include "filemanager/InputStream.h"
+#include "nlohmann/json.hpp"
 #include "storage/IndexEntryWriter.h"
 #include "storage/ThreadPools.h"
 #include "storage/plugin/PluginInterface.h"
@@ -55,6 +57,27 @@ class IndexEntryReader {
     ReadEntriesToFiles(const std::vector<std::pair<std::string, std::string>>&
                            name_path_pairs);
 
+    template <typename T>
+    T
+    GetMeta(const std::string& key) const {
+        AssertInfo(meta_json_.contains(key), "Meta key not found: {}", key);
+        return meta_json_[key].get<T>();
+    }
+
+    template <typename T>
+    T
+    GetMeta(const std::string& key, const T& default_value) const {
+        if (!meta_json_.contains(key)) {
+            return default_value;
+        }
+        return meta_json_[key].get<T>();
+    }
+
+    bool
+    HasMeta(const std::string& key) const {
+        return meta_json_.contains(key);
+    }
+
     IndexEntryReader(const IndexEntryReader&) = delete;
     IndexEntryReader&
     operator=(const IndexEntryReader&) = delete;
@@ -63,10 +86,12 @@ class IndexEntryReader {
     struct PlainEntryMeta {
         uint64_t offset;
         uint64_t size;
+        uint32_t crc32;
     };
 
     struct EncryptedEntryMeta {
         uint64_t original_size;
+        uint32_t crc32;
         std::vector<SliceMeta> slices;
     };
 
@@ -94,6 +119,12 @@ class IndexEntryReader {
     WriteEncryptedEntryToFile(const EntryMeta& meta,
                               const std::string& local_path);
 
+    void
+    VerifyCrc32c(uint32_t expected,
+                 const uint8_t* data,
+                 size_t size,
+                 const std::string& name);
+
     std::shared_ptr<milvus::InputStream> input_;
     int64_t file_size_ = 0;
     int64_t collection_id_ = 0;
@@ -111,6 +142,7 @@ class IndexEntryReader {
 
     static constexpr size_t kSmallEntryCacheThreshold = 1 * 1024 * 1024;
     std::unordered_map<std::string, Entry> small_entry_cache_;
+    nlohmann::json meta_json_;
 };
 
 }  // namespace milvus::storage
