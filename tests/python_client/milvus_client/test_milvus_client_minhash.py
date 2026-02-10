@@ -2409,104 +2409,153 @@ class TestMilvusClientMinHashAccuracy(TestMilvusClientV2Base):
 # ============================================================================
 # MinHash Function Correctness Test Helpers
 # ============================================================================
-# These helper functions use the milvus_minhash C++ binding for exact
-# compatibility with Milvus's MinHash implementation.
+# Pure Python implementation of Milvus MinHash algorithm.
+# Verified bit-identical to the C++ implementation (MinHashComputer.cpp).
 
-import milvus_minhash as _mh
+import hashlib
+import struct
 
-# Constants from C++ binding
-MINHASH_MERSENNE_PRIME = _mh.MERSENNE_PRIME
-MINHASH_MAX_HASH_MASK = _mh.MAX_HASH_MASK
+import xxhash
 
+# ---- MT19937-64 (matches std::mt19937_64) ----
 
-def init_permutations_like_milvus(num_hashes: int, seed: int):
-    """
-    Generate permutation parameters using Milvus C++ binding.
-
-    Args:
-        num_hashes: Number of hash functions
-        seed: Random seed
-
-    Returns:
-        tuple: (perm_a, perm_b) arrays of uint64
-    """
-    return _mh.init_permutations(num_hashes, seed)
+_MASK64 = 0xFFFFFFFFFFFFFFFF
+_MT_N = 312
+_MT_M = 156
+_MT_A = 0xB5026F5AA96619E9
+_MT_F = 6364136223846793005
+_MT_UPPER = _MASK64 & ~((1 << 31) - 1)
+_MT_LOWER = (1 << 31) - 1
 
 
-def hash_shingles_xxhash(text: str, shingle_size: int) -> list:
-    """
-    Compute character-level shingle hashes using xxhash (C++ binding).
+class _MT19937_64:
+    __slots__ = ("_mt", "_idx")
 
-    Args:
-        text: Input text
-        shingle_size: Size of character n-grams
+    def __init__(self, seed):
+        mt = [0] * _MT_N
+        mt[0] = seed & _MASK64
+        for i in range(1, _MT_N):
+            mt[i] = (_MT_F * (mt[i - 1] ^ (mt[i - 1] >> 62)) + i) & _MASK64
+        self._mt = mt
+        self._idx = _MT_N
 
-    Returns:
-        List of 32-bit hash values
-    """
-    return list(_mh.hash_shingles_char(text, shingle_size, use_sha1=False))
-
-
-def hash_shingles_sha1(text: str, shingle_size: int) -> list:
-    """
-    Compute character-level shingle hashes using SHA1 (C++ binding).
-
-    Args:
-        text: Input text
-        shingle_size: Size of character n-grams
-
-    Returns:
-        List of 32-bit hash values
-    """
-    return list(_mh.hash_shingles_char(text, shingle_size, use_sha1=True))
-
-
-def compute_minhash_signature(base_hashes: list, perm_a, perm_b) -> list:
-    """
-    Compute MinHash signature from base hashes (C++ binding).
-
-    Args:
-        base_hashes: List of base hash values (from shingles)
-        perm_a: Permutation parameters a
-        perm_b: Permutation parameters b
-
-    Returns:
-        List of uint32 signature values
-    """
-    return list(_mh.compute_signature(
-        np.array(base_hashes, dtype=np.uint64),
-        np.array(perm_a, dtype=np.uint64),
-        np.array(perm_b, dtype=np.uint64)
-    ))
+    def __call__(self):
+        if self._idx >= _MT_N:
+            mt = self._mt
+            for i in range(_MT_N):
+                x = (mt[i] & _MT_UPPER) | (mt[(i + 1) % _MT_N] & _MT_LOWER)
+                xa = x >> 1
+                if x & 1:
+                    xa ^= _MT_A
+                mt[i] = mt[(i + _MT_M) % _MT_N] ^ xa
+            self._idx = 0
+        y = self._mt[self._idx]
+        y ^= (y >> 29) & 0x5555555555555555
+        y ^= (y << 17) & 0x71D67FFFEDA60000
+        y ^= (y << 37) & 0xFFF7EEE000000000
+        y ^= y >> 43
+        self._idx += 1
+        return y & _MASK64
 
 
-def signature_to_binary_vector(signature: list) -> bytes:
-    """
-    Convert MinHash signature to binary vector (little-endian).
+# ---- MinHash constants (matching MinHashComputer.cpp) ----
 
-    Args:
-        signature: List of uint32 signature values
+MINHASH_MERSENNE_PRIME = 0x1FFFFFFFFFFFFFFF  # 2^61 - 1
+MINHASH_MAX_HASH_MASK = 0xFFFFFFFF           # 2^32 - 1
 
-    Returns:
-        bytes: Binary vector
-    """
-    import struct
+
+# ---- Hash functions ----
+
+def _hash_xxhash(data):
+    """xxHash (XXH3_64bits) cast to uint32, matching C++ static_cast<uint32_t>."""
+    return xxhash.xxh3_64(data).intdigest() & 0xFFFFFFFF
+
+
+def _hash_sha1(data):
+    """SHA1 first 4 bytes as little-endian uint32."""
+    return struct.unpack("<I", hashlib.sha1(data).digest()[:4])[0]
+
+
+# ---- Core MinHash functions ----
+
+def init_permutations_like_milvus(num_hashes, seed):
+    """Generate permutation parameters matching Milvus InitPermutations."""
+    rng = _MT19937_64(seed)
+    perm_a = np.empty(num_hashes, dtype=np.uint64)
+    perm_b = np.empty(num_hashes, dtype=np.uint64)
+    for i in range(num_hashes):
+        raw_a, raw_b = rng(), rng()
+        perm_a[i] = (raw_a % (MINHASH_MERSENNE_PRIME - 1)) + 1
+        perm_b[i] = raw_b % MINHASH_MERSENNE_PRIME
+    return perm_a, perm_b
+
+
+def hash_shingles_xxhash(text, shingle_size):
+    """Compute character-level shingle hashes using xxhash."""
+    return _hash_shingles(text, shingle_size, _hash_xxhash)
+
+
+def hash_shingles_sha1(text, shingle_size):
+    """Compute character-level shingle hashes using SHA1."""
+    return _hash_shingles(text, shingle_size, _hash_sha1)
+
+
+def _hash_shingles(text, shingle_size, hash_func):
+    data = text.encode("utf-8")
+    if len(data) < shingle_size:
+        return [hash_func(data)]
+    return [hash_func(data[i:i + shingle_size]) for i in range(len(data) - shingle_size + 1)]
+
+
+def compute_minhash_signature(base_hashes, perm_a, perm_b):
+    """Compute MinHash signature from base hashes, matching Milvus exactly."""
+    MP = MINHASH_MERSENNE_PRIME
+    num_hashes = len(perm_a)
+    sig = [0xFFFFFFFF] * num_hashes
+    a_vals = [int(x) for x in perm_a]
+    b_vals = [int(x) for x in perm_b]
+    for base in base_hashes:
+        base = int(base)
+        for i in range(num_hashes):
+            temp = (a_vals[i] * base + b_vals[i]) & _MASK64
+            temp = (temp & MP) + (temp >> 61)
+            if temp >= MP:
+                temp -= MP
+            h = temp & 0xFFFFFFFF
+            if h < sig[i]:
+                sig[i] = h
+    return sig
+
+
+def compute_minhash(text, num_hashes, shingle_size, seed,
+                    use_char_level=True, use_sha1=False):
+    """Compute MinHash signature from text (high-level API)."""
+    perm_a, perm_b = init_permutations_like_milvus(num_hashes, seed)
+    hash_func = _hash_sha1 if use_sha1 else _hash_xxhash
+    if use_char_level:
+        base_hashes = _hash_shingles(text, shingle_size, hash_func)
+    else:
+        tokens = text.split()
+        if len(tokens) < shingle_size:
+            combined = "".join(tokens).encode("utf-8")
+            base_hashes = [hash_func(combined)] if combined else []
+        else:
+            base_hashes = [
+                hash_func("".join(tokens[i:i + shingle_size]).encode("utf-8"))
+                for i in range(len(tokens) - shingle_size + 1)
+            ]
+    return compute_minhash_signature(base_hashes, perm_a, perm_b)
+
+
+# ---- Conversion helpers ----
+
+def signature_to_binary_vector(signature):
+    """Convert MinHash signature to binary vector (little-endian)."""
     return b''.join(struct.pack('<I', s) for s in signature)
 
 
-def binary_vector_to_signature(binary_vector) -> list:
-    """
-    Convert binary vector back to signature (little-endian).
-
-    Args:
-        binary_vector: Binary vector bytes or list containing bytes
-                       (Milvus returns [b'...'] format)
-
-    Returns:
-        List of uint32 signature values
-    """
-    import struct
-    # Handle Milvus return format: [b'...'] (list containing bytes)
+def binary_vector_to_signature(binary_vector):
+    """Convert binary vector back to signature (little-endian)."""
     if isinstance(binary_vector, list):
         binary_vector = binary_vector[0]
     num_hashes = len(binary_vector) // 4
@@ -3413,7 +3462,6 @@ class TestMinHashFunctionCorrectness(TestMilvusClientV2Base):
             5. Calculate recall@k
         expected: recall should be above acceptable threshold for similar texts
         """
-        import milvus_minhash as mh
 
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -3475,7 +3523,7 @@ class TestMinHashFunctionCorrectness(TestMilvusClientV2Base):
         # Compute ground truth using C++ binding
         signatures = {}
         for pk, text in test_texts:
-            sig = mh.compute_minhash(text, num_hashes, shingle_size, seed, use_char_level=True)
+            sig = compute_minhash(text, num_hashes, shingle_size, seed, use_char_level=True)
             signatures[pk] = list(sig)
 
         def compute_minhash_jaccard(sig1, sig2):
@@ -3534,7 +3582,6 @@ class TestMinHashFunctionCorrectness(TestMilvusClientV2Base):
             3. Verify that more bands generally improve recall (with trade-off)
         expected: recall should vary with band configuration
         """
-        import milvus_minhash as mh
 
         client = self._client()
 
@@ -3559,7 +3606,7 @@ class TestMinHashFunctionCorrectness(TestMilvusClientV2Base):
         # Compute ground truth signatures
         signatures = {}
         for pk, text in test_texts:
-            sig = mh.compute_minhash(text, num_hashes, shingle_size, seed, use_char_level=True)
+            sig = compute_minhash(text, num_hashes, shingle_size, seed, use_char_level=True)
             signatures[pk] = list(sig)
 
         def compute_jaccard(sig1, sig2):
@@ -3718,11 +3765,10 @@ class TestMinHashRecallBenchmark(TestMilvusClientV2Base):
         seed: int = 42,
     ) -> dict:
         """Compute MinHash signatures for ground truth."""
-        import milvus_minhash as mh
 
         signatures = {}
         for pk, text in texts:
-            sig = mh.compute_minhash(text, num_hashes, shingle_size, seed, use_char_level=True)
+            sig = compute_minhash(text, num_hashes, shingle_size, seed, use_char_level=True)
             signatures[pk] = list(sig)
         return signatures
 
