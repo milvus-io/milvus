@@ -391,16 +391,16 @@ TestBuildIndex(int N, int cardinality, int index_type) {
     if (index_type == 0) {
         auto index = std::make_unique<milvus::index::BitmapIndex<T>>();
         index->Build(N, raw_data.data());
-        return std::move(index);
+        return index;
     } else if (index_type == 1) {
         if constexpr (std::is_same_v<T, std::string>) {
             auto index = std::make_unique<milvus::index::StringIndexMarisa>();
             index->Build(N, raw_data.data());
-            return std::move(index);
+            return index;
         } else {
             auto index = milvus::index::CreateScalarIndexSort<T>();
             index->Build(N, raw_data.data());
-            return std::move(index);
+            return index;
         }
     }
 }

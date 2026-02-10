@@ -826,7 +826,7 @@ func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*plan
 	}
 
 	// Construct full field name for struct array field
-	fullFieldName := v.currentStructArrayField + "[" + fieldName + "]"
+	fullFieldName := typeutil.ConcatStructFieldName(v.currentStructArrayField, fieldName)
 	// Get the struct array field info
 	field, err := v.schema.GetFieldFromName(fullFieldName)
 	if err != nil {
@@ -2202,7 +2202,7 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 	}
 
 	// Construct full field name for struct array field
-	fullFieldName := v.currentStructArrayField + "[" + fieldName + "]"
+	fullFieldName := typeutil.ConcatStructFieldName(v.currentStructArrayField, fieldName)
 	// Get the struct array field info
 	field, err := v.schema.GetFieldFromName(fullFieldName)
 	if err != nil {

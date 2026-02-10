@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestUtil(t *testing.T) {
@@ -337,4 +338,159 @@ func (s *UtilSuite) TestAppendResultWithEmptyFieldsData() {
 	s.Equal([]int64{1, 2}, outputs.searchResultData.Ids.GetIntId().Data)
 	// FieldsData should still be empty
 	s.Equal(0, len(outputs.searchResultData.FieldsData))
+}
+
+// TestAppendResultWithNullableSparseVector tests appendResult with nullable sparse vector fields.
+// This ensures that idxComputers correctly maps row indices to data indices for nullable vectors.
+func (s *UtilSuite) TestAppendResultWithNullableSparseVector() {
+	// Create sparse vector data: 3 rows where row 1 (middle) is null
+	// ValidData: [true, false, true] means rows 0 and 2 have data, row 1 is null
+	// Contents only has 2 entries (for the non-null rows at indices 0 and 2)
+	sparseContent0 := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3f} // sparse vector data for row 0
+	sparseContent2 := []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40} // sparse vector data for row 2
+
+	inputs := &rerankInputs{
+		fieldData: []*schemapb.SearchResultData{
+			{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1, 2, 3}, // 3 rows
+						},
+					},
+				},
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_SparseFloatVector,
+						FieldName: "sparse_vec",
+						FieldId:   101,
+						ValidData: []bool{true, false, true}, // Row 1 is null
+						Field: &schemapb.FieldData_Vectors{
+							Vectors: &schemapb.VectorField{
+								Dim: 700,
+								Data: &schemapb.VectorField_SparseFloatVector{
+									SparseFloatVector: &schemapb.SparseFloatArray{
+										Dim:      700,
+										Contents: [][]byte{sparseContent0, sparseContent2}, // Only 2 entries
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		nq: 1,
+	}
+
+	// Initialize idxComputers for the inputs
+	inputs.idxComputers = make([]*typeutil.FieldDataIdxComputer, len(inputs.fieldData))
+	for i, srd := range inputs.fieldData {
+		if srd != nil {
+			inputs.idxComputers[i] = typeutil.NewFieldDataIdxComputer(srd.GetFieldsData())
+		}
+	}
+
+	searchParams := &SearchParams{limit: 10}
+	outputs := newRerankOutputs(inputs, searchParams)
+
+	// Select rows in reverse order: row 2 first, then row 0
+	// Row 2 is valid (should get sparseContent2), Row 0 is valid (should get sparseContent0)
+	idScores := &IDScores[int64]{
+		ids:       []int64{3, 1},                                               // IDs for rows 2 and 0
+		scores:    []float32{0.9, 0.8},                                         // scores
+		locations: []IDLoc{{batchIdx: 0, offset: 2}, {batchIdx: 0, offset: 0}}, // row indices
+	}
+
+	// This should NOT panic - the bug was that without idxComputers,
+	// it would use row index directly to access Contents, causing index out of range
+	s.NotPanics(func() {
+		appendResult(inputs, outputs, idScores)
+	})
+
+	// Verify results
+	s.Equal(int64(2), outputs.searchResultData.Topks[0])
+	s.Equal([]int64{3, 1}, outputs.searchResultData.Ids.GetIntId().Data)
+
+	// Verify sparse vector data is correctly copied
+	resultSparse := outputs.searchResultData.FieldsData[0]
+	s.Equal(schemapb.DataType_SparseFloatVector, resultSparse.GetType())
+
+	// ValidData should reflect the selected rows: both row 2 and row 0 are valid
+	s.Equal([]bool{true, true}, resultSparse.GetValidData())
+
+	// Contents should have 2 entries in the correct order
+	contents := resultSparse.GetVectors().GetSparseFloatVector().GetContents()
+	s.Len(contents, 2)
+	s.Equal(sparseContent2, contents[0]) // Row 2's data comes first
+	s.Equal(sparseContent0, contents[1]) // Row 0's data comes second
+}
+
+// TestAppendResultWithNullableSparseVectorSelectingNullRow tests appendResult when selecting a null row.
+func (s *UtilSuite) TestAppendResultWithNullableSparseVectorSelectingNullRow() {
+	sparseContent0 := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3f}
+
+	inputs := &rerankInputs{
+		fieldData: []*schemapb.SearchResultData{
+			{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_SparseFloatVector,
+						FieldName: "sparse_vec",
+						FieldId:   101,
+						ValidData: []bool{true, false, false}, // Only row 0 has data
+						Field: &schemapb.FieldData_Vectors{
+							Vectors: &schemapb.VectorField{
+								Dim: 700,
+								Data: &schemapb.VectorField_SparseFloatVector{
+									SparseFloatVector: &schemapb.SparseFloatArray{
+										Dim:      700,
+										Contents: [][]byte{sparseContent0}, // Only 1 entry
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		nq: 1,
+	}
+
+	inputs.idxComputers = make([]*typeutil.FieldDataIdxComputer, len(inputs.fieldData))
+	for i, srd := range inputs.fieldData {
+		if srd != nil {
+			inputs.idxComputers[i] = typeutil.NewFieldDataIdxComputer(srd.GetFieldsData())
+		}
+	}
+
+	searchParams := &SearchParams{limit: 10}
+	outputs := newRerankOutputs(inputs, searchParams)
+
+	// Select row 1 (null) and row 0 (valid)
+	idScores := &IDScores[int64]{
+		ids:       []int64{2, 1},
+		scores:    []float32{0.9, 0.8},
+		locations: []IDLoc{{batchIdx: 0, offset: 1}, {batchIdx: 0, offset: 0}},
+	}
+
+	s.NotPanics(func() {
+		appendResult(inputs, outputs, idScores)
+	})
+
+	// Verify ValidData: row 1 is null, row 0 is valid
+	resultSparse := outputs.searchResultData.FieldsData[0]
+	s.Equal([]bool{false, true}, resultSparse.GetValidData())
+
+	// Contents should have 1 entry (only for the valid row)
+	contents := resultSparse.GetVectors().GetSparseFloatVector().GetContents()
+	s.Len(contents, 1)
+	s.Equal(sparseContent0, contents[0])
 }

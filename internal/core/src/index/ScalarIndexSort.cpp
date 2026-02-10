@@ -479,7 +479,7 @@ ScalarIndexSort<T>::IsNotNull() {
 
 template <typename T>
 const TargetBitmap
-ScalarIndexSort<T>::Range(const T value, const OpType op) {
+ScalarIndexSort<T>::Range(const T& value, const OpType op) {
     AssertInfo(is_built_, "index has not been built");
     auto lb = begin();
     auto ub = end();
@@ -532,9 +532,9 @@ ScalarIndexSort<T>::Range(const T value, const OpType op) {
 
 template <typename T>
 const TargetBitmap
-ScalarIndexSort<T>::Range(T lower_bound_value,
+ScalarIndexSort<T>::Range(const T& lower_bound_value,
                           bool lb_inclusive,
-                          T upper_bound_value,
+                          const T& upper_bound_value,
                           bool ub_inclusive) {
     AssertInfo(is_built_, "index has not been built");
     if (lower_bound_value > upper_bound_value ||
