@@ -104,6 +104,18 @@ class PhyLogicalBinaryExpr : public Expr {
         return std::nullopt;
     }
 
+    bool
+    CanExecuteAllAtOnce() const override {
+        return inputs_[0]->CanExecuteAllAtOnce() &&
+               inputs_[1]->CanExecuteAllAtOnce();
+    }
+
+    void
+    SetExecuteAllAtOnce() override {
+        inputs_[0]->SetExecuteAllAtOnce();
+        inputs_[1]->SetExecuteAllAtOnce();
+    }
+
  private:
     std::shared_ptr<const milvus::expr::LogicalBinaryExpr> expr_;
 };

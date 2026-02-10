@@ -249,7 +249,6 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             auto val_type = expr_->val_.val_case();
-            auto val_type_inner = FromValCase(val_type);
             if (CanUseNgramIndex() && !has_offset_input_) {
                 auto res = ExecNgramMatch(context);
                 // If nullopt is returned, it means the query cannot be
@@ -260,7 +259,7 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 }
             }
 
-            if (CanUseIndexForJson(val_type_inner) && !has_offset_input_) {
+            if (use_index_ && !has_offset_input_) {
                 switch (val_type) {
                     case proto::plan::GenericValue::ValCase::kBoolVal:
                         result = ExecRangeVisitorImplForIndex<bool>();
@@ -314,24 +313,19 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             auto val_type = expr_->val_.val_case();
             switch (val_type) {
                 case proto::plan::GenericValue::ValCase::kBoolVal:
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<bool>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kInt64Val:
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<int64_t>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<double>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kStringVal:
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<std::string>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kArrayVal:
-                    if (!has_offset_input_ &&
-                        CanUseIndexForArray<milvus::Array>()) {
+                    if (use_index_ && !has_offset_input_) {
                         result = ExecRangeVisitorImplArrayForIndex<
                             proto::plan::Array>(context);
                     } else {
@@ -1355,7 +1349,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
         }
     }
 
-    if (CanUseIndex<T>() && !has_offset_input_) {
+    // use_index_ is already determined during initialization by DetermineUseIndex()
+    if (use_index_ && !has_offset_input_) {
         return ExecRangeVisitorImplForIndex<T>();
     } else {
         return ExecRangeVisitorImplForData<T>(context);
@@ -1515,9 +1510,8 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
             }
             auto valid =
                 (input != nullptr)
-                    ? ProcessChunksForValidByOffsets<T>(
-                          SegmentExpr::CanUseIndex(), *input)
-                    : ProcessChunksForValid<T>(SegmentExpr::CanUseIndex());
+                    ? ProcessChunksForValidByOffsets<T>(use_index_, *input)
+                    : ProcessChunksForValid<T>(use_index_);
             auto res_vec = std::make_shared<ColumnVector>(
                 TargetBitmap(batch_size), std::move(valid));
             TargetBitmapView res(res_vec->GetRawData(), batch_size);
@@ -1789,33 +1783,99 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     return res_vec;
 }
 
-template <typename T>
-bool
-PhyUnaryRangeFilterExpr::CanUseIndex() {
-    use_index_ = SegmentExpr::CanUseIndex() &&
-                 SegmentExpr::CanUseIndexForOp<T>(expr_->op_type_);
-    return use_index_;
-}
+void
+PhyUnaryRangeFilterExpr::DetermineUseIndex() {
+    // TextMatch/PhraseMatch use a separate text index path (segment_->GetTextIndex()),
+    // not the pinned_index_ scalar index path. Do not set use_index_ = true for them,
+    // as it would break MoveCursor/GetNextBatchSize on growing segments.
+    if (expr_->op_type_ == proto::plan::OpType::TextMatch ||
+        expr_->op_type_ == proto::plan::OpType::PhraseMatch) {
+        use_index_ = false;
+        return;
+    }
 
-bool
-PhyUnaryRangeFilterExpr::CanUseIndexForJson(DataType val_type) {
+    // check base condition first
     if (!SegmentExpr::CanUseIndex()) {
         use_index_ = false;
-        return false;
+        return;
     }
-    bool has_index = pinned_index_.size() > 0;
-    switch (val_type) {
-        case DataType::STRING:
-        case DataType::VARCHAR:
-            use_index_ = has_index &&
-                         expr_->op_type_ != proto::plan::OpType::Match &&
-                         expr_->op_type_ != proto::plan::OpType::PostfixMatch &&
-                         expr_->op_type_ != proto::plan::OpType::InnerMatch;
+
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+
+    switch (data_type) {
+        case DataType::BOOL:
+            use_index_ = SegmentExpr::CanUseIndexForOp<bool>(expr_->op_type_);
             break;
+        case DataType::INT8:
+            use_index_ = SegmentExpr::CanUseIndexForOp<int8_t>(expr_->op_type_);
+            break;
+        case DataType::INT16:
+            use_index_ =
+                SegmentExpr::CanUseIndexForOp<int16_t>(expr_->op_type_);
+            break;
+        case DataType::INT32:
+            use_index_ =
+                SegmentExpr::CanUseIndexForOp<int32_t>(expr_->op_type_);
+            break;
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
+            use_index_ =
+                SegmentExpr::CanUseIndexForOp<int64_t>(expr_->op_type_);
+            break;
+        case DataType::FLOAT:
+            use_index_ = SegmentExpr::CanUseIndexForOp<float>(expr_->op_type_);
+            break;
+        case DataType::DOUBLE:
+            use_index_ = SegmentExpr::CanUseIndexForOp<double>(expr_->op_type_);
+            break;
+        case DataType::VARCHAR:
+            use_index_ =
+                SegmentExpr::CanUseIndexForOp<std::string>(expr_->op_type_);
+            break;
+        case DataType::JSON: {
+            // For JSON type, check based on value type
+            auto val_type = FromValCase(expr_->val_.val_case());
+            bool has_index = pinned_index_.size() > 0;
+            switch (val_type) {
+                case DataType::STRING:
+                case DataType::VARCHAR:
+                    use_index_ =
+                        has_index &&
+                        expr_->op_type_ != proto::plan::OpType::Match &&
+                        expr_->op_type_ != proto::plan::OpType::PostfixMatch &&
+                        expr_->op_type_ != proto::plan::OpType::InnerMatch;
+                    break;
+                default:
+                    use_index_ = has_index;
+            }
+            break;
+        }
+        case DataType::ARRAY: {
+            // For ARRAY type, determine based on value type and element type
+            auto val_type = expr_->val_.val_case();
+            switch (val_type) {
+                case proto::plan::GenericValue::ValCase::kBoolVal:
+                case proto::plan::GenericValue::ValCase::kInt64Val:
+                case proto::plan::GenericValue::ValCase::kFloatVal:
+                case proto::plan::GenericValue::ValCase::kStringVal:
+                    // These types don't use index for array
+                    use_index_ = false;
+                    break;
+                case proto::plan::GenericValue::ValCase::kArrayVal:
+                    // Array equality check - can use index based on element type
+                    use_index_ = CanUseIndexForArray<milvus::Array>();
+                    break;
+                default:
+                    use_index_ = false;
+            }
+            break;
+        }
         default:
-            use_index_ = has_index;
+            use_index_ = false;
     }
-    return use_index_;
 }
 
 VectorPtr

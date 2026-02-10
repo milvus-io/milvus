@@ -81,6 +81,16 @@ class PhyAlwaysTrueExpr : public Expr {
         return std::nullopt;
     }
 
+    bool
+    CanExecuteAllAtOnce() const override {
+        return true;
+    }
+
+    void
+    SetExecuteAllAtOnce() override {
+        batch_size_ = active_count_;
+    }
+
  private:
     std::shared_ptr<const milvus::expr::AlwaysTrueExpr> expr_;
     int64_t active_count_;
