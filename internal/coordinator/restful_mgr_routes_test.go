@@ -37,7 +37,10 @@ func TestHandleAlterConfig(t *testing.T) {
 	_, hasEtcd := mgr.GetEtcdSource()
 	require.True(t, hasEtcd, "etcd source is required for this test, ensure etcd is running")
 
-	// Create a mock mixCoordImpl
+	// Mark some keys as immutable for testing
+	mgr.ImmutableUpdate("test.immutable.key1")
+
+	// Create a mixCoordImpl
 	coord := &mixCoordImpl{}
 
 	t.Run("single config update", func(t *testing.T) {
@@ -169,6 +172,22 @@ func TestHandleAlterConfig(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "mqtype configuration cannot be modified")
 		assert.Contains(t, w.Body.String(), "alterWAL endpoint")
+	})
+
+	t.Run("immutable config should fail", func(t *testing.T) {
+		reqBody := map[string]interface{}{
+			"configs": []map[string]string{
+				{"key": "test.immutable.key1", "value": "value"},
+			},
+		}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+
+		coord.HandleAlterConfig(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "immutable configuration cannot be modified")
 	})
 
 	t.Run("wrong HTTP method should fail", func(t *testing.T) {
