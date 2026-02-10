@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -114,16 +115,39 @@ class IndexEntryReader {
     ReadEncryptedEntry(const EntryMeta& meta);
 
     void
-    WritePlainEntryToFile(const EntryMeta& meta, const std::string& local_path);
-    void
-    WriteEncryptedEntryToFile(const EntryMeta& meta,
-                              const std::string& local_path);
-
-    void
     VerifyCrc32c(uint32_t expected,
                  const uint8_t* data,
                  size_t size,
                  const std::string& name);
+
+    // Helper struct for tracking entry download state
+    struct RangeCrc {
+        uint32_t crc;
+        size_t len;
+    };
+
+    struct EntryDownloadState {
+        std::string name;
+        int fd;
+        uint32_t expected_crc;
+        std::vector<RangeCrc> range_crcs;
+    };
+
+    // Prepare download state for an entry (open file, allocate CRC vector)
+    EntryDownloadState
+    PrepareEntryDownload(const std::string& name,
+                         const std::string& local_path,
+                         const EntryMeta& meta);
+
+    // Submit download tasks for an entry to the futures vector (does not wait)
+    void
+    SubmitEntryDownloadTasks(const EntryMeta& meta,
+                             EntryDownloadState& state,
+                             std::vector<std::future<void>>& futures);
+
+    // Verify CRC and close file descriptor
+    void
+    FinalizeEntryDownload(EntryDownloadState& state);
 
     std::shared_ptr<milvus::InputStream> input_;
     int64_t file_size_ = 0;
