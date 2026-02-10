@@ -21,6 +21,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/QueryResult.h"
+#include "log/Log.h"
 #include "segcore/ReduceUtils.h"
 
 namespace milvus::segcore {
@@ -207,6 +208,22 @@ GroupReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
             heap.push(pilot);
         }
     }
+    AssertInfo(static_cast<int64_t>(group_by_map.size()) <= topk,
+               "group_by_map size {} exceeds topk {}, qi={}, offset={}, "
+               "filtered_count={}",
+               group_by_map.size(),
+               topk,
+               qi,
+               offset,
+               filtered_count);
+    LOG_DEBUG(
+        "GroupReduceHelper::ReduceSearchResultForOneNQ qi={}, topk={}, "
+        "offset={}, filtered_count={}, group_by_map_size={}",
+        qi,
+        topk,
+        offset,
+        filtered_count,
+        group_by_map.size());
     return filtered_count;
 }
 
