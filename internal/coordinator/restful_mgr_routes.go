@@ -1282,8 +1282,8 @@ func (s *mixCoordImpl) broadcastAlterWALMessage(ctx context.Context, targetWALNa
 	return nil
 }
 
-// HandleAlterConfig handles POST requests to alter immutable configuration items.
-// Configurations can be modified through this endpoint and persisted to etcd.
+// HandleAlterConfig handles POST requests to alter configuration items.
+// Immutable configurations cannot be modified through this endpoint.
 // For mqtype modifications, use the alterWAL endpoint instead.
 //
 // Request format:
@@ -1347,6 +1347,14 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			logger.Info("HandleAlterConfig attempted to modify mqtype",
 				zap.String("key", config.Key))
 			http.Error(writer, fmt.Sprintf(`{"msg": "mqtype configuration cannot be modified through this endpoint. Please use the alterWAL endpoint instead. Invalid key: %s"}`, config.Key), http.StatusBadRequest)
+			return
+		}
+
+		// Check if the configuration is immutable - immutable keys cannot be modified
+		if paramMgr.IsImmutable(config.Key) {
+			logger.Info("HandleAlterConfig attempted to modify immutable config",
+				zap.String("key", config.Key))
+			http.Error(writer, fmt.Sprintf(`{"msg": "immutable configuration cannot be modified through this endpoint. Invalid key: %s"}`, config.Key), http.StatusBadRequest)
 			return
 		}
 
