@@ -456,7 +456,8 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size,
-        int32_t consistency_level)
+        int32_t consistency_level,
+        const query::PlanOptions& plan_options = {})
         : SegmentExpr(std::move(input),
                       name,
                       op_ctx,
@@ -470,8 +471,10 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
                       batch_size,
                       consistency_level,
                       false,
-                      true),
+                      true,
+                      plan_options),
           expr_(expr) {
+        DetermineExecPath();
     }
 
     void
@@ -490,6 +493,15 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const override {
         return expr_->column_;
+    }
+
+    void
+    DetermineExecPath() override {
+        if (CanUseJsonStatsAtInit()) {
+            exec_path_ = ExprExecPath::JsonStats;
+            return;
+        }
+        SegmentExpr::DetermineExecPath();
     }
 
  private:

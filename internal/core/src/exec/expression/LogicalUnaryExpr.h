@@ -68,6 +68,16 @@ class PhyLogicalUnaryExpr : public Expr {
         return std::nullopt;
     }
 
+    bool
+    CanExecuteAllAtOnce() const override {
+        return inputs_[0]->CanExecuteAllAtOnce();
+    }
+
+    void
+    SetExecuteAllAtOnce() override {
+        inputs_[0]->SetExecuteAllAtOnce();
+    }
+
  private:
     std::shared_ptr<const milvus::expr::LogicalUnaryExpr> expr_;
 };
