@@ -271,7 +271,7 @@ TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
     auto index = std::make_unique<Index>(
         200, "test_multi_batch", "milvus_tokenizer", "{}");
     index->CreateReader(milvus::index::SetBitsetGrowing);
-    index->RegisterAnalyzer("milvus_tokenizer", "{}");
+    index->RegisterTokenizer("milvus_tokenizer", "{}");
 
     index->BuildIndexFromFieldData(field_datas, true /* nullable */);
     index->Commit();
@@ -359,7 +359,7 @@ TEST(TextMatch, BuildIndexFromFieldDataSingleBatchNullable) {
     auto index = std::make_unique<Index>(
         200, "test_single_batch", "milvus_tokenizer", "{}");
     index->CreateReader(milvus::index::SetBitsetGrowing);
-    index->RegisterAnalyzer("milvus_tokenizer", "{}");
+    index->RegisterTokenizer("milvus_tokenizer", "{}");
 
     index->BuildIndexFromFieldData(field_datas, true);
     index->Commit();
