@@ -80,7 +80,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     switch (expr_->column_.data_type_) {
         case DataType::ARRAY: {
-            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+            if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
                 result = EvalArrayContainsForIndexSegment(
                     expr_->column_.element_type_);
             } else {
@@ -89,7 +89,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::JSON: {
-            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+            if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
                 result = EvalArrayContainsForIndexSegment(
                     value_type_ == DataType::INT64 ? DataType::DOUBLE
                                                    : value_type_);
@@ -566,12 +566,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 VectorPtr
@@ -788,12 +786,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 template <typename ExprValueType>
@@ -1151,12 +1147,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 VectorPtr
@@ -1502,12 +1496,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 VectorPtr
@@ -1731,12 +1723,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 VectorPtr
@@ -2057,12 +2047,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 VectorPtr
@@ -2152,5 +2140,6 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
                real_batch_size);
     return res;
 }
+
 }  //namespace exec
 }  // namespace milvus

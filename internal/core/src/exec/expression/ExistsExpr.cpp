@@ -59,7 +59,7 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     switch (data_type) {
         case DataType::JSON: {
             span.GetSpan()->SetAttribute("json_filter_expr_type", "exists");
-            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+            if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
                 result = EvalJsonExistsForIndex();
             } else {
                 result = EvalJsonExistsForDataSegment(context);
@@ -129,12 +129,10 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                           index->GetCastType());
         }
     }
-    TargetBitmap res;
-    res.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_index_chunk_pos_, real_batch_size);
     current_index_chunk_pos_ += real_batch_size;
-    return std::make_shared<ColumnVector>(std::move(res),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 VectorPtr
@@ -274,12 +272,10 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
         }
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 }  //namespace exec

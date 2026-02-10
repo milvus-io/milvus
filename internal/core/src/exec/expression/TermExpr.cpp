@@ -138,26 +138,21 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::ARRAY: {
             if (expr_->vals_.size() == 0) {
-                SetNotUseIndex();
                 result = ExecVisitorImplTemplateArray<bool>(context);
                 break;
             }
             auto type = expr_->vals_[0].val_case();
             switch (type) {
                 case proto::plan::GenericValue::ValCase::kBoolVal:
-                    SetNotUseIndex();
                     result = ExecVisitorImplTemplateArray<bool>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kInt64Val:
-                    SetNotUseIndex();
                     result = ExecVisitorImplTemplateArray<int64_t>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
-                    SetNotUseIndex();
                     result = ExecVisitorImplTemplateArray<double>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kStringVal:
-                    SetNotUseIndex();
                     result = ExecVisitorImplTemplateArray<std::string>(context);
                     break;
                 default:
@@ -262,7 +257,7 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(EvalCtx& context) {
     if (expr_->is_in_field_) {
         return ExecTermJsonVariableInField<ValueType>(context);
     } else {
-        if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+        if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
             // we create double index for json int64 field for now
             using GetType =
                 std::conditional_t<std::is_same_v<ValueType, int64_t>,
@@ -758,12 +753,10 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 template <typename ValueType>
@@ -897,7 +890,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
 template <typename T>
 VectorPtr
 PhyTermFilterExpr::ExecVisitorImpl(EvalCtx& context) {
-    if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+    if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
         return ExecVisitorImplForIndex<T>();
     } else {
         return ExecVisitorImplForData<T>(context);
@@ -1092,6 +1085,24 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
                processed_size,
                real_batch_size);
     return res_vec;
+}
+
+void
+PhyTermFilterExpr::DetermineExecPath() {
+    SegmentExpr::DetermineExecPath();
+    if (exec_path_ != ExprExecPath::ScalarIndex) {
+        return;
+    }
+
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+
+    // ARRAY type cannot use scalar index
+    if (data_type == DataType::ARRAY) {
+        exec_path_ = ExprExecPath::RawData;
+    }
 }
 
 }  //namespace exec
