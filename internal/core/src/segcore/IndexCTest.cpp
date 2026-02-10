@@ -366,7 +366,7 @@ TEST(CreateIndexTest, StorageV2) {
 
     auto* storage_config = build_index_info->mutable_storage_config();
     storage_config->set_storage_type("remote");
-    storage_config->set_root_path("/tmp/test_storage");
+    storage_config->set_root_path(TestLocalPath);
     storage_config->set_address("localhost:9000");
     storage_config->set_bucket_name("test_bucket");
     storage_config->set_access_keyid("test_access_key");
@@ -432,7 +432,7 @@ TEST(VectorMemIndexTest, StorageV2) {
 
     auto* storage_config = build_index_info->mutable_storage_config();
     storage_config->set_storage_type("local");
-    storage_config->set_root_path("/tmp");
+    storage_config->set_root_path(TestLocalPath);
 
     std::string serialized_info;
     build_index_info->SerializeToString(&serialized_info);
