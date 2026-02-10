@@ -73,8 +73,7 @@ const (
 	ReduceSegments = "segments"
 	ReduceShards   = "shards"
 
-	BatchReduce  = "batch_reduce"
-	StreamReduce = "stream_reduce"
+	BatchReduce = "batch_reduce"
 
 	Pending   = "pending"
 	Executing = "executing"

@@ -38,6 +38,17 @@ include_directories(
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
+if(APPLE)
+    # On macOS, aws-sdk-cpp comes from Homebrew instead of Conan.
+    # Add Homebrew include path AFTER Conan includes so Conan headers take precedence,
+    # avoiding conflicts (e.g., Boost version mismatch).
+    if(EXISTS "/opt/homebrew/include/aws")
+        include_directories("/opt/homebrew/include")
+    elseif(EXISTS "/usr/local/include/aws")
+        include_directories("/usr/local/include")
+    endif()
+endif()
+
 add_subdirectory( pb )
 add_subdirectory( config )
 add_subdirectory( common )

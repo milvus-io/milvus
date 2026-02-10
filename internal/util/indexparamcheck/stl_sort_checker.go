@@ -20,6 +20,13 @@ func (c *STLSORTChecker) CheckTrain(dataType schemapb.DataType, elementType sche
 
 func (c *STLSORTChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {
 	dataType := field.GetDataType()
+	if typeutil.IsArrayType(dataType) && typeutil.IsStructSubField(field.GetName()) {
+		elemType := field.GetElementType()
+		if !typeutil.IsArithmetic(elemType) && !typeutil.IsStringType(elemType) && !typeutil.IsTimestamptzType(elemType) {
+			return errors.New(fmt.Sprintf("STL_SORT are only supported on numeric, varchar or timestamptz field, got struct sub-field of %s", field.GetElementType()))
+		}
+		return nil
+	}
 	if !typeutil.IsArithmetic(dataType) && !typeutil.IsStringType(dataType) && !typeutil.IsTimestamptzType(dataType) {
 		return errors.New(fmt.Sprintf("STL_SORT are only supported on numeric, varchar or timestamptz field, got %s", field.GetDataType()))
 	}
