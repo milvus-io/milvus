@@ -3345,3 +3345,15 @@ func TestServer_ListRefreshExternalCollectionJobs(t *testing.T) {
 		assert.Equal(t, indexpb.JobState_JobStateFailed, resp.GetJobs()[1].GetState())
 	})
 }
+
+func TestServer_CreateExternalCollection_NoOp(t *testing.T) {
+	server := &Server{}
+	req := &msgpb.CreateCollectionRequest{
+		CollectionName: "test_external",
+	}
+
+	resp, err := server.CreateExternalCollection(context.Background(), req)
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.False(t, merr.Ok(resp.GetStatus()))
+}

@@ -1982,48 +1982,11 @@ func (s *Server) NotifyDropPartition(ctx context.Context, channel string, partit
 	return s.meta.DropSegmentsOfPartition(ctx, partitionIDs)
 }
 
-// CreateExternalCollection creates an external collection in datacoord
-// This is a skeleton implementation - details to be filled in later
-func (s *Server) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
-	log := log.Ctx(ctx).With(
-		zap.String("dbName", req.GetDbName()),
-		zap.String("collectionName", req.GetCollectionName()),
-		zap.Int64("dbID", req.GetDbID()),
-		zap.Int64("collectionID", req.GetCollectionID()))
-
-	log.Info("receive CreateExternalCollection request")
-
-	// Check if server is healthy
-	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		log.Warn("server is not healthy", zap.Error(err))
-		return &datapb.CreateExternalCollectionResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-
-	// Create collection info and add to meta
-	// This will make the collection visible to inspectors
-	// The collection schema already contains external_source and external_spec fields
-	collInfo := &collectionInfo{
-		ID:            req.GetCollectionID(),
-		Schema:        req.GetCollectionSchema(),
-		Partitions:    req.GetPartitionIDs(),
-		Properties:    make(map[string]string),
-		DatabaseID:    req.GetDbID(),
-		DatabaseName:  req.GetDbName(),
-		VChannelNames: req.GetVirtualChannelNames(),
-	}
-
-	s.meta.AddCollection(collInfo)
-
-	log.Info("CreateExternalCollection: collection added to meta",
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.String("collectionName", req.GetCollectionName()),
-		zap.String("externalSource", req.GetCollectionSchema().GetExternalSource()),
-		zap.String("externalSpec", req.GetCollectionSchema().GetExternalSpec()))
-
+// CreateExternalCollection is a no-op stub to satisfy the DataCoordServer interface.
+// External collection creation goes through the standard CreateCollection flow in RootCoord.
+func (s *Server) CreateExternalCollection(_ context.Context, _ *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
 	return &datapb.CreateExternalCollectionResponse{
-		Status: merr.Success(),
+		Status: merr.Status(merr.WrapErrServiceInternal("CreateExternalCollection is not supported, use CreateCollection instead")),
 	}, nil
 }
 
