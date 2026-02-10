@@ -48,6 +48,8 @@
 #include "pb/common.pb.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileWriter.h"
+#include "storage/IndexEntryReader.h"
+#include "storage/IndexEntryWriter.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
@@ -74,7 +76,7 @@ ScalarIndexSort<T>::ScalarIndexSort(
     // not valid means we are in unit test
     if (file_manager_context.Valid()) {
         field_id_ = file_manager_context.fieldDataMeta.field_id;
-        file_manager_ =
+        this->file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
         disk_file_manager_ = std::make_shared<storage::DiskFileManagerImpl>(
             file_manager_context);
@@ -87,8 +89,10 @@ ScalarIndexSort<T>::Build(const Config& config) {
     if (is_built_) {
         return;
     }
-    auto field_datas =
-        storage::CacheRawDataAndFillMissing(file_manager_, config);
+    auto field_datas = storage::CacheRawDataAndFillMissing(
+        std::static_pointer_cast<storage::MemFileManagerImpl>(
+            this->file_manager_),
+        config);
 
     BuildWithFieldData(field_datas);
 }
@@ -256,6 +260,9 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
 template <typename T>
 IndexStatsPtr
 ScalarIndexSort<T>::Upload(const Config& config) {
+    if (kScalarIndexUseV3) {
+        return this->UploadV3(config);
+    }
     auto index_build_duration =
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now() - index_build_begin_)
@@ -269,11 +276,64 @@ ScalarIndexSort<T>::Upload(const Config& config) {
         index_build_duration);
 
     auto binary_set = Serialize(config);
-    file_manager_->AddFile(binary_set);
+    this->file_manager_->AddFile(binary_set);
 
-    auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
-    return IndexStats::NewFromSizeMap(file_manager_->GetAddedTotalMemSize(),
-                                      remote_paths_to_size);
+    auto remote_paths_to_size = this->file_manager_->GetRemotePathsToFileSize();
+    return IndexStats::NewFromSizeMap(
+        this->file_manager_->GetAddedTotalMemSize(), remote_paths_to_size);
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::SetupMmapFromData(
+    const uint8_t* data,
+    size_t size,
+    milvus::proto::common::LoadPriority priority) {
+    // Setup mmap file path
+    mmap_filepath_ = disk_file_manager_ != nullptr
+                         ? disk_file_manager_->GetLocalIndexObjectPrefix() +
+                               STLSORT_INDEX_FILE_NAME
+                         : MMAP_PATH_FOR_TEST;
+    std::filesystem::create_directories(
+        std::filesystem::path(mmap_filepath_).parent_path());
+
+    auto aligned_size = ((size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+
+    // Write data to file with alignment padding
+    {
+        auto file_writer = storage::FileWriter(
+            mmap_filepath_, storage::io::GetPriorityFromLoadPriority(priority));
+        file_writer.Write(data, size);
+
+        if (aligned_size > size) {
+            std::vector<uint8_t> padding(aligned_size - size, 0);
+            file_writer.Write(padding.data(), padding.size());
+        }
+        // Write extra padding for safety
+        std::vector<uint8_t> padding(MMAP_INDEX_PADDING, 0);
+        file_writer.Write(padding.data(), padding.size());
+        file_writer.Finish();
+    }
+
+    // mmap the file
+    auto file = File::Open(mmap_filepath_, O_RDONLY);
+    mmap_data_ = static_cast<char*>(mmap(NULL,
+                                         aligned_size + MMAP_INDEX_PADDING,
+                                         PROT_READ,
+                                         MAP_PRIVATE,
+                                         file.Descriptor(),
+                                         0));
+
+    if (mmap_data_ == MAP_FAILED) {
+        file.Close();
+        remove(mmap_filepath_.c_str());
+        ThrowInfo(
+            ErrorCode::UnexpectedError, "failed to mmap: {}", strerror(errno));
+    }
+
+    mmap_size_ = aligned_size + MMAP_INDEX_PADDING;
+    data_size_ = size;
+    file.Close();
 }
 
 template <typename T>
@@ -296,57 +356,14 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
     auto index_data = index_binary.GetByName("index_data");
 
     if (is_mmap_) {
-        // some test may pass invalid file_manager_context in constructor which results in a nullptr disk_file_manager_
-        mmap_filepath_ = disk_file_manager_ != nullptr
-                             ? disk_file_manager_->GetLocalIndexObjectPrefix() +
-                                   STLSORT_INDEX_FILE_NAME
-                             : MMAP_PATH_FOR_TEST;
-        std::filesystem::create_directories(
-            std::filesystem::path(mmap_filepath_).parent_path());
-
-        auto aligned_size =
-            ((index_data->size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
-        {
-            auto load_priority =
-                GetValueFromConfig<milvus::proto::common::LoadPriority>(
-                    config, milvus::LOAD_PRIORITY)
-                    .value_or(milvus::proto::common::LoadPriority::HIGH);
-            auto file_writer = storage::FileWriter(
-                mmap_filepath_,
-                storage::io::GetPriorityFromLoadPriority(load_priority));
-            file_writer.Write(index_data->data.get(), (size_t)index_data->size);
-
-            if (aligned_size > index_data->size) {
-                std::vector<uint8_t> padding(aligned_size - index_data->size,
-                                             0);
-                file_writer.Write(padding.data(), padding.size());
-            }
-            // write padding in case of all null values
-            std::vector<uint8_t> padding(MMAP_INDEX_PADDING, 0);
-            file_writer.Write(padding.data(), padding.size());
-            file_writer.Finish();
-        }
-
-        auto file = File::Open(mmap_filepath_, O_RDONLY);
-        mmap_data_ = static_cast<char*>(mmap(NULL,
-                                             aligned_size + MMAP_INDEX_PADDING,
-                                             PROT_READ,
-                                             MAP_PRIVATE,
-                                             file.Descriptor(),
-                                             0));
-
-        if (mmap_data_ == MAP_FAILED) {
-            file.Close();
-            remove(mmap_filepath_.c_str());
-            ThrowInfo(ErrorCode::UnexpectedError,
-                      "failed to mmap: {}",
-                      strerror(errno));
-        }
-
-        mmap_size_ = aligned_size + MMAP_INDEX_PADDING;
-        data_size_ = index_data->size;
-
-        file.Close();
+        auto load_priority =
+            GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                config, milvus::LOAD_PRIORITY)
+                .value_or(milvus::proto::common::LoadPriority::HIGH);
+        SetupMmapFromData(
+            reinterpret_cast<const uint8_t*>(index_data->data.get()),
+            index_data->size,
+            load_priority);
     } else {
         data_.resize(index_size);
         memcpy(data_.data(), index_data->data.get(), (size_t)index_data->size);
@@ -391,6 +408,10 @@ template <typename T>
 void
 ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
                          const Config& config) {
+    if (kScalarIndexUseV3) {
+        this->LoadV3(config);
+        return;
+    }
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
@@ -399,8 +420,8 @@ ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
-    auto index_datas =
-        file_manager_->LoadIndexToMemory(index_files.value(), load_priority);
+    auto index_datas = this->file_manager_->LoadIndexToMemory(
+        index_files.value(), load_priority);
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
     // clear index_datas to free memory early
@@ -642,6 +663,68 @@ ScalarIndexSort<T>::ShouldSkip(const T lower_value,
         return shouldSkip;
     }
     return true;
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::WriteEntries(storage::IndexEntryWriter* writer) {
+    AssertInfo(is_built_, "index has not been built");
+
+    auto meta = nlohmann::json{{"index_length", data_.size()},
+                               {"num_rows", total_num_rows_},
+                               {"is_nested", is_nested_index_}}
+                    .dump();
+    writer->WriteEntry("SORT_INDEX_META", meta.data(), meta.size());
+
+    writer->WriteEntry(
+        "index_data", data_.data(), data_.size() * sizeof(IndexStructure<T>));
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
+                                const Config& config) {
+    auto meta_entry = reader.ReadEntry("SORT_INDEX_META");
+    auto mj =
+        nlohmann::json::parse(meta_entry.data.begin(), meta_entry.data.end());
+    size_t index_size = mj["index_length"].get<size_t>();
+    total_num_rows_ = mj["num_rows"].get<size_t>();
+    is_nested_index_ = mj["is_nested"].get<bool>();
+
+    auto data_entry = reader.ReadEntry("index_data");
+
+    is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+
+    if (is_mmap_) {
+        auto load_priority =
+            GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                config, milvus::LOAD_PRIORITY)
+                .value_or(milvus::proto::common::LoadPriority::HIGH);
+        SetupMmapFromData(
+            data_entry.data.data(), data_entry.data.size(), load_priority);
+    } else {
+        data_.resize(index_size);
+        std::memcpy(
+            data_.data(), data_entry.data.data(), data_entry.data.size());
+    }
+
+    setup_data_pointers();
+
+    idx_to_offsets_.resize(total_num_rows_);
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+
+    for (size_t i = 0; i < Size(); ++i) {
+        const auto& item = operator[](i);
+        idx_to_offsets_[item.idx_] = i;
+        valid_bitset_.set(item.idx_);
+    }
+
+    is_built_ = true;
+    ComputeByteSize();
+
+    LOG_INFO("LoadEntries ScalarIndexSort done, field_id: {}, is_mmap:{}",
+             field_id_,
+             is_mmap_);
 }
 
 template class ScalarIndexSort<bool>;

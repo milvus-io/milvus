@@ -186,6 +186,13 @@ class ScalarIndexSort : public ScalarIndex<T> {
     LoadWithoutAssemble(const BinarySet& binary_set,
                         const Config& config) override;
 
+    void
+    WriteEntries(storage::IndexEntryWriter* writer) override;
+
+    void
+    LoadEntries(storage::IndexEntryReader& reader,
+                const Config& config) override;
+
  public:
     // zero-cost data acess api
     ALWAYS_INLINE const IndexStructure<T>&
@@ -213,6 +220,15 @@ class ScalarIndexSort : public ScalarIndex<T> {
     }
 
  private:
+    /**
+     * Write data to mmap file and setup mmap pointers.
+     * Sets mmap_data_, mmap_size_, data_size_.
+     */
+    void
+    SetupMmapFromData(const uint8_t* data,
+                      size_t size,
+                      milvus::proto::common::LoadPriority priority);
+
     void
     setup_data_pointers() const {
         if (is_mmap_) {
@@ -232,7 +248,6 @@ class ScalarIndexSort : public ScalarIndex<T> {
     bool is_built_ = false;
     Config config_;
     std::vector<int32_t> idx_to_offsets_;  // used to retrieve.
-    std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
     std::shared_ptr<storage::DiskFileManagerImpl> disk_file_manager_;
     size_t total_num_rows_{0};
     // generate valid_bitset_ to speed up NotIn and IsNull and IsNotNull operate

@@ -48,6 +48,8 @@
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
 #include "storage/FileWriter.h"
+#include "storage/IndexEntryReader.h"
+#include "storage/IndexEntryWriter.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
@@ -124,7 +126,7 @@ StringIndexSort::StringIndexSort(
       is_nested_index_(is_nested_index) {
     if (file_manager_context.Valid()) {
         field_id_ = file_manager_context.fieldDataMeta.field_id;
-        file_manager_ =
+        this->file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
     }
 }
@@ -170,8 +172,10 @@ StringIndexSort::Build(const Config& config) {
         return;
     }
     config_ = config;
-    auto field_datas =
-        storage::CacheRawDataAndFillMissing(file_manager_, config);
+    auto field_datas = storage::CacheRawDataAndFillMissing(
+        std::static_pointer_cast<storage::MemFileManagerImpl>(
+            this->file_manager_),
+        config);
     BuildWithFieldData(field_datas);
 }
 
@@ -277,6 +281,9 @@ StringIndexSort::Serialize(const Config& config) {
 
 IndexStatsPtr
 StringIndexSort::Upload(const Config& config) {
+    if (kScalarIndexUseV3) {
+        return UploadV3(config);
+    }
     auto index_build_duration =
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now() - index_build_begin_)
@@ -287,11 +294,11 @@ StringIndexSort::Upload(const Config& config) {
         index_build_duration);
 
     auto binary_set = Serialize(config);
-    file_manager_->AddFile(binary_set);
+    this->file_manager_->AddFile(binary_set);
 
-    auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
-    return IndexStats::NewFromSizeMap(file_manager_->GetAddedTotalMemSize(),
-                                      remote_paths_to_size);
+    auto remote_paths_to_size = this->file_manager_->GetRemotePathsToFileSize();
+    return IndexStats::NewFromSizeMap(
+        this->file_manager_->GetAddedTotalMemSize(), remote_paths_to_size);
 }
 
 void
@@ -302,6 +309,10 @@ StringIndexSort::Load(const BinarySet& index_binary, const Config& config) {
 
 void
 StringIndexSort::Load(milvus::tracer::TraceContext ctx, const Config& config) {
+    if (kScalarIndexUseV3) {
+        this->LoadV3(config);
+        return;
+    }
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value() && !index_files.value().empty(),
@@ -312,8 +323,8 @@ StringIndexSort::Load(milvus::tracer::TraceContext ctx, const Config& config) {
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
 
-    auto index_datas =
-        file_manager_->LoadIndexToMemory(index_files.value(), load_priority);
+    auto index_datas = this->file_manager_->LoadIndexToMemory(
+        index_files.value(), load_priority);
 
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
@@ -508,6 +519,98 @@ StringIndexSort::ComputeByteSize() {
     }
 
     cached_byte_size_ = total;
+}
+
+void
+StringIndexSort::WriteEntries(storage::IndexEntryWriter* writer) {
+    AssertInfo(is_built_, "index has not been built");
+    AssertInfo(impl_ != nullptr, "impl_ is null, cannot write entries");
+
+    auto* memory_impl = dynamic_cast<StringIndexSortMemoryImpl*>(impl_.get());
+    AssertInfo(memory_impl != nullptr,
+               "WriteEntries requires StringIndexSortMemoryImpl");
+
+    size_t total_size = memory_impl->GetSerializedSize();
+    std::vector<uint8_t> data_buffer(total_size);
+    size_t offset = 0;
+    memory_impl->SerializeToBinary(data_buffer.data(), offset);
+
+    size_t valid_bitset_size = (total_num_rows_ + 7) / 8;
+    std::vector<uint8_t> valid_bitset_data(valid_bitset_size, 0);
+    for (size_t i = 0; i < total_num_rows_; ++i) {
+        if (valid_bitset_[i]) {
+            valid_bitset_data[i / 8] |= (1 << (i % 8));
+        }
+    }
+
+    auto meta = nlohmann::json{{"version", SERIALIZATION_VERSION},
+                               {"num_rows", total_num_rows_},
+                               {"is_nested", is_nested_index_}}
+                    .dump();
+    writer->WriteEntry("STRING_SORT_META", meta.data(), meta.size());
+    writer->WriteEntry("index_data", data_buffer.data(), total_size);
+    writer->WriteEntry(
+        "valid_bitset", valid_bitset_data.data(), valid_bitset_size);
+}
+
+void
+StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
+                             const Config& config) {
+    config_ = config;
+
+    auto meta_entry = reader.ReadEntry("STRING_SORT_META");
+    auto mj =
+        nlohmann::json::parse(meta_entry.data.begin(), meta_entry.data.end());
+
+    uint32_t version = mj["version"].get<uint32_t>();
+    if (version != SERIALIZATION_VERSION) {
+        ThrowInfo(milvus::ErrorCode::Unsupported,
+                  fmt::format("Unsupported StringIndexSort serialization "
+                              "version: {}, expected: {}",
+                              version,
+                              SERIALIZATION_VERSION));
+    }
+    total_num_rows_ = mj["num_rows"].get<size_t>();
+    is_nested_index_ = mj["is_nested"].get<bool>();
+
+    idx_to_offsets_.resize(total_num_rows_);
+
+    auto valid_bitset_entry = reader.ReadEntry("valid_bitset");
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    for (size_t i = 0; i < total_num_rows_; ++i) {
+        uint8_t byte = valid_bitset_entry.data[i / 8];
+        if (byte & (1 << (i % 8))) {
+            valid_bitset_.set(i);
+        }
+    }
+
+    auto index_data_entry = reader.ReadEntry("index_data");
+
+    if (config.contains(MMAP_FILE_PATH)) {
+        LOG_INFO("StringIndexSort::LoadEntries: loading with mmap strategy");
+        auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
+        auto mmap_path =
+            GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
+        mmap_impl->SetMmapFilePath(mmap_path);
+        mmap_impl->LoadFromData(index_data_entry.data.data(),
+                                index_data_entry.data.size(),
+                                total_num_rows_,
+                                valid_bitset_,
+                                idx_to_offsets_);
+        impl_ = std::move(mmap_impl);
+    } else {
+        LOG_INFO("StringIndexSort::LoadEntries: loading with memory strategy");
+        impl_ = std::make_unique<StringIndexSortMemoryImpl>();
+        impl_->LoadFromData(index_data_entry.data.data(),
+                            index_data_entry.data.size(),
+                            total_num_rows_,
+                            valid_bitset_,
+                            idx_to_offsets_);
+    }
+
+    is_built_ = true;
+    total_size_ = CalculateTotalSize();
+    ComputeByteSize();
 }
 
 void
@@ -722,7 +825,20 @@ StringIndexSortMemoryImpl::LoadFromBinary(
     AssertInfo(index_data != nullptr,
                "Failed to find 'index_data' in binary_set");
 
-    auto parsed = ParseBinaryData(index_data->data.get(), index_data->size);
+    LoadFromData(index_data->data.get(),
+                 index_data->size,
+                 total_num_rows,
+                 valid_bitset,
+                 idx_to_offsets);
+}
+
+void
+StringIndexSortMemoryImpl::LoadFromData(const uint8_t* data,
+                                        size_t data_size,
+                                        size_t total_num_rows,
+                                        TargetBitmap& valid_bitset,
+                                        std::vector<int32_t>& idx_to_offsets) {
+    auto parsed = ParseBinaryData(data, data_size);
     unique_values_.clear();
     posting_lists_.clear();
     unique_values_.reserve(parsed.unique_count);
@@ -1127,20 +1243,31 @@ StringIndexSortMmapImpl::LoadFromBinary(const BinarySet& binary_set,
                                         TargetBitmap& valid_bitset,
                                         std::vector<int32_t>& idx_to_offsets) {
     auto index_data = binary_set.GetByName("index_data");
+    LoadFromData(index_data->data.get(),
+                 index_data->size,
+                 total_num_rows,
+                 valid_bitset,
+                 idx_to_offsets);
+}
 
+void
+StringIndexSortMmapImpl::LoadFromData(const uint8_t* data,
+                                      size_t data_size,
+                                      size_t total_num_rows,
+                                      TargetBitmap& valid_bitset,
+                                      std::vector<int32_t>& idx_to_offsets) {
     AssertInfo(!mmap_filepath_.empty(), "mmap filepath is not set");
 
     std::filesystem::create_directories(
         std::filesystem::path(mmap_filepath_).parent_path());
 
-    auto aligned_size =
-        ((index_data->size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+    auto aligned_size = ((data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
     {
         auto file_writer = storage::FileWriter(mmap_filepath_);
-        file_writer.Write(index_data->data.get(), index_data->size);
+        file_writer.Write(data, data_size);
 
-        if (aligned_size > index_data->size) {
-            std::vector<uint8_t> padding(aligned_size - index_data->size, 0);
+        if (aligned_size > data_size) {
+            std::vector<uint8_t> padding(aligned_size - data_size, 0);
             file_writer.Write(padding.data(), padding.size());
         }
         // write padding in case of all null values
@@ -1155,7 +1282,7 @@ StringIndexSortMmapImpl::LoadFromBinary(const BinarySet& binary_set,
     }
 
     mmap_size_ = aligned_size + MMAP_INDEX_PADDING;
-    data_size_ = index_data->size;
+    data_size_ = data_size;
     mmap_data_ = static_cast<char*>(
         mmap(nullptr, mmap_size_, PROT_READ, MAP_PRIVATE, fd, 0));
     close(fd);
