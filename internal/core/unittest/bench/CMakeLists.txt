@@ -15,6 +15,7 @@ include_directories(${CMAKE_HOME_DIRECTORY}/unittest)
 set(bench_srcs
     bench_naive.cpp
     bench_search.cpp
+    bench_prepared_geometry.cpp
 )
 
 set(indexbuilder_bench_srcs

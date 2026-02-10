@@ -30,6 +30,7 @@ pytest-random-order
 # pymilvus
 pymilvus==2.6.9rc3
 pymilvus[bulk_writer]==2.6.9rc3
+
 # for protobuf
 protobuf>=5.29.5
 
