@@ -288,21 +288,6 @@ func (s *cSegmentImpl) LoadFieldData(ctx context.Context, request *LoadFieldData
 	return &LoadFieldDataResult{}, nil
 }
 
-// AddFieldDataInfo adds field data info into the segment.
-func (s *cSegmentImpl) AddFieldDataInfo(ctx context.Context, request *AddFieldDataInfoRequest) (*AddFieldDataInfoResult, error) {
-	creq, err := request.getCLoadFieldDataRequest()
-	if err != nil {
-		return nil, err
-	}
-	defer creq.Release()
-
-	status := C.AddFieldDataInfoForSealed(s.ptr, creq.cLoadFieldDataInfo)
-	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return nil, errors.Wrap(err, "failed to add field data info")
-	}
-	return &AddFieldDataInfoResult{}, nil
-}
-
 func (s *cSegmentImpl) Load(ctx context.Context) error {
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)

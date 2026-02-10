@@ -531,13 +531,6 @@ queryNode:
     growingMmapEnabled: false
     fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
     maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
-  lazyload:
-    enabled: false # Enable lazyload for loading data
-    waitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve
-    requestResourceTimeout: 5000 # max timeout in milliseconds for waiting request resource for lazy load, 5s by default
-    requestResourceRetryInterval: 2000 # retry interval in milliseconds for waiting request resource for lazy load, 2s by default
-    maxRetryTimes: 1 # max retry times for lazy load, 1 by default
-    maxEvictPerRetry: 1 # max evict count for lazy load, 1 by default
   indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
   scheduler:
     receiveChanSize: 10240

@@ -926,51 +926,6 @@ func (_c *MockSegment_InsertCount_Call) RunAndReturn(run func() int64) *MockSegm
 	return _c
 }
 
-// IsLazyLoad provides a mock function with no fields
-func (_m *MockSegment) IsLazyLoad() bool {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for IsLazyLoad")
-	}
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func() bool); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
-// MockSegment_IsLazyLoad_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsLazyLoad'
-type MockSegment_IsLazyLoad_Call struct {
-	*mock.Call
-}
-
-// IsLazyLoad is a helper method to define mock.On call
-func (_e *MockSegment_Expecter) IsLazyLoad() *MockSegment_IsLazyLoad_Call {
-	return &MockSegment_IsLazyLoad_Call{Call: _e.mock.On("IsLazyLoad")}
-}
-
-func (_c *MockSegment_IsLazyLoad_Call) Run(run func()) *MockSegment_IsLazyLoad_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockSegment_IsLazyLoad_Call) Return(_a0 bool) *MockSegment_IsLazyLoad_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockSegment_IsLazyLoad_Call) RunAndReturn(run func() bool) *MockSegment_IsLazyLoad_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // IsSorted provides a mock function with no fields
 func (_m *MockSegment) IsSorted() bool {
 	ret := _m.Called()
@@ -2275,8 +2230,7 @@ func (_c *MockSegment_Version_Call) RunAndReturn(run func() int64) *MockSegment_
 func NewMockSegment(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockSegment {
+}) *MockSegment {
 	mock := &MockSegment{}
 	mock.Mock.Test(t)
 
