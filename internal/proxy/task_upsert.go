@@ -17,6 +17,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -1078,6 +1079,48 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 	}
 }
 
+// cleanupDynamicFieldForPartialUpdate removes keys from the $meta dynamic field
+// JSON that conflict with static field names. After schema evolution, existing
+// $meta data may contain keys that now match newly added static columns. Only the
+// conflicting keys are stripped; all other dynamic field data is preserved.
+func cleanupDynamicFieldForPartialUpdate(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) {
+	staticFieldNames := make(map[string]bool)
+	for _, f := range schema.GetFields() {
+		if !f.GetIsDynamic() {
+			staticFieldNames[f.GetName()] = true
+		}
+	}
+	for _, fieldData := range insertMsg.FieldsData {
+		if !fieldData.GetIsDynamic() {
+			continue
+		}
+		jsonData := fieldData.GetScalars().GetJsonData()
+		if jsonData == nil {
+			continue
+		}
+		for i, rowBytes := range jsonData.Data {
+			var m map[string]interface{}
+			if err := json.Unmarshal(rowBytes, &m); err != nil {
+				continue
+			}
+			changed := false
+			for key := range m {
+				if staticFieldNames[key] {
+					delete(m, key)
+					changed = true
+				}
+			}
+			if changed {
+				newBytes, err := json.Marshal(m)
+				if err != nil {
+					continue
+				}
+				jsonData.Data[i] = newBytes
+			}
+		}
+	}
+}
+
 func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-insertPreExecute")
 	defer sp.End()
@@ -1138,6 +1181,13 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	it.result.SuccIndex = sliceIndex
 
 	if it.schema.EnableDynamicField {
+		if it.req.GetPartialUpdate() {
+			// For partial update, merged data from queryPreExecute may contain
+			// $meta keys matching static field names due to schema evolution.
+			// Remove only the conflicting keys so validation passes while
+			// preserving all other dynamic field data.
+			cleanupDynamicFieldForPartialUpdate(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+		}
 		err := checkDynamicFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 		if err != nil {
 			return err
