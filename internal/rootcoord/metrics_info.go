@@ -40,6 +40,22 @@ func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetric
 		log.Ctx(ctx).Warn("get iowait failed", zap.Error(err))
 	}
 
+	// Get all proxy metrics
+	proxyMetrics, err := getProxyMetrics(ctx, c.proxyClientManager)
+	if err != nil {
+		log.Ctx(ctx).Warn("get proxy metrics failed", zap.Error(err))
+		// Don't fail the entire request if proxy metrics fail
+		proxyMetrics = []*metricsinfo.ProxyInfos{}
+	}
+
+	// Convert []*ProxyInfos to []ProxyInfos
+	connectedProxies := make([]metricsinfo.ProxyInfos, 0, len(proxyMetrics))
+	for _, proxy := range proxyMetrics {
+		if proxy != nil {
+			connectedProxies = append(connectedProxies, *proxy)
+		}
+	}
+
 	rootCoordTopology := metricsinfo.RootCoordTopology{
 		Self: metricsinfo.RootCoordInfos{
 			BaseComponentInfos: metricsinfo.BaseComponentInfos{
@@ -64,6 +80,7 @@ func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetric
 				MinSegmentSizeToEnableIndex: Params.RootCoordCfg.MinSegmentSizeToEnableIndex.GetAsInt64(),
 			},
 		},
+		ConnectedProxies: connectedProxies,
 		Connections: metricsinfo.ConnTopology{
 			Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, c.session.ServerID),
 			// TODO(dragondriver): fill ConnectedComponents if necessary
