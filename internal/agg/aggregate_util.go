@@ -278,6 +278,41 @@ func newStringFieldAccessor() FieldAccessor {
 	return &StringFieldAccessor{hasher: fnv.New64a()}
 }
 
+// nullHashSentinel is a consistent hash value for NULL entries in group-by fields.
+// Hash collisions are resolved by Row.Equal, which correctly handles nil values.
+const nullHashSentinel uint64 = 0
+
+// NullableFieldAccessor wraps a FieldAccessor to handle nullable fields.
+// For fields with ValidData, it returns nil for null values and a consistent
+// hash sentinel for null entries.
+type NullableFieldAccessor struct {
+	inner     FieldAccessor
+	validData []bool
+}
+
+func (nfa *NullableFieldAccessor) Hash(idx int) uint64 {
+	if len(nfa.validData) > 0 && !nfa.validData[idx] {
+		return nullHashSentinel
+	}
+	return nfa.inner.Hash(idx)
+}
+
+func (nfa *NullableFieldAccessor) ValAt(idx int) interface{} {
+	if len(nfa.validData) > 0 && !nfa.validData[idx] {
+		return nil
+	}
+	return nfa.inner.ValAt(idx)
+}
+
+func (nfa *NullableFieldAccessor) SetVals(fieldData *schemapb.FieldData) {
+	nfa.validData = fieldData.GetValidData()
+	nfa.inner.SetVals(fieldData)
+}
+
+func (nfa *NullableFieldAccessor) RowCount() int {
+	return nfa.inner.RowCount()
+}
+
 func AssembleBucket(bucket *Bucket, fieldDatas []*schemapb.FieldData) error {
 	colCount := len(fieldDatas)
 	for r := 0; r < bucket.RowCount(); r++ {
@@ -300,6 +335,15 @@ func AssembleSingleRow(colCount int, row *Row, fieldDatas []*schemapb.FieldData)
 }
 
 func AssembleSingleValue(val interface{}, fieldData *schemapb.FieldData) error {
+	if val == nil {
+		// Null value: mark as invalid in ValidData and append a default/zero value to the data array
+		fieldData.ValidData = append(fieldData.ValidData, false)
+		return appendNullValue(fieldData)
+	}
+	// Non-null value: if the field tracks validity (nullable field), mark as valid
+	if fieldData.ValidData != nil {
+		fieldData.ValidData = append(fieldData.ValidData, true)
+	}
 	switch fieldData.GetType() {
 	case schemapb.DataType_Bool:
 		boolVal, ok := val.(bool)
@@ -345,6 +389,31 @@ func AssembleSingleValue(val interface{}, fieldData *schemapb.FieldData) error {
 		fieldData.GetScalars().GetStringData().Data = append(fieldData.GetScalars().GetStringData().GetData(), stringVal)
 	default:
 		return fmt.Errorf("unsupported DataType:%d", fieldData.GetType())
+	}
+	return nil
+}
+
+// appendNullValue appends a default/zero value to the field data's data array.
+// This is used for null entries where we need a placeholder in the data array
+// alongside a false entry in ValidData.
+func appendNullValue(fieldData *schemapb.FieldData) error {
+	switch fieldData.GetType() {
+	case schemapb.DataType_Bool:
+		fieldData.GetScalars().GetBoolData().Data = append(fieldData.GetScalars().GetBoolData().GetData(), false)
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		fieldData.GetScalars().GetIntData().Data = append(fieldData.GetScalars().GetIntData().GetData(), 0)
+	case schemapb.DataType_Int64:
+		fieldData.GetScalars().GetLongData().Data = append(fieldData.GetScalars().GetLongData().GetData(), 0)
+	case schemapb.DataType_Timestamptz:
+		fieldData.GetScalars().GetTimestamptzData().Data = append(fieldData.GetScalars().GetTimestamptzData().GetData(), 0)
+	case schemapb.DataType_Float:
+		fieldData.GetScalars().GetFloatData().Data = append(fieldData.GetScalars().GetFloatData().GetData(), 0)
+	case schemapb.DataType_Double:
+		fieldData.GetScalars().GetDoubleData().Data = append(fieldData.GetScalars().GetDoubleData().GetData(), 0)
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		fieldData.GetScalars().GetStringData().Data = append(fieldData.GetScalars().GetStringData().GetData(), "")
+	default:
+		return fmt.Errorf("unsupported DataType:%d for null value", fieldData.GetType())
 	}
 	return nil
 }
