@@ -5027,3 +5027,491 @@ func TestSchemaHelper_CanRetrieveRawFieldData(t *testing.T) {
 	}
 	assert.False(t, helper.CanRetrieveRawFieldData(orphanField))
 }
+
+func TestIsExternalCollection(t *testing.T) {
+	// nil schema
+	assert.False(t, IsExternalCollection(nil))
+
+	// empty schema with no fields
+	schema := &schemapb.CollectionSchema{}
+	assert.False(t, IsExternalCollection(schema))
+
+	// schema with fields but no ExternalField set
+	schema.Fields = []*schemapb.FieldSchema{
+		{Name: "field1", ExternalField: ""},
+	}
+	assert.False(t, IsExternalCollection(schema))
+
+	// schema with ExternalSource but no ExternalField set
+	schema.ExternalSource = "s3://bucket/path"
+	assert.False(t, IsExternalCollection(schema))
+
+	// schema with ExternalField set (empty ExternalSource is allowed)
+	schema.ExternalSource = ""
+	schema.Fields = []*schemapb.FieldSchema{
+		{Name: "field1", ExternalField: "ext_field1"},
+	}
+	assert.True(t, IsExternalCollection(schema))
+
+	// schema with both ExternalSource and ExternalField set
+	schema.ExternalSource = "s3://bucket/path"
+	assert.True(t, IsExternalCollection(schema))
+}
+
+func TestValidateExternalCollectionSchema(t *testing.T) {
+	buildSchema := func() *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Name:           "external",
+			ExternalSource: "s3://bucket/path",
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:          "text",
+					DataType:      schemapb.DataType_VarChar,
+					ExternalField: "text_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "32"},
+					},
+				},
+				{
+					Name:          "vec",
+					DataType:      schemapb.DataType_FloatVector,
+					ExternalField: "vec_col",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "16"},
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("non external schema skipped", func(t *testing.T) {
+		// A non-external schema has no ExternalField set on any field
+		schema := &schemapb.CollectionSchema{
+			Name: "regular_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "32"},
+					},
+				},
+			},
+		}
+		assert.NoError(t, ValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("functions disabled", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Functions = []*schemapb.FunctionSchema{{Name: "test_func"}}
+		err := ValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "does not support functions")
+	})
+
+	t.Run("dynamic field disabled", func(t *testing.T) {
+		schema := buildSchema()
+		schema.EnableDynamicField = true
+		assert.Error(t, ValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("struct fields disabled", func(t *testing.T) {
+		schema := buildSchema()
+		schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
+			{Name: "struct_field", Fields: []*schemapb.FieldSchema{{Name: "nested", DataType: schemapb.DataType_Array}}},
+		}
+		assert.Error(t, ValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("primary key disabled", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[0].IsPrimaryKey = true
+		assert.Error(t, ValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("partition key disabled", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[0].IsPartitionKey = true
+		assert.Error(t, ValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("clustering key disabled", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[0].IsClusteringKey = true
+		assert.Error(t, ValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("auto id disabled", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[0].AutoID = true
+		assert.Error(t, ValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("text match disabled", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[0].TypeParams = append(schema.Fields[0].TypeParams, &commonpb.KeyValuePair{
+			Key:   "enable_match",
+			Value: "true",
+		})
+		assert.Error(t, ValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("external_field mapping required", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[0].ExternalField = ""
+		err := ValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "must have external_field mapping")
+	})
+
+	t.Run("valid schema passes", func(t *testing.T) {
+		err := ValidateExternalCollectionSchema(buildSchema())
+		assert.NoError(t, err)
+	})
+}
+
+func TestAppendFieldDataByColumn(t *testing.T) {
+	t.Run("nil dst or src", func(t *testing.T) {
+		src := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
+					},
+				},
+			},
+		}
+		dst := &schemapb.FieldData{}
+		// nil dst
+		AppendFieldDataByColumn(nil, src, []int64{0, 1})
+		// nil src
+		AppendFieldDataByColumn(dst, nil, []int64{0, 1})
+		// empty dataIndices
+		AppendFieldDataByColumn(dst, src, []int64{})
+		assert.Nil(t, dst.GetScalars())
+	})
+
+	t.Run("scalar int32", func(t *testing.T) {
+		src := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{10, 20, 30, 40, 50}},
+					},
+				},
+			},
+		}
+		dst := &schemapb.FieldData{}
+		AppendFieldDataByColumn(dst, src, []int64{1, 3})
+		assert.Equal(t, []int32{20, 40}, dst.GetScalars().GetIntData().Data)
+	})
+
+	t.Run("scalar with ValidData", func(t *testing.T) {
+		src := &schemapb.FieldData{
+			ValidData: []bool{true, false, true, false, true},
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{100, 200, 300, 400, 500}},
+					},
+				},
+			},
+		}
+		dst := &schemapb.FieldData{}
+		AppendFieldDataByColumn(dst, src, []int64{0, 2, 4})
+		assert.Equal(t, []int64{100, 300, 500}, dst.GetScalars().GetLongData().Data)
+		assert.Equal(t, []bool{true, true, true}, dst.ValidData)
+	})
+
+	t.Run("string data", func(t *testing.T) {
+		src := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: []string{"a", "b", "c", "d"}},
+					},
+				},
+			},
+		}
+		dst := &schemapb.FieldData{}
+		AppendFieldDataByColumn(dst, src, []int64{1, 2})
+		assert.Equal(t, []string{"b", "c"}, dst.GetScalars().GetStringData().Data)
+	})
+
+	t.Run("json data", func(t *testing.T) {
+		src := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(`{"a":1}`), []byte(`{"b":2}`)}},
+					},
+				},
+			},
+		}
+		dst := &schemapb.FieldData{}
+		AppendFieldDataByColumn(dst, src, []int64{0})
+		assert.Equal(t, [][]byte{[]byte(`{"a":1}`)}, dst.GetScalars().GetJsonData().Data)
+	})
+
+	t.Run("float vector", func(t *testing.T) {
+		dim := int64(4)
+		src := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{
+							1, 2, 3, 4,
+							5, 6, 7, 8,
+							9, 10, 11, 12,
+						}},
+					},
+				},
+			},
+		}
+		dst := &schemapb.FieldData{}
+		AppendFieldDataByColumn(dst, src, []int64{0, 2})
+		assert.Equal(t, []float32{1, 2, 3, 4, 9, 10, 11, 12}, dst.GetVectors().GetFloatVector().Data)
+		assert.Equal(t, dim, dst.GetVectors().GetDim())
+	})
+
+	t.Run("float vector with ValidData - all null case", func(t *testing.T) {
+		dim := int64(4)
+		src := &schemapb.FieldData{
+			ValidData: []bool{false, false, false}, // all null
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{}}, // COMPRESSED: no data
+					},
+				},
+			},
+		}
+		dst := &schemapb.FieldData{}
+		// dataIndices is empty (no non-null data), but rowIndices has all rows
+		dataIndices := []int64{}
+		rowIndices := []int64{0, 1, 2}
+		AppendFieldDataByColumn(dst, src, dataIndices, rowIndices)
+		// ValidData should be copied even though data is empty
+		assert.Equal(t, []bool{false, false, false}, dst.ValidData)
+		// No vector data copied
+		assert.Nil(t, dst.GetVectors())
+	})
+
+	t.Run("sparse float vector", func(t *testing.T) {
+		src := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 100,
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      100,
+							Contents: [][]byte{{1, 2}, {3, 4}, {5, 6}},
+						},
+					},
+				},
+			},
+		}
+		dst := &schemapb.FieldData{}
+		AppendFieldDataByColumn(dst, src, []int64{0, 2})
+		assert.Equal(t, [][]byte{{1, 2}, {5, 6}}, dst.GetVectors().GetSparseFloatVector().Contents)
+	})
+}
+
+func TestUpdateFieldDataByColumn(t *testing.T) {
+	t.Run("nil base or update", func(t *testing.T) {
+		base := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{10, 20}},
+					},
+				},
+			},
+		}
+		// nil base
+		err := UpdateFieldDataByColumn(nil, update, []int64{0}, []int64{0})
+		assert.NoError(t, err)
+		// nil update
+		err = UpdateFieldDataByColumn(base, nil, []int64{0}, []int64{0})
+		assert.NoError(t, err)
+		// empty indices
+		err = UpdateFieldDataByColumn(base, update, []int64{}, []int64{})
+		assert.NoError(t, err)
+		assert.Equal(t, []int32{1, 2, 3}, base.GetScalars().GetIntData().Data)
+	})
+
+	t.Run("indices length mismatch", func(t *testing.T) {
+		base := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{10, 20}},
+					},
+				},
+			},
+		}
+		err := UpdateFieldDataByColumn(base, update, []int64{0, 1}, []int64{0})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "length mismatch")
+	})
+
+	t.Run("scalar int32", func(t *testing.T) {
+		base := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{1, 2, 3, 4, 5}},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{100, 200, 300}},
+					},
+				},
+			},
+		}
+		err := UpdateFieldDataByColumn(base, update, []int64{1, 3}, []int64{0, 2})
+		assert.NoError(t, err)
+		assert.Equal(t, []int32{1, 100, 3, 300, 5}, base.GetScalars().GetIntData().Data)
+	})
+
+	t.Run("scalar with ValidData", func(t *testing.T) {
+		base := &schemapb.FieldData{
+			ValidData: []bool{true, true, true, true},
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{10, 20, 30, 40}},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			ValidData: []bool{false, true},
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{100, 200}},
+					},
+				},
+			},
+		}
+		err := UpdateFieldDataByColumn(base, update, []int64{1, 2}, []int64{0, 1})
+		assert.NoError(t, err)
+		assert.Equal(t, []int64{10, 100, 200, 40}, base.GetScalars().GetLongData().Data)
+		assert.Equal(t, []bool{true, false, true, true}, base.ValidData)
+	})
+
+	t.Run("string data", func(t *testing.T) {
+		base := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: []string{"a", "b", "c"}},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: []string{"X", "Y"}},
+					},
+				},
+			},
+		}
+		err := UpdateFieldDataByColumn(base, update, []int64{0, 2}, []int64{0, 1})
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"X", "b", "Y"}, base.GetScalars().GetStringData().Data)
+	})
+
+	t.Run("float vector", func(t *testing.T) {
+		dim := int64(4)
+		base := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{
+							1, 2, 3, 4,
+							5, 6, 7, 8,
+							9, 10, 11, 12,
+						}},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{
+							100, 200, 300, 400,
+							500, 600, 700, 800,
+						}},
+					},
+				},
+			},
+		}
+		err := UpdateFieldDataByColumn(base, update, []int64{0, 2}, []int64{0, 1})
+		assert.NoError(t, err)
+		expected := []float32{100, 200, 300, 400, 5, 6, 7, 8, 500, 600, 700, 800}
+		assert.Equal(t, expected, base.GetVectors().GetFloatVector().Data)
+	})
+
+	t.Run("sparse float vector", func(t *testing.T) {
+		base := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      100,
+							Contents: [][]byte{{1}, {2}, {3}},
+						},
+					},
+				},
+			},
+		}
+		update := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      100,
+							Contents: [][]byte{{10}, {20}},
+						},
+					},
+				},
+			},
+		}
+		err := UpdateFieldDataByColumn(base, update, []int64{0, 2}, []int64{0, 1})
+		assert.NoError(t, err)
+		assert.Equal(t, [][]byte{{10}, {2}, {20}}, base.GetVectors().GetSparseFloatVector().Contents)
+	})
+}
