@@ -481,10 +481,10 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
         auto index_type = GetIndexType();
         if (CheckAndUpdateKnowhereRangeSearchParam(
                 search_info, topk, GetMetricType(), search_conf)) {
-            milvus::tracer::AddEvent("start_knowhere_index_range_search");
+            // milvus::tracer::AddEvent("start_knowhere_index_range_search");
             auto res =
                 index_.RangeSearch(dataset, search_conf, bitset, op_context);
-            milvus::tracer::AddEvent("finish_knowhere_index_range_search");
+            // milvus::tracer::AddEvent("finish_knowhere_index_range_search");
             if (!res.has_value()) {
                 ThrowInfo(ErrorCode::UnexpectedError,
                           "failed to range search: {}: {}",
@@ -493,12 +493,12 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
             }
             auto result = ReGenRangeSearchResult(
                 res.value(), topk, num_vectors, GetMetricType());
-            milvus::tracer::AddEvent("finish_ReGenRangeSearchResult");
+            // milvus::tracer::AddEvent("finish_ReGenRangeSearchResult");
             return result;
         } else {
-            milvus::tracer::AddEvent("start_knowhere_index_search");
+            // milvus::tracer::AddEvent("start_knowhere_index_search");
             auto res = index_.Search(dataset, search_conf, bitset, op_context);
-            milvus::tracer::AddEvent("finish_knowhere_index_search");
+            // milvus::tracer::AddEvent("finish_knowhere_index_search");
             if (!res.has_value()) {
                 ThrowInfo(
                     ErrorCode::UnexpectedError,

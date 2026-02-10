@@ -49,7 +49,7 @@ ExprSet::Eval(int32_t begin,
               bool initialize,
               EvalCtx& context,
               std::vector<VectorPtr>& results) {
-    tracer::AutoSpan span("ExprSet::Eval", tracer::GetRootSpan(), true);
+    // tracer::AutoSpan span("ExprSet::Eval", tracer::GetRootSpan(), true);
 
     results.resize(exprs_.size());
     auto* exec_ctx = context.get_exec_context();

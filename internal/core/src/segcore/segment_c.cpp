@@ -338,7 +338,7 @@ AsyncRetrieve(CTraceContext c_trace,
          collection_ttl](folly::CancellationToken cancel_token) {
             auto trace_ctx = milvus::tracer::TraceContext{
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
-            milvus::tracer::AutoSpan span("SegCoreRetrieve", &trace_ctx, true);
+            // milvus::tracer::AutoSpan span("SegCoreRetrieve", &trace_ctx, true);
 
             segment->LazyCheckSchema(plan->schema_);
 
@@ -374,8 +374,8 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
             folly::CancellationToken cancel_token) {
             auto trace_ctx = milvus::tracer::TraceContext{
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
-            milvus::tracer::AutoSpan span(
-                "SegCoreRetrieveByOffsets", &trace_ctx, true);
+            // milvus::tracer::AutoSpan span(
+                // "SegCoreRetrieveByOffsets", &trace_ctx, true);
 
             auto retrieve_result =
                 segment->Retrieve(&trace_ctx, plan, offsets, len);

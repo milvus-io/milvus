@@ -24,10 +24,10 @@ namespace exec {
 
 void
 PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
-    tracer::AutoSpan span(
-        "PhyTermFilterExpr::Eval", tracer::GetRootSpan(), true);
-    span.GetSpan()->SetAttribute("data_type",
-                                 static_cast<int>(expr_->column_.data_type_));
+    // tracer::AutoSpan span(
+        // "PhyTermFilterExpr::Eval", tracer::GetRootSpan(), true);
+    // span.GetSpan()->SetAttribute("data_type",
+                                 // static_cast<int>(expr_->column_.data_type_));
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));

@@ -98,8 +98,8 @@ PhyRandomSampleNode::GetOutput() {
         return nullptr;
     }
 
-    tracer::AutoSpan span(
-        "PhyRandomSampleNode::Execute", tracer::GetRootSpan(), true);
+    // tracer::AutoSpan span(
+        // "PhyRandomSampleNode::Execute", tracer::GetRootSpan(), true);
 
     if (!is_source_node_ && input_ == nullptr) {
         return nullptr;
@@ -110,8 +110,8 @@ PhyRandomSampleNode::GetOutput() {
         return nullptr;
     }
 
-    tracer::AddEvent(fmt::format(
-        "sample_factor: {}, active_count: {}", factor_, active_count_));
+    // tracer::AddEvent(fmt::format(
+        // "sample_factor: {}, active_count: {}", factor_, active_count_));
 
     std::chrono::high_resolution_clock::time_point start =
         std::chrono::high_resolution_clock::now();
@@ -183,9 +183,9 @@ PhyRandomSampleNode::GetOutput() {
         TargetBitmapView result_data(result_col->GetRawData(),
                                      result_col->size());
         auto sampled_count = result_col->size() - result_data.count();
-        tracer::AddEvent(fmt::format("sampled_count: {}, total_count: {}",
-                                     sampled_count,
-                                     active_count_));
+        // tracer::AddEvent(fmt::format("sampled_count: {}, total_count: {}",
+                                     // sampled_count,
+                                     // active_count_));
     }
 
     is_finished_ = true;

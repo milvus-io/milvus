@@ -186,7 +186,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                 "Unsupported dataType for chunk brute force range search:{}",
                 data_type);
         }
-        milvus::tracer::AddEvent("knowhere_finish_BruteForce_RangeSearch");
+        // milvus::tracer::AddEvent("knowhere_finish_BruteForce_RangeSearch");
         if (!res.has_value()) {
             ThrowInfo(KnowhereError,
                       "Brute force range search fail: {}, {}",
@@ -195,7 +195,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
         }
         auto result =
             ReGenRangeSearchResult(res.value(), topk, nq, query_ds.metric_type);
-        milvus::tracer::AddEvent("ReGenRangeSearchResult");
+        // milvus::tracer::AddEvent("ReGenRangeSearchResult");
         std::copy_n(
             GetDatasetIDs(result), nq * topk, sub_result.get_seg_offsets());
         std::copy_n(
@@ -261,7 +261,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                       "Unsupported dataType for chunk brute force search:{}",
                       data_type);
         }
-        milvus::tracer::AddEvent("knowhere_finish_BruteForce_SearchWithBuf");
+        // milvus::tracer::AddEvent("knowhere_finish_BruteForce_SearchWithBuf");
         if (stat != knowhere::Status::success) {
             ThrowInfo(KnowhereError,
                       "Brute force search fail: " + KnowhereStatusString(stat));

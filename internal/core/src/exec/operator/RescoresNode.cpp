@@ -59,8 +59,8 @@ PhyRescoresNode::GetOutput() {
         return nullptr;
     }
 
-    tracer::AutoSpan span(
-        "PhyRescoresNode::Execute", tracer::GetRootSpan(), true);
+    // tracer::AutoSpan span(
+        // "PhyRescoresNode::Execute", tracer::GetRootSpan(), true);
 
     DeferLambda([&]() { is_finished_ = true; });
 
@@ -212,7 +212,7 @@ PhyRescoresNode::GetOutput() {
     milvus::monitor::internal_core_search_latency_rescore.Observe(scalar_cost /
                                                                   1000);
 
-    tracer::AddEvent(fmt::format("rescored_count: {}", offsets.size()));
+    // tracer::AddEvent(fmt::format("rescored_count: {}", offsets.size()));
     return input_;
 };
 
