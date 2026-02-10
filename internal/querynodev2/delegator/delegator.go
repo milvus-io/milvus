@@ -511,7 +511,13 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		}
 		return results, nil
 	}
-	return sd.search(ctx, req, sealed, growing, sealedRowCount)
+
+	results, err := sd.search(ctx, req, sealed, growing, sealedRowCount)
+	if err != nil {
+		log.Warn("delegator common search failed", zap.Error(err))
+		return nil, err
+	}
+	return results, nil
 }
 
 func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
