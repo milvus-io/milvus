@@ -159,8 +159,10 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 		State:         datapb.CompactionTaskState_executing,
 		InputSegments: []int64{100, 101},
 	}, nil, s.mockMeta, nil)
-	_, err := task.BuildCompactionRequest()
-	s.Error(err)
+	plan, err := task.BuildCompactionRequest()
+	// Fast finish: should return an error indicating fast finish
+	s.ErrorIs(err, errFastFinishL0)
+	s.Nil(plan)
 }
 
 func (s *L0CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
