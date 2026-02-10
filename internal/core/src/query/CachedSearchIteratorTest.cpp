@@ -17,6 +17,7 @@
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Utils.h"
+#include "query/Utils.h"
 #include "index/Index.h"
 #include "knowhere/comp/index_param.h"
 #include "query/CachedSearchIterator.h"
@@ -749,6 +750,144 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
                          data_type_),
                      SegcoreError);
     }
+}
+
+// Test that CachedSearchIterator correctly adjusts chunk_size for nullable
+// ChunkedColumn (uses valid_count_per_chunk instead of total chunk_row_nums)
+TEST(CachedSearchIteratorNullableTest, ChunkedColumnWithPartialNulls) {
+    constexpr int64_t dim = 16;
+    constexpr int64_t chunk_rows = 100;      // logical rows per chunk
+    constexpr int64_t valid_per_chunk = 50;  // even rows valid, odd null
+    constexpr int64_t num_chunks = 2;
+    constexpr int64_t total_rows = chunk_rows * num_chunks;
+    constexpr int64_t total_valid = valid_per_chunk * num_chunks;
+    constexpr int64_t batch_size = 10;
+
+    // Create schema with nullable vector field
+    auto schema = std::make_shared<Schema>();
+    auto fakevec_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2, true);
+    auto field_meta = schema->operator[](fakevec_id);
+
+    // Generate random vector data (enough for all valid vectors)
+    auto base_schema = std::make_shared<Schema>();
+    base_schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    auto dataset = segcore::DataGen(base_schema, total_valid);
+    auto base_data =
+        dataset.get_col<float>(base_schema->get_field_id(FieldName("fakevec")));
+
+    // Build chunks with 50% null vectors.
+    // Nullable vector chunks store ONLY valid vectors contiguously in data
+    // section (matching NullableVectorChunkWriter behavior), while the null
+    // bitmap covers ALL logical rows.
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    std::vector<int64_t> num_rows_per_chunk;
+    std::vector<std::vector<char>> chunk_buffers;
+
+    for (int64_t c = 0; c < num_chunks; c++) {
+        num_rows_per_chunk.push_back(chunk_rows);
+
+        int null_bitmap_bytes = (chunk_rows + 7) / 8;
+        // Data section: only valid vectors stored contiguously
+        int vector_data_size = valid_per_chunk * dim * sizeof(float);
+        int buf_size = null_bitmap_bytes + vector_data_size;
+
+        chunk_buffers.emplace_back(buf_size, 0);
+        char* buf = chunk_buffers.back().data();
+
+        // Even rows valid, odd rows null
+        for (int j = 0; j < chunk_rows; j++) {
+            if (j % 2 == 0) {
+                buf[j >> 3] |= (1 << (j & 0x07));
+            }
+        }
+
+        // Copy valid vectors contiguously into data section
+        memcpy(buf + null_bitmap_bytes,
+               base_data.data() + c * valid_per_chunk * dim,
+               vector_data_size);
+
+        auto chunk_mmap_guard =
+            std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+        chunks.emplace_back(
+            std::make_unique<FixedWidthChunk>(chunk_rows,
+                                              dim,
+                                              buf,
+                                              buf_size,
+                                              sizeof(float),
+                                              true,
+                                              chunk_mmap_guard));
+    }
+
+    auto translator = std::make_unique<TestChunkTranslator>(
+        num_rows_per_chunk, "", std::move(chunks));
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<milvus::Chunk>(
+            std::move(translator), nullptr);
+    auto column = std::make_shared<ChunkedColumn>(std::move(slot), field_meta);
+    column->BuildValidRowIds(nullptr);
+
+    // Verify offset_mapping setup
+    const auto& offset_mapping = column->GetOffsetMapping();
+    ASSERT_TRUE(offset_mapping.IsEnabled());
+    ASSERT_EQ(offset_mapping.GetValidCount(), total_valid);
+
+    // Build query from first valid vector
+    std::vector<float> query_data(base_data.begin(), base_data.begin() + dim);
+
+    // Create an all-zero bitset (no filtering) for the physical data range
+    TargetBitmap search_bitset(total_valid, false);
+    BitsetView search_bitview(search_bitset);
+
+    dataset::SearchDataset search_dataset{
+        .metric_type = knowhere::metric::L2,
+        .num_queries = 1,
+        .topk = batch_size,
+        .round_decimal = -1,
+        .dim = dim,
+        .query_data = query_data.data(),
+    };
+
+    SearchInfo search_info{
+        .topk_ = batch_size,
+        .round_decimal_ = -1,
+        .metric_type_ = knowhere::metric::L2,
+        .iterator_v2_info_ =
+            SearchIteratorV2Info{
+                .batch_size = batch_size,
+            },
+    };
+
+    // Create CachedSearchIterator - this tests Fix 1:
+    // The lambda should use valid_count_per_chunk[chunk_id] as chunk_size
+    CachedSearchIterator iter(column.get(),
+                              search_dataset,
+                              search_info,
+                              std::map<std::string, std::string>{},
+                              search_bitview,
+                              DataType::VECTOR_FLOAT);
+
+    SearchResult result;
+    iter.NextBatch(search_info, result);
+
+    ASSERT_EQ(result.seg_offsets_.size(), batch_size);
+    ASSERT_EQ(result.distances_.size(), batch_size);
+
+    // All returned offsets should be physical offsets in [0, total_valid)
+    // (TransformOffset is NOT called here - that's the caller's job)
+    int valid_count = 0;
+    for (auto& offset : result.seg_offsets_) {
+        if (offset == INVALID_SEG_OFFSET) {
+            continue;
+        }
+        valid_count++;
+        ASSERT_GE(offset, 0);
+        ASSERT_LT(offset, total_valid)
+            << "Physical offset " << offset << " exceeds valid count "
+            << total_valid;
+    }
+    ASSERT_GT(valid_count, 0);
 }
 
 /********* Testcases End **********/
