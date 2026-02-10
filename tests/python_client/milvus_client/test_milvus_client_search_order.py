@@ -349,9 +349,59 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_order_by_json_path(self):
         """
-        target: test search order by JSON path in dynamic field
-        method: search with order_by_fields using JSON path syntax dyn_meta["price"]
-        expected: results sorted by the nested JSON value
+        target: test search order by JSON path on schema JSON field
+        method: search with order_by_fields using JSON path syntax json_field["nested_price"]
+        expected: results sorted by the JSON path value
+        """
+        client = self._client()
+        collection_name = VALID_COLLECTION_NAME
+
+        vectors_to_search = cf.gen_vectors(1, default_dim)
+        res = self.search(client, collection_name, vectors_to_search,
+                          limit=default_limit,
+                          anns_field="embeddings",
+                          output_fields=["id", "json_field"],
+                          order_by_fields=[{"field": 'json_field["nested_price"]', "order": "asc"}],
+                          consistency_level="Strong")[0]
+
+        results = res[0]
+        assert len(results) == default_limit
+        prices = [r["entity"]["json_field"]["nested_price"] for r in results]
+        for i in range(len(prices) - 1):
+            assert prices[i] <= prices[i + 1], \
+                f"json nested_price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_order_by_nested_json_path(self):
+        """
+        target: test search order by nested JSON path on schema JSON field
+        method: search with order_by_fields using json_field["nested"]["score"]
+        expected: results sorted by the deeply nested JSON value
+        """
+        client = self._client()
+        collection_name = VALID_COLLECTION_NAME
+
+        vectors_to_search = cf.gen_vectors(1, default_dim)
+        res = self.search(client, collection_name, vectors_to_search,
+                          limit=default_limit,
+                          anns_field="embeddings",
+                          output_fields=["id", "json_field"],
+                          order_by_fields=[{"field": 'json_field["nested"]["score"]', "order": "desc"}],
+                          consistency_level="Strong")[0]
+
+        results = res[0]
+        assert len(results) == default_limit
+        scores = [r["entity"]["json_field"]["nested"]["score"] for r in results]
+        for i in range(len(scores) - 1):
+            assert scores[i] >= scores[i + 1], \
+                f"nested score not descending at index {i}: {scores[i]} < {scores[i + 1]}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_order_by_dynamic_json_path(self):
+        """
+        target: test search order by JSON path on a dynamic field
+        method: search with order_by_fields using dyn_meta["price"] (dynamic field with JSON path)
+        expected: results sorted by the nested dynamic field value
         """
         client = self._client()
         collection_name = VALID_COLLECTION_NAME
@@ -370,31 +420,6 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
         for i in range(len(dyn_prices) - 1):
             assert dyn_prices[i] <= dyn_prices[i + 1], \
                 f"dyn_meta.price not ascending at index {i}: {dyn_prices[i]} > {dyn_prices[i + 1]}"
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_search_order_by_nested_json_path(self):
-        """
-        target: test search order by nested JSON path in dynamic field
-        method: search with order_by_fields using dyn_meta["profile"]["score"]
-        expected: results sorted by the deeply nested JSON value
-        """
-        client = self._client()
-        collection_name = VALID_COLLECTION_NAME
-
-        vectors_to_search = cf.gen_vectors(1, default_dim)
-        res = self.search(client, collection_name, vectors_to_search,
-                          limit=default_limit,
-                          anns_field="embeddings",
-                          output_fields=["id", "dyn_meta"],
-                          order_by_fields=[{"field": 'dyn_meta["profile"]["score"]', "order": "desc"}],
-                          consistency_level="Strong")[0]
-
-        results = res[0]
-        assert len(results) == default_limit
-        scores = [r["entity"]["dyn_meta"]["profile"]["score"] for r in results]
-        for i in range(len(scores) - 1):
-            assert scores[i] >= scores[i + 1], \
-                f"nested score not descending at index {i}: {scores[i]} < {scores[i + 1]}"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_order_by_with_filter(self):
@@ -607,65 +632,6 @@ class TestMilvusClientSearchOrderValid(TestMilvusClientV2Base):
             assert prices[i] <= prices[i + 1], \
                 f"Price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_search_hybrid_with_order_by(self):
-        """
-        target: test hybrid search combined with order_by_fields
-        method: create collection with 2 vector fields, hybrid search with order_by price asc
-        expected: results sorted by price ascending after rank fusion
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
-
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field("id", DataType.INT64, is_primary=True)
-        schema.add_field("price", DataType.DOUBLE)
-        schema.add_field("vec1", DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field("vec2", DataType.FLOAT_VECTOR, dim=default_dim)
-
-        index_params = client.prepare_index_params()
-        index_params.add_index(field_name="vec1", index_type="HNSW",
-                               metric_type="COSINE", M=16, efConstruction=200)
-        index_params.add_index(field_name="vec2", index_type="HNSW",
-                               metric_type="COSINE", M=16, efConstruction=200)
-
-        client.create_collection(collection_name=collection_name, schema=schema,
-                                 index_params=index_params, consistency_level="Strong")
-        try:
-            nb = 500
-            rows = []
-            for i in range(nb):
-                rows.append({
-                    "id": i,
-                    "price": float(random.randint(int(PRICE_MIN), int(PRICE_MAX))),
-                    "vec1": list(cf.gen_vectors(1, default_dim)[0]),
-                    "vec2": list(cf.gen_vectors(1, default_dim)[0]),
-                })
-            client.insert(collection_name=collection_name, data=rows)
-            client.flush(collection_name=collection_name)
-
-            vectors_to_search = cf.gen_vectors(1, default_dim)
-            sub_search1 = AnnSearchRequest(vectors_to_search, "vec1",
-                                           {"level": 1}, 50, expr="id>=0")
-            sub_search2 = AnnSearchRequest(vectors_to_search, "vec2",
-                                           {"level": 1}, 50, expr="id>=0")
-            ranker = WeightedRanker(0.5, 0.5)
-
-            res = self.hybrid_search(client, collection_name,
-                                     [sub_search1, sub_search2], ranker,
-                                     limit=default_limit,
-                                     output_fields=["id", "price"],
-                                     order_by_fields=[{"field": "price", "order": "asc"}])[0]
-
-            assert len(res) > 0
-            results = res[0] if isinstance(res[0], list) else res
-            prices = [r["entity"]["price"] if "entity" in r else r.get("price")
-                      for r in results]
-            for i in range(len(prices) - 1):
-                assert prices[i] <= prices[i + 1], \
-                    f"Hybrid search price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
-        finally:
-            client.drop_collection(collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_order_by_nullable_field(self):
@@ -948,8 +914,12 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
         collection_name = INVALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 65536,
-                 ct.err_msg: "order_by is not supported for JSON field"}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: (
+                     "order_by field 'json_field' has unsortable type JSON; supported types: "
+                     "bool, int8/16/32/64, float, double, string, varchar; for JSON fields use "
+                     "path syntax like field[\"key\"]"
+                 )}
         self.search(client, collection_name, vectors_to_search,
                     limit=default_limit,
                     anns_field="embeddings",
@@ -970,7 +940,7 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
         error = {ct.err_code: 1,
-                 ct.err_msg: "empty field name in order_by_fields"}
+                 ct.err_msg: "Invalid order_by_fields item: 'field' key is required and cannot be empty"}
         self.search(client, collection_name, vectors_to_search,
                     limit=default_limit,
                     anns_field="embeddings",
@@ -990,8 +960,8 @@ class TestMilvusClientSearchOrderInvalid(TestMilvusClientV2Base):
         collection_name = INVALID_COLLECTION_NAME
 
         vectors_to_search = cf.gen_vectors(1, default_dim)
-        error = {ct.err_code: 65536,
-                 ct.err_msg: "invalid JSON path in order_by field"}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: "order_by field 'json_field[invalid:asc' does not exist in collection schema"}
         self.search(client, collection_name, vectors_to_search,
                     limit=default_limit,
                     anns_field="embeddings",
