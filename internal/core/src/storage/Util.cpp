@@ -1319,11 +1319,9 @@ FetchFieldData(ChunkManager* cm, const std::vector<std::string>& remote_files) {
     std::vector<std::string> batch_files;
     auto FetchRawData = [&]() {
         auto fds = GetObjectData(cm, batch_files);
-        // Wait for all futures and collect exceptions to ensure all threads complete
-        auto codecs = storage::WaitAllFutures(std::move(fds));
-        for (auto& codec : codecs) {
+        ProcessFuturesInOrder(fds, [&](std::unique_ptr<DataCodec> codec) {
             field_datas.emplace_back(codec->GetFieldData());
-        }
+        });
     };
 
     auto parallel_degree =

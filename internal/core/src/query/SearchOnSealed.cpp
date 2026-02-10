@@ -227,6 +227,9 @@ SearchOnSealedColumn(const Schema& schema,
                                          search_bitview,
                                          data_type);
         cached_iter.NextBatch(search_info, result);
+        if (offset_mapping.IsEnabled()) {
+            TransformOffset(result.seg_offsets_, offset_mapping);
+        }
         return;
     }
 
@@ -252,7 +255,7 @@ SearchOnSealedColumn(const Schema& schema,
     auto vector_chunks = column->GetAllChunks(op_context);
     const auto& valid_count_per_chunk = column->GetValidCountPerChunk();
     for (int i = 0; i < num_chunk; ++i) {
-        auto pw = vector_chunks[i];
+        const auto& pw = vector_chunks[i];
         auto vec_data = pw.get()->Data();
         auto chunk_size = column->chunk_row_nums(i);
         if (offset_mapping.IsEnabled() && !valid_count_per_chunk.empty()) {

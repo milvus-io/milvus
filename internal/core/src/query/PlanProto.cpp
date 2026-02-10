@@ -630,7 +630,7 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
         auto field_id = FieldId(field_id_raw);
         plan->target_entries_.push_back(field_id);
     }
-    for (auto dynamic_field : plan_node_proto.dynamic_fields()) {
+    for (const auto& dynamic_field : plan_node_proto.dynamic_fields()) {
         plan->target_dynamic_fields_.push_back(dynamic_field);
     }
 
@@ -650,7 +650,7 @@ ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
         auto field_id = FieldId(field_id_raw);
         retrieve_plan->field_ids_.push_back(field_id);
     }
-    for (auto dynamic_field : plan_node_proto.dynamic_fields()) {
+    for (const auto& dynamic_field : plan_node_proto.dynamic_fields()) {
         retrieve_plan->target_dynamic_fields_.push_back(dynamic_field);
     }
     return retrieve_plan;

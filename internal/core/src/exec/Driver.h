@@ -176,7 +176,7 @@ struct DriverFactory {
     CreateDriver(std::unique_ptr<DriverContext> ctx,
                  // TODO: support exchange function
                  // std::shared_ptr<ExchangeClient> exchange_client,
-                 std::function<int(int pipilineid)> num_driver);
+                 const std::function<int(int pipilineid)>& num_driver);
 
     // TODO: support ditribution compute
     bool

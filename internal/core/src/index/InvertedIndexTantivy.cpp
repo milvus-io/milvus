@@ -438,7 +438,7 @@ InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
 
 template <typename T>
 const TargetBitmap
-InvertedIndexTantivy<T>::Range(T value, OpType op) {
+InvertedIndexTantivy<T>::Range(const T& value, OpType op) {
     tracer::AutoSpan span("InvertedIndexTantivy::Range", tracer::GetRootSpan());
     TargetBitmap bitset(Count());
 
@@ -465,9 +465,9 @@ InvertedIndexTantivy<T>::Range(T value, OpType op) {
 
 template <typename T>
 const TargetBitmap
-InvertedIndexTantivy<T>::Range(T lower_bound_value,
+InvertedIndexTantivy<T>::Range(const T& lower_bound_value,
                                bool lb_inclusive,
-                               T upper_bound_value,
+                               const T& upper_bound_value,
                                bool ub_inclusive) {
     tracer::AutoSpan span("InvertedIndexTantivy::RangeWithBounds",
                           tracer::GetRootSpan());
@@ -660,17 +660,19 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                     }
                 }
             } else {
+                int64_t offset = 0;
                 for (const auto& data : field_datas) {
                     auto n = data->get_num_rows();
                     if (schema_.nullable()) {
                         for (int i = 0; i < n; i++) {
                             if (!data->is_valid(i)) {
-                                null_offset_.push_back(i);
+                                null_offset_.push_back(offset);
                             }
                             wrapper_
                                 ->add_array_data_by_single_segment_writer<T>(
                                     static_cast<const T*>(data->RawValue(i)),
                                     data->is_valid(i));
+                            offset++;
                         }
                         continue;
                     }

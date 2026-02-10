@@ -116,12 +116,12 @@ class StringIndexSort : public StringIndex {
     IsNotNull() override;
 
     const TargetBitmap
-    Range(std::string value, OpType op) override;
+    Range(const std::string& value, OpType op) override;
 
     const TargetBitmap
-    Range(std::string lower_bound_value,
+    Range(const std::string& lower_bound_value,
           bool lb_inclusive,
-          std::string upper_bound_value,
+          const std::string& upper_bound_value,
           bool ub_inclusive) override;
 
     const TargetBitmap
@@ -204,12 +204,12 @@ class StringIndexSortImpl {
     IsNotNull(const TargetBitmap& valid_bitset) = 0;
 
     virtual const TargetBitmap
-    Range(std::string value, OpType op, size_t total_num_rows) = 0;
+    Range(const std::string& value, OpType op, size_t total_num_rows) = 0;
 
     virtual const TargetBitmap
-    Range(std::string lower_bound_value,
+    Range(const std::string& lower_bound_value,
           bool lb_inclusive,
-          std::string upper_bound_value,
+          const std::string& upper_bound_value,
           bool ub_inclusive,
           size_t total_num_rows) = 0;
 
@@ -292,12 +292,12 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
     IsNotNull(const TargetBitmap& valid_bitset) override;
 
     const TargetBitmap
-    Range(std::string value, OpType op, size_t total_num_rows) override;
+    Range(const std::string& value, OpType op, size_t total_num_rows) override;
 
     const TargetBitmap
-    Range(std::string lower_bound_value,
+    Range(const std::string& lower_bound_value,
           bool lb_inclusive,
-          std::string upper_bound_value,
+          const std::string& upper_bound_value,
           bool ub_inclusive,
           size_t total_num_rows) override;
 
@@ -424,12 +424,12 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
     IsNotNull(const TargetBitmap& valid_bitset) override;
 
     const TargetBitmap
-    Range(std::string value, OpType op, size_t total_num_rows) override;
+    Range(const std::string& value, OpType op, size_t total_num_rows) override;
 
     const TargetBitmap
-    Range(std::string lower_bound_value,
+    Range(const std::string& lower_bound_value,
           bool lb_inclusive,
-          std::string upper_bound_value,
+          const std::string& upper_bound_value,
           bool ub_inclusive,
           size_t total_num_rows) override;
 

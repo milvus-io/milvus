@@ -405,13 +405,12 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
                     GetObjectData(rcm_.get(),
                                   batch_remote_files,
                                   milvus::PriorityForLoad(priority));
-                // Wait for all futures to ensure all threads complete
-                auto chunk_codecs =
-                    storage::WaitAllFutures(std::move(index_chunks_futures));
-                for (auto& chunk_codec : chunk_codecs) {
-                    file_writer.Write(chunk_codec->PayloadData(),
-                                      chunk_codec->PayloadSize());
-                }
+                storage::ProcessFuturesInOrder(
+                    index_chunks_futures,
+                    [&](std::unique_ptr<DataCodec> chunk_codec) {
+                        file_writer.Write(chunk_codec->PayloadData(),
+                                          chunk_codec->PayloadSize());
+                    });
                 batch_remote_files.clear();
             };
 
@@ -558,39 +557,38 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
 
     auto FetchRawData = [&]() {
         auto field_datas = GetObjectData(rcm_.get(), batch_files);
-        // Wait for all futures to ensure all threads complete
-        auto codecs = storage::WaitAllFutures(std::move(field_datas));
-        int batch_size = batch_files.size();
-        for (int i = 0; i < batch_size; i++) {
-            auto field_data = codecs[i]->GetFieldData();
-            num_rows += uint32_t(field_data->get_valid_rows());
+        storage::ProcessFuturesInOrder(
+            field_datas, [&](std::unique_ptr<DataCodec> codec) {
+                auto field_data = codec->GetFieldData();
+                num_rows += uint32_t(field_data->get_valid_rows());
 
-            if (valid_data_path.has_value() && field_data->IsNullable()) {
-                nullable = true;
-                auto rows = field_data->get_num_rows();
-                if (rows > 0) {
-                    auto new_size = (total_num_rows + rows + 7) / 8;
-                    if (new_size > static_cast<int64_t>(valid_bitmap.size())) {
-                        valid_bitmap.resize(new_size, 0);
-                    }
-                    for (int64_t i = 0; i < rows; ++i) {
-                        if (field_data->is_valid(i)) {
-                            set_bit(valid_bitmap, total_num_rows + i);
+                if (valid_data_path.has_value() && field_data->IsNullable()) {
+                    nullable = true;
+                    auto rows = field_data->get_num_rows();
+                    if (rows > 0) {
+                        auto new_size = (total_num_rows + rows + 7) / 8;
+                        if (new_size >
+                            static_cast<int64_t>(valid_bitmap.size())) {
+                            valid_bitmap.resize(new_size, 0);
                         }
+                        for (int64_t i = 0; i < rows; ++i) {
+                            if (field_data->is_valid(i)) {
+                                set_bit(valid_bitmap, total_num_rows + i);
+                            }
+                        }
+                        total_num_rows += rows;
                     }
-                    total_num_rows += rows;
                 }
-            }
 
-            cache_raw_data_to_disk_common<DataType>(
-                field_data,
-                local_chunk_manager,
-                local_data_path,
-                file_created,
-                dim,
-                write_offset,
-                is_vector_array ? &offsets : nullptr);
-        }
+                cache_raw_data_to_disk_common<DataType>(
+                    field_data,
+                    local_chunk_manager,
+                    local_data_path,
+                    file_created,
+                    dim,
+                    write_offset,
+                    is_vector_array ? &offsets : nullptr);
+            });
     };
 
     auto parallel_degree =

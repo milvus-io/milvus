@@ -100,8 +100,9 @@ class ThreadSafeValidData {
         return &data_[offset];
     }
 
-    const FixedVector<bool>&
+    FixedVector<bool>
     get_data() const {
+        std::shared_lock<std::shared_mutex> lck(mutex_);
         return data_;
     }
 
@@ -190,10 +191,9 @@ class VectorBase {
         return 0;
     }
 
-    virtual const FixedVector<bool>&
+    virtual FixedVector<bool>
     get_valid_data() const {
-        static const FixedVector<bool> empty;
-        return empty;
+        return FixedVector<bool>{};
     }
 
     virtual const OffsetMapping&
@@ -445,13 +445,12 @@ class ConcurrentVectorImpl : public VectorBase {
         return offset_mapping_;
     }
 
-    const FixedVector<bool>&
+    FixedVector<bool>
     get_valid_data() const override {
         if (valid_data_ptr_ != nullptr) {
             return valid_data_ptr_->get_data();
         }
-        static const FixedVector<bool> empty;
-        return empty;
+        return FixedVector<bool>{};
     }
 
  private:
