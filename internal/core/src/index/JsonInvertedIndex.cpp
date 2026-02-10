@@ -13,12 +13,17 @@
 
 #include <algorithm>
 #include <exception>
+#include <fcntl.h>
 #include <list>
 #include <optional>
 #include <string>
+#include <unistd.h>
 #include <utility>
 
+#include "boost/filesystem/directory.hpp"
+#include "boost/filesystem/operations.hpp"
 #include "boost/filesystem/path.hpp"
+#include "folly/SharedMutex.h"
 #include "common/Json.h"
 #include "common/Types.h"
 #include "index/JsonIndexBuilder.h"
@@ -27,6 +32,9 @@
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
 #include "simdjson/error.h"
+#include "storage/FileWriter.h"
+#include "storage/IndexEntryReader.h"
+#include "storage/IndexEntryWriter.h"
 #include "storage/ThreadPools.h"
 
 namespace milvus::index {
@@ -120,7 +128,7 @@ JsonInvertedIndex<T>::LoadIndexMetas(
 
     if (non_exist_offset_file_itr != index_files.end()) {
         // null offset file is not sliced
-        auto index_datas = this->mem_file_manager_->LoadIndexToMemory(
+        auto index_datas = this->file_manager_->LoadIndexToMemory(
             {*non_exist_offset_file_itr}, load_priority);
         auto non_exist_offset_data =
             std::move(index_datas.at(INDEX_NON_EXIST_OFFSET_FILE_NAME));
@@ -142,7 +150,7 @@ JsonInvertedIndex<T>::LoadIndexMetas(
     }
     if (non_exist_offset_files.size() > 0) {
         // null offset file is sliced
-        auto index_datas = this->mem_file_manager_->LoadIndexToMemory(
+        auto index_datas = this->file_manager_->LoadIndexToMemory(
             non_exist_offset_files, load_priority);
 
         auto non_exist_offset_data = CompactIndexDatas(index_datas);
@@ -181,6 +189,54 @@ JsonInvertedIndex<T>::RetainTantivyIndexFiles(
             }),
         index_files.end());
     InvertedIndexTantivy<T>::RetainTantivyIndexFiles(index_files);
+}
+
+template <typename T>
+nlohmann::json
+JsonInvertedIndex<T>::BuildTantivyMeta(
+    const std::vector<std::string>& file_names, bool has_null) {
+    auto meta = InvertedIndexTantivy<T>::BuildTantivyMeta(file_names, has_null);
+    std::shared_lock<folly::SharedMutex> lock(this->mutex_);
+    meta["has_non_exist"] = !this->non_exist_offsets_.empty();
+    return meta;
+}
+
+template <typename T>
+void
+JsonInvertedIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
+    // Call parent to write tantivy index files and null_offset
+    InvertedIndexTantivy<T>::WriteEntries(writer);
+
+    // Write json-specific data (non_exist_offsets)
+    std::shared_lock<folly::SharedMutex> lock(this->mutex_);
+    if (!this->non_exist_offsets_.empty()) {
+        writer->WriteEntry(INDEX_NON_EXIST_OFFSET_FILE_NAME,
+                           this->non_exist_offsets_.data(),
+                           this->non_exist_offsets_.size() * sizeof(size_t));
+    }
+}
+
+template <typename T>
+void
+JsonInvertedIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
+                                  const Config& config) {
+    // Call parent to load tantivy index files and null_offset
+    InvertedIndexTantivy<T>::LoadEntries(reader, config);
+
+    // Load json-specific data (non_exist_offsets)
+    auto entry_names = reader.GetEntryNames();
+    bool has_non_exist =
+        std::find(entry_names.begin(),
+                  entry_names.end(),
+                  INDEX_NON_EXIST_OFFSET_FILE_NAME) != entry_names.end();
+    if (has_non_exist) {
+        auto e = reader.ReadEntry(INDEX_NON_EXIST_OFFSET_FILE_NAME);
+        this->non_exist_offsets_.resize(e.data.size() / sizeof(size_t));
+        std::memcpy(
+            this->non_exist_offsets_.data(), e.data.data(), e.data.size());
+    }
+    LOG_INFO("LoadEntries JsonInvertedIndex done, has_non_exist: {}",
+             has_non_exist);
 }
 
 template class JsonInvertedIndex<bool>;

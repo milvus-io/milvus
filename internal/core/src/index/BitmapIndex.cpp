@@ -36,6 +36,8 @@
 #include "query/Utils.h"
 
 #include "storage/FileWriter.h"
+#include "storage/IndexEntryReader.h"
+#include "storage/IndexEntryWriter.h"
 
 namespace milvus {
 namespace index {
@@ -50,9 +52,10 @@ BitmapIndex<T>::BitmapIndex(
       schema_(file_manager_context.fieldDataMeta.field_schema),
       is_mmap_(false) {
     if (file_manager_context.Valid()) {
-        file_manager_ =
+        this->file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
-        AssertInfo(file_manager_ != nullptr, "create file manager failed!");
+        AssertInfo(this->file_manager_ != nullptr,
+                   "create file manager failed!");
     }
 }
 
@@ -77,7 +80,7 @@ BitmapIndex<T>::Build(const Config& config) {
     }
 
     auto field_datas =
-        storage::CacheRawDataAndFillMissing(file_manager_, config);
+        storage::CacheRawDataAndFillMissing(this->file_manager_, config);
     BuildWithFieldData(field_datas);
 }
 
@@ -291,13 +294,16 @@ BitmapIndex<T>::Serialize(const Config& config) {
 template <typename T>
 IndexStatsPtr
 BitmapIndex<T>::Upload(const Config& config) {
+    if (kScalarIndexUseV3) {
+        return this->UploadV3(config);
+    }
     auto binary_set = Serialize(config);
 
-    file_manager_->AddFile(binary_set);
+    this->file_manager_->AddFile(binary_set);
 
-    auto remote_path_to_size = file_manager_->GetRemotePathsToFileSize();
-    return IndexStats::NewFromSizeMap(file_manager_->GetAddedTotalMemSize(),
-                                      remote_path_to_size);
+    auto remote_path_to_size = this->file_manager_->GetRemotePathsToFileSize();
+    return IndexStats::NewFromSizeMap(
+        this->file_manager_->GetAddedTotalMemSize(), remote_path_to_size);
 }
 
 template <typename T>
@@ -559,7 +565,7 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
         BuildOffsetCache();
     }
 
-    auto file_index_meta = file_manager_->GetIndexMeta();
+    auto file_index_meta = this->file_manager_->GetIndexMeta();
     LOG_INFO(
         "load bitmap index with cardinality = {}, num_rows = {} for segment_id "
         "= {}, field_id = {}, mmap = {}",
@@ -577,6 +583,10 @@ template <typename T>
 void
 BitmapIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     LOG_INFO("load bitmap index with config {}", config.dump());
+    if (kScalarIndexUseV3) {
+        this->LoadV3(config);
+        return;
+    }
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
@@ -585,8 +595,8 @@ BitmapIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
-    auto index_datas =
-        file_manager_->LoadIndexToMemory(index_files.value(), load_priority);
+    auto index_datas = this->file_manager_->LoadIndexToMemory(
+        index_files.value(), load_priority);
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
     // clear index_datas to free memory early
@@ -1333,6 +1343,82 @@ BitmapIndex<std::string>::RegexQuery(const std::string& regex_pattern) {
         }
     }
     return res;
+}
+
+template <typename T>
+void
+BitmapIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
+    AssertInfo(is_built_, "index has not been built yet");
+
+    auto index_meta = SerializeIndexMeta();
+    writer->WriteEntry(
+        BITMAP_INDEX_META, index_meta.first.get(), index_meta.second);
+
+    auto index_data_size = GetIndexDataSize();
+    std::shared_ptr<uint8_t[]> index_data(new uint8_t[index_data_size]);
+    uint8_t* data_ptr = index_data.get();
+    SerializeIndexData(data_ptr);
+    writer->WriteEntry(BITMAP_INDEX_DATA, index_data.get(), index_data_size);
+
+    LOG_INFO("write bitmap index entries with cardinality = {}, num_rows = {}",
+             data_.size(),
+             total_num_rows_);
+}
+
+template <typename T>
+void
+BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
+                            const Config& config) {
+    auto enable_offset_cache =
+        GetValueFromConfig<bool>(config, ENABLE_OFFSET_CACHE);
+
+    auto meta_entry = reader.ReadEntry(BITMAP_INDEX_META);
+    auto index_meta =
+        DeserializeIndexMeta(meta_entry.data.data(), meta_entry.data.size());
+    auto index_length = index_meta.first;
+    total_num_rows_ = index_meta.second;
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+
+    auto data_entry = reader.ReadEntry(BITMAP_INDEX_DATA);
+
+    ChooseIndexLoadMode(index_length);
+
+    if (config.contains(MMAP_FILE_PATH) &&
+        build_mode_ == BitmapIndexBuildMode::ROARING) {
+        auto mmap_filepath =
+            GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
+        auto priority =
+            GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                config, milvus::LOAD_PRIORITY)
+                .value_or(milvus::proto::common::LoadPriority::HIGH);
+        AssertInfo(mmap_filepath.has_value(),
+                   "mmap filepath is empty when load index");
+        MMapIndexData(mmap_filepath.value(),
+                      data_entry.data.data(),
+                      data_entry.data.size(),
+                      index_length,
+                      priority);
+    } else {
+        DeserializeIndexData(data_entry.data.data(), index_length);
+    }
+
+    if (enable_offset_cache.has_value() && enable_offset_cache.value()) {
+        BuildOffsetCache();
+    }
+
+    auto file_index_meta = this->file_manager_->GetIndexMeta();
+
+    LOG_INFO(
+        "LoadEntries bitmap index with cardinality = {}, num_rows = {} for "
+        "segment_id = {}, field_id = {}, mmap = {}",
+        Cardinality(),
+        total_num_rows_,
+        file_index_meta.segment_id,
+        file_index_meta.field_id,
+        is_mmap_);
+
+    is_built_ = true;
+    ComputeByteSize();
 }
 
 template class BitmapIndex<bool>;

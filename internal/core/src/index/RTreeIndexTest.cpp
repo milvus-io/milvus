@@ -262,9 +262,13 @@ TEST_F(RTreeIndexTest, Load_WithFileNamesOnly) {
     for (const auto& path : stats->GetIndexFiles()) {
         filenames.emplace_back(
             boost::filesystem::path(path).filename().string());
-        // make sure file exists in remote storage
-        ASSERT_TRUE(chunk_manager_->Exist(path));
-        ASSERT_GT(chunk_manager_->Size(path), 0);
+        // In V2 mode, files are stored via chunk_manager.
+        // In V3 mode, files are stored via ArrowFileSystem (fs_),
+        // so chunk_manager won't find them.
+        if (!milvus::index::kScalarIndexUseV3) {
+            ASSERT_TRUE(chunk_manager_->Exist(path));
+            ASSERT_GT(chunk_manager_->Size(path), 0);
+        }
     }
 
     // Load using filename only list
@@ -366,6 +370,24 @@ TEST_F(RTreeIndexTest, Build_ConfigAndMetaJson) {
 
     rtree.Build(build_cfg);
     auto stats = rtree.Upload({});
+
+    if (milvus::index::kScalarIndexUseV3) {
+        // V3 mode: verify upload produced a single packed file and can be loaded
+        auto index_files = stats->GetIndexFiles();
+        ASSERT_EQ(index_files.size(), 1);
+
+        milvus::storage::FileManagerContext ctx_load(
+            field_meta_, index_meta_, chunk_manager_, fs_);
+        ctx_load.set_for_loading_index(true);
+        milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
+
+        nlohmann::json cfg;
+        cfg["index_files"] = index_files;
+        milvus::tracer::TraceContext trace_ctx;
+        rtree_load.Load(trace_ctx, cfg);
+        ASSERT_EQ(rtree_load.Count(), 2);
+        return;
+    }
 
     // Cache remote index files locally
     milvus::storage::DiskFileManagerImpl diskfm(
