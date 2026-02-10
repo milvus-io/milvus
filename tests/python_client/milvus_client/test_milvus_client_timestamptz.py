@@ -626,15 +626,16 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         
         # step 4: compact
         compact_id = self.compact(client, collection_name, is_clustering=False)[0]
-        cost = 180
-        start = time.time()
-        while True:
-            time.sleep(1)
-            res = self.get_compaction_state(client, compact_id, is_clustering=False)[0]
-            if res == "Completed":
-                break
-            if time.time() - start > cost:
-                raise Exception(1, f"Compact after index cost more than {cost}s")
+        if compact_id > 0:
+            cost = 180
+            start = time.time()
+            while True:
+                time.sleep(1)
+                res = self.get_compaction_state(client, compact_id, is_clustering=False)[0]
+                if res == "Completed":
+                    break
+                if time.time() - start > cost:
+                    raise Exception(1, f"Compact after index cost more than {cost}s")
         
         # step 5: query the rows
         # first release the collection

@@ -586,11 +586,11 @@ class CollectionClient(Requests):
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
 
-    def get_compaction_state(self, collection_name, db_name="default"):
+    def get_compaction_state(self, job_id, db_name="default"):
         """Get compaction state"""
         url = f"{self.endpoint}/v2/vectordb/collections/get_compaction_state"
         payload = {
-            "collectionName": collection_name
+            "jobID": job_id
         }
         if self.db_name is not None:
             payload["dbName"] = self.db_name

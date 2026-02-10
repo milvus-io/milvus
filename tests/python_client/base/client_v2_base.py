@@ -603,6 +603,8 @@ class TestMilvusClientV2Base(Base):
         return False
 
     def wait_for_compaction_ready(self, client, compact_id, timeout=None, **kwargs):
+        if compact_id is not None and compact_id <= 0:
+            return True
         timeout = TIMEOUT if timeout is None else timeout
         start_time = time.time()
         while start_time + timeout > time.time():
