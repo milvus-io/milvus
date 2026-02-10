@@ -306,10 +306,10 @@ StringIndexMarisa::In(size_t n, const std::string* values) {
     tracer::AutoSpan span("StringIndexMarisa::In", tracer::GetRootSpan());
     TargetBitmap bitset(str_ids_.size());
     for (size_t i = 0; i < n; i++) {
-        auto str = values[i];
+        const auto& str = values[i];
         auto str_id = lookup(str);
         if (valid_str_id(str_id)) {
-            auto offsets = str_ids_to_offsets_[str_id];
+            auto& offsets = str_ids_to_offsets_[str_id];
             for (auto offset : offsets) {
                 bitset[offset] = true;
             }
@@ -323,10 +323,10 @@ StringIndexMarisa::NotIn(size_t n, const std::string* values) {
     tracer::AutoSpan span("StringIndexMarisa::NotIn", tracer::GetRootSpan());
     TargetBitmap bitset(str_ids_.size(), true);
     for (size_t i = 0; i < n; i++) {
-        auto str = values[i];
+        const auto& str = values[i];
         auto str_id = lookup(str);
         if (valid_str_id(str_id)) {
-            auto offsets = str_ids_to_offsets_[str_id];
+            auto& offsets = str_ids_to_offsets_[str_id];
             for (auto offset : offsets) {
                 bitset[offset] = false;
             }
@@ -380,7 +380,7 @@ StringIndexMarisa::IsNotNull() {
 }
 
 const TargetBitmap
-StringIndexMarisa::Range(std::string value, OpType op) {
+StringIndexMarisa::Range(const std::string& value, OpType op) {
     tracer::AutoSpan span("StringIndexMarisa::Range", tracer::GetRootSpan());
     auto count = Count();
     TargetBitmap bitset(count);
@@ -491,7 +491,7 @@ StringIndexMarisa::Range(std::string value, OpType op) {
     }
 
     for (const auto str_id : ids) {
-        auto offsets = str_ids_to_offsets_[str_id];
+        auto& offsets = str_ids_to_offsets_[str_id];
         for (auto offset : offsets) {
             bitset[offset] = true;
         }
@@ -500,9 +500,9 @@ StringIndexMarisa::Range(std::string value, OpType op) {
 }
 
 const TargetBitmap
-StringIndexMarisa::Range(std::string lower_bound_value,
+StringIndexMarisa::Range(const std::string& lower_bound_value,
                          bool lb_inclusive,
-                         std::string upper_bound_value,
+                         const std::string& upper_bound_value,
                          bool ub_inclusive) {
     tracer::AutoSpan span("StringIndexMarisa::Range", tracer::GetRootSpan());
     auto count = Count();
@@ -545,7 +545,7 @@ StringIndexMarisa::Range(std::string lower_bound_value,
         }
     }
     for (const auto str_id : ids) {
-        auto offsets = str_ids_to_offsets_[str_id];
+        auto& offsets = str_ids_to_offsets_[str_id];
         for (auto offset : offsets) {
             bitset[offset] = true;
         }
@@ -561,7 +561,7 @@ StringIndexMarisa::PrefixMatch(std::string_view prefix) {
     TargetBitmap bitset(str_ids_.size());
     auto matched = prefix_match(prefix);
     for (const auto str_id : matched) {
-        auto offsets = str_ids_to_offsets_[str_id];
+        auto& offsets = str_ids_to_offsets_[str_id];
         for (auto offset : offsets) {
             bitset[offset] = true;
         }
@@ -578,7 +578,7 @@ StringIndexMarisa::fill_str_ids(size_t n,
         if (valid_data != nullptr && !valid_data[i]) {
             continue;
         }
-        auto str = values[i];
+        const auto& str = values[i];
         auto str_id = lookup(str);
         AssertInfo(valid_str_id(str_id), "invalid marisa key");
         str_ids_[i] = str_id;

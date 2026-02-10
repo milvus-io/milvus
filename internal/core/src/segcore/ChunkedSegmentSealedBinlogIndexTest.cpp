@@ -127,7 +127,7 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
             {vec_field_id, fieldIndexMeta}};
         IndexMetaPtr metaPtr =
             std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
-        return std::move(metaPtr);
+        return metaPtr;
     }
 
     void
