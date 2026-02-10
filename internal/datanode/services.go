@@ -1020,7 +1020,10 @@ func (node *DataNode) createExternalCollectionTask(ctx context.Context, req *dat
 	// The task will execute asynchronously in the manager's goroutine pool
 	err := node.externalCollectionManager.SubmitTask(clusterID, req, func(taskCtx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
 		// Execute the task
-		task := external.NewUpdateExternalTask(taskCtx, func() {}, req)
+		// cancel is managed by SubmitTask's pool closure (defer cancel()),
+		// but we still pass a context-derived cancel for consistency.
+		_, taskCancel := context.WithCancel(taskCtx)
+		task := external.NewUpdateExternalTask(taskCtx, taskCancel, req)
 
 		if err := task.PreExecute(taskCtx); err != nil {
 			log.Warn("external collection task PreExecute failed", zap.Error(err))
@@ -1043,8 +1046,8 @@ func (node *DataNode) createExternalCollectionTask(ctx context.Context, req *dat
 		resp := &datapb.UpdateExternalCollectionResponse{
 			Status:          merr.Success(),
 			State:           indexpb.JobState_JobStateFinished,
-			KeptSegments:    extractSegmentIDs(req.GetCurrentSegments()),
-			UpdatedSegments: task.GetUpdatedSegments(),
+			KeptSegments:    task.GetKeptSegmentIDs(),
+			UpdatedSegments: task.GetNewSegments(),
 		}
 
 		return resp, nil

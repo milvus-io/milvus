@@ -1371,6 +1371,10 @@ message UpdateExternalCollectionRequest {
   repeated SegmentInfo currentSegments = 4;
   string externalSource = 5;
   string externalSpec = 6;
+  index.StorageConfig storage_config = 7;
+  schema.CollectionSchema schema = 8;
+  IDRange pre_allocated_segment_ids = 9;  // pre-allocated segment ID range for data mapping
+  int64 num_segments_expected = 10;       // expected number of segments for validation
 }
 
 message UpdateExternalCollectionResponse {

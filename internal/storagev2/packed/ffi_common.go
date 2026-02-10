@@ -193,7 +193,7 @@ func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 			errStr = C.GoString(errMsg)
 		}
 
-		return fmt.Errorf("failed to create properties: %s", errStr)
+		return fmt.Errorf("FFI operation failed: %s", errStr)
 	}
 	return nil
 }
@@ -204,10 +204,14 @@ type ManifestJSON struct {
 }
 
 func MarshalManifestPath(basePath string, version int64) string {
-	bs, _ := json.Marshal(ManifestJSON{
+	bs, err := json.Marshal(ManifestJSON{
 		ManifestVersion: version,
 		BasePath:        basePath,
 	})
+	if err != nil {
+		// json.Marshal on string+int64 struct should never fail, but log if it does
+		return fmt.Sprintf(`{"ver":%d,"base_path":"%s"}`, version, basePath)
+	}
 	return string(bs)
 }
 
