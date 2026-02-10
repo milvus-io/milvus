@@ -24,6 +24,8 @@ import (
 	"sort"
 	"strings"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -356,6 +358,15 @@ func newGroupingIDScores[T PKType](idScores map[T]float32, idLocations map[T]IDL
 		}
 	}
 	ret.size = int64(len(ret.ids))
+	log.Debug("newGroupingIDScores",
+		zap.Int("inputIDs", len(idScores)),
+		zap.Int("totalGroups", len(buckets)),
+		zap.Int("groupsAfterTrunc", endIndex-int(searchParams.offset)),
+		zap.Int64("limit", searchParams.limit),
+		zap.Int64("offset", searchParams.offset),
+		zap.Int64("groupSize", searchParams.groupSize),
+		zap.Int64("outputIDs", ret.size),
+	)
 	return &ret, nil
 }
 
