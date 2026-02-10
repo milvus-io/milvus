@@ -12,15 +12,13 @@ class MilvusConan(ConanFile):
         "zstd/1.5.5#34e9debe03bf0964834a09dfbc31a5dd",
         "lz4/1.9.4#c5afb86edd69ac0df30e3a9e192e43db",
         "snappy/1.1.9#0519333fef284acd04806243de7d3070",
-        "lzo/2.10#9517fc1bcc4d4cc229a79806003a1baa",
         "arrow/17.0.0@milvus/dev-2.6#7af258a853e20887f9969f713110aac8",
         "openssl/3.1.2#02594c4c0a6e2b4feb3cd15119993597",
         "aws-sdk-cpp/1.11.352@milvus/dev",
         "googleapis/cci.20221108#65604e1b3b9a6b363044da625b201a2a",
-        "benchmark/1.7.0#459f3bb1a64400a886ba43047576df3c",
         "gtest/1.13.0#f9548be18a41ccc6367efcb8146e92be",
+        "benchmark/1.7.0#459f3bb1a64400a886ba43047576df3c",
         "protobuf/3.21.4#fd372371d994b8585742ca42c12337f9",
-        "rapidxml/1.13#10c11a4bfe073e131ed399d5c4f2e075",
         "yaml-cpp/0.7.0#9c87b3998de893cf2e5a08ad09a7a6e0",
         "marisa/0.2.6#68446854f5a420672d21f21191f8e5af",
         "zlib/1.2.13#df233e6bed99052f285331b9f54d9070",
@@ -29,9 +27,6 @@ class MilvusConan(ConanFile):
         "fmt/9.1.0#95259249fb7ef8c6b5674a40b00abba3",
         "gflags/2.2.2#b15c28c567c7ade7449cf994168a559f",
         "double-conversion/3.2.1#640e35791a4bac95b0545e2f54b7aceb",
-        "libevent/2.1.12#4fd19d10d3bed63b3a8952c923454bc0",
-        "libdwarf/20191104#7f56c6c7ccda5fadf5f28351d35d7c01",
-        "libiberty/9.1.0#3060045a116b0fff6d4937b0fc9cfc0e",
         "libsodium/cci.20220430#7429a9e5351cc67bea3537229921714d",
         "xsimd/9.0.1#ac9fd02a381698c4e08c5c4ca03b73e1",
         "xz_utils/5.4.0#a6d90890193dc851fa0d470163271c7a",
@@ -51,8 +46,10 @@ class MilvusConan(ConanFile):
         "geos/3.12.0#0b177c90c25a8ca210578fb9e2899c37",
         "libavrocpp/1.12.1@milvus/dev",
     )
+
     generators = ("cmake", "cmake_find_package")
     default_options = {
+        "openssl:shared": True,
         "libevent:shared": True,
         "double-conversion:shared": True,
         "folly:shared": True,
