@@ -561,13 +561,16 @@ func pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.F
 	// v3 v2 v5 v4 v1  (result vectors)
 	// ===========================================
 	fieldsData := make([]*schemapb.FieldData, len(fields))
+	idxComputer := typeutil.NewFieldDataIdxComputer(fields)
 	for i := 0; i < typeutil.GetSizeOfIDs(ids); i++ {
 		id := typeutil.GetPK(ids, int64(i))
 		if _, ok := pkOffset[id]; !ok {
 			return nil, merr.WrapErrInconsistentRequery(fmt.Sprintf("incomplete query result, missing id %s, len(searchIDs) = %d, len(queryIDs) = %d, collection=%d",
 				id, typeutil.GetSizeOfIDs(ids), len(pkOffset), collectionID))
 		}
-		typeutil.AppendFieldData(fieldsData, fields, int64(pkOffset[id]))
+		rowIdx := int64(pkOffset[id])
+		fieldIdxs := idxComputer.Compute(rowIdx)
+		typeutil.AppendFieldData(fieldsData, fields, rowIdx, fieldIdxs...)
 	}
 
 	return fieldsData, nil
