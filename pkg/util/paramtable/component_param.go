@@ -3315,13 +3315,6 @@ type queryNodeConfig struct {
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
 	MaxMmapDiskPercentageForMmapManager ParamItem `refreshable:"false"`
 
-	LazyLoadEnabled                      ParamItem `refreshable:"false"`
-	LazyLoadWaitTimeout                  ParamItem `refreshable:"true"`
-	LazyLoadRequestResourceTimeout       ParamItem `refreshable:"true"`
-	LazyLoadRequestResourceRetryInterval ParamItem `refreshable:"true"`
-	LazyLoadMaxRetryTimes                ParamItem `refreshable:"true"`
-	LazyLoadMaxEvictPerRetry             ParamItem `refreshable:"true"`
-
 	IndexOffsetCacheEnabled ParamItem `refreshable:"true"`
 
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
@@ -4108,57 +4101,6 @@ However, this optimization may come at the cost of a slight decrease in query la
 		Export:       true,
 	}
 	p.MaxMmapDiskPercentageForMmapManager.Init(base.mgr)
-
-	p.LazyLoadEnabled = ParamItem{
-		Key:          "queryNode.lazyload.enabled",
-		Version:      "2.4.2",
-		DefaultValue: "false",
-		Doc:          "Enable lazyload for loading data",
-		Export:       true,
-	}
-	p.LazyLoadEnabled.Init(base.mgr)
-	p.LazyLoadWaitTimeout = ParamItem{
-		Key:          "queryNode.lazyload.waitTimeout",
-		Version:      "2.4.2",
-		DefaultValue: "30000",
-		Doc:          "max wait timeout duration in milliseconds before start to do lazyload search and retrieve",
-		Export:       true,
-	}
-	p.LazyLoadWaitTimeout.Init(base.mgr)
-	p.LazyLoadRequestResourceTimeout = ParamItem{
-		Key:          "queryNode.lazyload.requestResourceTimeout",
-		Version:      "2.4.2",
-		DefaultValue: "5000",
-		Doc:          "max timeout in milliseconds for waiting request resource for lazy load, 5s by default",
-		Export:       true,
-	}
-	p.LazyLoadRequestResourceTimeout.Init(base.mgr)
-	p.LazyLoadRequestResourceRetryInterval = ParamItem{
-		Key:          "queryNode.lazyload.requestResourceRetryInterval",
-		Version:      "2.4.2",
-		DefaultValue: "2000",
-		Doc:          "retry interval in milliseconds for waiting request resource for lazy load, 2s by default",
-		Export:       true,
-	}
-	p.LazyLoadRequestResourceRetryInterval.Init(base.mgr)
-
-	p.LazyLoadMaxRetryTimes = ParamItem{
-		Key:          "queryNode.lazyload.maxRetryTimes",
-		Version:      "2.4.2",
-		DefaultValue: "1",
-		Doc:          "max retry times for lazy load, 1 by default",
-		Export:       true,
-	}
-	p.LazyLoadMaxRetryTimes.Init(base.mgr)
-
-	p.LazyLoadMaxEvictPerRetry = ParamItem{
-		Key:          "queryNode.lazyload.maxEvictPerRetry",
-		Version:      "2.4.2",
-		DefaultValue: "1",
-		Doc:          "max evict count for lazy load, 1 by default",
-		Export:       true,
-	}
-	p.LazyLoadMaxEvictPerRetry.Init(base.mgr)
 
 	p.ReadAheadPolicy = ParamItem{
 		Key:          "queryNode.cache.readAheadPolicy",

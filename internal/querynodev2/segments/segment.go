@@ -43,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -90,7 +89,6 @@ type baseSegment struct {
 	segmentType    SegmentType
 	bloomFilterSet *pkoracle.BloomFilterSet
 	loadInfo       *atomic.Pointer[querypb.SegmentLoadInfo]
-	isLazyLoad     bool
 	skipGrowingBF  bool // Skip generating or maintaining BF for growing segments; deletion checks will be handled in segcore.
 	channel        metautil.Channel
 
@@ -114,21 +112,12 @@ func newBaseSegment(collection *Collection, segmentType SegmentType, version int
 		bloomFilterSet: pkoracle.NewBloomFilterSet(loadInfo.GetSegmentID(), loadInfo.GetPartitionID(), segmentType),
 		bm25Stats:      make(map[int64]*storage.BM25Stats),
 		channel:        channel,
-		isLazyLoad:     isLazyLoad(collection, segmentType),
 		skipGrowingBF:  segmentType == SegmentTypeGrowing && paramtable.Get().QueryNodeCfg.SkipGrowingSegmentBF.GetAsBool(),
 
 		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
 		needUpdatedVersion: atomic.NewInt64(0),
 	}
 	return bs, nil
-}
-
-// isLazyLoad checks if the segment is lazy load
-func isLazyLoad(collection *Collection, segmentType SegmentType) bool {
-	return segmentType == SegmentTypeSealed && // only sealed segment enable lazy load
-		(common.IsCollectionLazyLoadEnabled(collection.Schema().Properties...) || // collection level lazy load
-			(!common.HasLazyload(collection.Schema().Properties) &&
-				params.Params.QueryNodeCfg.LazyLoadEnabled.GetAsBool())) // global level lazy load
 }
 
 // ID returns the identity number.
@@ -276,10 +265,6 @@ func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
 	}
 	s.resourceUsageCache.Store(usage)
 	return *usage
-}
-
-func (s *baseSegment) IsLazyLoad() bool {
-	return s.isLazyLoad
 }
 
 func (s *baseSegment) NeedUpdatedVersion() int64 {
@@ -873,45 +858,6 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		return err
 	}
 	log.Info("load field done")
-	return nil
-}
-
-func (s *LocalSegment) AddFieldDataInfo(ctx context.Context, rowCount int64, fields []*datapb.FieldBinlog) error {
-	if !s.ptrLock.PinIf(state.IsNotReleased) {
-		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
-	}
-	defer s.ptrLock.Unpin()
-
-	log := log.Ctx(ctx).WithLazy(
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID()),
-		zap.Int64("row count", rowCount),
-	)
-
-	req := &segcore.AddFieldDataInfoRequest{
-		Fields:         make([]segcore.LoadFieldDataInfo, 0, len(fields)),
-		RowCount:       rowCount,
-		LoadPriority:   s.loadInfo.Load().GetPriority(),
-		StorageVersion: s.loadInfo.Load().GetStorageVersion(),
-	}
-	for _, field := range fields {
-		req.Fields = append(req.Fields, segcore.LoadFieldDataInfo{
-			Field: field,
-		})
-	}
-
-	var err error
-	GetLoadPool().Submit(func() (any, error) {
-		_, err = s.csegment.AddFieldDataInfo(ctx, req)
-		return nil, nil
-	}).Await()
-
-	if err != nil {
-		log.Warn("AddFieldDataInfo failed", zap.Error(err))
-		return err
-	}
-	log.Info("add field data info done")
 	return nil
 }
 

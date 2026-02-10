@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
@@ -893,28 +892,6 @@ func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 
 		suite.NoError(err)
 		suite.EqualValues(1100000, resource.Resource.MemorySize)
-	})
-
-	suite.Run("request_resource_with_timeout", func() {
-		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.Key, "50")
-		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.Key)
-
-		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.LazyLoadRequestResourceTimeout.Key, "500")
-		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.LazyLoadRequestResourceRetryInterval.Key, "100")
-		result, err := suite.loader.requestResourceWithTimeout(context.Background(), loadInfo)
-		suite.NoError(err)
-		suite.EqualValues(1100000, result.Resource.MemorySize)
-
-		suite.loader.committedResource.Add(LoadResource{
-			MemorySize: 1024 * 1024 * 1024 * 1024,
-		})
-
-		timeoutErr := errors.New("timeout")
-		ctx, cancel := contextutil.WithTimeoutCause(context.Background(), 1000*time.Millisecond, timeoutErr)
-		defer cancel()
-		result, err = suite.loader.requestResourceWithTimeout(ctx, loadInfo)
-		suite.Error(err)
-		suite.ErrorIs(err, timeoutErr)
 	})
 }
 
