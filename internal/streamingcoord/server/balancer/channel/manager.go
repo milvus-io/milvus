@@ -69,7 +69,7 @@ func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*Cha
 	}
 
 	globalVersion := resource.Resource().Session().GetRegisteredRevision()
-	return &ChannelManager{
+	cm := &ChannelManager{
 		cond:     syncutil.NewContextCond(&sync.Mutex{}),
 		channels: channels,
 		version: typeutil.VersionInt64Pair{
@@ -80,7 +80,23 @@ func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*Cha
 		cchannelMeta:     cchannelMeta,
 		streamingVersion: streamingVersion,
 		replicateConfig:  replicateConfig,
-	}, nil
+	}
+
+	// Register the channel manager singleton after recovery.
+	register(cm)
+
+	return cm, nil
+}
+
+// getClusterChannels returns the raw pchannel names and the control channel name.
+func (cm *ChannelManager) getClusterChannels() message.ClusterChannels {
+	cm.cond.L.Lock()
+	defer cm.cond.L.Unlock()
+
+	return message.ClusterChannels{
+		Channels:       lo.MapToSlice(cm.channels, func(_ ChannelID, ch *PChannelMeta) string { return ch.Name() }),
+		ControlChannel: funcutil.GetControlChannel(cm.cchannelMeta.Pchannel),
+	}
 }
 
 // recoverCChannelMeta recovers the control channel meta.

@@ -297,18 +297,13 @@ func (r *recoveryStorageImpl) updateCheckpoint(msg message.ImmutableMessage) {
 
 // The incoming message id is always sorted with timetick.
 func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
-	if funcutil.IsControlChannel(msg.VChannel()) && msg.MessageType() != message.MessageTypeAlterReplicateConfig && !msg.MessageType().IsBroadcastToAll() {
-		// Messages on the control channel are generally just used to determine DDL/DCL order
-		// and do not affect recovery storage, so skip them.
-		// Exceptions:
-		// - AlterReplicateConfig: needs to update replication checkpoint
-		// - BroadcastToAll messages (FlushAll, AlterWAL, etc.): need to be processed on all channels,
-		//   e.g. FlushAll must mark all growing segments as flushed, otherwise after restart
-		//   those segments would be incorrectly treated as growing.
+	if funcutil.IsControlChannel(msg.VChannel()) && !msg.IsPChannelLevel() {
+		// message on control channel except pchannel-level messages is just used to determine the DDL/DCL order,
+		// will not affect the recovery storage, so skip it.
 		return
 	}
 
-	if msg.VChannel() != "" && msg.MessageType() != message.MessageTypeAlterWAL && msg.MessageType() != message.MessageTypeCreateCollection &&
+	if msg.VChannel() != "" && !msg.IsPChannelLevel() && msg.MessageType() != message.MessageTypeCreateCollection &&
 		msg.MessageType() != message.MessageTypeDropCollection && r.vchannels[msg.VChannel()] == nil && !funcutil.IsControlChannel(msg.VChannel()) {
 		r.detectInconsistency(msg, "vchannel not found")
 	}
