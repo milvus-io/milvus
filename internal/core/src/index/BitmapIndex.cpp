@@ -21,6 +21,8 @@
 #include <unistd.h>
 #include <yaml-cpp/yaml.h>
 
+#include "nlohmann/json.hpp"
+
 #include "index/BitmapIndex.h"
 
 #include "common/Consts.h"
@@ -328,13 +330,21 @@ template <typename T>
 std::pair<size_t, size_t>
 BitmapIndex<T>::DeserializeIndexMeta(const uint8_t* data_ptr,
                                      size_t data_size) {
-    YAML::Node node = YAML::Load(
-        std::string(reinterpret_cast<const char*>(data_ptr), data_size));
+    std::string meta_str(reinterpret_cast<const char*>(data_ptr), data_size);
 
-    auto index_length = node[BITMAP_INDEX_LENGTH].as<size_t>();
-    auto index_num_rows = node[BITMAP_INDEX_NUM_ROWS].as<size_t>();
-
-    return std::make_pair(index_length, index_num_rows);
+    // Try JSON first (V3 format), fall back to YAML (V2 format)
+    try {
+        auto j = nlohmann::json::parse(meta_str);
+        auto index_length = j[BITMAP_INDEX_LENGTH].get<size_t>();
+        auto index_num_rows = j[BITMAP_INDEX_NUM_ROWS].get<size_t>();
+        return std::make_pair(index_length, index_num_rows);
+    } catch (const nlohmann::json::parse_error&) {
+        // Fall back to YAML for backward compatibility with V2
+        YAML::Node node = YAML::Load(meta_str);
+        auto index_length = node[BITMAP_INDEX_LENGTH].as<size_t>();
+        auto index_num_rows = node[BITMAP_INDEX_NUM_ROWS].as<size_t>();
+        return std::make_pair(index_length, index_num_rows);
+    }
 }
 
 template <typename T>
@@ -1350,9 +1360,9 @@ void
 BitmapIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     AssertInfo(is_built_, "index has not been built yet");
 
-    auto index_meta = SerializeIndexMeta();
-    writer->WriteEntry(
-        BITMAP_INDEX_META, index_meta.first.get(), index_meta.second);
+    // V3 format: meta goes into __meta__ entry
+    writer->PutMeta(BITMAP_INDEX_LENGTH, data_.size());
+    writer->PutMeta(BITMAP_INDEX_NUM_ROWS, total_num_rows_);
 
     auto index_data_size = GetIndexDataSize();
     std::shared_ptr<uint8_t[]> index_data(new uint8_t[index_data_size]);
@@ -1372,11 +1382,9 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     auto enable_offset_cache =
         GetValueFromConfig<bool>(config, ENABLE_OFFSET_CACHE);
 
-    auto meta_entry = reader.ReadEntry(BITMAP_INDEX_META);
-    auto index_meta =
-        DeserializeIndexMeta(meta_entry.data.data(), meta_entry.data.size());
-    auto index_length = index_meta.first;
-    total_num_rows_ = index_meta.second;
+    // V3 format: meta is in __meta__ entry
+    auto index_length = reader.GetMeta<size_t>(BITMAP_INDEX_LENGTH);
+    total_num_rows_ = reader.GetMeta<size_t>(BITMAP_INDEX_NUM_ROWS);
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
 
     auto data_entry = reader.ReadEntry(BITMAP_INDEX_DATA);

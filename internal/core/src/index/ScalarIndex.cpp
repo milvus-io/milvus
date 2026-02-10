@@ -179,10 +179,11 @@ ScalarIndex<T>::UploadV3(const Config& config) {
     AssertInfo(writer != nullptr,
                "failed to create IndexEntryWriter for V3 format");
 
-    // Call subclass implementation to write all entries
+    // Call subclass implementation to write all entries.
+    // Subclasses use writer->PutMeta() to add their metadata.
     WriteEntries(writer.get());
 
-    // Finish writing - this writes Directory Table and Footer
+    // Finish writing - writes __meta__ entry, Directory Table and Footer
     writer->Finish();
 
     // Get actual file size from writer

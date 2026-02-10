@@ -543,11 +543,9 @@ StringIndexSort::WriteEntries(storage::IndexEntryWriter* writer) {
         }
     }
 
-    auto meta = nlohmann::json{{"version", SERIALIZATION_VERSION},
-                               {"num_rows", total_num_rows_},
-                               {"is_nested", is_nested_index_}}
-                    .dump();
-    writer->WriteEntry("STRING_SORT_META", meta.data(), meta.size());
+    writer->PutMeta("version", SERIALIZATION_VERSION);
+    writer->PutMeta("num_rows", total_num_rows_);
+    writer->PutMeta("is_nested", is_nested_index_);
     writer->WriteEntry("index_data", data_buffer.data(), total_size);
     writer->WriteEntry(
         "valid_bitset", valid_bitset_data.data(), valid_bitset_size);
@@ -558,11 +556,7 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
                              const Config& config) {
     config_ = config;
 
-    auto meta_entry = reader.ReadEntry("STRING_SORT_META");
-    auto mj =
-        nlohmann::json::parse(meta_entry.data.begin(), meta_entry.data.end());
-
-    uint32_t version = mj["version"].get<uint32_t>();
+    uint32_t version = reader.GetMeta<uint32_t>("version");
     if (version != SERIALIZATION_VERSION) {
         ThrowInfo(milvus::ErrorCode::Unsupported,
                   fmt::format("Unsupported StringIndexSort serialization "
@@ -570,8 +564,8 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
                               version,
                               SERIALIZATION_VERSION));
     }
-    total_num_rows_ = mj["num_rows"].get<size_t>();
-    is_nested_index_ = mj["is_nested"].get<bool>();
+    total_num_rows_ = reader.GetMeta<size_t>("num_rows");
+    is_nested_index_ = reader.GetMeta<bool>("is_nested");
 
     idx_to_offsets_.resize(total_num_rows_);
 

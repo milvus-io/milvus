@@ -670,11 +670,9 @@ void
 ScalarIndexSort<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     AssertInfo(is_built_, "index has not been built");
 
-    auto meta = nlohmann::json{{"index_length", data_.size()},
-                               {"num_rows", total_num_rows_},
-                               {"is_nested", is_nested_index_}}
-                    .dump();
-    writer->WriteEntry("SORT_INDEX_META", meta.data(), meta.size());
+    writer->PutMeta("index_length", data_.size());
+    writer->PutMeta("num_rows", total_num_rows_);
+    writer->PutMeta("is_nested", is_nested_index_);
 
     writer->WriteEntry(
         "index_data", data_.data(), data_.size() * sizeof(IndexStructure<T>));
@@ -684,12 +682,9 @@ template <typename T>
 void
 ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                                 const Config& config) {
-    auto meta_entry = reader.ReadEntry("SORT_INDEX_META");
-    auto mj =
-        nlohmann::json::parse(meta_entry.data.begin(), meta_entry.data.end());
-    size_t index_size = mj["index_length"].get<size_t>();
-    total_num_rows_ = mj["num_rows"].get<size_t>();
-    is_nested_index_ = mj["is_nested"].get<bool>();
+    size_t index_size = reader.GetMeta<size_t>("index_length");
+    total_num_rows_ = reader.GetMeta<size_t>("num_rows");
+    is_nested_index_ = reader.GetMeta<bool>("is_nested");
 
     auto data_entry = reader.ReadEntry("index_data");
 

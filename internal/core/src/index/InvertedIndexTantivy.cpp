@@ -877,8 +877,8 @@ InvertedIndexTantivy<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     bool has_null = !null_offset_.empty();
     lock.unlock();
 
-    auto meta = BuildTantivyMeta(file_names, has_null).dump();
-    writer->WriteEntry("TANTIVY_META", meta.data(), meta.size());
+    writer->PutMeta("file_names", file_names);
+    writer->PutMeta("has_null", has_null);
 
     for (const auto& file_path : files) {
         auto file_name = file_path.filename().string();
@@ -902,11 +902,8 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
                                      const Config& config) {
-    auto meta_entry = reader.ReadEntry("TANTIVY_META");
-    auto mj =
-        nlohmann::json::parse(meta_entry.data.begin(), meta_entry.data.end());
-    auto file_names = mj["file_names"].get<std::vector<std::string>>();
-    bool has_null = mj["has_null"].get<bool>();
+    auto file_names = reader.GetMeta<std::vector<std::string>>("file_names");
+    bool has_null = reader.GetMeta<bool>("has_null");
 
     path_ = disk_file_manager_->GetLocalIndexObjectPrefix();
     boost::filesystem::create_directories(path_);

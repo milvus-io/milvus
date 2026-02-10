@@ -23,11 +23,15 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "nlohmann/json.hpp"
 
 namespace milvus::storage {
 
 constexpr char MILVUS_V3_MAGIC[] = "MVSIDXV3";
 constexpr size_t MILVUS_V3_MAGIC_SIZE = 8;
+constexpr size_t MILVUS_V3_FOOTER_SIZE = 32;
+constexpr uint16_t MILVUS_V3_FORMAT_VERSION = 3;
+constexpr char MILVUS_V3_META_ENTRY_NAME[] = "__meta__";
 
 struct DirectoryEntry {
     std::string name;
@@ -35,6 +39,7 @@ struct DirectoryEntry {
     // To get the absolute file position, add MILVUS_V3_MAGIC_SIZE.
     uint64_t offset;
     uint64_t size;
+    uint32_t crc32;
 };
 
 struct SliceMeta {
@@ -47,6 +52,7 @@ struct SliceMeta {
 struct EncryptedDirectoryEntry {
     std::string name;
     uint64_t original_size;
+    uint32_t crc32;
     std::vector<SliceMeta> slices;
 };
 
@@ -57,6 +63,13 @@ class IndexEntryWriter {
     WriteEntry(const std::string& name, const void* data, size_t size) = 0;
     virtual void
     WriteEntry(const std::string& name, int fd, size_t size) = 0;
+    template <typename T>
+    void
+    PutMeta(const std::string& key, T&& value) {
+        AssertInfo(!meta_json_.contains(key), "Duplicate meta key: {}", key);
+        meta_json_[key] = std::forward<T>(value);
+    }
+
     virtual void
     Finish() = 0;
     virtual size_t
@@ -67,7 +80,8 @@ class IndexEntryWriter {
     operator=(const IndexEntryWriter&) = delete;
 
  protected:
-    IndexEntryWriter() = default;
+    IndexEntryWriter() : meta_json_(nlohmann::json::object()) {
+    }
 
     void
     CheckDuplicateName(const std::string& name) {
@@ -76,6 +90,7 @@ class IndexEntryWriter {
     }
 
     std::unordered_set<std::string> written_names_;
+    nlohmann::json meta_json_;
 };
 
 }  // namespace milvus::storage

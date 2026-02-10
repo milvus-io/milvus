@@ -39,6 +39,7 @@ class IndexEntryEncryptedLocalWriter : public IndexEntryWriter {
         std::shared_ptr<plugin::ICipherPlugin> cipher_plugin,
         int64_t ez_id,
         int64_t collection_id,
+        const std::string& temp_dir = "",
         size_t slice_size = 16 * 1024 * 1024);
     ~IndexEntryEncryptedLocalWriter();
 
@@ -56,9 +57,9 @@ class IndexEntryEncryptedLocalWriter : public IndexEntryWriter {
  private:
     void
     EncryptAndWriteSlices(const std::string& name,
-                          uint64_t original_size,
                           const uint8_t* data,
                           size_t size);
+
     void
     UploadLocalFile();
 
@@ -80,6 +81,7 @@ class IndexEntryEncryptedLocalWriter : public IndexEntryWriter {
     struct EncDirEntry {
         std::string name;
         uint64_t original_size;
+        uint32_t crc32;
         std::vector<SliceMeta> slices;
     };
     std::vector<EncDirEntry> dir_entries_;

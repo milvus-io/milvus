@@ -240,7 +240,8 @@ class FileManagerImpl : public milvus::FileManager {
                     fs_,
                     cipher_plugin,
                     plugin_context_->ez_id,
-                    plugin_context_->collection_id);
+                    plugin_context_->collection_id,
+                    GetLocalTempDir());
             }
         }
         return std::make_unique<IndexEntryDirectStreamWriter>(
@@ -315,6 +316,14 @@ class FileManagerImpl : public milvus::FileManager {
     static std::string
     GetFileName(const std::string& filepath) {
         return boost::filesystem::path(filepath).filename().string();
+    }
+
+    std::string
+    GetLocalTempDir() const {
+        if (rcm_) {
+            return rcm_->GetRootPath();
+        }
+        return "";
     }
 
  protected:
