@@ -931,7 +931,7 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
 arrow::ArrayVector
 read_single_column_batches(std::shared_ptr<arrow::RecordBatchReader> reader) {
     arrow::ArrayVector array_vec;
-    for (auto batch : *reader) {
+    for (const auto& batch : *reader) {
         auto batch_data = batch.ValueOrDie();
         array_vec.push_back(std::move(batch_data->column(0)));
     }

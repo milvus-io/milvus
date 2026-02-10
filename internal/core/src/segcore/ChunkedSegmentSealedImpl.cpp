@@ -149,7 +149,7 @@ get_bit(const BitsetType& bitset, FieldId field_id) {
 }
 
 void
-ChunkedSegmentSealedImpl::LoadIndex(const LoadIndexInfo& info) {
+ChunkedSegmentSealedImpl::LoadIndex(LoadIndexInfo& info) {
     // print(info);
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
@@ -163,7 +163,7 @@ ChunkedSegmentSealedImpl::LoadIndex(const LoadIndexInfo& info) {
 }
 
 void
-ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
+ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
 
@@ -200,9 +200,7 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
         vector_indexings_.drop_field_indexing(field_id);
     }
     vector_indexings_.append_field_indexing(
-        field_id,
-        metric_type,
-        std::move(const_cast<LoadIndexInfo&>(info).cache_index));
+        field_id, metric_type, std::move(info.cache_index));
     set_bit(index_ready_bitset_, field_id, true);
     index_has_raw_data_[field_id] = request.has_raw_data;
     LOG_INFO("Has load vec index done, fieldID:{}. segmentID:{}, ",
@@ -211,7 +209,7 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
 }
 
 void
-ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
+ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
     auto& field_meta = schema_->operator[](field_id);
@@ -245,15 +243,13 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
                 (*ngram_indexings)[field_id] =
                     std::unordered_map<std::string, index::CacheIndexBasePtr>();
             }
-            (*ngram_indexings)[field_id][path] =
-                std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+            (*ngram_indexings)[field_id][path] = std::move(info.cache_index);
             return;
         } else {
             JsonIndex index;
             index.nested_path = path;
             index.field_id = field_id;
-            index.index =
-                std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+            index.index = std::move(info.cache_index);
             index.cast_type =
                 JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
             json_indices.wlock()->push_back(std::move(index));
@@ -267,13 +263,10 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         auto [scalar_indexings, ngram_fields] =
             lock(folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
         ngram_fields->insert(field_id);
-        scalar_indexings->insert(
-            {field_id,
-             std::move(const_cast<LoadIndexInfo&>(info).cache_index)});
+        scalar_indexings->insert({field_id, std::move(info.cache_index)});
     } else {
         scalar_indexings_.wlock()->insert(
-            {field_id,
-             std::move(const_cast<LoadIndexInfo&>(info).cache_index)});
+            {field_id, std::move(info.cache_index)});
     }
 
     LoadResourceRequest request =
@@ -429,7 +422,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
 
         // Create ProxyChunkColumn for each field in this column group
         for (const auto& field_id : milvus_field_ids) {
-            auto field_meta = field_metas.at(field_id);
+            const auto& field_meta = field_metas.at(field_id);
             auto column = std::make_shared<ProxyChunkColumn>(
                 chunked_column_group, field_id, field_meta);
             auto data_type = field_meta.get_data_type();
@@ -1268,7 +1261,7 @@ ChunkedSegmentSealedImpl::search_batch_pks(
         case DataType::INT64: {
             auto num_chunk = pk_column->num_chunks();
             for (int i = 0; i < num_chunk; ++i) {
-                auto pw = all_chunk_pins[i];
+                const auto& pw = all_chunk_pins[i];
                 auto src =
                     reinterpret_cast<const int64_t*>(pw.get()->RawData());
                 auto chunk_row_num = pk_column->chunk_row_nums(i);
@@ -1302,7 +1295,7 @@ ChunkedSegmentSealedImpl::search_batch_pks(
             for (int i = 0; i < num_chunk; ++i) {
                 // TODO @xiaocai2333, @sunby: chunk need to record the min/max.
                 auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
-                auto pw = all_chunk_pins[i];
+                const auto& pw = all_chunk_pins[i];
                 auto string_chunk = static_cast<StringChunk*>(pw.get());
                 for (size_t j = 0; j < pks.size(); ++j) {
                     // get varchar pks
@@ -1479,8 +1472,8 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
           &insert_record_,
           [this](const std::vector<PkType>& pks,
                  const Timestamp* timestamps,
-                 std::function<void(const SegOffset offset, const Timestamp ts)>
-                     callback) {
+                 const std::function<void(const SegOffset offset,
+                                          const Timestamp ts)>& callback) {
               this->search_batch_pks(
                   pks,
                   [&](const size_t idx) { return timestamps[idx]; },
@@ -3227,7 +3220,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 
     // Create ProxyChunkColumn for each field
     for (const auto& field_id : milvus_field_ids) {
-        auto field_meta = field_metas.at(field_id);
+        const auto& field_meta = field_metas.at(field_id);
         auto column = std::make_shared<ProxyChunkColumn>(
             chunked_column_group, field_id, field_meta);
         auto data_type = field_meta.get_data_type();
