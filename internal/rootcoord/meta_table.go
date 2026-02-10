@@ -238,9 +238,7 @@ func (mt *MetaTable) reload() error {
 			return err
 		}
 		for _, collection := range collections {
-			if collection.DBName == "" {
-				collection.DBName = dbName
-			}
+			collection.DBName = dbName
 			mt.collID2Meta[collection.CollectionID] = collection
 			if collection.Available() {
 				mt.names.insert(dbName, collection.Name, collection.CollectionID)
