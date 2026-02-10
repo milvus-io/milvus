@@ -56,7 +56,8 @@ class PhyExistsFilterExpr : public SegmentExpr {
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size,
-        int32_t consistency_level)
+        int32_t consistency_level,
+        const query::PlanOptions& plan_options = {})
         : SegmentExpr(std::move(input),
                       name,
                       op_ctx,
@@ -67,8 +68,11 @@ class PhyExistsFilterExpr : public SegmentExpr {
                       active_count,
                       batch_size,
                       consistency_level,
-                      true),
+                      true,
+                      false,
+                      plan_options),
           expr_(expr) {
+        DetermineExecPath();
     }
 
     void
@@ -88,6 +92,9 @@ class PhyExistsFilterExpr : public SegmentExpr {
     GetColumnInfo() const override {
         return expr_->column_;
     }
+
+    void
+    DetermineExecPath() override;
 
  private:
     VectorPtr

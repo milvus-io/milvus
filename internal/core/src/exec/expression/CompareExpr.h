@@ -251,6 +251,11 @@ class PhyCompareFilterExpr : public Expr {
         return std::nullopt;
     }
 
+    bool
+    CanExecuteAllAtOnce() const override {
+        return false;
+    }
+
  private:
     int64_t
     GetCurrentRows() {

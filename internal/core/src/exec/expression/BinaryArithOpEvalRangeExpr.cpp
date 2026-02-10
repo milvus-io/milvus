@@ -103,12 +103,10 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
             auto value_type = expr_->value_.val_case();
             switch (value_type) {
                 case proto::plan::GenericValue::ValCase::kInt64Val: {
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplForArray<int64_t>(input);
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplForArray<double>(input);
                     break;
                 }
@@ -930,7 +928,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
 template <typename T>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImpl(OffsetVector* input) {
-    if (CanUseIndex<T>()) {
+    if (exec_path_ == ExprExecPath::ScalarIndex) {
         return ExecRangeVisitorImplForIndex<T>(input);
     } else {
         return ExecRangeVisitorImplForData<T>(input);
