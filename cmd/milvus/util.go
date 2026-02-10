@@ -137,7 +137,7 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 	case typeutil.DataNodeRole:
 		role.EnableDataNode = true
 	case typeutil.StreamingNodeRole:
-		sessionutil.EnableEmbededQueryNodeLabel()
+		sessionutil.EnableEmbeddedQueryNodeLabel()
 		role.EnableStreamingNode = true
 		role.EnableQueryNode = true
 	case typeutil.StandaloneRole, typeutil.EmbeddedRole:
@@ -161,7 +161,7 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableStreamingNode = enableStreamingNode
 		if enableStreamingNode && !enableQueryNode {
 			role.EnableQueryNode = true
-			sessionutil.EnableEmbededQueryNodeLabel()
+			sessionutil.EnableEmbeddedQueryNodeLabel()
 		}
 
 	case typeutil.CDCRole:
