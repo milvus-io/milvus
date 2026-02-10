@@ -229,17 +229,9 @@ func (t *refreshExternalCollectionTask) SetJobInfo(ctx context.Context, resp *da
 		}
 	}
 
-	// Allocate new IDs and update updatedSegments directly
+	// DataNode already used pre-allocated segment IDs and wrote manifests to final paths.
+	// Just set the segment state to Flushed — no second ID allocation needed.
 	for _, seg := range updatedSegments {
-		newSegmentID, err := t.allocator.AllocID(ctx)
-		if err != nil {
-			log.Warn("failed to allocate segment ID", zap.Error(err))
-			return err
-		}
-		log.Info("allocated new segment ID",
-			zap.Int64("oldID", seg.GetID()),
-			zap.Int64("newID", newSegmentID))
-		seg.ID = newSegmentID
 		seg.State = commonpb.SegmentState_Flushed
 	}
 
@@ -368,13 +360,44 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 
 	log.Info("collected current segments", zap.Int("segmentCount", len(currentSegments)))
 
+	// Pre-allocate segment IDs for data mapping
+	// Use a default of 1000 segments per collection refresh task
+	const defaultPreAllocCount int64 = 1000
+
+	idBegin, idEnd, err := t.allocator.AllocN(defaultPreAllocCount)
+	if err != nil {
+		log.Warn("failed to batch allocate segment IDs", zap.Error(err))
+		return
+	}
+
+	idRange := &datapb.IDRange{
+		Begin: idBegin,
+		End:   idEnd,
+	}
+
+	log.Info("Pre-allocated segment IDs for external task",
+		zap.Int64("idBegin", idBegin),
+		zap.Int64("idEnd", idEnd),
+		zap.Int64("count", idEnd-idBegin))
+
+	// Get collection schema for column mapping
+	collInfo := t.mt.GetCollection(t.GetCollectionId())
+	if collInfo == nil {
+		err = fmt.Errorf("collection %d not found in meta", t.GetCollectionId())
+		return
+	}
+
 	// Build request
 	req := &datapb.UpdateExternalCollectionRequest{
-		CollectionID:    t.GetCollectionId(),
-		TaskID:          t.GetTaskId(),
-		CurrentSegments: currentSegments,
-		ExternalSource:  t.GetExternalSource(),
-		ExternalSpec:    t.GetExternalSpec(),
+		CollectionID:           t.GetCollectionId(),
+		TaskID:                 t.GetTaskId(),
+		CurrentSegments:        currentSegments,
+		ExternalSource:         t.GetExternalSource(),
+		ExternalSpec:           t.GetExternalSpec(),
+		StorageConfig:          createStorageConfig(),
+		Schema:                 collInfo.Schema,
+		PreAllocatedSegmentIds: idRange,
+		NumSegmentsExpected:    defaultPreAllocCount,
 	}
 
 	// Submit task to worker via unified task system

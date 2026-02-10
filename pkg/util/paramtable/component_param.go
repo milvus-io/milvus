@@ -6182,6 +6182,9 @@ type dataNodeConfig struct {
 
 	WorkerSlotUnit      ParamItem `refreshable:"true"`
 	StandaloneSlotRatio ParamItem `refreshable:"false"`
+
+	// external collection
+	ExternalCollectionTargetRowsPerSegment ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -6650,6 +6653,15 @@ if this parameter <= 0, will set it as 10`,
 		Doc:          "Offline task slot ratio in standalone mode",
 	}
 	p.StandaloneSlotRatio.Init(base.mgr)
+
+	p.ExternalCollectionTargetRowsPerSegment = ParamItem{
+		Key:          "dataNode.externalCollection.targetRowsPerSegment",
+		Version:      "2.6.0",
+		DefaultValue: "1000000",
+		Doc:          "Target number of rows per segment for external collections",
+		Export:       true,
+	}
+	p.ExternalCollectionTargetRowsPerSegment.Init(base.mgr)
 }
 
 type streamingConfig struct {
