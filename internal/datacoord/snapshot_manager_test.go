@@ -1781,3 +1781,15 @@ func TestSnapshotManager_RestoreCollection_SchemaNameAndDbName(t *testing.T) {
 	assert.Equal(t, targetCollectionName, schema.Name, "schema.Name should be updated to target collection name")
 	assert.Equal(t, targetDbName, schema.DbName, "schema.DbName should be updated to target database name")
 }
+
+func TestSnapshotManager_GetSnapshotRestoreRefCount(t *testing.T) {
+	mockGetRef := mockey.Mock((*copySegmentMeta).GetRestoreRefCount).Return(int32(5)).Build()
+	defer mockGetRef.UnPatch()
+
+	sm := &snapshotManager{
+		copySegmentMeta: &copySegmentMeta{},
+	}
+
+	count := sm.GetSnapshotRestoreRefCount("test_snapshot")
+	assert.Equal(t, int32(5), count)
+}

@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"math"
 	"sync"
 	"testing"
 
@@ -943,6 +944,18 @@ func TestSnapshotRestoreRefTracker_UnderflowProtection(t *testing.T) {
 	tracker.DecrementRestoreRef(snapshotName)
 	tracker.DecrementRestoreRef(snapshotName)
 	assert.Equal(t, int32(0), tracker.GetRestoreRefCount(snapshotName))
+}
+
+func TestSnapshotRestoreRefTracker_OverflowProtection(t *testing.T) {
+	tracker := NewSnapshotRestoreRefTracker()
+	snapshotName := "test_snapshot"
+
+	// Set ref count to MaxInt32 directly
+	tracker.refCount[snapshotName] = math.MaxInt32
+
+	// IncrementRestoreRef should not overflow past MaxInt32
+	tracker.IncrementRestoreRef(snapshotName)
+	assert.Equal(t, int32(math.MaxInt32), tracker.GetRestoreRefCount(snapshotName))
 }
 
 // TestNewCopySegmentMeta_CrashRecoveryRefFiltering verifies that terminal jobs

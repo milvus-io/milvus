@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -870,5 +871,75 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_FailedTask_ReleasesRef() {
 	// Verify: Job marked as Failed and ref released
 	updatedJob := s.copyMeta.GetJob(context.TODO(), jobID)
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
+	s.Equal(int32(0), s.copyMeta.GetRestoreRefCount(snapshotName))
+}
+
+func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
+	snapshotName := "test_snapshot_flush_fail"
+	jobID := int64(600)
+
+	// Setup mocks
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Maybe()
+	// AlterSegments returns error to simulate flush failure
+	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(errors.New("etcd unavailable"))
+
+	// Setup: Create job in Executing state
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        jobID,
+			CollectionId: s.collectionID,
+			SnapshotName: snapshotName,
+			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			IdMappings: []*datapb.CopySegmentIDMapping{
+				{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
+			},
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.copyMeta.AddJob(context.TODO(), job)
+	s.copyMeta.IncrementRestoreRef(snapshotName)
+
+	// Create target segment in Growing state (needs flush to Flushed)
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            101,
+			State:         commonpb.SegmentState_Growing,
+			NumOfRows:     100,
+			CollectionID:  s.collectionID,
+			InsertChannel: "ch1",
+		},
+	}
+	s.meta.AddSegment(context.TODO(), segment)
+
+	// Create a completed task
+	task := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		meta:     s.meta,
+		tr:       timerecord.NewTimeRecorder("test task"),
+		times:    taskcommon.NewTimes(),
+	}
+	taskProto := &datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        jobID,
+		CollectionId: s.collectionID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		IdMappings:   []*datapb.CopySegmentIDMapping{{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10}},
+	}
+	task.task.Store(taskProto)
+	s.copyMeta.AddTask(context.TODO(), task)
+
+	s.Equal(int32(1), s.copyMeta.GetRestoreRefCount(snapshotName))
+
+	// Execute: Check copying job - flush will fail due to AlterSegments error
+	s.checker.checkCopyingJob(job)
+
+	// Verify: Job marked as Failed (not Completed) due to flush failure
+	updatedJob := s.copyMeta.GetJob(context.TODO(), jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
+	s.Contains(updatedJob.GetReason(), "failed to flush")
+
+	// Verify: Ref count is released even on failure
 	s.Equal(int32(0), s.copyMeta.GetRestoreRefCount(snapshotName))
 }
