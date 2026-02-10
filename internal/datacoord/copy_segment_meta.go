@@ -550,6 +550,7 @@ func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID
 
 	job, ok := m.jobs[jobID]
 	if !ok {
+		log.Warn("UpdateJobStateAndReleaseRef: job not found", zap.Int64("jobID", jobID))
 		return nil
 	}
 
@@ -798,7 +799,8 @@ func (m *copySegmentMeta) IncrementRestoreRef(snapshotName string) {
 }
 
 // DecrementRestoreRef decrements the restore reference count for a snapshot.
-// This is called when a CopySegmentJob is garbage collected.
+// This is called when a CopySegmentJob transitions to a terminal state (Completed/Failed),
+// not during garbage collection.
 func (m *copySegmentMeta) DecrementRestoreRef(snapshotName string) {
 	m.restoreRefTracker.DecrementRestoreRef(snapshotName)
 }

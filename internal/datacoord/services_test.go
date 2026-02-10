@@ -2710,6 +2710,47 @@ func TestServer_DropSnapshot(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, merr.Error(resp))
 	})
+
+	t.Run("snapshot_being_restored_returns_error", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Mock GetSnapshot to return a valid snapshot (passes existence check)
+		mockGetSnapshot := mockey.Mock((*snapshotManager).GetSnapshot).To(
+			func(sm *snapshotManager, ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
+				return &datapb.SnapshotInfo{Name: name}, nil
+			}).Build()
+		defer mockGetSnapshot.UnPatch()
+
+		// Mock GetSnapshotRestoreRefCount to return 1 (active restore in progress)
+		mockGetRefCount := mockey.Mock((*snapshotManager).GetSnapshotRestoreRefCount).To(
+			func(sm *snapshotManager, snapshotName string) int32 {
+				return 1
+			}).Build()
+		defer mockGetRefCount.UnPatch()
+
+		mockBroadCaster := &struct{ broadcaster.BroadcastAPI }{}
+		mockClose := mockey.Mock((*struct{ broadcaster.BroadcastAPI }).Close).Return().Build()
+		defer mockClose.UnPatch()
+
+		mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				return mockBroadCaster, nil
+			}).Build()
+		defer mockBroadcast.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.DropSnapshot(ctx, &datapb.DropSnapshotRequest{
+			Name: "restoring_snapshot",
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
 }
 
 // --- Test DescribeSnapshot ---

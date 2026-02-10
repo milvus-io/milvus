@@ -304,7 +304,7 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 		if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted),
 			UpdateCopyJobReason("no segments to copy")); err != nil {
-			log.Warn("failed to update empty job state to Completed", zap.Error(err))
+			log.Error("failed to update empty job state to Completed", zap.Error(err))
 		}
 		return
 	}
@@ -447,7 +447,7 @@ func (c *copySegmentChecker) checkCopyingJob(job CopySegmentJob) {
 		if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 			UpdateCopyJobReason(fmt.Sprintf("%d/%d tasks failed", failedTasks, totalTasks))); err != nil {
-			log.Warn("failed to update job state to Failed", zap.Error(err))
+			log.Error("failed to update job state to Failed", zap.Error(err))
 		}
 		return
 	}
@@ -508,15 +508,17 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 	}
 
 	// Step 2: Update segment states to Flushed (make them visible for query)
+	var flushFailures int
 	if len(targetSegmentIDs) > 0 {
 		for _, segID := range targetSegmentIDs {
 			segment := c.meta.GetSegment(c.ctx, segID)
 			if segment != nil && segment.GetState() != commonpb.SegmentState_Flushed {
 				op := UpdateStatusOperator(segID, commonpb.SegmentState_Flushed)
 				if err := c.meta.UpdateSegmentsInfo(c.ctx, op); err != nil {
-					log.Warn("failed to update segment state to Flushed",
+					log.Error("failed to update segment state to Flushed",
 						zap.Int64("segmentID", segID),
 						zap.Error(err))
+					flushFailures++
 				} else {
 					log.Info("updated segment state to Flushed",
 						zap.Int64("segmentID", segID))
@@ -525,14 +527,28 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 		}
 	}
 
-	// Step 3: Update job state to Completed
+	// Step 3: Fail the job if any segment flush failed (prevents silent data availability issues)
+	if flushFailures > 0 {
+		reason := fmt.Sprintf("%d/%d segments failed to flush to Flushed state", flushFailures, len(targetSegmentIDs))
+		log.Error("finishJob: failing job due to segment flush failures",
+			zap.Int("flushFailures", flushFailures),
+			zap.Int("totalSegments", len(targetSegmentIDs)))
+		if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
+			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+			UpdateCopyJobReason(reason)); err != nil {
+			log.Error("failed to update job state to Failed after flush failures", zap.Error(err))
+		}
+		return
+	}
+
+	// Step 4: Update job state to Completed
 	completeTs := uint64(time.Now().UnixNano())
 	err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted),
 		UpdateCopyJobCompleteTs(completeTs),
 		UpdateCopyJobTotalRows(totalRows))
 	if err != nil {
-		log.Warn("failed to update job state to Completed", zap.Error(err))
+		log.Error("failed to update job state to Completed", zap.Error(err))
 		return
 	}
 
@@ -626,7 +642,7 @@ func (c *copySegmentChecker) tryTimeoutJob(job CopySegmentJob) {
 	if err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
 		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 		UpdateCopyJobReason("timeout")); err != nil {
-		log.Warn("failed to update timed-out job state to Failed",
+		log.Error("failed to update timed-out job state to Failed",
 			zap.Int64("jobID", job.GetJobId()), zap.Error(err))
 	}
 }

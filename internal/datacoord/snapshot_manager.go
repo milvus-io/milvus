@@ -1094,19 +1094,22 @@ func (sm *snapshotManager) createRestoreJob(
 		tr: timerecord.NewTimeRecorder("copy segment job"),
 	}
 
-	// Save job to metadata
-	if err := sm.copySegmentMeta.AddJob(ctx, copyJob); err != nil {
-		log.Error("failed to save copy segment job", zap.Error(err))
-		return err
-	}
-
-	// Increment snapshot restore reference count to protect snapshot from deletion
-	// This ref will be decremented when the job is garbage collected (after 3 hours retention)
+	// Increment snapshot restore reference count BEFORE saving the job to protect
+	// snapshot from deletion. This prevents a race where DropSnapshot could check
+	// the ref count between AddJob and IncrementRestoreRef.
 	snapshotName := snapshotData.SnapshotInfo.GetName()
 	sm.copySegmentMeta.IncrementRestoreRef(snapshotName)
 	log.Info("incremented snapshot restore ref count",
 		zap.String("snapshot", snapshotName),
 		zap.Int64("jobID", jobID))
+
+	// Save job to metadata (rollback ref on failure)
+	if err := sm.copySegmentMeta.AddJob(ctx, copyJob); err != nil {
+		sm.copySegmentMeta.DecrementRestoreRef(snapshotName)
+		log.Error("failed to save copy segment job, rolled back restore ref",
+			zap.String("snapshot", snapshotName), zap.Error(err))
+		return err
+	}
 
 	log.Info("copy segment job created successfully",
 		zap.Int64("jobID", jobID),

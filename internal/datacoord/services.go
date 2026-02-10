@@ -2153,10 +2153,7 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 		log.Warn("cannot drop snapshot with active restore operations",
 			zap.String("snapshot", snapshotName),
 			zap.Int32("activeRestoreCount", refCount))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    reason,
-		}, nil
+		return merr.Status(merr.WrapErrServiceInternal(reason)), nil
 	}
 
 	// Broadcast DropSnapshot message via DDL framework
