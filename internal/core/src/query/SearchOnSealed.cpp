@@ -227,6 +227,9 @@ SearchOnSealedColumn(const Schema& schema,
                                          search_bitview,
                                          data_type);
         cached_iter.NextBatch(search_info, result);
+        if (offset_mapping.IsEnabled()) {
+            TransformOffset(result.seg_offsets_, offset_mapping);
+        }
         return;
     }
 

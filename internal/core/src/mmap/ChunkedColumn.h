@@ -369,6 +369,14 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         return meta->num_rows_until_chunk_;
     }
 
+    const std::vector<int64_t>&
+    GetNumValidRowsUntilChunk() const override {
+        if (!num_valid_rows_until_chunk_.empty()) {
+            return num_valid_rows_until_chunk_;
+        }
+        return GetNumRowsUntilChunk();
+    }
+
     void
     BuildValidRowIds(milvus::OpContext* op_ctx) override {
         if (!nullable_) {
@@ -393,6 +401,15 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
             valid_count_per_chunk_[i] = valid_count;
             logical_offset += rows;
         }
+
+        num_valid_rows_until_chunk_.clear();
+        num_valid_rows_until_chunk_.reserve(num_chunks_ + 1);
+        num_valid_rows_until_chunk_.push_back(0);
+        for (size_t i = 0; i < num_chunks_; i++) {
+            num_valid_rows_until_chunk_.push_back(
+                num_valid_rows_until_chunk_.back() + valid_count_per_chunk_[i]);
+        }
+
         BuildOffsetMapping();
     }
 
@@ -417,7 +434,9 @@ class ChunkedColumn : public ChunkedColumnBase {
                 std::function<void(const char*, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) override {
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto [cids, offsets_in_chunk] =
+            nullable_ ? ToChunkIdAndOffsetByPhysical(offsets, count)
+                      : ToChunkIdAndOffset(offsets, count);
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
         for (int64_t i = 0; i < count; i++) {
             fn(ca->get_cell_of(cids[i])->ValueAt(offsets_in_chunk[i]), i);
@@ -515,7 +534,9 @@ class ChunkedColumn : public ChunkedColumnBase {
                       const int64_t* offsets,
                       int64_t element_sizeof,
                       int64_t count) override {
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto [cids, offsets_in_chunk] =
+            nullable_ ? ToChunkIdAndOffsetByPhysical(offsets, count)
+                      : ToChunkIdAndOffset(offsets, count);
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
         auto dst_vec = reinterpret_cast<char*>(dst);
         for (int64_t i = 0; i < count; i++) {
