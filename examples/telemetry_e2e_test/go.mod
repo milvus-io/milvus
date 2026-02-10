@@ -1,8 +1,6 @@
 module github.com/milvus-io/milvus/examples/telemetry_e2e_test
 
-go 1.24.11
-
-toolchain go1.24.12
+go 1.24.12
 
 require (
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.6-0.20260129065928-046ced892c8b
