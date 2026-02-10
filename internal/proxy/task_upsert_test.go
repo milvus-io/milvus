@@ -17,6 +17,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -1335,6 +1336,50 @@ func TestUpsertTask_queryPreExecute_PureUpdate(t *testing.T) {
 	}
 	assert.NotNil(t, valueField)
 	assert.Equal(t, []int32{600, 700}, valueField.GetScalars().GetIntData().GetData())
+}
+
+func TestCleanupDynamicFieldForPartialUpdate(t *testing.T) {
+	// After schema evolution, $meta may contain keys matching static field names.
+	// cleanupDynamicFieldForPartialUpdate should strip only the conflicting keys
+	// while preserving all other dynamic field data.
+	schema := &schemapb.CollectionSchema{
+		Name:               "test_cleanup_collection",
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "dfA", DataType: schemapb.DataType_Int64}, // static field matching $meta key
+			{FieldID: 102, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+	}
+
+	// $meta contains {"dfA": 111, "dfB": "keep_me", "dfC": 999}
+	// After cleanup, only "dfA" should be removed; "dfB" and "dfC" must remain.
+	metaJSON, _ := json.Marshal(map[string]interface{}{"dfA": 111, "dfB": "keep_me", "dfC": 999})
+	insertMsg := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldName: "$meta", FieldId: 102, Type: schemapb.DataType_JSON, IsDynamic: true,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{Data: [][]byte{metaJSON}},
+					}}},
+				},
+			},
+		},
+	}
+
+	cleanupDynamicFieldForPartialUpdate(schema, insertMsg)
+
+	jsonData := insertMsg.FieldsData[0].GetScalars().GetJsonData().GetData()
+	assert.Len(t, jsonData, 1)
+
+	var m map[string]interface{}
+	err := json.Unmarshal(jsonData[0], &m)
+	assert.NoError(t, err)
+	assert.NotContains(t, m, "dfA", "conflicting static field 'dfA' should be stripped from $meta")
+	assert.Contains(t, m, "dfB", "non-conflicting key 'dfB' should be preserved")
+	assert.Equal(t, "keep_me", m["dfB"])
+	assert.Contains(t, m, "dfC", "non-conflicting key 'dfC' should be preserved")
 }
 
 // Test ToCompressedFormatNullable for Geometry and Timestamptz types
