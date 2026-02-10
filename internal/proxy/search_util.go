@@ -229,8 +229,8 @@ func parseOrderByFieldSpec(fieldSpec string, fieldSchemaMap map[string]*schemapb
 		if exists {
 			// Field exists in schema
 			if field.GetIsDynamic() {
-				// This is $meta["key"] - explicit dynamic field access
-				// Use QueryNode-level extraction for dynamic fields
+				// Defensive: handle user directly using $meta["key"] syntax
+				// Normally users write just "key", but SDK may not block explicit $meta access
 				fieldName = common.MetaFieldName
 				fieldID = field.GetFieldID()
 				jsonPath, err = typeutil2.ParseAndVerifyNestedPath(fieldSpec, schema, fieldID)
@@ -263,8 +263,9 @@ func parseOrderByFieldSpec(fieldSpec string, fieldSchemaMap map[string]*schemapb
 			if err != nil {
 				return "", 0, "", "", false, fmt.Errorf("invalid JSON path in order_by field '%s': %w", fieldSpec, err)
 			}
-			// For dynamic fields, pass the original spec so translateOutputFields can extract subfields
-			outputFieldName = fieldSpec
+			// Use baseName (e.g., "dyn_meta") instead of full spec (e.g., "dyn_meta[\"price\"]")
+			// because translateOutputFields only supports single-level dynamic field keys
+			outputFieldName = baseName
 			isDynamicField = true
 		} else {
 			return "", 0, "", "", false, fmt.Errorf("order_by field '%s' not found in schema and no dynamic field available", baseName)

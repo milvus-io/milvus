@@ -2856,6 +2856,19 @@ func (s *SearchPipelineSuite) TestParseOrderByFieldsWithDynamicField() {
 	s.False(result[0].Ascending)
 	s.Equal(`$meta["category"]`, result[0].OutputFieldName) // Explicit path for requery
 	s.True(result[0].IsDynamicField)
+
+	// Test dynamic field with nested JSON path: dyn_meta["price"]
+	// dyn_meta is not a schema field, so it's treated as a dynamic field key with sub-path
+	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: `dyn_meta["price"]:asc`}}
+	result, err = parseOrderByFields(params, schema)
+	s.NoError(err)
+	s.Len(result, 1)
+	s.Equal("$meta", result[0].FieldName)
+	s.Equal(int64(102), result[0].FieldID)
+	s.Equal("/dyn_meta/price", result[0].JSONPath)
+	s.True(result[0].Ascending)
+	s.Equal("dyn_meta", result[0].OutputFieldName) // Use baseName for requery compatibility with translateOutputFields
+	s.True(result[0].IsDynamicField)
 }
 
 // Test splitOrderByFieldAndDirection helper
