@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -32,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	typeutil "github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"github.com/samber/lo"
 )
 
 func defaultIndexNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.IndexNodeClient, error) {

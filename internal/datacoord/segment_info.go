@@ -50,7 +50,6 @@ type segmentInfoIndexes struct {
 // SegmentInfo wraps datapb.SegmentInfo and patches some extra info on it
 type SegmentInfo struct {
 	*datapb.SegmentInfo
-	allocations   []*Allocation
 	lastFlushTime time.Time
 	isCompacting  bool
 	// a cache to avoid calculate twice
@@ -72,7 +71,6 @@ func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 	}
 	// setup growing fields
 	if s.GetState() == commonpb.SegmentState_Growing {
-		s.allocations = make([]*Allocation, 0, 16)
 		s.lastFlushTime = time.Now().Add(-1 * paramtable.Get().DataCoordCfg.SegmentFlushInterval.GetAsDuration(time.Second))
 		// A growing segment from recovery can be also considered idle.
 		s.lastWrittenTime = getZeroTime()
@@ -236,24 +234,6 @@ func (s *SegmentsInfo) SetStartPosition(segmentID UniqueID, pos *msgpb.MsgPositi
 	}
 }
 
-// SetAllocations sets allocations for segment with specified id
-// if the segment id is not found, do nothing
-// uses `ShadowClone` since internal SegmentInfo is not changed
-func (s *SegmentsInfo) SetAllocations(segmentID UniqueID, allocations []*Allocation) {
-	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = segment.ShadowClone(SetAllocations(allocations))
-	}
-}
-
-// AddAllocation adds a new allocation to specified segment
-// if the segment is not found, do nothing
-// uses `Clone` since internal SegmentInfo's LastExpireTime is changed
-func (s *SegmentsInfo) AddAllocation(segmentID UniqueID, allocation *Allocation) {
-	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = segment.Clone(AddAllocation(allocation))
-	}
-}
-
 // UpdateLastWrittenTime updates segment last writtent time to now.
 // if the segment is not found, do nothing
 // uses `ShadowClone` since internal SegmentInfo is not changed
@@ -322,7 +302,6 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 	info := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
 	cloned := &SegmentInfo{
 		SegmentInfo:   info,
-		allocations:   s.allocations,
 		lastFlushTime: s.lastFlushTime,
 		isCompacting:  s.isCompacting,
 		// cannot copy size, since binlog may be changed
@@ -338,7 +317,6 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 	cloned := &SegmentInfo{
 		SegmentInfo:     s.SegmentInfo,
-		allocations:     s.allocations,
 		lastFlushTime:   s.lastFlushTime,
 		isCompacting:    s.isCompacting,
 		lastWrittenTime: s.lastWrittenTime,
@@ -433,21 +411,6 @@ func SetDmlPosition(pos *msgpb.MsgPosition) SegmentInfoOption {
 func SetStartPosition(pos *msgpb.MsgPosition) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.StartPosition = pos
-	}
-}
-
-// SetAllocations is the option to set allocations for segment info
-func SetAllocations(allocations []*Allocation) SegmentInfoOption {
-	return func(segment *SegmentInfo) {
-		segment.allocations = allocations
-	}
-}
-
-// AddAllocation is the option to add allocation info for segment info
-func AddAllocation(allocation *Allocation) SegmentInfoOption {
-	return func(segment *SegmentInfo) {
-		segment.allocations = append(segment.allocations, allocation)
-		segment.LastExpireTime = allocation.ExpireTime
 	}
 }
 
