@@ -88,6 +88,11 @@ type externalCollectionRefreshManager struct {
 	scheduler task.GlobalScheduler
 	allocator allocator.Allocator
 
+	// collectionGetter retrieves collection metadata, with lazy-loading from RootCoord
+	// on cache miss. This handles the race condition where a refresh is triggered
+	// before the collection metadata has been synced to DataCoord.
+	collectionGetter func(ctx context.Context, collectionID int64) (*collectionInfo, error)
+
 	// Unified refresh meta for Job and Task management
 	refreshMeta *externalCollectionRefreshMeta
 
@@ -102,22 +107,25 @@ type externalCollectionRefreshManager struct {
 }
 
 // NewExternalCollectionRefreshManager creates a new external table refresh manager.
+// collectionGetter retrieves collection info with lazy-loading from RootCoord on cache miss.
 func NewExternalCollectionRefreshManager(
 	ctx context.Context,
 	mt *meta,
 	scheduler task.GlobalScheduler,
 	allocator allocator.Allocator,
 	refreshMeta *externalCollectionRefreshMeta,
+	collectionGetter func(ctx context.Context, collectionID int64) (*collectionInfo, error),
 ) ExternalCollectionRefreshManager {
 	closeChan := make(chan struct{})
 
 	m := &externalCollectionRefreshManager{
-		ctx:         ctx,
-		mt:          mt,
-		scheduler:   scheduler,
-		allocator:   allocator,
-		refreshMeta: refreshMeta,
-		closeChan:   closeChan,
+		ctx:              ctx,
+		mt:               mt,
+		scheduler:        scheduler,
+		allocator:        allocator,
+		refreshMeta:      refreshMeta,
+		collectionGetter: collectionGetter,
+		closeChan:        closeChan,
 	}
 
 	// Create internal components with shared refreshMeta
@@ -183,10 +191,13 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 		return jobID, nil
 	}
 
-	// Get collection info to validate it's an external collection
-	collection := m.mt.GetCollection(collectionID)
-	if collection == nil {
-		log.Warn("collection not found")
+	// Get collection info to validate it's an external collection.
+	// collectionGetter handles cache miss by lazy-loading from RootCoord,
+	// which covers the race condition where refresh is triggered before
+	// DataCoord syncs the newly created collection.
+	collection, err := m.collectionGetter(ctx, collectionID)
+	if err != nil || collection == nil {
+		log.Warn("collection not found", zap.Error(err))
 		return 0, merr.WrapErrCollectionNotFound(collectionID)
 	}
 

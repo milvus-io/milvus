@@ -2086,6 +2086,48 @@ var MustAsBroadcastBatchUpdateManifestMessageV2 = MustAsSpecializedBroadcastMess
 // NewBatchUpdateManifestMessageBuilderV2 creates a new message builder for BatchUpdateManifestMessageV2
 var NewBatchUpdateManifestMessageBuilderV2 = newMutableMessageBuilder[*BatchUpdateManifestMessageHeader, *BatchUpdateManifestMessageBody]
 
+// Type aliases for RefreshExternalCollectionMessageV2
+type (
+	MutableRefreshExternalCollectionMessageV2         = specializedMutableMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
+	ImmutableRefreshExternalCollectionMessageV2       = SpecializedImmutableMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
+	BroadcastRefreshExternalCollectionMessageV2       = SpecializedBroadcastMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
+	BroadcastResultRefreshExternalCollectionMessageV2 = BroadcastResult[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
+	AckResultRefreshExternalCollectionMessageV2       = AckResult[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
+)
+
+// MessageTypeWithVersion for RefreshExternalCollectionMessageV2
+var MessageTypeRefreshExternalCollectionV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeRefreshExternalCollection,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for RefreshExternalCollectionMessageV2
+var SpecializedTypeRefreshExternalCollectionV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*RefreshExternalCollectionMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*RefreshExternalCollectionMessageHeader)(nil)),
+}
+
+// AsMutableRefreshExternalCollectionMessageV2 converts a BasicMessage to MutableRefreshExternalCollectionMessageV2
+var AsMutableRefreshExternalCollectionMessageV2 = asSpecializedMutableMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
+
+// MustAsMutableRefreshExternalCollectionMessageV2 converts a BasicMessage to MutableRefreshExternalCollectionMessageV2, panics on error
+var MustAsMutableRefreshExternalCollectionMessageV2 = mustAsSpecializedMutableMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
+
+// AsImmutableRefreshExternalCollectionMessageV2 converts an ImmutableMessage to ImmutableRefreshExternalCollectionMessageV2
+var AsImmutableRefreshExternalCollectionMessageV2 = asSpecializedImmutableMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
+
+// MustAsImmutableRefreshExternalCollectionMessageV2 converts an ImmutableMessage to ImmutableRefreshExternalCollectionMessageV2, panics on error
+var MustAsImmutableRefreshExternalCollectionMessageV2 = MustAsSpecializedImmutableMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
+
+// AsBroadcastRefreshExternalCollectionMessageV2 converts a BasicMessage to BroadcastRefreshExternalCollectionMessageV2
+var AsBroadcastRefreshExternalCollectionMessageV2 = asSpecializedBroadcastMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
+
+// MustAsBroadcastRefreshExternalCollectionMessageV2 converts a BasicMessage to BroadcastRefreshExternalCollectionMessageV2, panics on error
+var MustAsBroadcastRefreshExternalCollectionMessageV2 = MustAsSpecializedBroadcastMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
+
+// NewRefreshExternalCollectionMessageBuilderV2 creates a new message builder for RefreshExternalCollectionMessageV2
+var NewRefreshExternalCollectionMessageBuilderV2 = newMutableMessageBuilder[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
+
 // messageTypeMap make the contriants that one header type can only be used for one message type.
 var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.AlterAliasMessageHeader{}):           MessageTypeAlterAlias,
@@ -2136,33 +2178,6 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.TimeTickMessageHeader{}):             MessageTypeTimeTick,
 	reflect.TypeOf(&messagespb.TruncateCollectionMessageHeader{}):   MessageTypeTruncateCollection,
 	reflect.TypeOf(&messagespb.TxnMessageHeader{}):                  MessageTypeTxn,
-// Type aliases for RefreshExternalCollectionMessageV2
-type MutableRefreshExternalCollectionMessageV2 = specializedMutableMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
-type ImmutableRefreshExternalCollectionMessageV2 = SpecializedImmutableMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
-type BroadcastRefreshExternalCollectionMessageV2 = SpecializedBroadcastMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
-type BroadcastResultRefreshExternalCollectionMessageV2 = BroadcastResult[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
-type AckResultRefreshExternalCollectionMessageV2 = AckResult[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
-// MessageTypeWithVersion for RefreshExternalCollectionMessageV2
-var MessageTypeRefreshExternalCollectionV2 = MessageTypeWithVersion{
-	MessageType: MessageTypeRefreshExternalCollection,
-// MessageSpecializedType for RefreshExternalCollectionMessageV2
-var SpecializedTypeRefreshExternalCollectionV2 = MessageSpecializedType{
-	BodyType:   reflect.TypeOf((*RefreshExternalCollectionMessageBody)(nil)),
-	HeaderType: reflect.TypeOf((*RefreshExternalCollectionMessageHeader)(nil)),
-// AsMutableRefreshExternalCollectionMessageV2 converts a BasicMessage to MutableRefreshExternalCollectionMessageV2
-var AsMutableRefreshExternalCollectionMessageV2 = asSpecializedMutableMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
-// MustAsMutableRefreshExternalCollectionMessageV2 converts a BasicMessage to MutableRefreshExternalCollectionMessageV2, panics on error
-var MustAsMutableRefreshExternalCollectionMessageV2 = mustAsSpecializedMutableMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
-// AsImmutableRefreshExternalCollectionMessageV2 converts an ImmutableMessage to ImmutableRefreshExternalCollectionMessageV2
-var AsImmutableRefreshExternalCollectionMessageV2 = asSpecializedImmutableMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
-// MustAsImmutableRefreshExternalCollectionMessageV2 converts an ImmutableMessage to ImmutableRefreshExternalCollectionMessageV2, panics on error
-var MustAsImmutableRefreshExternalCollectionMessageV2 = MustAsSpecializedImmutableMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
-// AsBroadcastRefreshExternalCollectionMessageV2 converts a BasicMessage to BroadcastRefreshExternalCollectionMessageV2
-var AsBroadcastRefreshExternalCollectionMessageV2 = asSpecializedBroadcastMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
-// MustAsBroadcastRefreshExternalCollectionMessageV2 converts a BasicMessage to BroadcastRefreshExternalCollectionMessageV2, panics on error
-var MustAsBroadcastRefreshExternalCollectionMessageV2 = MustAsSpecializedBroadcastMessage[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
-// NewRefreshExternalCollectionMessageBuilderV2 creates a new message builder for RefreshExternalCollectionMessageV2
-var NewRefreshExternalCollectionMessageBuilderV2 = newMutableMessageBuilder[*RefreshExternalCollectionMessageHeader, *RefreshExternalCollectionMessageBody]
 	reflect.TypeOf(&messagespb.RefreshExternalCollectionMessageHeader{}): MessageTypeRefreshExternalCollection,
 }
 
