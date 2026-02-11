@@ -1938,12 +1938,10 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id,
 
 void
 ChunkedSegmentSealedImpl::LoadTextIndex(
-    std::unique_ptr<milvus::proto::indexcgo::LoadTextIndexInfo> info_proto,
-    milvus::OpContext* op_ctx) {
+    milvus::OpContext* op_ctx,
+    std::shared_ptr<milvus::proto::indexcgo::LoadTextIndexInfo> info_proto) {
     // Check for cancellation before starting
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::LoadTextIndex()");
-
-    std::unique_lock lck(mutex_);
 
     milvus::storage::FieldDataMeta field_data_meta{info_proto->collectionid(),
                                                    info_proto->partitionid(),
@@ -1954,6 +1952,7 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
                                           info_proto->fieldid(),
                                           info_proto->buildid(),
                                           info_proto->version()};
+    auto field_meta = milvus::FieldMeta::ParseFrom(info_proto->schema());
     auto remote_chunk_manager =
         milvus::storage::RemoteChunkManagerSingleton::GetInstance()
             .GetRemoteChunkManager();
@@ -1976,7 +1975,7 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
         field_data_meta, index_meta, remote_chunk_manager, fs);
 
     auto field_id = milvus::FieldId(info_proto->fieldid());
-    const auto& field_meta = schema_->operator[](field_id);
+    // const auto& field_meta = schema_->operator[](field_id);
     milvus::segcore::storagev1translator::TextMatchIndexLoadInfo load_info{
         info_proto->enable_mmap(),
         this->get_segment_id(),
@@ -1993,6 +1992,8 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
     auto cache_slot =
         milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
             std::move(translator), op_ctx);
+
+    std::unique_lock lck(mutex_);
     text_indexes_[field_id] = std::move(cache_slot);
 }
 
@@ -2939,6 +2940,11 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
         }
     }
 
+    // load pre-built text indexes
+    if (!diff.text_indexes_to_load.empty()) {
+        LoadBatchTextIndexes(op_ctx, diff.text_indexes_to_load);
+    }
+
     // load field binlog
     if (!diff.binlogs_to_load.empty()) {
         LoadBatchFieldData(trace_ctx, diff.binlogs_to_load, op_ctx);
@@ -2947,6 +2953,14 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
     // fill default values for fields without data sources (schema evolution)
     if (!diff.fields_to_fill_default.empty()) {
         FillDefaultValueFields(diff.fields_to_fill_default);
+    }
+
+    // create text indexes from raw data
+    if (!diff.text_indexes_to_create.empty()) {
+        for (const auto& field_id : diff.text_indexes_to_create) {
+            CreateTextIndex(field_id, op_ctx);
+            segment_load_info.SetTextIndexCreated(field_id);
+        }
     }
 
     // drop field
@@ -3288,6 +3302,26 @@ ChunkedSegmentSealedImpl::ReloadColumns(const std::vector<FieldId>& field_ids,
     }
 
     storage::WaitAllFutures(reload_futures);
+}
+
+void
+ChunkedSegmentSealedImpl::LoadBatchTextIndexes(
+    milvus::OpContext* op_ctx,
+    std::unordered_map<FieldId,
+                       std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>>&
+        text_indexes_to_load) {
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+    std::vector<std::future<void>> load_index_futures;
+
+    load_index_futures.reserve(text_indexes_to_load.size());
+    for (auto& [field_id, load_text_index_info] : text_indexes_to_load) {
+        auto future = pool.Submit(
+            [this, op_ctx, info = std::move(load_text_index_info)]() mutable
+            -> void { LoadTextIndex(op_ctx, std::move(info)); });
+        load_index_futures.emplace_back(std::move(future));
+    }
+
+    storage::WaitAllFutures(load_index_futures);
 }
 
 void

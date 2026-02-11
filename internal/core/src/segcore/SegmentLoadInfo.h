@@ -32,6 +32,7 @@
 #include "common/protobuf_utils.h"
 #include "milvus-storage/column_groups.h"
 #include "pb/common.pb.h"
+#include "pb/index_cgo_msg.pb.h"
 #include "pb/segcore.pb.h"
 #include "segcore/Types.h"
 
@@ -76,6 +77,15 @@ struct LoadDiff {
     // These fields exist in schema but have no data source (binlog/index/column_group)
     std::vector<FieldId> fields_to_fill_default;
 
+    // Text indexes that need to be loaded from pre-built files
+    // (field_id -> converted LoadTextIndexInfo)
+    std::unordered_map<FieldId,
+                       std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>>
+        text_indexes_to_load;
+
+    // Text fields that need text indexes created from raw data
+    std::unordered_set<FieldId> text_indexes_to_create;
+
     // Whether manifest path has changed (only when both use manifest mode)
     bool manifest_updated = false;
 
@@ -87,7 +97,9 @@ struct LoadDiff {
         return !indexes_to_load.empty() || !binlogs_to_load.empty() ||
                !column_groups_to_load.empty() || !fields_to_reload.empty() ||
                !indexes_to_drop.empty() || !field_data_to_drop.empty() ||
-               !fields_to_fill_default.empty() || manifest_updated;
+               !fields_to_fill_default.empty() ||
+               !text_indexes_to_load.empty() ||
+               !text_indexes_to_create.empty() || manifest_updated;
     }
 
     [[nodiscard]] bool
@@ -178,6 +190,28 @@ struct LoadDiff {
         }
         oss << "], ";
 
+        // text_indexes_to_load
+        oss << "text_indexes_to_load=[";
+        first = true;
+        for (const auto& [field_id, stats] : text_indexes_to_load) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << field_id.get();
+        }
+        oss << "], ";
+
+        // text_indexes_to_create
+        oss << "text_indexes_to_create=[";
+        first = true;
+        for (const auto& field_id : text_indexes_to_create) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << field_id.get();
+        }
+        oss << "], ";
+
         // manifest_updated and new_manifest_path
         oss << "manifest_updated=" << (manifest_updated ? "true" : "false");
         if (manifest_updated) {
@@ -228,7 +262,8 @@ class SegmentLoadInfo {
     SegmentLoadInfo(const SegmentLoadInfo& other)
         : info_(other.info_),
           schema_(other.schema_),
-          column_groups_(other.column_groups_) {
+          column_groups_(other.column_groups_),
+          created_text_indexes_(other.created_text_indexes_) {
         BuildCache();
     }
 
@@ -242,7 +277,8 @@ class SegmentLoadInfo {
           converted_field_index_cache_(
               std::move(other.converted_field_index_cache_)),
           field_binlog_cache_(std::move(other.field_binlog_cache_)),
-          column_groups_(std::move(other.column_groups_)) {
+          column_groups_(std::move(other.column_groups_)),
+          created_text_indexes_(std::move(other.created_text_indexes_)) {
     }
 
     /**
@@ -255,6 +291,7 @@ class SegmentLoadInfo {
             info_ = other.info_;
             schema_ = other.schema_;
             column_groups_ = other.column_groups_;
+            created_text_indexes_ = other.created_text_indexes_;
             BuildCache();
         }
         return *this;
@@ -273,6 +310,7 @@ class SegmentLoadInfo {
                 std::move(other.converted_field_index_cache_);
             field_binlog_cache_ = std::move(other.field_binlog_cache_);
             column_groups_ = std::move(other.column_groups_);
+            created_text_indexes_ = std::move(other.created_text_indexes_);
         }
         return *this;
     }
@@ -653,6 +691,19 @@ class SegmentLoadInfo {
         return info_.jsonkeystatslogs();
     }
 
+    // ==================== Created Text Indexes Tracking ====================
+
+    void
+    SetTextIndexCreated(FieldId field_id) {
+        created_text_indexes_.insert(field_id);
+    }
+
+    [[nodiscard]] bool
+    HasTextIndexCreated(FieldId field_id) const {
+        return created_text_indexes_.find(field_id) !=
+               created_text_indexes_.end();
+    }
+
     // ==================== Diff Computation ====================
 
     /**
@@ -764,6 +815,21 @@ class SegmentLoadInfo {
     [[nodiscard]] static bool
     CheckIndexHasRawData(const LoadIndexInfo& load_index_info);
 
+    /**
+     * @brief Convert a TextIndexStats to LoadTextIndexInfo
+     *
+     * This method converts the protobuf TextIndexStats to the
+     * LoadTextIndexInfo structure used for loading pre-built text indexes.
+     *
+     * @param text_index_stats The TextIndexStats to convert
+     * @param field_id The field ID for the text index
+     * @return shared_ptr to LoadTextIndexInfo populated with the converted data
+     */
+    [[nodiscard]] std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>
+    ConvertTextIndexStatsToLoadTextIndexInfo(
+        const proto::segcore::TextIndexStats& text_index_stats,
+        FieldId field_id) const;
+
  private:
     void
     BuildCache() {
@@ -812,6 +878,9 @@ class SegmentLoadInfo {
     void
     ComputeDiffDefaultFields(LoadDiff& diff, SegmentLoadInfo& new_info);
 
+    void
+    ComputeDiffTextIndexes(LoadDiff& diff, SegmentLoadInfo& new_info);
+
     ProtoType info_;
 
     SchemaPtr schema_;
@@ -833,6 +902,10 @@ class SegmentLoadInfo {
 
     // Cache for column groups metadata (used with manifest mode)
     std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups_;
+
+    // Field IDs where text indexes were created from raw data (not loaded from files)
+    // These should NOT be re-loaded in diff computation
+    std::unordered_set<FieldId> created_text_indexes_;
 };
 
 }  // namespace milvus::segcore
