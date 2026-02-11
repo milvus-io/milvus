@@ -66,7 +66,7 @@ inline MmapConfig
 get_default_mmap_config() {
     MmapConfig mmap_config = {
         .cache_read_ahead_policy = "willneed",
-        .mmap_path = "/tmp/test_mmap_manager/",
+        .mmap_path = TestMmapPath,
         .disk_limit =
             uint64_t(2) * uint64_t(1024) * uint64_t(1024) * uint64_t(1024),
         .fix_file_size = uint64_t(4) * uint64_t(1024) * uint64_t(1024),
@@ -170,7 +170,8 @@ PrepareSingleFieldInsertBinlog(int64_t collection_id,
     for (auto i = 0; i < field_datas.size(); ++i) {
         auto& field_data = field_datas[i];
         row_count += field_data->get_num_rows();
-        auto file = "./data/test/" + std::to_string(collection_id) + "/" +
+        auto file = TestRemotePath + "data/test/" +
+                    std::to_string(collection_id) + "/" +
                     std::to_string(partition_id) + "/" +
                     std::to_string(segment_id) + "/" +
                     std::to_string(field_id) + "/" + std::to_string(i);

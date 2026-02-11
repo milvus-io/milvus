@@ -65,6 +65,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -110,7 +111,7 @@ class JsonFlatIndexTest : public ::testing::Test {
         index_meta_ =
             gen_index_meta(segment_id, field_id, index_build_id, index_version);
 
-        std::string root_path = "/tmp/test-json-flat-index/";
+        std::string root_path = TestLocalPath;
         auto storage_config = gen_local_storage_config(root_path);
         cm_ = storage::CreateChunkManager(storage_config);
         fs_ = storage::InitArrowFileSystem(storage_config);
@@ -138,7 +139,8 @@ class JsonFlatIndexTest : public ::testing::Test {
         auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
         auto get_binlog_path = [=](int64_t log_id) {
-            return fmt::format("{}/{}/{}/{}/{}",
+            return fmt::format("{}{}/{}/{}/{}/{}",
+                               TestLocalPath,
                                collection_id,
                                partition_id,
                                segment_id,
@@ -192,7 +194,7 @@ class JsonFlatIndexTest : public ::testing::Test {
     void
     TearDown() override {
         cm_w_.reset();
-        boost::filesystem::remove_all("/tmp/test-json-flat-index/");
+        // Cleanup handled by random test path in init_gtest.cpp
     }
 
     storage::FieldDataMeta field_meta_;

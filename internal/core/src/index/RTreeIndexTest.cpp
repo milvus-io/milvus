@@ -180,7 +180,7 @@ class RTreeIndexTest : public ::testing::Test {
                     }
                 }
             }
-            boost::filesystem::remove_all("/tmp/milvus/rtree-index/");
+            // TmpPath cleanup handles the test directory
         } catch (const std::exception& e) {
             // Log error but don't fail the test
             std::cout << "Warning: Failed to clean up test files: " << e.what()
