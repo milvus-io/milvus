@@ -1,69 +1,40 @@
-"""
-MinHash DIDO Function Test Suite
-
-This module contains comprehensive tests for MinHash DIDO (Data-In-Data-Out) Function,
-which automatically converts text (VarChar/String) into MinHash signature vectors (BinaryVector)
-for approximate nearest neighbor search based on Jaccard similarity.
-
-Test Categories:
-- L0: Basic functionality tests (core features, must pass)
-- L1: Extended functionality tests (common use cases)
-- L2: Advanced functionality tests (edge cases, combinations)
-
-Key Components:
-- MinHash Function: Configurable hash functions and shingles for text-to-signature conversion
-- MinHashLSH Index: Locality-Sensitive Hashing index optimized for MinHash vectors
-- MHJACCARD Metric: MinHash-specific Jaccard distance calculation
-"""
-
 import random
 import time
 
 import pytest
 import numpy as np
+from faker import Faker
+
 from base.client_v2_base import TestMilvusClientV2Base
+from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import DataType
-from pymilvus.orm.schema import Function
-from pymilvus.client.types import FunctionType
-from utils.util_log import test_log as log
+from utils.util_pymilvus import *  # noqa
+from common.constants import *  # noqa
+from pymilvus import DataType, Function, FunctionType
+
+fake = Faker()
 
 
-# ============================================================================
-# Constants
-# ============================================================================
 prefix = "minhash"
+default_nb = ct.default_nb
+default_limit = ct.default_limit
+default_primary_key_field_name = "id"
 default_text_field_name = "text"
 default_minhash_field_name = "minhash_signature"
-default_primary_key_field_name = "id"
-default_nb = 1000
-default_dim = 512  # num_hashes=16 -> dim=16*32=512
-default_limit = 10
 default_num_hashes = 16
 default_shingle_size = 3
+default_dim = default_num_hashes * 32
 
 
-# ============================================================================
-# Helper Functions
-# ============================================================================
 def gen_text_data(nb, min_words=5, max_words=50):
     """Generate random text data for testing."""
-    from faker import Faker
-    fake = Faker()
     return [fake.sentence(nb_words=random.randint(min_words, max_words)) for _ in range(nb)]
 
 
 def gen_similar_text_pairs(nb, overlap_ratios=[0.0, 0.25, 0.5, 0.75, 1.0]):
-    """
-    Generate text pairs with known word overlap ratios for Jaccard similarity testing.
-
-    Returns:
-        List of tuples: [(text1, text2, expected_jaccard), ...]
-    """
-    from faker import Faker
-    fake = Faker()
+    """Generate text pairs with known word overlap ratios for Jaccard similarity testing."""
     pairs = []
 
     for ratio in overlap_ratios:
@@ -96,14 +67,8 @@ def gen_minhash_rows(nb, start_id=0, text_field="text", pk_field="id"):
     return [{pk_field: start_id + i, text_field: texts[i]} for i in range(nb)]
 
 
-# ============================================================================
-# Basic Functionality Test Cases
-# ============================================================================
 class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
-    """
-    Basic Test Cases for MinHash DIDO Function.
-    These are critical path tests that must pass for basic functionality.
-    """
+    """ Test case of MinHash DIDO basic function """
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_minhash_create_collection_basic(self):
@@ -115,13 +80,12 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
 
-        # Create schema with MinHash function
+        # 1. create schema with MinHash function
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
         schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=default_dim)
 
-        # Add MinHash function
         schema.add_function(Function(
             name="text_to_minhash",
             function_type=FunctionType.MINHASH,
@@ -133,14 +97,14 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
             },
         ))
 
-        # Create collection
+        # 2. create collection
         self.create_collection(client, collection_name, schema=schema)
 
-        # Verify collection exists
+        # 3. verify collection exists
         collections = self.list_collections(client)[0]
         assert collection_name in collections
 
-        # Verify schema has MinHash function
+        # 4. verify schema has MinHash function
         desc = self.describe_collection(client, collection_name)[0]
         assert len(desc.get("functions", [])) == 1
         func = desc["functions"][0]
@@ -160,7 +124,7 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
 
-        # Create collection with MinHash function
+        # 1. create collection with MinHash function
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
@@ -176,7 +140,7 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, schema=schema)
 
-        # Create MINHASH_LSH index
+        # 2. create MINHASH_LSH index
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(
             field_name=default_minhash_field_name,
@@ -186,7 +150,7 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
         )
         self.create_index(client, collection_name, index_params)
 
-        # Verify index exists
+        # 3. verify index exists
         indexes = self.list_indexes(client, collection_name)[0]
         assert default_minhash_field_name in indexes
 
@@ -216,7 +180,7 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
             params={"num_hashes": default_num_hashes, "shingle_size": default_shingle_size},
         ))
 
-        # Create index
+        # 2. create index
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(
             field_name=default_minhash_field_name,
@@ -226,12 +190,12 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
         )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
-        # Insert data (only text, MinHash signature auto-generated)
+        # 3. insert data
         rows = gen_minhash_rows(default_nb)
         result = self.insert(client, collection_name, rows)[0]
         assert result["insert_count"] == default_nb
 
-        # Verify data count
+        # 4. verify data count
         self.flush(client, collection_name)
         stats = self.get_collection_stats(client, collection_name)[0]
         assert stats["row_count"] == default_nb
@@ -248,7 +212,7 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
 
-        # Create collection with MinHash function
+        # 1. create collection with MinHash function
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
@@ -262,7 +226,7 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
             params={"num_hashes": default_num_hashes, "shingle_size": default_shingle_size},
         ))
 
-        # Create index and collection
+        # 2. create index and collection
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(
             field_name=default_minhash_field_name,
@@ -272,15 +236,15 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
         )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
-        # Insert data
+        # 3. insert data
         rows = gen_minhash_rows(default_nb)
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
-        # Load collection
+        # 4. load collection
         self.load_collection(client, collection_name)
 
-        # Search using text
+        # 5. search using text
         query_text = rows[0][default_text_field_name]
         results = self.search(client, collection_name, [query_text],
                               anns_field=default_minhash_field_name,
@@ -291,8 +255,8 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
                               limit=default_limit,
                               output_fields=[default_primary_key_field_name, default_text_field_name])[0]
 
-        # Verify results
-        assert len(results) == 1  # One query
+        # 6. verify results
+        assert len(results) == 1
         assert len(results[0]) <= default_limit
         # First result should be the query itself (exact match)
         assert results[0][0]["id"] == rows[0][default_primary_key_field_name]
@@ -309,7 +273,7 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
 
-        # Create schema with additional scalar field
+        # 1. create schema with additional scalar field
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
@@ -333,18 +297,18 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
         )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
-        # Insert data with category field
+        # 2. insert data with category field
         texts = gen_text_data(default_nb)
         rows = [{
             default_primary_key_field_name: i,
             default_text_field_name: texts[i],
-            "category": i % 5  # 5 categories
+            "category": i % 5
         } for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
 
-        # Search with filter
+        # 3. search with filter
         query_text = texts[0]
         filter_expr = "category == 0"
         results = self.search(client, collection_name, [query_text],
@@ -354,7 +318,7 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
                               limit=default_limit,
                               output_fields=[default_primary_key_field_name, "category"])[0]
 
-        # Verify all results satisfy filter
+        # 4. verify all results satisfy filter
         for hit in results[0]:
             assert hit["entity"]["category"] == 0
 
@@ -412,19 +376,13 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
         # Both results should have distance 1.0 (MHJACCARD returns similarity, 1.0 = exact match)
         assert len(results[0]) == 2
         for hit in results[0]:
-            assert hit["distance"] == 1.0  # MHJACCARD similarity: 1.0 = identical
+            assert hit["distance"] == 1.0
 
         self.drop_collection(client, collection_name)
 
 
-# ============================================================================
-# Extended Functionality Test Cases
-# ============================================================================
 class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
-    """
-    Extended Test Cases for MinHash DIDO Function.
-    These cover common use cases and parameter combinations.
-    """
+    """ Test case of MinHash DIDO extended function """
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("num_hashes", [1, 8, 16, 32, 64, 128])
@@ -436,7 +394,7 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        dim = num_hashes * 32  # dim = num_hashes * 32
+        dim = num_hashes * 32
 
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
@@ -708,7 +666,7 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
 
-        # Search with Jaccard reranking
+        # 2. search with Jaccard reranking
         results = self.search(client, collection_name, [rows[0][default_text_field_name]],
                               anns_field=default_minhash_field_name,
                               search_params={
@@ -722,7 +680,7 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
                               output_fields=[default_primary_key_field_name])[0]
 
         # First result should be exact match with distance 0
-        assert results[0][0]["distance"] == 1.0  # MHJACCARD returns similarity
+        assert results[0][0]["distance"] == 1.0
         assert results[0][0]["id"] == rows[0][default_primary_key_field_name]
 
         self.drop_collection(client, collection_name)
@@ -999,7 +957,7 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
                               limit=1,
                               output_fields=[default_text_field_name])[0]
 
-        assert results[0][0]["distance"] == 1.0  # MHJACCARD returns similarity
+        assert results[0][0]["distance"] == 1.0
         assert results[0][0]["entity"][default_text_field_name] == updated_text
 
         self.drop_collection(client, collection_name)
@@ -1217,7 +1175,7 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
                                   search_params={"metric_type": "MHJACCARD", "params": {}},
                                   limit=1)[0]
             # Exact match should have distance 0
-            assert results[0][0]["distance"] == 1.0  # MHJACCARD returns similarity
+            assert results[0][0]["distance"] == 1.0
 
         self.drop_collection(client, collection_name)
 
@@ -1282,14 +1240,8 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
 
-# ============================================================================
-# Negative Test Cases - Error Handling
-# ============================================================================
 class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
-    """
-    Negative Test Cases for MinHash DIDO Function.
-    These test error handling and invalid inputs.
-    """
+    """ Test case of MinHash DIDO negative function """
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_minhash_invalid_input_field_type(self):
@@ -1309,15 +1261,15 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         schema.add_function(Function(
             name="text_to_minhash",
             function_type=FunctionType.MINHASH,
-            input_field_names=["int_field"],  # Invalid - not VARCHAR
+            input_field_names=["int_field"],
             output_field_names=[default_minhash_field_name],
             params={"num_hashes": default_num_hashes, "shingle_size": default_shingle_size},
         ))
 
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 65535,
-                                             "err_msg": "VARCHAR"})
+                               check_items={ct.err_code: 65535,
+                                             ct.err_msg: "VARCHAR"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_minhash_invalid_output_field_type(self):
@@ -1338,14 +1290,14 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
             name="text_to_minhash",
             function_type=FunctionType.MINHASH,
             input_field_names=[default_text_field_name],
-            output_field_names=["float_vec"],  # Invalid - not BINARY_VECTOR
+            output_field_names=["float_vec"],
             params={"num_hashes": default_num_hashes, "shingle_size": default_shingle_size},
         ))
 
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 65535,
-                                             "err_msg": "BinaryVector"})
+                               check_items={ct.err_code: 65535,
+                                             ct.err_msg: "BinaryVector"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_minhash_dim_not_multiple_of_32(self):
@@ -1360,23 +1312,24 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=128)  # 128 bits = 4 * 32
+        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=128)
 
         schema.add_function(Function(
             name="text_to_minhash",
             function_type=FunctionType.MINHASH,
             input_field_names=[default_text_field_name],
             output_field_names=[default_minhash_field_name],
-            params={"num_hashes": 3, "shingle_size": default_shingle_size},  # 3*32=96 != 128
+            params={"num_hashes": 3, "shingle_size": default_shingle_size},
         ))
 
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 65535,
-                                             "err_msg": "does not match expected dim"})
+                               check_items={ct.err_code: 65535,
+                                             ct.err_msg: "does not match expected dim"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="Server bug: allows BIN_FLAT index on MinHash function output field")
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/47585 "
+                               "Server allows BIN_FLAT index on MinHash function output field")
     def test_minhash_invalid_index_type(self):
         """
         target: test creating non-MinHashLSH index on MinHash output field
@@ -1401,23 +1354,22 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, schema=schema)
 
-        # Try to create wrong index type
+        # 2. try to create wrong index type
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(
             field_name=default_minhash_field_name,
-            index_type="BIN_FLAT",  # Invalid - should be MINHASH_LSH
+            index_type="BIN_FLAT",
             metric_type="HAMMING",
         )
-
-        # Error should occur during index creation
         self.create_index(client, collection_name, index_params,
                           check_task=CheckTasks.err_res,
-                          check_items={"err_code": 1})
+                          check_items={ct.err_code: 1})
 
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="Server bug: allows HAMMING metric with MINHASH_LSH index")
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/47585 "
+                               "Server allows HAMMING metric with MINHASH_LSH index")
     def test_minhash_invalid_metric_type(self):
         """
         target: test creating MinHashLSH index with wrong metric type
@@ -1442,19 +1394,17 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, schema=schema)
 
-        # Try to create index with wrong metric
+        # 2. try to create index with wrong metric
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(
             field_name=default_minhash_field_name,
             index_type="MINHASH_LSH",
-            metric_type="HAMMING",  # Invalid - should be MHJACCARD
+            metric_type="HAMMING",
             params={"mh_lsh_band": 8},
         )
-
-        # Error should occur during index creation
         self.create_index(client, collection_name, index_params,
                           check_task=CheckTasks.err_res,
-                          check_items={"err_code": 1})
+                          check_items={ct.err_code: 1})
 
         self.drop_collection(client, collection_name)
 
@@ -1468,10 +1418,7 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
 
-        # Ensure collection doesn't exist
-        if client.has_collection(collection_name):
-            client.drop_collection(collection_name)
-
+        # 1. create schema
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
@@ -1494,19 +1441,17 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         )
         client.create_collection(collection_name, schema=schema, index_params=index_params)
 
-        # Try to insert with MinHash signature directly
+        # 2. try to insert with MinHash signature directly
         fake_signature = bytes([0] * (default_dim // 8))
         rows = [{
             default_primary_key_field_name: 1,
             default_text_field_name: "Test text",
-            default_minhash_field_name: fake_signature,  # Should not be allowed
+            default_minhash_field_name: fake_signature,
         }]
-
-        # Error should occur during insert - cannot provide function output field
         self.insert(client, collection_name, rows,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 1,
-                                 "err_msg": "unexpected function output field"})
+                    check_items={ct.err_code: 1,
+                                 ct.err_msg: "unexpected function output field"})
 
         client.drop_collection(collection_name)
 
@@ -1520,10 +1465,7 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
 
-        # Ensure collection doesn't exist
-        if client.has_collection(collection_name):
-            client.drop_collection(collection_name)
-
+        # 1. create schema
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
@@ -1546,14 +1488,12 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         )
         client.create_collection(collection_name, schema=schema, index_params=index_params)
 
-        # Try to insert without text field
-        rows = [{default_primary_key_field_name: 1}]  # Missing text field
-
-        # Error should occur during insert - missing required field
+        # 2. try to insert without text field
+        rows = [{default_primary_key_field_name: 1}]
         self.insert(client, collection_name, rows,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 1,
-                                 "err_msg": "missed an field"})
+                    check_items={ct.err_code: 1,
+                                 ct.err_msg: "missed an field"})
 
         client.drop_collection(collection_name)
 
@@ -1583,8 +1523,8 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
 
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 65535,
-                                             "err_msg": "num_hashes"})
+                               check_items={ct.err_code: 65535,
+                                             ct.err_msg: "num_hashes"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_shingle_size", [0, -1, "xyz"])
@@ -1610,11 +1550,10 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
             params={"num_hashes": default_num_hashes, "shingle_size": invalid_shingle_size},
         ))
 
-        # Error should occur during collection creation (server-side validation)
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 65535,
-                                             "err_msg": "shingle_size"})
+                               check_items={ct.err_code: 65535,
+                                             ct.err_msg: "shingle_size"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_minhash_invalid_hash_function(self):
@@ -1639,15 +1578,14 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
             params={
                 "num_hashes": default_num_hashes,
                 "shingle_size": default_shingle_size,
-                "hash_function": "md5",  # Invalid - only xxhash64 and sha1 supported
+                "hash_function": "md5",
             },
         ))
 
-        # Error should occur during collection creation (server-side validation)
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 65535,
-                                             "err_msg": "Unknown hash function"})
+                               check_items={ct.err_code: 65535,
+                                             ct.err_msg: "Unknown hash function"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_token_level", ["sentence", "invalid", ""])
@@ -1677,11 +1615,10 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
             },
         ))
 
-        # Error should occur during collection creation (server-side validation)
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 65535,
-                                             "err_msg": "Unknown token_level"})
+                               check_items={ct.err_code: 65535,
+                                             ct.err_msg: "Unknown token_level"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_seed", ["not_a_number", "abc123"])
@@ -1711,11 +1648,10 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
             },
         ))
 
-        # Error should occur during collection creation (server-side validation)
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res,
-                               check_items={"err_code": 65535,
-                                             "err_msg": "seed"})
+                               check_items={ct.err_code: 65535,
+                                             ct.err_msg: "seed"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_minhash_search_empty_collection(self):
@@ -1762,14 +1698,8 @@ class TestMilvusClientMinHashNegative(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
 
-# ============================================================================
-# Advanced Functionality Test Cases
-# ============================================================================
 class TestMilvusClientMinHashAdvanced(TestMilvusClientV2Base):
-    """
-    Advanced Test Cases for MinHash DIDO Function.
-    These cover edge cases, complex combinations, and advanced features.
-    """
+    """ Test case of MinHash DIDO advanced function """
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_minhash_all_parameters(self):
@@ -1893,7 +1823,7 @@ class TestMilvusClientMinHashAdvanced(TestMilvusClientV2Base):
         for i, result in enumerate(results):
             assert len(result) <= 5
             # First result should be exact match
-            assert result[0]["distance"] == 1.0  # MHJACCARD returns similarity
+            assert result[0]["distance"] == 1.0
 
         self.drop_collection(client, collection_name)
 
@@ -2034,7 +1964,7 @@ class TestMilvusClientMinHashAdvanced(TestMilvusClientV2Base):
                                   anns_field=default_minhash_field_name,
                                   search_params={"metric_type": "MHJACCARD", "params": {}},
                                   limit=1)[0]
-            assert results[0][0]["distance"] == 1.0  # MHJACCARD returns similarity
+            assert results[0][0]["distance"] == 1.0
 
         self.drop_collection(client, collection_name)
 
@@ -2201,14 +2131,8 @@ class TestMilvusClientMinHashAdvanced(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
 
-# ============================================================================
-# Accuracy Test Cases
-# ============================================================================
 class TestMilvusClientMinHashAccuracy(TestMilvusClientV2Base):
-    """
-    Accuracy Test Cases for MinHash DIDO Function.
-    These verify the correctness of MinHash similarity estimation.
-    """
+    """ Test case of MinHash DIDO accuracy """
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_minhash_similar_text_search(self):
@@ -2329,7 +2253,7 @@ class TestMilvusClientMinHashAccuracy(TestMilvusClientV2Base):
                               limit=1)[0]
 
         # Distance should be exactly 0 for identical text
-        assert results[0][0]["distance"] == 1.0  # MHJACCARD returns similarity
+        assert results[0][0]["distance"] == 1.0
 
         self.drop_collection(client, collection_name)
 
@@ -2406,9 +2330,6 @@ class TestMilvusClientMinHashAccuracy(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name_2)
 
 
-# ============================================================================
-# MinHash Function Correctness Test Helpers
-# ============================================================================
 # Pure Python implementation of Milvus MinHash algorithm.
 # Verified bit-identical to the C++ implementation (MinHashComputer.cpp).
 
@@ -2562,16 +2483,8 @@ def binary_vector_to_signature(binary_vector):
     return list(struct.unpack(f'<{num_hashes}I', binary_vector))
 
 
-# ============================================================================
-# MinHash Function Correctness Test Cases
-# ============================================================================
 class TestMinHashFunctionCorrectness(TestMilvusClientV2Base):
-    """
-    Test cases to verify the correctness of MinHash function output.
-
-    These tests directly compare Milvus MinHash signatures against
-    Python-computed expected values using the same algorithm.
-    """
+    """ Test case of MinHash function correctness """
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_minhash_signature_deterministic(self):
@@ -2959,6 +2872,9 @@ class TestMinHashFunctionCorrectness(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/47521 "
+                               "MINHASH_LSH returns meaningless distance=1.0 "
+                               "when mh_search_with_jaccard is not set")
     def test_minhash_jaccard_distance_correlation(self):
         """
         target: verify MinHash Jaccard distance correlates with actual Jaccard similarity
@@ -3003,11 +2919,11 @@ class TestMinHashFunctionCorrectness(TestMilvusClientV2Base):
         # Base text and variants with decreasing similarity
         base_text = "the quick brown fox jumps over the lazy dog"
         variants = [
-            (0, base_text),                                              # Identical
-            (1, "the quick brown fox jumps over the lazy cat"),          # 1 word changed
-            (2, "the slow brown fox jumps over the lazy dog"),           # 1 word changed
-            (3, "a slow red fox runs over the tired dog"),               # Multiple changes
-            (4, "xyz completely different text about something else"),   # Very different
+            (0, base_text),
+            (1, "the quick brown fox jumps over the lazy cat"),
+            (2, "the slow brown fox jumps over the lazy dog"),
+            (3, "a slow red fox runs over the tired dog"),
+            (4, "xyz completely different text about something else"),
         ]
 
         rows = [{default_primary_key_field_name: pk, default_text_field_name: text}
@@ -3016,21 +2932,18 @@ class TestMinHashFunctionCorrectness(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
 
-        # Search with base text
         results = self.search(client, collection_name, [base_text],
                               anns_field=default_minhash_field_name,
-                              search_params={"metric_type": "MHJACCARD", "params": {}},
+                              search_params={
+                                  "metric_type": "MHJACCARD",
+                                  "params": {},
+                              },
                               limit=len(variants),
                               output_fields=[default_primary_key_field_name, default_text_field_name])[0]
 
         # Verify result ordering: identical text should be first
         assert results[0][0]["id"] == 0, "Identical text should be first result"
         assert results[0][0]["distance"] == 1.0, "Identical text should have distance 1.0"
-
-        # Verify distances are monotonically decreasing (more similar = higher score)
-        distances = [hit["distance"] for hit in results[0]]
-        # Note: MHJACCARD returns similarity (1.0 = identical), not distance
-        # So higher values mean more similar
 
         # The very different text should have lowest similarity
         last_hit = results[0][-1]
@@ -3690,290 +3603,8 @@ class TestMinHashFunctionCorrectness(TestMilvusClientV2Base):
             log.info(f"mh_lsh_band={bands}: recall@{top_k}={recall:.4f}")
 
 
-# ============================================================================
-# L3: Large-Scale Recall Benchmark Tests
-# ============================================================================
-class TestMinHashRecallBenchmark(TestMilvusClientV2Base):
-    """
-    Large-scale recall benchmark tests using real-world datasets.
-
-    These tests evaluate MINHASH_LSH search quality with larger datasets
-    from HuggingFace to measure realistic recall performance.
-
-    Test Level: L3 (requires datasets library and longer execution time)
-    """
-
-    # Dataset configurations
-    DATASETS = {
-        "ag_news": {
-            "name": "SetFit/ag_news",
-            "text_column": "text",
-            "split": "train",
-            "subset": None,
-        },
-        "enron_spam": {
-            "name": "SetFit/enron_spam",
-            "text_column": "text",
-            "split": "train",
-            "subset": None,
-        },
-        "bbc": {
-            "name": "SetFit/bbc-news",
-            "text_column": "text",
-            "split": "train",
-            "subset": None,
-        },
-        "imdb": {
-            "name": "SetFit/imdb",
-            "text_column": "text",
-            "split": "train",
-            "subset": None,
-        },
-    }
-
-    def _load_dataset_texts(self, dataset_name: str, limit: int = 10000) -> list:
-        """Load texts from HuggingFace dataset."""
-        from datasets import load_dataset
-
-        config = self.DATASETS[dataset_name]
-        log.info(f"Loading dataset: {config['name']}")
-
-        if config["subset"]:
-            ds = load_dataset(config["name"], config["subset"], split=config["split"])
-        else:
-            ds = load_dataset(config["name"], split=config["split"])
-
-        texts = []
-        max_text_len = 60000  # Leave some margin for VARCHAR(65535)
-        for i, row in enumerate(ds):
-            if i >= limit:
-                break
-            text = row[config["text_column"]]
-            if text and len(text.strip()) >= 10:
-                # Truncate text if too long
-                text = text.strip()[:max_text_len]
-                texts.append((len(texts), text))
-
-        log.info(f"Loaded {len(texts)} texts from {dataset_name}")
-        return texts
-
-    def _compute_signatures(
-        self,
-        texts: list,
-        num_hashes: int = 128,
-        shingle_size: int = 3,
-        seed: int = 42,
-    ) -> dict:
-        """Compute MinHash signatures for ground truth."""
-
-        signatures = {}
-        for pk, text in texts:
-            sig = compute_minhash(text, num_hashes, shingle_size, seed, use_char_level=True)
-            signatures[pk] = list(sig)
-        return signatures
-
-    def _compute_jaccard_similarity(self, sig1: list, sig2: list) -> float:
-        """Compute estimated Jaccard similarity from signatures."""
-        return sum(1 for a, b in zip(sig1, sig2) if a == b) / len(sig1)
-
-    def _get_ground_truth_topk(
-        self,
-        query_pk: int,
-        signatures: dict,
-        top_k: int = 10,
-        debug: bool = False,
-    ) -> tuple:
-        """Get ground truth top-k similar items.
-
-        Returns:
-            (set of top-k pks, list of (pk, similarity) pairs for debugging)
-        """
-        query_sig = signatures[query_pk]
-        similarities = []
-
-        for pk, sig in signatures.items():
-            if pk == query_pk:
-                continue
-            sim = self._compute_jaccard_similarity(query_sig, sig)
-            similarities.append((pk, sim))
-
-        similarities.sort(key=lambda x: x[1], reverse=True)
-        top_items = similarities[:top_k]
-
-        if debug and top_items:
-            log.info(f"  Ground truth top-{top_k} similarities: "
-                     f"max={top_items[0][1]:.4f}, min={top_items[-1][1]:.4f}")
-
-        return set(pk for pk, _ in top_items), top_items
-
-    def _run_recall_benchmark(
-        self,
-        client,
-        texts: list,
-        signatures: dict,
-        mh_lsh_band: int,
-        num_queries: int = 50,
-        top_k: int = 10,
-    ) -> dict:
-        """Run recall benchmark with given configuration."""
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        num_hashes = 128
-        dim = num_hashes * 32
-        seed = 42
-
-        # Create collection
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
-
-        schema.add_function(Function(
-            name="text_to_minhash",
-            function_type=FunctionType.MINHASH,
-            input_field_names=[default_text_field_name],
-            output_field_names=[default_minhash_field_name],
-            params={
-                "num_hashes": num_hashes,
-                "shingle_size": 3,
-                "seed": seed,
-                "token_level": "char",
-            },
-        ))
-
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(
-            field_name=default_minhash_field_name,
-            index_type="MINHASH_LSH",
-            metric_type="MHJACCARD",
-            params={"mh_lsh_band": mh_lsh_band},
-        )
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-        # Insert data in batches
-        batch_size = 1000
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i+batch_size]
-            rows = [{default_primary_key_field_name: pk, default_text_field_name: text}
-                    for pk, text in batch]
-            self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
-
-        # Sample queries
-        np.random.seed(42)
-        query_indices = np.random.choice(len(texts), size=min(num_queries, len(texts)), replace=False)
-
-        recalls = []
-        debug_first = True  # Only debug first query
-        for idx in query_indices:
-            query_pk, query_text = texts[idx]
-            ground_truth_set, ground_truth_items = self._get_ground_truth_topk(
-                query_pk, signatures, top_k, debug=debug_first
-            )
-
-            # Search with mh_search_with_jaccard=True to get actual Jaccard distance
-            results = self.search(
-                client, collection_name,
-                [query_text],
-                anns_field=default_minhash_field_name,
-                search_params={
-                    "metric_type": "MHJACCARD",
-                    "params": {"mh_search_with_jaccard": True}
-                },
-                limit=top_k + 1,
-                output_fields=[default_primary_key_field_name]
-            )[0]
-
-            # Extract results and distances
-            result_ids = set()
-            distances = []
-            for hit in results[0]:
-                hit_id = hit["entity"][default_primary_key_field_name]
-                distances.append(hit["distance"])
-                if hit_id != query_pk:
-                    result_ids.add(hit_id)
-
-            if debug_first:
-                log.info(f"  Search returned {len(results[0])} results")
-                if distances:
-                    log.info(f"  Similarities (MHJACCARD): {[f'{d:.4f}' for d in distances[:5]]}")
-                    log.info(f"  Note: with mh_search_with_jaccard=True, returns similarity (higher is more similar)")
-                debug_first = False
-
-            # Calculate recall
-            if ground_truth_set:
-                recall = len(result_ids & ground_truth_set) / len(ground_truth_set)
-            else:
-                recall = 1.0
-            recalls.append(recall)
-
-        self.drop_collection(client, collection_name)
-
-        return {
-            "mean_recall": np.mean(recalls),
-            "std_recall": np.std(recalls),
-            "min_recall": np.min(recalls),
-            "max_recall": np.max(recalls),
-            "recalls": recalls,
-        }
-
-    @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize("dataset_name,limit,num_queries", [
-        ("bbc", 1200, 50),           # small dataset
-        ("ag_news", 10000, 100),     # medium dataset
-        ("enron_spam", 10000, 100),  # high duplicate dataset (~35%)
-    ])
-    def test_minhash_recall_benchmark(self, dataset_name, limit, num_queries):
-        """
-        target: benchmark MINHASH_LSH recall on real-world datasets
-        method:
-            1. Load dataset from HuggingFace
-            2. Compute ground truth using C++ binding
-            3. Test different mh_lsh_band configurations
-            4. Measure recall@10
-        expected: recall varies with band configuration
-        """
-        client = self._client()
-        top_k = 10
-
-        # Load data
-        texts = self._load_dataset_texts(dataset_name, limit=limit)
-
-        # Compute signatures for ground truth
-        log.info("Computing MinHash signatures for ground truth...")
-        signatures = self._compute_signatures(texts)
-
-        # Test different band configurations
-        # More bands = fewer rows per band = more candidates pass LSH filter
-        # For num_hashes=128: band=64 means rows_per_band=2, band=128 means rows=1
-        band_configs = [16, 32, 64, 128]
-        results = {}
-
-        for mh_lsh_band in band_configs:
-            log.info(f"Testing mh_lsh_band={mh_lsh_band}")
-            result = self._run_recall_benchmark(
-                client, texts, signatures,
-                mh_lsh_band=mh_lsh_band,
-                num_queries=num_queries,
-                top_k=top_k,
-            )
-            results[mh_lsh_band] = result
-            log.info(f"  Recall@{top_k}: {result['mean_recall']:.4f} ± {result['std_recall']:.4f}")
-
-        # Log summary
-        log.info(f"\n{'='*60}")
-        log.info(f"RECALL BENCHMARK SUMMARY - {dataset_name}")
-        log.info(f"Dataset size: {len(texts)}, Queries: {num_queries}, Top-K: {top_k}")
-        log.info(f"{'='*60}")
-        for band, res in sorted(results.items()):
-            log.info(f"mh_lsh_band={band:3d}: recall={res['mean_recall']:.4f} ± {res['std_recall']:.4f}")
-
-
-# ============================================================================
-# Bulk Import Test Cases
-# ============================================================================
 class TestMinHashBulkImport(TestMilvusClientV2Base):
-    """Test case of MinHash bulk import functionality using bulk_import API"""
+    """ Test case of MinHash bulk import """
 
     # MinIO configuration constants
     MINIO_ACCESS_KEY = "minioadmin"
