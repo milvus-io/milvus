@@ -320,6 +320,8 @@ func (node *DataNode) Stop() error {
 
 		index.CloseSegcore()
 
+		metrics.CleanupDataNodeCompactionMetrics(paramtable.GetNodeID())
+
 		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the flow graph
 		node.cancel()
 	})
