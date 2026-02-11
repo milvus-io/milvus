@@ -180,10 +180,10 @@ Schema::ConvertToLoonArrowSchema() const {
             arrow_data_type = GetArrowDataType(data_type, dim);
         }
 
-        auto arrow_field = std::make_shared<arrow::Field>(
-            std::to_string(field_id.get()),
-            arrow_data_type,
-            meta.is_nullable());
+        auto arrow_field =
+            std::make_shared<arrow::Field>(std::to_string(field_id.get()),
+                                           arrow_data_type,
+                                           meta.is_nullable());
         arrow_fields.push_back(arrow_field);
     }
     return arrow::schema(arrow_fields);

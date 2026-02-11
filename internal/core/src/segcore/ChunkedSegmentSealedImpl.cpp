@@ -2922,11 +2922,9 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
                 .GetProperties();
         auto column_groups = segment_load_info.GetColumnGroups();
         auto arrow_schema = schema_->ConvertToLoonArrowSchema();
-        auto needed_columns =
-            std::make_shared<std::vector<std::string>>();
+        auto needed_columns = std::make_shared<std::vector<std::string>>();
         for (const auto& field_id : schema_->get_field_ids()) {
-            needed_columns->push_back(
-                std::to_string(field_id.get()));
+            needed_columns->push_back(std::to_string(field_id.get()));
         }
         reader_ = milvus_storage::api::Reader::create(
             column_groups, arrow_schema, needed_columns, *properties);

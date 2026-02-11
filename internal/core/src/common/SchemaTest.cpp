@@ -424,8 +424,7 @@ TEST_F(SchemaTest, WarmupPolicyFallbackToCollectionLevel) {
 // ConvertToLoonArrowSchema tests
 
 TEST_F(SchemaTest, ConvertToLoonArrowSchemaFieldNamesAreFieldIds) {
-    auto pk_id =
-        schema_->AddDebugField("pk_field", DataType::INT64, false);
+    auto pk_id = schema_->AddDebugField("pk_field", DataType::INT64, false);
     schema_->set_primary_field_id(pk_id);
     auto float_id =
         schema_->AddDebugField("float_field", DataType::FLOAT, false);
@@ -439,8 +438,7 @@ TEST_F(SchemaTest, ConvertToLoonArrowSchemaFieldNamesAreFieldIds) {
 }
 
 TEST_F(SchemaTest, ConvertToLoonArrowSchemaVsConvertToArrowSchema) {
-    auto pk_id =
-        schema_->AddDebugField("pk_field", DataType::INT64, false);
+    auto pk_id = schema_->AddDebugField("pk_field", DataType::INT64, false);
     schema_->set_primary_field_id(pk_id);
     auto varchar_id =
         schema_->AddDebugField("varchar_field", DataType::VARCHAR, true);
