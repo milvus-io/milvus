@@ -159,13 +159,11 @@ func (queue *baseTaskQueue) getTaskByReqID(reqID UniqueID) task {
 	queue.utLock.RUnlock()
 
 	queue.atLock.RLock()
-	for tID, t := range queue.activeTasks {
-		if tID == reqID {
-			queue.atLock.RUnlock()
-			return t
-		}
-	}
+	t, ok := queue.activeTasks[reqID]
 	queue.atLock.RUnlock()
+	if ok {
+		return t
+	}
 	return nil
 }
 
