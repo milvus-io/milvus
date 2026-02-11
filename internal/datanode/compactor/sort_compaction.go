@@ -247,14 +247,15 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	defer rr.Close()
 	initReaderCost := time.Since(phaseStart)
 
-	phaseStart = time.Now()
 	rrs := []storage.RecordReader{rr}
-	numValidRows, err := storage.Sort(t.compactionParams.BinLogMaxSize, t.plan.GetSchema(), rrs, srw, predicate, t.sortByFieldIDs)
+	numValidRows, sortTimings, err := storage.Sort(t.compactionParams.BinLogMaxSize, t.plan.GetSchema(), rrs, srw, predicate, t.sortByFieldIDs)
 	if err != nil {
 		log.Warn("sort failed", zap.Error(err))
 		return nil, err
 	}
-	sortCost := time.Since(phaseStart)
+	if sortTimings == nil {
+		sortTimings = &storage.SortTimings{}
+	}
 
 	phaseStart = time.Now()
 	if err := srw.Close(); err != nil {
@@ -304,7 +305,10 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		zap.Duration("initWriterCost", initWriterCost),
 		zap.Duration("loadDeltaCost", loadDeltaCost),
 		zap.Duration("initReaderCost", initReaderCost),
-		zap.Duration("sortCost", sortCost),
+		zap.Int("sortBatches", sortTimings.NumBatches),
+		zap.Duration("sortReadCost", sortTimings.ReadCost),
+		zap.Duration("sortSortCost", sortTimings.SortCost),
+		zap.Duration("sortWriteCost", sortTimings.WriteCost),
 		zap.Duration("flushCost", flushCost),
 		zap.Duration("compressCost", compressCost),
 		zap.Duration("total elapse", time.Since(sortStartTime)))
@@ -314,7 +318,9 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "init_writer").Observe(float64(initWriterCost.Milliseconds()))
 	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "load_delta").Observe(float64(loadDeltaCost.Milliseconds()))
 	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "init_reader").Observe(float64(initReaderCost.Milliseconds()))
-	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "sort").Observe(float64(sortCost.Milliseconds()))
+	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "sort_read").Observe(float64(sortTimings.ReadCost.Milliseconds()))
+	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "sort_sort").Observe(float64(sortTimings.SortCost.Milliseconds()))
+	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "sort_write").Observe(float64(sortTimings.WriteCost.Milliseconds()))
 	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "flush").Observe(float64(flushCost.Milliseconds()))
 	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "compress").Observe(float64(compressCost.Milliseconds()))
 
