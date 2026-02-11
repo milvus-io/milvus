@@ -438,3 +438,16 @@ func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel 
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	})
 }
+
+func CleanupDataNodeCompactionMetrics(nodeID int64) {
+	nodeIDLabel := fmt.Sprint(nodeID)
+	DataNodeCompactionLatency.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName: nodeIDLabel,
+	})
+	DataNodeCompactionLatencyInQueue.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName: nodeIDLabel,
+	})
+	DataNodeCompactionStageLatency.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName: nodeIDLabel,
+	})
+}
