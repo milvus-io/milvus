@@ -71,7 +71,7 @@ class SealedIndexTranslator
         int64_t num_rows;
         int64_t dim;
         std::string
-            warmup_policy;  // "disable" or "sync", empty means use global config
+            warmup_policy;  // "disable", "sync", or "async"; empty means use global config
     };
 
     milvus::index::CreateIndexInfo index_info_;

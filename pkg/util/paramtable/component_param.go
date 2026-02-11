@@ -3449,9 +3449,10 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Version:      "2.6.0",
 		DefaultValue: "sync",
 		Forbidden:    true,
-		Doc: `options: sync, disable.
+		Doc: `options: sync, async, disable.
 Specifies the timing for warming up the Tiered Storage cache.
 - "sync": data will be loaded into the cache before a segment is considered loaded.
+- "async": data will be loaded into the cache asynchronously in the background after a segment is loaded.
 - "disable": data will not be proactively loaded into the cache, and loaded only if needed by search/query tasks.
 Defaults to "sync", except for vector field which defaults to "disable".`,
 		Export: true,
