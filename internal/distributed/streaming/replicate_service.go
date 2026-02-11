@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -48,6 +49,21 @@ func (s replicateService) UpdateReplicateConfiguration(ctx context.Context, conf
 	defer s.lifetime.Done()
 
 	return s.streamingCoordClient.Assignment().UpdateReplicateConfiguration(ctx, config)
+}
+
+func (s replicateService) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
+	if !s.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrWALAccesserClosed
+	}
+	defer s.lifetime.Done()
+
+	// Use WithFreshRead to ensure strong consistency after UpdateReplicateConfiguration.
+	configHelper, err := s.streamingCoordClient.Assignment().GetReplicateConfiguration(ctx, assignment.WithFreshRead())
+	if err != nil {
+		return nil, err
+	}
+
+	return replicateutil.SanitizeReplicateConfiguration(configHelper.GetReplicateConfiguration()), nil
 }
 
 func (s replicateService) GetReplicateCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error) {

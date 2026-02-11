@@ -6924,6 +6924,35 @@ func (node *Proxy) UpdateReplicateConfiguration(ctx context.Context, req *milvus
 	return merr.Status(nil), nil
 }
 
+// GetReplicateConfiguration returns the current cross-cluster replication configuration.
+func (node *Proxy) GetReplicateConfiguration(ctx context.Context, req *milvuspb.GetReplicateConfigurationRequest) (*milvuspb.GetReplicateConfigurationResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetReplicateConfiguration")
+	defer sp.End()
+
+	log := log.Ctx(ctx)
+	log.Info("GetReplicateConfiguration request received")
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.GetReplicateConfigurationResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	config, err := streaming.WAL().Replicate().GetReplicateConfiguration(ctx)
+	if err != nil {
+		log.Warn("GetReplicateConfiguration failed", zap.Error(err))
+		return &milvuspb.GetReplicateConfigurationResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("GetReplicateConfiguration succeeded")
+	return &milvuspb.GetReplicateConfigurationResponse{
+		Status:        merr.Success(),
+		Configuration: config,
+	}, nil
+}
+
 // GetReplicateInfo retrieves replication-related metadata from a target Milvus cluster.
 // TODO: sheep, only get target checkpoint
 func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplicateInfoRequest) (resp *milvuspb.GetReplicateInfoResponse, err error) {
