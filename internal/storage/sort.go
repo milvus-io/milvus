@@ -30,9 +30,9 @@ import (
 
 // SortTimings holds phase-level timing information from the Sort function.
 type SortTimings struct {
-	ReadCost  time.Duration
-	SortCost  time.Duration
-	WriteCost time.Duration
+	ReadCost   time.Duration
+	SortCost   time.Duration
+	WriteCost  time.Duration
 	NumBatches int
 	NumRows    int
 }
