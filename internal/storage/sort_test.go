@@ -55,7 +55,7 @@ func TestSort(t *testing.T) {
 	}
 
 	t.Run("sort", func(t *testing.T) {
-		gotNumRows, err := Sort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
+		gotNumRows, _, err := Sort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
 			return true
 		}, []int64{common.RowIDField})
 		assert.NoError(t, err)
@@ -65,7 +65,7 @@ func TestSort(t *testing.T) {
 	})
 
 	t.Run("sort with predicate", func(t *testing.T) {
-		gotNumRows, err := Sort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
+		gotNumRows, _, err := Sort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
 			pk := r.Column(common.RowIDField).(*array.Int64).Value(i)
 			return pk >= 20
 		}, []int64{common.RowIDField})
@@ -190,7 +190,7 @@ func TestSortByMoreThanOneField(t *testing.T) {
 			return nil
 		},
 	}
-	gotNumRows, err := Sort(batchSize, generateTestSchema(), rr, rw, func(r Record, ri, i int) bool {
+	gotNumRows, _, err := Sort(batchSize, generateTestSchema(), rr, rw, func(r Record, ri, i int) bool {
 		return true
 	}, sortByFieldIDs)
 	assert.NoError(t, err)
