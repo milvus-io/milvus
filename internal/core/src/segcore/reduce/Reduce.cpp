@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <future>
 #include <map>
 #include <numeric>
 #include <optional>
@@ -40,6 +41,8 @@
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
 #include "segcore/pkVisitor.h"
+#include "segcore/ReduceUtils.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::segcore {
 
@@ -157,23 +160,45 @@ ReduceHelper::FillPrimaryKey() {
     tracer::AutoSpan span("ReduceHelper::FillPrimaryKey",
                           tracer::GetRootSpan());
     // get primary keys for duplicates removal
+    // First pass: filter invalid results and compact the array sequentially
     uint32_t valid_index = 0;
     for (auto& search_result : search_results_) {
-        // skip when results num is 0
         if (search_result->unity_topK_ == 0) {
             continue;
         }
         FilterInvalidSearchResult(search_result);
         LOG_DEBUG("the size of search result: {}",
                   search_result->seg_offsets_.size());
-        auto segment = static_cast<SegmentInterface*>(search_result->segment_);
         if (search_result->get_total_result_count() > 0) {
-            segment->FillPrimaryKeys(plan_, *search_result);
             search_results_[valid_index++] = search_result;
         }
     }
     search_results_.resize(valid_index);
     num_segments_ = search_results_.size();
+
+    // Second pass: fill primary keys
+    if (num_segments_ > 1) {
+        // Parallel execution using MIDDLE thread pool for multiple segments
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+        std::vector<std::future<void>> futures;
+        futures.reserve(num_segments_);
+        for (auto& search_result : search_results_) {
+            auto future = pool.Submit([this, search_result] {
+                auto segment =
+                    static_cast<SegmentInterface*>(search_result->segment_);
+                segment->FillPrimaryKeys(plan_, *search_result);
+            });
+            futures.emplace_back(std::move(future));
+        }
+        for (auto& future : futures) {
+            future.get();
+        }
+    } else if (num_segments_ == 1) {
+        auto segment =
+            static_cast<SegmentInterface*>(search_results_[0]->segment_);
+        segment->FillPrimaryKeys(plan_, *search_results_[0]);
+    }
 }
 
 void
