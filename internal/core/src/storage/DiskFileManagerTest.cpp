@@ -71,6 +71,9 @@
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
+#include "index/BitmapIndex.h"
+#include "index/StringIndexMarisa.h"
+#include "index/StringIndexSort.h"
 
 class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectDOUBLE_Test;
 class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectFLOAT_Test;
