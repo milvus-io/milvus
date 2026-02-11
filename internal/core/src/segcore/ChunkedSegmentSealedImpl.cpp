@@ -2571,6 +2571,21 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
         return fill_with_empty(field_id, count);
     }
 
+    // Fast path for int64 PK field: use compressed offset2pk index
+    auto pk_field_id = schema_->get_primary_field_id();
+    if (pk_field_id.has_value() && pk_field_id.value() == field_id &&
+        field_meta.get_data_type() == DataType::INT64 &&
+        insert_record_.has_int64_pk_index()) {
+        auto ret = fill_with_empty(field_id, count);
+        auto* output = ret->mutable_scalars()
+                           ->mutable_long_data()
+                           ->mutable_data()
+                           ->mutable_data();
+        insert_record_.bulk_get_int64_pks_by_offsets(
+            seg_offsets, count, output);
+        return ret;
+    }
+
     if (!IsVectorDataType(field_meta.get_data_type())) {
         // === Scalar field ===
         // Try index first: if scalar index exists and has raw data, read from index
@@ -3124,17 +3139,21 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     }
 
     // set pks to offset
-    if (schema_->get_primary_field_id() == field_id && !is_sorted_by_pk_) {
-        AssertInfo(field_id.get() != -1, "Primary key is -1");
-        if (!is_replace) {
-            AssertInfo(
-                insert_record_.empty_pks(),
-                "primary key records already exists, current field id {}",
-                field_id.get());
-            insert_record_.insert_pks(data_type, column.get());
-            insert_record_.seal_pks();
+    if (schema_->get_primary_field_id() == field_id) {
+        // Always build compressed offset->pk for FillPrimaryKeys fast path
+        insert_record_.build_offset2pk(data_type, column.get());
+
+        if (!is_sorted_by_pk_) {
+            AssertInfo(field_id.get() != -1, "Primary key is -1");
+            if (!is_replace) {
+                AssertInfo(
+                    insert_record_.empty_pks(),
+                    "primary key records already exists, current field id {}",
+                    field_id.get());
+                insert_record_.insert_pks(data_type, column.get());
+                insert_record_.seal_pks();
+            }
         }
-        // TODO: handle PK replacement for insert_record_ in future
     }
 
     // now interim index does not touch column warmup
