@@ -121,18 +121,18 @@ class HybridScalarIndex : public ScalarIndex<T> {
     }
 
     bool
-    TryUseRegexQuery() const override {
-        return internal_index_->TryUseRegexQuery();
+    TryUsePatternQuery() const override {
+        return internal_index_->TryUsePatternQuery();
     }
 
     bool
-    SupportRegexQuery() const override {
-        return internal_index_->SupportRegexQuery();
+    SupportPatternQuery() const override {
+        return internal_index_->SupportPatternQuery();
     }
 
     const TargetBitmap
-    RegexQuery(const std::string& pattern) override {
-        return internal_index_->RegexQuery(pattern);
+    PatternQuery(const std::string& pattern) override {
+        return internal_index_->PatternQuery(pattern);
     }
 
     const TargetBitmap

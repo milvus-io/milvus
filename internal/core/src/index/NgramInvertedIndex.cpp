@@ -584,9 +584,8 @@ NgramInvertedIndex::ExecutePhase2(const std::string& literal,
                 break;
             }
             case proto::plan::OpType::Match: {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(literal);
-                RegexMatcher matcher(regex_pattern);
+                // Use LikePatternMatcher optimized for LIKE patterns
+                LikePatternMatcher matcher(literal);
                 apply_predicate([&matcher, this](const milvus::Json& data) {
                     auto x =
                         data.template at<std::string_view>(this->nested_path_);
@@ -637,9 +636,8 @@ NgramInvertedIndex::ExecutePhase2(const std::string& literal,
                 break;
             }
             case proto::plan::OpType::Match: {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(literal);
-                RegexMatcher matcher(regex_pattern);
+                // Use LikePatternMatcher optimized for LIKE patterns
+                LikePatternMatcher matcher(literal);
                 apply_predicate([&matcher](const std::string_view& data) {
                     return matcher(data);
                 });

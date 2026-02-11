@@ -318,9 +318,11 @@ struct TantivyIndexWrapper {
         if constexpr (std::is_same_v<T, std::string>) {
             // TODO: not very efficient, a lot of overhead due to rust-ffi call.
             for (uintptr_t i = 0; i < len; i++) {
+                const auto& s = static_cast<const std::string*>(array)[i];
                 auto res = RustResultWrapper(tantivy_index_add_string(
                     writer_,
-                    static_cast<const std::string*>(array)[i].c_str(),
+                    reinterpret_cast<const uint8_t*>(s.data()),
+                    s.size(),
                     offset_begin + i));
                 AssertInfo(res.result_->success,
                            "failed to add string: {}",
@@ -445,13 +447,17 @@ struct TantivyIndexWrapper {
         }
 
         if constexpr (std::is_same_v<T, std::string>) {
-            std::vector<const char*> views;
-            views.reserve(len);
+            std::vector<const uint8_t*> ptrs;
+            std::vector<uintptr_t> str_lens;
+            ptrs.reserve(len);
+            str_lens.reserve(len);
             for (uintptr_t i = 0; i < len; i++) {
-                views.push_back(array[i].c_str());
+                ptrs.push_back(
+                    reinterpret_cast<const uint8_t*>(array[i].data()));
+                str_lens.push_back(array[i].size());
             }
             auto res = RustResultWrapper(tantivy_index_add_array_keywords(
-                writer_, views.data(), len, offset));
+                writer_, ptrs.data(), str_lens.data(), len, offset));
             AssertInfo(res.result_->success,
                        "failed to add multi keywords: {}",
                        res.result_->error);
@@ -541,10 +547,12 @@ struct TantivyIndexWrapper {
         if constexpr (std::is_same_v<T, std::string>) {
             // TODO: not very efficient, a lot of overhead due to rust-ffi call.
             for (uintptr_t i = 0; i < len; i++) {
+                const auto& s = static_cast<const std::string*>(array)[i];
                 auto res = RustResultWrapper(
                     tantivy_index_add_string_by_single_segment_writer(
                         writer_,
-                        static_cast<const std::string*>(array)[i].c_str()));
+                        reinterpret_cast<const uint8_t*>(s.data()),
+                        s.size()));
                 AssertInfo(res.result_->success,
                            "failed to add string: {}",
                            res.result_->error);
@@ -632,14 +640,18 @@ struct TantivyIndexWrapper {
         }
 
         if constexpr (std::is_same_v<T, std::string>) {
-            std::vector<const char*> views;
-            views.reserve(len);
+            std::vector<const uint8_t*> ptrs;
+            std::vector<uintptr_t> str_lens;
+            ptrs.reserve(len);
+            str_lens.reserve(len);
             for (uintptr_t i = 0; i < len; i++) {
-                views.push_back(array[i].c_str());
+                ptrs.push_back(
+                    reinterpret_cast<const uint8_t*>(array[i].data()));
+                str_lens.push_back(array[i].size());
             }
             auto res = RustResultWrapper(
                 tantivy_index_add_array_keywords_by_single_segment_writer(
-                    writer_, views.data(), len));
+                    writer_, ptrs.data(), str_lens.data(), len));
             AssertInfo(res.result_->success,
                        "failed to add multi keywords: {}",
                        res.result_->error);
@@ -944,8 +956,11 @@ struct TantivyIndexWrapper {
 
     void
     prefix_query(const std::string& prefix, void* bitset) {
-        auto array =
-            tantivy_prefix_query_keyword(reader_, prefix.c_str(), bitset);
+        auto array = tantivy_prefix_query_keyword(
+            reader_,
+            reinterpret_cast<const uint8_t*>(prefix.data()),
+            prefix.size(),
+            bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.prefix_query: {}",
@@ -956,7 +971,11 @@ struct TantivyIndexWrapper {
 
     void
     regex_query(const std::string& pattern, void* bitset) {
-        auto array = tantivy_regex_query(reader_, pattern.c_str(), bitset);
+        auto array = tantivy_regex_query(
+            reader_,
+            reinterpret_cast<const uint8_t*>(pattern.data()),
+            pattern.size(),
+            bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.regex_query: {}",
@@ -1194,7 +1213,11 @@ struct TantivyIndexWrapper {
                      const std::string& pattern,
                      void* bitset) {
         auto array = tantivy_json_regex_query(
-            reader_, json_path.c_str(), pattern.c_str(), bitset);
+            reader_,
+            json_path.c_str(),
+            reinterpret_cast<const uint8_t*>(pattern.data()),
+            pattern.size(),
+            bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.json_regex_query: {}",
@@ -1208,7 +1231,11 @@ struct TantivyIndexWrapper {
                       const std::string& prefix,
                       void* bitset) {
         auto array = tantivy_json_prefix_query(
-            reader_, json_path.c_str(), prefix.c_str(), bitset);
+            reader_,
+            json_path.c_str(),
+            reinterpret_cast<const uint8_t*>(prefix.data()),
+            prefix.size(),
+            bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.json_prefix_query: {}",
