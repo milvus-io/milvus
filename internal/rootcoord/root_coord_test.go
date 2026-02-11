@@ -1956,7 +1956,14 @@ func TestRootCoord_ListFileResources(t *testing.T) {
 	})
 
 	t.Run("success", func(t *testing.T) {
-		c := newTestCore(withHealthyCode())
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{
+			Id:   0,
+			Name: "test",
+			Path: "test_path",
+		}}, 0)
+
+		c := newTestCore(withHealthyCode(), withMeta(meta))
 		ctx := context.Background()
 		resp, err := c.ListFileResources(ctx, &milvuspb.ListFileResourcesRequest{})
 		assert.NoError(t, err)
