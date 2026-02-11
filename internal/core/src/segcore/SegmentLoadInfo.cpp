@@ -306,9 +306,11 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             auto iter = cur_field_ids.find(field_id);
             // If this field doesn't exist in current, mark the column group for loading
             if (iter == cur_field_ids.end() || iter->second != i) {
-                if (schema_->ShouldLoadField(FieldId(field_id)) &&
-                    field_index_has_raw_data_.find(FieldId(field_id)) ==
-                        field_index_has_raw_data_.end()) {
+                if (field_id < START_USER_FIELDID ||
+                    (schema_->ShouldLoadField(FieldId(field_id)) &&
+                     field_index_has_raw_data_.find(FieldId(field_id)) ==
+                         field_index_has_raw_data_.end())) {
+                    // system fields are always proactively loaded
                     fields.emplace_back(field_id);
                 } else {
                     // put lazy load & index_has_raw_data field in lazy_fields

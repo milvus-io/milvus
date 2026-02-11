@@ -157,6 +157,23 @@ struct LoadDiff {
         }
         oss << "], ";
 
+        // column_groups_to_lazyload
+        oss << "column_groups_to_lazyload=[";
+        first = true;
+        for (const auto& [group_idx, field_ids] : column_groups_to_lazyload) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << "group" << group_idx << ":[";
+            for (size_t i = 0; i < field_ids.size(); ++i) {
+                if (i > 0)
+                    oss << ",";
+                oss << field_ids[i].get();
+            }
+            oss << "]";
+        }
+        oss << "], ";
+
         // indexes_to_drop
         oss << "indexes_to_drop=[";
         first = true;
