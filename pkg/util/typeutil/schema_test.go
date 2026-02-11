@@ -1068,6 +1068,21 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 			},
 			FieldId: fieldID,
 		}
+	case schemapb.DataType_Mol:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolData{
+						MolData: &schemapb.MolArray{
+							Data: fieldValue.([][]byte),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
 	default:
 		fmt.Printf("not supported field type: %s", fieldType.String())
 	}
@@ -1092,6 +1107,7 @@ func TestAppendFieldData(t *testing.T) {
 		Int8VectorFieldName        = "Int8VectorField"
 		VectorArrayFieldName       = "VectorArrayField"
 		GeometryFieldName          = "GeometryField"
+		MolFieldName               = "MolField"
 		BoolFieldID                = common.StartOfUserFieldID + 1
 		Int32FieldID               = common.StartOfUserFieldID + 2
 		Int64FieldID               = common.StartOfUserFieldID + 3
@@ -1106,6 +1122,7 @@ func TestAppendFieldData(t *testing.T) {
 		Int8VectorFieldID          = common.StartOfUserFieldID + 12
 		VectorArrayFieldID         = common.StartOfUserFieldID + 13
 		GeometryFieldID            = common.StartOfUserFieldID + 14
+		MolFieldID                 = common.StartOfUserFieldID + 15
 	)
 	BoolArray := []bool{true, false}
 	Int32Array := []int32{1, 2}
@@ -1167,12 +1184,13 @@ func TestAppendFieldData(t *testing.T) {
 		},
 	}
 
-	result := make([]*schemapb.FieldData, 14)
+	result := make([]*schemapb.FieldData, 15)
 	// POINT (30.123 -10.456) and LINESTRING (30.123 -10.456, 10.789 30.123, -40.567 40.890)
 	GeometryArray := [][]byte{
 		{0x01, 0x01, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x40},
 		{0x01, 0x02, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x40, 0x03, 0xA6, 0xB4, 0xA6, 0xA4, 0xD2, 0xC5, 0xC0, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A},
 	}
+	MolArray := [][]byte{[]byte("CCO"), []byte("CC")}
 
 	var fieldDataArray1 []*schemapb.FieldData
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(BoolFieldName, BoolFieldID, schemapb.DataType_Bool, BoolArray[0:1], 1))
@@ -1189,6 +1207,7 @@ func TestAppendFieldData(t *testing.T) {
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(Int8VectorFieldName, Int8VectorFieldID, schemapb.DataType_Int8Vector, Int8Vector[0:Dim], Dim))
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(VectorArrayFieldName, VectorArrayFieldID, schemapb.DataType_ArrayOfVector, VectorArray[0:1], Dim))
 	fieldDataArray1 = append(fieldDataArray1, genFieldData(GeometryFieldName, GeometryFieldID, schemapb.DataType_Geometry, GeometryArray[0:1], 1))
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(MolFieldName, MolFieldID, schemapb.DataType_Mol, MolArray[0:1], 1))
 
 	var fieldDataArray2 []*schemapb.FieldData
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(BoolFieldName, BoolFieldID, schemapb.DataType_Bool, BoolArray[1:2], 1))
@@ -1205,6 +1224,7 @@ func TestAppendFieldData(t *testing.T) {
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(Int8VectorFieldName, Int8VectorFieldID, schemapb.DataType_Int8Vector, Int8Vector[Dim:2*Dim], Dim))
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(VectorArrayFieldName, VectorArrayFieldID, schemapb.DataType_ArrayOfVector, VectorArray[1:2], Dim))
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(GeometryFieldName, GeometryFieldID, schemapb.DataType_Geometry, GeometryArray[1:2], 1))
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(MolFieldName, MolFieldID, schemapb.DataType_Mol, MolArray[1:2], 1))
 
 	AppendFieldData(result, fieldDataArray1, 0)
 	AppendFieldData(result, fieldDataArray2, 0)
@@ -1223,6 +1243,7 @@ func TestAppendFieldData(t *testing.T) {
 	assert.Equal(t, Int8Vector, result[11].GetVectors().Data.(*schemapb.VectorField_Int8Vector).Int8Vector)
 	assert.Equal(t, VectorArray, result[12].GetVectors().GetVectorArray().Data)
 	assert.Equal(t, GeometryArray, result[13].GetScalars().GetGeometryData().Data)
+	assert.Equal(t, MolArray, result[14].GetScalars().GetMolData().Data)
 }
 
 func TestDeleteFieldData(t *testing.T) {
@@ -5548,4 +5569,242 @@ func TestUpdateFieldDataByColumn(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, [][]byte{{10}, {2}, {20}}, base.GetVectors().GetSparseFloatVector().Contents)
 	})
+}
+
+func TestCalcScalarSize_Mol(t *testing.T) {
+	column := &schemapb.FieldData{
+		Type:      schemapb.DataType_Mol,
+		FieldName: "mol_field",
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_MolData{
+					MolData: &schemapb.MolArray{
+						Data: [][]byte{[]byte("CCO"), []byte("CC"), []byte("c1ccccc1")},
+					},
+				},
+			},
+		},
+	}
+	size := CalcScalarSize(column)
+	expected := len([]byte("CCO")) + len([]byte("CC")) + len([]byte("c1ccccc1"))
+	assert.Equal(t, expected, size)
+}
+
+func TestEstimateEntitySize_Mol(t *testing.T) {
+	samples := []*schemapb.FieldData{
+		{
+			FieldId:   100,
+			FieldName: "mol_field",
+			Type:      schemapb.DataType_Mol,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolData{
+						MolData: &schemapb.MolArray{
+							Data: [][]byte{[]byte("CCO"), []byte("CC")},
+						},
+					},
+				},
+			},
+		},
+	}
+	size, err := EstimateEntitySize(samples, 0)
+	assert.NoError(t, err)
+	assert.Equal(t, len([]byte("CCO")), size)
+
+	size, err = EstimateEntitySize(samples, 1)
+	assert.NoError(t, err)
+	assert.Equal(t, len([]byte("CC")), size)
+
+	_, err = EstimateEntitySize(samples, 2)
+	assert.Error(t, err)
+}
+
+func TestAppendFieldData_MolData(t *testing.T) {
+	const (
+		MolFieldName = "MolField"
+		MolFieldID   = int64(200)
+	)
+	MolArray := [][]byte{[]byte("CCO"), []byte("CC")}
+
+	result := make([]*schemapb.FieldData, 1)
+	fieldDataArray1 := []*schemapb.FieldData{
+		genFieldData(MolFieldName, MolFieldID, schemapb.DataType_Mol, MolArray[0:1], 1),
+	}
+	fieldDataArray2 := []*schemapb.FieldData{
+		genFieldData(MolFieldName, MolFieldID, schemapb.DataType_Mol, MolArray[1:2], 1),
+	}
+
+	AppendFieldData(result, fieldDataArray1, 0)
+	AppendFieldData(result, fieldDataArray2, 0)
+
+	assert.Equal(t, MolArray, result[0].GetScalars().GetMolData().Data)
+}
+
+func TestAppendFieldData_MolSmilesData(t *testing.T) {
+	const (
+		MolFieldName = "MolSmilesField"
+		MolFieldID   = int64(201)
+	)
+
+	src := []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_Mol,
+			FieldName: MolFieldName,
+			FieldId:   MolFieldID,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolSmilesData{
+						MolSmilesData: &schemapb.MolSmilesArray{
+							Data: []string{"CCO", "CC"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := make([]*schemapb.FieldData, 1)
+	AppendFieldData(result, src, 0)
+	assert.Equal(t, "CCO", result[0].GetScalars().GetMolSmilesData().Data[0])
+
+	AppendFieldData(result, src, 1)
+	assert.Equal(t, "CC", result[0].GetScalars().GetMolSmilesData().Data[1])
+}
+
+func TestDeleteFieldData_Mol(t *testing.T) {
+	const (
+		MolFieldName = "MolField"
+		MolFieldID   = int64(200)
+	)
+	MolArray := [][]byte{[]byte("CCO"), []byte("CC")}
+
+	result := make([]*schemapb.FieldData, 1)
+	fieldDataArray1 := []*schemapb.FieldData{
+		genFieldData(MolFieldName, MolFieldID, schemapb.DataType_Mol, MolArray[0:1], 1),
+	}
+	fieldDataArray2 := []*schemapb.FieldData{
+		genFieldData(MolFieldName, MolFieldID, schemapb.DataType_Mol, MolArray[1:2], 1),
+	}
+
+	AppendFieldData(result, fieldDataArray1, 0)
+	AppendFieldData(result, fieldDataArray2, 0)
+	assert.Equal(t, 2, len(result[0].GetScalars().GetMolData().Data))
+
+	DeleteFieldData(result)
+	assert.Equal(t, 1, len(result[0].GetScalars().GetMolData().Data))
+	assert.Equal(t, MolArray[0:1], result[0].GetScalars().GetMolData().Data)
+}
+
+func TestMergeFieldData_Mol(t *testing.T) {
+	t.Run("merge mol data", func(t *testing.T) {
+		dstFields := []*schemapb.FieldData{
+			genFieldData("mol", 200, schemapb.DataType_Mol, [][]byte{[]byte("CCO"), []byte("CC")}, 1),
+		}
+		srcFields := []*schemapb.FieldData{
+			genFieldData("mol", 200, schemapb.DataType_Mol, [][]byte{[]byte("C"), []byte("c1ccccc1")}, 1),
+		}
+
+		err := MergeFieldData(dstFields, srcFields)
+		assert.NoError(t, err)
+		assert.Equal(t, [][]byte{[]byte("CCO"), []byte("CC"), []byte("C"), []byte("c1ccccc1")},
+			dstFields[0].GetScalars().GetMolData().Data)
+	})
+
+	t.Run("merge mol data with nil dst", func(t *testing.T) {
+		srcFields := []*schemapb.FieldData{
+			genFieldData("mol", 200, schemapb.DataType_Mol, [][]byte{[]byte("CCO"), []byte("CC")}, 1),
+		}
+		dstFields := []*schemapb.FieldData{
+			{Type: schemapb.DataType_Mol, FieldName: "mol", Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_MolData{}}}, FieldId: 200},
+		}
+
+		err := MergeFieldData(dstFields, srcFields)
+		assert.NoError(t, err)
+		assert.Equal(t, [][]byte{[]byte("CCO"), []byte("CC")},
+			dstFields[0].GetScalars().GetMolData().Data)
+	})
+}
+
+func TestUpdateFieldData_Mol(t *testing.T) {
+	t.Run("update mol field", func(t *testing.T) {
+		baseData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Mol,
+				FieldName: "mol_field",
+				FieldId:   200,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_MolData{
+							MolData: &schemapb.MolArray{
+								Data: [][]byte{[]byte("CCO"), []byte("CC"), []byte("C")},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		updateData := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Mol,
+				FieldName: "mol_field",
+				FieldId:   200,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_MolData{
+							MolData: &schemapb.MolArray{
+								Data: [][]byte{[]byte("c1ccccc1"), []byte("CC(=O)O"), []byte("O")},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := UpdateFieldData(baseData, updateData, 1, 1)
+		assert.NoError(t, err)
+
+		molData := baseData[0].GetScalars().GetMolData().GetData()
+		assert.Equal(t, []byte("CCO"), molData[0])
+		assert.Equal(t, []byte("CC(=O)O"), molData[1])
+		assert.Equal(t, []byte("C"), molData[2])
+	})
+}
+
+func (s *FieldDataSuite) TestPrepareFieldData_Mol() {
+	fieldID := int64(100)
+	fieldName := "testMolField"
+	topK := int64(100)
+
+	samples := []*schemapb.FieldData{
+		{
+			FieldId:   fieldID,
+			FieldName: fieldName,
+			Type:      schemapb.DataType_Mol,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolData{},
+				},
+			},
+		},
+	}
+
+	fields := PrepareResultFieldData(samples, topK)
+	s.Require().Len(fields, 1)
+	field := fields[0]
+	s.Equal(fieldID, field.GetFieldId())
+	s.Equal(fieldName, field.GetFieldName())
+	s.Equal(schemapb.DataType_Mol, field.GetType())
+
+	s.EqualValues(topK, cap(field.GetScalars().GetMolData().GetData()))
+}
+
+func TestGetVarFieldLength_Mol(t *testing.T) {
+	fieldSchema := &schemapb.FieldSchema{
+		Name:     "mol_field",
+		DataType: schemapb.DataType_Mol,
+	}
+	length, err := getVarFieldLength(fieldSchema, custom)
+	assert.NoError(t, err)
+	assert.Equal(t, GetDynamicFieldEstimateLength(), length)
 }

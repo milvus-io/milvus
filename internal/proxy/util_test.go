@@ -5323,3 +5323,49 @@ func TestMinHashFunction(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestValidateMOLField(t *testing.T) {
+	t.Run("no mol field", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
+		}
+		err := validateMOLField(schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("has mol field - temporarily disabled", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{Name: "mol_field", DataType: schemapb.DataType_Mol},
+				{Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
+		}
+		err := validateMOLField(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "MOL data type is not supported yet")
+	})
+
+	t.Run("multiple mol fields", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{Name: "mol1", DataType: schemapb.DataType_Mol},
+				{Name: "mol2", DataType: schemapb.DataType_Mol},
+			},
+		}
+		err := validateMOLField(schema)
+		assert.Error(t, err)
+	})
+
+	t.Run("empty schema", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{},
+		}
+		err := validateMOLField(schema)
+		assert.NoError(t, err)
+	})
+}

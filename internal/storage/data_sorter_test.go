@@ -409,3 +409,65 @@ func TestDataSorter_Less(t *testing.T) {
 	res = dataSorter.Less(-1, -2)
 	assert.True(t, res)
 }
+
+func TestDataSorterWithMol(t *testing.T) {
+	schema := &etcdpb.CollectionMeta{
+		ID:            1,
+		CreateTime:    1,
+		SegmentIDs:    []int64{0},
+		PartitionTags: []string{"partition_0"},
+		Schema: &schemapb.CollectionSchema{
+			Name:   "mol_sort_test",
+			AutoID: true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      0,
+					Name:         "row_id",
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:      1,
+					Name:         "Ts",
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:      100,
+					Name:         "field_mol",
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_Mol,
+				},
+			},
+		},
+	}
+
+	insertCodec := NewInsertCodecWithSchema(schema)
+	insertData := &InsertData{
+		Data: map[int64]FieldData{
+			0: &Int64FieldData{
+				Data: []int64{3, 1, 2},
+			},
+			1: &Int64FieldData{
+				Data: []int64{300, 100, 200},
+			},
+			100: &MolFieldData{
+				Data: [][]byte{[]byte("CC(=O)O"), []byte("CCO"), []byte("c1ccccc1")},
+			},
+		},
+	}
+
+	dataSorter := &DataSorter{
+		InsertCodec: insertCodec,
+		InsertData:  insertData,
+	}
+
+	sort.Sort(dataSorter)
+
+	assert.Equal(t, []int64{1, 2, 3}, dataSorter.InsertData.Data[0].(*Int64FieldData).Data)
+	assert.Equal(t, []int64{100, 200, 300}, dataSorter.InsertData.Data[1].(*Int64FieldData).Data)
+	molData := dataSorter.InsertData.Data[100].(*MolFieldData)
+	assert.EqualValues(t, []byte("CCO"), molData.Data[0])
+	assert.EqualValues(t, []byte("c1ccccc1"), molData.Data[1])
+	assert.EqualValues(t, []byte("CC(=O)O"), molData.Data[2])
+}

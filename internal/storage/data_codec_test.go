@@ -1970,6 +1970,10 @@ func TestAddFieldDataToPayload(t *testing.T) {
 	assert.Error(t, err)
 	err = AddFieldDataToPayload(e, schemapb.DataType_JSON, &JSONFieldData{[][]byte{[]byte(`"batch":2}`)}, nil, false})
 	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Mol, &MolFieldData{Data: [][]byte{[]byte("CCO")}, ValidData: nil, Nullable: false})
+	assert.Error(t, err)
+	err = AddFieldDataToPayload(e, schemapb.DataType_Geometry, &GeometryFieldData{Data: [][]byte{[]byte("POINT(0 0)")}, ValidData: nil, Nullable: false})
+	assert.Error(t, err)
 	err = AddFieldDataToPayload(e, schemapb.DataType_BinaryVector, &BinaryVectorFieldData{
 		Data:      []byte{},
 		ValidData: nil,
@@ -2027,4 +2031,159 @@ func TestAddFieldDataToPayload(t *testing.T) {
 		},
 	})
 	assert.Error(t, err)
+}
+
+func TestMolInsertCodec(t *testing.T) {
+	const MolFieldID = 200
+
+	schema := &etcdpb.CollectionMeta{
+		ID:            CollectionID,
+		CreateTime:    1,
+		SegmentIDs:    []int64{SegmentID},
+		PartitionTags: []string{"partition_0"},
+		Schema: &schemapb.CollectionSchema{
+			Name:   "mol_test_schema",
+			AutoID: true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  RowIDField,
+					Name:     "row_id",
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  TimestampField,
+					Name:     "Timestamp",
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:      Int64Field,
+					Name:         "field_int64",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  MolFieldID,
+					Name:     "field_mol",
+					DataType: schemapb.DataType_Mol,
+				},
+			},
+		},
+	}
+
+	insertCodec := NewInsertCodecWithSchema(schema)
+	insertData := &InsertData{
+		Data: map[int64]FieldData{
+			RowIDField: &Int64FieldData{
+				Data: []int64{1, 2, 3},
+			},
+			TimestampField: &Int64FieldData{
+				Data: []int64{100, 200, 300},
+			},
+			Int64Field: &Int64FieldData{
+				Data: []int64{10, 20, 30},
+			},
+			MolFieldID: &MolFieldData{
+				Data: [][]byte{
+					[]byte("CCO"),
+					[]byte("c1ccccc1"),
+					[]byte("CC(=O)O"),
+				},
+			},
+		},
+	}
+
+	blobs, err := insertCodec.Serialize(PartitionID, SegmentID, insertData)
+	assert.NoError(t, err)
+	assert.NotNil(t, blobs)
+
+	_, _, _, resultData, err := insertCodec.DeserializeAll(blobs)
+	assert.NoError(t, err)
+	assert.NotNil(t, resultData)
+
+	molResult, ok := resultData.Data[MolFieldID]
+	assert.True(t, ok)
+	molFieldData := molResult.(*MolFieldData)
+	assert.Equal(t, 3, molFieldData.RowNum())
+	assert.EqualValues(t, []byte("CCO"), molFieldData.Data[0])
+	assert.EqualValues(t, []byte("c1ccccc1"), molFieldData.Data[1])
+	assert.EqualValues(t, []byte("CC(=O)O"), molFieldData.Data[2])
+}
+
+func TestMolInsertCodecNullable(t *testing.T) {
+	const MolFieldID = 200
+
+	schema := &etcdpb.CollectionMeta{
+		ID:            CollectionID,
+		CreateTime:    1,
+		SegmentIDs:    []int64{SegmentID},
+		PartitionTags: []string{"partition_0"},
+		Schema: &schemapb.CollectionSchema{
+			Name:   "mol_nullable_test_schema",
+			AutoID: true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  RowIDField,
+					Name:     "row_id",
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  TimestampField,
+					Name:     "Timestamp",
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:      Int64Field,
+					Name:         "field_int64",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  MolFieldID,
+					Name:     "field_mol",
+					DataType: schemapb.DataType_Mol,
+					Nullable: true,
+				},
+			},
+		},
+	}
+
+	insertCodec := NewInsertCodecWithSchema(schema)
+	insertData := &InsertData{
+		Data: map[int64]FieldData{
+			RowIDField: &Int64FieldData{
+				Data: []int64{1, 2, 3},
+			},
+			TimestampField: &Int64FieldData{
+				Data: []int64{100, 200, 300},
+			},
+			Int64Field: &Int64FieldData{
+				Data: []int64{10, 20, 30},
+			},
+			MolFieldID: &MolFieldData{
+				Data: [][]byte{
+					[]byte("CCO"),
+					[]byte(""),
+					[]byte("CC(=O)O"),
+				},
+				ValidData: []bool{true, false, true},
+				Nullable:  true,
+			},
+		},
+	}
+
+	blobs, err := insertCodec.Serialize(PartitionID, SegmentID, insertData)
+	assert.NoError(t, err)
+	assert.NotNil(t, blobs)
+
+	_, _, _, resultData, err := insertCodec.DeserializeAll(blobs)
+	assert.NoError(t, err)
+	assert.NotNil(t, resultData)
+
+	molResult, ok := resultData.Data[MolFieldID]
+	assert.True(t, ok)
+	molFieldData := molResult.(*MolFieldData)
+	assert.Equal(t, 3, molFieldData.RowNum())
+	assert.EqualValues(t, []byte("CCO"), molFieldData.Data[0])
+	assert.EqualValues(t, []byte("CC(=O)O"), molFieldData.Data[2])
+	assert.Equal(t, []bool{true, false, true}, molFieldData.ValidData)
 }
