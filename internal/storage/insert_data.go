@@ -368,6 +368,15 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 			data.ValidData = make([]bool, 0, cap)
 		}
 		return data, nil
+	case schemapb.DataType_Mol:
+		data := &MolFieldData{
+			Data:     make([][]byte, 0, cap),
+			Nullable: fieldSchema.GetNullable(),
+		}
+		if fieldSchema.GetNullable() {
+			data.ValidData = make([]bool, 0, cap)
+		}
+		return data, nil
 	case schemapb.DataType_Array:
 		data := &ArrayFieldData{
 			Data:        make([]*schemapb.ScalarField, 0, cap),
@@ -462,6 +471,11 @@ type TimestamptzFieldData struct {
 	Nullable  bool
 }
 type GeometryFieldData struct {
+	Data      [][]byte
+	ValidData []bool
+	Nullable  bool
+}
+type MolFieldData struct {
 	Data      [][]byte
 	ValidData []bool
 	Nullable  bool
@@ -596,6 +610,7 @@ func (data *StringFieldData) RowNum() int      { return len(data.Data) }
 func (data *ArrayFieldData) RowNum() int       { return len(data.Data) }
 func (data *JSONFieldData) RowNum() int        { return len(data.Data) }
 func (data *GeometryFieldData) RowNum() int    { return len(data.Data) }
+func (data *MolFieldData) RowNum() int         { return len(data.Data) }
 func (data *BinaryVectorFieldData) RowNum() int {
 	if data.Nullable {
 		return len(data.ValidData)
@@ -727,6 +742,13 @@ func (data *GeometryFieldData) GetRow(i int) any {
 	return data.Data[i]
 }
 
+func (data *MolFieldData) GetRow(i int) any {
+	if data.GetNullable() && !data.ValidData[i] {
+		return nil
+	}
+	return data.Data[i]
+}
+
 func (data *BinaryVectorFieldData) GetRow(i int) any {
 	if data.GetNullable() && !data.ValidData[i] {
 		return nil
@@ -791,6 +813,7 @@ func (data *StringFieldData) GetDataRows() any            { return data.Data }
 func (data *ArrayFieldData) GetDataRows() any             { return data.Data }
 func (data *JSONFieldData) GetDataRows() any              { return data.Data }
 func (data *GeometryFieldData) GetDataRows() any          { return data.Data }
+func (data *MolFieldData) GetDataRows() any               { return data.Data }
 func (data *BinaryVectorFieldData) GetDataRows() any      { return data.Data }
 func (data *FloatVectorFieldData) GetDataRows() any       { return data.Data }
 func (data *Float16VectorFieldData) GetDataRows() any     { return data.Data }
@@ -1000,6 +1023,27 @@ func (data *GeometryFieldData) AppendRow(row interface{}) error {
 		data.Data = append(data.Data, []byte(v))
 	default:
 		return merr.WrapErrParameterInvalid("[]byte", row, "Wrong row type")
+	}
+	if data.GetNullable() {
+		data.ValidData = append(data.ValidData, true)
+	}
+	return nil
+}
+
+func (data *MolFieldData) AppendRow(row interface{}) error {
+	if data.GetNullable() && row == nil {
+		data.Data = append(data.Data, make([][]byte, 1)...)
+		data.ValidData = append(data.ValidData, false)
+		return nil
+	}
+	switch v := row.(type) {
+	case []byte:
+		data.Data = append(data.Data, v)
+	case string:
+		// MOL type stores SMILES strings, convert to []byte
+		data.Data = append(data.Data, []byte(v))
+	default:
+		return merr.WrapErrParameterInvalid("[]byte or string", row, "Wrong row type")
 	}
 	if data.GetNullable() {
 		data.ValidData = append(data.ValidData, true)
@@ -1227,6 +1271,14 @@ func (data *GeometryFieldData) AppendRows(dataRows interface{}, validDataRows in
 	return data.AppendValidDataRows(validDataRows)
 }
 
+func (data *MolFieldData) AppendRows(dataRows interface{}, validDataRows interface{}) error {
+	err := data.AppendDataRows(dataRows)
+	if err != nil {
+		return err
+	}
+	return data.AppendValidDataRows(validDataRows)
+}
+
 // AppendDataRows appends FLATTEN vectors to field data.
 func (data *BinaryVectorFieldData) AppendRows(dataRows interface{}, validDataRows interface{}) error {
 	err := data.AppendDataRows(dataRows)
@@ -1396,6 +1448,21 @@ func (data *GeometryFieldData) AppendDataRows(rows interface{}) error {
 		}
 	default:
 		return merr.WrapErrParameterInvalid("[][]byte", rows, "Wrong rows type")
+	}
+	return nil
+}
+
+func (data *MolFieldData) AppendDataRows(rows interface{}) error {
+	switch v := rows.(type) {
+	case [][]byte:
+		data.Data = append(data.Data, v...)
+	case []string:
+		// MOL type stores SMILES strings, convert to [][]byte
+		for _, row := range v {
+			data.Data = append(data.Data, []byte(row))
+		}
+	default:
+		return merr.WrapErrParameterInvalid("[][]byte or []string", rows, "Wrong rows type")
 	}
 	return nil
 }
@@ -1670,6 +1737,18 @@ func (data *FloatVectorFieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
+func (data *MolFieldData) AppendValidDataRows(rows interface{}) error {
+	if rows == nil {
+		return nil
+	}
+	v, ok := rows.([]bool)
+	if !ok {
+		return merr.WrapErrParameterInvalid("[]bool", rows, "Wrong rows type")
+	}
+	data.ValidData = append(data.ValidData, v...)
+	return nil
+}
+
 // AppendValidDataRows appends FLATTEN vectors to field data.
 func (data *Float16VectorFieldData) AppendValidDataRows(rows interface{}) error {
 	if rows == nil {
@@ -1831,6 +1910,10 @@ func (data *GeometryFieldData) GetDataType() schemapb.DataType {
 	return schemapb.DataType_Geometry
 }
 
+func (data *MolFieldData) GetDataType() schemapb.DataType {
+	return schemapb.DataType_Mol
+}
+
 func (data *BinaryVectorFieldData) GetDataType() schemapb.DataType {
 	return schemapb.DataType_BinaryVector
 }
@@ -1913,6 +1996,15 @@ func (data *GeometryFieldData) GetMemorySize() int {
 	return size + binary.Size(data.ValidData) + binary.Size(data.Nullable)
 }
 
+func (data *MolFieldData) GetMemorySize() int {
+	var size int
+	// MOL type stores pickle binary data, each molecule has different size
+	for _, val := range data.Data {
+		size += len(val) + 16
+	}
+	return size + binary.Size(data.ValidData) + binary.Size(data.Nullable)
+}
+
 func (data *BoolFieldData) GetRowSize(i int) int        { return 1 }
 func (data *Int8FieldData) GetRowSize(i int) int        { return 1 }
 func (data *Int16FieldData) GetRowSize(i int) int       { return 2 }
@@ -1958,6 +2050,7 @@ func (data *Int8VectorFieldData) GetRowSize(i int) int {
 func (data *StringFieldData) GetRowSize(i int) int   { return len(data.Data[i]) + 16 }
 func (data *JSONFieldData) GetRowSize(i int) int     { return len(data.Data[i]) + 16 }
 func (data *GeometryFieldData) GetRowSize(i int) int { return len(data.Data[i]) + 16 }
+func (data *MolFieldData) GetRowSize(i int) int      { return len(data.Data[i]) + 16 }
 func (data *ArrayFieldData) GetRowSize(i int) int {
 	switch data.ElementType {
 	case schemapb.DataType_Bool:
@@ -2068,6 +2161,10 @@ func (data *GeometryFieldData) GetNullable() bool {
 	return data.Nullable
 }
 
+func (data *MolFieldData) GetNullable() bool {
+	return data.Nullable
+}
+
 func (data *BoolFieldData) GetValidData() []bool              { return data.ValidData }
 func (data *Int8FieldData) GetValidData() []bool              { return data.ValidData }
 func (data *Int16FieldData) GetValidData() []bool             { return data.ValidData }
@@ -2080,6 +2177,7 @@ func (data *StringFieldData) GetValidData() []bool            { return data.Vali
 func (data *ArrayFieldData) GetValidData() []bool             { return data.ValidData }
 func (data *JSONFieldData) GetValidData() []bool              { return data.ValidData }
 func (data *GeometryFieldData) GetValidData() []bool          { return data.ValidData }
+func (data *MolFieldData) GetValidData() []bool               { return data.ValidData }
 func (data *BinaryVectorFieldData) GetValidData() []bool      { return data.ValidData }
 func (data *FloatVectorFieldData) GetValidData() []bool       { return data.ValidData }
 func (data *Float16VectorFieldData) GetValidData() []bool     { return data.ValidData }

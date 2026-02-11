@@ -749,6 +749,12 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 				return err
 			}
 		}
+		if fieldData.Type == schemapb.DataType_Mol {
+			if err := validateMOLFieldSearchResult(&t.result.FieldsData[i]); err != nil {
+				log.Warn("fail to validate mol field search result", zap.Error(err))
+				return err
+			}
+		}
 	}
 	t.result.OutputFields = t.userOutputFields
 	if !t.reQuery {

@@ -1328,3 +1328,75 @@ func Test_FormatLocalIP(t *testing.T) {
 		assert.Equal(t, "192.168.1.1", result)
 	})
 }
+
+func TestGetNumRowOfFieldData_Mol(t *testing.T) {
+	t.Run("mol data with rows", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolData{
+						MolData: &schemapb.MolArray{
+							Data: [][]byte{[]byte("CCO"), []byte("CC"), []byte("C")},
+						},
+					},
+				},
+			},
+		}
+		numRows, err := GetNumRowOfFieldData(fieldData)
+		assert.NoError(t, err)
+		assert.Equal(t, uint64(3), numRows)
+	})
+
+	t.Run("mol data with empty data", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolData{
+						MolData: &schemapb.MolArray{
+							Data: [][]byte{},
+						},
+					},
+				},
+			},
+		}
+		numRows, err := GetNumRowOfFieldData(fieldData)
+		assert.NoError(t, err)
+		assert.Equal(t, uint64(0), numRows)
+	})
+}
+
+func TestGetNumRowOfFieldDataWithSchema_Mol(t *testing.T) {
+	helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "mol_field",
+				DataType:     schemapb.DataType_Mol,
+				IsPrimaryKey: false,
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	fieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Mol,
+		FieldName: "mol_field",
+		FieldId:   100,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_MolData{
+					MolData: &schemapb.MolArray{
+						Data: [][]byte{[]byte("CCO"), []byte("CC")},
+					},
+				},
+			},
+		},
+	}
+	numRows, err := GetNumRowOfFieldDataWithSchema(fieldData, helper)
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(2), numRows)
+}

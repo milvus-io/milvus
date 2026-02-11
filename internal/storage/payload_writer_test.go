@@ -247,6 +247,25 @@ func TestPayloadWriter_Failed(t *testing.T) {
 		require.Error(t, err)
 	})
 
+	t.Run("Test Mol", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Mol)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.FinishPayloadWriter()
+		require.NoError(t, err)
+
+		err = w.AddOneMolToPayload([]byte("CCO"), true)
+		require.Error(t, err)
+
+		w, err = NewPayloadWriter(schemapb.DataType_Int64)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddOneMolToPayload([]byte("CCO"), true)
+		require.Error(t, err)
+	})
+
 	t.Run("Test BinaryVector", func(t *testing.T) {
 		w, err := NewPayloadWriter(schemapb.DataType_BinaryVector, WithDim(8))
 		require.Nil(t, err)
