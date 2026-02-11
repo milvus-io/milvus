@@ -1079,46 +1079,43 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 	}
 }
 
-// cleanupDynamicFieldForPartialUpdate removes keys from the $meta dynamic field
-// JSON that conflict with static field names. After schema evolution, existing
-// $meta data may contain keys that now match newly added static columns. Only the
-// conflicting keys are stripped; all other dynamic field data is preserved.
-func cleanupDynamicFieldForPartialUpdate(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) {
-	staticFieldNames := make(map[string]bool)
-	for _, f := range schema.GetFields() {
-		if !f.GetIsDynamic() {
-			staticFieldNames[f.GetName()] = true
+// checkDynamicFieldDataForPartialUpdate is a relaxed version of checkDynamicFieldData
+// for partial updates. After schema evolution, $meta may legitimately contain keys
+// matching static field names (e.g., a dynamic field "end_timestamp" that was later
+// added as a static column). This function validates JSON format and rejects the
+// reserved $meta key, but skips the static field name conflict check so that
+// existing dynamic field data is preserved.
+func checkDynamicFieldDataForPartialUpdate(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+	for _, data := range insertMsg.FieldsData {
+		if data.IsDynamic {
+			data.FieldName = common.MetaFieldName
+			if !schema.EnableDynamicField {
+				return fmt.Errorf("without dynamic schema enabled, the field name cannot be set to %s", common.MetaFieldName)
+			}
+			for _, rowData := range data.GetScalars().GetJsonData().GetData() {
+				jsonData := make(map[string]interface{})
+				if err := json.Unmarshal(rowData, &jsonData); err != nil {
+					return merr.WrapErrIoFailedReason(err.Error())
+				}
+				if _, ok := jsonData[common.MetaFieldName]; ok {
+					return fmt.Errorf("cannot set json key to: %s", common.MetaFieldName)
+				}
+				// Note: we intentionally skip the static field name check here.
+				// For partial updates, merged data from queryPreExecute may contain
+				// $meta keys matching static field names due to schema evolution.
+				// This is expected — the data was already stored and must be preserved.
+			}
+			return nil
 		}
 	}
-	for _, fieldData := range insertMsg.FieldsData {
-		if !fieldData.GetIsDynamic() {
-			continue
-		}
-		jsonData := fieldData.GetScalars().GetJsonData()
-		if jsonData == nil {
-			continue
-		}
-		for i, rowBytes := range jsonData.Data {
-			var m map[string]interface{}
-			if err := json.Unmarshal(rowBytes, &m); err != nil {
-				continue
-			}
-			changed := false
-			for key := range m {
-				if staticFieldNames[key] {
-					delete(m, key)
-					changed = true
-				}
-			}
-			if changed {
-				newBytes, err := json.Marshal(m)
-				if err != nil {
-					continue
-				}
-				jsonData.Data[i] = newBytes
-			}
-		}
+	// No dynamic field found — auto-generate empty ones
+	defaultData := make([][]byte, insertMsg.NRows())
+	for i := range defaultData {
+		defaultData[i] = []byte("{}")
 	}
+	dynamicData := autoGenDynamicFieldData(defaultData)
+	insertMsg.FieldsData = append(insertMsg.FieldsData, dynamicData)
+	return nil
 }
 
 func (it *upsertTask) insertPreExecute(ctx context.Context) error {
@@ -1181,14 +1178,12 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	it.result.SuccIndex = sliceIndex
 
 	if it.schema.EnableDynamicField {
+		var err error
 		if it.req.GetPartialUpdate() {
-			// For partial update, merged data from queryPreExecute may contain
-			// $meta keys matching static field names due to schema evolution.
-			// Remove only the conflicting keys so validation passes while
-			// preserving all other dynamic field data.
-			cleanupDynamicFieldForPartialUpdate(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+			err = checkDynamicFieldDataForPartialUpdate(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+		} else {
+			err = checkDynamicFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 		}
-		err := checkDynamicFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 		if err != nil {
 			return err
 		}
