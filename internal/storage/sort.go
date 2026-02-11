@@ -18,24 +18,28 @@ package storage
 
 import (
 	"container/heap"
-	"fmt"
 	"io"
 	"sort"
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+// SortTimings holds phase-level timing information from the Sort function.
+type SortTimings struct {
+	ReadCost  time.Duration
+	SortCost  time.Duration
+	WriteCost time.Duration
+	NumBatches int
+	NumRows    int
+}
 
 func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader,
 	rw RecordWriter, predicate func(r Record, ri, i int) bool, sortByFieldIDs []int64,
-) (int, error) {
+) (int, *SortTimings, error) {
 	records := make([]Record, 0)
 
 	type index struct {
@@ -67,14 +71,14 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 			} else if err == io.EOF {
 				break
 			} else {
-				return 0, err
+				return 0, nil, err
 			}
 		}
 	}
-	downloadCost := time.Since(phaseStart)
+	readCost := time.Since(phaseStart)
 
 	if len(records) == 0 {
-		return 0, nil
+		return 0, &SortTimings{ReadCost: readCost}, nil
 	}
 
 	phaseStart = time.Now()
@@ -110,7 +114,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 				}
 				comparators = append(comparators, f)
 			default:
-				return 0, merr.WrapErrParameterInvalidMsg("unsupported type for sorting key")
+				return 0, nil, merr.WrapErrParameterInvalidMsg("unsupported type for sorting key")
 			}
 		}
 
@@ -144,36 +148,31 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 
 	for _, idx := range indices {
 		if err := rb.Append(records[idx.ri], idx.i, idx.i+1); err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 
 		// Write when accumulated data size reaches batchSize
 		if rb.GetSize() >= batchSize {
 			if err := writeRecord(); err != nil {
-				return 0, err
+				return 0, nil, err
 			}
 		}
 	}
 
 	// write the last batch
 	if err := writeRecord(); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	writeCost := time.Since(phaseStart)
-	log.Info("Sort done",
-		zap.Int("recordBatches", len(records)),
-		zap.Int("validRows", len(indices)),
-		zap.Duration("downloadCost", downloadCost),
-		zap.Duration("sortCost", sortCost),
-		zap.Duration("writeCost", writeCost),
-		zap.Duration("totalCost", downloadCost+sortCost+writeCost))
 
-	nodeID := fmt.Sprint(paramtable.GetNodeID())
-	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, "Sort", "read").Observe(float64(downloadCost.Milliseconds()))
-	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, "Sort", "sort").Observe(float64(sortCost.Milliseconds()))
-	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, "Sort", "write").Observe(float64(writeCost.Milliseconds()))
-
-	return len(indices), nil
+	timings := &SortTimings{
+		ReadCost:   readCost,
+		SortCost:   sortCost,
+		WriteCost:  writeCost,
+		NumBatches: len(records),
+		NumRows:    len(indices),
+	}
+	return len(indices), timings, nil
 }
 
 // A PriorityQueue implements heap.Interface and holds Items.
