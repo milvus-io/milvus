@@ -36,6 +36,8 @@
 #include <string>
 #include <vector>
 
+#include "test_utils/Constants.h"
+
 using namespace milvus;
 using namespace milvus::segcore;
 using namespace milvus::storage;
@@ -51,7 +53,7 @@ class StorageV2IndexRawDataTest : public ::testing::Test {
  protected:
     storage::ChunkManagerPtr cm_;
     milvus_storage::ArrowFileSystemPtr fs_;
-    std::string path_ = "/tmp/test-inverted-index-storage-v2";
+    std::string path_ = TestLocalPath;
     int64_t collection_id = 1;
     int64_t partition_id = 2;
     int64_t segment_id = 3;
@@ -159,7 +161,7 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
                 storage::FileManagerContext(
                     field_data_meta, index_meta, cm_, fs_));
         auto res = file_manager->CacheRawDataToDisk<float>(config);
-        ASSERT_EQ(res, "/tmp/milvus/local_data/raw_datas/3/105/raw_data");
+        ASSERT_EQ(res, TestLocalPath + "raw_datas/3/105/raw_data");
     }
 
     {

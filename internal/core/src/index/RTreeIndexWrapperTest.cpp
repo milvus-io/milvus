@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <vector>
 #include "RTreeIndexWrapper.h"
+#include "test_utils/Constants.h"
 #include "common/Geometry.h"
 
 class RTreeIndexWrapperTest : public ::testing::Test {
@@ -20,7 +21,7 @@ class RTreeIndexWrapperTest : public ::testing::Test {
     void
     SetUp() override {
         // Create test directory
-        test_dir_ = "/tmp/rtree_test";
+        test_dir_ = TestLocalPath + "rtree_test";
         std::filesystem::create_directories(test_dir_);
 
         // Initialize GEOS

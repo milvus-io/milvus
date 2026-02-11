@@ -20,6 +20,7 @@
 #include "storage/InsertData.h"
 #include "indexbuilder/IndexFactory.h"
 #include "index/IndexFactory.h"
+#include "test_utils/Constants.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "index/Meta.h"
 #include "test_utils/DataGen.h"
@@ -93,7 +94,7 @@ test_run() {
         }
     }
 
-    std::string root_path = "/tmp/test-inverted-index/";
+    std::string root_path = TestLocalPath;
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
@@ -148,7 +149,8 @@ test_run() {
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
     auto get_binlog_path = [=](int64_t log_id) {
-        return fmt::format("{}/{}/{}/{}/{}",
+        return fmt::format("{}{}/{}/{}/{}/{}",
+                           TestLocalPath,
                            collection_id,
                            partition_id,
                            segment_id,
@@ -496,7 +498,7 @@ test_string() {
         default_value->set_string_data("20");
     }
 
-    std::string root_path = "/tmp/test-inverted-index/";
+    std::string root_path = TestLocalPath;
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
@@ -542,7 +544,8 @@ test_string() {
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
     auto get_binlog_path = [=](int64_t log_id) {
-        return fmt::format("{}/{}/{}/{}/{}",
+        return fmt::format("{}{}/{}/{}/{}/{}",
+                           TestLocalPath,
                            collection_id,
                            partition_id,
                            segment_id,

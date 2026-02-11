@@ -28,6 +28,7 @@
 #include "arrow/type_fwd.h"
 #include <arrow/util/key_value_metadata.h>
 #include <numeric>
+#include "test_utils/Constants.h"
 
 TEST(CPackedTest, PackedWriterAndReader) {
     std::vector<int64_t> test_data(5);
@@ -56,8 +57,10 @@ TEST(CPackedTest, PackedWriterAndReader) {
     ASSERT_TRUE(arrow::ExportSchema(*origin_schema, &c_origin_schema).ok());
 
     const int64_t buffer_size = 10 * 1024 * 1024;
-    char* path = const_cast<char*>("/tmp");
-    char* paths[] = {const_cast<char*>("/tmp/0")};
+    std::string root_path = TestLocalPath;
+    std::string file_path = TestLocalPath + "0";
+    char* path = const_cast<char*>(root_path.c_str());
+    char* paths[] = {const_cast<char*>(file_path.c_str())};
     int64_t part_upload_size = 0;
 
     CColumnGroups cgs = NewCColumnGroups();

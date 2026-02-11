@@ -21,7 +21,7 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 #include "common/VectorArray.h"
-
+#include "test_utils/Constants.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
@@ -2342,7 +2342,7 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     auto dataset = DataGen(schema, dataset_size, 42, 0, 1, emb_list_len);
 
     // create field data
-    std::string root_path = "/tmp/test-vector-array/";
+    std::string root_path = TestLocalPath;
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = CreateChunkManager(storage_config);
     auto fs = milvus::storage::InitArrowFileSystem(storage_config);
@@ -2375,7 +2375,8 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
     auto get_binlog_path = [=](int64_t log_id) {
-        return fmt::format("{}/{}/{}/{}/{}",
+        return fmt::format("{}{}/{}/{}/{}/{}",
+                           TestLocalPath,
                            collection_id,
                            partition_id,
                            segment_id,
