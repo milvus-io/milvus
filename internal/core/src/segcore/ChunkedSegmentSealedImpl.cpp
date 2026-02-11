@@ -2921,9 +2921,15 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
             milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                 .GetProperties();
         auto column_groups = segment_load_info.GetColumnGroups();
-        auto arrow_schema = schema_->ConvertToArrowSchema();
+        auto arrow_schema = schema_->ConvertToLoonArrowSchema();
+        auto needed_columns =
+            std::make_shared<std::vector<std::string>>();
+        for (const auto& field_id : schema_->get_field_ids()) {
+            needed_columns->push_back(
+                std::to_string(field_id.get()));
+        }
         reader_ = milvus_storage::api::Reader::create(
-            column_groups, arrow_schema, nullptr, *properties);
+            column_groups, arrow_schema, needed_columns, *properties);
         if (!diff.column_groups_to_load.empty()) {
             LoadColumnGroups(column_groups,
                              properties,
@@ -3196,9 +3202,11 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 
     auto chunk_reader_result = reader_->get_chunk_reader(index);
     AssertInfo(chunk_reader_result.ok(),
-               "get chunk reader failed, segment {}, column group index {}",
+               "get chunk reader failed, segment {}, column group index {}, "
+               "status msg: {}",
                get_segment_id(),
-               index);
+               index,
+               chunk_reader_result.status().ToString());
 
     auto chunk_reader = std::move(chunk_reader_result).ValueOrDie();
 

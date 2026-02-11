@@ -420,3 +420,47 @@ TEST_F(SchemaTest, WarmupPolicyFallbackToCollectionLevel) {
     EXPECT_TRUE(has_setting2);
     EXPECT_EQ(policy2, "disable");
 }
+
+// ConvertToLoonArrowSchema tests
+
+TEST_F(SchemaTest, ConvertToLoonArrowSchemaFieldNamesAreFieldIds) {
+    auto pk_id =
+        schema_->AddDebugField("pk_field", DataType::INT64, false);
+    schema_->set_primary_field_id(pk_id);
+    auto float_id =
+        schema_->AddDebugField("float_field", DataType::FLOAT, false);
+
+    auto loon_schema = schema_->ConvertToLoonArrowSchema();
+
+    // Field names should be field ID strings, not field names
+    ASSERT_EQ(loon_schema->num_fields(), 2);
+    EXPECT_EQ(loon_schema->field(0)->name(), std::to_string(pk_id.get()));
+    EXPECT_EQ(loon_schema->field(1)->name(), std::to_string(float_id.get()));
+}
+
+TEST_F(SchemaTest, ConvertToLoonArrowSchemaVsConvertToArrowSchema) {
+    auto pk_id =
+        schema_->AddDebugField("pk_field", DataType::INT64, false);
+    schema_->set_primary_field_id(pk_id);
+    auto varchar_id =
+        schema_->AddDebugField("varchar_field", DataType::VARCHAR, true);
+
+    auto arrow_schema = schema_->ConvertToArrowSchema();
+    auto loon_schema = schema_->ConvertToLoonArrowSchema();
+
+    ASSERT_EQ(arrow_schema->num_fields(), loon_schema->num_fields());
+
+    auto field_ids = schema_->get_field_ids();
+    for (int i = 0; i < arrow_schema->num_fields(); ++i) {
+        auto orig = arrow_schema->field(i);
+        auto loon = loon_schema->field(i);
+
+        // Arrow schema uses field name, Loon uses field ID string
+        EXPECT_EQ(loon->name(), std::to_string(field_ids[i].get()));
+        EXPECT_NE(orig->name(), loon->name());
+
+        // Data type and nullability should be identical
+        EXPECT_TRUE(orig->type()->Equals(loon->type()));
+        EXPECT_EQ(orig->nullable(), loon->nullable());
+    }
+}

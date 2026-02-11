@@ -369,6 +369,11 @@ class Schema {
     const ArrowSchemaPtr
     ConvertToArrowSchema() const;
 
+    /// Convert to Arrow schema with field ID strings as field names,
+    /// used by Loon FFI / milvus-storage Reader.
+    const ArrowSchemaPtr
+    ConvertToLoonArrowSchema() const;
+
     proto::schema::CollectionSchema
     ToProto() const;
 
