@@ -33,6 +33,7 @@
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
 #include "index/Utils.h"
+#include "test_utils/Constants.h"
 
 using namespace milvus;
 using namespace milvus::index;
@@ -65,7 +66,7 @@ struct TmpFileWrapperIndexUtilsTest {
 TEST(UtilIndex, ReadFromFD) {
     auto uuid = boost::uuids::random_generator()();
     auto uuid_string = boost::uuids::to_string(uuid);
-    auto file = std::string("/tmp/") + uuid_string;
+    auto file = TestLocalPath + uuid_string;
 
     auto tmp_file = TmpFileWrapperIndexUtilsTest(file);
     ASSERT_NE(tmp_file.fd, -1);

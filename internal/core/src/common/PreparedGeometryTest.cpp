@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <mutex>
@@ -250,18 +251,30 @@ TEST(ThreadLocalGEOSContextTest, DifferentThreadsGetDifferentContexts) {
     std::mutex mutex;
     std::set<GEOSContextHandle_t> contexts;
 
-    auto worker = [&mutex, &contexts]() {
+    constexpr int num_threads = 4;
+    // Use a barrier to ensure all threads are alive simultaneously,
+    // preventing thread-local storage address reuse.
+    std::atomic<int> ready_count{0};
+
+    auto worker = [&]() {
         GEOSContextHandle_t ctx = GetThreadLocalGEOSContext();
 
         // Verify context is valid by using it
         Geometry point(ctx, "POINT(5 5)");
         EXPECT_TRUE(point.IsValid());
 
-        std::lock_guard<std::mutex> lock(mutex);
-        contexts.insert(ctx);
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            contexts.insert(ctx);
+        }
+
+        // Signal ready and wait for all threads to reach this point
+        ready_count.fetch_add(1);
+        while (ready_count.load() < num_threads) {
+            std::this_thread::yield();
+        }
     };
 
-    constexpr int num_threads = 4;
     std::vector<std::thread> threads;
     threads.reserve(num_threads);
 
