@@ -1,8 +1,11 @@
+import hashlib
 import random
+import struct
 import time
 
 import pytest
 import numpy as np
+import xxhash
 from faker import Faker
 
 from base.client_v2_base import TestMilvusClientV2Base
@@ -739,7 +742,7 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
 
         # Query texts - use original base texts for searching
         query_text = base_texts[0]  # "the quick brown fox jumps over the lazy dog"
-        similar_id = 1  # "the quick brown fox jumps over the lazy cat" variant
+        _ = 1  # "the quick brown fox jumps over the lazy cat" variant
 
         results_by_config = {}
 
@@ -788,7 +791,7 @@ class TestMilvusClientMinHashExtended(TestMilvusClientV2Base):
             log.info(f"with_raw_data={with_raw_data}: waiting for index to be ready...")
             index_ready = self.wait_for_index_ready(client, collection_name, index_name, timeout=120)
             if not index_ready:
-                log.warning(f"Index not ready after timeout, test may use brute force search")
+                log.warning("Index not ready after timeout, test may use brute force search")
 
             # Verify index state
             index_info = self.describe_index(client, collection_name, index_name)[0]
@@ -2333,10 +2336,6 @@ class TestMilvusClientMinHashAccuracy(TestMilvusClientV2Base):
 # Pure Python implementation of Milvus MinHash algorithm.
 # Verified bit-identical to the C++ implementation (MinHashComputer.cpp).
 
-import hashlib
-import struct
-
-import xxhash
 
 # ---- MT19937-64 (matches std::mt19937_64) ----
 
@@ -3815,8 +3814,6 @@ class TestMinHashBulkImport(TestMilvusClientV2Base):
         batch_files = self.gen_file_with_local_bulk_writer(schema, data, file_type)
 
         # Step 3: Upload to MinIO
-        import os
-        # batch_files is a list of lists, get the first file
         local_file = batch_files[0][0]
         remote_files = self.upload_to_minio(local_file)
 
@@ -3908,7 +3905,6 @@ class TestMinHashBulkImport(TestMilvusClientV2Base):
         batch_files = self.gen_file_with_local_bulk_writer(file_schema, data, file_type)
 
         # Step 3: Upload to MinIO
-        import os
         local_file = batch_files[0][0]
         remote_files = self.upload_to_minio(local_file)
 
