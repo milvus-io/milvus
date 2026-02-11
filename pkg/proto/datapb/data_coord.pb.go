@@ -8397,6 +8397,10 @@ type CopySegmentSource struct {
 	TextIndexFiles map[int64]*TextIndexStats `protobuf:"bytes,9,rep,name=text_index_files,json=textIndexFiles,proto3" json:"text_index_files,omitempty" protobuf_key:"varint,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"` // text index files by field ID
 	// JSON key index files (for JSON index)
 	JsonKeyIndexFiles map[int64]*JsonKeyStats `protobuf:"bytes,10,rep,name=json_key_index_files,json=jsonKeyIndexFiles,proto3" json:"json_key_index_files,omitempty" protobuf_key:"varint,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"` // json key index files by field ID
+	// StorageV2 manifest (JSON encoded)
+	ManifestPath string `protobuf:"bytes,11,opt,name=manifest_path,json=manifestPath,proto3" json:"manifest_path,omitempty"`
+	// Storage version: 0=V1(legacy binlog), 2=V2(packed parquet), 3=V3(loon manifest)
+	StorageVersion int64 `protobuf:"varint,12,opt,name=storage_version,json=storageVersion,proto3" json:"storage_version,omitempty"`
 }
 
 func (x *CopySegmentSource) Reset() {
@@ -8499,6 +8503,20 @@ func (x *CopySegmentSource) GetJsonKeyIndexFiles() map[int64]*JsonKeyStats {
 		return x.JsonKeyIndexFiles
 	}
 	return nil
+}
+
+func (x *CopySegmentSource) GetManifestPath() string {
+	if x != nil {
+		return x.ManifestPath
+	}
+	return ""
+}
+
+func (x *CopySegmentSource) GetStorageVersion() int64 {
+	if x != nil {
+		return x.StorageVersion
+	}
+	return 0
 }
 
 type CopySegmentTarget struct {
@@ -8999,6 +9017,8 @@ type CopySegmentResult struct {
 	TextIndexInfos map[int64]*TextIndexStats `protobuf:"bytes,8,rep,name=text_index_infos,json=textIndexInfos,proto3" json:"text_index_infos,omitempty" protobuf_key:"varint,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
 	// JSON Key indexes - map<int64, JsonKeyStats>
 	JsonKeyIndexInfos map[int64]*JsonKeyStats `protobuf:"bytes,9,rep,name=json_key_index_infos,json=jsonKeyIndexInfos,proto3" json:"json_key_index_infos,omitempty" protobuf_key:"varint,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	// Transformed manifest path for target segment
+	ManifestPath string `protobuf:"bytes,10,opt,name=manifest_path,json=manifestPath,proto3" json:"manifest_path,omitempty"`
 }
 
 func (x *CopySegmentResult) Reset() {
@@ -9094,6 +9114,13 @@ func (x *CopySegmentResult) GetJsonKeyIndexInfos() map[int64]*JsonKeyStats {
 		return x.JsonKeyIndexInfos
 	}
 	return nil
+}
+
+func (x *CopySegmentResult) GetManifestPath() string {
+	if x != nil {
+		return x.ManifestPath
+	}
+	return ""
 }
 
 // CopySegmentTask represents a copy segment task that copies segment data and optionally indexes
