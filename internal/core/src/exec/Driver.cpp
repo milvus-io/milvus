@@ -59,49 +59,49 @@ DriverFactory::CreateDriver(std::unique_ptr<DriverContext> ctx,
         if (auto filterbitsnode =
                 std::dynamic_pointer_cast<const plan::FilterBitsNode>(
                     plannode)) {
-            tracer::AddEvent("create_operator: FilterBitsNode");
+            // tracer::AddEvent("create_operator: FilterBitsNode");
             operators.push_back(std::make_unique<PhyFilterBitsNode>(
                 id, ctx.get(), filterbitsnode));
         } else if (auto filternode =
                        std::dynamic_pointer_cast<const plan::FilterNode>(
                            plannode)) {
-            tracer::AddEvent("create_operator: FilterNode");
+            // tracer::AddEvent("create_operator: FilterNode");
             operators.push_back(std::make_unique<PhyIterativeFilterNode>(
                 id, ctx.get(), filternode));
         } else if (auto mvccnode =
                        std::dynamic_pointer_cast<const plan::MvccNode>(
                            plannode)) {
-            tracer::AddEvent("create_operator: MvccNode");
+            // tracer::AddEvent("create_operator: MvccNode");
             operators.push_back(
                 std::make_unique<PhyMvccNode>(id, ctx.get(), mvccnode));
         } else if (auto countnode =
                        std::dynamic_pointer_cast<const plan::CountNode>(
                            plannode)) {
-            tracer::AddEvent("create_operator: CountNode");
+            // tracer::AddEvent("create_operator: CountNode");
             operators.push_back(
                 std::make_unique<PhyCountNode>(id, ctx.get(), countnode));
         } else if (auto vectorsearchnode =
                        std::dynamic_pointer_cast<const plan::VectorSearchNode>(
                            plannode)) {
-            tracer::AddEvent("create_operator: VectorSearchNode");
+            // tracer::AddEvent("create_operator: VectorSearchNode");
             operators.push_back(std::make_unique<PhyVectorSearchNode>(
                 id, ctx.get(), vectorsearchnode));
         } else if (auto groupbynode =
                        std::dynamic_pointer_cast<const plan::GroupByNode>(
                            plannode)) {
-            tracer::AddEvent("create_operator: GroupByNode");
+            // tracer::AddEvent("create_operator: GroupByNode");
             operators.push_back(
                 std::make_unique<PhyGroupByNode>(id, ctx.get(), groupbynode));
         } else if (auto samplenode =
                        std::dynamic_pointer_cast<const plan::RandomSampleNode>(
                            plannode)) {
-            tracer::AddEvent("create_operator: RandomSampleNode");
+            // tracer::AddEvent("create_operator: RandomSampleNode");
             operators.push_back(std::make_unique<PhyRandomSampleNode>(
                 id, ctx.get(), samplenode));
         } else if (auto rescoresnode =
                        std::dynamic_pointer_cast<const plan::RescoresNode>(
                            plannode)) {
-            tracer::AddEvent("create_operator: RescoresNode");
+            // tracer::AddEvent("create_operator: RescoresNode");
             operators.push_back(
                 std::make_unique<PhyRescoresNode>(id, ctx.get(), rescoresnode));
         }

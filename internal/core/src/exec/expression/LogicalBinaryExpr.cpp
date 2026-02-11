@@ -21,7 +21,7 @@ namespace exec {
 
 void
 PhyLogicalBinaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
-    tracer::AutoSpan span("PhyLogicalBinaryExpr::Eval", tracer::GetRootSpan());
+    // tracer::AutoSpan span("PhyLogicalBinaryExpr::Eval", tracer::GetRootSpan());
 
     AssertInfo(
         inputs_.size() == 2,

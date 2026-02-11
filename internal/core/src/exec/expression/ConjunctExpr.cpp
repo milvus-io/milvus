@@ -90,9 +90,9 @@ PhyConjunctFilterExpr::SkipFollowingExprs(int start) {
 
 void
 PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
-    tracer::AutoSpan span(
-        "PhyConjunctFilterExpr::Eval", tracer::GetRootSpan(), true);
-    span.GetSpan()->SetAttribute("is_and", is_and_);
+    // tracer::AutoSpan span(
+        // "PhyConjunctFilterExpr::Eval", tracer::GetRootSpan(), true);
+    // span.GetSpan()->SetAttribute("is_and", is_and_);
 
     if (input_order_.empty()) {
         input_order_.resize(inputs_.size());

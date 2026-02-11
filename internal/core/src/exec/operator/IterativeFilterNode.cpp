@@ -119,8 +119,8 @@ PhyIterativeFilterNode::GetOutput() {
         return nullptr;
     }
 
-    tracer::AutoSpan span(
-        "PhyIterativeFilterNode::Execute", tracer::GetRootSpan(), true);
+    // tracer::AutoSpan span(
+        // "PhyIterativeFilterNode::Execute", tracer::GetRootSpan(), true);
 
     DeferLambda([&]() { is_finished_ = true; });
 
@@ -274,9 +274,9 @@ PhyIterativeFilterNode::GetOutput() {
         scalar_cost / 1000);
 
     if (!is_native_supported_) {
-        tracer::AddEvent(fmt::format("total_processed: {}, matched: {}",
-                                     need_process_rows_,
-                                     need_process_rows_ - bitset.count()));
+        // tracer::AddEvent(fmt::format("total_processed: {}, matched: {}",
+                                     // need_process_rows_,
+                                     // need_process_rows_ - bitset.count()));
     }
 
     return input_;

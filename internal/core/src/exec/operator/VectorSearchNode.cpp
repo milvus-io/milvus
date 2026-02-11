@@ -62,16 +62,16 @@ PhyVectorSearchNode::GetOutput() {
         return nullptr;
     }
 
-    tracer::AutoSpan span(
-        "PhyVectorSearchNode::Execute", tracer::GetRootSpan(), true);
+    // tracer::AutoSpan span(
+        // "PhyVectorSearchNode::Execute", tracer::GetRootSpan(), true);
 
     DeferLambda([&]() { is_finished_ = true; });
     if (input_ == nullptr) {
         return nullptr;
     }
 
-    span.GetSpan()->SetAttribute("search_type", search_info_.metric_type_);
-    span.GetSpan()->SetAttribute("topk", search_info_.topk_);
+    // span.GetSpan()->SetAttribute("search_type", search_info_.metric_type_);
+    // span.GetSpan()->SetAttribute("topk", search_info_.topk_);
 
     std::chrono::high_resolution_clock::time_point vector_start =
         std::chrono::high_resolution_clock::now();
@@ -105,8 +105,8 @@ PhyVectorSearchNode::GetOutput() {
 
     search_result.total_data_cnt_ = final_view.size();
 
-    span.GetSpan()->SetAttribute(
-        "result_count", static_cast<int>(search_result.seg_offsets_.size()));
+    // span.GetSpan()->SetAttribute(
+        // "result_count", static_cast<int>(search_result.seg_offsets_.size()));
 
     query_context_->set_search_result(std::move(search_result));
     std::chrono::high_resolution_clock::time_point vector_end =
