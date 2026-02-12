@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -844,8 +845,21 @@ func (h *HandlersV2) alterCollectionProperties(ctx context.Context, c *gin.Conte
 		CollectionName: httpReq.CollectionName,
 	}
 	properties := make([]*commonpb.KeyValuePair, 0, len(httpReq.Properties))
+
 	for key, value := range httpReq.Properties {
-		properties = append(properties, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
+		var valueStr string
+		switch v := value.(type) {
+		case float64:
+			if v == math.Trunc(v) {
+				valueStr = strconv.FormatInt(int64(v), 10)
+			} else {
+				valueStr = strconv.FormatFloat(v, 'f', -1, 64)
+			}
+		default:
+			valueStr = fmt.Sprintf("%v", value)
+		}
+
+		properties = append(properties, &commonpb.KeyValuePair{Key: key, Value: valueStr})
 	}
 	req.Properties = properties
 
@@ -2012,10 +2026,29 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	if partitionsNum > 0 {
 		req.NumPartitions = partitionsNum
 	}
-	if _, ok := httpReq.Params["ttlSeconds"]; ok {
+	if ttlSeconds, ok := httpReq.Params["ttlSeconds"]; ok {
+		var valueStr string
+		switch v := ttlSeconds.(type) {
+		case float64:
+			if v != math.Trunc(v) {
+				err := merr.WrapErrParameterInvalid("integer", ttlSeconds,
+					"ttlSeconds should be an integer representing seconds")
+				log.Ctx(ctx).Warn("high level restful api, create collection fail", zap.Error(err), zap.Any("request", anyReq))
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(err),
+					HTTPReturnMessage: err.Error(),
+				})
+				return nil, err
+			}
+
+			valueStr = strconv.FormatInt(int64(v), 10)
+		default:
+			valueStr = fmt.Sprintf("%v", ttlSeconds)
+		}
+
 		req.Properties = append(req.Properties, &commonpb.KeyValuePair{
 			Key:   common.CollectionTTLConfigKey,
-			Value: fmt.Sprintf("%v", httpReq.Params["ttlSeconds"]),
+			Value: valueStr,
 		})
 	}
 	if _, ok := httpReq.Params["ttlField"]; ok {
