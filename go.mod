@@ -64,7 +64,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.62
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.23.0
 	github.com/bits-and-blooms/bitset v1.10.0
-	github.com/bytedance/mockey v1.2.14
+	github.com/bytedance/mockey v1.4.4
 	github.com/bytedance/sonic v1.15.0
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cockroachdb/redact v1.1.3
@@ -327,3 +327,5 @@ replace (
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
 )
+
+replace github.com/bytedance/mockey => ./mockey_go126_patch/mockey

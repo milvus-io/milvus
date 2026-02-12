@@ -1,0 +1,6 @@
+# Typo check: https://github.com/crate-ci/typos
+[default.extend-identifiers]
+48ba01efbc9a78563412 = "48ba01efbc9a78563412"
+
+[files]
+extend-exclude = ["go.sum", "check_branch_name.sh"]

@@ -1,0 +1,72 @@
+name: Tests
+
+on: [pull_request]
+
+jobs:
+  unit-benchmark-test:
+    strategy:
+      matrix:
+        go: [
+            "1.13",
+            "1.18",
+            "1.19",
+            "1.20",
+            "1.21",
+            "1.22",
+            "1.23",
+            "1.24",
+            "1.25",
+          ]
+        os: [linux] # should be [ macOS, linux, windows ], but currently we don't have macOS and windows runners
+        arch: [X64, ARM64]
+        exclude:
+          - os: Linux
+            arch: ARM64
+          - os: Windows
+            arch: ARM64
+    runs-on: ["${{ matrix.os }}", "${{ matrix.arch }}"]
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: ${{ matrix.go }}
+      - name: Unit Test
+        run: MOCKEY_DEBUG=true go test -gcflags="all=-l -N" -race -timeout 30s -count 1 ./...
+      - name: Benchmark
+        run: go test -gcflags="all=-l -N" -bench=. -benchmem -run=none ./...
+
+  unit-benchmark-test-no-race: # some go version -race has fatal issues
+    strategy:
+      matrix:
+        go: ["1.14", "1.15", "1.16", "1.17"]
+        os: [linux] # should be [ macOS, linux, windows ], but currently we don't have macOS and windows runners
+        arch: [X64, ARM64]
+        exclude:
+          - os: Linux
+            arch: ARM64
+          - os: Windows
+            arch: ARM64
+    runs-on: ["${{ matrix.os }}", "${{ matrix.arch }}"]
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: ${{ matrix.go }}
+      - name: Unit Test
+        run: MOCKEY_DEBUG=true go test -gcflags="all=-l -N" -timeout 30s -count 1 ./...
+      - name: Benchmark
+        run: go test -gcflags="all=-l -N" -bench=. -benchmem -run=none ./...
+  unit-benchmark-test-no-suspend-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.25"
+      - name: Unit Test
+        run: MOCKEY_DEBUG=true go test -gcflags="all=-l -N" -timeout 30s -count 1 -tags mockey_disable_ss,mockey_disable_stw ./...
+      - name: Benchmark
+        run: go test -gcflags="all=-l -N" -bench=. -benchmem -run=none ./...
