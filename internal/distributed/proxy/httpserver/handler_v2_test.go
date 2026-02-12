@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -1104,6 +1105,37 @@ func TestColletcionProperties(t *testing.T) {
 	}
 }
 
+func TestAlterCollectionPropertiesTTLSecondsAsIntegerString(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	const ttl = int64(315360000000)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().AlterCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+			var ttlValue string
+			for _, kv := range req.Properties {
+				if kv.Key == common.CollectionTTLConfigKey {
+					ttlValue = kv.Value
+					break
+				}
+			}
+			assert.Equal(t, fmt.Sprintf("%d", ttl), ttlValue)
+			return commonSuccessStatus, nil
+		}).Once()
+
+	testEngine := initHTTPServerV2(mp, false)
+	path := versionalV2(CollectionCategory, AlterPropertiesAction)
+	body := []byte(fmt.Sprintf(`{"collectionName":"test", "properties":{"%s": %d}}`, common.CollectionTTLConfigKey, ttl))
+
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
 func TestIndexProperties(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
@@ -1517,6 +1549,39 @@ func TestCreateCollection(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCreateCollectionTTLSecondsAsIntegerString(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	const ttl = int64(315360000000)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, req *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+			var ttlValue string
+			for _, kv := range req.Properties {
+				if kv.Key == common.CollectionTTLConfigKey {
+					ttlValue = kv.Value
+					break
+				}
+			}
+			assert.Equal(t, fmt.Sprintf("%d", ttl), ttlValue)
+			return commonSuccessStatus, nil
+		}).Once()
+	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+
+	testEngine := initHTTPServerV2(mp, false)
+	path := versionalV2(CollectionCategory, CreateAction)
+	body := []byte(fmt.Sprintf(`{"collectionName": "%s", "dimension": 2, "params": {"ttlSeconds": %d}}`, DefaultCollectionName, ttl))
+
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func versionalV2(category string, action string) string {
