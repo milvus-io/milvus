@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus/tests/go_client
 
-go 1.24.12
+go 1.26
 
 require (
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.6-0.20260129065928-046ced892c8b
