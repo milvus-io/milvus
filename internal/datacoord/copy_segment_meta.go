@@ -432,43 +432,34 @@ func (m *copySegmentMeta) AddJob(ctx context.Context, job CopySegmentJob) error 
 	return nil
 }
 
+// updateJob applies actions to a job and persists the result.
+// Must be called with m.mu write lock held.
+// Returns (previous job, updated job, error). If job not found, returns (nil, nil, nil).
+func (m *copySegmentMeta) updateJob(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) (CopySegmentJob, CopySegmentJob, error) {
+	job, ok := m.jobs[jobID]
+	if !ok {
+		return nil, nil, nil
+	}
+	updatedJob := job.Clone()
+	for _, action := range actions {
+		action(updatedJob)
+	}
+	err := m.catalog.SaveCopySegmentJob(ctx, updatedJob.(*copySegmentJob).CopySegmentJob)
+	if err != nil {
+		return nil, nil, err
+	}
+	m.jobs[updatedJob.GetJobId()] = updatedJob
+	return job, updatedJob, nil
+}
+
 // UpdateJob modifies an existing job using functional update actions.
 //
-// Process flow:
-//  1. Acquire write lock
-//  2. Clone the job to avoid modifying the original
-//  3. Apply all update actions to the clone
-//  4. Persist updated job to catalog
-//  5. Update in-memory cache with the new job
-//  6. Release lock
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - jobID: ID of job to update
-//   - actions: Functional updates to apply (e.g., UpdateCopyJobState)
-//
 // Thread safety: Protected by write lock
-// Idempotency: Safe to call with same updates (last write wins)
-//
-// Why functional updates:
-// - Composable: Can combine multiple updates in one call
-// - Type-safe: Each action has specific purpose
-// - Flexible: Easy to add new update types
 func (m *copySegmentMeta) UpdateJob(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if job, ok := m.jobs[jobID]; ok {
-		updatedJob := job.Clone()
-		for _, action := range actions {
-			action(updatedJob)
-		}
-		err := m.catalog.SaveCopySegmentJob(ctx, updatedJob.(*copySegmentJob).CopySegmentJob)
-		if err != nil {
-			return err
-		}
-		m.jobs[updatedJob.GetJobId()] = updatedJob
-	}
-	return nil
+	_, _, err := m.updateJob(ctx, jobID, actions...)
+	return err
 }
 
 // GetJob retrieves a job by ID from in-memory cache.
@@ -537,37 +528,21 @@ func (m *copySegmentMeta) CountJobBy(ctx context.Context, filters ...CopySegment
 // This ensures snapshot references are released immediately when restore jobs finish,
 // while Job records are retained for audit purposes (3 hours).
 //
-// Parameters:
-//   - ctx: Context for the operation
-//   - jobID: The job to update
-//   - actions: State update actions to apply
-//
-// Returns:
-//   - error: If update fails
+// Thread safety: Protected by write lock
 func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	job, ok := m.jobs[jobID]
-	if !ok {
+	prevJob, updatedJob, err := m.updateJob(ctx, jobID, actions...)
+	if err != nil {
+		return err
+	}
+	if prevJob == nil {
 		log.Warn("UpdateJobStateAndReleaseRef: job not found", zap.Int64("jobID", jobID))
 		return nil
 	}
 
-	// Record previous state BEFORE update to detect actual state transitions
-	previousState := job.GetState()
-
-	// Apply update under the same lock to prevent TOCTOU race
-	updatedJob := job.Clone()
-	for _, action := range actions {
-		action(updatedJob)
-	}
-	err := m.catalog.SaveCopySegmentJob(ctx, updatedJob.(*copySegmentJob).CopySegmentJob)
-	if err != nil {
-		return err
-	}
-	m.jobs[updatedJob.GetJobId()] = updatedJob
-
+	previousState := prevJob.GetState()
 	newState := updatedJob.GetState()
 	isTerminal := newState == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
 		newState == datapb.CopySegmentJobState_CopySegmentJobFailed
