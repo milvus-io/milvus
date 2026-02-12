@@ -22,7 +22,6 @@ func (s *ClientSuite) TestNewClient() {
 			&ClientConfig{
 				Address: "bufnet",
 				DialOptions: []grpc.DialOption{
-					grpc.WithBlock(),
 					grpc.WithTransportCredentials(insecure.NewCredentials()),
 					grpc.WithContextDialer(s.mockDialer),
 				},

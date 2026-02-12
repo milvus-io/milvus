@@ -77,8 +77,6 @@ func (s *GrpcLoggerSuite) registerClient() *localListenerClient {
 	addr := fmt.Sprintf("127.0.0.1:%d", s.port)
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
-		grpc.WithTimeout(time.Second),
 	}
 
 	conn, err := grpc.DialContext(ctx, addr, opts...)

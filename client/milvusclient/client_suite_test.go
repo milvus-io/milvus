@@ -62,7 +62,6 @@ func (s *MockSuiteBase) SetupTest() {
 	c, err := New(context.Background(), &ClientConfig{
 		Address: "bufnet",
 		DialOptions: []grpc.DialOption{
-			grpc.WithBlock(),
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithContextDialer(s.mockDialer),
 		},
