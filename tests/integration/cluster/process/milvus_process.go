@@ -473,7 +473,6 @@ func (mp *MilvusProcess) getConfigValueFromEnv(key string) string {
 func DailGRPClient(ctx context.Context, addr string, rootPath string, nodeID int64, extraOpts ...grpc.DialOption) (*grpc.ClientConn, error) {
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 		grpc.WithUnaryInterceptor(grpc_middleware.ChainUnaryClient(
 			clusterInjectionUnaryClientInterceptor(rootPath),
 			interceptor.ServerIDInjectionUnaryClientInterceptor(nodeID),

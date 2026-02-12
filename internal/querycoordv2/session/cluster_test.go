@@ -85,7 +85,7 @@ func (suite *ClusterTestSuite) setupServers() {
 
 	// check server ready to serve
 	for _, lis := range suite.listeners {
-		conn, err := grpc.Dial(lis.Addr().String(), grpc.WithBlock(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err := grpc.Dial(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 		suite.NoError(err)
 		suite.NoError(conn.Close())
 	}
