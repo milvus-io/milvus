@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <chrono>
 #include <aws/core/auth/AWSCredentialsProvider.h>
 #include <memory>
 
@@ -17,10 +18,14 @@
 #include "aws/core/utils/memory/AWSMemory.h"
 #include "aws/core/utils/memory/stl/AWSString.h"
 
+class HuaweiCloudCredentialsProviderTestHelper;
+
 namespace Aws {
 namespace Auth {
 class HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider
     : public AWSCredentialsProvider {
+    friend class ::HuaweiCloudCredentialsProviderTestHelper;
+
  public:
     HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider();
     AWSCredentials
@@ -45,8 +50,15 @@ class HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider
     Aws::String m_sessionName;
     Aws::String m_token;
     bool m_initialized;
+    bool m_lastReloadFailed = false;
+    std::chrono::steady_clock::time_point m_lastFailedReloadTime;
+    static constexpr int RELOAD_COOLDOWN_SECONDS = 30;
+    static constexpr int RELOAD_COOLDOWN_SECONDS_URGENT = 5;
+
     bool
     ExpiresSoon() const;
+    bool
+    IsInCooldown() const;
 };
 }  // namespace Auth
 }  // namespace Aws
