@@ -102,9 +102,9 @@ func (_c *MockManagerClient_Close_Call) RunAndReturn(run func()) *MockManagerCli
 	return _c
 }
 
-// CollectAllStatus provides a mock function with given fields: ctx
-func (_m *MockManagerClient) CollectAllStatus(ctx context.Context) (map[int64]*types.StreamingNodeStatus, error) {
-	ret := _m.Called(ctx)
+// CollectAllStatus provides a mock function with given fields: ctx, resourceGroup
+func (_m *MockManagerClient) CollectAllStatus(ctx context.Context, resourceGroup string) (map[int64]*types.StreamingNodeStatus, error) {
+	ret := _m.Called(ctx, resourceGroup)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CollectAllStatus")
@@ -112,19 +112,19 @@ func (_m *MockManagerClient) CollectAllStatus(ctx context.Context) (map[int64]*t
 
 	var r0 map[int64]*types.StreamingNodeStatus
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (map[int64]*types.StreamingNodeStatus, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, string) (map[int64]*types.StreamingNodeStatus, error)); ok {
+		return rf(ctx, resourceGroup)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) map[int64]*types.StreamingNodeStatus); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, string) map[int64]*types.StreamingNodeStatus); ok {
+		r0 = rf(ctx, resourceGroup)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[int64]*types.StreamingNodeStatus)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, resourceGroup)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -139,13 +139,14 @@ type MockManagerClient_CollectAllStatus_Call struct {
 
 // CollectAllStatus is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockManagerClient_Expecter) CollectAllStatus(ctx interface{}) *MockManagerClient_CollectAllStatus_Call {
-	return &MockManagerClient_CollectAllStatus_Call{Call: _e.mock.On("CollectAllStatus", ctx)}
+//   - resourceGroup string
+func (_e *MockManagerClient_Expecter) CollectAllStatus(ctx interface{}, resourceGroup interface{}) *MockManagerClient_CollectAllStatus_Call {
+	return &MockManagerClient_CollectAllStatus_Call{Call: _e.mock.On("CollectAllStatus", ctx, resourceGroup)}
 }
 
-func (_c *MockManagerClient_CollectAllStatus_Call) Run(run func(ctx context.Context)) *MockManagerClient_CollectAllStatus_Call {
+func (_c *MockManagerClient_CollectAllStatus_Call) Run(run func(ctx context.Context, resourceGroup string)) *MockManagerClient_CollectAllStatus_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -155,29 +156,29 @@ func (_c *MockManagerClient_CollectAllStatus_Call) Return(_a0 map[int64]*types.S
 	return _c
 }
 
-func (_c *MockManagerClient_CollectAllStatus_Call) RunAndReturn(run func(context.Context) (map[int64]*types.StreamingNodeStatus, error)) *MockManagerClient_CollectAllStatus_Call {
+func (_c *MockManagerClient_CollectAllStatus_Call) RunAndReturn(run func(context.Context, string) (map[int64]*types.StreamingNodeStatus, error)) *MockManagerClient_CollectAllStatus_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetAllStreamingNodes provides a mock function with given fields: ctx
-func (_m *MockManagerClient) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
+func (_m *MockManagerClient) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error) {
 	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetAllStreamingNodes")
 	}
 
-	var r0 map[int64]*types.StreamingNodeInfo
+	var r0 map[int64]*types.StreamingNodeInfoWithResourceGroup
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (map[int64]*types.StreamingNodeInfo, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error)); ok {
 		return rf(ctx)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) map[int64]*types.StreamingNodeInfo); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) map[int64]*types.StreamingNodeInfoWithResourceGroup); ok {
 		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[int64]*types.StreamingNodeInfo)
+			r0 = ret.Get(0).(map[int64]*types.StreamingNodeInfoWithResourceGroup)
 		}
 	}
 
@@ -208,12 +209,12 @@ func (_c *MockManagerClient_GetAllStreamingNodes_Call) Run(run func(ctx context.
 	return _c
 }
 
-func (_c *MockManagerClient_GetAllStreamingNodes_Call) Return(_a0 map[int64]*types.StreamingNodeInfo, _a1 error) *MockManagerClient_GetAllStreamingNodes_Call {
+func (_c *MockManagerClient_GetAllStreamingNodes_Call) Return(_a0 map[int64]*types.StreamingNodeInfoWithResourceGroup, _a1 error) *MockManagerClient_GetAllStreamingNodes_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockManagerClient_GetAllStreamingNodes_Call) RunAndReturn(run func(context.Context) (map[int64]*types.StreamingNodeInfo, error)) *MockManagerClient_GetAllStreamingNodes_Call {
+func (_c *MockManagerClient_GetAllStreamingNodes_Call) RunAndReturn(run func(context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error)) *MockManagerClient_GetAllStreamingNodes_Call {
 	_c.Call.Return(run)
 	return _c
 }

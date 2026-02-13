@@ -40,21 +40,18 @@ func TestBalancer(t *testing.T) {
 	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
 	streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).Return(nil)
 	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
-	streamingNodeManager.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{
+	streamingNodeManager.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
 		1: {
-			ServerID: 1,
-			Address:  "localhost:1",
+			StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
 		},
 		2: {
-			ServerID: 2,
-			Address:  "localhost:2",
+			StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 2, Address: "localhost:2"},
 		},
 		3: {
-			ServerID: 3,
-			Address:  "localhost:3",
+			StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 3, Address: "localhost:3"},
 		},
 	}, nil)
-	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything).Return(map[int64]*types.StreamingNodeStatus{
+	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything, mock.Anything).Return(map[int64]*types.StreamingNodeStatus{
 		1: {
 			StreamingNodeInfo: types.StreamingNodeInfo{
 				ServerID: 1,
@@ -276,7 +273,7 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
 	streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).Return(nil)
 	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
-	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything).RunAndReturn(func(ctx context.Context) (map[int64]*types.StreamingNodeStatus, error) {
+	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, resourceGroup string) (map[int64]*types.StreamingNodeStatus, error) {
 		now := time.Now()
 		mvccTimeTick := tsoutil.ComposeTSByTime(now, 0)
 		recoveryTimeTick := tsoutil.ComposeTSByTime(now.Add(-time.Second*10), 0)

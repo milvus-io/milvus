@@ -226,16 +226,16 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 		<-ctx.Done()
 		return ctx.Err()
 	})
-	b.EXPECT().GetAllStreamingNodes(mock.Anything).RunAndReturn(func(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
-		pchans := []map[int64]*types.StreamingNodeInfo{
+	b.EXPECT().GetAllStreamingNodes(mock.Anything).RunAndReturn(func(ctx context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error) {
+		pchans := []map[int64]*types.StreamingNodeInfoWithResourceGroup{
 			{
-				1: {ServerID: 1, Address: "localhost:1"},
-				2: {ServerID: 2, Address: "localhost:2"},
-				3: {ServerID: 3, Address: "localhost:3"},
+				1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
+				2: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 2, Address: "localhost:2"}},
+				3: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 3, Address: "localhost:3"}},
 			},
 			{
-				1: {ServerID: 1, Address: "localhost:1"},
-				2: {ServerID: 2, Address: "localhost:2"},
+				1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
+				2: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 2, Address: "localhost:2"}},
 			},
 		}
 		select {

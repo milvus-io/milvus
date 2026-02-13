@@ -118,8 +118,8 @@ func (b *balancerImpl) ReplicateRole() replicateutil.Role {
 	return b.channelMetaManager.ReplicateRole()
 }
 
-// GetAllStreamingNodes fetches all streaming node info.
-func (b *balancerImpl) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
+// GetAllStreamingNodes fetches all streaming node info with resource group.
+func (b *balancerImpl) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error) {
 	return resource.Resource().StreamingNodeManagerClient().GetAllStreamingNodes(ctx)
 }
 
@@ -475,8 +475,9 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 	b.Logger().Info("start to balance")
 	pchannelView := b.channelMetaManager.CurrentPChannelsView()
 
-	b.Logger().Info("collect all status...")
-	nodeStatus, err := b.fetchStreamingNodeStatus(ctx)
+	rgName := paramtable.Get().StreamingCfg.PrimaryResourceGroup.GetValue()
+	b.Logger().Info("collect all status...", zap.String("resourceGroup", rgName))
+	nodeStatus, err := b.fetchStreamingNodeStatus(ctx, rgName)
 	if err != nil {
 		return false, err
 	}
@@ -507,8 +508,8 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 }
 
 // fetchStreamingNodeStatus fetch the streaming node status.
-func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context) (map[int64]*types.StreamingNodeStatus, error) {
-	nodeStatus, err := resource.Resource().StreamingNodeManagerClient().CollectAllStatus(ctx)
+func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context, rgName string) (map[int64]*types.StreamingNodeStatus, error) {
+	nodeStatus, err := resource.Resource().StreamingNodeManagerClient().CollectAllStatus(ctx, rgName)
 	if err != nil {
 		return nil, errors.Wrap(err, "fail to collect all status")
 	}

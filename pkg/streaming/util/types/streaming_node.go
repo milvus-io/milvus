@@ -82,6 +82,12 @@ func (n StreamingNodeInfo) String() string {
 	return fmt.Sprintf("%d@%s", n.ServerID, n.Address)
 }
 
+// StreamingNodeInfoWithResourceGroup extends StreamingNodeInfo with resource group information.
+type StreamingNodeInfoWithResourceGroup struct {
+	StreamingNodeInfo
+	ResourceGroup string // Resource group label from session's ServerLabels, if empty, it means the streaming node doesn't have a resource group.
+}
+
 // StreamingNodeStatus is the information of a streaming node.
 type StreamingNodeStatus struct {
 	StreamingNodeInfo

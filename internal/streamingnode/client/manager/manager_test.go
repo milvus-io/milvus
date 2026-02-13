@@ -57,7 +57,7 @@ func TestManager(t *testing.T) {
 		}, nil
 	})
 	// Not address here.
-	nodes, err := m.CollectAllStatus(context.Background())
+	nodes, err := m.CollectAllStatus(context.Background(), "")
 	assert.NoError(t, err)
 	assert.Len(t, nodes, 0)
 
@@ -84,7 +84,7 @@ func TestManager(t *testing.T) {
 		return s, nil
 	})
 
-	nodes, err = m.CollectAllStatus(context.Background())
+	nodes, err = m.CollectAllStatus(context.Background(), "")
 	assert.NoError(t, err)
 	assert.Len(t, nodes, 3)
 	assert.ErrorIs(t, nodes[3].Err, types.ErrNotAlive)
@@ -132,7 +132,7 @@ func TestManager(t *testing.T) {
 	nodeInfos, err = m.GetAllStreamingNodes(context.Background())
 	assert.Nil(t, nodeInfos)
 	assert.Error(t, err)
-	nodes, err = m.CollectAllStatus(context.Background())
+	nodes, err = m.CollectAllStatus(context.Background(), "")
 	assert.Nil(t, nodes)
 	assert.Error(t, err)
 	err = m.Assign(context.Background(), types.PChannelInfoAssigned{})
