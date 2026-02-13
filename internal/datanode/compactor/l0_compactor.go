@@ -491,3 +491,7 @@ func (t *LevelZeroCompactionTask) GetSlotUsage() int64 {
 func (t *LevelZeroCompactionTask) GetStorageConfig() *indexpb.StorageConfig {
 	return t.compactionParams.StorageConfig
 }
+
+func (t *LevelZeroCompactionTask) GetSlotUsageV2() (float64, float64) {
+	return t.plan.GetCpuSlot(), t.plan.GetMemorySlot()
+}

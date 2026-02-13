@@ -725,7 +725,7 @@ message CompactionPlan {
   int32 state = 16;
   int64 begin_logID = 17; // deprecated, use pre_allocated_logIDs instead.
   IDRange pre_allocated_segmentIDs = 18;
-  int64 slot_usage = 19;
+  int64 slot_usage = 19 [deprecated = true];
   int64 max_size = 20;
   // bf path for importing
   // collection is importing
@@ -735,6 +735,8 @@ message CompactionPlan {
   repeated common.KeyValuePair plugin_context = 29;
   repeated internal.FileResourceInfo file_resources = 30;
   repeated schema.FunctionSchema functions = 31;
+  double cpu_slot = 32;
+  double memory_slot = 33;
 }
 
 message CompactionSegment {
@@ -916,8 +918,10 @@ message PreImportRequest {
   repeated internal.ImportFile import_files = 8;
   repeated common.KeyValuePair options = 9;
   index.StorageConfig storage_config = 10;
-  int64 task_slot = 11;
+  int64 task_slot = 11 [deprecated = true];
   repeated common.KeyValuePair plugin_context = 12;
+  double cpu_slot = 13;
+  double memory_slot = 14;
 }
 
 message IDRange {
@@ -945,10 +949,12 @@ message ImportRequest {
   IDRange ID_range = 11;
   repeated ImportRequestSegment request_segments = 12;
   index.StorageConfig storage_config = 13;
-  int64 task_slot = 14;
+  int64 task_slot = 14 [deprecated = true];
   int64 storage_version = 15;
   repeated common.KeyValuePair plugin_context = 16;
   bool use_loon_ffi = 17;
+  double cpu_slot = 18;
+  double memory_slot = 19;
 }
 
 message QueryPreImportRequest {
@@ -1053,6 +1059,8 @@ message CopySegmentRequest {
 
   index.StorageConfig storage_config = 6;
   int64 task_slot = 7;
+  double cpu_slot = 8;
+  double memory_slot = 9;
 }
 
 message QueryCopySegmentRequest {
@@ -1121,13 +1129,15 @@ message CopySegmentTask {
 
   int64 node_id = 4;
   int64 task_version = 5;
-  int64 task_slot = 6;
+  int64 task_slot = 6 [deprecated = true];
 
   CopySegmentTaskState state = 7;
   string reason = 8;
   repeated CopySegmentIDMapping id_mappings = 9;
   uint64 created_ts = 10;   // Unix timestamp in nanoseconds
   uint64 complete_ts = 11;  // Unix timestamp in nanoseconds
+  double cpu_slot = 12;
+  double memory_slot = 13;
 }
 
 // CopySegmentJobState defines the state machine for copy segment jobs
@@ -1292,7 +1302,11 @@ message QuerySlotRequest {}
 
 message QuerySlotResponse {
   common.Status status = 1;
-  int64 available_slots = 2;
+  int64 available_slots = 2 [deprecated = true];
+  double available_cpu_slots = 3;
+  double available_memory_slots = 4;
+  double total_cpu_slots = 5;
+  double total_memory_slots = 6;
 }
 
 enum CompactionTaskState {

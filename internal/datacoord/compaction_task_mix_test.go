@@ -135,3 +135,148 @@ func (s *MixCompactionTaskSuite) TestQueryTaskOnWorker() {
 
 	s.Equal(taskcommon.Retry, t1.GetTaskState())
 }
+
+func (s *MixCompactionTaskSuite) TestGetTaskSlot() {
+	// Test backward compatibility - GetTaskSlot returns int64
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_MixCompaction,
+		MaxSize:       512 * 1024 * 1024, // 512MB
+		InputSegments: []int64{200},
+	}, nil, s.mockMeta, newMockVersionManager())
+
+	slot := task.GetTaskSlot()
+	s.Greater(slot, int64(0))
+	s.IsType(int64(0), slot)
+}
+
+func (s *MixCompactionTaskSuite) TestGetTaskSlotV2_MixCompaction() {
+	// Test new GetTaskSlotV2 returns (float64, float64)
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_MixCompaction,
+		MaxSize:       512 * 1024 * 1024, // 512MB
+		InputSegments: []int64{200},
+	}, nil, s.mockMeta, newMockVersionManager())
+
+	cpuSlot, memorySlot := task.GetTaskSlotV2()
+	s.Greater(cpuSlot, 0.0)
+	s.Greater(memorySlot, 0.0)
+}
+
+func (s *MixCompactionTaskSuite) TestGetTaskSlotV2_SortCompaction() {
+	// Test SortCompaction uses calculateStatsTaskSlotV2
+	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID: 200,
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 10, MemorySize: 512 * 1024 * 1024, // 512MB},
+						},
+					},
+				},
+			},
+			Statslogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{
+						{LogID: 10, MemorySize: 100},
+					},
+				},
+			},
+		},
+	}).Once()
+
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_SortCompaction,
+		MaxSize:       512 * 1024 * 1024, // 512MB
+		InputSegments: []int64{200},
+	}, nil, s.mockMeta, newMockVersionManager())
+
+	cpuSlot, memorySlot := task.GetTaskSlotV2()
+	s.Greater(cpuSlot, 0.0)
+	s.Greater(memorySlot, 0.0)
+}
+
+func (s *MixCompactionTaskSuite) TestGetSlotUsage() {
+	// Test GetSlotUsage delegates to GetTaskSlot
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_MixCompaction,
+		MaxSize:       512 * 1024 * 1024,
+		InputSegments: []int64{200},
+	}, nil, s.mockMeta, newMockVersionManager())
+
+	slotUsage := task.GetSlotUsage()
+	taskSlot := task.GetTaskSlot()
+	s.Equal(taskSlot, slotUsage)
+}
+
+func (s *MixCompactionTaskSuite) TestGetTaskSlotV2_DifferentSizes() {
+	// Test that different task sizes return different memory slots
+	testCases := []struct {
+		name    string
+		maxSize int64
+	}{
+		{"small_100MB", 100 * 1024 * 1024},
+		{"medium_500MB", 500 * 1024 * 1024},
+		{"large_1GB", 1024 * 1024 * 1024},
+		{"xlarge_5GB", 5 * 1024 * 1024 * 1024},
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			task := newMixCompactionTask(&datapb.CompactionTask{
+				PlanID:        1,
+				Type:          datapb.CompactionType_MixCompaction,
+				MaxSize:       tc.maxSize,
+				InputSegments: []int64{200},
+			}, nil, s.mockMeta, newMockVersionManager())
+
+			cpuSlot, memorySlot := task.GetTaskSlotV2()
+			s.Greater(cpuSlot, 0.0)
+			s.Greater(memorySlot, 0.0)
+
+			// Memory should scale with size
+			expectedMemory := float64(tc.maxSize) / 1024 / 1024 / 1024
+			s.Greater(memorySlot, expectedMemory*0.5) // At least 0.5x the size
+		})
+	}
+}
+
+func (s *MixCompactionTaskSuite) TestGetTaskSlot_CachedValue() {
+	// Test that slot value is cached after first calculation
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_MixCompaction,
+		MaxSize:       512 * 1024 * 1024,
+		InputSegments: []int64{200},
+	}, nil, s.mockMeta, newMockVersionManager())
+
+	// First call
+	slot1 := task.GetTaskSlot()
+	// Second call should return same cached value
+	slot2 := task.GetTaskSlot()
+	s.Equal(slot1, slot2)
+}
+
+func (s *MixCompactionTaskSuite) TestGetTaskSlotV2_SortCompaction_NoSegment() {
+	// Test SortCompaction when segment is not found
+	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(nil).Once()
+
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_SortCompaction,
+		MaxSize:       512 * 1024 * 1024,
+		InputSegments: []int64{200},
+	}, nil, s.mockMeta, newMockVersionManager())
+
+	cpuSlot, memorySlot := task.GetTaskSlotV2()
+	// Should fallback to default calculation
+	s.Greater(cpuSlot, 0.0)
+	s.Greater(memorySlot, 0.0)
+}

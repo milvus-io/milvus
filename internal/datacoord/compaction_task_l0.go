@@ -71,6 +71,21 @@ func (t *l0CompactionTask) GetTaskSlot() int64 {
 	return slot
 }
 
+func (t *l0CompactionTask) GetTaskSlotV2() (float64, float64) {
+	// Currently use the same slot value for both CPU and memory
+	// In future, separate L0CompactionCPUFactor and L0CompactionMemoryFactor
+	// can be added to paramtable for more fine-grained control
+	slot := float64(t.GetTaskSlot())
+	cpuSlot := slot
+	memorySlot := slot
+	return cpuSlot, memorySlot
+}
+
+func (t *l0CompactionTask) AllowCpuOversubscription() bool {
+	// L0 compaction tasks are memory/IO-intensive, allow CPU over-subscription
+	return true
+}
+
 func (t *l0CompactionTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
 	t.times.SetTaskTime(timeType, time)
 }
@@ -348,9 +363,10 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		CollectionTtl: taskProto.GetCollectionTtl(),
 		TotalRows:     taskProto.GetTotalRows(),
 		Schema:        taskProto.GetSchema(),
-		SlotUsage:     t.GetSlotUsage(),
 		JsonParams:    compactionParams,
 	}
+	plan.CpuSlot, plan.MemorySlot = t.GetTaskSlotV2()
+	plan.SlotUsage = t.GetTaskSlot() // deprecated, kept for backward compatibility
 
 	log := log.With(zap.Int64("taskID", taskProto.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 	segments := make([]*SegmentInfo, 0)
@@ -459,6 +475,8 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 	return t.meta.UpdateSegmentsInfo(context.TODO(), operators...)
 }
 
+// GetSlotUsage returns the slot usage (deprecated, kept for backward compatibility).
+// Use GetTaskSlot() or GetTaskSlotV2() instead.
 func (t *l0CompactionTask) GetSlotUsage() int64 {
 	return t.GetTaskSlot()
 }

@@ -18,6 +18,7 @@ package task
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/samber/lo"
 )
 
 const NullNodeID = -1
@@ -137,24 +139,6 @@ func (s *globalTaskScheduler) Stop() {
 	s.wg.Wait()
 }
 
-func (s *globalTaskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, taskSlot int64) int64 {
-	var maxAvailable int64 = -1
-	var nodeID int64 = NullNodeID
-
-	for id, ws := range workerSlots {
-		if ws.AvailableSlots > maxAvailable && ws.AvailableSlots > 0 {
-			maxAvailable = ws.AvailableSlots
-			nodeID = id
-		}
-	}
-
-	if nodeID != NullNodeID {
-		workerSlots[nodeID].AvailableSlots = 0
-		return nodeID
-	}
-	return NullNodeID
-}
-
 func (s *globalTaskScheduler) schedule() {
 	pendingNum := len(s.pendingTasks.TaskIDs())
 	if pendingNum == 0 {
@@ -169,8 +153,9 @@ func (s *globalTaskScheduler) schedule() {
 		if task == nil {
 			break
 		}
-		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(nodeSlots, taskSlot)
+		cpuSlot, memorySlot := task.GetTaskSlotV2()
+		allowCpuOversubscription := task.AllowCpuOversubscription()
+		nodeID := s.pickNode(nodeSlots, cpuSlot, memorySlot, allowCpuOversubscription)
 		if nodeID == NullNodeID {
 			s.pendingTasks.Push(task)
 			break
@@ -328,4 +313,65 @@ func NewGlobalTaskScheduler(ctx context.Context, cluster session.Cluster) Global
 		checkPool:    checkPool,
 		cluster:      cluster,
 	}
+}
+
+// pickNode selects an optimal worker node for the task based on CPU and memory requirements.
+// The scheduling algorithm prioritizes memory availability first, then CPU availability.
+//
+// Scheduling strategy:
+//  1. Sort nodes by available memory slots (descending), then by CPU slots (descending)
+//  2. Select the node with the most available resources
+//  3. Memory allocation rules:
+//     - If task requires more memory than available on the optimal node:
+//     Only schedule if the node has all its memory available (idle node)
+//     - Otherwise, check CPU availability with the following rules:
+//     a. Task requires less CPU than available: schedule immediately
+//     b. Node is idle (full CPU available): schedule immediately
+//     c. Task allows CPU over-subscription: allow over-subscription for better utilization
+//     Memory/IO-intensive tasks (stats, scalar index, compaction) can safely over-subscribe
+//     CPU without causing OOM, unlike memory over-subscription. Vector index tasks
+//     require dedicated CPU resources and don't allow over-subscription.
+//
+// Returns NullNodeID if no suitable node is found.
+func (s *globalTaskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, cpuSlot, memorySlot float64, allowCpuOversubscription bool) int64 {
+	var nodeID int64 = NullNodeID
+	if len(workerSlots) <= 0 {
+		return nodeID
+	}
+
+	// Sort workers by available resources: memory first (critical), then CPU
+	workerSlotsList := lo.Values(workerSlots)
+	sort.Slice(workerSlotsList, func(i, j int) bool {
+		if workerSlotsList[i].AvailableMemorySlot == workerSlotsList[j].AvailableMemorySlot {
+			return workerSlotsList[i].AvailableCpuSlot > workerSlotsList[j].AvailableCpuSlot
+		}
+		return workerSlotsList[i].AvailableMemorySlot > workerSlotsList[j].AvailableMemorySlot
+	})
+	optimal := workerSlotsList[0]
+
+	// Memory-based scheduling decision
+	if memorySlot >= optimal.AvailableMemorySlot {
+		// Large task: only schedule on completely idle nodes to avoid OOM
+		if optimal.TotalMemorySlot == optimal.AvailableMemorySlot {
+			nodeID = optimal.NodeID
+		}
+	} else {
+		// Normal task: check CPU availability
+		// Allow scheduling if:
+		// 1. Sufficient CPU available, OR
+		// 2. Node is completely idle, OR
+		// 3. Task allows CPU over-subscription
+		if cpuSlot <= optimal.AvailableCpuSlot ||
+			optimal.AvailableCpuSlot == optimal.TotalCpuSlot ||
+			allowCpuOversubscription {
+			nodeID = optimal.NodeID
+		}
+	}
+
+	// Deduct allocated resources (allow negative for tracking actual over-subscription)
+	if nodeID != NullNodeID {
+		workerSlots[nodeID].AvailableCpuSlot -= cpuSlot
+		workerSlots[nodeID].AvailableMemorySlot -= memorySlot
+	}
+	return nodeID
 }

@@ -105,3 +105,39 @@ func GetIndexType(indexParams []*commonpb.KeyValuePair) string {
 	}
 	return ""
 }
+
+// CalculateNodeSlotsV2 calculates the total CPU and memory slots available for task scheduling on this DataNode.
+// It returns (cpuSlot, memorySlot) where:
+//   - cpuSlot: Total CPU cores available for task scheduling
+//   - memorySlot: Total memory in GB available for task scheduling
+//
+// The calculation considers:
+//  1. Hardware resources: actual CPU cores and memory bytes
+//  2. BuildParallel config: multiplier for parallel task execution
+//  3. Standalone mode: reduced capacity (StandaloneSlotRatio) when running as standalone
+//
+// Formula:
+//
+//	cpuSlot = cpuCores * buildParallel [* standaloneRatio]
+//	memorySlot = memoryGB * buildParallel [* standaloneRatio]
+func CalculateNodeSlotsV2() (float64, float64) {
+	const bytesPerGB = 1024 * 1024 * 1024
+
+	cpuCores := hardware.GetCPUNum()
+	memoryBytes := hardware.GetMemoryCount()
+	memoryGB := float64(memoryBytes) / bytesPerGB
+
+	buildParallel := paramtable.Get().DataNodeCfg.BuildParallel.GetAsFloat()
+
+	cpuSlot := float64(cpuCores) * buildParallel
+	memorySlot := memoryGB * buildParallel
+
+	// In standalone mode, reduce slot capacity to reserve resources for other components
+	if paramtable.GetRole() == typeutil.StandaloneRole {
+		standaloneRatio := paramtable.Get().DataNodeCfg.StandaloneSlotRatio.GetAsFloat()
+		cpuSlot *= standaloneRatio
+		memorySlot *= standaloneRatio
+	}
+
+	return cpuSlot, memorySlot
+}

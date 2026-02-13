@@ -103,6 +103,10 @@ func (t *L0ImportTask) GetSlots() int64 {
 	return t.req.GetTaskSlot()
 }
 
+func (t *L0ImportTask) GetSlotsV2() (float64, float64) {
+	return t.req.GetCpuSlot(), t.req.GetMemorySlot()
+}
+
 // L0 import task buffer size is fixed
 func (t *L0ImportTask) GetBufferSize() int64 {
 	return paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
@@ -138,9 +142,12 @@ func (t *L0ImportTask) Clone() Task {
 
 func (t *L0ImportTask) Execute() []*conc.Future[any] {
 	bufferSize := int(t.GetBufferSize())
+	cpuSlot, memorySlot := t.GetSlotsV2()
 	log.Info("start to import l0", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
 		zap.Int64("taskSlot", t.GetSlots()),
+		zap.Float64("cpuSlot", cpuSlot),
+		zap.Float64("memorySlot", memorySlot),
 		zap.Any("files", t.req.GetFiles()),
 		zap.Any("schema", t.GetSchema()),
 	)...)

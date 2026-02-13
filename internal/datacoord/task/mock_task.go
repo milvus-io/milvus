@@ -183,6 +183,106 @@ func (_c *MockTask_GetTaskSlot_Call) RunAndReturn(run func() int64) *MockTask_Ge
 	return _c
 }
 
+// GetTaskSlotV2 provides a mock function with no fields
+func (_m *MockTask) GetTaskSlotV2() (float64, float64) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetTaskSlotV2")
+	}
+
+	var r0 float64
+	var r1 float64
+	if rf, ok := ret.Get(0).(func() (float64, float64)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() float64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(float64)
+	}
+
+	if rf, ok := ret.Get(1).(func() float64); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Get(1).(float64)
+	}
+
+	return r0, r1
+}
+
+// MockTask_GetTaskSlotV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTaskSlotV2'
+type MockTask_GetTaskSlotV2_Call struct {
+	*mock.Call
+}
+
+// GetTaskSlotV2 is a helper method to define mock.On call
+func (_e *MockTask_Expecter) GetTaskSlotV2() *MockTask_GetTaskSlotV2_Call {
+	return &MockTask_GetTaskSlotV2_Call{Call: _e.mock.On("GetTaskSlotV2")}
+}
+
+func (_c *MockTask_GetTaskSlotV2_Call) Run(run func()) *MockTask_GetTaskSlotV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockTask_GetTaskSlotV2_Call) Return(_a0 float64, _a1 float64) *MockTask_GetTaskSlotV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockTask_GetTaskSlotV2_Call) RunAndReturn(run func() (float64, float64)) *MockTask_GetTaskSlotV2_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// AllowCpuOversubscription provides a mock function with no fields
+func (_m *MockTask) AllowCpuOversubscription() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for AllowCpuOversubscription")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Bool(0)
+	}
+
+	return r0
+}
+
+// MockTask_AllowCpuOversubscription_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AllowCpuOversubscription'
+type MockTask_AllowCpuOversubscription_Call struct {
+	*mock.Call
+}
+
+// AllowCpuOversubscription is a helper method to define mock.On call
+func (_e *MockTask_Expecter) AllowCpuOversubscription() *MockTask_AllowCpuOversubscription_Call {
+	return &MockTask_AllowCpuOversubscription_Call{Call: _e.mock.On("AllowCpuOversubscription")}
+}
+
+func (_c *MockTask_AllowCpuOversubscription_Call) Run(run func()) *MockTask_AllowCpuOversubscription_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockTask_AllowCpuOversubscription_Call) Return(_a0 bool) *MockTask_AllowCpuOversubscription_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTask_AllowCpuOversubscription_Call) RunAndReturn(run func() bool) *MockTask_AllowCpuOversubscription_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetTaskState provides a mock function with no fields
 func (_m *MockTask) GetTaskState() indexpb.JobState {
 	ret := _m.Called()

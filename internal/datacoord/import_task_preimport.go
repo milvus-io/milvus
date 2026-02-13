@@ -91,7 +91,17 @@ func (p *preImportTask) GetTaskState() taskcommon.State {
 }
 
 func (p *preImportTask) GetTaskSlot() int64 {
-	return int64(CalculateTaskSlot(p, p.importMeta))
+	cpuSlot, memorySlot := p.GetTaskSlotV2()
+	return int64(max(cpuSlot, memorySlot))
+}
+
+func (p *preImportTask) GetTaskSlotV2() (float64, float64) {
+	return CalculateTaskSlot(p, p.importMeta)
+}
+
+func (p *preImportTask) AllowCpuOversubscription() bool {
+	// PreImport tasks are memory/IO-intensive, allow CPU over-subscription
+	return true
 }
 
 func (p *preImportTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
@@ -111,7 +121,7 @@ func (p *preImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster
 	job := p.importMeta.GetJob(context.TODO(), p.GetJobID())
 	req := AssemblePreImportRequest(p, job)
 
-	err := cluster.CreatePreImport(nodeID, req, p.GetTaskSlot())
+	err := cluster.CreatePreImport(nodeID, req)
 	if err != nil {
 		log.Warn("preimport failed", WrapTaskLog(p, zap.Error(err))...)
 		p.retryTimes++

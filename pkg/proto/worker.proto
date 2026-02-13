@@ -106,12 +106,14 @@ message CreateJobRequest {
   schema.FieldSchema field = 25;
   bool partition_key_isolation = 26;
   int32 current_scalar_index_version = 27;
-  int64 task_slot = 28;
+  int64 task_slot = 28 [deprecated = true];
   int64 storage_version = 29;
   int64 lack_binlog_rows = 30;
   repeated data.FieldBinlog insert_logs = 31;
   repeated common.KeyValuePair plugin_context = 32;
   string manifest = 33;
+  double cpu_slot = 34;
+  double memory_slot = 35;
 }
 
 message QueryJobsRequest {
@@ -138,11 +140,15 @@ message GetJobStatsResponse {
   int64 total_job_num = 2;
   int64 in_progress_job_num = 3;
   int64 enqueue_job_num = 4;
-  int64 available_slots = 5;
+  int64 available_slots = 5 [deprecated = true];
   repeated index.JobInfo job_infos = 6;
   // deprecated
   bool enable_disk = 7;
-  int64 total_slots = 8;
+  int64 total_slots = 8 [deprecated = true];
+  double available_cpu_slots = 9;
+  double available_memory_slots = 10;
+  double total_cpu_slots = 11;
+  double total_memory_slots = 12;
 }
 
 message AnalyzeRequest {
@@ -163,8 +169,10 @@ message AnalyzeRequest {
   double min_cluster_size_ratio = 15;
   double max_cluster_size_ratio = 16;
   int64 max_cluster_size = 17;
-  int64 task_slot = 18;
+  int64 task_slot = 18 [deprecated = true];
   repeated common.KeyValuePair plugin_context = 19;
+    double cpu_slot = 20;
+  double memory_slot = 21;
 }
 
 message CreateStatsRequest {
@@ -196,7 +204,7 @@ message CreateStatsRequest {
   int64 json_key_stats_data_format = 22;
   // deprecated, the sort logic has been moved into the compaction process.
   bool enable_json_key_stats_in_sort = 23; 
-  int64 task_slot = 24;
+  int64 task_slot = 24 [deprecated = true];
   int64 storage_version = 25;
   int32 current_scalar_index_version = 26;
   repeated common.KeyValuePair plugin_context = 27;
@@ -205,6 +213,8 @@ message CreateStatsRequest {
   int64 json_stats_write_batch_size = 30;
   string manifest_path = 31;
   repeated internal.FileResourceInfo file_resources = 32;
+  double cpu_slot = 33;
+  double memory_slot = 34;
 }
 
 message CreateJobV2Request {

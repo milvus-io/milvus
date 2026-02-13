@@ -652,7 +652,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 16, Params.SlotCap.GetAsInt())
 
 		// compaction
-		assert.Equal(t, 10, Params.MaxCompactionConcurrency.GetAsInt())
+		assert.Equal(t, 1024, Params.MaxCompactionConcurrency.GetAsInt())
 
 		assert.Equal(t, 4, Params.MaxVecIndexBuildConcurrency.GetAsInt())
 

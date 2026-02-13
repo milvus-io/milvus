@@ -383,6 +383,61 @@ func (_c *MockCompactor_GetStorageConfig_Call) RunAndReturn(run func() *indexpb.
 	return _c
 }
 
+// GetSlotUsageV2 provides a mock function with no fields
+func (_m *MockCompactor) GetSlotUsageV2() (float64, float64) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSlotUsageV2")
+	}
+
+	var r0 float64
+	var r1 float64
+	if rf, ok := ret.Get(0).(func() (float64, float64)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() float64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(float64)
+	}
+
+	if rf, ok := ret.Get(1).(func() float64); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Get(1).(float64)
+	}
+
+	return r0, r1
+}
+
+// MockCompactor_GetSlotUsageV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSlotUsageV2'
+type MockCompactor_GetSlotUsageV2_Call struct {
+	*mock.Call
+}
+
+// GetSlotUsageV2 is a helper method to define mock.On call
+func (_e *MockCompactor_Expecter) GetSlotUsageV2() *MockCompactor_GetSlotUsageV2_Call {
+	return &MockCompactor_GetSlotUsageV2_Call{Call: _e.mock.On("GetSlotUsageV2")}
+}
+
+func (_c *MockCompactor_GetSlotUsageV2_Call) Run(run func()) *MockCompactor_GetSlotUsageV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCompactor_GetSlotUsageV2_Call) Return(_a0 float64, _a1 float64) *MockCompactor_GetSlotUsageV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCompactor_GetSlotUsageV2_Call) RunAndReturn(run func() (float64, float64)) *MockCompactor_GetSlotUsageV2_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Stop provides a mock function with no fields
 func (_m *MockCompactor) Stop() {
 	_m.Called()
