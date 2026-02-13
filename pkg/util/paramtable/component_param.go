@@ -3722,7 +3722,7 @@ If set to 0, time based eviction is disabled.`,
 
 	p.AutoWarmupForNonPKIsolationCollection = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.warmup.autoWarmupForNonPKIsolationCollection",
-		Version:      "2.6.10",
+		Version:      "2.6.12",
 		DefaultValue: "false",
 		Doc:          `When enabled, forces vectorIndex, scalarField, and scalarIndex warmup to sync for collections without partition key isolation. vectorField is not affected.`,
 		Forbidden:    true,
