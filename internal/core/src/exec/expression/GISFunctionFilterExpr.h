@@ -68,6 +68,9 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
         }
     }
 
+    bool
+    CanUseIndex(proto::plan::GISFunctionFilterExpr_GISOp op) const;
+
  private:
     VectorPtr
     EvalForIndexSegment();
