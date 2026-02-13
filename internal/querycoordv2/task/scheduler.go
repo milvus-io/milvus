@@ -379,7 +379,8 @@ func (scheduler *taskScheduler) Stop() {
 }
 
 func (scheduler *taskScheduler) AddExecutor(nodeID int64) {
-	executor := NewExecutor(scheduler.meta,
+	executor := NewExecutor(nodeID,
+		scheduler.meta,
 		scheduler.distMgr,
 		scheduler.broker,
 		scheduler.targetMgr,
@@ -1139,6 +1140,22 @@ func (scheduler *taskScheduler) checkStale(task Task) error {
 		if replica == nil {
 			log.Warn("task stale due to replica not found")
 			return merr.WrapErrReplicaNotFound(task.ReplicaID())
+		}
+	}
+
+	// For segment grow tasks, check if segment is already loaded in dist.
+	// This prevents duplicate load tasks when checker generates tasks using stale dist snapshot
+	// but dist has been updated before the task is processed.
+	if segmentTask, ok := task.(*SegmentTask); ok && GetTaskType(task) == TaskTypeGrow && replica != nil {
+		existsInDist := scheduler.distMgr.SegmentDistManager.GetByFilter(
+			meta.WithCollectionID(task.CollectionID()),
+			meta.WithReplica(replica),
+			meta.WithSegmentID(segmentTask.SegmentID()),
+		)
+		if len(existsInDist) > 0 {
+			log.Info("task stale due to segment already loaded in dist",
+				zap.Int64("segmentID", segmentTask.SegmentID()))
+			return merr.WrapErrServiceInternal("segment already loaded in dist")
 		}
 	}
 

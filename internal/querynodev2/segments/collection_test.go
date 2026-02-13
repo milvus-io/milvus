@@ -81,6 +81,88 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 	})
 }
 
+func (s *CollectionManagerSuite) TestRef() {
+	s.Run("ref_existing_collection", func() {
+		ok := s.cm.Ref(1, 1)
+		s.True(ok)
+	})
+
+	s.Run("ref_non_existing_collection", func() {
+		ok := s.cm.Ref(9999, 1)
+		s.False(ok)
+	})
+}
+
+func (s *CollectionManagerSuite) TestUnref() {
+	s.Run("unref_non_existing_collection", func() {
+		// Unref on non-existing collection should return true
+		ok := s.cm.Unref(9999, 1)
+		s.True(ok)
+	})
+
+	s.Run("unref_without_release", func() {
+		// Add more refs first
+		s.cm.Ref(1, 2)
+		// Unref once, should not release (refCount > 0)
+		ok := s.cm.Unref(1, 1)
+		s.False(ok)
+		// Collection should still exist
+		coll := s.cm.Get(1)
+		s.NotNil(coll)
+	})
+
+	s.Run("unref_with_release", func() {
+		// Create a new collection manager for this test
+		cm := NewCollectionManager()
+		schema := mock_segcore.GenTestCollectionSchema("collection_2", schemapb.DataType_Int64, false)
+		err := cm.PutOrRef(2, schema, mock_segcore.GenTestIndexMeta(2, schema), &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
+		s.Require().NoError(err)
+
+		// Unref to release the collection (refCount goes to 0)
+		ok := cm.Unref(2, 1)
+		s.True(ok)
+
+		// Collection should be removed
+		coll := cm.Get(2)
+		s.Nil(coll)
+	})
+}
+
+func (s *CollectionManagerSuite) TestList() {
+	ids := s.cm.List()
+	s.Contains(ids, int64(1))
+}
+
+func (s *CollectionManagerSuite) TestListWithName() {
+	names := s.cm.ListWithName()
+	s.Contains(names, int64(1))
+	s.Equal("collection_1", names[1])
+}
+
+func (s *CollectionManagerSuite) TestPutOrRef() {
+	s.Run("put_new_collection", func() {
+		cm := NewCollectionManager()
+		schema := mock_segcore.GenTestCollectionSchema("collection_new", schemapb.DataType_Int64, false)
+		err := cm.PutOrRef(100, schema, mock_segcore.GenTestIndexMeta(100, schema), &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
+		s.NoError(err)
+		coll := cm.Get(100)
+		s.NotNil(coll)
+	})
+
+	s.Run("ref_existing_collection", func() {
+		// Ref existing collection (id=1)
+		schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
+		err := s.cm.PutOrRef(1, schema, mock_segcore.GenTestIndexMeta(1, schema), &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
+		s.NoError(err)
+	})
+}
+
 func TestCollectionManager(t *testing.T) {
 	suite.Run(t, new(CollectionManagerSuite))
 }

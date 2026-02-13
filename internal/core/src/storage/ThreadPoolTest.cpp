@@ -62,15 +62,15 @@ TEST_F(ThreadPoolTest, ResizeBelowMinimum) {
 TEST_F(ThreadPoolTest, ResizeAboveMaximum) {
     ThreadPool pool(1.0, "test_pool");
 
-    // Resize to values above maximum (should be clamped to 16)
+    // Resize to large values (no upper limit, should be accepted as-is)
     pool.Resize(17);
-    EXPECT_EQ(pool.GetMaxThreadNum(), 16);
+    EXPECT_EQ(pool.GetMaxThreadNum(), 17);
 
     pool.Resize(100);
-    EXPECT_EQ(pool.GetMaxThreadNum(), 16);
+    EXPECT_EQ(pool.GetMaxThreadNum(), 100);
 
     pool.Resize(1000);
-    EXPECT_EQ(pool.GetMaxThreadNum(), 16);
+    EXPECT_EQ(pool.GetMaxThreadNum(), 1000);
 }
 
 }  // namespace milvus
