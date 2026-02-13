@@ -18,10 +18,15 @@ package datacoord
 
 import (
 	"context"
+	"math"
+	"sync"
 
+	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -57,6 +62,65 @@ import (
 // - Provides crash recovery and consistency guarantees
 
 // ===========================================================================================
+// Snapshot Restore Reference Tracking
+// ===========================================================================================
+
+// SnapshotRestoreRefTracker manages snapshot restore reference counts.
+// It maintains a mapping from snapshot name to the count of active restore operations.
+// When a CopySegmentJob is created, the count increments. When the job is garbage
+// collected (after 3-hour retention), the count decrements. DropSnapshot checks this
+// count and rejects deletion if non-zero.
+type SnapshotRestoreRefTracker struct {
+	mu       sync.RWMutex
+	refCount map[string]int32 // key: snapshotName, value: active restore operation count
+}
+
+// NewSnapshotRestoreRefTracker creates a new snapshot restore reference tracker.
+func NewSnapshotRestoreRefTracker() *SnapshotRestoreRefTracker {
+	return &SnapshotRestoreRefTracker{
+		refCount: make(map[string]int32),
+	}
+}
+
+// IncrementRestoreRef increments the restore reference count for a snapshot.
+func (t *SnapshotRestoreRefTracker) IncrementRestoreRef(snapshotName string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Protect against integer overflow
+	if t.refCount[snapshotName] >= math.MaxInt32 {
+		log.Warn("snapshot restore ref count reached maximum, cannot increment",
+			zap.String("snapshot", snapshotName),
+			zap.Int32("currentCount", t.refCount[snapshotName]))
+		return
+	}
+
+	t.refCount[snapshotName]++
+}
+
+// DecrementRestoreRef decrements the restore reference count for a snapshot.
+func (t *SnapshotRestoreRefTracker) DecrementRestoreRef(snapshotName string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if count, ok := t.refCount[snapshotName]; ok && count > 0 {
+		t.refCount[snapshotName]--
+		if t.refCount[snapshotName] == 0 {
+			delete(t.refCount, snapshotName)
+		}
+	} else {
+		log.Warn("attempted to decrement snapshot restore ref that is already zero or does not exist",
+			zap.String("snapshot", snapshotName))
+	}
+}
+
+// GetRestoreRefCount returns the restore reference count for a snapshot.
+func (t *SnapshotRestoreRefTracker) GetRestoreRefCount(snapshotName string) int32 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.refCount[snapshotName]
+}
+
+// ===========================================================================================
 // Metadata Interface
 // ===========================================================================================
 
@@ -78,6 +142,7 @@ type CopySegmentMeta interface {
 	// Job operations
 	AddJob(ctx context.Context, job CopySegmentJob) error
 	UpdateJob(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error
+	UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error
 	GetJob(ctx context.Context, jobID int64) CopySegmentJob
 	GetJobBy(ctx context.Context, filters ...CopySegmentJobFilter) []CopySegmentJob
 	CountJobBy(ctx context.Context, filters ...CopySegmentJobFilter) int
@@ -91,6 +156,11 @@ type CopySegmentMeta interface {
 	GetTasksByCollectionID(ctx context.Context, collectionID int64) []CopySegmentTask
 	GetTaskBy(ctx context.Context, filters ...CopySegmentTaskFilter) []CopySegmentTask
 	RemoveTask(ctx context.Context, taskID int64) error
+
+	// Snapshot restore reference tracking
+	IncrementRestoreRef(snapshotName string)
+	DecrementRestoreRef(snapshotName string)
+	GetRestoreRefCount(snapshotName string) int32
 }
 
 // ===========================================================================================
@@ -240,6 +310,9 @@ type copySegmentMeta struct {
 	catalog      metastore.DataCoordCatalog // Persistent storage backend (etcd)
 	meta         *meta                      // Segment metadata for task execution
 	snapshotMeta *snapshotMeta              // Snapshot metadata for reading source data
+
+	// Snapshot restore reference tracker
+	restoreRefTracker *SnapshotRestoreRefTracker
 }
 
 // ===========================================================================================
@@ -282,9 +355,10 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 
 	tasks := newCopySegmentTasks()
 	copySegmentMeta := &copySegmentMeta{
-		catalog:      catalog,
-		meta:         meta,
-		snapshotMeta: snapshotMeta,
+		catalog:           catalog,
+		meta:              meta,
+		snapshotMeta:      snapshotMeta,
+		restoreRefTracker: NewSnapshotRestoreRefTracker(),
 	}
 
 	// Reconstruct task objects with metadata references
@@ -311,6 +385,25 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 
 	copySegmentMeta.jobs = jobs
 	copySegmentMeta.tasks = tasks
+
+	// Rebuild snapshot restore reference counts from non-terminal restored jobs.
+	// Only Pending and Executing jobs need ref tracking — terminal jobs (Completed/Failed)
+	// already had their refs released before the crash, so re-incrementing them would
+	// cause a permanent leak (no code path exists to decrement them again).
+	for _, job := range restoredJobs {
+		state := job.GetState()
+		if state == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
+			state == datapb.CopySegmentJobState_CopySegmentJobFailed {
+			continue
+		}
+		snapshotName := job.GetSnapshotName()
+		copySegmentMeta.IncrementRestoreRef(snapshotName)
+		log.Info("rebuilt snapshot restore ref count from active job",
+			zap.String("snapshot", snapshotName),
+			zap.Int64("jobID", job.GetJobId()),
+			zap.String("state", state.String()))
+	}
+
 	return copySegmentMeta, nil
 }
 
@@ -339,43 +432,34 @@ func (m *copySegmentMeta) AddJob(ctx context.Context, job CopySegmentJob) error 
 	return nil
 }
 
+// updateJob applies actions to a job and persists the result.
+// Must be called with m.mu write lock held.
+// Returns (previous job, updated job, error). If job not found, returns (nil, nil, nil).
+func (m *copySegmentMeta) updateJob(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) (CopySegmentJob, CopySegmentJob, error) {
+	job, ok := m.jobs[jobID]
+	if !ok {
+		return nil, nil, nil
+	}
+	updatedJob := job.Clone()
+	for _, action := range actions {
+		action(updatedJob)
+	}
+	err := m.catalog.SaveCopySegmentJob(ctx, updatedJob.(*copySegmentJob).CopySegmentJob)
+	if err != nil {
+		return nil, nil, err
+	}
+	m.jobs[updatedJob.GetJobId()] = updatedJob
+	return job, updatedJob, nil
+}
+
 // UpdateJob modifies an existing job using functional update actions.
 //
-// Process flow:
-//  1. Acquire write lock
-//  2. Clone the job to avoid modifying the original
-//  3. Apply all update actions to the clone
-//  4. Persist updated job to catalog
-//  5. Update in-memory cache with the new job
-//  6. Release lock
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - jobID: ID of job to update
-//   - actions: Functional updates to apply (e.g., UpdateCopyJobState)
-//
 // Thread safety: Protected by write lock
-// Idempotency: Safe to call with same updates (last write wins)
-//
-// Why functional updates:
-// - Composable: Can combine multiple updates in one call
-// - Type-safe: Each action has specific purpose
-// - Flexible: Easy to add new update types
 func (m *copySegmentMeta) UpdateJob(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if job, ok := m.jobs[jobID]; ok {
-		updatedJob := job.Clone()
-		for _, action := range actions {
-			action(updatedJob)
-		}
-		err := m.catalog.SaveCopySegmentJob(ctx, updatedJob.(*copySegmentJob).CopySegmentJob)
-		if err != nil {
-			return err
-		}
-		m.jobs[updatedJob.GetJobId()] = updatedJob
-	}
-	return nil
+	_, _, err := m.updateJob(ctx, jobID, actions...)
+	return err
 }
 
 // GetJob retrieves a job by ID from in-memory cache.
@@ -438,6 +522,47 @@ func (m *copySegmentMeta) CountJobBy(ctx context.Context, filters ...CopySegment
 	return len(m.getJobBy(filters...))
 }
 
+// UpdateJobStateAndReleaseRef updates job state and releases snapshot reference
+// if the job transitions to a terminal state (Completed/Failed).
+//
+// This ensures snapshot references are released immediately when restore jobs finish,
+// while Job records are retained for audit purposes (3 hours).
+//
+// Thread safety: Protected by write lock
+func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	prevJob, updatedJob, err := m.updateJob(ctx, jobID, actions...)
+	if err != nil {
+		return err
+	}
+	if prevJob == nil {
+		log.Warn("UpdateJobStateAndReleaseRef: job not found", zap.Int64("jobID", jobID))
+		return nil
+	}
+
+	previousState := prevJob.GetState()
+	newState := updatedJob.GetState()
+	isTerminal := newState == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
+		newState == datapb.CopySegmentJobState_CopySegmentJobFailed
+	wasTerminal := previousState == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
+		previousState == datapb.CopySegmentJobState_CopySegmentJobFailed
+
+	// Only decrement on actual transition TO terminal state (not if already terminal)
+	// This prevents double-decrement when multiple paths try to fail the same job
+	if isTerminal && !wasTerminal {
+		m.restoreRefTracker.DecrementRestoreRef(updatedJob.GetSnapshotName())
+		log.Info("released snapshot reference on job completion",
+			zap.Int64("jobID", jobID),
+			zap.String("snapshot", updatedJob.GetSnapshotName()),
+			zap.String("previousState", previousState.String()),
+			zap.String("newState", newState.String()))
+	}
+
+	return nil
+}
+
 // RemoveJob deletes a job from both persistent storage and memory cache.
 //
 // Process flow:
@@ -452,11 +577,24 @@ func (m *copySegmentMeta) CountJobBy(ctx context.Context, filters ...CopySegment
 func (m *copySegmentMeta) RemoveJob(ctx context.Context, jobID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.jobs[jobID]; ok {
+
+	// Check if job exists
+	_, ok := m.jobs[jobID]
+	if ok {
+		// Remove from persistent storage first to maintain consistency
+		// If this fails, we return error without modifying in-memory state
 		err := m.catalog.DropCopySegmentJob(ctx, jobID)
 		if err != nil {
 			return err
 		}
+
+		// Note: Snapshot restore reference was already decremented when the job
+		// transitioned to a terminal state (Completed/Failed), not here at removal.
+		// This decouples reference lifetime from job metadata cleanup.
+		log.Info("removed copy segment job",
+			zap.Int64("jobID", jobID))
+
+		// Remove from in-memory cache
 		delete(m.jobs, jobID)
 	}
 	return nil
@@ -623,4 +761,27 @@ func (m *copySegmentMeta) RemoveTask(ctx context.Context, taskID int64) error {
 		m.tasks.remove(taskID)
 	}
 	return nil
+}
+
+// ===========================================================================================
+// Snapshot Restore Reference Tracking
+// ===========================================================================================
+
+// IncrementRestoreRef increments the restore reference count for a snapshot.
+// This is called when a new CopySegmentJob is created for snapshot restore.
+func (m *copySegmentMeta) IncrementRestoreRef(snapshotName string) {
+	m.restoreRefTracker.IncrementRestoreRef(snapshotName)
+}
+
+// DecrementRestoreRef decrements the restore reference count for a snapshot.
+// This is called when a CopySegmentJob transitions to a terminal state (Completed/Failed),
+// not during garbage collection.
+func (m *copySegmentMeta) DecrementRestoreRef(snapshotName string) {
+	m.restoreRefTracker.DecrementRestoreRef(snapshotName)
+}
+
+// GetRestoreRefCount returns the restore reference count for a snapshot.
+// This is used in DropSnapshot to check if there are active restore operations.
+func (m *copySegmentMeta) GetRestoreRefCount(snapshotName string) int32 {
+	return m.restoreRefTracker.GetRestoreRefCount(snapshotName)
 }
