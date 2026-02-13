@@ -505,6 +505,7 @@ func TestCompactionExecutor(t *testing.T) {
 
 		mockC.EXPECT().GetPlanID().Return(planID)
 		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
+		mockC.EXPECT().GetSlotUsageV2().Return(float64(8), float64(8)).Times(2)
 		mockC.EXPECT().Complete().Return()
 		mockC.EXPECT().GetStorageConfig().Return(storageConfig)
 
