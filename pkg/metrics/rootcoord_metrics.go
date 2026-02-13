@@ -265,6 +265,7 @@ func RegisterMixCoord(registry *prometheus.Registry) {
 	registry.MustRegister(RootCoordTimestampSaved)
 
 	// for collection
+	registry.MustRegister(RootCoordNumOfDatabases)
 	registry.MustRegister(RootCoordNumOfCollections)
 	registry.MustRegister(RootCoordNumOfPartitions)
 
