@@ -199,10 +199,18 @@ func (c *copySegmentChecker) Close() {
 // This logs the count of jobs in each state and reports metrics for monitoring.
 // Called on every checker tick to provide visibility into job progress.
 //
+// Skips logging when no jobs exist (system idle) to reduce log noise,
+// consistent with import_checker.go.
+//
 // Metrics reported:
 //   - CopySegmentJobs gauge with state label
 //   - Counts for Pending, Executing, Completed, Failed states
 func (c *copySegmentChecker) LogJobStats(jobs []CopySegmentJob) {
+	// Skip logging when system is idle (no jobs at all)
+	if len(jobs) == 0 {
+		return
+	}
+
 	// Group jobs by state
 	byState := lo.GroupBy(jobs, func(job CopySegmentJob) string {
 		return job.GetState().String()
@@ -226,12 +234,20 @@ func (c *copySegmentChecker) LogJobStats(jobs []CopySegmentJob) {
 // This logs the count of tasks in each state and reports metrics for monitoring.
 // Called on every checker tick to provide visibility into task execution.
 //
+// Skips logging when no tasks exist (system idle) to reduce log noise,
+// consistent with import_checker.go.
+//
 // Metrics reported:
 //   - CopySegmentTasks gauge with state label
 //   - Counts for Pending, InProgress, Completed, Failed states
 func (c *copySegmentChecker) LogTaskStats() {
 	// Fetch all tasks from metadata
 	tasks := c.copyMeta.GetTaskBy(c.ctx)
+
+	// Skip logging when system is idle (no tasks at all)
+	if len(tasks) == 0 {
+		return
+	}
 
 	// Group tasks by state
 	byState := lo.GroupBy(tasks, func(t CopySegmentTask) datapb.CopySegmentTaskState {
