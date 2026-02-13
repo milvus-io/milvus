@@ -353,7 +353,7 @@ func (s *Server) initDataCoord() error {
 
 	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler)
 
-	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.compactionTriggerManager)
+	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler)
 
 	// init file resource observer
 	if s.fileResourceObserver != nil {
@@ -746,7 +746,7 @@ func (s *Server) initCompaction() {
 	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.indexEngineVersionManager)
 	cph.loadMeta()
 	s.compactionInspector = cph
-	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.importMeta, s.indexEngineVersionManager)
+	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexEngineVersionManager)
 	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
 	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
 }

@@ -21,7 +21,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -38,7 +37,6 @@ type CompactionTriggerManagerSuite struct {
 	inspector      *MockCompactionInspector
 	testLabel      *CompactionGroupLabel
 	meta           *meta
-	importMeta     ImportMeta
 	versionManager *MockVersionManager
 
 	triggerManager *CompactionTriggerManager
@@ -66,17 +64,10 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 		ID:     s.testLabel.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	})
-	catalog := mocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{}, nil)
-	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{}, nil)
-	catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{}, nil)
-	importMeta, err := NewImportMeta(context.TODO(), catalog, s.mockAlloc, s.meta)
-	s.Require().NoError(err)
-	s.importMeta = importMeta
 	versionManager := NewMockVersionManager(s.T())
 	versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0")).Maybe()
 	s.versionManager = versionManager
-	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.inspector, s.meta, s.importMeta, s.versionManager)
+	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.inspector, s.meta, s.versionManager)
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
@@ -386,33 +377,9 @@ func TestCompactionAndImport(t *testing.T) {
 		ID:     1,
 		Schema: &schemapb.CollectionSchema{},
 	})
-	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{}, nil)
-	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{}, nil)
-	catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{
-		{
-			JobID:        100,
-			CollectionID: 1,
-			State:        internalpb.ImportJobState_Importing,
-			Schema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{
-						FieldID:      100,
-						Name:         "pk",
-						DataType:     schemapb.DataType_Int64,
-						IsPrimaryKey: true,
-					},
-				},
-			},
-		},
-	}, nil).Once()
-	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
-	importMeta, err := NewImportMeta(context.TODO(), catalog, mockAlloc, meta)
-	assert.NoError(t, err)
-
 	versionManager := NewMockVersionManager(t)
 	versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0")).Maybe()
-	triggerManager := NewCompactionTriggerManager(mockAlloc, handler, inspector, meta, importMeta, versionManager)
+	triggerManager := NewCompactionTriggerManager(mockAlloc, handler, inspector, meta, versionManager)
 
 	Params.Save(Params.DataCoordCfg.L0CompactionTriggerInterval.Key, "1")
 	defer Params.Reset(Params.DataCoordCfg.L0CompactionTriggerInterval.Key)
@@ -432,11 +399,6 @@ func TestCompactionAndImport(t *testing.T) {
 			return nil
 		}).Return(nil)
 	mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
-
-	<-triggerManager.GetPauseCompactionChan(100, 10)
-	defer func() {
-		<-triggerManager.GetResumeCompactionChan(100, 10)
-	}()
 
 	triggerManager.Start()
 	defer triggerManager.Stop()
