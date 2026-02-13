@@ -112,6 +112,10 @@ set(LINK_TARGETS
     ${CONAN_LIBS}
     )
 
+if(TARGET RDKit::RDKit)
+    list(APPEND LINK_TARGETS RDKit::RDKit)
+endif()
+
 if(USE_OPENDAL)
     set(LINK_TARGETS ${LINK_TARGETS} opendal)
 endif()
@@ -127,5 +131,12 @@ if (ENABLE_GCP_NATIVE)
 endif()
 
 target_link_libraries(milvus_core ${LINK_TARGETS})
+
+if(DEFINED RDKIT_INCLUDE_DIR)
+    set(MOL_C_OBJECT ${CMAKE_CURRENT_BINARY_DIR}/common/mol_c.o)
+    target_link_libraries(milvus_core ${MOL_C_OBJECT})
+    add_dependencies(milvus_core mol_c_build)
+    target_link_directories(milvus_core PUBLIC ${CONAN_LIB_DIRS_RDKIT})
+endif()
 
 install(TARGETS milvus_core DESTINATION "${CMAKE_INSTALL_LIBDIR}")
