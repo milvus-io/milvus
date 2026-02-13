@@ -120,8 +120,8 @@ type CompactionTriggerManager struct {
 	handler   Handler
 	allocator allocator.Allocator
 
-	meta     *meta
-	l0Policy *l0CompactionPolicy
+	meta                        *meta
+	l0Policy                    *l0CompactionPolicy
 	clusteringPolicy            *clusteringCompactionPolicy
 	singlePolicy                *singleCompactionPolicy
 	forceMergePolicy            *forceMergeCompactionPolicy
