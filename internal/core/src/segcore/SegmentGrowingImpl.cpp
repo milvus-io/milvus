@@ -1132,6 +1132,8 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   const BitsetView& bitset,
                                   milvus::OpContext* op_context,
                                   SearchResult& output) const {
+    // Acquire shared lock to prevent race with Reopen/fill_empty_field
+    std::shared_lock lck(sch_mutex_);
     query::SearchOnGrowing(*this,
                            search_info,
                            query_data,
@@ -1150,6 +1152,8 @@ SegmentGrowingImpl::bulk_subscript(
     const int64_t* seg_offsets,
     int64_t count,
     const std::vector<std::string>& dynamic_field_names) const {
+    // Acquire shared lock to prevent race with Reopen/fill_empty_field
+    std::shared_lock lck(sch_mutex_);
     Assert(!dynamic_field_names.empty());
     auto& field_meta = schema_->operator[](field_id);
     auto vec_ptr = insert_record_.get_data_base(field_id);
@@ -1178,6 +1182,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                    FieldId field_id,
                                    const int64_t* seg_offsets,
                                    int64_t count) const {
+    // Acquire shared lock to prevent race with Reopen/fill_empty_field
+    std::shared_lock lck(sch_mutex_);
     auto& field_meta = schema_->operator[](field_id);
     auto vec_ptr = insert_record_.get_data_base(field_id);
     if (field_meta.is_vector()) {
@@ -1606,6 +1612,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                    const int64_t* seg_offsets,
                                    int64_t count,
                                    void* output) const {
+    // Acquire shared lock to prevent race with Reopen/fill_empty_field
+    std::shared_lock lck(sch_mutex_);
     switch (system_type) {
         case SystemFieldType::Timestamp:
             bulk_subscript_impl<Timestamp>(op_ctx,
@@ -1632,6 +1640,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                    void* data,
                                    TargetBitmap& valid_map,
                                    bool small_int_raw_type) const {
+    // Acquire shared lock to prevent race with Reopen/fill_empty_field
+    std::shared_lock lck(sch_mutex_);
     auto vec_ptr = insert_record_.get_data_base(field_id);
     auto& field_meta = schema_->operator[](field_id);
     valid_map.set();
