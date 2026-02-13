@@ -165,7 +165,7 @@ func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetData
 			session.WithSegmentCnt(len(resp.GetSegments())),
 			session.WithChannelCnt(len(resp.GetChannels())),
 			session.WithMemCapacity(resp.GetMemCapacityInMB()),
-			session.WithChannelCnt(int(resp.GetCpuNum())),
+			session.WithCPUNum(resp.GetCpuNum()),
 		)
 		dh.updateSegmentsDistribution(ctx, resp)
 		dh.updateChannelsDistribution(ctx, resp)
