@@ -2061,11 +2061,13 @@ class TestCollectionMaintenance(TestBase):
         # Compact collection
         response = client.compact(name)
         assert response["code"] == 0
+        compaction_id = response["data"]["compactionID"]
 
-        # Get compaction state
-        response = client.get_compaction_state(name)
-        assert response["code"] == 0
-        assert "state" in response["data"]
-        assert "compactionID" in response["data"]
+        # Get compaction state (compactionID <= 0 means no compaction was generated)
+        if compaction_id > 0:
+            response = client.get_compaction_state(compaction_id)
+            assert response["code"] == 0
+            assert "state" in response["data"]
+            assert "compactionID" in response["data"]
         # TODO need verification by pymilvus
 
