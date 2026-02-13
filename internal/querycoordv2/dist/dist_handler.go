@@ -296,20 +296,27 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 }
 
 func checkDelegatorServiceable(ctx context.Context, dh *distHandler, view *meta.LeaderView) bool {
+	// if status is already set, return directly without creating log object
+	if status := view.Status; status != nil {
+		if status.GetServiceable() {
+			return true
+		}
+		// Only create log when not serviceable
+		log.Ctx(ctx).
+			WithRateGroup(fmt.Sprintf("distHandler.updateChannelsDistribution.%s", view.Channel), 1, 60).
+			With(
+				zap.Int64("nodeID", view.ID),
+				zap.String("channel", view.Channel),
+			).RatedInfo(10, "delegator is not serviceable", zap.Int64("queryViewVersion", view.TargetVersion))
+		return false
+	}
+
 	log := log.Ctx(ctx).
 		WithRateGroup(fmt.Sprintf("distHandler.updateChannelsDistribution.%s", view.Channel), 1, 60).
 		With(
 			zap.Int64("nodeID", view.ID),
 			zap.String("channel", view.Channel),
 		)
-
-	if status := view.Status; status != nil {
-		if !status.GetServiceable() {
-			log.RatedInfo(10, "delegator is not serviceable", zap.Int64("queryViewVersion", view.TargetVersion))
-			return false
-		}
-		return true
-	}
 
 	// check leader data ready for version before 2.5.8
 	if err := utils.CheckDelegatorDataReady(dh.nodeManager, dh.target, view, meta.CurrentTarget); err != nil {
