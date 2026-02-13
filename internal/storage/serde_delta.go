@@ -622,6 +622,5 @@ func NewLegacyDeltalogReader(pkField *schemapb.FieldSchema, downloader downloade
 		schema,
 		nil,
 		blobsReader,
-		nil,
 	), nil
 }
