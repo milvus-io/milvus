@@ -227,6 +227,7 @@ func fillDatabase(ctx context.Context, req interface{}) (context.Context, interf
 		if r.DbName == "" {
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
 		}
+		return ctx, r
 	case *milvuspb.ImportRequest:
 		if r.DbName == "" {
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
@@ -315,7 +316,7 @@ func fillDatabase(ctx context.Context, req interface{}) (context.Context, interf
 		if r.DbName == "" {
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
 		}
-
+		return ctx, r
 	case *milvuspb.CreateSnapshotRequest:
 		if r.DbName == "" {
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
@@ -332,6 +333,16 @@ func fillDatabase(ctx context.Context, req interface{}) (context.Context, interf
 		}
 		return ctx, r
 	case *milvuspb.ListRestoreSnapshotJobsRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
+	case *milvuspb.RefreshExternalCollectionRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
+	case *milvuspb.ListRefreshExternalCollectionJobsRequest:
 		if r.DbName == "" {
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
 		}
