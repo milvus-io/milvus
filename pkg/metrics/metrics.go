@@ -143,6 +143,17 @@ const (
 	TaskStateLabel = "task_state"
 
 	filesystemKeyLabelName = "fs"
+
+	// Snapshot metric labels
+	snapshotNameLabelName    = "snapshot_name"
+	snapshotOpLabelName      = "operation"
+	snapshotErrTypeLabelName = "error_type"
+	jobIDLabelName           = "job_id"
+
+	// Snapshot operation values
+	SnapshotCreateOp  = "create"
+	SnapshotDropOp    = "drop"
+	SnapshotRestoreOp = "restore"
 )
 
 var (

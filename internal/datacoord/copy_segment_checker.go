@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -219,6 +220,20 @@ func (c *copySegmentChecker) LogJobStats(jobs []CopySegmentJob) {
 		metrics.CopySegmentJobs.WithLabelValues(state).Set(float64(num))
 	}
 	log.Info("copy segment job stats", zap.Any("stateNum", stateNum))
+
+	// Report snapshot restore jobs by state (only jobs with snapshot source)
+	snapshotJobs := lo.Filter(jobs, func(job CopySegmentJob, _ int) bool {
+		return job.GetSnapshotName() != ""
+	})
+	snapshotByState := lo.GroupBy(snapshotJobs, func(job CopySegmentJob) string {
+		return job.GetState().String()
+	})
+	for state := range datapb.CopySegmentJobState_value {
+		if state == datapb.CopySegmentJobState_CopySegmentJobNone.String() {
+			continue
+		}
+		metrics.DataCoordSnapshotRestoreJobsTotal.WithLabelValues(state).Set(float64(len(snapshotByState[state])))
+	}
 }
 
 // LogTaskStats reports task statistics grouped by state.
@@ -437,6 +452,15 @@ func (c *copySegmentChecker) checkCopyingJob(job CopySegmentJob) {
 		}
 	}
 
+	// Report restore progress ratio for snapshot jobs
+	if job.GetSnapshotName() != "" && totalSegments > 0 {
+		ratio := float64(copiedSegments) / float64(totalSegments)
+		metrics.DataCoordSnapshotRestoreProgressRatio.WithLabelValues(
+			strconv.FormatInt(job.GetJobId(), 10),
+			job.GetSnapshotName(),
+		).Set(ratio)
+	}
+
 	// Step 4: Check for failures (fail-fast)
 	if failedTasks > 0 {
 		log.Warn("copy segment job has failed tasks",
@@ -535,6 +559,13 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 	// Step 4: Record metrics
 	totalDuration := job.GetTR().ElapseSpan()
 	metrics.CopySegmentJobLatency.Observe(float64(totalDuration.Milliseconds()))
+	// Set progress to 1.0 on completion; metric is deleted later by GC.
+	if job.GetSnapshotName() != "" {
+		metrics.DataCoordSnapshotRestoreProgressRatio.WithLabelValues(
+			strconv.FormatInt(job.GetJobId(), 10),
+			job.GetSnapshotName(),
+		).Set(1.0)
+	}
 	log.Info("copy segment job completed",
 		zap.Int64("totalRows", totalRows),
 		zap.Int("targetSegments", len(targetSegmentIDs)),
@@ -588,6 +619,8 @@ func (c *copySegmentChecker) checkFailedJob(job CopySegmentJob) {
 				WrapCopySegmentTaskLog(task, zap.Error(err))...)
 		}
 	}
+
+	cleanupSnapshotProgressMetric(job)
 }
 
 // ============================================================================
@@ -708,6 +741,18 @@ func (c *copySegmentChecker) checkGC(job CopySegmentJob) {
 			log.Warn("failed to remove copy segment job", zap.Error(err))
 			return
 		}
+		cleanupSnapshotProgressMetric(job)
 		log.Info("copy segment job removed")
+	}
+}
+
+// cleanupSnapshotProgressMetric removes the per-job progress gauge to prevent
+// cardinality leak after the job finishes, fails, or is garbage collected.
+func cleanupSnapshotProgressMetric(job CopySegmentJob) {
+	if job.GetSnapshotName() != "" {
+		metrics.DataCoordSnapshotRestoreProgressRatio.DeleteLabelValues(
+			strconv.FormatInt(job.GetJobId(), 10),
+			job.GetSnapshotName(),
+		)
 	}
 }

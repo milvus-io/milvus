@@ -815,8 +815,21 @@ func (s *Server) collectMetaMetrics(ctx context.Context) {
 		case <-ticker.C:
 			s.meta.statsTaskMeta.updateMetrics()
 			s.meta.indexMeta.updateIndexTasksMetrics()
+			s.collectSnapshotMetrics()
 		}
 	}
+}
+
+func (s *Server) collectSnapshotMetrics() {
+	if s.meta == nil || s.meta.snapshotMeta == nil {
+		return
+	}
+	s.meta.snapshotMeta.updateMetrics(func(collectionID int64) string {
+		if coll := s.meta.GetCollection(collectionID); coll != nil {
+			return coll.DatabaseName
+		}
+		return ""
+	})
 }
 
 func (s *Server) startTaskScheduler() {
