@@ -582,6 +582,28 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 			return true
 		}
 
+		// Check if segment is referenced by any snapshot before deleting its binlog
+		if segment != nil {
+			snapshotMeta := gc.meta.GetSnapshotMeta()
+			if snapshotMeta != nil {
+				// If RefIndex is not loaded yet, skip to avoid incorrectly deleting snapshot-referenced files
+				if !snapshotMeta.IsRefIndexLoadedForCollection(segment.GetCollectionID()) {
+					logger.Info("skip GC binlog files since snapshot RefIndex is not loaded yet",
+						zap.Int64("segmentID", segmentID),
+						zap.Int64("collectionID", segment.GetCollectionID()))
+					valid++
+					return true
+				}
+				if snapshotIDs := snapshotMeta.GetSnapshotBySegment(ctx, segment.GetCollectionID(), segmentID); len(snapshotIDs) > 0 {
+					logger.Info("skip GC binlog files since segment is referenced by snapshot",
+						zap.Int64("segmentID", segmentID),
+						zap.Int64s("snapshotIDs", snapshotIDs))
+					valid++
+					return true
+				}
+			}
+		}
+
 		// ignore error since it could be cleaned up next time
 		file := chunkInfo.FilePath
 
@@ -739,20 +761,23 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 
 		// Check if snapshot RefIndex is loaded before querying snapshot references
 		// If not loaded, skip this segment and try again in next GC cycle
-		if !gc.meta.GetSnapshotMeta().IsRefIndexLoadedForCollection(segment.GetCollectionID()) {
-			log.Info("skip GC segment since snapshot RefIndex is not loaded yet",
-				zap.Int64("collectionID", segment.GetCollectionID()))
-			continue
-		}
+		snapshotMeta := gc.meta.GetSnapshotMeta()
+		if snapshotMeta != nil {
+			if !snapshotMeta.IsRefIndexLoadedForCollection(segment.GetCollectionID()) {
+				log.Info("skip GC segment since snapshot RefIndex is not loaded yet",
+					zap.Int64("collectionID", segment.GetCollectionID()))
+				continue
+			}
 
-		if snapshotIDs := gc.meta.GetSnapshotMeta().GetSnapshotBySegment(ctx, segment.GetCollectionID(), segmentID); len(snapshotIDs) > 0 {
-			log.Info("skip GC segment since it is referenced by snapshot",
-				zap.Int64("collectionID", segment.GetCollectionID()),
-				zap.Int64("partitionID", segment.GetPartitionID()),
-				zap.String("channel", segInsertChannel),
-				zap.Int64("segmentID", segmentID),
-				zap.Int64s("snapshotIDs", snapshotIDs))
-			continue
+			if snapshotIDs := snapshotMeta.GetSnapshotBySegment(ctx, segment.GetCollectionID(), segmentID); len(snapshotIDs) > 0 {
+				log.Info("skip GC segment since it is referenced by snapshot",
+					zap.Int64("collectionID", segment.GetCollectionID()),
+					zap.Int64("partitionID", segment.GetPartitionID()),
+					zap.String("channel", segInsertChannel),
+					zap.Int64("segmentID", segmentID),
+					zap.Int64s("snapshotIDs", snapshotIDs))
+				continue
+			}
 		}
 
 		if !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, channelCPs[segInsertChannel]) {
@@ -995,16 +1020,19 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 
 			// Check if snapshot RefIndex is loaded before querying snapshot references
 			// If not loaded, skip this index and try again in next GC cycle
-			if !gc.meta.GetSnapshotMeta().IsRefIndexLoadedForCollection(segIdx.CollectionID) {
-				log.Info("skip GC segment index since snapshot RefIndex is not loaded yet",
-					zap.Int64("collectionID", segIdx.CollectionID))
-				continue
-			}
+			snapshotMeta := gc.meta.GetSnapshotMeta()
+			if snapshotMeta != nil {
+				if !snapshotMeta.IsRefIndexLoadedForCollection(segIdx.CollectionID) {
+					log.Info("skip GC segment index since snapshot RefIndex is not loaded yet",
+						zap.Int64("collectionID", segIdx.CollectionID))
+					continue
+				}
 
-			if snapshotIDs := gc.meta.GetSnapshotMeta().GetSnapshotByIndex(ctx, segIdx.CollectionID, segIdx.IndexID); len(snapshotIDs) > 0 {
-				log.Info("skip GC segment index since it is referenced by snapshot",
-					zap.Int64s("snapshotIDs", snapshotIDs))
-				continue
+				if snapshotIDs := snapshotMeta.GetSnapshotByIndex(ctx, segIdx.CollectionID, segIdx.IndexID); len(snapshotIDs) > 0 {
+					log.Info("skip GC segment index since it is referenced by snapshot",
+						zap.Int64s("snapshotIDs", snapshotIDs))
+					continue
+				}
 			}
 
 			log.Info("GC Segment Index file start...")
@@ -1064,6 +1092,26 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 			logger.Info("garbageCollector recycleUnusedIndexFiles remove index files success")
 			return true
 		}
+
+		// Check if snapshot RefIndex is loaded before querying snapshot references
+		// If not loaded, skip this index and try again in next GC cycle
+		snapshotMeta := gc.meta.GetSnapshotMeta()
+		if snapshotMeta != nil {
+			if !snapshotMeta.IsRefIndexLoadedForCollection(segIdx.CollectionID) {
+				logger.Info("skip GC index files since snapshot RefIndex is not loaded yet",
+					zap.Int64("collectionID", segIdx.CollectionID))
+				return true
+			}
+
+			// Check if this index is referenced by any snapshot
+			// If snapshots reference this index, do not delete the index files
+			if snapshotIDs := snapshotMeta.GetSnapshotByIndex(ctx, segIdx.CollectionID, segIdx.IndexID); len(snapshotIDs) > 0 {
+				logger.Info("skip GC index files since index is referenced by snapshot",
+					zap.Int64s("snapshotIDs", snapshotIDs))
+				return true
+			}
+		}
+
 		filesMap := gc.getAllIndexFilesOfIndex(segIdx)
 
 		logger.Info("recycle index files", zap.Int("meta files num", len(filesMap)))
@@ -1220,6 +1268,25 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context, sig
 			log.Info("skip GC segment since collection is paused", zap.Int64("segmentID", seg.GetID()), zap.Int64("collectionID", seg.GetCollectionID()))
 			continue
 		}
+
+		// Check if segment is referenced by any snapshot before deleting text index files
+		snapshotMeta := gc.meta.GetSnapshotMeta()
+		if snapshotMeta != nil {
+			// If RefIndex is not loaded yet, skip to avoid incorrectly deleting snapshot-referenced files
+			if !snapshotMeta.IsRefIndexLoadedForCollection(seg.GetCollectionID()) {
+				log.Info("skip GC text index files since snapshot RefIndex is not loaded yet",
+					zap.Int64("segmentID", seg.GetID()),
+					zap.Int64("collectionID", seg.GetCollectionID()))
+				continue
+			}
+			if snapshotIDs := snapshotMeta.GetSnapshotBySegment(ctx, seg.GetCollectionID(), seg.GetID()); len(snapshotIDs) > 0 {
+				log.Info("skip GC text index files since segment is referenced by snapshot",
+					zap.Int64("segmentID", seg.GetID()),
+					zap.Int64s("snapshotIDs", snapshotIDs))
+				continue
+			}
+		}
+
 		gc.ackSignal(signal)
 		for _, fieldStats := range seg.GetTextStatsLogs() {
 			log := log.With(zap.Int64("segmentID", seg.GetID()), zap.Int64("fieldID", fieldStats.GetFieldID()))
@@ -1397,6 +1464,25 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 			log.Info("skip GC segment since collection is paused", zap.Int64("segmentID", seg.GetID()), zap.Int64("collectionID", seg.GetCollectionID()))
 			continue
 		}
+
+		// Check if segment is referenced by any snapshot before deleting JSON index files
+		snapshotMeta := gc.meta.GetSnapshotMeta()
+		if snapshotMeta != nil {
+			// If RefIndex is not loaded yet, skip to avoid incorrectly deleting snapshot-referenced files
+			if !snapshotMeta.IsRefIndexLoadedForCollection(seg.GetCollectionID()) {
+				log.Info("skip GC JSON index files since snapshot RefIndex is not loaded yet",
+					zap.Int64("segmentID", seg.GetID()),
+					zap.Int64("collectionID", seg.GetCollectionID()))
+				continue
+			}
+			if snapshotIDs := snapshotMeta.GetSnapshotBySegment(ctx, seg.GetCollectionID(), seg.GetID()); len(snapshotIDs) > 0 {
+				log.Info("skip GC JSON index files since segment is referenced by snapshot",
+					zap.Int64("segmentID", seg.GetID()),
+					zap.Int64s("snapshotIDs", snapshotIDs))
+				continue
+			}
+		}
+
 		gc.ackSignal(signal)
 		for _, fieldStats := range seg.GetJsonKeyStats() {
 			log := log.With(zap.Int64("segmentID", seg.GetID()), zap.Int64("fieldID", fieldStats.GetFieldID()))
