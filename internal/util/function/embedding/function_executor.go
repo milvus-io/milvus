@@ -71,6 +71,9 @@ func createFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSc
 		return f, nil
 	case schemapb.FunctionType_MinHash:
 		return nil, nil
+	case schemapb.FunctionType_MolFingerprint:
+		// Return nil during validation phase, will be created in NewFunctionExecutor with FieldIds
+		return nil, nil
 	default:
 		return nil, fmt.Errorf("unknown functionRunner type %s", schema.GetType().String())
 	}
@@ -91,7 +94,13 @@ func validateFunction(schema *schemapb.CollectionSchema, fSchema *schemapb.Funct
 				return err
 			}
 		}
-		// bm25 or minhash validate pass
+		if fSchema.GetType() == schemapb.FunctionType_MolFingerprint {
+			err := function.ValidateMolFingerprintFunction(schema, fSchema)
+			if err != nil {
+				return err
+			}
+		}
+		// bm25 or minhash or mol_fingerprint validate pass
 		return nil
 	}
 
@@ -130,10 +139,22 @@ func NewFunctionExecutor(schema *schemapb.CollectionSchema, functions []*schemap
 		functions = schema.Functions
 	}
 	for _, fSchema := range functions {
-		runner, err := createFunction(schema, fSchema, extraInfo)
+		var runner Runner
+		var err error
+
+		// MolFingerprint needs special handling since createFunction returns nil for it
+		if fSchema.GetType() == schemapb.FunctionType_MolFingerprint {
+			runner, err = NewMolFingerprintEmbeddingFunction(schema, fSchema)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			runner, err = createFunction(schema, fSchema, extraInfo)
 		if err != nil {
 			return nil, err
 		}
+		}
+
 		if runner != nil {
 			executor.runners[fSchema.GetOutputFieldIds()[0]] = runner
 		}

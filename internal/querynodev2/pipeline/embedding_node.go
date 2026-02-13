@@ -33,7 +33,6 @@ import (
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/util/bm25"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -169,7 +168,7 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, msg *m
 		stats[outputFieldID] = storage.NewBM25Stats()
 	}
 	stats[outputFieldID].AppendBytes(sparseArray.GetContents()...)
-	msg.FieldsData = append(msg.FieldsData, bm25.BuildSparseFieldData(outputField, sparseArray))
+	msg.FieldsData = append(msg.FieldsData, delegator.BuildSparseFieldData(outputField, sparseArray))
 	return nil
 }
 
@@ -237,6 +236,11 @@ func (eNode *embeddingNode) embedding(msg *msgstream.InsertMsg, stats map[int64]
 			if err != nil {
 				return err
 			}
+		case schemapb.FunctionType_MolFingerprint:
+			err := eNode.molFingerprintEmbedding(functionRunner, msg)
+			if err != nil {
+				return err
+			}
 		default:
 			log.Warn("pipeline embedding with unknown function type", zap.Any("type", functionSchema.GetType()))
 			return errors.New("unknown function type")
@@ -288,11 +292,59 @@ func getEmbeddingFieldDatas(datas []*schemapb.FieldData, fieldIDs ...int64) ([]a
 	return result, nil
 }
 
-func getEmbeddingFieldData(datas []*schemapb.FieldData, fieldID int64) ([]string, error) {
+func getEmbeddingFieldData(datas []*schemapb.FieldData, fieldID int64) (any, error) {
 	for _, data := range datas {
 		if data.GetFieldId() == fieldID {
-			return data.GetScalars().GetStringData().GetData(), nil
+			// Handle String/VarChar/Text types
+			if stringData := data.GetScalars().GetStringData(); stringData != nil {
+				return stringData.GetData(), nil
+			}
+			// Handle MOL type: return [][]byte (pickle format) directly
+			// The MolFingerprintFunctionRunner will convert pickle to SMILES
+			if molData := data.GetScalars().GetMolData(); molData != nil {
+				return molData.GetData(), nil
+			}
+			return nil, fmt.Errorf("field %d has unsupported data type for embedding", fieldID)
 		}
 	}
 	return nil, fmt.Errorf("field %d not found", fieldID)
+}
+
+func (eNode *embeddingNode) molFingerprintEmbedding(runner function.FunctionRunner, msg *msgstream.InsertMsg) error {
+	inputFields := runner.GetInputFields()
+	outputField := runner.GetOutputFields()[0]
+
+	datas, err := getEmbeddingFieldDatas(msg.FieldsData, lo.Map(inputFields, func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })...)
+	if err != nil {
+		return err
+	}
+
+	output, err := runner.BatchRun(datas...)
+	if err != nil {
+		return err
+	}
+
+	binaryVectorData, ok := output[0].(*storage.BinaryVectorFieldData)
+	if !ok {
+		return errors.New("MOL fingerprint runner return unknown type output")
+	}
+
+	msg.FieldsData = append(msg.FieldsData, BuildBinaryFieldData(outputField, binaryVectorData))
+	return nil
+}
+
+func BuildBinaryFieldData(field *schemapb.FieldSchema, binaryVectorData *storage.BinaryVectorFieldData) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      field.GetDataType(),
+		FieldName: field.GetName(),
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(binaryVectorData.Dim),
+				Data: &schemapb.VectorField_BinaryVector{
+					BinaryVector: binaryVectorData.Data,
+				},
+			},
+		},
+		FieldId: field.GetFieldID(),
+	}
 }
