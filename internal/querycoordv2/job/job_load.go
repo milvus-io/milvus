@@ -141,6 +141,7 @@ func (job *LoadCollectionJob) Execute() error {
 	req := job.req
 	log := log.Ctx(job.ctx).With(zap.Int64("collectionID", req.GetCollectionID()))
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionID())
+	triggerResourceLimitFlagClearHook()
 
 	// 1. Fetch target partitions
 	partitionIDs, err := job.broker.GetPartitions(job.ctx, req.GetCollectionID())
@@ -354,6 +355,7 @@ func (job *LoadPartitionJob) Execute() error {
 		zap.Int64s("partitionIDs", req.GetPartitionIDs()),
 	)
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionID())
+	triggerResourceLimitFlagClearHook()
 
 	// 1. Fetch target partitions
 	loadedPartitionIDs := lo.Map(job.meta.CollectionManager.GetPartitionsByCollection(job.ctx, req.GetCollectionID()),
