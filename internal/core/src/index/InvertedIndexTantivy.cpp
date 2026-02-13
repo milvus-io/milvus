@@ -11,7 +11,9 @@
 
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <fcntl.h>
 #include <string.h>
+#include <unistd.h>
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -42,8 +44,11 @@
 #include "nlohmann/detail/iterators/iter_impl.hpp"
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
+#include "storage/FileWriter.h"
+#include "storage/IndexEntryReader.h"
 #include "storage/DataCodec.h"
 #include "storage/FileManager.h"
+#include "storage/IndexEntryWriter.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/ThreadPools.h"
@@ -97,7 +102,7 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
       inverted_index_single_segment_(inverted_index_single_segment),
       user_specified_doc_id_(user_specified_doc_id),
       is_nested_index_(is_nested_index) {
-    mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
+    this->file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
     // push init wrapper to load process
     if (ctx.for_loading_index) {
@@ -150,6 +155,9 @@ InvertedIndexTantivy<T>::Serialize(const Config& config) {
 template <typename T>
 IndexStatsPtr
 InvertedIndexTantivy<T>::Upload(const Config& config) {
+    if (kScalarIndexUseV3) {
+        return this->UploadV3(config);
+    }
     finish();
 
     boost::filesystem::path p(path_);
@@ -180,9 +188,9 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
     auto remote_paths_to_size = disk_file_manager_->GetRemotePathsToFileSize();
 
     auto binary_set = Serialize(config);
-    mem_file_manager_->AddFile(binary_set);
+    this->file_manager_->AddFile(binary_set);
     auto remote_mem_path_to_size =
-        mem_file_manager_->GetRemotePathsToFileSize();
+        this->file_manager_->GetRemotePathsToFileSize();
 
     std::vector<SerializedIndexFileInfo> index_files;
     index_files.reserve(remote_paths_to_size.size() +
@@ -193,7 +201,7 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
     for (auto& file : remote_mem_path_to_size) {
         index_files.emplace_back(file.first, file.second);
     }
-    return IndexStats::New(mem_file_manager_->GetAddedTotalMemSize() +
+    return IndexStats::New(this->file_manager_->GetAddedTotalMemSize() +
                                disk_file_manager_->GetAddedTotalFileSize(),
                            std::move(index_files));
 }
@@ -201,8 +209,8 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
 template <typename T>
 void
 InvertedIndexTantivy<T>::Build(const Config& config) {
-    auto field_datas =
-        storage::CacheRawDataAndFillMissing(mem_file_manager_, config);
+    auto field_datas = storage::CacheRawDataAndFillMissing(
+        std::static_pointer_cast<MemFileManager>(this->file_manager_), config);
     BuildWithFieldData(field_datas);
 }
 
@@ -210,6 +218,10 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
                               const Config& config) {
+    if (kScalarIndexUseV3) {
+        this->LoadV3(config);
+        return;
+    }
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
@@ -264,7 +276,7 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
 
     if (null_offset_file_itr != index_files.end()) {
         // null offset file is not sliced
-        auto index_datas = mem_file_manager_->LoadIndexToMemory(
+        auto index_datas = this->file_manager_->LoadIndexToMemory(
             {*null_offset_file_itr}, load_priority);
         auto null_offset_data =
             std::move(index_datas.at(INDEX_NULL_OFFSET_FILE_NAME));
@@ -287,7 +299,7 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
 
     if (null_offset_files.size() > 0) {
         // null offset file is sliced
-        auto index_datas = mem_file_manager_->LoadIndexToMemory(
+        auto index_datas = this->file_manager_->LoadIndexToMemory(
             null_offset_files, load_priority);
 
         auto null_offsets_data = CompactIndexDatas(index_datas);
@@ -831,6 +843,102 @@ InvertedIndexTantivy<std::string>::build_index_for_array_nested(
             offset += length;
         }
     }
+}
+
+template <typename T>
+nlohmann::json
+InvertedIndexTantivy<T>::BuildTantivyMeta(
+    const std::vector<std::string>& file_names, bool has_null) {
+    return {{"file_names", file_names}, {"has_null", has_null}};
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::WriteEntries(storage::IndexEntryWriter* writer) {
+    finish();
+
+    boost::filesystem::path p(path_);
+    std::vector<boost::filesystem::path> files;
+    for (boost::filesystem::directory_iterator iter(p);
+         iter != boost::filesystem::directory_iterator();
+         iter++) {
+        if (!boost::filesystem::is_directory(*iter)) {
+            files.push_back(iter->path());
+        }
+    }
+    std::sort(files.begin(), files.end());
+
+    std::vector<std::string> file_names;
+    for (const auto& f : files) {
+        file_names.push_back(f.filename().string());
+    }
+
+    std::shared_lock<folly::SharedMutex> lock(mutex_);
+    bool has_null = !null_offset_.empty();
+    lock.unlock();
+
+    writer->PutMeta("file_names", file_names);
+    writer->PutMeta("has_null", has_null);
+
+    for (const auto& file_path : files) {
+        auto file_name = file_path.filename().string();
+        int fd = open(file_path.c_str(), O_RDONLY | O_CLOEXEC);
+        AssertInfo(fd != -1, "failed to open file: {}", file_path.string());
+        auto file_size = boost::filesystem::file_size(file_path);
+        writer->WriteEntry(file_name, fd, file_size);
+        close(fd);
+    }
+
+    lock.lock();
+    if (has_null) {
+        writer->WriteEntry(INDEX_NULL_OFFSET_FILE_NAME,
+                           null_offset_.data(),
+                           null_offset_.size() * sizeof(size_t));
+    }
+    lock.unlock();
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
+                                     const Config& config) {
+    auto file_names = reader.GetMeta<std::vector<std::string>>("file_names");
+    bool has_null = reader.GetMeta<bool>("has_null");
+
+    path_ = disk_file_manager_->GetLocalIndexObjectPrefix();
+    boost::filesystem::create_directories(path_);
+
+    std::vector<std::pair<std::string, std::string>> pairs;
+    for (const auto& fn : file_names) {
+        pairs.emplace_back(fn, path_ + "/" + fn);
+    }
+    reader.ReadEntriesToFiles(pairs);
+
+    if (has_null) {
+        auto null_entry = reader.ReadEntry(INDEX_NULL_OFFSET_FILE_NAME);
+        null_offset_.resize(null_entry.data.size() / sizeof(size_t));
+        std::memcpy(null_offset_.data(),
+                    null_entry.data.data(),
+                    null_entry.data.size());
+    }
+
+    auto load_in_mmap =
+        GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        path_.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
+
+    if (!load_in_mmap) {
+        disk_file_manager_->RemoveIndexFiles();
+    }
+
+    ComputeByteSize();
+
+    LOG_INFO(
+        "LoadEntries InvertedIndexTantivy done, file_count: {}, has_null: "
+        "{}, mmap: {}",
+        file_names.size(),
+        has_null,
+        load_in_mmap);
 }
 
 template class InvertedIndexTantivy<bool>;

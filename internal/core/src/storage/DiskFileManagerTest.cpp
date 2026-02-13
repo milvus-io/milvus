@@ -71,6 +71,9 @@
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
+#include "index/BitmapIndex.h"
+#include "index/StringIndexMarisa.h"
+#include "index/StringIndexSort.h"
 
 class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectDOUBLE_Test;
 class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectFLOAT_Test;
@@ -267,6 +270,29 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     lcm->Remove(small_index_file_path_read);
     lcm->Remove(large_index_file_path);
     lcm->Remove(small_index_file_path);
+}
+
+// Ensure that index v3 generated path is the same as v2 path, only with different
+// file name.
+TEST_F(DiskAnnFileManagerTest, V3PackedIndexPathMismatch) {
+    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    storage::FileManagerContext context(filed_data_meta, index_meta, cm_, fs_);
+
+    milvus::index::ScalarIndexSort<int64_t> index(context);
+    std::vector<int64_t> values = {1, 2, 3};
+    index.Build(values.size(), values.data());
+
+    auto stats = index.UploadV3({});
+    auto files = stats->GetIndexFiles();
+    ASSERT_EQ(files.size(), 1);
+
+    storage::MemFileManagerImpl file_manager(context);
+    std::string v2_path = file_manager.GetRemoteIndexObjectPrefixV2() +
+                          "/milvus_packed_stlsort_index.v3";
+    std::string v3_path = files[0];
+
+    EXPECT_EQ(v3_path, v2_path);
 }
 
 int
@@ -1022,4 +1048,198 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskNoValidDataForNonNullable) {
 
     local_chunk_manager->Remove(local_data_path);
     cm_->Remove(insert_file_path);
+}
+
+TEST_F(DiskAnnFileManagerTest, ScalarIndexSortV3Roundtrip) {
+    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    storage::FileManagerContext context(filed_data_meta, index_meta, cm_, fs_);
+
+    const size_t N = 1000;
+    std::vector<int64_t> values(N);
+    for (size_t i = 0; i < N; ++i) {
+        values[i] = static_cast<int64_t>(i * 3);
+    }
+
+    milvus::index::ScalarIndexSort<int64_t> build_index(context);
+    build_index.Build(N, values.data());
+    ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
+
+    auto stats = build_index.UploadV3({});
+    ASSERT_NE(stats, nullptr);
+    auto files = stats->GetIndexFiles();
+    ASSERT_EQ(files.size(), 1);
+
+    milvus::index::ScalarIndexSort<int64_t> load_index(context);
+    milvus::Config load_config;
+    load_config[milvus::index::INDEX_FILES] =
+        std::vector<std::string>{files[0]};
+    load_config[milvus::index::ENABLE_MMAP] = false;
+    load_index.LoadV3(load_config);
+
+    EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
+
+    {
+        std::vector<int64_t> query_vals = {0, 3, 6};
+        auto bitset = load_index.In(query_vals.size(), query_vals.data());
+        EXPECT_TRUE(bitset[0]);
+        EXPECT_TRUE(bitset[1]);
+        EXPECT_TRUE(bitset[2]);
+        EXPECT_FALSE(bitset[3]);
+    }
+
+    {
+        auto bitset =
+            load_index.Range(static_cast<int64_t>(6), milvus::OpType::LessThan);
+        EXPECT_TRUE(bitset[0]);
+        EXPECT_TRUE(bitset[1]);
+        EXPECT_FALSE(bitset[2]);
+    }
+
+    {
+        auto bitset = load_index.Range(
+            static_cast<int64_t>(3), true, static_cast<int64_t>(9), false);
+        EXPECT_FALSE(bitset[0]);
+        EXPECT_TRUE(bitset[1]);
+        EXPECT_TRUE(bitset[2]);
+        EXPECT_FALSE(bitset[3]);
+    }
+
+    for (size_t i = 0; i < N; ++i) {
+        auto val = load_index.Reverse_Lookup(i);
+        ASSERT_TRUE(val.has_value());
+        EXPECT_EQ(val.value(), values[i]);
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest, BitmapIndexV3Roundtrip) {
+    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    storage::FileManagerContext context(filed_data_meta, index_meta, cm_, fs_);
+
+    const size_t N = 1000;
+    std::vector<int64_t> values(N);
+    for (size_t i = 0; i < N; ++i) {
+        values[i] = static_cast<int64_t>(i % 100);
+    }
+
+    milvus::index::BitmapIndex<int64_t> build_index(context);
+    build_index.Build(N, values.data());
+    ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
+
+    auto stats = build_index.UploadV3({});
+    ASSERT_NE(stats, nullptr);
+    auto files = stats->GetIndexFiles();
+    ASSERT_EQ(files.size(), 1);
+
+    milvus::index::BitmapIndex<int64_t> load_index(context);
+    milvus::Config load_config;
+    load_config[milvus::index::INDEX_FILES] =
+        std::vector<std::string>{files[0]};
+    load_config[milvus::index::ENABLE_MMAP] = false;
+    load_index.LoadV3(load_config);
+
+    EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
+
+    {
+        std::vector<int64_t> query_vals = {0, 1};
+        auto bitset = load_index.In(query_vals.size(), query_vals.data());
+        for (size_t i = 0; i < N; ++i) {
+            if (values[i] == 0 || values[i] == 1) {
+                EXPECT_TRUE(bitset[i]) << "offset " << i;
+            } else {
+                EXPECT_FALSE(bitset[i]) << "offset " << i;
+            }
+        }
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest, StringIndexMarisaV3Roundtrip) {
+    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    storage::FileManagerContext context(filed_data_meta, index_meta, cm_, fs_);
+
+    const size_t N = 500;
+    std::vector<std::string> values(N);
+    for (size_t i = 0; i < N; ++i) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "str_%03zu", i);
+        values[i] = buf;
+    }
+
+    milvus::index::StringIndexMarisa build_index(context);
+    build_index.Build(N, values.data());
+    ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
+
+    auto stats = build_index.UploadV3({});
+    ASSERT_NE(stats, nullptr);
+    auto files = stats->GetIndexFiles();
+    ASSERT_EQ(files.size(), 1);
+
+    milvus::index::StringIndexMarisa load_index(context);
+    milvus::Config load_config;
+    load_config[milvus::index::INDEX_FILES] =
+        std::vector<std::string>{files[0]};
+    load_config[milvus::index::ENABLE_MMAP] = false;
+    load_index.LoadV3(load_config);
+
+    EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
+
+    {
+        std::vector<std::string> query_vals = {"str_000", "str_001"};
+        auto bitset = load_index.In(query_vals.size(), query_vals.data());
+        EXPECT_TRUE(bitset[0]);
+        EXPECT_TRUE(bitset[1]);
+        for (size_t i = 2; i < N; ++i) {
+            EXPECT_FALSE(bitset[i]) << "offset " << i;
+        }
+    }
+}
+
+TEST_F(DiskAnnFileManagerTest, StringIndexSortV3Roundtrip) {
+    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    storage::FileManagerContext context(filed_data_meta, index_meta, cm_, fs_);
+
+    const size_t N = 500;
+    std::vector<std::string> values(N);
+    for (size_t i = 0; i < N; ++i) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "str_%03zu", i);
+        values[i] = buf;
+    }
+
+    milvus::index::StringIndexSort build_index(context);
+    build_index.Build(N, values.data());
+    ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
+
+    auto stats = build_index.UploadV3({});
+    ASSERT_NE(stats, nullptr);
+    auto files = stats->GetIndexFiles();
+    ASSERT_EQ(files.size(), 1);
+
+    milvus::index::StringIndexSort load_index(context);
+    milvus::Config load_config;
+    load_config[milvus::index::INDEX_FILES] =
+        std::vector<std::string>{files[0]};
+    load_config[milvus::index::ENABLE_MMAP] = false;
+    load_index.LoadV3(load_config);
+
+    EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
+
+    {
+        std::vector<std::string> query_vals = {"str_000", "str_001"};
+        auto bitset = load_index.In(query_vals.size(), query_vals.data());
+        EXPECT_TRUE(bitset[0]);
+        EXPECT_TRUE(bitset[1]);
+        for (size_t i = 2; i < N; ++i) {
+            EXPECT_FALSE(bitset[i]) << "offset " << i;
+        }
+    }
+
+    {
+        auto val = load_index.Reverse_Lookup(0);
+        ASSERT_TRUE(val.has_value());
+        EXPECT_EQ(val.value(), "str_000");
+    }
 }

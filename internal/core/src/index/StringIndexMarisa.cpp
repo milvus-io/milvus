@@ -50,6 +50,8 @@
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
 #include "storage/FileWriter.h"
+#include "storage/IndexEntryReader.h"
+#include "storage/IndexEntryWriter.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
@@ -60,7 +62,7 @@ StringIndexMarisa::StringIndexMarisa(
     const storage::FileManagerContext& file_manager_context)
     : StringIndex(MARISA_TRIE) {
     if (file_manager_context.Valid()) {
-        file_manager_ =
+        this->file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
     }
 }
@@ -124,8 +126,10 @@ StringIndexMarisa::Build(const Config& config) {
     if (built_) {
         ThrowInfo(IndexAlreadyBuild, "index has been built");
     }
-    auto field_datas =
-        storage::CacheRawDataAndFillMissing(file_manager_, config);
+    auto field_datas = storage::CacheRawDataAndFillMissing(
+        std::static_pointer_cast<storage::MemFileManagerImpl>(
+            this->file_manager_),
+        config);
 
     BuildWithFieldData(field_datas);
 }
@@ -234,12 +238,15 @@ StringIndexMarisa::Serialize(const Config& config) {
 
 IndexStatsPtr
 StringIndexMarisa::Upload(const Config& config) {
+    if (kScalarIndexUseV3) {
+        return UploadV3(config);
+    }
     auto binary_set = Serialize(config);
-    file_manager_->AddFile(binary_set);
+    this->file_manager_->AddFile(binary_set);
 
-    auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
-    return IndexStats::NewFromSizeMap(file_manager_->GetAddedTotalMemSize(),
-                                      remote_paths_to_size);
+    auto remote_paths_to_size = this->file_manager_->GetRemotePathsToFileSize();
+    return IndexStats::NewFromSizeMap(
+        this->file_manager_->GetAddedTotalMemSize(), remote_paths_to_size);
 }
 
 void
@@ -297,6 +304,10 @@ StringIndexMarisa::Load(const BinarySet& set, const Config& config) {
 void
 StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
                         const Config& config) {
+    if (kScalarIndexUseV3) {
+        this->LoadV3(config);
+        return;
+    }
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
@@ -305,8 +316,8 @@ StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
-    auto index_datas =
-        file_manager_->LoadIndexToMemory(index_files.value(), load_priority);
+    auto index_datas = this->file_manager_->LoadIndexToMemory(
+        index_files.value(), load_priority);
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
     // clear index_datas to free memory early
@@ -658,4 +669,82 @@ StringIndexMarisa::in_lexicographic_order() {
 
     return false;
 }
+
+void
+StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
+    // Write trie data via temp file (marisa trie writes to file descriptor)
+    auto uuid = boost::uuids::random_generator()();
+    auto uuid_string = boost::uuids::to_string(uuid);
+    auto file = std::string("/tmp/") + uuid_string;
+
+    auto fd = open(file.c_str(),
+                   O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC,
+                   S_IRUSR | S_IWUSR | S_IXUSR);
+    AssertInfo(fd != -1, "open file failed: {}", file);
+
+    // Immediately unlink the file so it will be deleted when fd is closed,
+    // even if an exception occurs or the process crashes
+    unlink(file.c_str());
+
+    trie_.write(fd);
+
+    auto size = get_file_size(fd);
+    lseek(fd, 0, SEEK_SET);
+    writer->WriteEntry(MARISA_TRIE_INDEX, fd, size);
+
+    close(fd);
+
+    // Write str_ids
+    auto str_ids_len = str_ids_.size() * sizeof(size_t);
+    writer->WriteEntry(MARISA_STR_IDS, str_ids_.data(), str_ids_len);
+}
+
+void
+StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
+                               const Config& config) {
+    auto trie_entry = reader.ReadEntry(MARISA_TRIE_INDEX);
+
+    auto uuid = boost::uuids::random_generator()();
+    auto uuid_string = boost::uuids::to_string(uuid);
+    auto file_name = std::string("/tmp/") + uuid_string;
+
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+
+    {
+        auto file_writer = storage::FileWriter(
+            file_name, storage::io::GetPriorityFromLoadPriority(load_priority));
+        file_writer.Write(trie_entry.data.data(), trie_entry.data.size());
+        file_writer.Finish();
+    }
+
+    if (config.contains(MMAP_FILE_PATH)) {
+        trie_.mmap(file_name.c_str());
+        mmap_file_raii_ = std::make_unique<MmapFileRAII>(file_name);
+    } else {
+        auto file = File::Open(file_name, O_RDONLY);
+        trie_.read(file.Descriptor());
+        mmap_file_raii_ = nullptr;
+    }
+
+    if (!config.contains(MMAP_FILE_PATH)) {
+        unlink(file_name.c_str());
+    }
+
+    auto str_ids_entry = reader.ReadEntry(MARISA_STR_IDS);
+
+    auto str_ids_len = str_ids_entry.data.size();
+    str_ids_.resize(str_ids_len / sizeof(size_t), MARISA_NULL_KEY_ID);
+    memcpy(str_ids_.data(), str_ids_entry.data.data(), str_ids_len);
+
+    fill_offsets();
+    built_ = true;
+    total_size_ = CalculateTotalSize();
+    ComputeByteSize();
+
+    LOG_INFO("LoadEntries StringIndexMarisa done");
+}
+
 }  // namespace milvus::index

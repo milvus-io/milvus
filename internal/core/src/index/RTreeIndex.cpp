@@ -10,6 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <algorithm>
 #include <cstdint>
 #include <exception>
@@ -40,6 +42,9 @@
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/ThreadPools.h"
+#include "storage/FileWriter.h"
+#include "storage/IndexEntryReader.h"
+#include "storage/IndexEntryWriter.h"
 #include "storage/Types.h"
 
 namespace milvus::index {
@@ -85,6 +90,7 @@ RTreeIndex<T>::RTreeIndex(const storage::FileManagerContext& ctx)
       schema_(ctx.fieldDataMeta.field_schema) {
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
+    this->file_manager_ = mem_file_manager_;
 
     if (ctx.for_loading_index) {
         return;
@@ -121,6 +127,10 @@ template <typename T>
 void
 RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     LOG_DEBUG("Load RTreeIndex with config {}", config.dump());
+    if (kScalarIndexUseV3) {
+        this->LoadV3(config);
+        return;
+    }
 
     auto index_files_opt =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
@@ -326,6 +336,9 @@ RTreeIndex<T>::finish() {
 template <typename T>
 IndexStatsPtr
 RTreeIndex<T>::Upload(const Config& config) {
+    if (kScalarIndexUseV3) {
+        return this->UploadV3(config);
+    }
     // 1. Ensure all buffered data flushed to disk
     finish();
 
@@ -613,6 +626,122 @@ RTreeIndex<T>::AddGeometry(const std::string& wkb_data, int64_t row_offset) {
 
         LOG_DEBUG("Added null geometry at row offset {}", row_offset);
     }
+}
+
+template <typename T>
+void
+RTreeIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
+    finish();
+
+    std::vector<boost::filesystem::path> files;
+    if (!path_.empty()) {
+        boost::filesystem::path dir(path_);
+        for (boost::filesystem::directory_iterator iter(dir);
+             iter != boost::filesystem::directory_iterator();
+             ++iter) {
+            if (!boost::filesystem::is_directory(*iter)) {
+                files.push_back(iter->path());
+            }
+        }
+        std::sort(files.begin(), files.end());
+    }
+
+    std::vector<std::string> file_names;
+    for (const auto& f : files) {
+        file_names.push_back(f.filename().string());
+    }
+
+    folly::SharedMutexWritePriority::ReadHolder lock(mutex_);
+    bool has_null = !null_offset_.empty();
+    lock.unlock();
+
+    writer->PutMeta("file_names", file_names);
+    writer->PutMeta("has_null", has_null);
+
+    for (const auto& file_path : files) {
+        auto file = file_path.string();
+        auto fd = open(file.c_str(), O_RDONLY | O_CLOEXEC);
+        AssertInfo(fd != -1, "open file failed: {}", file);
+        auto file_size = boost::filesystem::file_size(file);
+        auto file_name = file_path.filename().string();
+        writer->WriteEntry(file_name, fd, file_size);
+        close(fd);
+    }
+
+    if (has_null) {
+        folly::SharedMutexWritePriority::ReadHolder lock2(mutex_);
+        writer->WriteEntry("index_null_offset",
+                           null_offset_.data(),
+                           null_offset_.size() * sizeof(size_t));
+    }
+
+    LOG_INFO("write rtree index entries: {} files, {} null offsets",
+             files.size(),
+             null_offset_.size());
+}
+
+template <typename T>
+void
+RTreeIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
+                           const Config& config) {
+    auto file_names = reader.GetMeta<std::vector<std::string>>("file_names");
+    bool has_null = reader.GetMeta<bool>("has_null");
+
+    path_ = disk_file_manager_->GetLocalIndexObjectPrefix();
+    boost::filesystem::create_directories(path_);
+
+    std::vector<std::pair<std::string, std::string>> pairs;
+    for (const auto& fn : file_names) {
+        pairs.emplace_back(fn, path_ + "/" + fn);
+    }
+    reader.ReadEntriesToFiles(pairs);
+
+    if (has_null) {
+        auto null_entry = reader.ReadEntry("index_null_offset");
+        null_offset_.resize(null_entry.data.size() / sizeof(size_t));
+        std::memcpy(null_offset_.data(),
+                    null_entry.data.data(),
+                    null_entry.data.size());
+    }
+
+    // Determine base path (without extension) from local file names,
+    // same logic as V2 Load.
+    std::string base_path;
+    for (const auto& fn : file_names) {
+        auto local = path_ + "/" + fn;
+        if (ends_with(local, ".bgi")) {
+            base_path = local.substr(0, local.size() - 4);
+            break;
+        }
+    }
+    if (base_path.empty()) {
+        for (const auto& fn : file_names) {
+            auto local = path_ + "/" + fn;
+            if (ends_with(local, ".meta.json")) {
+                base_path = local.substr(
+                    0, local.size() - std::string(".meta.json").size());
+                break;
+            }
+        }
+    }
+    AssertInfo(!base_path.empty(),
+               "RTreeIndex LoadEntries: cannot determine base path from files");
+    path_ = base_path;
+
+    wrapper_ =
+        std::make_shared<RTreeIndexWrapper>(path_, /*is_build_mode=*/false);
+    wrapper_->load();
+
+    total_num_rows_ =
+        wrapper_->count() + static_cast<int64_t>(null_offset_.size());
+    is_built_ = true;
+    ComputeByteSize();
+    LOG_INFO(
+        "LoadEntries RTreeIndex done, file_count: {}, has_null: {}, "
+        "base_path: {}",
+        file_names.size(),
+        has_null,
+        path_);
 }
 
 // Explicit template instantiation for std::string as we only support string field for now.
