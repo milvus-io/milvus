@@ -8,6 +8,7 @@
 **/cmake-build-debug-coverage/*
 **/cmake-build-release/*
 **/cmake_build_release/*
+cmake_build
 **/cmake_build/*
 **/CMakeFiles/*
 **/.cmake/*
@@ -15,6 +16,7 @@ CMakeCache.txt
 .cache
 coverage_report/
 
+internal/core/output
 internal/core/output/*
 internal/core/build/*
 **/.idea/*
@@ -121,6 +123,22 @@ WARP.md
 
 # Gocache
 **/.gocache/
+
+# Claude
 claude.md
 docs/plans/
 
+# Claude sandbox env
+.bash_profile
+.bashrc
+.claude/
+.gitconfig
+.gitmodules
+.idea
+.mcp.json
+.profile
+.ripgreprc
+.zprofile
+.zshrc
+.claude
+CLAUDE.md

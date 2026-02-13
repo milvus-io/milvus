@@ -1296,9 +1296,9 @@ streaming:
     # The max interval of balance task trigger backoff, 5s by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
     backoffMaxInterval: 5s
-    # The timeout of wal balancer operation, 30s by default.
+    # The timeout of wal balancer operation, 5m by default.
     # If the operation exceeds this timeout, it will be canceled.
-    operationTimeout: 30s
+    operationTimeout: 5m
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
       # Whether to allow rebalance, true by default.
@@ -1378,6 +1378,59 @@ streaming:
     # When the wal is on-closing, the recovery module will try to persist the recovery info for wal to make next recovery operation more fast.
     # If that persist operation exceeds this timeout, the wal recovery module will close right now.
     gracefulCloseTimeout: 3s
+  walRateLimit:
+    defaultBurst: 20m # The default burst size for the WAL rate limiter, 20MB by default. The burst size determines the maximum number of bytes that can be consumed at once.
+    nodeMemory:
+      slowdownThreshold: 0.9 # When the memory usage is greater than this threshold, the node memory rate limiter will enter slowdown mode, 0.9 by default.
+      rejectThreshold: 0.95 # When the memory usage is greater than this threshold, the node memory rate limiter will enter reject mode, 0.95 by default.
+      recoverThreshold: 0.85 # When the memory usage is less than this threshold, the node memory rate limiter will enter recovery mode, 0.85 by default.
+      adaptiveRateLimit:
+        slowdown:
+          startupDelayInterval: 0 # The startup delay interval for adaptive rate limit slowdown, when the first time the rate limit enters slowdown mode, it will wait for this interval to take effect, 0 by default.
+          hwm: 8mb # The high watermark of adaptive rate limit slowdown, the rate limit will be set to this value when slowdown mode is triggered, 8mb/s by default.
+          lwm: 512kb # The low watermark of adaptive rate limit slowdown, the rate limit will decrease until this value if slowdown mode is kept, 512kb/s by default.
+          decreaseInterval: 30s # The interval of adaptive rate limit slowdown decrease, the rate limit will decrease every this interval, 30s by default.
+          decreaseRatio: 0.8 # The ratio of adaptive rate limit slowdown decrease, the rate limit will decrease by this ratio every decrease interval, 0.8 by default.
+          rejectDelayInterval: 0 # The delay interval of adaptive rate limit slowdown to reject mode after slowdown reaches low watermark; 0 means no reject operation will be triggered, 0 by default.
+        recovery:
+          hwm: 32mb # The high watermark of adaptive rate limit recovery, the rate limit will increase until this value if recovery mode is kept, 32mb/s by default.
+          lwm: 2mb # The low watermark of adaptive rate limit recovery, the rate limit will be set to this value when recovery mode is triggered, 2mb/s by default.
+          incremental: 512kb # The incremental of adaptive rate limit recovery, the rate limit will increase by this value every increase interval, 512kb/s by default.
+          increaseInterval: 1s # The delay interval of adaptive rate limit recovery increase, the rate limit will increase every this interval, 1s by default.
+          normalDelayInterval: 10s # The delay interval of adaptive rate limit recovery to normal mode after recovery reaches high watermark, 10s by default.
+    recoveryStorage:
+      adaptiveRateLimit:
+        slowdown:
+          startupDelayInterval: 30s # The startup delay interval for adaptive rate limit slowdown, when the first time the rate limit enters slowdown mode, it will wait for this interval to take effect, 30s by default.
+          hwm: 16mb # The high watermark of adaptive rate limit slowdown, the rate limit will be set to this value when slowdown mode is triggered, 16mb/s by default.
+          lwm: 1mb # The low watermark of adaptive rate limit slowdown, the rate limit will decrease until this value if slowdown mode is kept, 1mb/s by default.
+          decreaseInterval: 30s # The interval of adaptive rate limit slowdown decrease, the rate limit will decrease every this interval, 30s by default.
+          decreaseRatio: 0.8 # The ratio of adaptive rate limit slowdown decrease, the rate limit will decrease by this ratio every decrease interval, 0.8 by default.
+          rejectDelayInterval: 2m # The delay interval of adaptive rate limit slowdown to reject mode after slowdown reaches low watermark; 0 means no reject operation will be triggered, 2m by default.
+        recovery:
+          hwm: 32mb # The high watermark of adaptive rate limit recovery, the rate limit will increase until this value if recovery mode is kept, 32mb/s by default.
+          lwm: 2mb # The low watermark of adaptive rate limit recovery, the rate limit will be set to this value when recovery mode is triggered, 2mb/s by default.
+          incremental: 512kb # The incremental of adaptive rate limit recovery, the rate limit will increase by this value every increase interval, 512kb/s by default.
+          increaseInterval: 1s # The delay interval of adaptive rate limit recovery increase, the rate limit will increase every this interval, 1s by default.
+          normalDelayInterval: 1m # The delay interval of adaptive rate limit recovery to normal mode after recovery reaches high watermark, 1m by default.
+    appendRate:
+      enabled: false # Whether to enable the append rate limiter, true by default. When enabled, the rate limiter will throttle writes based on append rate thresholds.
+      slowdownThreshold: 32m # When the append rate (bytes/sec) is greater than this threshold, the append rate limiter will enter slowdown mode, 32MB/s by default. This protects each WAL from being overloaded.
+      recoverThreshold: 28m # When the append rate (bytes/sec) is less than this threshold, the append rate limiter will enter recovery mode, 28MB/s by default. The gap between slowdown and recover threshold prevents oscillation.
+      adaptiveRateLimit:
+        slowdown:
+          startupDelayInterval: 0 # The startup delay interval for adaptive rate limit slowdown, when the first time the rate limit enters slowdown mode, it will wait for this interval to take effect, 0 by default.
+          hwm: 32mb # The high watermark of adaptive rate limit slowdown, the rate limit will be set to this value when slowdown mode is triggered, 32mb/s by default.
+          lwm: 2mb # The low watermark of adaptive rate limit slowdown, the rate limit will decrease until this value if slowdown mode is kept, 2mb/s by default.
+          decreaseInterval: 10s # The interval of adaptive rate limit slowdown decrease, the rate limit will decrease every this interval, 10s by default.
+          decreaseRatio: 0.9 # The ratio of adaptive rate limit slowdown decrease, the rate limit will decrease by this ratio every decrease interval, 0.9 by default.
+          rejectDelayInterval: 0 # The delay interval of adaptive rate limit slowdown to reject mode after slowdown reaches low watermark; 0 means no reject operation will be triggered, 0 by default.
+        recovery:
+          hwm: 32mb # The high watermark of adaptive rate limit recovery, the rate limit will increase until this value if recovery mode is kept, 32mb/s by default.
+          lwm: 4mb # The low watermark of adaptive rate limit recovery, the rate limit will be set to this value when recovery mode is triggered, 4mb/s by default.
+          incremental: 512kb # The incremental of adaptive rate limit recovery, the rate limit will increase by this value every increase interval, 512kb/s by default.
+          increaseInterval: 1s # The delay interval of adaptive rate limit recovery increase, the rate limit will increase every this interval, 1s by default.
+          normalDelayInterval: 10s # The delay interval of adaptive rate limit recovery to normal mode after recovery reaches high watermark, 10s by default.
 
 # Any configuration related to the knowhere vector search engine
 knowhere:
