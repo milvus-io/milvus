@@ -7879,3 +7879,187 @@ func TestFillWithNullValue_Geometry(t *testing.T) {
 		assert.Nil(t, field.GetScalars().GetGeometryData().GetData()[3])
 	})
 }
+
+func Test_validateUtil_checkMOLFieldData(t *testing.T) {
+	t.Run("no mol data", func(t *testing.T) {
+		v := newValidateUtil()
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Mol,
+		}
+		data := &schemapb.FieldData{
+			FieldName: "mol_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolSmilesData{
+						MolSmilesData: &schemapb.MolSmilesArray{
+							Data: nil,
+						},
+					},
+				},
+			},
+		}
+		err := v.checkMOLFieldData(data, f)
+		assert.Error(t, err)
+	})
+
+	t.Run("no mol data but nullable", func(t *testing.T) {
+		v := newValidateUtil()
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Mol,
+			Nullable: true,
+		}
+		data := &schemapb.FieldData{
+			FieldName: "mol_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolSmilesData{
+						MolSmilesData: &schemapb.MolSmilesArray{
+							Data: nil,
+						},
+					},
+				},
+			},
+		}
+		err := v.checkMOLFieldData(data, f)
+		assert.NoError(t, err)
+	})
+
+	t.Run("valid SMILES data", func(t *testing.T) {
+		v := newValidateUtil()
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Mol,
+		}
+		data := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			FieldId:   101,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolSmilesData{
+						MolSmilesData: &schemapb.MolSmilesArray{
+							Data: []string{"CCO", "c1ccccc1", "CC(=O)O"},
+						},
+					},
+				},
+			},
+		}
+		err := v.checkMOLFieldData(data, f)
+		assert.NoError(t, err)
+		// After validation, data should be converted to pickle format
+		pickleData := data.GetScalars().GetMolData().GetData()
+		assert.Equal(t, 3, len(pickleData))
+		for _, p := range pickleData {
+			assert.NotEmpty(t, p)
+		}
+	})
+
+	t.Run("invalid SMILES data", func(t *testing.T) {
+		v := newValidateUtil()
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Mol,
+		}
+		data := &schemapb.FieldData{
+			FieldName: "mol_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolSmilesData{
+						MolSmilesData: &schemapb.MolSmilesArray{
+							Data: []string{"CCO", "not_valid_smiles!!!"},
+						},
+					},
+				},
+			},
+		}
+		err := v.checkMOLFieldData(data, f)
+		assert.Error(t, err)
+	})
+}
+
+func Test_validateMOLFieldSearchResult(t *testing.T) {
+	t.Run("nil field data", func(t *testing.T) {
+		var fieldData *schemapb.FieldData
+		err := validateMOLFieldSearchResult(&fieldData)
+		assert.NoError(t, err)
+	})
+
+	t.Run("already SMILES format", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolSmilesData{
+						MolSmilesData: &schemapb.MolSmilesArray{
+							Data: []string{"CCO", "c1ccccc1"},
+						},
+					},
+				},
+			},
+		}
+		err := validateMOLFieldSearchResult(&fieldData)
+		assert.NoError(t, err)
+		// Should remain unchanged
+		assert.Equal(t, []string{"CCO", "c1ccccc1"}, fieldData.GetScalars().GetMolSmilesData().GetData())
+	})
+
+	t.Run("pickle to SMILES conversion", func(t *testing.T) {
+		// First convert SMILES to pickle to get valid pickle data
+		smilesList := []string{"CCO", "c1ccccc1"}
+		pickleList := make([][]byte, len(smilesList))
+		for i, s := range smilesList {
+			pickle, err := common.ConvertSMILESToPickle(s)
+			assert.NoError(t, err)
+			pickleList[i] = pickle
+		}
+
+		fieldData := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			FieldId:   101,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolData{
+						MolData: &schemapb.MolArray{
+							Data: pickleList,
+						},
+					},
+				},
+			},
+		}
+		err := validateMOLFieldSearchResult(&fieldData)
+		assert.NoError(t, err)
+		// Should be converted to SMILES format
+		smilesResult := fieldData.GetScalars().GetMolSmilesData().GetData()
+		assert.Equal(t, 2, len(smilesResult))
+		for _, s := range smilesResult {
+			assert.NotEmpty(t, s)
+		}
+	})
+
+	t.Run("pickle to SMILES with validData", func(t *testing.T) {
+		pickle, err := common.ConvertSMILESToPickle("CCO")
+		assert.NoError(t, err)
+
+		fieldData := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			FieldId:   101,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolData{
+						MolData: &schemapb.MolArray{
+							Data: [][]byte{pickle, nil},
+						},
+					},
+				},
+			},
+			ValidData: []bool{true, false},
+		}
+		err = validateMOLFieldSearchResult(&fieldData)
+		assert.NoError(t, err)
+		smilesResult := fieldData.GetScalars().GetMolSmilesData().GetData()
+		assert.Equal(t, 2, len(smilesResult))
+		assert.NotEmpty(t, smilesResult[0])
+		assert.Empty(t, smilesResult[1])
+	})
+}

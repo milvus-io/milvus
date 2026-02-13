@@ -406,7 +406,8 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
                     break;
                 case DataType::VARCHAR:
                 case DataType::TEXT:
-                case DataType::GEOMETRY: {
+                case DataType::GEOMETRY:
+                case DataType::MOL: {
                     auto avg_size =
                         SegmentInternalInterface::get_field_avg_size(field_id);
                     field_bytes = num_rows * avg_size;
@@ -1402,6 +1403,15 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                                      ->mutable_data());
             break;
         }
+        case DataType::MOL: {
+            bulk_subscript_ptr_impl<std::string>(
+                op_ctx,
+                vec_ptr,
+                seg_offsets,
+                count,
+                result->mutable_scalars()->mutable_mol_data()->mutable_data());
+            break;
+        }
         case DataType::ARRAY: {
             // element
             bulk_subscript_array_impl(op_ctx,
@@ -1723,7 +1733,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 vec_ptr, seg_offsets, count, static_cast<Json*>(data));
             break;
         }
-        case DataType::GEOMETRY: {
+        case DataType::GEOMETRY:
+        case DataType::MOL: {
             bulk_subscript_ptr_impl<std::string>(
                 vec_ptr, seg_offsets, count, static_cast<std::string*>(data));
             break;

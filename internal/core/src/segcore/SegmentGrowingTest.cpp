@@ -193,6 +193,7 @@ TEST_P(GrowingTest, FillData) {
     auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
     auto json_field = schema->AddDebugField("json", DataType::JSON);
     auto geometry_field = schema->AddDebugField("geometry", DataType::GEOMETRY);
+    auto mol_field = schema->AddDebugField("mol", DataType::MOL);
     auto int_array_field =
         schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT8);
     auto long_array_field =
@@ -260,6 +261,8 @@ TEST_P(GrowingTest, FillData) {
             nullptr, json_field, ids_ds->GetIds(), num_inserted);
         auto geometry_result = segment->bulk_subscript(
             nullptr, geometry_field, ids_ds->GetIds(), num_inserted);
+        auto mol_result = segment->bulk_subscript(
+            nullptr, mol_field, ids_ds->GetIds(), num_inserted);
         auto int_array_result = segment->bulk_subscript(
             nullptr, int_array_field, ids_ds->GetIds(), num_inserted);
         auto long_array_result = segment->bulk_subscript(
@@ -292,6 +295,7 @@ TEST_P(GrowingTest, FillData) {
         EXPECT_EQ(json_result->scalars().json_data().data_size(), num_inserted);
         EXPECT_EQ(geometry_result->scalars().geometry_data().data_size(),
                   num_inserted);
+        EXPECT_EQ(mol_result->scalars().mol_data().data_size(), num_inserted);
         if (data_type == DataType::VECTOR_FLOAT) {
             EXPECT_EQ(vec_result->vectors().float_vector().data_size(),
                       num_inserted * dim);
@@ -349,6 +353,7 @@ TEST(Growing, FillNullableData) {
     auto varchar_field =
         schema->AddDebugField("varchar", DataType::VARCHAR, true);
     auto json_field = schema->AddDebugField("json", DataType::JSON, true);
+    auto mol_field = schema->AddDebugField("mol", DataType::MOL, true);
     auto int_array_field = schema->AddDebugField(
         "int_array", DataType::ARRAY, DataType::INT8, true);
     auto long_array_field = schema->AddDebugField(
@@ -415,6 +420,8 @@ TEST(Growing, FillNullableData) {
             nullptr, varchar_field, ids_ds->GetIds(), num_inserted);
         auto json_result = segment->bulk_subscript(
             nullptr, json_field, ids_ds->GetIds(), num_inserted);
+        auto mol_result = segment->bulk_subscript(
+            nullptr, mol_field, ids_ds->GetIds(), num_inserted);
         auto int_array_result = segment->bulk_subscript(
             nullptr, int_array_field, ids_ds->GetIds(), num_inserted);
         auto long_array_result = segment->bulk_subscript(
@@ -445,6 +452,7 @@ TEST(Growing, FillNullableData) {
         EXPECT_EQ(varchar_result->scalars().string_data().data_size(),
                   num_inserted);
         EXPECT_EQ(json_result->scalars().json_data().data_size(), num_inserted);
+        EXPECT_EQ(mol_result->scalars().mol_data().data_size(), num_inserted);
         EXPECT_EQ(vec_result->vectors().float_vector().data_size(),
                   num_inserted * dim);
         EXPECT_EQ(int_array_result->scalars().array_data().data_size(),
@@ -468,6 +476,7 @@ TEST(Growing, FillNullableData) {
         EXPECT_EQ(timestamptz_result->valid_data_size(), num_inserted);
         EXPECT_EQ(varchar_result->valid_data_size(), num_inserted);
         EXPECT_EQ(json_result->valid_data_size(), num_inserted);
+        EXPECT_EQ(mol_result->valid_data_size(), num_inserted);
         EXPECT_EQ(int_array_result->valid_data_size(), num_inserted);
         EXPECT_EQ(long_array_result->valid_data_size(), num_inserted);
         EXPECT_EQ(bool_array_result->valid_data_size(), num_inserted);
