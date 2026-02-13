@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
       - name: Install GitHub CLI
         run: |
           sudo apt update
@@ -73,7 +73,7 @@ jobs:
       - name: Create Pull Request
         id: cpr
         continue-on-error: true
-        uses: peter-evans/create-pull-request@v3
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
           author: sre-ci-robot <sre-ci-robot@users.noreply.github.com>

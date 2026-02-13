@@ -48,10 +48,10 @@ jobs:
           helm version
           kubectl version
       
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v6
         with:
           python-version: 3.8
 
@@ -186,7 +186,7 @@ jobs:
       
       - name: Upload logs
         if: ${{ ! success() }}
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v6
         with:
           name: logs-${{ matrix.pod }}-${{ matrix.chaos_type }}
           path: tests/python_client/chaos/k8s_logs
