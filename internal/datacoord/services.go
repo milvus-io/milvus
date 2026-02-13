@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -2111,6 +2112,57 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	}
 
 	log.Info("CreateSnapshot completed successfully")
+	return merr.Success(), nil
+}
+
+func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionId()))
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	log.Info("receive BatchUpdateManifest request", zap.Int("itemCount", len(req.GetItems())))
+
+	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionId())
+	if err != nil {
+		log.Warn("BatchUpdateManifest failed to describe collection", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	dbName := coll.GetDbName()
+	collectionName := coll.GetCollectionName()
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
+		message.NewSharedDBNameResourceKey(dbName),
+		message.NewSharedCollectionNameResourceKey(dbName, collectionName),
+	)
+	if err != nil {
+		log.Warn("BatchUpdateManifest failed to start broadcast", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	defer broadcaster.Close()
+
+	items := make([]*messagespb.BatchUpdateManifestItem, 0, len(req.GetItems()))
+	for _, item := range req.GetItems() {
+		items = append(items, &messagespb.BatchUpdateManifestItem{
+			SegmentId:       item.GetSegmentId(),
+			ManifestVersion: item.GetManifestVersion(),
+		})
+	}
+
+	if _, err := broadcaster.Broadcast(ctx, message.NewBatchUpdateManifestMessageBuilderV2().
+		WithHeader(&message.BatchUpdateManifestMessageHeader{
+			CollectionId: req.GetCollectionId(),
+		}).
+		WithBody(&message.BatchUpdateManifestMessageBody{
+			Items: items,
+		}).
+		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		MustBuildBroadcast(),
+	); err != nil {
+		log.Error("BatchUpdateManifest broadcast failed", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	log.Info("BatchUpdateManifest completed successfully")
 	return merr.Success(), nil
 }
 

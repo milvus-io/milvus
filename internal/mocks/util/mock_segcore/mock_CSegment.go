@@ -873,8 +873,7 @@ func (_c *MockCSegment_Search_Call) RunAndReturn(run func(context.Context, *segc
 func NewMockCSegment(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockCSegment {
+}) *MockCSegment {
 	mock := &MockCSegment{}
 	mock.Mock.Test(t)
 

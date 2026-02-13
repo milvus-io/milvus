@@ -469,6 +469,22 @@ func (s *Server) initMessageCallback() {
 		}
 		return nil
 	})
+
+	registry.RegisterBatchUpdateManifestV2AckCallback(func(ctx context.Context, result message.BroadcastResultBatchUpdateManifestMessageV2) error {
+		body := result.Message.MustBody()
+		var operators []UpdateOperator
+		for _, item := range body.GetItems() {
+			operators = append(operators, UpdateManifestVersion(item.GetSegmentId(), item.GetManifestVersion()))
+		}
+		if len(operators) > 0 {
+			if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+				log.Ctx(ctx).Warn("batch update manifest version failed", zap.Error(err))
+				return err
+			}
+		}
+		log.Ctx(ctx).Info("batch update manifest version handled", zap.Int("itemCount", len(body.GetItems())))
+		return nil
+	})
 }
 
 // Start initialize `Server` members and start loops, follow steps are taken:

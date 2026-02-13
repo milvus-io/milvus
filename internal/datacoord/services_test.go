@@ -3040,3 +3040,80 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		assert.Contains(t, resp.GetReason(), "already exists")
 	})
 }
+
+// --- Test BatchUpdateManifest ---
+
+func TestServer_BatchUpdateManifest(t *testing.T) {
+	t.Run("server_not_healthy", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Abnormal)
+
+		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
+			CollectionId: 100,
+			Items: []*datapb.BatchUpdateManifestItem{
+				{SegmentId: 1, ManifestVersion: 10},
+			},
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("describe_collection_failed", func(t *testing.T) {
+		ctx := context.Background()
+
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(nil, errors.New("collection not found"))
+
+		server := &Server{
+			broker: mockBroker,
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
+			CollectionId: 100,
+			Items: []*datapb.BatchUpdateManifestItem{
+				{SegmentId: 1, ManifestVersion: 10},
+			},
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("start_broadcast_failed", func(t *testing.T) {
+		ctx := context.Background()
+
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:         merr.Success(),
+				DbName:         "default",
+				CollectionName: "test_collection",
+			}, nil)
+
+		mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				return nil, errors.New("failed to start broadcast")
+			}).Build()
+		defer mockBroadcast.UnPatch()
+
+		server := &Server{
+			broker: mockBroker,
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
+			CollectionId: 100,
+			Items: []*datapb.BatchUpdateManifestItem{
+				{SegmentId: 1, ManifestVersion: 10},
+			},
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+}
