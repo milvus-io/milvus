@@ -56,7 +56,8 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     }
     switch (data_type) {
         case DataType::JSON: {
-            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+            // use_index_ is already determined during initialization by DetermineUseIndex()
+            if (use_index_ && !has_offset_input_) {
                 result = EvalJsonExistsForIndex();
             } else {
                 result = EvalJsonExistsForDataSegment(context);
@@ -256,6 +257,12 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
+}
+
+void
+PhyExistsFilterExpr::DetermineUseIndex() {
+    // only JSON type uses this expression, check base condition
+    use_index_ = SegmentExpr::CanUseIndex();
 }
 
 }  //namespace exec

@@ -55,10 +55,14 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
                       batch_size,
                       consistency_level),
           expr_(expr) {
+        DetermineUseIndex();
     }
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    void
+    DetermineUseIndex() override;
 
     std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const override {
@@ -83,9 +87,6 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
 
     VectorPtr
     EvalForDataSegment();
-
-    bool
-    CanUseIndex(proto::plan::GISFunctionFilterExpr_GISOp op) const;
 
  private:
     std::shared_ptr<const milvus::expr::GISFunctionFilterExpr> expr_;
