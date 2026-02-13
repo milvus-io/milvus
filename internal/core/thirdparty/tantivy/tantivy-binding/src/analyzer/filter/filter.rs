@@ -1,8 +1,10 @@
 use serde_json as json;
 use tantivy::tokenizer::*;
 
+use super::util::*;
 use super::{
-    CnAlphaNumOnlyFilter, CnCharOnlyFilter, RegexFilter, RemovePunctFilter, SynonymFilter,
+    CnAlphaNumOnlyFilter, CnCharOnlyFilter, PinyinFilter, RegexFilter, RemovePunctFilter,
+    SynonymFilter,
 };
 use crate::analyzer::options::FileResourcePathHelper;
 use crate::error::{Result, TantivyBindingError};
@@ -21,6 +23,7 @@ pub(crate) enum SystemFilter {
     Stemmer(Stemmer),
     Regex(RegexFilter),
     Synonym(SynonymFilter),
+    Pinyin(PinyinFilter),
 }
 
 pub(crate) trait FilterBuilder {
@@ -47,6 +50,7 @@ impl SystemFilter {
             Self::RemovePunct(filter) => builder.filter(filter).dynamic(),
             Self::Regex(filter) => builder.filter(filter).dynamic(),
             Self::Synonym(filter) => builder.filter(filter).dynamic(),
+            Self::Pinyin(filter) => builder.filter(filter).dynamic(),
             Self::Invalid => builder,
         }
     }
@@ -108,6 +112,7 @@ impl From<&str> for SystemFilter {
             "cncharonly" => Self::CnCharOnly(CnCharOnlyFilter),
             "cnalphanumonly" => Self::CnAlphaNumOnly(CnAlphaNumOnlyFilter),
             "removepunct" => Self::RemovePunct(RemovePunctFilter),
+            "pinyin" => Self::Pinyin(PinyinFilter::default()),
             _ => Self::Invalid,
         }
     }
@@ -135,6 +140,7 @@ pub fn create_filter(
                 "synonym" => {
                     SynonymFilter::from_json(params, helper).map(|f| SystemFilter::Synonym(f))
                 }
+                "pinyin" => PinyinFilter::from_json(params).map(|f| SystemFilter::Pinyin(f)),
                 other => Err(TantivyBindingError::InternalError(format!(
                     "unsupport filter type: {}",
                     other
