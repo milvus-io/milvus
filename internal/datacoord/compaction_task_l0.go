@@ -445,7 +445,13 @@ func (t *l0CompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
 func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegment) error {
 	var operators []UpdateOperator
 	for _, seg := range outputSegs {
-		operators = append(operators, AddBinlogsOperator(seg.GetSegmentID(), nil, nil, seg.GetDeltalogs(), nil))
+		if seg.GetManifest() != "" {
+			// V2: Update manifest path (deltalog is inside manifest)
+			operators = append(operators, UpdateManifest(seg.GetSegmentID(), seg.GetManifest()))
+		} else {
+			// V1: Add deltalogs directly
+			operators = append(operators, AddBinlogsOperator(seg.GetSegmentID(), nil, nil, seg.GetDeltalogs(), nil))
+		}
 	}
 
 	for _, segID := range t.GetTaskProto().InputSegments {

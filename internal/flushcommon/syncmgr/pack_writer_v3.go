@@ -18,6 +18,7 @@ package syncmgr
 
 import (
 	"context"
+	"fmt"
 
 	"go.uber.org/zap"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -68,11 +70,15 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 		log.Error("failed to write insert data", zap.Error(err))
 		return
 	}
+	// Update manifestPath after writeInserts
+	bw.manifestPath = manifest
+
 	if stats, err = bw.writeStats(ctx, pack); err != nil {
 		log.Error("failed to process stats blob", zap.Error(err))
 		return
 	}
-	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
+	// writeDelta for V3 updates manifest and returns nil FieldBinlog
+	if manifest, err = bw.writeDelta(ctx, pack); err != nil {
 		log.Error("failed to process delta blob", zap.Error(err))
 		return
 	}
@@ -81,6 +87,8 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 		return
 	}
 
+	// For V3, deltas is always nil since deltalogs are in manifest
+	deltas = nil
 	size = bw.sizeWritten
 	return
 }
@@ -183,4 +191,72 @@ func (bw *BulkPackWriterV3) writeInsertsIntoStorage(ctx context.Context,
 	}
 	manifestPath = w.GetWrittenManifest()
 	return logs, manifestPath, nil
+}
+
+// writeDelta writes deltalog to storage and updates the manifest.
+// For V3, deltalogs are stored in the manifest, not returned as FieldBinlog.
+func (bw *BulkPackWriterV3) writeDelta(ctx context.Context, pack *SyncPack) (string, error) {
+	if pack.deltaData == nil || pack.deltaData.RowCount == 0 {
+		return bw.manifestPath, nil
+	}
+
+	pkField, err := typeutil.GetPrimaryFieldSchema(bw.schema)
+	if err != nil {
+		return "", fmt.Errorf("primary key field not found: %w", err)
+	}
+
+	// Allocate log ID for deltalog
+	logID, err := bw.allocator.AllocOne()
+	if err != nil {
+		return "", err
+	}
+
+	// Build deltalog path
+	deltaPath := metautil.BuildDeltaLogPath(
+		bw.storageConfig.GetRootPath(),
+		pack.collectionID,
+		pack.partitionID,
+		pack.segmentID,
+		logID,
+	)
+
+	// Create deltalog writer with V2 storage
+	writer, err := storage.NewDeltalogWriter(
+		ctx, pack.collectionID, pack.partitionID, pack.segmentID, logID, pkField.DataType, deltaPath,
+		storage.WithVersion(storage.StorageV2),
+		storage.WithStorageConfig(bw.storageConfig),
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to create deltalog writer: %w", err)
+	}
+
+	// Build Arrow record from delete data using existing utility
+	record, _, _, err := storage.BuildDeleteRecord(pack.deltaData.Pks, pack.deltaData.Tss)
+	if err != nil {
+		return "", fmt.Errorf("failed to build delete record: %w", err)
+	}
+	defer record.Release()
+
+	// Write and close
+	if err := writer.Write(record); err != nil {
+		return "", fmt.Errorf("failed to write delta record: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return "", fmt.Errorf("failed to close delta writer: %w", err)
+	}
+
+	// Update manifest with the new deltalog
+	newManifest, err := packed.AddDeltaLogsToManifest(
+		bw.manifestPath,
+		bw.storageConfig,
+		[]packed.DeltaLogEntry{{Path: deltaPath, NumEntries: pack.deltaData.RowCount}},
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to add deltalog to manifest: %w", err)
+	}
+
+	bw.manifestPath = newManifest
+	bw.sizeWritten += pack.deltaData.Size()
+
+	return newManifest, nil
 }

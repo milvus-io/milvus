@@ -22,6 +22,7 @@ import (
 	"io"
 	"math"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -38,8 +39,10 @@ import (
 type reader struct {
 	ctx            context.Context
 	cm             storage.ChunkManager
+	storageConfig  *indexpb.StorageConfig
 	schema         *schemapb.CollectionSchema
 	storageVersion int64
+	importEz       string
 
 	fileSize   *atomic.Int64
 	bufferSize int
@@ -78,15 +81,17 @@ func NewReader(ctx context.Context,
 		storageVersion: storageVersion,
 		fileSize:       atomic.NewInt64(0),
 		bufferSize:     bufferSize,
+		storageConfig:  storageConfig,
+		importEz:       importEz,
 	}
-	err := r.init(paths, tsStart, tsEnd, storageConfig, importEz)
+	err := r.init(paths, tsStart, tsEnd)
 	if err != nil {
 		return nil, err
 	}
 	return r, nil
 }
 
-func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *indexpb.StorageConfig, importEZ string) error {
+func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	if tsStart != 0 || tsEnd != math.MaxUint64 {
 		r.filters = append(r.filters, FilterWithTimeRange(tsStart, tsEnd))
 	}
@@ -121,11 +126,11 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return r.cm.MultiRead(ctx, paths)
 		}),
-		storage.WithStorageConfig(storageConfig),
+		storage.WithStorageConfig(r.storageConfig),
 	}
 
-	if len(importEZ) > 0 {
-		ezID, err := hookutil.GetEzIDByImportEzk(importEZ)
+	if len(r.importEz) > 0 {
+		ezID, err := hookutil.GetEzIDByImportEzk(r.importEz)
 		if err != nil {
 			return err
 		}
@@ -135,6 +140,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 		}
 		rwOptions = append(rwOptions, storage.WithPluginContext(pluginContext))
 	}
+
 	rr, err := storage.NewBinlogRecordReader(r.ctx, binlogs, r.schema, rwOptions...)
 	if err != nil {
 		return err
@@ -173,35 +179,88 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 }
 
 func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]typeutil.Timestamp, error) {
+	v1opts := []storage.RwOption{
+		storage.WithVersion(storage.StorageV1),
+		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+			return r.cm.MultiRead(ctx, paths)
+		}),
+	}
+	v2opts := []storage.RwOption{
+		storage.WithVersion(storage.StorageV2),
+		storage.WithStorageConfig(r.storageConfig),
+	}
+
 	deleteData := make(map[any]typeutil.Timestamp)
-	for _, path := range deltaLogs {
-		reader, err := newBinlogReader(r.ctx, r.cm, path)
+
+	readInternal := func(path string, opts []storage.RwOption) (map[any]typeutil.Timestamp, error) {
+		tempData := make(map[any]typeutil.Timestamp)
+		pkField, err := typeutil.GetPrimaryFieldSchema(r.schema)
 		if err != nil {
 			return nil, err
 		}
-		// no need to read nulls in DeleteEventType
-		rowsSet, _, err := readData(reader, storage.DeleteEventType)
+		reader, err := storage.NewDeltalogReader(pkField.DataType, []string{path}, opts...)
 		if err != nil {
-			reader.Close()
 			return nil, err
 		}
-		for _, rows := range rowsSet {
-			for _, row := range rows.([]string) {
-				dl := &storage.DeleteLog{}
-				err = dl.Parse(row)
-				if err != nil {
-					reader.Close()
-					return nil, err
+		defer reader.Close()
+
+		for {
+			rec, err := reader.Next()
+			if err != nil {
+				if err == io.EOF {
+					break
 				}
-				if dl.Ts >= tsStart && dl.Ts <= tsEnd {
-					pk := dl.Pk.GetValue()
-					if ts, ok := deleteData[pk]; !ok || ts < dl.Ts {
-						deleteData[pk] = dl.Ts
-					}
+				log.Error("compose delete wrong, failed to read deltalogs", zap.Error(err))
+				return nil, err
+			}
+
+			for i := 0; i < rec.Len(); i++ {
+				ts := typeutil.Timestamp(rec.Column(1).(*array.Int64).Value(i))
+				if ts < tsStart || ts > tsEnd {
+					continue
 				}
+				var pk any
+				switch pkField.DataType {
+				case schemapb.DataType_Int64:
+					pk = rec.Column(0).(*array.Int64).Value(i)
+				case schemapb.DataType_VarChar:
+					pk = rec.Column(0).(*array.String).Value(i)
+				}
+				if tsExisting, ok := tempData[pk]; ok && tsExisting > ts {
+					// skip if existing entry is newer
+					continue
+				}
+				tempData[pk] = ts
 			}
 		}
-		reader.Close()
+		return tempData, nil
+	}
+
+	for _, path := range deltaLogs {
+		// try v1 first
+		tempData, errv1 := readInternal(path, v1opts)
+		if errv1 != nil {
+			// try v2 if v1 failed
+			tempData, errv2 := readInternal(path, v2opts)
+			if errv2 != nil {
+				return nil, errv2
+			}
+			// Merge v2 results into deleteData
+			for pk, ts := range tempData {
+				if tsExisting, ok := deleteData[pk]; ok && tsExisting > ts {
+					continue
+				}
+				deleteData[pk] = ts
+			}
+		} else {
+			// Merge v1 results into deleteData
+			for pk, ts := range tempData {
+				if tsExisting, ok := deleteData[pk]; ok && tsExisting > ts {
+					continue
+				}
+				deleteData[pk] = ts
+			}
+		}
 	}
 	return deleteData, nil
 }

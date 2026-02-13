@@ -51,6 +51,12 @@ func (s *L2SingleCompactionSuite) SetupSuite() {
 	s.MiniClusterSuite.SetupSuite()
 }
 
+func (s *L2SingleCompactionSuite) TearDownSuite() {
+	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.MixCompactionTriggerInterval.Key)
+	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key)
+	s.MiniClusterSuite.TearDownSuite()
+}
+
 func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

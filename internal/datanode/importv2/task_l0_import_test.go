@@ -94,7 +94,7 @@ func (s *L0ImportSuite) SetupTest() {
 	s.NoError(err)
 
 	cm := mocks.NewChunkManager(s.T())
-	cm.EXPECT().Read(mock.Anything, mock.Anything).Return(blob.Value, nil)
+	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{blob.Value}, nil)
 	cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, s string, b bool, walkFunc storage.ChunkObjectWalkFunc) error {
 			for _, file := range []string{"a/b/c/"} {
