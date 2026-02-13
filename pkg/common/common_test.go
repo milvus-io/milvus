@@ -395,6 +395,61 @@ func TestWarmupPolicy(t *testing.T) {
 	})
 }
 
+func TestConvertSMILESToPickle(t *testing.T) {
+	t.Run("valid SMILES", func(t *testing.T) {
+		testCases := []string{"CCO", "CC", "C", "c1ccccc1", "CC(=O)O"}
+		for _, smiles := range testCases {
+			result, err := ConvertSMILESToPickle(smiles)
+			assert.NoError(t, err)
+			assert.NotNil(t, result)
+		}
+	})
+
+	t.Run("empty SMILES", func(t *testing.T) {
+		result, err := ConvertSMILESToPickle("")
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+	})
+}
+
+func TestConvertPickleToSMILES(t *testing.T) {
+	t.Run("valid pickle data", func(t *testing.T) {
+		testCases := []string{"CCO", "CC", "C", "c1ccccc1"}
+		for _, smiles := range testCases {
+			pickle, err := ConvertSMILESToPickle(smiles)
+			assert.NoError(t, err)
+
+			result, err := ConvertPickleToSMILES(pickle)
+			assert.NoError(t, err)
+			assert.Equal(t, smiles, result)
+		}
+	})
+
+	t.Run("empty pickle data", func(t *testing.T) {
+		result, err := ConvertPickleToSMILES([]byte{})
+		assert.NoError(t, err)
+		assert.Equal(t, "", result)
+	})
+
+	t.Run("nil pickle data", func(t *testing.T) {
+		result, err := ConvertPickleToSMILES(nil)
+		assert.NoError(t, err)
+		assert.Equal(t, "", result)
+	})
+}
+
+func TestSMILESPickleRoundTrip(t *testing.T) {
+	testCases := []string{"CCO", "CC", "C", "c1ccccc1", "CC(=O)O", "O=C(O)c1ccccc1"}
+	for _, smiles := range testCases {
+		pickle, err := ConvertSMILESToPickle(smiles)
+		assert.NoError(t, err)
+
+		result, err := ConvertPickleToSMILES(pickle)
+		assert.NoError(t, err)
+		assert.Equal(t, smiles, result)
+	}
+}
+
 func TestWKTWKBConversion(t *testing.T) {
 	testCases := []struct {
 		name string

@@ -7879,3 +7879,457 @@ func TestFillWithNullValue_Geometry(t *testing.T) {
 		assert.Nil(t, field.GetScalars().GetGeometryData().GetData()[3])
 	})
 }
+
+func TestFillWithNullValue_MOL(t *testing.T) {
+	t.Run("mol SMILES with null values", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolSmilesData{
+						MolSmilesData: &schemapb.MolSmilesArray{
+							Data: []string{"CCO", "CC"},
+						},
+					},
+				},
+			},
+			ValidData: []bool{true, false, true, false},
+		}
+
+		fieldSchema := &schemapb.FieldSchema{
+			Name:     "mol_field",
+			DataType: schemapb.DataType_Mol,
+			Nullable: true,
+		}
+
+		numRows := 4
+		err := FillWithNullValue(field, fieldSchema, numRows)
+
+		assert.NoError(t, err)
+		assert.Len(t, field.GetScalars().GetMolSmilesData().GetData(), numRows)
+		assert.Equal(t, "CCO", field.GetScalars().GetMolSmilesData().GetData()[0])
+		assert.Equal(t, "", field.GetScalars().GetMolSmilesData().GetData()[1])
+		assert.Equal(t, "CC", field.GetScalars().GetMolSmilesData().GetData()[2])
+		assert.Equal(t, "", field.GetScalars().GetMolSmilesData().GetData()[3])
+	})
+
+	t.Run("mol pickle data with null values", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolData{
+						MolData: &schemapb.MolArray{
+							Data: [][]byte{[]byte("CCO"), []byte("CC")},
+						},
+					},
+				},
+			},
+			ValidData: []bool{true, false, true, false},
+		}
+
+		fieldSchema := &schemapb.FieldSchema{
+			Name:     "mol_field",
+			DataType: schemapb.DataType_Mol,
+			Nullable: true,
+		}
+
+		numRows := 4
+		err := FillWithNullValue(field, fieldSchema, numRows)
+
+		assert.NoError(t, err)
+		assert.Len(t, field.GetScalars().GetMolData().GetData(), numRows)
+		assert.Equal(t, []byte("CCO"), field.GetScalars().GetMolData().GetData()[0])
+		assert.Nil(t, field.GetScalars().GetMolData().GetData()[1])
+		assert.Equal(t, []byte("CC"), field.GetScalars().GetMolData().GetData()[2])
+		assert.Nil(t, field.GetScalars().GetMolData().GetData()[3])
+	})
+}
+
+func TestFillWithDefaultValue_MOL(t *testing.T) {
+	t.Run("mol pickle data with default value", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolData{
+						MolData: &schemapb.MolArray{
+							Data: [][]byte{[]byte("CCO"), []byte("CC")},
+						},
+					},
+				},
+			},
+			ValidData: []bool{true, false, true, false},
+		}
+
+		fieldSchema := &schemapb.FieldSchema{
+			Name:     "mol_field",
+			DataType: schemapb.DataType_Mol,
+			Nullable: false,
+			DefaultValue: &schemapb.ValueField{
+				Data: &schemapb.ValueField_StringData{
+					StringData: "C",
+				},
+			},
+		}
+
+		numRows := 4
+		err := FillWithDefaultValue(field, fieldSchema, numRows)
+
+		assert.NoError(t, err)
+		assert.Len(t, field.GetScalars().GetMolData().GetData(), numRows)
+		assert.Equal(t, []byte("CCO"), field.GetScalars().GetMolData().GetData()[0])
+		assert.Equal(t, []byte("C"), field.GetScalars().GetMolData().GetData()[1])
+		assert.Equal(t, []byte("CC"), field.GetScalars().GetMolData().GetData()[2])
+		assert.Equal(t, []byte("C"), field.GetScalars().GetMolData().GetData()[3])
+	})
+
+	t.Run("mol data with invalid valid_data length", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolData{
+						MolData: &schemapb.MolArray{
+							Data: [][]byte{[]byte("CCO")},
+						},
+					},
+				},
+			},
+			ValidData: []bool{true, false},
+		}
+
+		fieldSchema := &schemapb.FieldSchema{
+			Name:     "mol_field",
+			DataType: schemapb.DataType_Mol,
+			Nullable: false,
+			DefaultValue: &schemapb.ValueField{
+				Data: &schemapb.ValueField_StringData{
+					StringData: "C",
+				},
+			},
+		}
+
+		numRows := 4
+		err := FillWithDefaultValue(field, fieldSchema, numRows)
+
+		assert.Error(t, err)
+	})
+}
+
+func Test_validateUtil_checkMOLFieldData(t *testing.T) {
+	t.Run("valid mol SMILES data", func(t *testing.T) {
+		v := newValidateUtil()
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolSmilesData{
+						MolSmilesData: &schemapb.MolSmilesArray{
+							Data: []string{"CCO", "CC", "C"},
+						},
+					},
+				},
+			},
+		}
+
+		fieldSchema := &schemapb.FieldSchema{
+			Name:     "mol_field",
+			DataType: schemapb.DataType_Mol,
+			Nullable: false,
+		}
+
+		err := v.checkMOLFieldData(field, fieldSchema)
+		assert.NoError(t, err)
+
+		assert.NotNil(t, field.GetScalars().GetMolData())
+		assert.Len(t, field.GetScalars().GetMolData().GetData(), 3)
+	})
+
+	t.Run("nil mol data without nullable", func(t *testing.T) {
+		v := newValidateUtil()
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolSmilesData{
+						MolSmilesData: &schemapb.MolSmilesArray{
+							Data: nil,
+						},
+					},
+				},
+			},
+		}
+
+		fieldSchema := &schemapb.FieldSchema{
+			Name:     "mol_field",
+			DataType: schemapb.DataType_Mol,
+			Nullable: false,
+		}
+
+		err := v.checkMOLFieldData(field, fieldSchema)
+		assert.Error(t, err)
+	})
+
+	t.Run("nil mol data with nullable", func(t *testing.T) {
+		v := newValidateUtil()
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolSmilesData{
+						MolSmilesData: &schemapb.MolSmilesArray{
+							Data: nil,
+						},
+					},
+				},
+			},
+		}
+
+		fieldSchema := &schemapb.FieldSchema{
+			Name:     "mol_field",
+			DataType: schemapb.DataType_Mol,
+			Nullable: true,
+		}
+
+		err := v.checkMOLFieldData(field, fieldSchema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("empty mol SMILES data", func(t *testing.T) {
+		v := newValidateUtil()
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolSmilesData{
+						MolSmilesData: &schemapb.MolSmilesArray{
+							Data: []string{},
+						},
+					},
+				},
+			},
+		}
+
+		fieldSchema := &schemapb.FieldSchema{
+			Name:     "mol_field",
+			DataType: schemapb.DataType_Mol,
+			Nullable: false,
+		}
+
+		err := v.checkMOLFieldData(field, fieldSchema)
+		assert.NoError(t, err)
+		assert.Len(t, field.GetScalars().GetMolData().GetData(), 0)
+	})
+}
+
+func Test_validateUtil_Validate_MOL(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("valid mol data via Validate", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "mol_field",
+				Type:      schemapb.DataType_Mol,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_MolSmilesData{
+							MolSmilesData: &schemapb.MolSmilesArray{
+								Data: []string{"CCO", "CC"},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "mol_field",
+					DataType: schemapb.DataType_Mol,
+				},
+			},
+		}
+
+		v := newValidateUtil()
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+
+		err = v.Validate(data, helper, 2)
+		assert.NoError(t, err)
+
+		assert.NotNil(t, data[0].GetScalars().GetMolData())
+	})
+
+	t.Run("mol data with nil and non-nullable", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "mol_field",
+				Type:      schemapb.DataType_Mol,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_MolSmilesData{
+							MolSmilesData: &schemapb.MolSmilesArray{
+								Data: nil,
+							},
+						},
+					},
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "mol_field",
+					DataType: schemapb.DataType_Mol,
+					Nullable: false,
+				},
+			},
+		}
+
+		v := newValidateUtil()
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+
+		err = v.Validate(data, helper, 0)
+		assert.Error(t, err)
+	})
+
+	t.Run("mol data with nullable and default value", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "mol_field",
+				Type:      schemapb.DataType_Mol,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_MolSmilesData{
+							MolSmilesData: &schemapb.MolSmilesArray{
+								Data: nil,
+							},
+						},
+					},
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "mol_field",
+					DataType: schemapb.DataType_Mol,
+					Nullable: true,
+				},
+			},
+		}
+
+		v := newValidateUtil()
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+
+		err = v.Validate(data, helper, 0)
+		assert.NoError(t, err)
+	})
+}
+
+func Test_validateMOLFieldSearchResult(t *testing.T) {
+	t.Run("nil field data", func(t *testing.T) {
+		var field *schemapb.FieldData
+		err := validateMOLFieldSearchResult(&field)
+		assert.NoError(t, err)
+	})
+
+	t.Run("field data with nil scalars", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			Field:     nil,
+		}
+		err := validateMOLFieldSearchResult(&field)
+		assert.NoError(t, err)
+	})
+
+	t.Run("already contains SMILES data", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolSmilesData{
+						MolSmilesData: &schemapb.MolSmilesArray{
+							Data: []string{"CCO", "CC"},
+						},
+					},
+				},
+			},
+		}
+
+		err := validateMOLFieldSearchResult(&field)
+		assert.NoError(t, err)
+		assert.NotNil(t, field.GetScalars().GetMolSmilesData())
+		assert.Equal(t, []string{"CCO", "CC"}, field.GetScalars().GetMolSmilesData().GetData())
+	})
+
+	t.Run("convert pickle to SMILES", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			FieldId:   100,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolData{
+						MolData: &schemapb.MolArray{
+							Data: [][]byte{[]byte("CCO"), []byte("CC")},
+						},
+					},
+				},
+			},
+		}
+
+		err := validateMOLFieldSearchResult(&field)
+		assert.NoError(t, err)
+
+		assert.NotNil(t, field.GetScalars().GetMolSmilesData())
+		assert.Equal(t, []string{"CCO", "CC"}, field.GetScalars().GetMolSmilesData().GetData())
+		assert.Equal(t, schemapb.DataType_Mol, field.GetType())
+		assert.Equal(t, "mol_field", field.GetFieldName())
+		assert.Equal(t, int64(100), field.GetFieldId())
+	})
+
+	t.Run("convert pickle to SMILES with valid data", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Mol,
+			FieldName: "mol_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_MolData{
+						MolData: &schemapb.MolArray{
+							Data: [][]byte{[]byte("CCO"), nil, []byte("CC")},
+						},
+					},
+				},
+			},
+			ValidData: []bool{true, false, true},
+		}
+
+		err := validateMOLFieldSearchResult(&field)
+		assert.NoError(t, err)
+
+		assert.NotNil(t, field.GetScalars().GetMolSmilesData())
+		smiles := field.GetScalars().GetMolSmilesData().GetData()
+		assert.Len(t, smiles, 3)
+		assert.Equal(t, "CCO", smiles[0])
+		assert.Equal(t, "", smiles[1])
+		assert.Equal(t, "CC", smiles[2])
+		assert.Equal(t, []bool{true, false, true}, field.GetValidData())
+	})
+}

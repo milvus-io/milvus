@@ -99,6 +99,52 @@ func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
 	return nil
 }
 
+func validateMOLFieldSearchResult(fieldData **schemapb.FieldData) error {
+	if *fieldData == nil || (*fieldData).GetScalars() == nil || (*fieldData).GetScalars().Data == nil {
+		return nil
+	}
+	// Check if the field data already contains MolSmilesData
+	_, ok := (*fieldData).GetScalars().Data.(*schemapb.ScalarField_MolSmilesData)
+	if ok {
+		// Already in SMILES format, no conversion needed
+		log.Debug("MOL field data already contains SMILES data, skipping conversion",
+			zap.String("fieldName", (*fieldData).GetFieldName()))
+		return nil
+	}
+	pickleArray := (*fieldData).GetScalars().GetMolData().GetData()
+	smilesArray := make([]string, len(pickleArray))
+	validData := (*fieldData).GetValidData()
+	for i, data := range pickleArray {
+		if validData != nil && !validData[i] {
+			continue
+		}
+		smilesStr, err := common.ConvertPickleToSMILES(data)
+		if err != nil {
+			log.Error("translate the mol pickle into smiles failed", zap.Error(err))
+			return err
+		}
+		smilesArray[i] = smilesStr
+	}
+	// modify the field data in place
+	*fieldData = &schemapb.FieldData{
+		Type:      (*fieldData).GetType(),
+		FieldName: (*fieldData).GetFieldName(),
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_MolSmilesData{
+					MolSmilesData: &schemapb.MolSmilesArray{
+						Data: smilesArray,
+					},
+				},
+			},
+		},
+		FieldId:   (*fieldData).GetFieldId(),
+		IsDynamic: (*fieldData).GetIsDynamic(),
+		ValidData: (*fieldData).GetValidData(),
+	}
+	return nil
+}
+
 func (v *validateUtil) apply(opts ...validateOption) {
 	for _, opt := range opts {
 		opt(v)
@@ -154,6 +200,10 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 			}
 		case schemapb.DataType_JSON:
 			if err := v.checkJSONFieldData(field, fieldSchema); err != nil {
+				return err
+			}
+		case schemapb.DataType_Mol:
+			if err := v.checkMOLFieldData(field, fieldSchema); err != nil {
 				return err
 			}
 		case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
@@ -549,6 +599,18 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 			if err != nil {
 				return err
 			}
+
+		case *schemapb.ScalarField_MolData:
+			sd.MolData.Data, err = fillWithNullValueImpl(sd.MolData.Data, field.GetValidData())
+			if err != nil {
+				return err
+			}
+
+		case *schemapb.ScalarField_MolSmilesData:
+			sd.MolSmilesData.Data, err = fillWithNullValueImpl(sd.MolSmilesData.Data, field.GetValidData())
+			if err != nil {
+				return err
+			}
 		default:
 			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
 		}
@@ -692,6 +754,22 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 				return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
 			}
 			sd.GeometryData.Data, err = fillWithDefaultValueImpl(sd.GeometryData.Data, defaultValueWkbBytes, field.GetValidData())
+			if err != nil {
+				return err
+			}
+
+		case *schemapb.ScalarField_MolData:
+			if len(field.GetValidData()) != numRows {
+				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
+				return merr.WrapErrParameterInvalid(numRows, len(field.GetValidData()), msg)
+			}
+			defaultValue := fieldSchema.GetDefaultValue().GetStringData()
+			defaultValuePickleBytes, err := common.ConvertSMILESToPickle(defaultValue)
+			if err != nil {
+				log.Warn("invalid default value for mol field", zap.Error(err))
+				return merr.WrapErrParameterInvalidMsg("invalid default value for mol field")
+			}
+			sd.MolData.Data, err = fillWithDefaultValueImpl(sd.MolData.Data, defaultValuePickleBytes, field.GetValidData())
 			if err != nil {
 				return err
 			}
@@ -956,6 +1034,39 @@ func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema
 				return merr.WrapErrParameterInvalid("valid length json string", "length exceeds max length", msg)
 			}
 		}
+	}
+	return nil
+}
+
+func (v *validateUtil) checkMOLFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	molArray := field.GetScalars().GetMolSmilesData().GetData()
+	pickleArray := make([][]byte, len(molArray))
+	if molArray == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
+		msg := fmt.Sprintf("mol field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need mol array", "got nil", msg)
+	}
+	var err error
+	for index, smilesData := range molArray {
+		pickleArray[index], err = common.ConvertSMILESToPickle(smilesData)
+		if err != nil {
+			log.Warn("insert invalid MOL data!! Transform to pickle failed",
+				zap.Error(err),
+				zap.Int("index", index))
+			return merr.WrapErrIoFailedReason(err.Error())
+		}
+	}
+	// replace the field data with pickle data array
+	*field = schemapb.FieldData{
+		Type:      field.GetType(),
+		FieldName: field.GetFieldName(),
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_MolData{MolData: &schemapb.MolArray{Data: pickleArray}},
+			},
+		},
+		FieldId:   field.GetFieldId(),
+		IsDynamic: field.GetIsDynamic(),
+		ValidData: field.GetValidData(),
 	}
 	return nil
 }
