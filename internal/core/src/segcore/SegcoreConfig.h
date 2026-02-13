@@ -157,6 +157,16 @@ class SegcoreConfig {
         return enable_geometry_cache_;
     }
 
+    void
+    set_interim_index_mem_expansion_rate(float rate) {
+        interim_index_mem_expansion_rate_ = rate;
+    }
+
+    float
+    get_interim_index_mem_expansion_rate() const {
+        return interim_index_mem_expansion_rate_;
+    }
+
  private:
     inline static const std::unordered_set<std::string>
         valid_dense_vector_index_type = {
@@ -176,6 +186,7 @@ class SegcoreConfig {
         knowhere::RefineType::DATA_VIEW;
     inline static bool refine_with_quant_flag_ = false;
     inline static bool enable_geometry_cache_ = false;
+    inline static float interim_index_mem_expansion_rate_ = 1.15f;
 };
 
 }  // namespace milvus::segcore
