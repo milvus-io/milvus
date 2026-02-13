@@ -251,6 +251,12 @@ func (suite *RowParserSuite) createAllTypesSchema() *schemapb.CollectionSchema {
 				DataType: schemapb.DataType_Geometry,
 				Nullable: suite.hasNullable,
 			},
+			{
+				FieldID:  111,
+				Name:     "mol",
+				DataType: schemapb.DataType_Mol,
+				Nullable: suite.hasNullable,
+			},
 		},
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{structArray},
 	}
@@ -303,6 +309,7 @@ func (suite *RowParserSuite) genAllTypesRowData(resetKey string, resetVal string
 		"{\"sub_bool\": false, \"sub_int8\": 13, \"sub_int16\": 14, \"sub_int16\": 15, \"sub_int32\": 16," +
 		"\"sub_int64\": 17, \"sub_float\": 13.1415, \"sub_double\": 199.99, \"sub_float_vector\": [0.3, 0.4], \"sub_str\": \"hello2\"}]"
 	rawContent["geometry"] = "POINT (30.123 -10.456)"
+	rawContent["mol"] = "CCO"
 	rawContent[resetKey] = resetVal // reset a value
 	for _, deleteKey := range deleteKeys {
 		delete(rawContent, deleteKey) // delete a key
@@ -370,6 +377,10 @@ func compareValues(t *testing.T, field *schemapb.FieldSchema, val any) {
 			assert.Equal(t, field.GetDefaultValue().GetStringData(), val.(string))
 		case schemapb.DataType_Geometry:
 			assert.Equal(t, field.GetDefaultValue().GetStringData(), val.(string))
+		case schemapb.DataType_Mol:
+			pickleValue, err := common.ConvertSMILESToPickle(field.GetDefaultValue().GetStringData())
+			assert.NoError(t, err)
+			assert.Equal(t, pickleValue, val)
 		default:
 		}
 	} else if field.GetNullable() {
@@ -542,6 +553,10 @@ func (suite *RowParserSuite) runValid(c *testCase) {
 			wkbValue, err := common.ConvertWKTToWKB(rawVal)
 			suite.NoError(err)
 			suite.Equal(wkbValue, val)
+		case schemapb.DataType_Mol:
+			pickleValue, err := common.ConvertSMILESToPickle(rawVal)
+			suite.NoError(err)
+			suite.Equal(pickleValue, val)
 		default:
 			continue
 		}

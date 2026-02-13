@@ -330,6 +330,12 @@ func (suite *RowParserSuite) createAllTypesSchema() *schemapb.CollectionSchema {
 				DataType: schemapb.DataType_Geometry,
 				Nullable: suite.hasNullable,
 			},
+			{
+				FieldID:  111,
+				Name:     "mol",
+				DataType: schemapb.DataType_Mol,
+				Nullable: suite.hasNullable,
+			},
 		},
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{structArray},
 	}
@@ -375,6 +381,7 @@ func (suite *RowParserSuite) genAllTypesRowData(resetKey string, resetVal any, d
 	rawContent["varchar"] = "test"
 	rawContent["json"] = map[string]any{"a": 1}
 	rawContent["geometry"] = "POINT (30.123 -10.456)"
+	rawContent["mol"] = "CCO"
 	rawContent["x"] = 6
 	rawContent["$meta"] = map[string]any{"dynamic": "dummy"}
 	rawContent["struct_array"] = []any{
@@ -444,6 +451,10 @@ func compareValues(t *testing.T, field *schemapb.FieldSchema, val any) {
 			assert.Equal(t, field.GetDefaultValue().GetStringData(), val.(string))
 		case schemapb.DataType_Geometry:
 			assert.Equal(t, field.GetDefaultValue().GetStringData(), val.(string))
+		case schemapb.DataType_Mol:
+			pickleValue, err := common.ConvertSMILESToPickle(field.GetDefaultValue().GetStringData())
+			assert.NoError(t, err)
+			assert.Equal(t, pickleValue, val)
 		default:
 		}
 	} else if field.GetNullable() {
@@ -586,6 +597,10 @@ func (suite *RowParserSuite) runValid(c *testCase) {
 				wkbValue, err := common.ConvertWKTToWKB(rawVal.(string))
 				suite.NoError(err)
 				suite.Equal(wkbValue, val)
+			case schemapb.DataType_Mol:
+				pickleValue, err := common.ConvertSMILESToPickle(rawVal.(string))
+				suite.NoError(err)
+				suite.Equal(pickleValue, val)
 			default:
 				continue
 			}
