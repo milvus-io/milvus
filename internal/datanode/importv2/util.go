@@ -454,6 +454,10 @@ func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
 	if err := RunMinHashFunction(task, data); err != nil {
 		return err
 	}
+
+	if err := RunMolFingerprintFunction(task, data); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -601,6 +605,56 @@ func RunMinHashFunction(task *ImportTask, data *storage.InsertData) error {
 			Data: binaryVector,
 			Dim:  int(vectorField.GetDim()),
 		}
+	}
+	return nil
+}
+
+func RunMolFingerprintFunction(task *ImportTask, data *storage.InsertData) error {
+	fns := task.GetSchema().GetFunctions()
+	for _, fn := range fns {
+		if fn.GetType() != schemapb.FunctionType_MolFingerprint {
+			continue
+		}
+		runner, err := function.NewFunctionRunner(task.GetSchema(), fn)
+		if err != nil {
+			return err
+		}
+
+		if runner == nil {
+			continue
+		}
+
+		defer runner.Close()
+
+		inputFieldIDs := lo.Map(runner.GetInputFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })
+		inputDatas := make([]any, 0, len(inputFieldIDs))
+		for _, inputFieldID := range inputFieldIDs {
+			inputDatas = append(inputDatas, data.Data[inputFieldID].GetDataRows())
+		}
+
+		output, err := runner.BatchRun(inputDatas...)
+		if err != nil {
+			return err
+		}
+
+		// Sanity check: ensure BatchRun returned at least one output
+		if len(output) == 0 {
+			return errors.New("MolFingerprint function failed: runner.BatchRun returned empty output")
+		}
+
+		outputFields := runner.GetOutputFields()
+		if len(outputFields) == 0 {
+			return errors.New("MolFingerprint function failed: runner has no output fields")
+		}
+
+		// MolFingerprint function returns *storage.BinaryVectorFieldData directly
+		binaryVectorData, ok := output[0].(*storage.BinaryVectorFieldData)
+		if !ok {
+			return errors.New("MolFingerprint function failed: runner output not BinaryVectorFieldData")
+		}
+
+		outputFieldId := outputFields[0].GetFieldID()
+		data.Data[outputFieldId] = binaryVectorData
 	}
 	return nil
 }

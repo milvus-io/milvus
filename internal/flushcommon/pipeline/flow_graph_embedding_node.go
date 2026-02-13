@@ -178,6 +178,11 @@ func (eNode *embeddingNode) embedding(datas []*storage.InsertData) (map[int64]*s
 				if err != nil {
 					return nil, err
 				}
+			case schemapb.FunctionType_MolFingerprint:
+				err := eNode.molFingerprintEmbedding(functionRunner, data)
+				if err != nil {
+					return nil, err
+				}
 			default:
 				return nil, fmt.Errorf("unknown function type %s", functionSchema.Type)
 			}
@@ -237,4 +242,41 @@ func BuildSparseFieldData(array *schemapb.SparseFloatArray) storage.FieldData {
 			Dim:      array.GetDim(),
 		},
 	}
+}
+
+func (eNode *embeddingNode) molFingerprintEmbedding(runner function.FunctionRunner, data *storage.InsertData) error {
+	inputFieldIds := lo.Map(runner.GetInputFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })
+	outputFieldId := runner.GetOutputFields()[0].GetFieldID()
+
+	datas := []any{}
+
+	for _, inputFieldId := range inputFieldIds {
+		fieldData, ok := data.Data[inputFieldId]
+		if !ok {
+			return errors.New("MOL fingerprint embedding failed: input field data not found")
+		}
+
+		// Extract data from field - MOL data is stored as [][]byte (pickle format)
+		switch fd := fieldData.(type) {
+		case *storage.MolFieldData:
+			datas = append(datas, fd.Data)
+		case *storage.StringFieldData:
+			datas = append(datas, fd.Data)
+		default:
+			return errors.New("MOL fingerprint embedding failed: input field data must be MOL or string/varchar")
+		}
+	}
+
+	output, err := runner.BatchRun(datas...)
+	if err != nil {
+		return err
+	}
+
+	binaryVectorData, ok := output[0].(*storage.BinaryVectorFieldData)
+	if !ok {
+		return errors.New("MOL fingerprint embedding failed: runner output not binary vector")
+	}
+
+	data.Data[outputFieldId] = binaryVectorData
+	return nil
 }

@@ -254,7 +254,8 @@ class ChunkedColumnInterface {
     IsChunkedVariableColumnDataType(DataType data_type) {
         return data_type == DataType::STRING ||
                data_type == DataType::VARCHAR || data_type == DataType::TEXT ||
-               data_type == DataType::JSON || data_type == DataType::GEOMETRY;
+               data_type == DataType::JSON || data_type == DataType::GEOMETRY ||
+               data_type == DataType::MOL;
     }
 
     static bool

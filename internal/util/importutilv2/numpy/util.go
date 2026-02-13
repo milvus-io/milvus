@@ -323,7 +323,7 @@ func validateHeader(npyReader *npy.Reader, field *schemapb.FieldSchema, dim int)
 		if shape[1] != dim {
 			return wrapDimError(shape[1], dim, field)
 		}
-	case schemapb.DataType_VarChar, schemapb.DataType_JSON, schemapb.DataType_Geometry:
+	case schemapb.DataType_VarChar, schemapb.DataType_JSON, schemapb.DataType_Geometry, schemapb.DataType_Mol:
 		if elementType != schemapb.DataType_VarChar {
 			return wrapElementTypeError(elementType, field)
 		}

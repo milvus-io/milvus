@@ -418,3 +418,40 @@ func TestWKTWKBConversion(t *testing.T) {
 		})
 	}
 }
+
+func TestSMILESPickleConversion(t *testing.T) {
+	testCases := []struct {
+		name   string
+		smiles string
+	}{
+		{"ethanol", "CCO"},
+		{"benzene", "c1ccccc1"},
+		{"acetic acid", "CC(=O)O"},
+		{"aspirin", "CC(=O)Oc1ccccc1C(=O)O"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			pickle, err := ConvertSMILESToPickle(tc.smiles)
+			assert.NoError(t, err)
+			assert.NotEmpty(t, pickle)
+
+			smilesResult, err := ConvertPickleToSMILES(pickle)
+			assert.NoError(t, err)
+			assert.NotEmpty(t, smilesResult)
+		})
+	}
+
+	t.Run("empty SMILES", func(t *testing.T) {
+		_, err := ConvertSMILESToPickle("")
+		assert.Error(t, err)
+	})
+
+	t.Run("empty pickle", func(t *testing.T) {
+		_, err := ConvertPickleToSMILES(nil)
+		assert.Error(t, err)
+
+		_, err = ConvertPickleToSMILES([]byte{})
+		assert.Error(t, err)
+	})
+}

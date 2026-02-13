@@ -42,6 +42,8 @@ func NewFunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Functio
 		return NewMinHashFunctionRunner(coll, schema)
 	case schemapb.FunctionType_TextEmbedding:
 		return nil, nil
+	case schemapb.FunctionType_MolFingerprint:
+		return NewMolFingerprintFunctionRunner(coll, schema)
 	default:
 		return nil, fmt.Errorf("unknown functionRunner type %s", schema.GetType().String())
 	}
