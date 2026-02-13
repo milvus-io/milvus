@@ -1,0 +1,8 @@
+header:
+  license:
+    spdx-id: Apache-2.0
+    copyright-owner: 2022 ByteDance Inc.
+  paths:
+    - "**/*.go"
+    - "**/*.s"
+  comment: on-failure
