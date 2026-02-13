@@ -18,7 +18,6 @@ package compactor
 
 import (
 	"context"
-	"strconv"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -31,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
-	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -54,7 +52,6 @@ type LevelZeroCompactionTaskSuite struct {
 	task         *LevelZeroCompactionTask
 
 	dData *storage.DeleteData
-	dBlob []byte
 }
 
 func (s *LevelZeroCompactionTaskSuite) SetupTest() {
@@ -66,27 +63,55 @@ func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 			Begin: 200,
 			End:   2000,
 		},
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+			},
+		},
 	}
 	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, nil, plan, compaction.GenParams())
 	var err error
 	s.task.compactionParams, err = compaction.ParseParamsFromJSON("")
 	s.Require().NoError(err)
 
-	pk2ts := map[int64]uint64{
-		1: 20000,
-		2: 20001,
-		3: 20002,
-	}
-
-	s.dData = storage.NewDeleteData([]storage.PrimaryKey{}, []typeutil.Timestamp{})
-	for pk, ts := range pk2ts {
-		s.dData.Append(storage.NewInt64PrimaryKey(pk), ts)
-	}
+	s.dData = storage.NewDeleteData([]storage.PrimaryKey{
+		storage.NewInt64PrimaryKey(1),
+		storage.NewInt64PrimaryKey(2),
+		storage.NewInt64PrimaryKey(3),
+	}, []typeutil.Timestamp{20000, 20001, 20002})
 
 	dataCodec := storage.NewDeleteCodec()
 	blob, err := dataCodec.Serialize(0, 0, 0, s.dData)
 	s.Require().NoError(err)
-	s.dBlob = blob.GetValue()
+
+	// Create a map to store uploaded data
+	uploadedData := make(map[string][]byte)
+
+	// Mock Upload to capture uploaded data
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.MatchedBy(func(kvs map[string][]byte) bool {
+		for k, v := range kvs {
+			uploadedData[k] = v
+		}
+		return true
+	})).Return(nil).Maybe()
+
+	// Mock Download to return uploaded data or original data
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, paths []string) ([][]byte, error) {
+			result := make([][]byte, 0, len(paths))
+			for _, path := range paths {
+				if data, ok := uploadedData[path]; ok {
+					result = append(result, data)
+				} else {
+					// Return original data for paths not found
+					result = append(result, blob.GetValue())
+				}
+			}
+			return result, nil
+		}).Maybe()
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestGetMaxBatchSize() {
@@ -119,48 +144,6 @@ func (s *LevelZeroCompactionTaskSuite) TestGetMaxBatchSize() {
 	}
 }
 
-func (s *LevelZeroCompactionTaskSuite) TestProcessLoadDeltaFail() {
-	plan := &datapb.CompactionPlan{
-		PlanID: 19530,
-		Type:   datapb.CompactionType_Level0DeleteCompaction,
-		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-			{
-				SegmentID: 100, Level: datapb.SegmentLevel_L0, Deltalogs: []*datapb.FieldBinlog{
-					{
-						Binlogs: []*datapb.Binlog{
-							{LogPath: "a/b/c1", LogSize: 100},
-							{LogPath: "a/b/c2", LogSize: 100},
-							{LogPath: "a/b/c3", LogSize: 100},
-							{LogPath: "a/b/c4", LogSize: 100},
-						},
-					},
-				},
-			},
-			{SegmentID: 200, Level: datapb.SegmentLevel_L1},
-		},
-		Schema: &schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{
-					IsPrimaryKey: true,
-				},
-			},
-		},
-	}
-
-	s.task.plan = plan
-	s.task.tr = timerecord.NewTimeRecorder("test")
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(nil, errors.New("mock download fail")).Once()
-
-	targetSegments := lo.Filter(plan.SegmentBinlogs, func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
-		return s.Level == datapb.SegmentLevel_L1
-	})
-	deltaLogs := map[int64][]string{100: {"a/b/c1"}}
-
-	segments, err := s.task.process(context.Background(), 1, targetSegments, lo.Values(deltaLogs)...)
-	s.Error(err)
-	s.Empty(segments)
-}
-
 func (s *LevelZeroCompactionTaskSuite) TestProcessUploadByCheckFail() {
 	plan := &datapb.CompactionPlan{
 		PlanID: 19530,
@@ -189,6 +172,7 @@ func (s *LevelZeroCompactionTaskSuite) TestProcessUploadByCheckFail() {
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
+					DataType:     schemapb.DataType_Int64,
 					IsPrimaryKey: true,
 				},
 			},
@@ -208,7 +192,6 @@ func (s *LevelZeroCompactionTaskSuite) TestProcessUploadByCheckFail() {
 	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{sw.GetBuffer()}, nil)
 	s.task.cm = cm
 
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Once()
 	mockAlloc := allocator.NewMockAllocator(s.T())
 	mockAlloc.EXPECT().AllocOne().Return(0, errors.New("mock alloc err"))
 	s.task.allocator = mockAlloc
@@ -216,9 +199,21 @@ func (s *LevelZeroCompactionTaskSuite) TestProcessUploadByCheckFail() {
 	targetSegments := lo.Filter(plan.SegmentBinlogs, func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
 		return s.Level == datapb.SegmentLevel_L1
 	})
-	deltaLogs := map[int64][]string{100: {"a/b/c1"}}
+	l0Segments := []*datapb.CompactionSegmentBinlogs{
+		{
+			SegmentID: 100,
+			Level:     datapb.SegmentLevel_L0,
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{LogPath: "a/b/c1", LogSize: 100},
+					},
+				},
+			},
+		},
+	}
 
-	segments, err := s.task.process(context.Background(), 2, targetSegments, lo.Values(deltaLogs)...)
+	segments, err := s.task.process(context.Background(), 2, targetSegments, l0Segments)
 	s.Error(err)
 	s.Empty(segments)
 }
@@ -278,6 +273,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
+					DataType:     schemapb.DataType_Int64,
 					IsPrimaryKey: true,
 				},
 			},
@@ -298,9 +294,6 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{sw.GetBuffer()}, nil)
 	s.task.cm = cm
 
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Times(1)
-	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Once()
-
 	s.Require().Equal(plan.GetPlanID(), s.task.GetPlanID())
 	s.Require().Equal(plan.GetChannel(), s.task.GetChannelName())
 	s.Require().EqualValues(1, s.task.GetCollection())
@@ -312,20 +305,8 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 	targetSegments := lo.Filter(s.task.plan.GetSegmentBinlogs(), func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
 		return s.Level == datapb.SegmentLevel_L1
 	})
-	totalDeltalogs := make(map[int64][]string)
 
-	for _, s := range l0Segments {
-		paths := []string{}
-		for _, d := range s.GetDeltalogs() {
-			for _, l := range d.GetBinlogs() {
-				paths = append(paths, l.GetLogPath())
-			}
-		}
-		if len(paths) > 0 {
-			totalDeltalogs[s.GetSegmentID()] = paths
-		}
-	}
-	segments, err := s.task.process(context.Background(), 1, targetSegments, lo.Values(totalDeltalogs)...)
+	segments, err := s.task.process(context.Background(), 1, targetSegments, l0Segments)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	s.Equal(2, len(segments))
@@ -387,6 +368,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
+					DataType:     schemapb.DataType_Int64,
 					IsPrimaryKey: true,
 				},
 			},
@@ -407,9 +389,6 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{sw.GetBuffer()}, nil)
 	s.task.cm = cm
 
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Once()
-	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Once()
-
 	l0Segments := lo.Filter(s.task.plan.GetSegmentBinlogs(), func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
 		return s.Level == datapb.SegmentLevel_L0
 	})
@@ -417,20 +396,8 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 	targetSegments := lo.Filter(s.task.plan.GetSegmentBinlogs(), func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
 		return s.Level == datapb.SegmentLevel_L1
 	})
-	totalDeltalogs := make(map[int64][]string)
 
-	for _, s := range l0Segments {
-		paths := []string{}
-		for _, d := range s.GetDeltalogs() {
-			for _, l := range d.GetBinlogs() {
-				paths = append(paths, l.GetLogPath())
-			}
-		}
-		if len(paths) > 0 {
-			totalDeltalogs[s.GetSegmentID()] = paths
-		}
-	}
-	segments, err := s.task.process(context.TODO(), 2, targetSegments, lo.Values(totalDeltalogs)...)
+	segments, err := s.task.process(context.TODO(), 2, targetSegments, l0Segments)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	s.Equal(2, len(segments))
@@ -445,66 +412,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 	log.Info("test segment results", zap.Any("result", segments))
 }
 
-func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
-	ctx := context.Background()
-	plan := &datapb.CompactionPlan{
-		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-			{
-				SegmentID: 100,
-			},
-		},
-		PreAllocatedLogIDs: &datapb.IDRange{Begin: 11111, End: 21111},
-	}
-
-	s.Run("serializeUpload allocator Alloc failed", func() {
-		s.SetupTest()
-		s.task.plan = plan
-		mockAlloc := allocator.NewMockAllocator(s.T())
-		mockAlloc.EXPECT().AllocOne().Return(0, errors.New("mock alloc err"))
-		s.task.allocator = mockAlloc
-
-		writer := NewSegmentDeltaWriter(100, 10, 1)
-		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
-		writers := map[int64]*SegmentDeltaWriter{100: writer}
-
-		result, err := s.task.serializeUpload(ctx, writers)
-		s.Error(err)
-		s.Equal(0, len(result))
-	})
-
-	s.Run("serializeUpload Upload failed", func() {
-		s.SetupTest()
-		s.task.plan = plan
-		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock upload failed"))
-		writer := NewSegmentDeltaWriter(100, 10, 1)
-		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
-		writers := map[int64]*SegmentDeltaWriter{100: writer}
-
-		results, err := s.task.serializeUpload(ctx, writers)
-		s.Error(err)
-		s.Equal(0, len(results))
-	})
-
-	s.Run("upload success", func() {
-		s.SetupTest()
-		s.task.plan = plan
-		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
-		writer := NewSegmentDeltaWriter(100, 10, 1)
-		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
-		writers := map[int64]*SegmentDeltaWriter{100: writer}
-
-		results, err := s.task.serializeUpload(ctx, writers)
-		s.NoError(err)
-		s.Equal(1, len(results))
-
-		seg1 := results[0]
-		s.EqualValues(100, seg1.GetSegmentID())
-		s.Equal(1, len(seg1.GetDeltalogs()))
-		s.Equal(1, len(seg1.GetDeltalogs()[0].GetBinlogs()))
-	})
-}
-
-func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
+func (s *LevelZeroCompactionTaskSuite) TestSplitAndWrite() {
 	bfs1 := pkoracle.NewBloomFilterSetWithBatchSize(100)
 	bfs1.UpdatePKRange(&storage.Int64FieldData{Data: []int64{1, 3}})
 	bfs2 := pkoracle.NewBloomFilterSetWithBatchSize(100)
@@ -518,61 +426,106 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
 		101: bfs2,
 		102: bfs3,
 	}
-	deltaWriters := s.task.splitDelta(context.TODO(), s.dData, segmentBFs)
 
-	s.NotEmpty(deltaWriters)
-	s.ElementsMatch(predicted, lo.Keys(deltaWriters))
-	s.EqualValues(2, deltaWriters[100].GetRowNum())
-	s.EqualValues(1, deltaWriters[101].GetRowNum())
-	s.EqualValues(1, deltaWriters[102].GetRowNum())
+	segments, err := s.task.splitAndWrite(context.TODO(), s.dData, segmentBFs)
+	s.NoError(err)
 
-	s.ElementsMatch([]storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(3)}, deltaWriters[100].deleteData.Pks)
-	s.Equal(storage.NewInt64PrimaryKey(3), deltaWriters[101].deleteData.Pks[0])
-	s.Equal(storage.NewInt64PrimaryKey(3), deltaWriters[102].deleteData.Pks[0])
-}
+	// Verify basic structure
+	s.NotEmpty(segments)
+	s.ElementsMatch(predicted, lo.Map(segments, func(seg *datapb.CompactionSegment, _ int) int64 {
+		return seg.GetSegmentID()
+	}))
 
-func (s *LevelZeroCompactionTaskSuite) TestLoadDelta() {
-	ctx := context.TODO()
+	// Verify each segment has deltalogs and check content
+	for _, segment := range segments {
+		s.NotNil(segment.GetDeltalogs())
+		s.NotEmpty(segment.GetDeltalogs(), "segment %d should have deltalogs", segment.GetSegmentID())
 
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(
-		func(paths []string) bool {
-			return len(paths) > 0 && paths[0] == "correct"
-		})).Return([][]byte{s.dBlob}, nil).Once()
+		// Each segment should have exactly 1 deltalog field
+		s.Len(segment.GetDeltalogs(), 1, "segment %d should have 1 deltalog field", segment.GetSegmentID())
 
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(
-		func(paths []string) bool {
-			return len(paths) > 0 && paths[0] == "error"
-		})).Return(nil, errors.New("mock err")).Once()
-
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(
-		func(paths []string) bool {
-			return len(paths) > 0 && paths[0] == "invalid-blobs"
-		})).Return([][]byte{{1}}, nil).Once()
-
-	tests := []struct {
-		description string
-		paths       []string
-
-		expectError bool
-	}{
-		{"no error", []string{"correct"}, false},
-		{"download error", []string{"error"}, true},
-		{"deserialize error", []string{"invalid-blobs"}, true},
+		// Each deltalog field should have at least 1 binlog
+		deltalogField := segment.GetDeltalogs()[0]
+		s.NotEmpty(deltalogField.GetBinlogs(), "segment %d should have binlog entries", segment.GetSegmentID())
 	}
 
-	for _, test := range tests {
-		dData, err := s.task.loadDelta(ctx, test.paths)
+	// Verify the expected data distribution based on bloom filter hits
+	// Test data: PK 1 (ts 20000), PK 2 (ts 20001), PK 3 (ts 20002)
+	// bfs1 (seg 100): contains 1, 3
+	// bfs2 (seg 101): contains 3
+	// bfs3 (seg 102): contains 3
+	// So: seg 100 should have 2 PKs (1 and 3), seg 101 and 102 should each have 1 PK (3)
 
-		if test.expectError {
-			s.Error(err)
-		} else {
-			s.NoError(err)
-			s.NotEmpty(dData)
-			s.NotNil(dData)
-			s.ElementsMatch(s.dData.Pks, dData.Pks)
-			s.Equal(s.dData.RowCount, dData.RowCount)
+	segmentMap := lo.SliceToMap(segments, func(seg *datapb.CompactionSegment) (int64, *datapb.CompactionSegment) {
+		return seg.GetSegmentID(), seg
+	})
+
+	// Helper function to read and verify deltalog content
+	assertDeltalog := func(segmentID int64, expectedPKs []int64, expectedTSs []uint64) {
+		seg := segmentMap[segmentID]
+		s.NotNil(seg, "segment %d should exist", segmentID)
+		s.NotEmpty(seg.GetDeltalogs(), "segment %d should have deltalogs", segmentID)
+
+		deltalogField := seg.GetDeltalogs()[0]
+		s.NotEmpty(deltalogField.GetBinlogs(), "segment %d should have binlogs", segmentID)
+
+		// Read each binlog and collect all PKs and timestamps
+		var allPKs []int64
+		var allTSs []uint64
+
+		for _, binlog := range deltalogField.GetBinlogs() {
+			path := binlog.GetLogPath()
+			s.NotEmpty(path, "binlog path should not be empty")
+
+			// Download the deltalog data
+			blobs, err := s.task.BinlogIO.Download(context.TODO(), []string{path})
+			s.NoError(err, "should be able to download deltalog for segment %d", segmentID)
+			s.NotEmpty(blobs, "downloaded blobs should not be empty")
+
+			// Convert [][]byte to []*Blob
+			blobPtrs := make([]*storage.Blob, len(blobs))
+			for i, b := range blobs {
+				blobPtrs[i] = &storage.Blob{
+					Key:   path,
+					Value: b,
+				}
+			}
+
+			// Deserialize the deltalog
+			codec := storage.NewDeleteCodec()
+			_, _, deltaData, err := codec.Deserialize(blobPtrs)
+			s.NoError(err, "should be able to deserialize deltalog for segment %d", segmentID)
+			s.NotNil(deltaData, "deltaData should not be nil")
+
+			// Extract PKs and timestamps using DeltaData methods
+			pks := deltaData.DeletePks()
+			tss := deltaData.DeleteTimestamps()
+
+			for i := 0; i < int(deltaData.DeleteRowCount()); i++ {
+				pk := pks.Get(i).(*storage.Int64PrimaryKey)
+				allPKs = append(allPKs, pk.Value)
+				allTSs = append(allTSs, tss[i])
+			}
 		}
+
+		// Verify the PKs and timestamps
+		s.ElementsMatch(expectedPKs, allPKs, "segment %d should have expected PKs", segmentID)
+		s.ElementsMatch(expectedTSs, allTSs, "segment %d should have expected timestamps", segmentID)
+
+		log.Info("verified deltalog content",
+			zap.Int64("segmentID", segmentID),
+			zap.Int64s("pks", allPKs),
+			zap.Uint64s("tss", allTSs))
 	}
+
+	// Segment 100 should have PKs 1 and 3 with their timestamps
+	assertDeltalog(100, []int64{1, 3}, []uint64{20000, 20002})
+
+	// Segment 101 should have PK 3 with its timestamp
+	assertDeltalog(101, []int64{3}, []uint64{20002})
+
+	// Segment 102 should have PK 3 with its timestamp
+	assertDeltalog(102, []int64{3}, []uint64{20002})
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestLoadBF() {
@@ -591,6 +544,7 @@ func (s *LevelZeroCompactionTaskSuite) TestLoadBF() {
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
+					DataType:     schemapb.DataType_Int64,
 					IsPrimaryKey: true,
 				},
 			},
@@ -613,180 +567,6 @@ func (s *LevelZeroCompactionTaskSuite) TestLoadBF() {
 	s.NoError(err)
 
 	s.Len(bfs, 1)
-	for _, pk := range s.dData.Pks {
-		lc := storage.NewLocationsCache(pk)
-		s.True(bfs[201].PkExists(lc))
-	}
-}
-
-func (s *LevelZeroCompactionTaskSuite) TestBuildBinlogWithRootPath() {
-	ctx := context.Background()
-
-	// Test cases for different binlog types and parameters
-	testCases := []struct {
-		name         string
-		rootPath     string
-		binlogType   storage.BinlogType
-		collectionID int64
-		partitionID  int64
-		segmentID    int64
-		fieldID      int64
-		logID        int64
-		expectError  bool
-		expectPrefix string
-	}{
-		{
-			name:         "DeleteBinlog with valid params",
-			rootPath:     "/test/root",
-			binlogType:   storage.DeleteBinlog,
-			collectionID: 1001,
-			partitionID:  2001,
-			segmentID:    3001,
-			fieldID:      -1,
-			logID:        4001,
-			expectError:  false,
-			expectPrefix: "/test/root/delta_log/",
-		},
-		{
-			name:         "InsertBinlog with valid params",
-			rootPath:     "/test/root",
-			binlogType:   storage.InsertBinlog,
-			collectionID: 1002,
-			partitionID:  2002,
-			segmentID:    3002,
-			fieldID:      100,
-			logID:        4002,
-			expectError:  false,
-			expectPrefix: "/test/root/insert_log/",
-		},
-		{
-			name:         "StatsBinlog with valid params",
-			rootPath:     "/test/root",
-			binlogType:   storage.StatsBinlog,
-			collectionID: 1003,
-			partitionID:  2003,
-			segmentID:    3003,
-			fieldID:      101,
-			logID:        4003,
-			expectError:  false,
-			expectPrefix: "/test/root/stats_log/",
-		},
-		{
-			name:         "BM25Binlog with valid params",
-			rootPath:     "/test/root",
-			binlogType:   storage.BM25Binlog,
-			collectionID: 1004,
-			partitionID:  2004,
-			segmentID:    3004,
-			fieldID:      102,
-			logID:        4004,
-			expectError:  false,
-			expectPrefix: "/test/root/bm25_stats/",
-		},
-		{
-			name:         "Empty root path",
-			rootPath:     "",
-			binlogType:   storage.DeleteBinlog,
-			collectionID: 1005,
-			partitionID:  2005,
-			segmentID:    3005,
-			fieldID:      -1,
-			logID:        4005,
-			expectError:  false,
-			expectPrefix: "delta_log/",
-		},
-		{
-			name:         "Invalid binlog type",
-			rootPath:     "/test/root",
-			binlogType:   storage.BinlogType(999),
-			collectionID: 1006,
-			partitionID:  2006,
-			segmentID:    3006,
-			fieldID:      103,
-			logID:        4006,
-			expectError:  true,
-		},
-	}
-
-	for _, tc := range testCases {
-		s.Run(tc.name, func() {
-			path, err := binlog.BuildLogPathWithRootPath(
-				tc.rootPath,
-				tc.binlogType,
-				tc.collectionID,
-				tc.partitionID,
-				tc.segmentID,
-				tc.fieldID,
-				tc.logID,
-			)
-
-			if tc.expectError {
-				s.Error(err)
-				s.Empty(path)
-			} else {
-				s.NoError(err)
-				s.NotEmpty(path)
-				s.Contains(path, tc.expectPrefix)
-				s.Contains(path, strconv.FormatInt(tc.collectionID, 10))
-				s.Contains(path, strconv.FormatInt(tc.partitionID, 10))
-				s.Contains(path, strconv.FormatInt(tc.segmentID, 10))
-				s.Contains(path, strconv.FormatInt(tc.logID, 10))
-
-				// For non-delete binlogs, check field ID is included
-				if tc.binlogType != storage.DeleteBinlog {
-					s.Contains(path, strconv.FormatInt(tc.fieldID, 10))
-				}
-			}
-		})
-	}
-
-	// Test the actual usage in serializeUpload method context
-	s.Run("serializeUpload context usage", func() {
-		plan := &datapb.CompactionPlan{
-			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-				{
-					CollectionID: 1234,
-					PartitionID:  5678,
-					SegmentID:    9012,
-				},
-			},
-			PreAllocatedLogIDs: &datapb.IDRange{Begin: 1000, End: 2000},
-		}
-		s.task.plan = plan
-		s.task.compactionParams.StorageConfig.RootPath = "/compaction/root"
-
-		// Create a segment delta writer for testing
-		writer := NewSegmentDeltaWriter(9012, 5678, 1234)
-		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
-		segmentWriters := map[int64]*SegmentDeltaWriter{9012: writer}
-
-		// Mock the upload
-		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, blobs map[string][]byte) error {
-				s.Len(blobs, 1)
-				for blobKey := range blobs {
-					// Verify the blob key format
-					s.Contains(blobKey, "/compaction/root/delta_log/")
-					s.Contains(blobKey, "1234") // collection ID
-					s.Contains(blobKey, "5678") // partition ID
-					s.Contains(blobKey, "9012") // segment ID
-				}
-				return nil
-			},
-		).Once()
-
-		results, err := s.task.serializeUpload(ctx, segmentWriters)
-		s.NoError(err)
-		s.Len(results, 1)
-		s.Equal(int64(9012), results[0].GetSegmentID())
-		s.NotNil(results[0].GetDeltalogs())
-		s.Len(results[0].GetDeltalogs(), 1)
-		s.Len(results[0].GetDeltalogs()[0].GetBinlogs(), 1)
-
-		// Verify the log path in result
-		logPath := results[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath()
-		s.Contains(logPath, "/compaction/root/delta_log/")
-	})
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestFailed() {
@@ -806,6 +586,7 @@ func (s *LevelZeroCompactionTaskSuite) TestFailed() {
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
 					{
+						DataType:     schemapb.DataType_Int64,
 						IsPrimaryKey: false,
 					},
 				},

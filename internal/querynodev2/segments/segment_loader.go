@@ -34,6 +34,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
@@ -53,7 +54,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
@@ -1292,46 +1292,20 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 	)
 	log.Info("loading delta...")
 
-	var blobs []*storage.Blob
-	var futures []*conc.Future[any]
+	var rowNums int64
+	valid := func(binlog *datapb.Binlog, _ int) bool {
+		// the segment has applied the delta logs, skip it
+		if binlog.GetTimestampTo() > 0 && // this field may be missed in legacy versions
+			binlog.GetTimestampTo() < segment.LastDeltaTimestamp() {
+			return false
+		}
+		return true
+	}
 	for _, deltaLog := range deltaLogs {
-		for _, bLog := range deltaLog.GetBinlogs() {
-			bLog := bLog
-			// the segment has applied the delta logs, skip it
-			if bLog.GetTimestampTo() > 0 && // this field may be missed in legacy versions
-				bLog.GetTimestampTo() < segment.LastDeltaTimestamp() {
-				continue
-			}
-			future := GetLoadPool().Submit(func() (any, error) {
-				value, err := loader.cm.Read(ctx, bLog.GetLogPath())
-				if err != nil {
-					return nil, err
-				}
-				blob := &storage.Blob{
-					Key:    bLog.GetLogPath(),
-					Value:  value,
-					RowNum: bLog.EntriesNum,
-				}
-				return blob, nil
-			})
-			futures = append(futures, future)
-		}
+		rowNums += lo.SumBy(lo.Filter(deltaLog.GetBinlogs(), valid), func(binlog *datapb.Binlog) int64 {
+			return binlog.GetEntriesNum()
+		})
 	}
-	for _, future := range futures {
-		blob, err := future.Await()
-		if err != nil {
-			return err
-		}
-		blobs = append(blobs, blob.(*storage.Blob))
-	}
-	if len(blobs) == 0 {
-		log.Info("there are no delta logs saved with segment, skip loading delete record")
-		return nil
-	}
-
-	rowNums := lo.SumBy(blobs, func(blob *storage.Blob) int64 {
-		return blob.RowNum
-	})
 
 	collection := loader.manager.Collection.Get(segment.Collection())
 
@@ -1342,20 +1316,50 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		return err
 	}
 
-	reader, err := storage.CreateDeltalogReader(blobs)
-	if err != nil {
-		return err
-	}
-	defer reader.Close()
-	for {
-		dl, err := reader.NextValue()
-		if err != nil {
-			if err == io.EOF {
-				break
+	for _, deltalog := range deltaLogs {
+		err := func() error {
+			opts := []storage.RwOption{
+				storage.WithDownloader(
+					func(ctx context.Context, paths []string) ([][]byte, error) {
+						return loader.cm.MultiRead(ctx, paths)
+					},
+				),
 			}
-			return err
-		}
-		err = deltaData.Append((*dl).Pk, (*dl).Ts)
+			paths := lo.Map(lo.Filter(deltalog.Binlogs, valid), func(binlog *datapb.Binlog, _ int) string {
+				return binlog.GetLogPath()
+			})
+			reader, err := storage.NewDeltalogReader(pkField.DataType, paths, opts...)
+			if err != nil {
+				return err
+			}
+			defer reader.Close()
+
+			for {
+				dl, err := reader.Next()
+				if err != nil {
+					if err == io.EOF {
+						break
+					}
+					return err
+				}
+
+				for i := 0; i < dl.Len(); i++ {
+					var pk storage.PrimaryKey
+					switch pkField.DataType {
+					case schemapb.DataType_Int64:
+						pk = storage.NewInt64PrimaryKey(dl.Column(0).(*array.Int64).Value(i))
+					case schemapb.DataType_VarChar:
+						pk = storage.NewVarCharPrimaryKey(dl.Column(0).(*array.String).Value(i))
+					}
+					ts := typeutil.Timestamp(dl.Column(1).(*array.Int64).Value(i))
+					err = deltaData.Append(pk, ts)
+					if err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}()
 		if err != nil {
 			return err
 		}

@@ -18,20 +18,16 @@ package compactor
 
 import (
 	"context"
-	sio "io"
 	"strconv"
 	"time"
 
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -118,55 +114,6 @@ func (filter *EntityFilter) isEntityExpired(entityTs typeutil.Timestamp) bool {
 
 	// filter.ttl is nanoseconds
 	return filter.ttl/int64(time.Millisecond) <= dur
-}
-
-func mergeDeltalogs(ctx context.Context, io io.BinlogIO, paths []string) (map[interface{}]typeutil.Timestamp, error) {
-	pk2Ts := make(map[interface{}]typeutil.Timestamp)
-
-	log := log.Ctx(ctx)
-	if len(paths) == 0 {
-		log.Debug("compact with no deltalogs, skip merge deltalogs")
-		return pk2Ts, nil
-	}
-
-	blobs := make([]*storage.Blob, 0)
-	binaries, err := io.Download(ctx, paths)
-	if err != nil {
-		log.Warn("compact wrong, fail to download deltalogs",
-			zap.Strings("path", paths),
-			zap.Error(err))
-		return nil, err
-	}
-
-	for i := range binaries {
-		blobs = append(blobs, &storage.Blob{Value: binaries[i]})
-	}
-	reader, err := storage.CreateDeltalogReader(blobs)
-	if err != nil {
-		log.Error("malformed delta file", zap.Error(err))
-		return nil, err
-	}
-	defer reader.Close()
-
-	for {
-		dl, err := reader.NextValue()
-		if err != nil {
-			if err == sio.EOF {
-				break
-			}
-			log.Error("compact wrong, fail to read deltalogs", zap.Error(err))
-			return nil, err
-		}
-
-		if ts, ok := pk2Ts[(*dl).Pk.GetValue()]; ok && ts > (*dl).Ts {
-			continue
-		}
-		pk2Ts[(*dl).Pk.GetValue()] = (*dl).Ts
-	}
-
-	log.Info("compact mergeDeltalogs end", zap.Int("delete entries counts", len(pk2Ts)))
-
-	return pk2Ts, nil
 }
 
 // TODO: remove, used in test only

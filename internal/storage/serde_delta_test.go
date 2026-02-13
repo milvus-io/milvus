@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -152,4 +153,53 @@ func TestDeltalogStreamWriter_NoRecordWriter(t *testing.T) {
 	blob, err := writer.Finalize()
 	assert.Error(t, err)
 	assert.Nil(t, blob)
+}
+
+func TestLegacyDeltalogWriter_PathUsedInUploader(t *testing.T) {
+	paramtable.Init()
+
+	const (
+		testCollectionID = int64(1)
+		testPartitionID  = int64(2)
+		testSegmentID    = int64(3)
+		testLogID        = int64(4)
+		testPath         = "/test/path/to/deltalog"
+	)
+
+	// Test that the uploader receives the correct path
+	var uploadedPath string
+	var uploadedData []byte
+
+	uploader := func(ctx context.Context, kvs map[string][]byte) error {
+		for k, v := range kvs {
+			uploadedPath = k
+			uploadedData = v
+		}
+		return nil
+	}
+
+	writer, err := NewLegacyDeltalogWriter(
+		testCollectionID, testPartitionID, testSegmentID, testLogID,
+		schemapb.DataType_Int64, uploader, testPath,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, writer)
+
+	// Write a test record
+	record, _, _, err := BuildDeleteRecord(
+		[]PrimaryKey{NewInt64PrimaryKey(1), NewInt64PrimaryKey(2)},
+		[]uint64{100, 101},
+	)
+	require.NoError(t, err)
+	defer record.Release()
+
+	err = writer.Write(record)
+	require.NoError(t, err)
+
+	err = writer.Close()
+	require.NoError(t, err)
+
+	// Verify the uploader received the correct path (not empty)
+	assert.Equal(t, testPath, uploadedPath, "uploader should receive the configured path")
+	assert.NotEmpty(t, uploadedData, "uploader should receive non-empty data")
 }

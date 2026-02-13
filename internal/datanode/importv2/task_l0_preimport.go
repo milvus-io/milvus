@@ -160,7 +160,7 @@ func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 			return
 		}
 
-		reader, err := binlog.NewL0Reader(t.ctx, t.cm, pkField, file, bufferSize, tsStart, tsEnd)
+		reader, err := binlog.NewL0Reader(t.ctx, t.cm, t.req.GetStorageConfig(), pkField, file, bufferSize, tsStart, tsEnd)
 		if err != nil {
 			return
 		}
