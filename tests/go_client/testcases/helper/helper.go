@@ -183,8 +183,9 @@ func CreateMilvusClient(ctx context.Context, t *testing.T, cfg *client.ClientCon
 type CollectionPrepare struct{}
 
 var (
-	CollPrepare CollectionPrepare
-	FieldsFact  FieldsFactory
+	CollPrepare      CollectionPrepare
+	FieldsFact       FieldsFactory
+	nonAlphaNumRegex = regexp.MustCompile("[^a-zA-Z0-9]")
 )
 
 func mergeOptions(schema *entity.Schema, opts ...CreateCollectionOpt) client.CreateCollectionOption {
@@ -242,7 +243,7 @@ func (chainTask *CollectionPrepare) CreateCollection(ctx context.Context, t *tes
 
 	schemaOpt.Fields = fields
 	if schemaOpt.CollectionName == "" {
-		testName := regexp.MustCompile("[^a-zA-Z0-9]").ReplaceAllString(t.Name(), "_")
+		testName := nonAlphaNumRegex.ReplaceAllString(t.Name(), "_")
 		schemaOpt.CollectionName = common.GenRandomString(testName, 6)
 	}
 	schema := GenSchema(schemaOpt)

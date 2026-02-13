@@ -421,9 +421,10 @@ func ConvertChannelName(chanName string, tokenFrom string, tokenTo string) (stri
 	return strings.Replace(chanName, tokenFrom, tokenTo, 1), nil
 }
 
+var collectionIDRegexp = regexp.MustCompile(`.*_(\d+)v\d+`)
+
 func GetCollectionIDFromVChannel(vChannelName string) int64 {
-	re := regexp.MustCompile(`.*_(\d+)v\d+`)
-	matches := re.FindStringSubmatch(vChannelName)
+	matches := collectionIDRegexp.FindStringSubmatch(vChannelName)
 	if len(matches) > 1 {
 		number, err := strconv.ParseInt(matches[1], 0, 64)
 		if err == nil {
