@@ -1022,7 +1022,7 @@ class SkipIndexStatsBuilder {
         ankerl::unordered_dense::set<std::string> ngram_values;
 
         for (int64_t i = 0; i < total_rows; ++i) {
-            bool is_valid = chunk->isValid(i);
+            bool is_valid = chunk->IsValid(i);
             if (!is_valid) {
                 null_count++;
                 continue;

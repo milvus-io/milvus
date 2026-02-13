@@ -24,7 +24,6 @@
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/ConcurrentVector.h"
-#include "common/Span.h"
 #include "query/Utils.h"
 #include "common/EasyAssert.h"
 

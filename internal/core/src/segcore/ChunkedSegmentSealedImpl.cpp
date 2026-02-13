@@ -51,6 +51,7 @@
 #include "common/Channel.h"
 #include "common/Chunk.h"
 #include "common/ChunkWriter.h"
+#include "common/ChunkDataView.h"
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -63,7 +64,6 @@
 #include "common/OffsetMapping.h"
 #include "common/QueryInfo.h"
 #include "common/Schema.h"
-#include "common/Span.h"
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/TypeTraits.h"
@@ -457,12 +457,10 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 for (int i = 0; i < all_ts_chunks.size(); i++) {
                     auto chunk_data = all_ts_chunks[i].get();
                     auto fixed_chunk =
-                        static_cast<FixedWidthChunk*>(chunk_data);
-                    auto span = fixed_chunk->Span();
-                    for (size_t j = 0; j < span.row_count(); j++) {
-                        auto ts = *(int64_t*)((char*)span.data() +
-                                              j * span.element_sizeof());
-                        timestamps[offset++] = ts;
+                        static_cast<FixedWidthChunk<int64_t>*>(chunk_data);
+                    auto data_view = fixed_chunk->GetDataView<int64_t>();
+                    for (size_t j = 0; j < data_view->RowCount(); j++) {
+                        timestamps[offset++] = (*data_view)[j];
                     }
                 }
                 init_timestamp_index(timestamps, num_rows);
@@ -597,11 +595,11 @@ ChunkedSegmentSealedImpl::load_system_field_internal(
         while (data.arrow_reader_channel->pop(r)) {
             auto array_vec = read_single_column_batches(r->reader);
             auto chunk = create_chunk(field_meta, array_vec);
-            auto chunk_ptr = static_cast<FixedWidthChunk*>(chunk.get());
-            std::copy_n(static_cast<const Timestamp*>(chunk_ptr->Span().data()),
-                        chunk_ptr->Span().row_count(),
+            auto data_view = chunk->GetDataView<int64_t>();
+            std::copy_n(data_view->Data(),
+                        data_view->RowCount(),
                         timestamps.data() + offset);
-            offset += chunk_ptr->Span().row_count();
+            offset += data_view->RowCount();
         }
 
         init_timestamp_index(timestamps, num_rows);
@@ -719,70 +717,41 @@ ChunkedSegmentSealedImpl::prefetch_chunks(
     }
 }
 
-PinWrapper<SpanBase>
-ChunkedSegmentSealedImpl::chunk_data_impl(milvus::OpContext* op_ctx,
+PinWrapper<AnyDataView>
+ChunkedSegmentSealedImpl::chunk_view_impl(milvus::OpContext* op_ctx,
                                           FieldId field_id,
                                           int64_t chunk_id) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto column = get_column(field_id)) {
-        return column->Span(op_ctx, chunk_id);
+        return column->ChunkDataView(op_ctx, chunk_id);
     }
     ThrowInfo(ErrorCode::UnexpectedError,
-              "chunk_data_impl only used for chunk column field ");
+              "chunk_view_impl only used for chunk column field ");
 }
 
-PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-ChunkedSegmentSealedImpl::chunk_array_view_impl(
-    milvus::OpContext* op_ctx,
-    FieldId field_id,
-    int64_t chunk_id,
-    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
+PinWrapper<AnyDataView>
+ChunkedSegmentSealedImpl::chunk_view_impl(milvus::OpContext* op_ctx,
+                                          FieldId field_id,
+                                          int64_t chunk_id,
+                                          int64_t start_offset,
+                                          int64_t length) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto column = get_column(field_id)) {
-        return column->ArrayViews(op_ctx, chunk_id, offset_len);
+        auto chunk_wrapper = column->GetChunk(op_ctx, chunk_id);
+        auto chunk = chunk_wrapper.get();
+        return PinWrapper<AnyDataView>(
+            chunk_wrapper, chunk->GetAnyDataView(start_offset, length));
     }
     ThrowInfo(ErrorCode::UnexpectedError,
-              "chunk_array_view_impl only used for chunk column field ");
+              "chunk_view_impl only used for chunk column field ");
 }
 
-PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
-ChunkedSegmentSealedImpl::chunk_vector_array_view_impl(
-    milvus::OpContext* op_ctx,
-    FieldId field_id,
-    int64_t chunk_id,
-    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
-    std::shared_lock lck(mutex_);
-    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
-               "Can't get bitset element at " + std::to_string(field_id.get()));
-    if (auto column = get_column(field_id)) {
-        return column->VectorArrayViews(op_ctx, chunk_id, offset_len);
-    }
-    ThrowInfo(ErrorCode::UnexpectedError,
-              "chunk_vector_array_view_impl only used for chunk column field ");
-}
-
-PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-ChunkedSegmentSealedImpl::chunk_string_view_impl(
-    milvus::OpContext* op_ctx,
-    FieldId field_id,
-    int64_t chunk_id,
-    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
-    std::shared_lock lck(mutex_);
-    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
-               "Can't get bitset element at " + std::to_string(field_id.get()));
-    if (auto column = get_column(field_id)) {
-        return column->StringViews(op_ctx, chunk_id, offset_len);
-    }
-    ThrowInfo(ErrorCode::UnexpectedError,
-              "chunk_string_view_impl only used for variable column field ");
-}
-
-PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-ChunkedSegmentSealedImpl::chunk_string_views_by_offsets(
+PinWrapper<AnyDataView>
+ChunkedSegmentSealedImpl::chunk_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
     int64_t chunk_id,
@@ -791,27 +760,13 @@ ChunkedSegmentSealedImpl::chunk_string_views_by_offsets(
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto column = get_column(field_id)) {
-        return column->StringViewsByOffsets(op_ctx, chunk_id, offsets);
+        auto chunk_wrapper = column->GetChunk(op_ctx, chunk_id);
+        auto chunk = chunk_wrapper.get();
+        return PinWrapper<AnyDataView>(chunk_wrapper,
+                                       chunk->GetAnyDataView(offsets));
     }
     ThrowInfo(ErrorCode::UnexpectedError,
-              "chunk_view_by_offsets only used for variable column field ");
-}
-
-PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-ChunkedSegmentSealedImpl::chunk_array_views_by_offsets(
-    milvus::OpContext* op_ctx,
-    FieldId field_id,
-    int64_t chunk_id,
-    const FixedVector<int32_t>& offsets) const {
-    std::shared_lock lck(mutex_);
-    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
-               "Can't get bitset element at " + std::to_string(field_id.get()));
-    if (auto column = get_column(field_id)) {
-        return column->ArrayViewsByOffsets(op_ctx, chunk_id, offsets);
-    }
-    ThrowInfo(ErrorCode::UnexpectedError,
-              "chunk_array_views_by_offsets only used for variable column "
-              "field ");
+              "chunk_view_impl only used for chunk column field ");
 }
 
 PinWrapper<index::NgramInvertedIndex*>
@@ -1262,8 +1217,8 @@ ChunkedSegmentSealedImpl::search_batch_pks(
             auto num_chunk = pk_column->num_chunks();
             for (int i = 0; i < num_chunk; ++i) {
                 const auto& pw = all_chunk_pins[i];
-                auto src =
-                    reinterpret_cast<const int64_t*>(pw.get()->RawData());
+                auto data_view = pw.get()->GetDataView<int64_t>();
+                auto src = data_view->Data();
                 auto chunk_row_num = pk_column->chunk_row_nums(i);
                 for (size_t j = 0; j < pks.size(); j++) {
                     // get int64 pks
@@ -3060,15 +3015,20 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
         // Iterate through all chunks and collect WKB data
         auto num_chunks = column->num_chunks();
         for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
-            // Get all string views from this chunk
-            auto pw = column->StringViews(nullptr, chunk_id);
-            auto [string_views, valid_data] = pw.get();
+            // Get all string views from this chunk using ChunkDataView
+            auto chunk_wrapper = column->GetChunk(nullptr, chunk_id);
+            auto chunk = chunk_wrapper.get();
+            auto data_view = chunk->GetAnyDataView();
+            auto typed_view = data_view.as<std::string_view>();
+            auto row_count = typed_view->RowCount();
+            auto data = typed_view->Data();
+            auto valid_data = typed_view->ValidData();
 
-            // Add each string view to the geometry cache
-            for (size_t i = 0; i < string_views.size(); ++i) {
-                if (valid_data.empty() || valid_data[i]) {
+            // Add each string to the geometry cache
+            for (int64_t i = 0; i < row_count; ++i) {
+                if (valid_data == nullptr || valid_data[i]) {
                     // Valid geometry data
-                    const auto& wkb_data = string_views[i];
+                    const auto& wkb_data = data[i];
                     geometry_cache.AppendData(
                         ctx_, wkb_data.data(), wkb_data.size());
                 } else {
@@ -3266,12 +3226,12 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             int64_t offset = 0;
             for (auto& all_ts_chunk : all_ts_chunks) {
                 auto chunk_data = all_ts_chunk.get();
-                auto fixed_chunk = dynamic_cast<FixedWidthChunk*>(chunk_data);
-                auto span = fixed_chunk->Span();
+                // auto fixed_chunk =
+                //     dynamic_cast<FixedWidthChunk<int64_t>*>(chunk_data);
+                auto data_view = chunk_data->GetDataView<int64_t>();
 
-                for (size_t j = 0; j < span.row_count(); j++) {
-                    auto ts = *(int64_t*)((char*)span.data() +
-                                          j * span.element_sizeof());
+                for (size_t j = 0; j < data_view->RowCount(); j++) {
+                    auto ts = (*data_view)[j];
                     timestamps[offset++] = ts;
                 }
             }

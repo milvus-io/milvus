@@ -40,9 +40,9 @@
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
 #include "common/EasyAssert.h"
+#include "common/ChunkDataView.h"
 #include "common/FieldData.h"
 #include "common/OpContext.h"
-#include "common/Span.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/Utils.h"
@@ -246,20 +246,11 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
         for (size_t i = 0; i < num_data_chunk; i++) {
             auto chunk_size = column->chunk_row_nums(i);
-            const bool* valid_data;
-            if (GetShreddingJsonType(path) == JSONType::STRING ||
-                GetShreddingJsonType(path) == JSONType::ARRAY) {
-                auto pw = column->StringViews(op_ctx, i);
-                valid_data = pw.get().second.data();
-                ApplyOnlyValidData(
-                    valid_data, valid_res + processed_size, chunk_size);
-            } else {
-                auto pw = column->Span(op_ctx, i);
-                auto chunk = pw.get();
-                valid_data = chunk.valid_data();
-                ApplyOnlyValidData(
-                    valid_data, valid_res + processed_size, chunk_size);
-            }
+            auto pw = column->ChunkDataView(op_ctx, i);
+            auto data_view = pw.get();
+            const bool* valid_data = data_view.ValidData();
+            ApplyOnlyValidData(
+                valid_data, valid_res + processed_size, chunk_size);
             processed_size += chunk_size;
         }
         AssertInfo(processed_size == valid_res.size(),
@@ -294,23 +285,24 @@ class JsonKeyStats : public ScalarIndex<std::string> {
             auto chunk_size = column->chunk_row_nums(i);
 
             if (!skip_func || !skip_func(skip_index_, path, i)) {
+                auto pw = column->ChunkDataView(op_ctx, i);
+                auto any_view = pw.get();
                 if constexpr (std::is_same_v<T, std::string_view>) {
-                    // first is the raw data, second is valid_data
-                    // use valid_data to see if raw data is null
-                    auto pw = column->StringViews(op_ctx, i);
-                    auto [data_vec, valid_data] = pw.get();
-
-                    func(data_vec.data(),
-                         valid_data.data(),
+                    // Get string data as string_view directly
+                    auto data_view = any_view.as<std::string_view>();
+                    auto row_count = data_view->RowCount();
+                    auto data = data_view->Data();
+                    const bool* valid_data = data_view->ValidData();
+                    func(data,
+                         valid_data,
                          chunk_size,
                          res + processed_size,
                          valid_res + processed_size,
                          values...);
                 } else {
-                    auto pw = column->Span(op_ctx, i);
-                    auto chunk = pw.get();
-                    const T* data = static_cast<const T*>(chunk.data());
-                    const bool* valid_data = chunk.valid_data();
+                    auto data_view = any_view.as<T>();
+                    const T* data = static_cast<const T*>(data_view->Data());
+                    const bool* valid_data = data_view->ValidData();
                     func(data,
                          valid_data,
                          chunk_size,
@@ -319,23 +311,13 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                          values...);
                 }
             } else {
-                const bool* valid_data;
-                if constexpr (std::is_same_v<T, std::string_view>) {
-                    auto pw = column->StringViews(op_ctx, i);
-                    valid_data = pw.get().second.data();
-                    ApplyValidData(valid_data,
-                                   res + processed_size,
-                                   valid_res + processed_size,
-                                   chunk_size);
-                } else {
-                    auto pw = column->Span(op_ctx, i);
-                    auto chunk = pw.get();
-                    valid_data = chunk.valid_data();
-                    ApplyValidData(valid_data,
-                                   res + processed_size,
-                                   valid_res + processed_size,
-                                   chunk_size);
-                }
+                auto pw = column->ChunkDataView(op_ctx, i);
+                auto chunk = pw.get();
+                const bool* valid_data = chunk.ValidData();
+                ApplyValidData(valid_data,
+                               res + processed_size,
+                               valid_res + processed_size,
+                               chunk_size);
             }
 
             processed_size += chunk_size;

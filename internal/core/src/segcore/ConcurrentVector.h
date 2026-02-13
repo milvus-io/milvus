@@ -30,8 +30,8 @@
 #include "common/FieldMeta.h"
 #include "common/FieldData.h"
 #include "common/Json.h"
+#include "common/ChunkDataView.h"
 #include "common/OffsetMapping.h"
-#include "common/Span.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "mmap/ChunkVector.h"
@@ -140,8 +140,8 @@ class VectorBase {
     virtual void
     fill_chunk_data(const std::vector<FieldDataPtr>& data) = 0;
 
-    virtual SpanBase
-    get_span_base(int64_t chunk_id) const = 0;
+    virtual AnyDataView
+    get_data_view(int64_t chunk_id) const = 0;
 
     int64_t
     get_size_per_chunk() const {
@@ -247,12 +247,10 @@ class ConcurrentVectorImpl : public VectorBase {
         chunks_ptr_ = SelectChunkVectorPtr<Type>(mmap_descriptor);
     }
 
-    SpanBase
-    get_span_base(int64_t chunk_id) const override {
-        if constexpr (std::is_same_v<Type, VectorArray>) {
-            ThrowInfo(NotImplemented, "unimplemented");
-        } else if constexpr (is_type_entire_row) {
-            return chunks_ptr_->get_span(chunk_id);
+    AnyDataView
+    get_data_view(int64_t chunk_id) const override {
+        if constexpr (std::is_same_v<Type, VectorArray> || is_type_entire_row) {
+            return chunks_ptr_->get_data_view(chunk_id);
         } else if constexpr (std::is_same_v<Type, int64_t> ||  // NOLINT
                              std::is_same_v<Type, int>) {
             // only for testing
@@ -262,7 +260,7 @@ class ConcurrentVectorImpl : public VectorBase {
             auto chunk_size = chunks_ptr_->get_chunk_size(chunk_id);
             static_assert(
                 std::is_same_v<typename TraitType::embedded_type, Type>);
-            return Span<TraitType>(
+            return std::make_shared<ContiguousDataView<TraitType>>(
                 static_cast<Type*>(chunk_data), chunk_size, elements_per_row_);
         }
     }
@@ -334,9 +332,7 @@ class ConcurrentVectorImpl : public VectorBase {
 
     int64_t
     get_element_size() const override {
-        if constexpr (std::is_same_v<Type, VectorArray>) {
-            ThrowInfo(NotImplemented, "unimplemented");
-        } else if constexpr (is_type_entire_row) {
+        if constexpr (std::is_same_v<Type, VectorArray> || is_type_entire_row) {
             return chunks_ptr_->get_element_size();
         } else if constexpr (std::is_same_v<Type, int64_t> ||  // NOLINT
                              std::is_same_v<Type, int>) {

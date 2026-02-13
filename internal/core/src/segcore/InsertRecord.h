@@ -26,6 +26,7 @@
 #include "common/Schema.h"
 #include "common/TrackingStdAllocator.h"
 #include "common/Types.h"
+#include "common/ChunkDataView.h"
 #include "mmap/ChunkedColumn.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
@@ -561,13 +562,12 @@ class InsertRecordSealed {
             case DataType::VARCHAR: {
                 auto num_chunk = data->num_chunks();
                 for (int i = 0; i < num_chunk; ++i) {
-                    auto column =
-                        reinterpret_cast<ChunkedVariableColumn<std::string>*>(
-                            data);
-                    auto pw = column->StringViews(nullptr, i);
-                    auto pks = pw.get().first;
-                    for (auto& pk : pks) {
-                        pk2offset_->insert(std::string(pk), offset++);
+                    auto pw = data->GetChunk(nullptr, i);
+                    auto typed_view = pw.get()->GetDataView<std::string_view>();
+                    auto row_count = typed_view->RowCount();
+                    auto str_data = typed_view->Data();
+                    for (int64_t j = 0; j < row_count; ++j) {
+                        pk2offset_->insert(std::string(str_data[j]), offset++);
                     }
                 }
                 break;
@@ -1003,19 +1003,17 @@ class InsertRecordGrowing {
         return valid_data_.find(field_id) != valid_data_.end();
     }
 
-    SpanBase
-    get_span_base(FieldId field_id, int64_t chunk_id) const {
+    AnyDataView
+    get_data_view(FieldId field_id, int64_t chunk_id) const {
         auto data = get_data_base(field_id);
+        auto data_view = data->get_data_view(chunk_id);
         if (is_valid_data_exist(field_id)) {
             auto size = data->get_chunk_size(chunk_id);
             auto element_offset = data->get_element_offset(chunk_id);
-            return SpanBase(
-                data->get_chunk_data(chunk_id),
-                get_valid_data(field_id)->get_chunk_data(element_offset),
-                size,
-                data->get_element_size());
+            data_view.SetValidData(
+                get_valid_data(field_id)->get_chunk_data(element_offset));
         }
-        return data->get_span_base(chunk_id);
+        return data_view;
     }
 
     // append a column of scalar type

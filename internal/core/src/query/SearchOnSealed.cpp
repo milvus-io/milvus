@@ -256,7 +256,8 @@ SearchOnSealedColumn(const Schema& schema,
     const auto& valid_count_per_chunk = column->GetValidCountPerChunk();
     for (int i = 0; i < num_chunk; ++i) {
         const auto& pw = vector_chunks[i];
-        auto vec_data = pw.get()->Data();
+        auto chunk = pw.get();
+        auto vec_data = chunk->Data();
         auto chunk_size = column->chunk_row_nums(i);
         if (offset_mapping.IsEnabled() && !valid_count_per_chunk.empty()) {
             chunk_size = valid_count_per_chunk[i];
@@ -264,9 +265,9 @@ SearchOnSealedColumn(const Schema& schema,
 
         // For element-level search, get element count from VectorArrayOffsets
         if (is_element_level_search) {
-            auto elem_offsets_pw = column->VectorArrayOffsets(op_context, i);
+            auto elem_offsets = chunk->ArrayOffsets();
             // offsets[row_count] gives total element count in this chunk
-            chunk_size = elem_offsets_pw.get()[chunk_size];
+            chunk_size = elem_offsets[chunk_size];
         }
 
         auto raw_dataset =
@@ -278,8 +279,7 @@ SearchOnSealedColumn(const Schema& schema,
                 query_offsets != nullptr,
                 "query_offsets is nullptr, but data_type is vector array");
 
-            offsets_pw = column->VectorArrayOffsets(op_context, i);
-            raw_dataset.raw_data_offsets = offsets_pw.get();
+            raw_dataset.raw_data_offsets = chunk->ArrayOffsets();
         }
 
         if (milvus::exec::UseVectorIterator(search_info)) {

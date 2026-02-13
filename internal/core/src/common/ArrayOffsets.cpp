@@ -186,11 +186,13 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
         for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
             auto pin_wrapper = seg->chunk_view<VectorArrayView>(
                 op_ctx_ptr, field_id, chunk_id);
-            const auto& [vector_array_views, valid_flags] = pin_wrapper.get();
+            const auto data_view = pin_wrapper.get();
+            auto vector_array_views = data_view->Data();
+            auto valid_flags = data_view->ValidData();
 
-            for (size_t i = 0; i < vector_array_views.size(); ++i) {
+            for (size_t i = 0; i < data_view->RowCount(); ++i) {
                 int32_t array_len = 0;
-                if (valid_flags.empty() || valid_flags[i]) {
+                if (valid_flags == nullptr || valid_flags[i]) {
                     array_len = vector_array_views[i].length();
                 }
 
@@ -209,11 +211,13 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
         for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
             auto pin_wrapper =
                 seg->chunk_view<ArrayView>(op_ctx_ptr, field_id, chunk_id);
-            const auto& [array_views, valid_flags] = pin_wrapper.get();
+            const auto data_view = pin_wrapper.get();
+            auto array_views = data_view->Data();
+            auto valid_flags = data_view->ValidData();
 
-            for (size_t i = 0; i < array_views.size(); ++i) {
+            for (size_t i = 0; i < data_view->RowCount(); ++i) {
                 int32_t array_len = 0;
-                if (valid_flags.empty() || valid_flags[i]) {
+                if (valid_flags == nullptr || valid_flags[i]) {
                     array_len = array_views[i].length();
                 }
 

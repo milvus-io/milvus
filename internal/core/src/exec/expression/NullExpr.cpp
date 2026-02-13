@@ -81,14 +81,7 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::VARCHAR: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                result = ExecVisitorImpl<std::string>(input);
-            } else {
-                result = ExecVisitorImpl<std::string_view>(input);
-            }
+            result = ExecVisitorImpl<std::string_view>(input);
             break;
         }
         case DataType::JSON: {
@@ -100,14 +93,7 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::GEOMETRY: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                result = ExecVisitorImpl<std::string>(input);
-            } else {
-                result = ExecVisitorImpl<std::string_view>(input);
-            }
+            result = ExecVisitorImpl<std::string_view>(input);
             break;
         }
         default:
