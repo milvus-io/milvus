@@ -349,7 +349,10 @@ func autoWarmupForNonPKIsolationCollection(collectionProperties []*commonpb.KeyV
 	if !paramtable.Get().QueryNodeCfg.AutoWarmupForNonPKIsolationCollection.GetAsBool() {
 		return false
 	}
-	isPKI, _ := common.IsPartitionKeyIsolationKvEnabled(collectionProperties...)
+	isPKI, isError := common.IsPartitionKeyIsolationKvEnabled(collectionProperties...)
+	if isError != nil {
+		return false
+	}
 	return !isPKI
 }
 
