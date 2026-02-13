@@ -674,7 +674,7 @@ dataCoord:
         minSize: 8388608 # The minimum size in bytes to force trigger a LevelZero Compaction, default as 8MB
         maxSize: 67108864 # The maxmum size in bytes to force trigger a LevelZero Compaction, default as 64MB
         deltalogMinNum: 10 # The minimum number of deltalog files to force trigger a LevelZero Compaction
-        deltalogMaxNum: 30 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30
+        deltalogMaxNum: 1000 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 1000
     expiry:
       tolerance: -1 # tolerant duration in hours for expiry data, negative value means no toleration and equivalent to zero
     backfill:
