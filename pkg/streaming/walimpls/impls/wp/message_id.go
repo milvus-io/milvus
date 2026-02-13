@@ -47,10 +47,6 @@ func (id wpID) WoodpeckerID() *wp.LogMessageId {
 	return id.logMsgId
 }
 
-func (id wpID) WoodpeckerMsgId() *wp.LogMessageId {
-	return id.logMsgId
-}
-
 func (id wpID) WALName() message.WALName {
 	return message.WALNameWoodpecker
 }
