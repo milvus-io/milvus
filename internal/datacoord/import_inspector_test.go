@@ -64,6 +64,8 @@ func (s *ImportInspectorSuite) SetupTest() {
 	s.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	s.alloc = allocator.NewMockAllocator(s.T())
 	broker := broker.NewMockBroker(s.T())

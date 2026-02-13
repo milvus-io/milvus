@@ -1,5 +1,8 @@
 # CLion generated files
 
+# Git worktrees
+.worktrees/
+
 # This can ignore
 #   cmake-build-debug/
 #   proxy/cmake-build-debug/
