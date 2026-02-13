@@ -38,17 +38,6 @@ include_directories(
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
-if(APPLE)
-    # On macOS, aws-sdk-cpp comes from Homebrew instead of Conan.
-    # Add Homebrew include path AFTER Conan includes so Conan headers take precedence,
-    # avoiding conflicts (e.g., Boost version mismatch).
-    if(EXISTS "/opt/homebrew/include/aws")
-        include_directories("/opt/homebrew/include")
-    elseif(EXISTS "/usr/local/include/aws")
-        include_directories("/usr/local/include")
-    endif()
-endif()
-
 add_subdirectory( pb )
 add_subdirectory( config )
 add_subdirectory( common )
@@ -68,7 +57,8 @@ add_subdirectory( minhash )
 
 milvus_add_pkg_config("milvus_core")
 
-add_library(milvus_core SHARED
+# Collect object files for milvus_core
+set(MILVUS_CORE_OBJECTS
     $<TARGET_OBJECTS:milvus_pb>
     $<TARGET_OBJECTS:milvus_config>
     $<TARGET_OBJECTS:milvus_common>
@@ -87,6 +77,8 @@ add_library(milvus_core SHARED
     $<TARGET_OBJECTS:milvus_minhash>
 )
 
+add_library(milvus_core SHARED ${MILVUS_CORE_OBJECTS})
+
 set(LINK_TARGETS
     boost_bitset_ext
     simdjson
@@ -98,6 +90,11 @@ set(LINK_TARGETS
     ${OpenMP_CXX_FLAGS}
     ${CONAN_LIBS}
     )
+
+# Add RDKit libraries
+if(TARGET RDKit::RDKit)
+    list(APPEND LINK_TARGETS RDKit::RDKit)
+endif()
 
 if(USE_OPENDAL)
     set(LINK_TARGETS ${LINK_TARGETS} opendal)
@@ -114,5 +111,16 @@ if (ENABLE_GCP_NATIVE)
 endif()
 
 target_link_libraries(milvus_core ${LINK_TARGETS})
+
+# Add mol_c.o at link time (compiled separately with GCC 11 for C++20 support)
+# Cannot add .o file to add_library sources as CMake checks file existence at configure time
+if(DEFINED RDKIT_INCLUDE_DIR)
+    set(MOL_C_OBJECT ${CMAKE_CURRENT_BINARY_DIR}/common/mol_c.o)
+    target_link_libraries(milvus_core ${MOL_C_OBJECT})
+    # Ensure mol_c.o is built before linking milvus_core
+    add_dependencies(milvus_core mol_c_build)
+    # Ensure RDKit shared libraries can be found at runtime
+    target_link_directories(milvus_core PUBLIC ${CONAN_LIB_DIRS_RDKIT})
+endif()
 
 install(TARGETS milvus_core DESTINATION "${CMAKE_INSTALL_LIBDIR}")
