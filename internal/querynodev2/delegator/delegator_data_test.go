@@ -1445,6 +1445,10 @@ func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 		ms.EXPECT().Indexes().Return(nil)
 		ms.EXPECT().Shard().Return(s.channel)
 		ms.EXPECT().Level().Return(datapb.SegmentLevel_L1)
+		ms.EXPECT().LoadInfo().Return(&querypb.SegmentLoadInfo{
+			StorageVersion: 0,
+		})
+		ms.EXPECT().GetIndexStatus().Return(segments.IndexStatusIndexed)
 		s.manager.Segment.Put(context.Background(), segments.SegmentTypeGrowing, ms)
 	}
 
