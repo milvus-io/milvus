@@ -20,7 +20,8 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	sio "io"
+	"io"
+	"path/filepath"
 	"sort"
 
 	"github.com/samber/lo"
@@ -30,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
@@ -76,15 +77,11 @@ type rwOptions struct {
 }
 
 func (o *rwOptions) validate() error {
-	if o.collectionID == 0 {
-		log.Warn("storage config collection id is empty when init BinlogReader")
-		// return merr.WrapErrServiceInternal("storage config collection id is empty")
-	}
-	if o.op == OpWrite && o.uploader == nil {
-		return merr.WrapErrServiceInternal("uploader is nil for writer")
-	}
 	switch o.version {
 	case StorageV1:
+		if o.op == OpWrite && o.uploader == nil {
+			return merr.WrapErrServiceInternal("uploader is nil for writer")
+		}
 		if o.op == OpRead && o.downloader == nil {
 			return merr.WrapErrServiceInternal("downloader is nil for v1 reader")
 		}
@@ -102,6 +99,7 @@ type RwOption func(*rwOptions)
 
 func DefaultWriterOptions() *rwOptions {
 	return &rwOptions{
+		version:             StorageV1,
 		bufferSize:          packed.DefaultWriteBufferSize,
 		multiPartUploadSize: packed.DefaultMultiPartUploadSize,
 		op:                  OpWrite,
@@ -184,7 +182,7 @@ func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption 
 func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloader downloaderFn) (ChunkedBlobsReader, error) {
 	if len(binlogs) == 0 {
 		return func() ([]*Blob, error) {
-			return nil, sio.EOF
+			return nil, io.EOF
 		}, nil
 	}
 	sort.Slice(binlogs, func(i, j int) bool {
@@ -233,7 +231,7 @@ func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloa
 	chunkPos := 0
 	return func() ([]*Blob, error) {
 		if chunkPos >= nChunks {
-			return nil, sio.EOF
+			return nil, io.EOF
 		}
 
 		vals, err := downloader(ctx, chunks[chunkPos])
@@ -293,7 +291,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		rr = newIterativeCompositeBinlogRecordReader(schema, rwOptions.neededFields, blobsReader, binlogReaderOpts...)
 	case StorageV2, StorageV3:
 		if len(binlogs) <= 0 {
-			return nil, sio.EOF
+			return nil, io.EOF
 		}
 		sort.Slice(binlogs, func(i, j int) bool {
 			return binlogs[i].GetFieldID() < binlogs[j].GetFieldID()
@@ -399,8 +397,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 	case StorageV1:
 		rootPath := rwOptions.storageConfig.GetRootPath()
 		return newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
-			blobsWriter, allocator, chunkSize, rootPath, maxRowNum, opts...,
-		)
+			blobsWriter, allocator, chunkSize, rootPath, maxRowNum, opts...)
 	case StorageV2:
 		return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
 			blobsWriter, allocator, maxRowNum,
@@ -433,11 +430,35 @@ func NewDeltalogWriter(
 	if err := rwOptions.validate(); err != nil {
 		return nil, err
 	}
-	return NewLegacyDeltalogWriter(collectionID, partitionID, segmentID, logID, pkType, rwOptions.uploader, path)
+	switch rwOptions.version {
+	case StorageV1:
+		return NewLegacyDeltalogWriter(collectionID, partitionID, segmentID, logID, pkType, rwOptions.uploader, path)
+	case StorageV2:
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      0,
+					DataType:     pkType,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:  1,
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		}
+		bucketName := rwOptions.storageConfig.BucketName
+		return NewPackedRecordWriter(bucketName, []string{path}, schema,
+			rwOptions.bufferSize, rwOptions.multiPartUploadSize,
+			[]storagecommon.ColumnGroup{{GroupID: 0, Columns: []int{0, 1}, Fields: []int64{0, common.TimeStampField}}},
+			rwOptions.storageConfig, nil)
+	default:
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
+	}
 }
 
 func NewDeltalogReader(
-	pkField *schemapb.FieldSchema,
+	pkType schemapb.DataType,
 	paths []string,
 	option ...RwOption,
 ) (RecordReader, error) {
@@ -449,5 +470,79 @@ func NewDeltalogReader(
 		return nil, err
 	}
 
-	return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
+	pkField := &schemapb.FieldSchema{
+		FieldID:      0,
+		DataType:     pkType,
+		IsPrimaryKey: true,
+	}
+
+	switch rwOptions.version {
+	case StorageV1:
+		return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
+	case StorageV2:
+		pathPos := 0
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				pkField,
+				{
+					FieldID:  common.TimeStampField,
+					Name:     "ts",
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		}
+		bucketName := rwOptions.storageConfig.BucketName
+		paths = lo.Map(paths, func(path string, _ int) string {
+			if rwOptions.storageConfig.StorageType != "local" {
+				return filepath.Join(bucketName, path)
+			}
+			return path
+		})
+		return &IterativeRecordReader{
+			iterate: func() (RecordReader, error) {
+				if pathPos >= len(paths) {
+					return nil, io.EOF
+				}
+				path := paths[pathPos]
+				pathPos++
+				return newPackedRecordReader([]string{path}, schema, rwOptions.bufferSize, rwOptions.storageConfig, nil)
+			},
+		}, nil
+	default:
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
+	}
+}
+
+// NewDeltalogReaderFromManifest creates a deltalog reader from segment manifest path.
+// The manifest contains deltalog file paths that will be read using FFI.
+func NewDeltalogReaderFromManifest(
+	pkType schemapb.DataType,
+	manifestPath string,
+	option ...RwOption,
+) (RecordReader, error) {
+	rwOptions := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	if err := rwOptions.validate(); err != nil {
+		return nil, err
+	}
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      0,
+				Name:         "pk",
+				DataType:     pkType,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:  common.TimeStampField,
+				Name:     "ts",
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+
+	return NewManifestReader(manifestPath, schema, rwOptions.bufferSize, rwOptions.storageConfig, nil)
 }

@@ -65,7 +65,6 @@ type sortCompactionTask struct {
 	collectionID          int64
 	partitionID           int64
 	segmentID             int64
-	deltaLogs             []string
 	insertLogs            []*datapb.FieldBinlog
 	storageVersion        int64
 	segmentStorageVersion int64
@@ -135,12 +134,6 @@ func (t *sortCompactionTask) preCompact() error {
 		return err
 	}
 
-	for _, d := range segment.GetDeltalogs() {
-		for _, l := range d.GetBinlogs() {
-			t.deltaLogs = append(t.deltaLogs, l.GetLogPath())
-		}
-	}
-
 	t.insertLogs = segment.GetFieldBinlogs()
 	t.storageVersion = t.compactionParams.StorageVersion
 	t.segmentStorageVersion = segment.GetStorageVersion()
@@ -199,7 +192,9 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		return nil, err
 	}
 
-	deletePKs, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.binlogIO, t.deltaLogs)
+	deletePKs, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, t.plan.SegmentBinlogs[0],
+		storage.WithDownloader(t.binlogIO.Download),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig))
 	if err != nil {
 		log.Warn("load deletePKs failed", zap.Error(err))
 		return nil, err

@@ -100,7 +100,6 @@ func (s *MixCompactionTaskStorageV1Suite) setupTest() {
 
 func (s *MixCompactionTaskStorageV1Suite) SetupTest() {
 	s.setupTest()
-	paramtable.Get().Save("common.storage.enablev2", "false")
 }
 
 func (s *MixCompactionTaskStorageV1Suite) SetupBM25() {
@@ -710,14 +709,10 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeDeltalogsMultiSegment() {
 		description   string
 	}{
 		{
-			0, nil, nil,
-			100,
-			[]int64{1, 2, 3},
-			[]uint64{20000, 30000, 20005},
-			200,
-			[]int64{4, 5, 6},
-			[]uint64{50000, 50001, 50002},
-			map[int64]uint64{
+			segIDA: 0, dataApk: nil, dataAts: nil,
+			segIDB: 100, dataBpk: []int64{1, 2, 3}, dataBts: []uint64{20000, 30000, 20005},
+			segIDC: 200, dataCpk: []int64{4, 5, 6}, dataCts: []uint64{50000, 50001, 50002},
+			expectedpk2ts: map[int64]uint64{
 				1: 20000,
 				2: 30000,
 				3: 20005,
@@ -725,19 +720,13 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeDeltalogsMultiSegment() {
 				5: 50001,
 				6: 50002,
 			},
-			"2 segments",
+			description: "2 segments",
 		},
 		{
-			300,
-			[]int64{10, 20},
-			[]uint64{20001, 40001},
-			100,
-			[]int64{1, 2, 3},
-			[]uint64{20000, 30000, 20005},
-			200,
-			[]int64{4, 5, 6},
-			[]uint64{50000, 50001, 50002},
-			map[int64]uint64{
+			segIDA: 300, dataApk: []int64{10, 20}, dataAts: []uint64{20001, 40001},
+			segIDB: 100, dataBpk: []int64{1, 2, 3}, dataBts: []uint64{20000, 30000, 20005},
+			segIDC: 200, dataCpk: []int64{4, 5, 6}, dataCts: []uint64{50000, 50001, 50002},
+			expectedpk2ts: map[int64]uint64{
 				10: 20001,
 				20: 40001,
 				1:  20000,
@@ -747,33 +736,45 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeDeltalogsMultiSegment() {
 				5:  50001,
 				6:  50002,
 			},
-			"3 segments",
+			description: "3 segments",
 		},
 	}
 
 	for _, test := range tests {
 		s.Run(test.description, func() {
-			dValues := make([][]byte, 0)
+			pks := make([]int64, 0)
+			tss := make([]uint64, 0)
 			if test.dataApk != nil {
-				d, err := getInt64DeltaBlobs(test.segIDA, test.dataApk, test.dataAts)
-				s.Require().NoError(err)
-				dValues = append(dValues, d.GetValue())
+				pks = append(pks, test.dataApk...)
+				tss = append(tss, test.dataAts...)
 			}
 			if test.dataBpk != nil {
-				d, err := getInt64DeltaBlobs(test.segIDB, test.dataBpk, test.dataBts)
-				s.Require().NoError(err)
-				dValues = append(dValues, d.GetValue())
+				pks = append(pks, test.dataBpk...)
+				tss = append(tss, test.dataBts...)
 			}
 			if test.dataCpk != nil {
-				d, err := getInt64DeltaBlobs(test.segIDC, test.dataCpk, test.dataCts)
-				s.Require().NoError(err)
-				dValues = append(dValues, d.GetValue())
+				pks = append(pks, test.dataCpk...)
+				tss = append(tss, test.dataCts...)
 			}
+			blob, err := getInt64DeltaBlobs(test.segIDA, pks, tss)
+			s.Require().NoError(err)
 
-			s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).
-				Return(dValues, nil)
+			mockBinlogIO := mock_util.NewMockBinlogIO(s.T())
+			mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).
+				Return([][]byte{blob.GetValue()}, nil)
 
-			got, err := compaction.ComposeDeleteFromDeltalogs(s.task.ctx, s.task.binlogIO, []string{"random"})
+			pkField, err := typeutil.GetPrimaryFieldSchema(s.task.plan.GetSchema())
+			s.Require().NoError(err)
+			got, err := compaction.ComposeDeleteFromDeltalogsV1(s.task.ctx, pkField.DataType,
+				[]*datapb.FieldBinlog{
+					{
+						Binlogs: []*datapb.Binlog{
+							{LogPath: "random"},
+						},
+					},
+				},
+				storage.WithDownloader(mockBinlogIO.Download),
+				storage.WithStorageConfig(s.task.compactionParams.StorageConfig))
 			s.NoError(err)
 			s.Equal(len(got), len(test.expectedpk2ts))
 
@@ -802,13 +803,31 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeDeltalogsOneSegment() {
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{"mock_error"}).
 		Return(nil, errors.New("mock_error")).Once()
 
-	invalidPaths := []string{"mock_error"}
-	got, err := compaction.ComposeDeleteFromDeltalogs(s.task.ctx, s.task.binlogIO, invalidPaths)
+	pkField, err := typeutil.GetPrimaryFieldSchema(s.task.plan.GetSchema())
+	s.Require().NoError(err)
+	got, err := compaction.ComposeDeleteFromDeltalogsV1(s.task.ctx, pkField.DataType,
+		[]*datapb.FieldBinlog{
+			{
+				Binlogs: []*datapb.Binlog{
+					{LogPath: "mock_error"},
+				},
+			},
+		},
+		storage.WithDownloader(s.mockBinlogIO.Download),
+		storage.WithStorageConfig(s.task.compactionParams.StorageConfig))
 	s.Error(err)
 	s.Nil(got)
 
-	dpaths := []string{"a"}
-	got, err = compaction.ComposeDeleteFromDeltalogs(s.task.ctx, s.task.binlogIO, dpaths)
+	got, err = compaction.ComposeDeleteFromDeltalogsV1(s.task.ctx, pkField.DataType,
+		[]*datapb.FieldBinlog{
+			{
+				Binlogs: []*datapb.Binlog{
+					{LogPath: "a"},
+				},
+			},
+		},
+		storage.WithDownloader(s.mockBinlogIO.Download),
+		storage.WithStorageConfig(s.task.compactionParams.StorageConfig))
 	s.NoError(err)
 	s.NotNil(got)
 	s.Equal(len(expectedMap), len(got))

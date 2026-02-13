@@ -18,10 +18,15 @@ package storage
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/valyala/fastjson"
 
@@ -272,4 +277,74 @@ func (data *DeleteData) Merge(other *DeleteData) {
 
 func (data *DeleteData) Size() int64 {
 	return data.memSize
+}
+
+// BuildDeleteRecord builds an Arrow Record from primary keys and timestamps
+func BuildDeleteRecord(pks []PrimaryKey, tss []Timestamp) (r Record, tsFrom uint64, tsTo uint64, err error) {
+	tsFrom = math.MaxUint64
+	tsTo = 0
+
+	if len(pks) == 0 {
+		return nil, 0, 0, errors.New("empty primary keys")
+	}
+	if len(pks) != len(tss) {
+		return nil, 0, 0, errors.New("length of pks and tss must be equal")
+	}
+
+	allocator := memory.DefaultAllocator
+	var pkArray arrow.Array
+
+	// Determine pk type from first element
+	switch pks[0].(type) {
+	case *Int64PrimaryKey:
+		builder := array.NewInt64Builder(allocator)
+		defer builder.Release()
+		for _, pk := range pks {
+			builder.Append(pk.(*Int64PrimaryKey).Value)
+		}
+		pkArray = builder.NewArray()
+	case *VarCharPrimaryKey:
+		builder := array.NewStringBuilder(allocator)
+		defer builder.Release()
+		for _, pk := range pks {
+			builder.Append(pk.(*VarCharPrimaryKey).Value)
+		}
+		pkArray = builder.NewArray()
+	default:
+		return nil, 0, 0, errors.Newf("unsupported primary key type %T", pks[0])
+	}
+
+	// Build timestamp array
+	tsBuilder := array.NewInt64Builder(allocator)
+	defer tsBuilder.Release()
+	for _, ts := range tss {
+		if ts < tsFrom {
+			tsFrom = ts
+		}
+		if ts > tsTo {
+			tsTo = ts
+		}
+		tsBuilder.Append(int64(ts))
+	}
+	tsArray := tsBuilder.NewArray()
+
+	// Create schema
+	pkArrowType := pkArray.DataType()
+	fields := []arrow.Field{
+		{Name: "pk", Type: pkArrowType, Nullable: false},
+		{Name: "ts", Type: arrow.PrimitiveTypes.Int64, Nullable: false},
+	}
+	schema := arrow.NewSchema(fields, nil)
+
+	// Create record
+	columns := []arrow.Array{pkArray, tsArray}
+	record := array.NewRecord(schema, columns, int64(len(pks)))
+
+	// Create field to column mapping
+	field2Col := map[FieldID]int{
+		0: 0, // pk column
+		1: 1, // ts column
+	}
+
+	return NewSimpleArrowRecord(record, field2Col), tsFrom, tsTo, nil
 }
