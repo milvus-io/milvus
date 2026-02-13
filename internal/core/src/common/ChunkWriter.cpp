@@ -10,27 +10,18 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "common/ChunkWriter.h"
-
 #include <cstdint>
 #include <memory>
 #include <tuple>
 #include <utility>
 #include <vector>
-
-#include "NamedType/underlying_functionalities.hpp"
 #include "arrow/array/array_binary.h"
-#include "arrow/array/array_nested.h"
+#include "arrow/array/array_primitive.h"
 #include "arrow/record_batch.h"
-#include "arrow/result.h"
-#include "common/Array.h"
+#include "arrow/type_fwd.h"
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
-#include "common/FieldMeta.h"
 #include "common/Types.h"
-#include "glog/logging.h"
-#include "knowhere/operands.h"
-#include "log/Log.h"
-#include "simdjson/base.h"
 #include "simdjson/padded_string.h"
 #include "storage/FileWriter.h"
 
@@ -267,7 +258,7 @@ MolChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
 
 void
 MolChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
-                                const std::shared_ptr<ChunkTarget>& target) {
+                                 const std::shared_ptr<ChunkTarget>& target) {
     std::vector<std::string_view> mol_strs;
     std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
     mol_strs.reserve(row_nums_);
@@ -277,10 +268,6 @@ MolChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
         for (int64_t i = 0; i < array->length(); ++i) {
             auto str = array->GetView(i);
             mol_strs.emplace_back(str);
-        }
-        if (nullable_) {
-            null_bitmaps.emplace_back(
-                data->null_bitmap_data(), data->length(), data->offset());
         }
     }
 
@@ -309,7 +296,9 @@ MolChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
 
     char padding[MMAP_MOL_PADDING];
     target->write(padding, MMAP_MOL_PADDING);
+    
 }
+
 
 std::pair<size_t, size_t>
 ArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
@@ -1003,7 +992,7 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
 arrow::ArrayVector
 read_single_column_batches(std::shared_ptr<arrow::RecordBatchReader> reader) {
     arrow::ArrayVector array_vec;
-    for (const auto& batch : *reader) {
+    for (auto batch : *reader) {
         auto batch_data = batch.ValueOrDie();
         array_vec.push_back(std::move(batch_data->column(0)));
     }

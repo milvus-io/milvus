@@ -238,6 +238,13 @@ func (s *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType
 						s.Fail("marshal wkb failed")
 					}
 					s.Equal(wkbValue, actual.([]byte))
+				} else if fieldDataType == schemapb.DataType_Mol && expect != nil {
+					expectData := expect.([]byte)
+					pickleValue, err := common.ConvertSMILESToPickle(string(expectData))
+					if err != nil {
+						s.Fail("convert SMILES to pickle failed")
+					}
+					s.Equal(pickleValue, actual.([]byte))
 				} else {
 					s.Equal(expect, actual)
 				}
@@ -554,7 +561,7 @@ func (s *ReaderSuite) TestReadScalarFields() {
 		schemapb.DataType_String,
 	}
 
-	scalarTypes := append(elementTypes, []schemapb.DataType{schemapb.DataType_VarChar, schemapb.DataType_JSON, schemapb.DataType_Geometry, schemapb.DataType_Array}...)
+	scalarTypes := append(elementTypes, []schemapb.DataType{schemapb.DataType_VarChar, schemapb.DataType_JSON, schemapb.DataType_Geometry, schemapb.DataType_Mol, schemapb.DataType_Array}...)
 
 	for _, dataType := range scalarTypes {
 		if dataType == schemapb.DataType_Array {

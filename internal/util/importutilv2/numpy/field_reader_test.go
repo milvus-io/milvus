@@ -320,6 +320,14 @@ func TestNumpyFieldReaderError(t *testing.T) {
 			},
 			timezone: "Asia/Shanghai",
 		},
+		{
+			name: "read mol error",
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:  100,
+				Name:     "mol",
+				DataType: schemapb.DataType_Mol,
+			},
+		},
 	}
 
 	for _, tt := range tests {
