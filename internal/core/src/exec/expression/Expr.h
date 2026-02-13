@@ -191,6 +191,8 @@ class SegmentExpr : public Expr {
         InitSegmentExpr();
     }
 
+    virtual ~SegmentExpr();
+
     void
     InitSegmentExpr() {
         auto& schema = segment_->get_schema();
@@ -2106,6 +2108,13 @@ class SegmentExpr : public Expr {
 
     // Cache for ngram Phase1 result (index query, before post-filter).
     std::shared_ptr<TargetBitmap> cached_phase1_res_{nullptr};
+
+    // Accumulated latency for JSON filter metrics (in microseconds).
+    // These are recorded in destructor (converted to ms) to avoid per-batch metric overhead.
+    double json_filter_bruteforce_latency_us_{0.0};
+    double json_filter_stats_latency_us_{0.0};
+    double json_stats_shredding_latency_us_{0.0};
+    double json_stats_shared_latency_us_{0.0};
 };
 
 bool

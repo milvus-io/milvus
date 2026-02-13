@@ -669,9 +669,9 @@ LoadJsonKeyIndex(CTraceContext c_trace,
         {
             milvus::ScopedTimer timer(
                 "json_stats_load",
-                [](double ms) {
+                [](double us) {
                     milvus::monitor::internal_json_stats_latency_load.Observe(
-                        ms);
+                        us / 1000.0);
                 },
                 milvus::ScopedTimer::LogLevel::Info);
             index->Load(ctx, config);
