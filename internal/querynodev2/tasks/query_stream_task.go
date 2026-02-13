@@ -75,6 +75,7 @@ func (t *QueryStreamTask) Execute() error {
 		t.req.Req.Base.GetMsgID(),
 		t.req.Req.GetConsistencyLevel(),
 		t.req.Req.GetCollectionTtlTimestamps(),
+		t.req.Req.GetEntityTtlPhysicalTime(),
 	)
 	if err != nil {
 		return err

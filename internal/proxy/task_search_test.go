@@ -913,6 +913,13 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		assert.NoError(t, st.PreExecute(ctx))
 		assert.NotNil(t, st.functionScore)
 		assert.Equal(t, false, st.SearchRequest.GetIsAdvanced())
+
+		// Verify EntityTtlPhysicalTime is set (issue #47413)
+		assert.NotZero(t, st.SearchRequest.GetEntityTtlPhysicalTime(),
+			"EntityTtlPhysicalTime should be set from GuaranteeTimestamp")
+		expectedPhysicalMs, _ := tsoutil.ParseHybridTs(st.SearchRequest.GetGuaranteeTimestamp())
+		assert.Equal(t, uint64(expectedPhysicalMs*1000), st.SearchRequest.GetEntityTtlPhysicalTime(),
+			"EntityTtlPhysicalTime should equal physical time in microseconds")
 	})
 
 	t.Run("advance search with rerank", func(t *testing.T) {

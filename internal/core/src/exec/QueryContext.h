@@ -31,6 +31,7 @@
 #include "common/ArrayOffsets.h"
 #include "common/OpContext.h"
 #include "segcore/SegmentInterface.h"
+#include "segcore/Utils.h"
 
 namespace milvus::exec {
 
@@ -185,13 +186,20 @@ class QueryContext : public Context {
                  std::shared_ptr<QueryConfig> query_config =
                      std::make_shared<QueryConfig>(),
                  folly::Executor* executor = nullptr,
-                 std::unordered_map<std::string, std::shared_ptr<Config>>
-                     connector_configs = {})
+                 std::unordered_map<std::string, std::shared_ptr<BaseConfig>>
+                     connector_configs = {},
+                 int64_t entity_ttl_physical_time_us = 0)
         : Context(ContextScope::QUERY),
           query_id_(query_id),
           segment_(segment),
           active_count_(active_count),
           query_timestamp_(timestamp),
+          entity_ttl_physical_time_us_(
+              entity_ttl_physical_time_us > 0
+                  ? entity_ttl_physical_time_us
+                  : static_cast<int64_t>(
+                        milvus::segcore::TimestampToPhysicalMs(timestamp)) *
+                        1000),
           collection_ttl_timestamp_(collection_ttl),
           query_config_(query_config),
           executor_(executor),
@@ -227,6 +235,11 @@ class QueryContext : public Context {
     milvus::Timestamp
     get_query_timestamp() {
         return query_timestamp_;
+    }
+
+    int64_t
+    get_entity_ttl_physical_time_us() {
+        return entity_ttl_physical_time_us_;
     }
 
     milvus::Timestamp
@@ -373,8 +386,11 @@ class QueryContext : public Context {
     const milvus::segcore::SegmentInternalInterface* segment_;
     // num rows for current query
     int64_t active_count_;
-    // timestamp this query generate
+    // timestamp this query generate (for MVCC consistency)
     milvus::Timestamp query_timestamp_;
+    // physical time in microseconds (for entity-level TTL filtering)
+    // This is already converted from TSO timestamp to physical time in Go layer
+    int64_t entity_ttl_physical_time_us_;
     milvus::Timestamp collection_ttl_timestamp_;
     // used for vector search
     milvus::SearchInfo search_info_;

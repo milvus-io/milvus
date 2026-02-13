@@ -75,13 +75,14 @@ func (plan *SearchPlan) delete() {
 }
 
 type SearchRequest struct {
-	plan              *SearchPlan
-	cPlaceholderGroup C.CPlaceholderGroup
-	msgID             int64
-	searchFieldID     int64
-	mvccTimestamp     typeutil.Timestamp
-	consistencyLevel  commonpb.ConsistencyLevel
-	collectionTTL     typeutil.Timestamp
+	plan                  *SearchPlan
+	cPlaceholderGroup     C.CPlaceholderGroup
+	msgID                 int64
+	searchFieldID         int64
+	mvccTimestamp         typeutil.Timestamp
+	consistencyLevel      commonpb.ConsistencyLevel
+	collectionTTL         typeutil.Timestamp
+	entityTTLPhysicalTime typeutil.Timestamp
 }
 
 func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
@@ -120,13 +121,14 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 	}
 
 	return &SearchRequest{
-		plan:              plan,
-		cPlaceholderGroup: cPlaceholderGroup,
-		msgID:             req.GetReq().GetBase().GetMsgID(),
-		searchFieldID:     int64(fieldID),
-		mvccTimestamp:     req.GetReq().GetMvccTimestamp(),
-		consistencyLevel:  req.GetReq().GetConsistencyLevel(),
-		collectionTTL:     req.GetReq().GetCollectionTtlTimestamps(),
+		plan:                  plan,
+		cPlaceholderGroup:     cPlaceholderGroup,
+		msgID:                 req.GetReq().GetBase().GetMsgID(),
+		searchFieldID:         int64(fieldID),
+		mvccTimestamp:         req.GetReq().GetMvccTimestamp(),
+		consistencyLevel:      req.GetReq().GetConsistencyLevel(),
+		collectionTTL:         req.GetReq().GetCollectionTtlTimestamps(),
+		entityTTLPhysicalTime: req.GetReq().GetEntityTtlPhysicalTime(),
 	}, nil
 }
 
@@ -156,16 +158,24 @@ func (req *SearchRequest) Delete() {
 
 // RetrievePlan is a wrapper of the underlying C-structure C.CRetrievePlan
 type RetrievePlan struct {
-	cRetrievePlan    C.CRetrievePlan
-	Timestamp        typeutil.Timestamp
-	msgID            int64 // only used to debug.
-	maxLimitSize     int64
-	ignoreNonPk      bool
-	consistencyLevel commonpb.ConsistencyLevel
-	collectionTTL    typeutil.Timestamp
+	cRetrievePlan         C.CRetrievePlan
+	Timestamp             typeutil.Timestamp
+	msgID                 int64 // only used to debug.
+	maxLimitSize          int64
+	ignoreNonPk           bool
+	consistencyLevel      commonpb.ConsistencyLevel
+	collectionTTL         typeutil.Timestamp
+	entityTTLPhysicalTime typeutil.Timestamp
 }
 
-func NewRetrievePlan(col *CCollection, expr []byte, timestamp typeutil.Timestamp, msgID int64, consistencylevel commonpb.ConsistencyLevel, collectionTTL typeutil.Timestamp) (*RetrievePlan, error) {
+func NewRetrievePlan(col *CCollection,
+	expr []byte,
+	timestamp typeutil.Timestamp,
+	msgID int64,
+	consistencylevel commonpb.ConsistencyLevel,
+	collectionTTL typeutil.Timestamp,
+	entityTTLPhysicalTime typeutil.Timestamp,
+) (*RetrievePlan, error) {
 	if col.rawPointer() == nil {
 		return nil, errors.New("collection is released")
 	}
@@ -176,12 +186,13 @@ func NewRetrievePlan(col *CCollection, expr []byte, timestamp typeutil.Timestamp
 	}
 	maxLimitSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	return &RetrievePlan{
-		cRetrievePlan:    cPlan,
-		Timestamp:        timestamp,
-		msgID:            msgID,
-		maxLimitSize:     maxLimitSize,
-		consistencyLevel: consistencylevel,
-		collectionTTL:    collectionTTL,
+		cRetrievePlan:         cPlan,
+		Timestamp:             timestamp,
+		msgID:                 msgID,
+		maxLimitSize:          maxLimitSize,
+		consistencyLevel:      consistencylevel,
+		collectionTTL:         collectionTTL,
+		entityTTLPhysicalTime: entityTTLPhysicalTime,
 	}, nil
 }
 
