@@ -72,6 +72,9 @@ bm25s==0.2.0
 jieba==0.42.1
 Unidecode==1.3.8
 
+# for minhash function test
+xxhash>=3.0.0
+
 
 # for perf test
 locust==2.25.0
