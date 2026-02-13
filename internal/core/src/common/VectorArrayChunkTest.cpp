@@ -22,6 +22,7 @@
 #include "common/VectorArray.h"
 #include "common/Types.h"
 #include "common/FieldMeta.h"
+#include "test_utils/Constants.h"
 #include "pb/schema.pb.h"
 #include "test_utils/DataGen.h"
 
@@ -284,7 +285,7 @@ TEST_F(VectorArrayChunkTest, TestWriteWithMmap) {
 
     // Create temp file path
     std::string temp_file =
-        "/tmp/test_vector_array_chunk_" +
+        TestLocalPath + "test_vector_array_chunk_" +
         std::to_string(
             std::chrono::steady_clock::now().time_since_epoch().count());
 

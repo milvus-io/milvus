@@ -25,6 +25,7 @@
 #include "test_utils/indexbuilder_test_utils.h"
 #include "index/Meta.h"
 #include "pb/schema.pb.h"
+#include "test_utils/Constants.h"
 
 using namespace milvus::index;
 using namespace milvus::indexbuilder;
@@ -217,7 +218,7 @@ class ArrayBitmapIndexTest : public testing::Test {
         auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
         auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
-                                    "/tmp/test_array_bitmap",
+                                    TestLocalPath,
                                     collection_id,
                                     partition_id,
                                     segment_id,
@@ -293,7 +294,7 @@ class ArrayBitmapIndexTest : public testing::Test {
         int64_t partition_id = 2;
         int64_t segment_id = 3;
         int64_t field_id = 101;
-        std::string root_path = "/tmp/test-bitmap-index/";
+        std::string root_path = TestLocalPath;
 
         storage::StorageConfig storage_config;
         storage_config.storage_type = "local";
