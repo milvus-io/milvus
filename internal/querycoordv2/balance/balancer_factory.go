@@ -127,8 +127,8 @@ func (f *BalancerFactory) GetBalancer() Balance {
 	default:
 		log.Info("Unknown balancer type, using default",
 			zap.String("requested", balanceKey),
-			zap.String("default", meta.ScoreBasedBalancerName))
-		balancer = NewScoreBasedBalancer(f.scheduler, f.nodeManager, f.dist, f.meta, f.targetMgr)
+			zap.String("default", meta.ChannelLevelScoreBalancerName))
+		balancer = NewChannelLevelScoreBalancer(f.scheduler, f.nodeManager, f.dist, f.meta, f.targetMgr)
 	}
 
 	f.balancerMap[balanceKey] = balancer

@@ -165,12 +165,16 @@ func (suite *ReplicaManagerSuite) TestSpawn() {
 	suite.Len(replicas, 0)
 
 	mgr.idAllocator = suite.idAllocator
+
+	// First test with ScoreBasedBalancer (which doesn't populate ChannelNodeInfos)
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ScoreBasedBalancerName)
 	replicas, err = mgr.Spawn(ctx, 1, map[string]int{DefaultResourceGroupName: 1}, []string{"channel1", "channel2"}, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	for _, replica := range replicas {
 		suite.Len(replica.replicaPB.GetChannelNodeInfos(), 0)
 	}
 
+	// Then test with ChannelLevelScoreBalancer (which populates ChannelNodeInfos)
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ChannelLevelScoreBalancerName)
 	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.Balancer.Key)
 	replicas, err = mgr.Spawn(ctx, 2, map[string]int{DefaultResourceGroupName: 1}, []string{"channel1", "channel2"}, commonpb.LoadPriority_LOW)
