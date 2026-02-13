@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -674,4 +675,77 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 		err := queue.Enqueue(st)
 		assert.Error(t, err)
 	})
+}
+
+func TestPChanStatInfo_PushAndRemove(t *testing.T) {
+	stat := &pChanStatInfo{}
+
+	// push in increasing order (the only valid usage in dmTaskQueue)
+	stat.push(10)
+	stat.push(20)
+	stat.push(30)
+	stat.push(40)
+	stat.push(50)
+
+	assert.Equal(t, []Timestamp{10, 20, 30, 40, 50}, stat.tsSortedArr)
+	assert.True(t, sort.SliceIsSorted(stat.tsSortedArr, func(i, j int) bool {
+		return stat.tsSortedArr[i] < stat.tsSortedArr[j]
+	}))
+
+	// remove from head
+	stat.remove(10)
+	assert.Equal(t, []Timestamp{20, 30, 40, 50}, stat.tsSortedArr)
+	assert.True(t, sort.SliceIsSorted(stat.tsSortedArr, func(i, j int) bool {
+		return stat.tsSortedArr[i] < stat.tsSortedArr[j]
+	}))
+
+	// remove from middle
+	stat.remove(40)
+	assert.Equal(t, []Timestamp{20, 30, 50}, stat.tsSortedArr)
+	assert.True(t, sort.SliceIsSorted(stat.tsSortedArr, func(i, j int) bool {
+		return stat.tsSortedArr[i] < stat.tsSortedArr[j]
+	}))
+
+	// remove from tail
+	stat.remove(50)
+	assert.Equal(t, []Timestamp{20, 30}, stat.tsSortedArr)
+	assert.True(t, sort.SliceIsSorted(stat.tsSortedArr, func(i, j int) bool {
+		return stat.tsSortedArr[i] < stat.tsSortedArr[j]
+	}))
+}
+
+func TestPChanStatInfo_RemoveNonExistingAndEmpty(t *testing.T) {
+	stat := &pChanStatInfo{}
+
+	// remove on empty should be safe
+	stat.remove(100)
+	assert.Empty(t, stat.tsSortedArr)
+
+	stat.push(1)
+	stat.push(2)
+	stat.push(3)
+	assert.Equal(t, []Timestamp{1, 2, 3}, stat.tsSortedArr)
+
+	// remove non-existing should be a no-op
+	stat.remove(4)
+	assert.Equal(t, []Timestamp{1, 2, 3}, stat.tsSortedArr)
+
+	// remove value strictly between existing elements should be a no-op
+	stat2 := &pChanStatInfo{tsSortedArr: []Timestamp{1, 3, 5}}
+	stat2.remove(4)
+	assert.Equal(t, []Timestamp{1, 3, 5}, stat2.tsSortedArr)
+}
+
+func TestPChanStatInfo_RemoveDuplicate(t *testing.T) {
+	stat := &pChanStatInfo{}
+	stat.push(10)
+	stat.push(10)
+	stat.push(20)
+	assert.Equal(t, []Timestamp{10, 10, 20}, stat.tsSortedArr)
+
+	// remove should delete exactly one occurrence
+	stat.remove(10)
+	assert.Equal(t, []Timestamp{10, 20}, stat.tsSortedArr)
+	stat.remove(10)
+	assert.Equal(t, []Timestamp{20}, stat.tsSortedArr)
 }

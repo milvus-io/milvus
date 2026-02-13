@@ -20,6 +20,7 @@ import (
 	"container/list"
 	"context"
 	"math"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -36,6 +37,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+const defaultReserveSizeTsArr = 128
 
 type taskQueue interface {
 	utChan() <-chan int
@@ -244,7 +247,25 @@ func (queue *ddTaskQueue) updateMetrics() {
 
 type pChanStatInfo struct {
 	pChanStatistics
-	tsSet map[Timestamp]struct{}
+	tsSortedArr []Timestamp
+}
+
+func (stat *pChanStatInfo) push(ts Timestamp) {
+	stat.tsSortedArr = append(stat.tsSortedArr, ts)
+}
+
+func (stat *pChanStatInfo) remove(ts Timestamp) {
+	index := sort.Search(len(stat.tsSortedArr), func(i int) bool {
+		return stat.tsSortedArr[i] >= ts
+	})
+
+	// Because deletion usually occurs at the beginning of the array, move the data from front to back
+	if index < len(stat.tsSortedArr) && stat.tsSortedArr[index] == ts {
+		for i := index; i > 0; i-- {
+			stat.tsSortedArr[i] = stat.tsSortedArr[i-1]
+		}
+		stat.tsSortedArr = stat.tsSortedArr[1:]
+	}
 }
 
 // dmTaskQueue represents queue for DML task such as insert/delete/upsert
@@ -330,9 +351,7 @@ func (queue *dmTaskQueue) commitPChanStats(dmt dmlTask, pChannels []pChan) {
 		if !ok {
 			currentStat = &pChanStatInfo{
 				pChanStatistics: newStat,
-				tsSet: map[Timestamp]struct{}{
-					newStat.minTs: {},
-				},
+				tsSortedArr:     make([]Timestamp, 0, defaultReserveSizeTsArr),
 			}
 			queue.pChanStatisticsInfos[cName] = currentStat
 		} else {
@@ -342,8 +361,9 @@ func (queue *dmTaskQueue) commitPChanStats(dmt dmlTask, pChannels []pChan) {
 			if currentStat.maxTs < newStat.maxTs {
 				currentStat.maxTs = newStat.maxTs
 			}
-			currentStat.tsSet[newStat.minTs] = struct{}{}
 		}
+		// append minTs to the end of array directly, because minTs must be greater than all timestamps in array
+		currentStat.push(newStat.minTs)
 	}
 }
 
@@ -353,17 +373,11 @@ func (queue *dmTaskQueue) popPChanStats(t task) {
 	for _, cName := range channels {
 		info, ok := queue.pChanStatisticsInfos[cName]
 		if ok {
-			delete(info.tsSet, taskTs)
-			if len(info.tsSet) <= 0 {
+			info.remove(taskTs)
+			if len(info.tsSortedArr) <= 0 {
 				delete(queue.pChanStatisticsInfos, cName)
 			} else {
-				newMinTs := info.maxTs
-				for ts := range info.tsSet {
-					if newMinTs > ts {
-						newMinTs = ts
-					}
-				}
-				info.minTs = newMinTs
+				info.minTs = min(info.maxTs, info.tsSortedArr[0])
 			}
 		}
 	}
