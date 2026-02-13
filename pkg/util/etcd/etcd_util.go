@@ -92,7 +92,7 @@ func GetRemoteEtcdClient(endpoints []string, opts ...ClientOption) (*clientv3.Cl
 		Endpoints:   endpoints,
 		DialTimeout: 5 * time.Second,
 		DialOptions: []grpc.DialOption{
-			grpc.WithBlock(),
+			grpc.WithBlock(), //nolint:staticcheck // etcd DialTimeout requires WithBlock to take effect
 		},
 	}
 	applyClientOptions(&cfg, opts...)
@@ -106,7 +106,7 @@ func GetRemoteEtcdClientWithAuth(endpoints []string, userName, password string, 
 		Username:    userName,
 		Password:    password,
 		DialOptions: []grpc.DialOption{
-			grpc.WithBlock(),
+			grpc.WithBlock(), //nolint:staticcheck // etcd DialTimeout requires WithBlock to take effect
 		},
 	}
 	applyClientOptions(&cfg, opts...)
@@ -156,7 +156,7 @@ func GetRemoteEtcdSSLClientWithCfg(endpoints []string, certFile string, keyFile 
 		return nil, errors.Errorf("unknown TLS version,%s", minVersion)
 	}
 
-	cfg.DialOptions = append(cfg.DialOptions, grpc.WithBlock())
+	cfg.DialOptions = append(cfg.DialOptions, grpc.WithBlock()) //nolint:staticcheck // etcd DialTimeout requires WithBlock
 	applyClientOptions(&cfg, opts...)
 
 	return clientv3.New(cfg)

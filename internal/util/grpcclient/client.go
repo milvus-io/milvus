@@ -260,6 +260,9 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 		log.Ctx(ctx).Warn("failed to get client address", zap.Error(err))
 		return err
 	}
+	if addr == "" {
+		return wrapErrConnect(addr, errors.New("empty address"))
+	}
 
 	dialContext, cancel := context.WithTimeout(ctx, c.DialTimeout)
 
@@ -280,7 +283,6 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 					ServerName: c.internalTLSServerName,
 				},
 			)),
-			grpc.WithBlock(),
 			grpc.WithDefaultCallOptions(
 				grpc.MaxCallRecvMsgSize(c.ClientMaxRecvSize),
 				grpc.MaxCallSendMsgSize(c.ClientMaxSendSize),
@@ -318,7 +320,6 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 			dialContext,
 			addr,
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithBlock(),
 			grpc.WithDefaultCallOptions(
 				grpc.MaxCallRecvMsgSize(c.ClientMaxRecvSize),
 				grpc.MaxCallSendMsgSize(c.ClientMaxSendSize),

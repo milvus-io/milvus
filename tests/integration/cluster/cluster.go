@@ -746,7 +746,6 @@ func (c *MiniClusterV3) Stop() {
 
 func getGrpcDialOpt() []grpc.DialOption {
 	return []grpc.DialOption{
-		grpc.WithBlock(),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                5 * time.Second,
 			Timeout:             10 * time.Second,
