@@ -17,9 +17,11 @@
 package storage
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -55,24 +57,91 @@ func TestSort(t *testing.T) {
 	}
 
 	t.Run("sort", func(t *testing.T) {
-		gotNumRows, err := Sort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
+		gotNumRows, timings, err := Sort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
 			return true
 		}, []int64{common.RowIDField})
 		assert.NoError(t, err)
 		assert.Equal(t, 6, gotNumRows)
+		assert.NotNil(t, timings)
+		assert.Equal(t, 6, timings.NumRows)
+		assert.Greater(t, timings.NumBatches, 0)
+		assert.GreaterOrEqual(t, timings.ReadCost.Nanoseconds(), int64(0))
+		assert.GreaterOrEqual(t, timings.SortCost.Nanoseconds(), int64(0))
+		assert.GreaterOrEqual(t, timings.WriteCost.Nanoseconds(), int64(0))
 		err = rw.Close()
 		assert.NoError(t, err)
 	})
 
 	t.Run("sort with predicate", func(t *testing.T) {
-		gotNumRows, err := Sort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
+		gotNumRows, timings, err := Sort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
 			pk := r.Column(common.RowIDField).(*array.Int64).Value(i)
 			return pk >= 20
 		}, []int64{common.RowIDField})
 		assert.NoError(t, err)
 		assert.Equal(t, 3, gotNumRows)
+		assert.NotNil(t, timings)
+		assert.Equal(t, 3, timings.NumRows)
 		err = rw.Close()
 		assert.NoError(t, err)
+	})
+
+	t.Run("sort empty readers", func(t *testing.T) {
+		gotNumRows, timings, err := Sort(batchSize, generateTestSchema(), []RecordReader{}, rw, func(r Record, ri, i int) bool {
+			return true
+		}, []int64{common.RowIDField})
+		assert.NoError(t, err)
+		assert.Equal(t, 0, gotNumRows)
+		assert.NotNil(t, timings)
+		assert.GreaterOrEqual(t, timings.ReadCost.Nanoseconds(), int64(0))
+	})
+
+	t.Run("sort with reader error", func(t *testing.T) {
+		mockNext := mockey.Mock((*IterativeRecordReader).Next).Return(nil, fmt.Errorf("read error")).Build()
+		defer mockNext.UnPatch()
+		errReader := &IterativeRecordReader{}
+		gotNumRows, timings, err := Sort(batchSize, generateTestSchema(), []RecordReader{errReader}, rw, func(r Record, ri, i int) bool {
+			return true
+		}, []int64{common.RowIDField})
+		assert.Error(t, err)
+		assert.Equal(t, 0, gotNumRows)
+		assert.Nil(t, timings)
+	})
+
+	t.Run("sort with batch write error", func(t *testing.T) {
+		errWriter := &MockRecordWriter{
+			writefn: func(r Record) error {
+				return fmt.Errorf("write error")
+			},
+			closefn: func() error {
+				return nil
+			},
+		}
+		// Use small batchSize to trigger mid-loop batch write error (line 157)
+		gotNumRows, timings, err := Sort(1, generateTestSchema(), getReaders(), errWriter, func(r Record, ri, i int) bool {
+			return true
+		}, []int64{common.RowIDField})
+		assert.Error(t, err)
+		assert.Equal(t, 0, gotNumRows)
+		assert.Nil(t, timings)
+	})
+
+	t.Run("sort with final write error", func(t *testing.T) {
+		errWriter := &MockRecordWriter{
+			writefn: func(r Record) error {
+				// Fail on the first write (which is the final batch write when batchSize is large)
+				return fmt.Errorf("write error")
+			},
+			closefn: func() error {
+				return nil
+			},
+		}
+		// Use large batchSize so data doesn't trigger mid-loop write, only the final batch write (line 164)
+		gotNumRows, timings, err := Sort(batchSize, generateTestSchema(), getReaders(), errWriter, func(r Record, ri, i int) bool {
+			return true
+		}, []int64{common.RowIDField})
+		assert.Error(t, err)
+		assert.Equal(t, 0, gotNumRows)
+		assert.Nil(t, timings)
 	})
 }
 
@@ -190,7 +259,7 @@ func TestSortByMoreThanOneField(t *testing.T) {
 			return nil
 		},
 	}
-	gotNumRows, err := Sort(batchSize, generateTestSchema(), rr, rw, func(r Record, ri, i int) bool {
+	gotNumRows, _, err := Sort(batchSize, generateTestSchema(), rr, rw, func(r Record, ri, i int) bool {
 		return true
 	}, sortByFieldIDs)
 	assert.NoError(t, err)

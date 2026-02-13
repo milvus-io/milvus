@@ -244,6 +244,19 @@ var (
 			Help:      "Number of missing deletes in compaction",
 		}, []string{collectionIDLabelName})
 
+	DataNodeCompactionStageLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "compaction_stage_latency",
+			Help:      "latency of each compaction stage",
+			Buckets:   longTaskBuckets,
+		}, []string{
+			nodeIDLabelName,
+			compactionTypeLabelName,
+			stageLabelName,
+		})
+
 	// index service metrics
 	// unit second, from 1ms to 2hrs
 	indexBucket = []float64{0.001, 0.1, 0.5, 1, 5, 10, 20, 50, 100, 250, 500, 1000, 3600, 5000, 10000}
@@ -370,6 +383,7 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeCompactionLatencyInQueue)
 	registry.MustRegister(DataNodeCompactionDeleteCount)
 	registry.MustRegister(DataNodeCompactionMissingDeleteCount)
+	registry.MustRegister(DataNodeCompactionStageLatency)
 	// deprecated metrics
 	registry.MustRegister(DataNodeForwardDeleteMsgTimeTaken)
 	registry.MustRegister(DataNodeNumProducers)
@@ -422,5 +436,18 @@ func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel 
 
 	DataNodeWriteDataCount.Delete(prometheus.Labels{
 		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
+}
+
+func CleanupDataNodeCompactionMetrics(nodeID int64) {
+	nodeIDLabel := fmt.Sprint(nodeID)
+	DataNodeCompactionLatency.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName: nodeIDLabel,
+	})
+	DataNodeCompactionLatencyInQueue.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName: nodeIDLabel,
+	})
+	DataNodeCompactionStageLatency.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName: nodeIDLabel,
 	})
 }
