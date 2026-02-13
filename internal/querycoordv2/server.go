@@ -357,6 +357,12 @@ func (s *Server) initQueryCoord() error {
 
 	// Init load status cache
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
+	task.SetResourceLimitFlagHook(func() {
+		markResourceLimitFlag(s.ctx, s.etcdCli)
+	})
+	job.SetResourceLimitFlagClearHook(func() {
+		clearResourceLimitFlag(s.ctx, s.etcdCli)
+	})
 
 	RegisterDDLCallbacks(s)
 	log.Info("init querycoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", s.address))
@@ -743,6 +749,7 @@ func (s *Server) handleNodeUp(node int64) {
 
 	// add executor to task scheduler
 	s.taskScheduler.AddExecutor(node)
+	clearResourceLimitFlag(s.ctx, s.etcdCli)
 
 	// start dist handler
 	s.distController.StartDistInstance(s.ctx, node)

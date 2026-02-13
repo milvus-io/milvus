@@ -1001,6 +1001,14 @@ func (scheduler *taskScheduler) recordSegmentTaskError(task *SegmentTask) {
 		zap.Error(task.err),
 	)
 	meta.GlobalFailedLoadCache.Put(task.collectionID, task.Err())
+	if errors.IsAny(task.Err(),
+		merr.ErrServiceMemoryLimitExceeded,
+		merr.ErrServiceDiskLimitExceeded,
+		merr.ErrServiceResourceInsufficient,
+		merr.ErrSegmentRequestResourceFailed,
+	) {
+		triggerResourceLimitFlagHook()
+	}
 }
 
 func (scheduler *taskScheduler) remove(task Task) {
