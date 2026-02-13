@@ -17,8 +17,10 @@
 #include "ProjectNode.h"
 
 #include <algorithm>
+#include <cstring>
 #include <utility>
 
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "exec/QueryContext.h"
 #include "exec/expression/Utils.h"
@@ -68,6 +70,18 @@ PhyProjectNode::GetOutput() {
     for (int i = 0; i < fields_to_project_.size(); i++) {
         auto column_type = row_type->column_type(i);
         auto field_id = fields_to_project_.at(i);
+
+        if (field_id == SegmentOffsetFieldID) {
+            // Two-project mode: output segment offsets as INT64 column
+            // so that late materialization can fetch deferred fields.
+            auto offset_col =
+                std::make_shared<ColumnVector>(DataType::INT64, selected_count);
+            auto raw = static_cast<int64_t*>(offset_col->GetRawData());
+            std::memcpy(
+                raw, selected_offsets.data(), selected_count * sizeof(int64_t));
+            column_vectors.emplace_back(offset_col);
+            continue;
+        }
 
         TargetBitmap valid_map(selected_count);
         auto field_data = bulk_script_field_data(op_context_,

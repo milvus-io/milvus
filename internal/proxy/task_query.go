@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -94,6 +95,7 @@ type queryParams struct {
 	isIterator        bool
 	collectionID      int64
 	groupByFields     []string
+	orderByFields     []string // NEW: ORDER BY field specifications (e.g., "price:desc")
 	timezone          string
 	extractTimeFields []string
 }
@@ -147,6 +149,141 @@ func translateGroupByFieldIds(groupByFieldNames []string, schema *schemapb.Colle
 		groupByFieldIds = append(groupByFieldIds, fieldSchema.GetFieldID())
 	}
 	return groupByFieldIds, nil
+}
+
+// validateOrderByFieldsWithGroupBy validates that ORDER BY fields are compatible with GROUP BY.
+// When GROUP BY is used, ORDER BY can only reference:
+// 1. Columns in the GROUP BY clause
+// 2. Aggregate function results
+// This is a fundamental SQL semantic rule because non-grouped columns don't exist in the output.
+func validateOrderByFieldsWithGroupBy(
+	orderByFieldSpecs []string,
+	groupByFields []string,
+	aggregates []agg.AggregateBase,
+) error {
+	if len(orderByFieldSpecs) == 0 {
+		return nil
+	}
+
+	// If no GROUP BY and no aggregates, any field is valid for ORDER BY
+	hasGroupBy := len(groupByFields) > 0 || len(aggregates) > 0
+	if !hasGroupBy {
+		return nil
+	}
+
+	// Build set of valid ORDER BY targets
+	validTargets := make(map[string]bool)
+
+	// Add GROUP BY fields as valid targets
+	for _, field := range groupByFields {
+		validTargets[strings.ToLower(strings.TrimSpace(field))] = true
+	}
+
+	// Add aggregate expressions as valid targets
+	// Aggregates are typically referenced by their original name (e.g., "count(*)", "sum(price)")
+	for _, aggBase := range aggregates {
+		// Get the aggregate original name (e.g., "count(*)", "sum(price)")
+		aggExpr := strings.ToLower(aggBase.OriginalName())
+		validTargets[aggExpr] = true
+	}
+
+	// Validate each ORDER BY field
+	for _, spec := range orderByFieldSpecs {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+
+		// Extract field name (remove direction suffix like ":desc" or " desc")
+		var fieldName string
+		parts := strings.Split(spec, ":")
+		if len(parts) == 1 {
+			parts = strings.Fields(spec)
+		}
+		fieldName = strings.ToLower(strings.TrimSpace(parts[0]))
+
+		if !validTargets[fieldName] {
+			return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(
+				"ORDER BY field '%s' is not valid: when using GROUP BY or aggregates, "+
+					"ORDER BY can only reference GROUP BY columns or aggregate results. "+
+					"Valid targets are: %v",
+				fieldName, getValidTargetList(groupByFields, aggregates),
+			))
+		}
+	}
+
+	return nil
+}
+
+// getValidTargetList returns a formatted list of valid ORDER BY targets for error messages.
+func getValidTargetList(groupByFields []string, aggregates []agg.AggregateBase) []string {
+	targets := make([]string, 0, len(groupByFields)+len(aggregates))
+	for _, field := range groupByFields {
+		targets = append(targets, field)
+	}
+	for _, aggBase := range aggregates {
+		targets = append(targets, aggBase.OriginalName())
+	}
+	return targets
+}
+
+// translateOrderByFields converts ORDER BY field specifications to planpb.OrderByField messages
+// Input format: "field_name:desc" or "field_name desc" or "field_name" (default asc)
+func translateOrderByFields(orderByFieldSpecs []string, schema *schemapb.CollectionSchema) ([]*planpb.OrderByField, error) {
+	if len(orderByFieldSpecs) == 0 {
+		return nil, nil
+	}
+
+	fieldNameToSchema := make(map[string]*schemapb.FieldSchema, len(schema.Fields))
+	for _, field := range schema.Fields {
+		fieldNameToSchema[field.Name] = field
+	}
+
+	orderByFields := make([]*planpb.OrderByField, 0, len(orderByFieldSpecs))
+	for _, spec := range orderByFieldSpecs {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+
+		// Parse "field_name:desc" or "field_name desc" format
+		var fieldName string
+		ascending := true   // Default: ASC
+		nullsFirst := false // Default: NULLS LAST
+
+		// Try colon separator first, then space
+		parts := strings.Split(spec, ":")
+		if len(parts) == 1 {
+			// Try space separator
+			parts = strings.Fields(spec)
+		}
+
+		fieldName = strings.TrimSpace(parts[0])
+		if len(parts) > 1 {
+			direction := strings.ToLower(strings.TrimSpace(parts[1]))
+			if direction == "desc" || direction == "descending" {
+				ascending = false
+			}
+		}
+
+		fieldSchema, found := fieldNameToSchema[fieldName]
+		if !found {
+			return nil, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("order by field %s not exist", fieldName))
+		}
+
+		if !isSortableFieldType(fieldSchema.GetDataType()) {
+			return nil, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(
+				"order by field %s has unsupported data type %s", fieldName, fieldSchema.GetDataType().String(),
+			))
+		}
+
+		orderByFields = append(orderByFields, &planpb.OrderByField{
+			FieldId:    fieldSchema.GetFieldID(),
+			Ascending:  ascending,
+			NullsFirst: nullsFirst,
+		})
+	}
+	return orderByFields, nil
 }
 
 // translateToOutputFieldIDs translates output fields name to output fields id.
@@ -321,6 +458,19 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		}
 	}
 
+	// parse order by fields (e.g., "price:desc,rating:asc" or "price desc, rating asc")
+	orderByFieldsStr, err := funcutil.GetAttrByKeyFromRepeatedKV(OrderByFieldsKey, queryParamsPair)
+	var orderByFields []string
+	if err == nil {
+		splitFields := strings.Split(orderByFieldsStr, ",")
+		for _, field := range splitFields {
+			trimmed := strings.TrimSpace(field)
+			if trimmed != "" {
+				orderByFields = append(orderByFields, trimmed)
+			}
+		}
+	}
+
 	return &queryParams{
 		limit:             limit,
 		offset:            offset,
@@ -328,6 +478,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		isIterator:        isIterator,
 		collectionID:      collectionID,
 		groupByFields:     groupByFields,
+		orderByFields:     orderByFields,
 		timezone:          timezone,
 		extractTimeFields: extractTimeFields,
 	}, nil
@@ -393,6 +544,23 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 	}
 	t.plan.GetQuery().GroupByFieldIds = groupByFieldsIDs
 	t.RetrieveRequest.GroupByFieldIds = groupByFieldsIDs
+
+	// Validate ORDER BY fields compatibility with GROUP BY
+	// When GROUP BY is used, ORDER BY can only reference groupBy columns or aggregate results
+	if err := validateOrderByFieldsWithGroupBy(
+		t.queryParams.orderByFields,
+		t.queryParams.groupByFields,
+		t.userAggregates,
+	); err != nil {
+		return err
+	}
+
+	// parse order by fields
+	orderByFields, err := translateOrderByFields(t.queryParams.orderByFields, t.schema.CollectionSchema)
+	if err != nil {
+		return err
+	}
+	t.plan.GetQuery().OrderByFields = orderByFields
 
 	hasAgg := len(t.RetrieveRequest.GroupByFieldIds) > 0 || len(t.RetrieveRequest.Aggregates) > 0
 	// parse output field ids
@@ -735,13 +903,64 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Observe(0.0)
 	tr.CtxRecord(ctx, "reduceResultStart")
 
-	reducer := createMilvusReducer(ctx, t.queryParams, t.RetrieveRequest, t.schema.CollectionSchema, t.plan, t.collectionName, t.aggregationFieldMap)
+	// Parse ORDER BY fields if present
+	var orderByFields []*orderby.OrderByField
+	if len(t.queryParams.orderByFields) > 0 {
+		orderByFields, err = orderby.ParseOrderByFields(t.queryParams.orderByFields, t.schema.CollectionSchema)
+		if err != nil {
+			log.Warn("fail to parse order by fields", zap.Error(err))
+			return err
+		}
+	}
 
-	t.result, err = reducer.Reduce(toReduceResults)
+	primaryFieldSchema, err := t.schema.GetPkField()
+	if err != nil {
+		log.Warn("failed to get primary field schema", zap.Error(err))
+		return err
+	}
+
+	pipeline := NewQueryPipeline(
+		t.schema.CollectionSchema,
+		t.queryParams.limit,
+		t.queryParams.offset,
+		orderByFields,
+		t.RetrieveRequest.GetGroupByFieldIds(),
+		t.RetrieveRequest.GetAggregates(),
+		t.aggregationFieldMap,
+		primaryFieldSchema.GetName(),
+		t.translatedOutputFields,
+		t.userOutputFields,
+	)
+	t.result, err = pipeline.Execute(ctx, toReduceResults)
 	if err != nil {
 		log.Warn("fail to reduce query result", zap.Error(err))
 		return err
 	}
+
+	// Populate FieldName on each FieldData from schema (segcore doesn't set it).
+	// Then filter to only include user-requested output fields.
+	fieldSchemaMap := make(map[int64]*schemapb.FieldSchema, len(t.schema.CollectionSchema.Fields))
+	for _, fs := range t.schema.CollectionSchema.Fields {
+		fieldSchemaMap[fs.FieldID] = fs
+	}
+	outputFieldSet := make(map[string]struct{}, len(t.userOutputFields))
+	for _, name := range t.userOutputFields {
+		outputFieldSet[name] = struct{}{}
+	}
+	for _, fieldData := range t.result.FieldsData {
+		if fieldData != nil {
+			if fs, ok := fieldSchemaMap[fieldData.FieldId]; ok {
+				fieldData.FieldName = fs.Name
+				fieldData.Type = fs.DataType
+				fieldData.IsDynamic = fs.IsDynamic
+			}
+		}
+	}
+	t.result.FieldsData = lo.Filter(t.result.FieldsData, func(fd *schemapb.FieldData, _ int) bool {
+		_, ok := outputFieldSet[fd.FieldName]
+		return ok
+	})
+
 	for i, fieldData := range t.result.FieldsData {
 		if fieldData.Type == schemapb.DataType_Geometry {
 			if err := validateGeometryFieldSearchResult(&t.result.FieldsData[i]); err != nil {
@@ -755,11 +974,6 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		reconstructStructFieldDataForQuery(t.result, t.schema.CollectionSchema)
 	}
 
-	primaryFieldSchema, err := t.schema.GetPkField()
-	if err != nil {
-		log.Warn("failed to get primary field schema", zap.Error(err))
-		return err
-	}
 	t.result.PrimaryFieldName = primaryFieldSchema.GetName()
 	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 

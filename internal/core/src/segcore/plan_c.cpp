@@ -205,6 +205,13 @@ DeleteRetrievePlan(CRetrievePlan c_plan) {
 bool
 ShouldIgnoreNonPk(CRetrievePlan c_plan) {
     auto plan = static_cast<milvus::query::RetrievePlan*>(c_plan);
+    // ORDER BY queries must not use two-phase retrieval: the pipeline
+    // returns data in a positional layout [pk, orderby, remaining] that
+    // the Go-side Remap depends on.  RetrieveByOffsets would re-fetch
+    // via FillTargetEntry in field_ids_ order, breaking that layout.
+    if (plan->plan_node_ && plan->plan_node_->has_order_by_) {
+        return false;
+    }
     auto pk_field = plan->schema_->get_primary_field_id();
     auto only_contain_pk = pk_field.has_value() &&
                            plan->field_ids_.size() == 1 &&

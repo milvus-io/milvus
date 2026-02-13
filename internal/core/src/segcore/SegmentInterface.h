@@ -573,6 +573,14 @@ class SegmentInternalInterface : public SegmentInterface {
         const std::unique_ptr<proto::segcore::RetrieveResults>& results,
         RetrieveResult& retrieveResult) const;
 
+    // ORDER BY path: move sorted columns, late-materialize deferred fields,
+    // and populate PK-based IDs for proxy reduce.
+    void
+    FillOrderByResult(
+        const query::RetrievePlan* plan,
+        const std::unique_ptr<proto::segcore::RetrieveResults>& results,
+        RetrieveResult& retrieveResult) const;
+
     void
     FillTargetEntry(
         tracer::TraceContext* trace_ctx,
