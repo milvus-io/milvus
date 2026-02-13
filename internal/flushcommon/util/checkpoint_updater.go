@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -176,7 +177,8 @@ func (ccu *ChannelCheckpointUpdater) execute() {
 }
 
 func (ccu *ChannelCheckpointUpdater) AddTask(channelPos *msgpb.MsgPosition, flush bool, callback func()) {
-	if channelPos == nil || channelPos.GetMsgID() == nil || channelPos.GetChannelName() == "" {
+	// Note: Only earliest msgId of woodpecker can be empty bytes
+	if channelPos == nil || (channelPos.GetMsgID() == nil && channelPos.GetWALName() != commonpb.WALName_WoodPecker) || channelPos.GetChannelName() == "" {
 		log.Warn("illegal checkpoint", zap.Any("pos", channelPos))
 		return
 	}

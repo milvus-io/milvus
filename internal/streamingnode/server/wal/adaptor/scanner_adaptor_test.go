@@ -61,7 +61,7 @@ func TestScannerAdaptorReadError(t *testing.T) {
 			MessageFilter: nil,
 		},
 		metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
-		func() {})
+		func() {}, false)
 	// wait for timetick inspector first round
 	<-sig1.CloseCh()
 	// wait for scanner backoff 2 rounds

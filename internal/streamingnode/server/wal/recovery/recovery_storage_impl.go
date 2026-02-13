@@ -97,6 +97,8 @@ type recoveryStorageImpl struct {
 	truncator              walimpls.WALImpls
 	metrics                *recoveryMetrics
 	pendingPersistSnapshot *RecoverySnapshot
+	// used to mark switch MQ msg found
+	alterWALInfo *AlterWALInfo
 }
 
 // Metrics gets the metrics of the wal.
@@ -264,6 +266,14 @@ func (r *recoveryStorageImpl) updateCheckpoint(msg message.ImmutableMessage) {
 	}
 	r.checkpoint.MessageID = msg.LastConfirmedMessageID()
 	r.checkpoint.TimeTick = msg.TimeTick()
+	if r.alterWALInfo != nil && r.alterWALInfo.FoundAlterWALMsg && (r.checkpoint.AlterWalState == nil || r.checkpoint.AlterWalState.Stage == streamingpb.AlterWALStage_NONE) {
+		r.checkpoint.AlterWalState = &streamingpb.AlterWALState{
+			TargetWalName: r.alterWALInfo.TargetWALName,
+			TimeTick:      r.alterWALInfo.AlterWALTs,
+			Configs:       r.alterWALInfo.AlterWALConfig,
+			Stage:         streamingpb.AlterWALStage_FLUSHING,
+		}
+	}
 
 	// update the replicate checkpoint.
 	replicateHeader := msg.ReplicateHeader()
@@ -298,7 +308,7 @@ func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 		return
 	}
 
-	if msg.VChannel() != "" && msg.MessageType() != message.MessageTypeCreateCollection &&
+	if msg.VChannel() != "" && msg.MessageType() != message.MessageTypeAlterWAL && msg.MessageType() != message.MessageTypeCreateCollection &&
 		msg.MessageType() != message.MessageTypeDropCollection && r.vchannels[msg.VChannel()] == nil && !funcutil.IsControlChannel(msg.VChannel()) {
 		r.detectInconsistency(msg, "vchannel not found")
 	}
@@ -351,6 +361,50 @@ func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 		r.handleTruncateCollection(immutableMsg)
 	case message.MessageTypeTimeTick:
 		// nothing, the time tick message make no recovery operation.
+	case message.MessageTypeAlterWAL:
+		immutableMsg := message.MustAsImmutableAlterWALMessageV2(msg)
+		r.handleAlterWAL(immutableMsg)
+	}
+}
+
+// handleAlterWAL handles the alter WAL message.
+// Flushes all growing segments to ensure segment data does not span across different WAL implementations.
+func (r *recoveryStorageImpl) handleAlterWAL(msg message.ImmutableAlterWALMessageV2) {
+	header := msg.Header()
+
+	segmentIDs := make([]int64, 0)
+	rows := make([]uint64, 0)
+	binarySize := make([]uint64, 0)
+
+	// Flush all growing segments before WAL switch
+	for segmentID, segment := range r.segments {
+		if segment.IsGrowing() {
+			segment.ObserveFlush(msg.TimeTick())
+			segmentIDs = append(segmentIDs, segmentID)
+			rows = append(rows, segment.Rows())
+			binarySize = append(binarySize, segment.BinarySize())
+		}
+	}
+
+	if len(segmentIDs) > 0 {
+		r.Logger().Info("flush all growing segments for WAL switch",
+			log.FieldMessage(msg),
+			zap.Stringer("targetWALName", header.TargetWalName),
+			zap.Int64s("segmentIDs", segmentIDs),
+			zap.Uint64s("rows", rows),
+			zap.Uint64s("binarySize", binarySize))
+	} else {
+		r.Logger().Info("no growing segments to flush for WAL switch",
+			log.FieldMessage(msg),
+			zap.Stringer("targetWALName", header.TargetWalName))
+	}
+
+	// Record alter WAL information for snapshot persistence
+	r.alterWALInfo = &AlterWALInfo{
+		FoundAlterWALMsg: true,
+		TargetWALName:    header.TargetWalName,
+		AlterWALConfig:   header.Config,
+		AlterWALTs:       msg.TimeTick(),
 	}
 }
 
@@ -556,6 +610,30 @@ func (r *recoveryStorageImpl) detectInconsistency(msg message.ImmutableMessage, 
 	// because our meta is not atomic-updated, so these error may be logged if crashes when meta updated partially.
 	r.Logger().Warn("inconsistency detected", fields...)
 	r.metrics.ObserveInconsitentEvent()
+}
+
+// GetFlusherCheckpointByTimeTick returns the minimum flush checkpoint among all vchannels based on time tick.
+// This method is used to determine the earliest checkpoint that can be safely flushed.
+func (r *recoveryStorageImpl) GetFlusherCheckpointByTimeTick(ctx context.Context) *WALCheckpoint {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(r.vchannels) == 0 {
+		r.Logger().Info("get flush checkpoint fast return pChan cp, due to no vChan", zap.String("pChannel", r.channel.String()))
+		return r.checkpoint
+	}
+
+	var minimumCheckpoint *WALCheckpoint
+	for _, vchannel := range r.vchannels {
+		if vchannel.GetFlushCheckpoint() == nil {
+			// If any flush checkpoint is not set, not ready.
+			return nil
+		}
+		if minimumCheckpoint == nil || vchannel.GetFlushCheckpoint().TimeTick < minimumCheckpoint.TimeTick {
+			minimumCheckpoint = vchannel.GetFlushCheckpoint()
+		}
+	}
+	return minimumCheckpoint
 }
 
 // getFlusherCheckpoint returns flusher checkpoint concurrent-safe

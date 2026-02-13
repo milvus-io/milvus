@@ -5,6 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
@@ -23,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
 
@@ -82,6 +84,7 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 				MsgID:     adaptor.MustGetMQWrapperIDFromMessage(createCollectionMsg.LastConfirmedMessageID()).Serialize(),
 				MsgGroup:  "", // Not important any more.
 				Timestamp: createCollectionMsg.TimeTick(),
+				WALName:   commonpb.WALName(createCollectionMsg.WALName()),
 			},
 		},
 		func(t syncmgr.Task, err error) {
@@ -114,7 +117,7 @@ func (impl *flusherComponents) WhenDropCollection(vchannel string) {
 // HandleMessage handles the plain message.
 func (impl *flusherComponents) HandleMessage(ctx context.Context, msg message.ImmutableMessage) error {
 	vchannel := msg.VChannel()
-	if vchannel == "" || msg.MessageType().IsBroadcastToAll() {
+	if vchannel == "" || msg.MessageType().IsBroadcastToAll() || funcutil.IsPhysicalChannel(vchannel) {
 		return impl.broadcastToAllDataSyncService(ctx, msg)
 	}
 	if _, ok := impl.dataServices[vchannel]; !ok {

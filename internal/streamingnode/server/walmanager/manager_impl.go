@@ -7,14 +7,14 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -22,20 +22,20 @@ import (
 
 var errWALManagerClosed = status.NewOnShutdownError("wal manager is closed")
 
-// OpenManager create a wal manager.
+// OpenManager create a WAL Manager, which now uses dynamic opener that can handle multiple WALNames at runtime.
+// The specific WALName will be determined when opening each channel based on checkpoint's MessageID.WALName
 func OpenManager() (Manager, error) {
-	walName := util.MustSelectWALName()
-	resource.Resource().Logger().Info("open wal manager", zap.Stringer("walName", walName))
-	opener, err := registry.MustGetBuilder(walName,
-		redo.NewInterceptorBuilder(),
-		lock.NewInterceptorBuilder(),
-		replicate.NewInterceptorBuilder(),
-		timetick.NewInterceptorBuilder(),
-		shard.NewInterceptorBuilder(),
-	).Build()
-	if err != nil {
-		return nil, err
-	}
+	resource.Resource().Logger().Info("open wal manager with dynamic opener")
+	// Create dynamic opener directly with interceptors
+	opener := adaptor.NewOpenerAdaptor(
+		[]interceptors.InterceptorBuilder{
+			redo.NewInterceptorBuilder(),
+			lock.NewInterceptorBuilder(),
+			replicate.NewInterceptorBuilder(),
+			timetick.NewInterceptorBuilder(),
+			shard.NewInterceptorBuilder(),
+		},
+	)
 	return newManager(opener), nil
 }
 
