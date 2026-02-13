@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -15,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
@@ -128,63 +126,31 @@ func TestReplicateCreateCollection(t *testing.T) {
 	}
 }
 
-func TestStreamingBroadcast(t *testing.T) {
-	t.Skip("cat not running without streaming service at background")
-	streamingutil.SetStreamingServiceEnabled()
-	streaming.Init()
-	defer streaming.Release()
-
-	msg, _ := message.NewCreateCollectionMessageBuilderV1().
-		WithHeader(&message.CreateCollectionMessageHeader{
-			CollectionId: 1,
-			PartitionIds: []int64{1, 2, 3},
-		}).
-		WithBody(&msgpb.CreateCollectionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_CreateCollection,
-				Timestamp: 1,
-			},
-			CollectionID:   1,
-			CollectionName: collectionName,
-		}).
-		WithBroadcast(vChannels).
-		BuildBroadcast()
-
-	resp, err := streaming.WAL().Broadcast().Append(context.Background(), msg)
-	assert.NoError(t, err)
-	assert.NotNil(t, resp)
-	t.Logf("CreateCollection: %+v\t%+v\n", resp, err)
-
-	// repeated broadcast with same resource key should be rejected
-	resp2, err := streaming.WAL().Broadcast().Append(context.Background(), msg)
-	assert.Error(t, err)
-	assert.True(t, status.AsStreamingError(err).IsResourceAcquired())
-	assert.Nil(t, resp2)
-}
-
 func TestStreamingProduce(t *testing.T) {
 	t.Skip("cat not running without streaming service at background")
 	streamingutil.SetStreamingServiceEnabled()
 	streaming.Init()
 	defer streaming.Release()
-	msg, _ := message.NewCreateCollectionMessageBuilderV1().
-		WithHeader(&message.CreateCollectionMessageHeader{
-			CollectionId: 1,
-			PartitionIds: []int64{1, 2, 3},
-		}).
-		WithBody(&msgpb.CreateCollectionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_CreateCollection,
-				Timestamp: 1,
-			},
-			CollectionID:   1,
-			CollectionName: collectionName,
-		}).
-		WithBroadcast(vChannels).
-		BuildBroadcast()
 
-	resp, err := streaming.WAL().Broadcast().Append(context.Background(), msg)
-	t.Logf("CreateCollection: %+v\t%+v\n", resp, err)
+	for _, vChannel := range vChannels {
+		msg, _ := message.NewCreateCollectionMessageBuilderV1().
+			WithHeader(&message.CreateCollectionMessageHeader{
+				CollectionId: 1,
+				PartitionIds: []int64{1, 2, 3},
+			}).
+			WithBody(&msgpb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_CreateCollection,
+					Timestamp: 1,
+				},
+				CollectionID:   1,
+				CollectionName: collectionName,
+			}).
+			WithVChannel(vChannel).
+			BuildMutable()
+		resp, err := streaming.WAL().RawAppend(context.Background(), msg)
+		t.Logf("CreateCollection: %+v\t%+v\n", resp, err)
+	}
 
 	for i := 0; i < 500; i++ {
 		time.Sleep(time.Millisecond * 1)
@@ -231,17 +197,19 @@ func TestStreamingProduce(t *testing.T) {
 		t.Logf("txn commit: %+v\n", result)
 	}
 
-	msg, _ = message.NewDropCollectionMessageBuilderV1().
-		WithHeader(&message.DropCollectionMessageHeader{
-			CollectionId: 1,
-		}).
-		WithBody(&msgpb.DropCollectionRequest{
-			CollectionID: 1,
-		}).
-		WithBroadcast(vChannels).
-		BuildBroadcast()
-	resp, err = streaming.WAL().Broadcast().Append(context.Background(), msg)
-	t.Logf("DropCollection: %+v\t%+v\n", resp, err)
+	for _, vChannel := range vChannels {
+		msg, _ := message.NewDropCollectionMessageBuilderV1().
+			WithHeader(&message.DropCollectionMessageHeader{
+				CollectionId: 1,
+			}).
+			WithBody(&msgpb.DropCollectionRequest{
+				CollectionID: 1,
+			}).
+			WithVChannel(vChannel).
+			BuildMutable()
+		resp, err := streaming.WAL().RawAppend(context.Background(), msg)
+		t.Logf("DropCollection: %+v\t%+v\n", resp, err)
+	}
 }
 
 func TestStreamingConsume(t *testing.T) {
