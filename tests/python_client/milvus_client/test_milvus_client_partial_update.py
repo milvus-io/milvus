@@ -1388,6 +1388,72 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_partial_update_after_schema_evolution_dynamic_to_static(self):
+        """
+        target: test partial update succeeds after a dynamic field name becomes a static column via schema evolution
+        method:
+            1. Create a collection with dynamic fields enabled
+            2. Insert full rows, then partial upsert a dynamic field `end_timestamp`
+            3. Add `end_timestamp` as a static column (schema evolution)
+            4. Partial upsert again with `end_timestamp` — should succeed after fix
+            5. Verify the static field has the new value
+        expected: Step 4 should succeed without "dynamic field name cannot include the static field name" error
+        """
+        # step 1: create collection with dynamic fields
+        client = self._client()
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
+        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
+        collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
+        self.create_collection(client, collection_name, default_dim, schema=schema,
+                               consistency_level="Strong", index_params=index_params)
+
+        # step 2: insert full rows, then partial upsert dynamic field `end_timestamp`
+        nb = 100
+        vectors = cf.gen_vectors(nb, default_dim)
+        rows = [{default_primary_key_field_name: i,
+                 default_vector_field_name: vectors[i],
+                 default_string_field_name: f"row_{i}"} for i in range(nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        partial_rows = [{default_primary_key_field_name: i, "end_timestamp": 1000 + i} for i in range(nb)]
+        self.upsert(client, collection_name, partial_rows, partial_update=True)
+        self.flush(client, collection_name)
+
+        # verify dynamic field was written
+        res = self.query(client, collection_name, filter="id < 5",
+                         output_fields=[default_primary_key_field_name, "end_timestamp"])[0]
+        for r in res:
+            assert "end_timestamp" in r, f"end_timestamp should exist as dynamic field, got {r}"
+
+        # step 3: add `end_timestamp` as a static column (schema evolution)
+        self.add_collection_field(client, collection_name, field_name="end_timestamp",
+                                  data_type=DataType.INT64, nullable=True)
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        # step 4: partial upsert again — this is the operation that used to fail
+        new_ts = 9999
+        partial_rows_2 = [{default_primary_key_field_name: i, "end_timestamp": new_ts + i} for i in range(nb)]
+        self.upsert(client, collection_name, partial_rows_2, partial_update=True)
+        self.flush(client, collection_name)
+
+        # step 5: verify the static field has the new value
+        res = self.query(client, collection_name, filter="id < 5",
+                         output_fields=[default_primary_key_field_name, "end_timestamp"])[0]
+        for r in res:
+            pk = r[default_primary_key_field_name]
+            assert r["end_timestamp"] == new_ts + pk, \
+                f"end_timestamp mismatch for pk={pk}: expected {new_ts + pk}, got {r['end_timestamp']}"
+
+        self.drop_collection(client, collection_name)
+
 
 class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
     """ Test case of partial update interface """

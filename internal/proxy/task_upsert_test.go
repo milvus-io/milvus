@@ -17,6 +17,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -1336,6 +1337,166 @@ func TestUpsertTask_queryPreExecute_PureUpdate(t *testing.T) {
 	}
 	assert.NotNil(t, valueField)
 	assert.Equal(t, []int32{600, 700}, valueField.GetScalars().GetIntData().GetData())
+}
+
+func TestCheckDynamicFieldDataForPartialUpdate(t *testing.T) {
+	t.Run("preserves $meta keys matching static field names after schema evolution", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:               "test_collection",
+			EnableDynamicField: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{FieldID: 101, Name: "dfA", DataType: schemapb.DataType_Int64},
+				{FieldID: 102, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+			},
+		}
+
+		// $meta contains {"dfA": 111, "dfB": "keep_me", "dfC": 999}
+		// All keys must be preserved — including "dfA" which matches a static field name.
+		metaJSON, _ := json.Marshal(map[string]interface{}{"dfA": 111, "dfB": "keep_me", "dfC": 999})
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				FieldsData: []*schemapb.FieldData{
+					{
+						FieldName: "$meta", FieldId: 102, Type: schemapb.DataType_JSON, IsDynamic: true,
+						Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{Data: [][]byte{metaJSON}},
+						}}},
+					},
+				},
+			},
+		}
+
+		err := checkDynamicFieldDataForPartialUpdate(schema, insertMsg)
+		assert.NoError(t, err)
+
+		jsonData := insertMsg.FieldsData[0].GetScalars().GetJsonData().GetData()
+		assert.Len(t, jsonData, 1)
+
+		var m map[string]interface{}
+		err = json.Unmarshal(jsonData[0], &m)
+		assert.NoError(t, err)
+		assert.Contains(t, m, "dfA", "key matching static field name must be preserved")
+		assert.Contains(t, m, "dfB", "non-conflicting key must be preserved")
+		assert.Equal(t, "keep_me", m["dfB"])
+		assert.Contains(t, m, "dfC", "non-conflicting key must be preserved")
+	})
+
+	t.Run("rejects $meta key in dynamic field", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:               "test_collection",
+			EnableDynamicField: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{FieldID: 102, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+			},
+		}
+
+		metaJSON := []byte(`{"$meta": "bad_value"}`)
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				FieldsData: []*schemapb.FieldData{
+					{
+						FieldName: "$meta", FieldId: 102, Type: schemapb.DataType_JSON, IsDynamic: true,
+						Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{Data: [][]byte{metaJSON}},
+						}}},
+					},
+				},
+			},
+		}
+
+		err := checkDynamicFieldDataForPartialUpdate(schema, insertMsg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "$meta")
+	})
+
+	t.Run("rejects malformed JSON", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:               "test_collection",
+			EnableDynamicField: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{FieldID: 102, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+			},
+		}
+
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				FieldsData: []*schemapb.FieldData{
+					{
+						FieldName: "$meta", FieldId: 102, Type: schemapb.DataType_JSON, IsDynamic: true,
+						Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(`{invalid json`)}},
+						}}},
+					},
+				},
+			},
+		}
+
+		err := checkDynamicFieldDataForPartialUpdate(schema, insertMsg)
+		assert.Error(t, err)
+	})
+
+	t.Run("rejects dynamic field when dynamic schema is disabled", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:               "test_collection",
+			EnableDynamicField: false,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			},
+		}
+
+		metaJSON := []byte(`{"key": "value"}`)
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				FieldsData: []*schemapb.FieldData{
+					{
+						FieldName: "$meta", FieldId: 102, Type: schemapb.DataType_JSON, IsDynamic: true,
+						Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{
+							JsonData: &schemapb.JSONArray{Data: [][]byte{metaJSON}},
+						}}},
+					},
+				},
+			},
+		}
+
+		err := checkDynamicFieldDataForPartialUpdate(schema, insertMsg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "without dynamic schema enabled")
+	})
+
+	t.Run("auto-generates empty dynamic field when none present", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:               "test_collection",
+			EnableDynamicField: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			},
+		}
+
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				NumRows: 2,
+				Version: msgpb.InsertDataVersion_ColumnBased,
+				FieldsData: []*schemapb.FieldData{
+					{
+						FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+						Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: []int64{1, 2}},
+						}}},
+					},
+				},
+			},
+		}
+
+		err := checkDynamicFieldDataForPartialUpdate(schema, insertMsg)
+		assert.NoError(t, err)
+		// Should have appended a dynamic field
+		assert.Len(t, insertMsg.FieldsData, 2)
+		assert.True(t, insertMsg.FieldsData[1].IsDynamic)
+		assert.Len(t, insertMsg.FieldsData[1].GetScalars().GetJsonData().GetData(), 2)
+	})
 }
 
 // Test ToCompressedFormatNullable for Geometry and Timestamptz types
