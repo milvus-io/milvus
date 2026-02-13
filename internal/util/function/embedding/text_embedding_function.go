@@ -49,6 +49,7 @@ const (
 	siliconflowProvider  string = "siliconflow"
 	teiProvider          string = "tei"
 	zillizProvider       string = "zilliz"
+	arkProvider          string = "ark"
 )
 
 func hasEmptyString(texts []string) bool {
@@ -139,8 +140,10 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 	case zillizProvider:
 		conf := paramtable.Get().FunctionCfg.ZillizProviders.GetValue()
 		embP, newProviderErr = NewZillizEmbeddingProvider(base.outputFields[0], functionSchema, conf, extraInfo)
+	case arkProvider:
+		embP, newProviderErr = NewArkEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials, extraInfo)
 	default:
-		return nil, fmt.Errorf("Unsupported text embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s, %s, %s, %s, %s, %s]", base.provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider, voyageAIProvider, cohereProvider, siliconflowProvider, teiProvider, zillizProvider)
+		return nil, fmt.Errorf("Unsupported text embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s]", base.provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider, voyageAIProvider, cohereProvider, siliconflowProvider, teiProvider, zillizProvider, arkProvider)
 	}
 
 	if newProviderErr != nil {
@@ -170,7 +173,7 @@ func (runner *TextEmbeddingFunction) Check(ctx context.Context) error {
 			return fmt.Errorf("Embedding model output and field type mismatch, model output is %s, field type is %s", schemapb.DataType_name[int32(schemapb.DataType_Int8Vector)], schemapb.DataType_name[int32(runner.GetOutputFields()[0].DataType)])
 		}
 	default:
-		return fmt.Errorf("Unsupport embedding type: %s", reflect.TypeOf(embds).String())
+		return fmt.Errorf("Unsupported embedding type: %s", reflect.TypeOf(embds).String())
 	}
 	if dim != int(runner.embProvider.FieldDim()) {
 		return fmt.Errorf("The dim set in the schema is inconsistent with the dim of the model, dim in schema is %d, dim of model is %d", runner.embProvider.FieldDim(), dim)
