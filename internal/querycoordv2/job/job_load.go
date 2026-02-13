@@ -88,6 +88,7 @@ func (job *LoadCollectionJob) Execute() error {
 	log := log.Ctx(job.ctx).With(zap.Int64("collectionID", req.GetCollectionId()))
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionId())
 
+	triggerResourceLimitFlagClearHook()
 	collInfo, err := job.broker.DescribeCollection(job.ctx, req.GetCollectionId())
 	if errors.Is(err, merr.ErrCollectionNotFound) {
 		return nil
