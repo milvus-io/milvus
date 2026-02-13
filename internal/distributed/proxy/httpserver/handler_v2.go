@@ -2030,18 +2030,11 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		var valueStr string
 		switch v := ttlSeconds.(type) {
 		case float64:
-			if v != math.Trunc(v) {
-				err := merr.WrapErrParameterInvalid("integer", ttlSeconds,
-					"ttlSeconds should be an integer representing seconds")
-				log.Ctx(ctx).Warn("high level restful api, create collection fail", zap.Error(err), zap.Any("request", anyReq))
-				HTTPAbortReturn(c, http.StatusOK, gin.H{
-					HTTPReturnCode:    merr.Code(err),
-					HTTPReturnMessage: err.Error(),
-				})
-				return nil, err
+			if v == math.Trunc(v) {
+				valueStr = strconv.FormatInt(int64(v), 10)
+			} else {
+				valueStr = strconv.FormatFloat(v, 'f', -1, 64)
 			}
-
-			valueStr = strconv.FormatInt(int64(v), 10)
 		default:
 			valueStr = fmt.Sprintf("%v", ttlSeconds)
 		}
