@@ -82,6 +82,7 @@ const (
 	SearchIterIdKey        = "search_iter_id"
 	QueryGroupByFieldsKey  = "group_by_fields"
 	OrderByFieldsKey       = "order_by_fields"
+	PipelineTraceKey       = "pipeline_trace"
 
 	InsertTaskName                = "InsertTask"
 	CreateCollectionTaskName      = "CreateCollectionTask"

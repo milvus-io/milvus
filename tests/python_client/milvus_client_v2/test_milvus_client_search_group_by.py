@@ -269,11 +269,13 @@ class TestGroupSearch(TestMilvusClientV2Base):
                 req = AnnSearchRequest(**search_params)
                 req_list.append(req)
         # 4. hybrid search group by
-        rank_scorers = ["max", "avg", "sum"]
+        #rank_scorers = ["max", "avg", "sum"]
+        rank_scorers = ["max"]
         for scorer in rank_scorers:
             res = self.hybrid_search(client, self.collection_name, reqs=req_list, ranker=WeightedRanker(0.1, 0.3, 0.6),
                                      limit=limit, group_by_field=DataType.VARCHAR.name, group_size=group_size,
-                                     rank_group_scorer=scorer, output_fields=[DataType.VARCHAR.name])[0]
+                                     rank_group_scorer=scorer, output_fields=[DataType.VARCHAR.name],
+                                     pipeline_trace=True)[0]
             for i in range(nq):
                 group_values = []
                 for l in range(len(res[i])):

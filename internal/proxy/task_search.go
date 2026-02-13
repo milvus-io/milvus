@@ -109,7 +109,8 @@ type searchTask struct {
 	// if the user explicitly set pk field in output fields, we add it back to the result.
 	userRequestedPkFieldExplicitly bool
 
-	storageCost segcore.StorageCost
+	storageCost  segcore.StorageCost
+	traceEnabled bool
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -429,6 +430,9 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		log.Error("parseRankParams failed", zap.Error(err))
 		return err
 	}
+
+	traceVal, _ := funcutil.GetAttrByKeyFromRepeatedKV(PipelineTraceKey, t.request.GetSearchParams())
+	t.traceEnabled = strings.EqualFold(traceVal, "true")
 
 	// Parse order_by_fields from main search params
 	if t.orderByFields, err = parseOrderByFields(t.request.GetSearchParams(), t.schema.CollectionSchema); err != nil {
