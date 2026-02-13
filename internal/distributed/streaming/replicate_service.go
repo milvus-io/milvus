@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -42,13 +43,13 @@ func (s replicateService) Append(ctx context.Context, rmsg message.ReplicateMuta
 	return s.appendToWAL(ctx, msg)
 }
 
-func (s replicateService) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
+func (s replicateService) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) error {
 	if !s.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return ErrWALAccesserClosed
 	}
 	defer s.lifetime.Done()
 
-	return s.streamingCoordClient.Assignment().UpdateReplicateConfiguration(ctx, config)
+	return s.streamingCoordClient.Assignment().UpdateReplicateConfiguration(ctx, req)
 }
 
 func (s replicateService) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
@@ -171,7 +172,15 @@ func (s replicateService) overwriteCreateCollectionMessage(sourceCluster *replic
 // overwriteAlterReplicateConfigMessage overwrites the alter replicate configuration message.
 func (s replicateService) overwriteAlterReplicateConfigMessage(currentReplicateConfig *replicateutil.ConfigHelper, msg message.ReplicateMutableMessage) error {
 	alterReplicateConfigMsg := message.MustAsMutableAlterReplicateConfigMessageV2(msg)
-	cfg := alterReplicateConfigMsg.Header().ReplicateConfiguration
+	header := alterReplicateConfigMsg.Header()
+
+	// Check ignore field - if true, skip processing
+	// This is used for incomplete switchover messages that should be ignored after force promote
+	if header.Ignore {
+		return nil
+	}
+
+	cfg := header.ReplicateConfiguration
 	_, err := replicateutil.NewConfigHelper(s.clusterID, cfg)
 	if err == nil {
 		return nil

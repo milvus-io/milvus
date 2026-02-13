@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -50,29 +51,31 @@ func TestReplicate(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := streaming.WAL().Replicate().UpdateReplicateConfiguration(ctx, &commonpb.ReplicateConfiguration{
-		Clusters: []*commonpb.MilvusCluster{
-			{
-				ClusterId: "primary",
-				ConnectionParam: &commonpb.ConnectionParam{
-					Uri:   "localhost:19530",
-					Token: "test-token",
+	err := streaming.WAL().Replicate().UpdateReplicateConfiguration(ctx, &milvuspb.UpdateReplicateConfigurationRequest{
+		ReplicateConfiguration: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{
+					ClusterId: "primary",
+					ConnectionParam: &commonpb.ConnectionParam{
+						Uri:   "localhost:19530",
+						Token: "test-token",
+					},
+					Pchannels: pchannels1,
 				},
-				Pchannels: pchannels1,
-			},
-			{
-				ClusterId: "by-dev",
-				ConnectionParam: &commonpb.ConnectionParam{
-					Uri:   "localhost:19531",
-					Token: "test-token",
+				{
+					ClusterId: "by-dev",
+					ConnectionParam: &commonpb.ConnectionParam{
+						Uri:   "localhost:19531",
+						Token: "test-token",
+					},
+					Pchannels: pchannels2,
 				},
-				Pchannels: pchannels2,
 			},
-		},
-		CrossClusterTopology: []*commonpb.CrossClusterTopology{
-			{
-				SourceClusterId: "primary",
-				TargetClusterId: "by-dev",
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{
+					SourceClusterId: "primary",
+					TargetClusterId: "by-dev",
+				},
 			},
 		},
 	})
