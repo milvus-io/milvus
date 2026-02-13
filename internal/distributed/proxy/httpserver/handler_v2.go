@@ -1417,7 +1417,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	return resp, err
 }
 
-func generatePlaceholderGroup(ctx context.Context, body string, collSchema *schemapb.CollectionSchema, fieldName string) ([]byte, error) {
+func generatePlaceholderGroup(ctx context.Context, body string, collSchema *schemapb.CollectionSchema, fieldName string, isEmbeddingList bool) ([]byte, error) {
 	var err error
 	var vectorField *schemapb.FieldSchema
 	if len(fieldName) == 0 {
@@ -1438,6 +1438,17 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 				break
 			}
 		}
+		if vectorField == nil {
+		StructArrayLoop:
+			for _, structField := range collSchema.StructArrayFields {
+				for _, subField := range structField.Fields {
+					if subField.Name == fieldName && typeutil.IsVectorType(subField.ElementType) {
+						vectorField = subField
+						break StructArrayLoop
+					}
+				}
+			}
+		}
 	}
 	if vectorField == nil {
 		return nil, errors.New("cannot find a vector field named: " + fieldName)
@@ -1448,6 +1459,9 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 	}
 
 	dataType := vectorField.DataType
+	if isEmbeddingList {
+		dataType = vectorField.ElementType
+	}
 
 	if vectorField.GetIsFunctionOutput() {
 		for _, function := range collSchema.Functions {
@@ -1460,7 +1474,7 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 		}
 	}
 
-	phv, err := convertQueries2Placeholder(body, dataType, dim)
+	phv, err := convertQueries2Placeholder(body, dataType, dim, isEmbeddingList)
 	if err != nil {
 		return nil, err
 	}
@@ -1579,8 +1593,28 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	} else {
 		// Search by vectors (existing logic)
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: httpReq.AnnsField})
+
+		// Check if Data is a 3-dimensional list (embedding list format)
+		// 3-dim: [][][]float64 -> [[[0.1, 0.2], [0.3, 0.4]], [[0.5, 0.6]]]
+		// 2-dim: [][]float64   -> [[0.1, 0.2], [0.3, 0.4]]
+		isEmbeddingList := false
+		if httpReq.Data != nil && len(httpReq.Data) > 0 {
+			if firstElem, ok := httpReq.Data[0].([]interface{}); ok && len(firstElem) > 0 {
+				// Check if second level is also a slice
+				if secondElem, ok := firstElem[0].([]interface{}); ok {
+					// Check if third level is numeric (float64 or int)
+					if len(secondElem) > 0 {
+						switch secondElem[0].(type) {
+						case float64, int8, int16, int32, int64, float32:
+							isEmbeddingList = true
+						}
+					}
+				}
+			}
+		}
+
 		body, _ := c.Get(gin.BodyBytesKey)
-		placeholderGroup, err := generatePlaceholderGroup(ctx, string(body.([]byte)), collSchema, httpReq.AnnsField)
+		placeholderGroup, err := generatePlaceholderGroup(ctx, string(body.([]byte)), collSchema, httpReq.AnnsField, isEmbeddingList)
 		if err != nil {
 			log.Ctx(ctx).Warn("high level restful api, search with vector invalid", zap.Error(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -1702,7 +1736,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(subReq.Limit), 10)})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(subReq.Offset), 10)})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: subReq.AnnsField})
-		placeholderGroup, err := generatePlaceholderGroup(ctx, searchArray[i].Raw, collSchema, subReq.AnnsField)
+		placeholderGroup, err := generatePlaceholderGroup(ctx, searchArray[i].Raw, collSchema, subReq.AnnsField, false)
 		if err != nil {
 			log.Ctx(ctx).Warn("high level restful api, search with vector invalid", zap.Error(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -1971,6 +2005,38 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			}
 			collSchema.Fields = append(collSchema.Fields, &fieldSchema)
 			fieldNames[field.FieldName] = true
+		}
+
+		for _, structArrayField := range httpReq.Schema.StructArrayFields {
+			typeParams := make([]*commonpb.KeyValuePair, 0, len(structArrayField.TypeParams))
+			max_capacity := structArrayField.TypeParams["max_capacity"]
+			for key, value := range structArrayField.TypeParams {
+				typeParams = append(typeParams, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
+			}
+			structArrayFieldSchema := schemapb.StructArrayFieldSchema{
+				Name:        structArrayField.Name,
+				Description: structArrayField.Description,
+				Fields:      []*schemapb.FieldSchema{},
+				TypeParams:  typeParams,
+			}
+			structFieldRootName := structArrayField.Name
+			for _, field := range structArrayField.Fields {
+				fieldNames[structFieldRootName+"["+field.FieldName+"]"] = true
+				field.ElementTypeParams["max_capacity"] = max_capacity
+				fieldSchema, err := field.GetProto(ctx)
+				if err != nil {
+					HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+					return nil, err
+				}
+				fieldSchema.ElementType = fieldSchema.DataType
+				if typeutil.IsVectorType(fieldSchema.DataType) {
+					fieldSchema.DataType = schemapb.DataType_ArrayOfVector
+				} else {
+					fieldSchema.DataType = schemapb.DataType_Array
+				}
+				structArrayFieldSchema.Fields = append(structArrayFieldSchema.Fields, fieldSchema)
+			}
+			collSchema.StructArrayFields = append(collSchema.StructArrayFields, &structArrayFieldSchema)
 		}
 		schema, err = proto.Marshal(&collSchema)
 	}
