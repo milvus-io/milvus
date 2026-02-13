@@ -1034,6 +1034,13 @@ message CopySegmentSource {
 
   // JSON key index files (for JSON index)
   map<int64, JsonKeyStats> json_key_index_files = 10;  // json key index files by field ID
+
+  // StorageV2 manifest (JSON encoded)
+  string manifest_path = 11;
+
+  // Storage version: 0=V1(legacy binlog), 2=V2(packed parquet), 3=V3(loon manifest)
+  // When storage_version >= 3, binlog paths must be resolved from manifest_path
+  int64 storage_version = 12;
 }
 
 message CopySegmentTarget {
@@ -1109,6 +1116,9 @@ message CopySegmentResult {
 
   // JSON Key indexes - map<int64, JsonKeyStats>
   map<int64, JsonKeyStats> json_key_index_infos = 9;
+
+  // Transformed manifest path for target segment
+  string manifest_path = 10;
 }
 
 // CopySegmentTask represents a copy segment task that copies segment data and optionally indexes

@@ -417,8 +417,8 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 	// Sync task state and binlog info
 	err = SyncCopySegmentTask(t, resp, t.copyMeta, t.meta)
 	if err != nil {
-		log.Warn("failed to sync copy segment task",
-			WrapCopySegmentTaskLog(t, zap.Int64("nodeID", nodeID), zap.Error(err))...)
+		t.markTaskAndJobFailed(fmt.Sprintf("failed to sync segment metadata: %v", err))
+		return
 	}
 
 	log.Info("query copy segment task",
@@ -561,6 +561,8 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			Bm25Binlogs:       sourceSegDesc.GetBm25Statslogs(),     // BM25 stats logs
 			TextIndexFiles:    sourceSegDesc.GetTextIndexFiles(),    // Text index files
 			JsonKeyIndexFiles: sourceSegDesc.GetJsonKeyIndexFiles(), // JSON key index files
+			ManifestPath:      sourceSegDesc.GetManifestPath(),      // manifest path for StorageV3+
+			StorageVersion:    sourceSegDesc.GetStorageVersion(),    // storage version for binlog format decision
 		}
 		sources = append(sources, source)
 
@@ -635,15 +637,17 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 		// Update binlog information for all segments
 		for _, result := range resp.GetSegmentResults() {
 
-			// Note: Binlog paths are already compressed by DataNode
-			// No need to compress again here
-
 			// Update binlog info and segment state to Flushed
+			// For StorageV3+ segments, also update manifest_path
 			var err error
 			op1 := UpdateBinlogsOperator(result.GetSegmentId(), result.GetBinlogs(),
 				result.GetStatslogs(), result.GetDeltalogs(), result.GetBm25Logs())
 			op2 := UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
-			err = meta.UpdateSegmentsInfo(ctx, op1, op2)
+			operators := []UpdateOperator{op1, op2}
+			if manifestPath := result.GetManifestPath(); manifestPath != "" {
+				operators = append(operators, UpdateManifest(result.GetSegmentId(), manifestPath))
+			}
+			err = meta.UpdateSegmentsInfo(ctx, operators...)
 			if err != nil {
 				// On error, mark task and job as failed
 				updateErr := copyMeta.UpdateTask(ctx, task.GetTaskId(),
