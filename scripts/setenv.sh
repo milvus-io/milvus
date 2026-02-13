@@ -16,8 +16,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Exit immediately for non zero status
-set +e
+# Note: This script is sourced by other scripts, so we don't set -e here
+# to avoid affecting the calling script's error handling behavior
 
 SOURCE="${BASH_SOURCE[0]}"
 # fix on zsh environment
@@ -38,7 +38,7 @@ unameOut="$(uname -s)"
 case "${unameOut}" in
     Linux*)
       # check if use asan.
-      MILVUS_ENABLE_ASAN_LIB=$(ldd $ROOT_DIR/internal/core/output/lib/libmilvus_core.so | grep asan | awk '{print $3}')
+      MILVUS_ENABLE_ASAN_LIB=$(ldd $ROOT_DIR/internal/core/output/lib/libmilvus_core.so 2>/dev/null | grep asan | awk '{print $3}' || true)
       if [ -n "$MILVUS_ENABLE_ASAN_LIB" ]; then
           echo "Enable ASAN With ${MILVUS_ENABLE_ASAN_LIB}"
           export MILVUS_ENABLE_ASAN_LIB="$MILVUS_ENABLE_ASAN_LIB"
