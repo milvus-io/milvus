@@ -131,6 +131,17 @@ VectorBase::set_data_raw(ssize_t element_offset,
             }
             return set_data_raw(element_offset, data_raw.data(), element_count);
         }
+        case DataType::MOL: {
+            // get the mol array of a column from proto message
+            auto& mol_data = FIELD_DATA(data, mol);
+            std::vector<std::string> data_raw{};
+            data_raw.reserve(mol_data.size());
+            for (auto& mol_bytes : mol_data) {
+                data_raw.emplace_back(
+                    std::string(mol_bytes.data(), mol_bytes.size()));
+            }
+            return set_data_raw(element_offset, data_raw.data(), element_count);
+        }
         case DataType::ARRAY: {
             auto& array_data = FIELD_DATA(data, array);
             std::vector<Array> data_raw{};
