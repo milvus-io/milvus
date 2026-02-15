@@ -18,10 +18,12 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/mock_client"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_producer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/mock_handler"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	pulsar2 "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -217,6 +219,122 @@ func TestReplicateService_GetReplicateConfiguration(t *testing.T) {
 		assert.Equal(t, "http://standalone:19530", config.Clusters[0].ConnectionParam.Uri)
 		assert.Empty(t, config.CrossClusterTopology)
 	})
+}
+
+func TestReplicateService_SkipMessageTypes(t *testing.T) {
+	newReplicateService := func(t *testing.T) *replicateService {
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(replicateutil.MustNewConfigHelper(
+			"by-dev",
+			&commonpb.ReplicateConfiguration{
+				Clusters: []*commonpb.MilvusCluster{
+					{ClusterId: "primary", Pchannels: []string{"primary-rootcoord-dml_0", "primary-rootcoord-dml_1"}},
+					{ClusterId: "by-dev", Pchannels: []string{"by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1"}},
+				},
+				CrossClusterTopology: []*commonpb.CrossClusterTopology{
+					{SourceClusterId: "primary", TargetClusterId: "by-dev"},
+				},
+			},
+		), nil).Maybe()
+
+		h := mock_handler.NewMockHandlerClient(t)
+		p := mock_producer.NewMockProducer(t)
+		p.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{
+			MessageID: walimplstest.NewTestMessageID(1),
+			TimeTick:  1,
+		}, nil).Maybe()
+		p.EXPECT().IsAvailable().Return(true).Maybe()
+		p.EXPECT().Available().Return(make(chan struct{})).Maybe()
+		h.EXPECT().CreateProducer(mock.Anything, mock.Anything).Return(p, nil).Maybe()
+
+		return &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+	}
+
+	t.Run("skip_AlterResourceGroup", func(t *testing.T) {
+		old := paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.SwapTempValue("AlterResourceGroup,DropResourceGroup")
+		defer paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.SwapTempValue(old)
+
+		rs := newReplicateService(t)
+		broadcastMsg := message.NewAlterResourceGroupMessageBuilderV2().
+			WithHeader(&message.AlterResourceGroupMessageHeader{}).
+			WithBody(&message.AlterResourceGroupMessageBody{}).
+			WithBroadcast([]string{"primary-rootcoord-dml_0_cchannel"}).
+			MustBuildBroadcast()
+		msgs := broadcastMsgToReplicateMsgs(broadcastMsg)
+		for _, msg := range msgs {
+			_, err := rs.Append(context.Background(), msg)
+			assert.Error(t, err)
+			se := status.AsStreamingError(err)
+			assert.NotNil(t, se)
+			assert.True(t, se.IsIgnoredOperation())
+		}
+	})
+
+	t.Run("skip_DropResourceGroup", func(t *testing.T) {
+		old := paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.SwapTempValue("AlterResourceGroup,DropResourceGroup")
+		defer paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.SwapTempValue(old)
+
+		rs := newReplicateService(t)
+		broadcastMsg := message.NewDropResourceGroupMessageBuilderV2().
+			WithHeader(&message.DropResourceGroupMessageHeader{ResourceGroupName: "test_rg"}).
+			WithBody(&message.DropResourceGroupMessageBody{}).
+			WithBroadcast([]string{"primary-rootcoord-dml_0_cchannel"}).
+			MustBuildBroadcast()
+		msgs := broadcastMsgToReplicateMsgs(broadcastMsg)
+		for _, msg := range msgs {
+			_, err := rs.Append(context.Background(), msg)
+			assert.Error(t, err)
+			se := status.AsStreamingError(err)
+			assert.NotNil(t, se)
+			assert.True(t, se.IsIgnoredOperation())
+		}
+	})
+
+	t.Run("non_skipped_message_passthrough", func(t *testing.T) {
+		old := paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.SwapTempValue("AlterResourceGroup,DropResourceGroup")
+		defer paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.SwapTempValue(old)
+
+		rs := newReplicateService(t)
+		replicateMsgs := createReplicateCreateCollectionMessages()
+		for _, msg := range replicateMsgs {
+			_, err := rs.Append(context.Background(), msg)
+			assert.NoError(t, err)
+		}
+	})
+
+	t.Run("empty_skip_list", func(t *testing.T) {
+		old := paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.SwapTempValue("")
+		defer paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.SwapTempValue(old)
+
+		rs := newReplicateService(t)
+		replicateMsgs := createReplicateCreateCollectionMessages()
+		for _, msg := range replicateMsgs {
+			_, err := rs.Append(context.Background(), msg)
+			assert.NoError(t, err)
+		}
+	})
+}
+
+func broadcastMsgToReplicateMsgs(broadcastMsg message.BroadcastMutableMessage) []message.ReplicateMutableMessage {
+	msgs := broadcastMsg.WithBroadcastID(200).SplitIntoMutableMessage()
+	replicateMsgs := make([]message.ReplicateMutableMessage, 0, len(msgs))
+	for _, msg := range msgs {
+		immutableMsg := msg.WithLastConfirmedUseMessageID().WithTimeTick(1).IntoImmutableMessage(pulsar2.NewPulsarID(
+			pulsar.NewMessageID(1, 2, 3, 4),
+		))
+		replicateMsgs = append(replicateMsgs, message.MustNewReplicateMessage("primary", immutableMsg.IntoImmutableMessageProto()))
+	}
+	return replicateMsgs
 }
 
 func createReplicateCreateCollectionMessages() []message.ReplicateMutableMessage {
