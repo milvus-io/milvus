@@ -128,6 +128,8 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 		if err := s.overwriteAlterReplicateConfigMessage(cfg, msg); err != nil {
 			return nil, err
 		}
+	case message.MessageTypeAlterLoadConfig:
+		s.overwriteAlterLoadConfigMessage(msg)
 	}
 
 	if funcutil.IsControlChannel(msg.VChannel()) {
@@ -190,4 +192,14 @@ func (s replicateService) overwriteAlterReplicateConfigMessage(currentReplicateC
 		},
 	})
 	return nil
+}
+
+// overwriteAlterLoadConfigMessage sets use_local_replica_config flag on replicated AlterLoadConfig messages.
+// This allows the secondary cluster to use its own cluster-level replica/resource-group config
+// instead of blindly applying the primary's config.
+func (s replicateService) overwriteAlterLoadConfigMessage(msg message.ReplicateMutableMessage) {
+	alterLoadConfigMsg := message.MustAsMutableAlterLoadConfigMessageV2(msg)
+	header := alterLoadConfigMsg.Header()
+	header.UseLocalReplicaConfig = true
+	alterLoadConfigMsg.OverwriteHeader(header)
 }

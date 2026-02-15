@@ -35,9 +35,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/eventlog"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -96,16 +98,29 @@ func (job *LoadCollectionJob) Execute() error {
 		return err
 	}
 
-	// 1. create replica if not exist
+	// 1. resolve replica config: use local cluster-level config if this is a replicated message
+	replicas := req.GetReplicas()
+	if req.GetUseLocalReplicaConfig() {
+		if localReplicas := getLocalReplicaConfig(job.ctx, job.meta); localReplicas != nil {
+			replicas = localReplicas
+			log.Info("using local cluster-level replica config for replicated load",
+				zap.Int("localReplicaCount", len(localReplicas)))
+		} else {
+			log.Info("local cluster-level replica config not set, falling back to primary config",
+				zap.Int("primaryReplicaCount", len(replicas)))
+		}
+	}
+
+	// 2. create replica if not exist
 	if _, err := utils.SpawnReplicasWithReplicaConfig(job.ctx, job.meta, meta.SpawnWithReplicaConfigParams{
 		CollectionID: req.GetCollectionId(),
 		Channels:     collInfo.GetVirtualChannelNames(),
-		Configs:      req.GetReplicas(),
+		Configs:      replicas,
 	}); err != nil {
 		return err
 	}
 
-	// 2. put load info meta
+	// 3. put load info meta
 	fieldIndexIDs := make(map[int64]int64, len(req.GetLoadFields()))
 	fieldIDs := make([]int64, 0, len(req.GetLoadFields()))
 	for _, loadField := range req.GetLoadFields() {
@@ -114,7 +129,7 @@ func (job *LoadCollectionJob) Execute() error {
 		}
 		fieldIDs = append(fieldIDs, loadField.GetFieldId())
 	}
-	replicaNumber := int32(len(req.GetReplicas()))
+	replicaNumber := int32(len(replicas))
 	partitions := lo.Map(req.GetPartitionIds(), func(partID int64, _ int) *meta.Partition {
 		return &meta.Partition{
 			PartitionLoadInfo: &querypb.PartitionLoadInfo{
@@ -196,4 +211,41 @@ func (job *LoadCollectionJob) Execute() error {
 		log.Info("wait for partition released done", zap.Int64s("toReleasePartitions", toReleasePartitions))
 	}
 	return nil
+}
+
+// getLocalReplicaConfig reads the local cluster-level replica config and generates LoadReplicaConfig entries.
+// Returns nil if the local config is not set (replicaNum <= 0 or no resource groups).
+func getLocalReplicaConfig(ctx context.Context, m *meta.Meta) []*messagespb.LoadReplicaConfig {
+	replicaNum := int(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt64())
+	rgs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+
+	if replicaNum <= 0 || len(rgs) == 0 {
+		return nil
+	}
+
+	// Determine replica distribution across resource groups (same logic as AssignReplica in utils/meta.go)
+	replicaNumInRG := make(map[string]int)
+	if len(rgs) == 1 {
+		replicaNumInRG[rgs[0]] = replicaNum
+	} else {
+		for _, rg := range rgs {
+			replicaNumInRG[rg]++
+		}
+	}
+
+	replicas := make([]*messagespb.LoadReplicaConfig, 0)
+	for rg, num := range replicaNumInRG {
+		for i := 0; i < num; i++ {
+			newID, err := m.ReplicaManager.AllocateReplicaID(ctx)
+			if err != nil {
+				log.Ctx(ctx).Warn("failed to allocate replica ID for local config", zap.Error(err))
+				return nil
+			}
+			replicas = append(replicas, &messagespb.LoadReplicaConfig{
+				ReplicaId:         newID,
+				ResourceGroupName: rg,
+			})
+		}
+	}
+	return replicas
 }
