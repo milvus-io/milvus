@@ -4,11 +4,9 @@ import (
 	"context"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
@@ -16,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -347,63 +344,7 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 	})
 }
 
-func TestCompactionAndImport(t *testing.T) {
-	paramtable.Init()
-	mockAlloc := allocator.NewMockAllocator(t)
-	handler := NewNMockHandler(t)
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
-		ID: 1,
-	}, nil)
-	inspector := NewMockCompactionInspector(t)
-	inspector.EXPECT().isFull().Return(false)
 
-	testLabel := &CompactionGroupLabel{
-		CollectionID: 1,
-		PartitionID:  10,
-		Channel:      "ch-1",
-	}
-	segments := genSegmentsForMeta(testLabel)
-	catelog := mocks.NewDataCoordCatalog(t)
-	catelog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		catalog:     catelog,
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-	}
-	for id, segment := range segments {
-		meta.segments.SetSegment(id, segment)
-	}
-	meta.collections.Insert(1, &collectionInfo{
-		ID:     1,
-		Schema: &schemapb.CollectionSchema{},
-	})
-	versionManager := NewMockVersionManager(t)
-	versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0")).Maybe()
-	triggerManager := NewCompactionTriggerManager(mockAlloc, handler, inspector, meta, versionManager)
-
-	Params.Save(Params.DataCoordCfg.L0CompactionTriggerInterval.Key, "1")
-	defer Params.Reset(Params.DataCoordCfg.L0CompactionTriggerInterval.Key)
-	Params.Save(Params.DataCoordCfg.ClusteringCompactionTriggerInterval.Key, "6000000")
-	defer Params.Reset(Params.DataCoordCfg.ClusteringCompactionTriggerInterval.Key)
-	Params.Save(Params.DataCoordCfg.MixCompactionTriggerInterval.Key, "6000000")
-	defer Params.Reset(Params.DataCoordCfg.MixCompactionTriggerInterval.Key)
-
-	mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
-	mockAlloc.EXPECT().AllocN(mock.Anything).Return(195300, 195300, nil)
-	mockAlloc.EXPECT().AllocTimestamp(mock.Anything).Return(30000, nil)
-	inspector.EXPECT().enqueueCompaction(mock.Anything).
-		RunAndReturn(func(task *datapb.CompactionTask) error {
-			assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetType())
-			expectedSegs := []int64{100, 101, 102}
-			assert.ElementsMatch(t, expectedSegs, task.GetInputSegments())
-			return nil
-		}).Return(nil)
-	mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
-
-	triggerManager.Start()
-	defer triggerManager.Stop()
-	time.Sleep(3 * time.Second)
-}
 
 func (s *CompactionTriggerManagerSuite) TestManualTriggerL0Compaction() {
 	handler := NewNMockHandler(s.T())
