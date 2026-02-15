@@ -817,4 +817,17 @@ func Test_NewServer(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, 2, len(resp.GetJobs()))
 	})
+
+	t.Run("BatchUpdateManifest", func(t *testing.T) {
+		req := &datapb.BatchUpdateManifestRequest{
+			CollectionId: 100,
+			Items: []*datapb.BatchUpdateManifestItem{
+				{SegmentId: 1, ManifestVersion: 10},
+			},
+		}
+		mockMixCoord.EXPECT().BatchUpdateManifest(mock.Anything, req).Return(merr.Success(), nil)
+		resp, err := server.BatchUpdateManifest(ctx, req)
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp))
+	})
 }

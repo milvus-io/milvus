@@ -79,6 +79,7 @@ const (
 	DataCoord_RestoreSnapshot_FullMethodName             = "/milvus.proto.data.DataCoord/RestoreSnapshot"
 	DataCoord_GetRestoreSnapshotState_FullMethodName     = "/milvus.proto.data.DataCoord/GetRestoreSnapshotState"
 	DataCoord_ListRestoreSnapshotJobs_FullMethodName     = "/milvus.proto.data.DataCoord/ListRestoreSnapshotJobs"
+	DataCoord_BatchUpdateManifest_FullMethodName         = "/milvus.proto.data.DataCoord/BatchUpdateManifest"
 )
 
 // DataCoordClient is the client API for DataCoord service.
@@ -150,6 +151,8 @@ type DataCoordClient interface {
 	RestoreSnapshot(ctx context.Context, in *RestoreSnapshotRequest, opts ...grpc.CallOption) (*RestoreSnapshotResponse, error)
 	GetRestoreSnapshotState(ctx context.Context, in *GetRestoreSnapshotStateRequest, opts ...grpc.CallOption) (*GetRestoreSnapshotStateResponse, error)
 	ListRestoreSnapshotJobs(ctx context.Context, in *ListRestoreSnapshotJobsRequest, opts ...grpc.CallOption) (*ListRestoreSnapshotJobsResponse, error)
+	// batch update manifest
+	BatchUpdateManifest(ctx context.Context, in *BatchUpdateManifestRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 }
 
 type dataCoordClient struct {
@@ -657,6 +660,15 @@ func (c *dataCoordClient) ListRestoreSnapshotJobs(ctx context.Context, in *ListR
 	return out, nil
 }
 
+func (c *dataCoordClient) BatchUpdateManifest(ctx context.Context, in *BatchUpdateManifestRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, DataCoord_BatchUpdateManifest_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DataCoordServer is the server API for DataCoord service.
 // All implementations should embed UnimplementedDataCoordServer
 // for forward compatibility
@@ -726,6 +738,8 @@ type DataCoordServer interface {
 	RestoreSnapshot(context.Context, *RestoreSnapshotRequest) (*RestoreSnapshotResponse, error)
 	GetRestoreSnapshotState(context.Context, *GetRestoreSnapshotStateRequest) (*GetRestoreSnapshotStateResponse, error)
 	ListRestoreSnapshotJobs(context.Context, *ListRestoreSnapshotJobsRequest) (*ListRestoreSnapshotJobsResponse, error)
+	// batch update manifest
+	BatchUpdateManifest(context.Context, *BatchUpdateManifestRequest) (*commonpb.Status, error)
 }
 
 // UnimplementedDataCoordServer should be embedded to have forward compatible implementations.
@@ -896,6 +910,9 @@ func (UnimplementedDataCoordServer) GetRestoreSnapshotState(context.Context, *Ge
 }
 func (UnimplementedDataCoordServer) ListRestoreSnapshotJobs(context.Context, *ListRestoreSnapshotJobsRequest) (*ListRestoreSnapshotJobsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListRestoreSnapshotJobs not implemented")
+}
+func (UnimplementedDataCoordServer) BatchUpdateManifest(context.Context, *BatchUpdateManifestRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BatchUpdateManifest not implemented")
 }
 
 // UnsafeDataCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -1899,6 +1916,24 @@ func _DataCoord_ListRestoreSnapshotJobs_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DataCoord_BatchUpdateManifest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BatchUpdateManifestRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).BatchUpdateManifest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_BatchUpdateManifest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).BatchUpdateManifest(ctx, req.(*BatchUpdateManifestRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DataCoord_ServiceDesc is the grpc.ServiceDesc for DataCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2125,6 +2160,10 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListRestoreSnapshotJobs",
 			Handler:    _DataCoord_ListRestoreSnapshotJobs_Handler,
+		},
+		{
+			MethodName: "BatchUpdateManifest",
+			Handler:    _DataCoord_BatchUpdateManifest_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

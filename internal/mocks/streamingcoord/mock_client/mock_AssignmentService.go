@@ -3,11 +3,11 @@
 package mock_client
 
 import (
-	context "context"
+	assignment "github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
-	assignment "github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
+	context "context"
 
 	mock "github.com/stretchr/testify/mock"
 
@@ -241,8 +241,7 @@ type MockAssignmentService_GetReplicateConfiguration_Call struct {
 //   - opts ...assignment.GetReplicateConfigurationOpt
 func (_e *MockAssignmentService_Expecter) GetReplicateConfiguration(ctx interface{}, opts ...interface{}) *MockAssignmentService_GetReplicateConfiguration_Call {
 	return &MockAssignmentService_GetReplicateConfiguration_Call{Call: _e.mock.On("GetReplicateConfiguration",
-		append([]interface{}{ctx}, opts...)...,
-	)}
+		append([]interface{}{ctx}, opts...)...)}
 }
 
 func (_c *MockAssignmentService_GetReplicateConfiguration_Call) Run(run func(ctx context.Context, opts ...assignment.GetReplicateConfigurationOpt)) *MockAssignmentService_GetReplicateConfiguration_Call {

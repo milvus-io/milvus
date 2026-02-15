@@ -1244,3 +1244,7 @@ func (s *Server) PushClientCommand(ctx context.Context, req *milvuspb.PushClient
 func (s *Server) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
 	return s.proxy.DeleteClientCommand(ctx, req)
 }
+
+func (s *Server) BatchUpdateManifest(ctx context.Context, req *milvuspb.BatchUpdateManifestRequest) (*commonpb.Status, error) {
+	return s.proxy.BatchUpdateManifest(ctx, req)
+}

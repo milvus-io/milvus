@@ -63,6 +63,7 @@ enum MessageType {
     RestoreSnapshot      = 39;
     CreateSnapshot       = 40;
     DropSnapshot         = 41;
+    BatchUpdateManifest  = 42;
 
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;
@@ -737,4 +738,20 @@ message TruncateCollectionMessageHeader {
 
 // TruncateCollectionMessageBody is the body of truncate collection message.
 message TruncateCollectionMessageBody {}
+
+// BatchUpdateManifestMessageHeader is the header of batch update manifest message.
+message BatchUpdateManifestMessageHeader {
+    int64 collection_id = 1;
+}
+
+// BatchUpdateManifestMessageBody is the body of batch update manifest message.
+message BatchUpdateManifestMessageBody {
+    repeated BatchUpdateManifestItem items = 1;
+}
+
+// BatchUpdateManifestItem is an item in batch update manifest message.
+message BatchUpdateManifestItem {
+    int64 segment_id = 1;
+    int64 manifest_version = 2;
+}
 

@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -1231,6 +1232,33 @@ func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
 			return false
 		}
 		segment.ManifestPath = manifestPath
+		return true
+	}
+}
+
+func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: update manifest version failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		if segment.ManifestPath == "" {
+			log.Ctx(context.TODO()).Warn("meta update: update manifest version failed - no manifest path",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		basePath, currentVer, err := packed.UnmarshalManfestPath(segment.ManifestPath)
+		if err != nil {
+			log.Ctx(context.TODO()).Warn("meta update: update manifest version failed - unmarshal error",
+				zap.Int64("segmentID", segmentID), zap.Error(err))
+			return false
+		}
+		if currentVer == manifestVersion {
+			return false
+		}
+		segment.ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)
 		return true
 	}
 }

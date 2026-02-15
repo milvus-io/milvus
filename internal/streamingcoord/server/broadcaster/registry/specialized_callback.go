@@ -23,7 +23,8 @@ func resetMessageCheckCallbacks() {
 }
 
 var (
-	RegisterImportV1AckCallback = registerMessageAckCallback[*message.ImportMessageHeader, *msgpb.ImportMsg]
+	RegisterImportV1AckCallback              = registerMessageAckCallback[*message.ImportMessageHeader, *msgpb.ImportMsg]
+	RegisterBatchUpdateManifestV2AckCallback = registerMessageAckCallback[*message.BatchUpdateManifestMessageHeader, *message.BatchUpdateManifestMessageBody]
 
 	// Cluster
 	RegisterAlterReplicateConfigV2AckCallback = registerMessageAckCallback[*message.AlterReplicateConfigMessageHeader, *message.AlterReplicateConfigMessageBody]
@@ -82,7 +83,8 @@ var (
 // resetMessageAckCallbacks resets the message ack callbacks.
 func resetMessageAckCallbacks() {
 	messageAckCallbacks = map[message.MessageTypeWithVersion]*syncutil.Future[messageInnerAckCallback]{
-		message.MessageTypeImportV1: syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeImportV1:              syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeBatchUpdateManifestV2: syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Cluster
 		message.MessageTypeAlterReplicateConfigV2: syncutil.NewFuture[messageInnerAckCallback](),
