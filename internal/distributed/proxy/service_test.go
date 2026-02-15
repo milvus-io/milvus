@@ -1158,6 +1158,21 @@ func TestSnapshotAPIs(t *testing.T) {
 		assert.NotNil(t, resp)
 		assert.Equal(t, mockResp, resp)
 	})
+
+	t.Run("BatchUpdateManifest", func(t *testing.T) {
+		req := &milvuspb.BatchUpdateManifestRequest{
+			CollectionName: "test_collection",
+			Items: []*milvuspb.BatchUpdateManifestItem{
+				{SegmentId: 1, ManifestVersion: 10},
+			},
+		}
+		mockResp := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+		mockProxy.EXPECT().BatchUpdateManifest(mock.Anything, req).Return(mockResp, nil)
+		resp, err := server.BatchUpdateManifest(ctx, req)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Equal(t, mockResp, resp)
+	})
 }
 
 func TestHttpAuthenticate(t *testing.T) {

@@ -2817,3 +2817,66 @@ func TestClient_ListRestoreSnapshotJobs(t *testing.T) {
 	_, err = client.ListRestoreSnapshotJobs(ctx, &datapb.ListRestoreSnapshotJobsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
+
+func TestClient_BatchUpdateManifest(t *testing.T) {
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockmix := MixCoordClient{
+		DataCoordClient: mockDC,
+	}
+	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().GetNodeID().Return(1)
+	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		return f(mockmix)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success
+	mockDC.EXPECT().BatchUpdateManifest(mock1.Anything, mock1.Anything).Return(merr.Success(), nil)
+	resp, err := client.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
+		CollectionId: 100,
+		Items: []*datapb.BatchUpdateManifestItem{
+			{SegmentId: 1, ManifestVersion: 10},
+		},
+	})
+	assert.Nil(t, err)
+	assert.True(t, merr.Ok(resp))
+
+	// test return error status
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().BatchUpdateManifest(mock1.Anything, mock1.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
+
+	rsp, err := client.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
+		CollectionId: 100,
+		Items: []*datapb.BatchUpdateManifestItem{
+			{SegmentId: 1, ManifestVersion: 10},
+		},
+	})
+	assert.NotEqual(t, int32(0), rsp.GetCode())
+	assert.Nil(t, err)
+
+	// test return error
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().BatchUpdateManifest(mock1.Anything, mock1.Anything).Return(merr.Success(), mockErr)
+
+	_, err = client.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
+		CollectionId: 100,
+		Items: []*datapb.BatchUpdateManifestItem{
+			{SegmentId: 1, ManifestVersion: 10},
+		},
+	})
+	assert.NotNil(t, err)
+
+	// test ctx done
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer cancel()
+	time.Sleep(20 * time.Millisecond)
+	_, err = client.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
