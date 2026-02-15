@@ -511,7 +511,10 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 		return errors.New("like operation on non-string or no-json field is unsupported")
 	}
 
-	pattern, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	literal := ctx.StringLiteral().GetText()
+	literal = prepareSpecialEscapeCharactersForConvertingEscapeSingle(literal, likeEscapeCharacters)
+
+	pattern, err := convertEscapeSingle(literal)
 	if err != nil {
 		return err
 	}
