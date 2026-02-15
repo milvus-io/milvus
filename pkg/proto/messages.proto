@@ -311,6 +311,7 @@ message AlterLoadConfigMessageHeader {
     repeated LoadFieldConfig load_fields = 4; // the field id that has to be loaded.
     repeated LoadReplicaConfig replicas = 5; // the replicas that has to be loaded.
     bool user_specified_replica_mode = 6; // whether the replica mode is user specified.
+    bool use_local_replica_config = 7; // when true, use local cluster-level replica config instead of the replicas field above.
 }
 
 // AlterLoadConfigMessageBody is the body of alter load config message.

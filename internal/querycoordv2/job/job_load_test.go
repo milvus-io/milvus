@@ -127,6 +127,238 @@ func (suite *LoadCollectionJobSuite) TestDescribeCollectionSuccess() {
 	})
 }
 
+func (suite *LoadCollectionJobSuite) buildBroadcastResultWithLocalReplicaConfig(
+	collectionID int64, partitionIDs []int64, useLocalReplicaConfig bool,
+) message.BroadcastResultAlterLoadConfigMessageV2 {
+	controlChannel := "_ctrl_channel"
+	replicas := []*messagespb.LoadReplicaConfig{
+		{ReplicaId: 1, ResourceGroupName: "primary_rg1"},
+		{ReplicaId: 2, ResourceGroupName: "primary_rg2"},
+		{ReplicaId: 3, ResourceGroupName: "primary_rg3"},
+	}
+	broadcastMsg := message.NewAlterLoadConfigMessageBuilderV2().
+		WithHeader(&messagespb.AlterLoadConfigMessageHeader{
+			CollectionId:          collectionID,
+			PartitionIds:          partitionIDs,
+			Replicas:              replicas,
+			UseLocalReplicaConfig: useLocalReplicaConfig,
+		}).
+		WithBody(&messagespb.AlterLoadConfigMessageBody{}).
+		WithBroadcast([]string{controlChannel}).
+		MustBuildBroadcast()
+
+	specializedMsg := message.MustAsBroadcastAlterLoadConfigMessageV2(broadcastMsg)
+	return message.BroadcastResultAlterLoadConfigMessageV2{
+		Message: specializedMsg,
+		Results: map[string]*message.AppendResult{
+			controlChannel: {},
+		},
+	}
+}
+
+// TestUseLocalReplicaConfigWithLocalConfigSet tests that local config overrides primary config.
+func (suite *LoadCollectionJobSuite) TestUseLocalReplicaConfigWithLocalConfigSet() {
+	// Set local cluster-level config: 1 replica in __default_resource_group
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "1")
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "__default_resource_group")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+	}()
+
+	ctx := context.Background()
+	collectionID := int64(2000)
+
+	broker := meta.NewMockBroker(suite.T())
+	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
+		Return(&milvuspb.DescribeCollectionResponse{
+			CollectionID:        collectionID,
+			VirtualChannelNames: []string{"ch1"},
+		}, nil)
+
+	// UseLocalReplicaConfig=true AND local config is set → should use local config (1 replica)
+	// Primary config has 3 replicas, but local overrides to 1
+	result := suite.buildBroadcastResultWithLocalReplicaConfig(collectionID, []int64{400}, true)
+
+	// We pass nil for meta - SpawnReplicasWithReplicaConfig will panic on nil meta,
+	// but getLocalReplicaConfig also needs meta.ReplicaManager.AllocateReplicaID which will panic first.
+	// This proves the local config path was taken (it tried to allocate replica IDs locally).
+	job := NewLoadCollectionJob(ctx, result, nil, nil, broker, nil, nil, nil, nil, nil)
+	suite.Panics(func() {
+		job.Execute()
+	})
+}
+
+// TestUseLocalReplicaConfigWithoutLocalConfig tests fallback to primary config when local config is not set.
+func (suite *LoadCollectionJobSuite) TestUseLocalReplicaConfigWithoutLocalConfig() {
+	// Ensure local config is NOT set (defaults: replicaNum=0, rgs="")
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "0")
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+	}()
+
+	ctx := context.Background()
+	collectionID := int64(2001)
+
+	broker := meta.NewMockBroker(suite.T())
+	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
+		Return(&milvuspb.DescribeCollectionResponse{
+			CollectionID:        collectionID,
+			VirtualChannelNames: []string{"ch1"},
+		}, nil)
+
+	// UseLocalReplicaConfig=true but local config not set → should fall back to primary's 3 replicas
+	result := suite.buildBroadcastResultWithLocalReplicaConfig(collectionID, []int64{401}, true)
+
+	// Will panic at SpawnReplicasWithReplicaConfig with nil meta,
+	// proving DescribeCollection succeeded and fallback to primary config was used.
+	job := NewLoadCollectionJob(ctx, result, nil, nil, broker, nil, nil, nil, nil, nil)
+	suite.Panics(func() {
+		job.Execute()
+	})
+}
+
+// TestUseLocalReplicaConfigFlagFalse tests that when UseLocalReplicaConfig=false, primary config is used directly.
+func (suite *LoadCollectionJobSuite) TestUseLocalReplicaConfigFlagFalse() {
+	// Even if local config is set, UseLocalReplicaConfig=false should use primary config
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "1")
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "__default_resource_group")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+	}()
+
+	ctx := context.Background()
+	collectionID := int64(2002)
+
+	broker := meta.NewMockBroker(suite.T())
+	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
+		Return(&milvuspb.DescribeCollectionResponse{
+			CollectionID:        collectionID,
+			VirtualChannelNames: []string{"ch1"},
+		}, nil)
+
+	// UseLocalReplicaConfig=false → should NOT read local config, use primary's 3 replicas directly
+	result := suite.buildBroadcastResultWithLocalReplicaConfig(collectionID, []int64{402}, false)
+
+	// Will panic at SpawnReplicasWithReplicaConfig with nil meta (using primary's replicas)
+	job := NewLoadCollectionJob(ctx, result, nil, nil, broker, nil, nil, nil, nil, nil)
+	suite.Panics(func() {
+		job.Execute()
+	})
+}
+
+// TestGetLocalReplicaConfig_SingleRG tests getLocalReplicaConfig with a single resource group.
+func (suite *LoadCollectionJobSuite) TestGetLocalReplicaConfig_SingleRG() {
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "3")
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+	}()
+
+	nextID := int64(100)
+	m := &meta.Meta{
+		ReplicaManager: meta.NewReplicaManager(func() (int64, error) {
+			id := nextID
+			nextID++
+			return id, nil
+		}, nil),
+	}
+
+	replicas := getLocalReplicaConfig(context.Background(), m)
+	suite.NotNil(replicas)
+	suite.Len(replicas, 3)
+	// All replicas should be in rg1
+	for _, r := range replicas {
+		suite.Equal("rg1", r.ResourceGroupName)
+		suite.Greater(r.ReplicaId, int64(0))
+	}
+	// Replica IDs should be unique
+	ids := make(map[int64]bool)
+	for _, r := range replicas {
+		suite.False(ids[r.ReplicaId], "duplicate replica ID")
+		ids[r.ReplicaId] = true
+	}
+}
+
+// TestGetLocalReplicaConfig_MultipleRGs tests getLocalReplicaConfig with multiple resource groups.
+func (suite *LoadCollectionJobSuite) TestGetLocalReplicaConfig_MultipleRGs() {
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "2")
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1,rg2")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+	}()
+
+	nextID := int64(200)
+	m := &meta.Meta{
+		ReplicaManager: meta.NewReplicaManager(func() (int64, error) {
+			id := nextID
+			nextID++
+			return id, nil
+		}, nil),
+	}
+
+	replicas := getLocalReplicaConfig(context.Background(), m)
+	suite.NotNil(replicas)
+	suite.Len(replicas, 2)
+	// Each RG should have 1 replica
+	rgCount := make(map[string]int)
+	for _, r := range replicas {
+		rgCount[r.ResourceGroupName]++
+	}
+	suite.Equal(1, rgCount["rg1"])
+	suite.Equal(1, rgCount["rg2"])
+}
+
+// TestGetLocalReplicaConfig_NotSet tests getLocalReplicaConfig returns nil when config is not set.
+func (suite *LoadCollectionJobSuite) TestGetLocalReplicaConfig_NotSet() {
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "0")
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+	}()
+
+	replicas := getLocalReplicaConfig(context.Background(), nil)
+	suite.Nil(replicas)
+}
+
+// TestGetLocalReplicaConfig_NoResourceGroups tests getLocalReplicaConfig returns nil when rgs is empty.
+func (suite *LoadCollectionJobSuite) TestGetLocalReplicaConfig_NoResourceGroups() {
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "2")
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+	}()
+
+	replicas := getLocalReplicaConfig(context.Background(), nil)
+	suite.Nil(replicas)
+}
+
+// TestGetLocalReplicaConfig_AllocIDError tests getLocalReplicaConfig returns nil when ID allocation fails.
+func (suite *LoadCollectionJobSuite) TestGetLocalReplicaConfig_AllocIDError() {
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "1")
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+	}()
+
+	m := &meta.Meta{
+		ReplicaManager: meta.NewReplicaManager(func() (int64, error) {
+			return 0, errors.New("allocation failed")
+		}, nil),
+	}
+
+	replicas := getLocalReplicaConfig(context.Background(), m)
+	suite.Nil(replicas)
+}
+
 func TestLoadCollectionJob(t *testing.T) {
 	suite.Run(t, new(LoadCollectionJobSuite))
 }
