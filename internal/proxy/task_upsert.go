@@ -1074,7 +1074,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	it.result.SuccIndex = sliceIndex
 
 	if it.schema.EnableDynamicField {
-		err := checkDynamicFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+		err := checkDynamicFieldData(it.schema, it.upsertMsg.InsertMsg)
 		if err != nil {
 			return err
 		}

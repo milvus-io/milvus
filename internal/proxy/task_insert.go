@@ -196,8 +196,8 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 	it.result.SuccIndex = sliceIndex
 
-	if it.schema.EnableDynamicField {
-		err = checkDynamicFieldData(it.schema, it.insertMsg)
+	if schema.EnableDynamicField {
+		err = checkDynamicFieldData(schema, it.insertMsg)
 		if err != nil {
 			return err
 		}
