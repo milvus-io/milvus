@@ -2295,6 +2295,69 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		err := checkDynamicFieldData(schema, insertMsg)
 		assert.NoError(t, err)
 	})
+	t.Run("invalid dynamic field name starting with number", func(t *testing.T) {
+		jsonData := make([][]byte, 0)
+		data := map[string]interface{}{
+			"123field": "value",
+		}
+		jsonBytes, err := json.Marshal(data)
+		assert.NoError(t, err)
+		jsonData = append(jsonData, jsonBytes)
+		jsonFieldData := autoGenDynamicFieldData(jsonData)
+		schema := newTestSchema()
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData},
+				NumRows:        1,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err = checkDynamicFieldData(schema, insertMsg)
+		assert.Error(t, err)
+	})
+	t.Run("invalid dynamic field name with special char", func(t *testing.T) {
+		jsonData := make([][]byte, 0)
+		data := map[string]interface{}{
+			"my-field": "value",
+		}
+		jsonBytes, err := json.Marshal(data)
+		assert.NoError(t, err)
+		jsonData = append(jsonData, jsonBytes)
+		jsonFieldData := autoGenDynamicFieldData(jsonData)
+		schema := newTestSchema()
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData},
+				NumRows:        1,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err = checkDynamicFieldData(schema, insertMsg)
+		assert.Error(t, err)
+	})
+	t.Run("invalid dynamic field name with at sign", func(t *testing.T) {
+		jsonData := make([][]byte, 0)
+		data := map[string]interface{}{
+			"@field": "value",
+		}
+		jsonBytes, err := json.Marshal(data)
+		assert.NoError(t, err)
+		jsonData = append(jsonData, jsonBytes)
+		jsonFieldData := autoGenDynamicFieldData(jsonData)
+		schema := newTestSchema()
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData},
+				NumRows:        1,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err = checkDynamicFieldData(schema, insertMsg)
+		assert.Error(t, err)
+	})
 }
 
 func Test_validateMaxCapacityPerRow(t *testing.T) {

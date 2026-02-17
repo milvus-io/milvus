@@ -2421,6 +2421,11 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 			if !schema.EnableDynamicField {
 				return fmt.Errorf("without dynamic schema enabled, the field name cannot be set to %s", common.MetaFieldName)
 			}
+			staticFieldNames := make(map[string]struct{}, len(schema.GetFields()))
+			for _, f := range schema.GetFields() {
+				staticFieldNames[f.GetName()] = struct{}{}
+			}
+			validatedKeys := make(map[string]struct{})
 			for _, rowData := range field.GetScalars().GetJsonData().GetData() {
 				jsonData := make(map[string]interface{})
 				if err := json.Unmarshal(rowData, &jsonData); err != nil {
@@ -2433,10 +2438,16 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 				if _, ok := jsonData[common.MetaFieldName]; ok {
 					return fmt.Errorf("cannot set json key to: %s", common.MetaFieldName)
 				}
-				for _, f := range schema.GetFields() {
-					if _, ok := jsonData[f.GetName()]; ok {
-						log.Info("dynamic field name include the static field name", zap.String("fieldName", f.GetName()))
-						return fmt.Errorf("dynamic field name cannot include the static field name: %s", f.GetName())
+				for key := range jsonData {
+					if _, ok := staticFieldNames[key]; ok {
+						log.Info("dynamic field name include the static field name", zap.String("fieldName", key))
+						return fmt.Errorf("dynamic field name cannot include the static field name: %s", key)
+					}
+					if _, ok := validatedKeys[key]; !ok {
+						if err := validateFieldName(key); err != nil {
+							return err
+						}
+						validatedKeys[key] = struct{}{}
 					}
 				}
 			}
