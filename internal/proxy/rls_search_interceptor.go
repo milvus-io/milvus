@@ -58,16 +58,19 @@ func (i *RLSSearchInterceptor) InterceptSearch(
 	if i.cache == nil {
 		return searchFilter, nil
 	}
+	if i.contextProvider == nil {
+		return "false", fmt.Errorf("RLS context provider is nil")
+	}
 
 	// Get user context
 	userContext, err := i.contextProvider.GetUserContext(ctx)
 	if err != nil {
-		log.Warn("failed to get user context for RLS search", zap.Error(err))
-		return searchFilter, nil
+		log.Warn("failed to get user context for RLS search, denying access", zap.Error(err))
+		return "false", fmt.Errorf("RLS context error: %w", err)
 	}
 
 	if userContext == nil {
-		return searchFilter, nil
+		return "false", nil
 	}
 
 	logger := log.Ctx(ctx).With(
@@ -79,8 +82,8 @@ func (i *RLSSearchInterceptor) InterceptSearch(
 	// Get RLS policies for the collection
 	policies := i.cache.GetPoliciesForCollection(dbID, collectionID)
 	if len(policies) == 0 {
-		logger.Debug("no RLS policies found for collection")
-		return searchFilter, nil
+		logger.Debug("no RLS policies found for collection, deny by default")
+		return "false", nil
 	}
 
 	// Convert CompiledRLSPolicy to model.RLSPolicy
@@ -142,16 +145,31 @@ func (i *RLSSearchInterceptor) InterceptHybridSearch(
 	if i.cache == nil {
 		return searchFilters, nil
 	}
+	if i.contextProvider == nil {
+		result := make([]string, len(searchFilters))
+		for idx := range result {
+			result[idx] = "false"
+		}
+		return result, fmt.Errorf("RLS context provider is nil")
+	}
 
 	// Get user context
 	userContext, err := i.contextProvider.GetUserContext(ctx)
 	if err != nil {
 		log.Warn("failed to get user context for RLS hybrid search", zap.Error(err))
-		return searchFilters, nil
+		result := make([]string, len(searchFilters))
+		for idx := range result {
+			result[idx] = "false"
+		}
+		return result, fmt.Errorf("RLS context error: %w", err)
 	}
 
 	if userContext == nil {
-		return searchFilters, nil
+		result := make([]string, len(searchFilters))
+		for idx := range result {
+			result[idx] = "false"
+		}
+		return result, nil
 	}
 
 	logger := log.Ctx(ctx).With(
@@ -162,8 +180,12 @@ func (i *RLSSearchInterceptor) InterceptHybridSearch(
 	// Get RLS policies
 	policies := i.cache.GetPoliciesForCollection(dbID, collectionID)
 	if len(policies) == 0 {
-		logger.Debug("no RLS policies found for hybrid search")
-		return searchFilters, nil
+		logger.Debug("no RLS policies found for hybrid search, deny by default")
+		result := make([]string, len(searchFilters))
+		for idx := range result {
+			result[idx] = "false"
+		}
+		return result, nil
 	}
 
 	// Convert CompiledRLSPolicy to model.RLSPolicy
@@ -251,33 +273,39 @@ func NewRLSUpsertInterceptor(
 	}
 }
 
-// InterceptUpsert validates upsert against RLS constraints
-// Upsert combines insert and update semantics, so RLS validation is similar to insert
+// InterceptUpsert validates upsert against RLS CHECK expressions.
+// NOTE: Current implementation is a collection-level gate — it checks if the user
+// has any applicable policy with a non-false CheckExpr, but does NOT verify each
+// upserted row satisfies the expression. Full row-level validation requires
+// enforcement at the segment layer (tracked as follow-up work).
 func (i *RLSUpsertInterceptor) InterceptUpsert(
 	ctx context.Context,
 	dbID int64,
 	collectionID int64,
-) error {
+) (string, error) {
 	// Skip RLS if cache is not available
 	if i.cache == nil {
-		return nil
+		return "", nil
+	}
+	if i.contextProvider == nil {
+		return "", fmt.Errorf("RLS context provider is nil")
 	}
 
 	// Get user context
 	userContext, err := i.contextProvider.GetUserContext(ctx)
 	if err != nil {
 		log.Warn("failed to get user context for RLS upsert", zap.Error(err))
-		return nil
+		return "", fmt.Errorf("RLS context error: %w", err)
 	}
 
 	if userContext == nil {
-		return nil
+		return "", fmt.Errorf("upsert operation denied by RLS: missing user context")
 	}
 
 	// Get RLS policies for the collection
 	policies := i.cache.GetPoliciesForCollection(dbID, collectionID)
 	if len(policies) == 0 {
-		return nil
+		return "", fmt.Errorf("upsert operation denied by RLS: no matching policies")
 	}
 
 	logger := log.Ctx(ctx).With(
@@ -313,18 +341,18 @@ func (i *RLSUpsertInterceptor) InterceptUpsert(
 	if err != nil {
 		logger.Error("failed to build RLS check expression for upsert", zap.Error(err))
 		// On error, deny upsert
-		return fmt.Errorf("RLS check expression validation failed: %w", err)
+		return "", fmt.Errorf("RLS check expression validation failed: %w", err)
 	}
 
 	// If expression evaluates to false, deny upsert
 	if checkExpr == "false" {
 		logger.Warn("upsert denied by RLS policies")
-		return fmt.Errorf("upsert operation denied by RLS policies")
+		return "", fmt.Errorf("upsert operation denied by RLS policies")
 	}
 
 	logger.Debug("upsert validated against RLS policies",
 		zap.String("checkExpr", checkExpr),
 	)
 
-	return nil
+	return checkExpr, nil
 }

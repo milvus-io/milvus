@@ -25,20 +25,20 @@ import (
 )
 
 func TestRLSSearchInterceptorWithoutPolicies(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	contextProvider := NewSimpleContextProvider("alice", []string{"employee"})
 	interceptor := NewRLSSearchInterceptor(cache, contextProvider)
 
-	// Search without policies should return filter unchanged
+	// Search without policies should deny by default.
 	searchFilter := "score > 0.8"
 	result, err := interceptor.InterceptSearch(context.Background(), 1, 100, searchFilter, "search")
 
 	assert.NoError(t, err)
-	assert.Equal(t, searchFilter, result)
+	assert.Equal(t, "false", result)
 }
 
 func TestRLSSearchInterceptorWithPermissivePolicy(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	contextProvider := NewSimpleContextProvider("alice", []string{"PUBLIC"})
 	interceptor := NewRLSSearchInterceptor(cache, contextProvider)
 
@@ -68,7 +68,7 @@ func TestRLSSearchInterceptorWithPermissivePolicy(t *testing.T) {
 }
 
 func TestRLSSearchInterceptorWithRestrictivePolicy(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	contextProvider := NewSimpleContextProvider("bob", []string{"employee"})
 	interceptor := NewRLSSearchInterceptor(cache, contextProvider)
 
@@ -109,7 +109,7 @@ func TestRLSSearchInterceptorNilCache(t *testing.T) {
 }
 
 func TestRLSSearchInterceptorMergeExpressions(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	contextProvider := NewSimpleContextProvider("alice", []string{"employee"})
 	interceptor := NewRLSSearchInterceptor(cache, contextProvider)
 
@@ -133,7 +133,7 @@ func TestRLSSearchInterceptorMergeExpressions(t *testing.T) {
 }
 
 func TestRLSHybridSearchInterceptor(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	contextProvider := NewSimpleContextProvider("alice", []string{"PUBLIC"})
 	interceptor := NewRLSSearchInterceptor(cache, contextProvider)
 
@@ -165,20 +165,20 @@ func TestRLSHybridSearchInterceptor(t *testing.T) {
 }
 
 func TestRLSHybridSearchInterceptorNoPolicies(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	contextProvider := NewSimpleContextProvider("alice", []string{"employee"})
 	interceptor := NewRLSSearchInterceptor(cache, contextProvider)
 
-	// Hybrid search without policies
+	// Hybrid search without policies should deny all sub-searches.
 	searchFilters := []string{"score > 0.8", "category == 'electronics'"}
 	results, err := interceptor.InterceptHybridSearch(context.Background(), 1, 100, searchFilters)
 
 	assert.NoError(t, err)
-	assert.Equal(t, searchFilters, results)
+	assert.Equal(t, []string{"false", "false"}, results)
 }
 
 func TestRLSUpsertInterceptor(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	contextProvider := NewSimpleContextProvider("alice", []string{"PUBLIC"})
 	interceptor := NewRLSUpsertInterceptor(cache, contextProvider)
 
@@ -198,12 +198,12 @@ func TestRLSUpsertInterceptor(t *testing.T) {
 	cache.UpdatePolicies(1, 100, policies)
 
 	// Upsert should pass validation
-	err := interceptor.InterceptUpsert(context.Background(), 1, 100)
+	_, err := interceptor.InterceptUpsert(context.Background(), 1, 100)
 	assert.NoError(t, err)
 }
 
 func TestRLSUpsertInterceptorDenied(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	contextProvider := NewSimpleContextProvider("alice", []string{"employee"})
 	interceptor := NewRLSUpsertInterceptor(cache, contextProvider)
 
@@ -223,19 +223,19 @@ func TestRLSUpsertInterceptorDenied(t *testing.T) {
 	cache.UpdatePolicies(1, 100, policies)
 
 	// Upsert should be denied
-	err := interceptor.InterceptUpsert(context.Background(), 1, 100)
+	_, err := interceptor.InterceptUpsert(context.Background(), 1, 100)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "denied")
 }
 
 func TestRLSUpsertInterceptorNoPolicies(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	contextProvider := NewSimpleContextProvider("alice", []string{"employee"})
 	interceptor := NewRLSUpsertInterceptor(cache, contextProvider)
 
-	// Upsert without policies should pass
-	err := interceptor.InterceptUpsert(context.Background(), 1, 100)
-	assert.NoError(t, err)
+	// Upsert without policies should be denied by default.
+	_, err := interceptor.InterceptUpsert(context.Background(), 1, 100)
+	assert.Error(t, err)
 }
 
 func TestRLSUpsertInterceptorNilCache(t *testing.T) {
@@ -243,6 +243,6 @@ func TestRLSUpsertInterceptorNilCache(t *testing.T) {
 	interceptor := NewRLSUpsertInterceptor(nil, contextProvider)
 
 	// Upsert with nil cache should pass
-	err := interceptor.InterceptUpsert(context.Background(), 1, 100)
+	_, err := interceptor.InterceptUpsert(context.Background(), 1, 100)
 	assert.NoError(t, err)
 }

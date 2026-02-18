@@ -25,20 +25,20 @@ import (
 )
 
 func TestRLSQueryInterceptorWithoutPolicies(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	contextProvider := NewSimpleContextProvider("alice", []string{"employee"})
 	interceptor := NewRLSQueryInterceptor(cache, contextProvider)
 
-	// Query without policies should return user filter unchanged
+	// Query without policies should deny by default.
 	userFilter := "age > 18"
 	result, err := interceptor.InterceptQuery(context.Background(), 1, 100, userFilter, "query")
 
 	assert.NoError(t, err)
-	assert.Equal(t, userFilter, result)
+	assert.Equal(t, "false", result)
 }
 
 func TestRLSQueryInterceptorWithPermissivePolicy(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	contextProvider := NewSimpleContextProvider("alice", []string{"PUBLIC"})
 	interceptor := NewRLSQueryInterceptor(cache, contextProvider)
 
@@ -68,7 +68,7 @@ func TestRLSQueryInterceptorWithPermissivePolicy(t *testing.T) {
 }
 
 func TestRLSQueryInterceptorWithRestrictivePolicy(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	contextProvider := NewSimpleContextProvider("bob", []string{"employee"})
 	interceptor := NewRLSQueryInterceptor(cache, contextProvider)
 
@@ -99,7 +99,7 @@ func TestRLSQueryInterceptorWithRestrictivePolicy(t *testing.T) {
 }
 
 func TestRLSQueryInterceptorWithUserTags(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	contextProvider := NewSimpleContextProvider("charlie", []string{"employee"})
 	interceptor := NewRLSQueryInterceptor(cache, contextProvider)
 
@@ -141,7 +141,7 @@ func TestRLSQueryInterceptorNilCache(t *testing.T) {
 }
 
 func TestRLSQueryInterceptorMergeExpressions(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	contextProvider := NewSimpleContextProvider("alice", []string{"employee"})
 	interceptor := NewRLSQueryInterceptor(cache, contextProvider)
 
@@ -165,7 +165,7 @@ func TestRLSQueryInterceptorMergeExpressions(t *testing.T) {
 }
 
 func TestRLSInsertInterceptor(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	contextProvider := NewSimpleContextProvider("alice", []string{"PUBLIC"})
 	interceptor := NewRLSInsertInterceptor(cache, contextProvider)
 
@@ -185,12 +185,12 @@ func TestRLSInsertInterceptor(t *testing.T) {
 	cache.UpdatePolicies(1, 100, policies)
 
 	// Insert should pass validation
-	err := interceptor.InterceptInsert(context.Background(), 1, 100)
+	_, err := interceptor.InterceptInsert(context.Background(), 1, 100)
 	assert.NoError(t, err)
 }
 
 func TestRLSInsertInterceptorDenied(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	contextProvider := NewSimpleContextProvider("alice", []string{"employee"})
 	interceptor := NewRLSInsertInterceptor(cache, contextProvider)
 
@@ -210,13 +210,13 @@ func TestRLSInsertInterceptorDenied(t *testing.T) {
 	cache.UpdatePolicies(1, 100, policies)
 
 	// Insert should be denied
-	err := interceptor.InterceptInsert(context.Background(), 1, 100)
+	_, err := interceptor.InterceptInsert(context.Background(), 1, 100)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "denied")
 }
 
 func TestRLSDeleteInterceptor(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	contextProvider := NewSimpleContextProvider("alice", []string{"PUBLIC"})
 	interceptor := NewRLSDeleteInterceptor(cache, contextProvider)
 

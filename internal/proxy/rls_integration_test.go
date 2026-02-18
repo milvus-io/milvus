@@ -40,7 +40,7 @@ type RLSIntegrationTestSuite struct {
 
 // SetupTest initializes test components before each test
 func (suite *RLSIntegrationTestSuite) SetupTest() {
-	suite.cache = NewRLSCache(nil)
+	suite.cache = NewRLSCache()
 	suite.exprBuilder = NewRLSExpressionBuilder()
 	suite.contextProvider = NewSimpleContextProvider("alice", []string{"employee"})
 
@@ -234,7 +234,7 @@ func (suite *RLSIntegrationTestSuite) TestScenarioInsertRestriction() {
 	suite.cache.UpdatePolicies(1, 100, []*model.RLSPolicy{policy})
 
 	// Insert should be allowed for employee role
-	err := suite.insertInt.InterceptInsert(context.Background(), 1, 100)
+	_, err := suite.insertInt.InterceptInsert(context.Background(), 1, 100)
 	suite.NoError(err)
 }
 
@@ -255,7 +255,7 @@ func (suite *RLSIntegrationTestSuite) TestScenarioInsertDenied() {
 	suite.cache.UpdatePolicies(1, 100, []*model.RLSPolicy{policy})
 
 	// Insert should be denied for employee
-	err := suite.insertInt.InterceptInsert(context.Background(), 1, 100)
+	_, err := suite.insertInt.InterceptInsert(context.Background(), 1, 100)
 	suite.Error(err)
 	suite.Contains(err.Error(), "denied")
 }
@@ -352,12 +352,10 @@ func (suite *RLSIntegrationTestSuite) TestScenarioMultiActionPolicy() {
 // TestScenarioNoPoliciesDenyAll tests deny-all when no policies exist
 func (suite *RLSIntegrationTestSuite) TestScenarioNoPoliciesDenyAll() {
 	// No policies loaded
-	// This scenario depends on configuration whether to deny or allow when no policies
 
 	result, err := suite.queryInt.InterceptQuery(context.Background(), 1, 100, "age > 18", "query")
 	suite.NoError(err)
-	// Without policies, user filter should be returned as-is (permissive default)
-	suite.Equal("age > 18", result)
+	suite.Equal("false", result)
 }
 
 // TestRLSIntegrationTestSuite runs the integration test suite

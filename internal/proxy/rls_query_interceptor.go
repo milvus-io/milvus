@@ -69,16 +69,20 @@ func (i *RLSQueryInterceptor) InterceptQuery(
 	if i.cache == nil {
 		return userFilter, nil
 	}
+	if i.contextProvider == nil {
+		return "false", fmt.Errorf("RLS context provider is nil")
+	}
 
 	// Get user context
 	userContext, err := i.contextProvider.GetUserContext(ctx)
 	if err != nil {
-		log.Warn("failed to get user context for RLS", zap.Error(err))
-		return userFilter, nil
+		log.Warn("failed to get user context for RLS, denying access", zap.Error(err))
+		return "false", fmt.Errorf("RLS context error: %w", err)
 	}
 
 	if userContext == nil {
-		return userFilter, nil
+		// Fail-closed when RLS is enabled but user identity is unavailable.
+		return "false", nil
 	}
 
 	logger := log.Ctx(ctx).With(
@@ -90,9 +94,9 @@ func (i *RLSQueryInterceptor) InterceptQuery(
 	// Get RLS policies for the collection
 	policies := i.cache.GetPoliciesForCollection(dbID, collectionID)
 	if len(policies) == 0 {
-		// No policies, return user filter as-is
-		logger.Debug("no RLS policies found for collection")
-		return userFilter, nil
+		// Fail-closed by default when no policy is configured.
+		logger.Debug("no RLS policies found for collection, deny by default")
+		return "false", nil
 	}
 
 	// Convert CompiledRLSPolicy to model.RLSPolicy for expression builder
@@ -161,26 +165,36 @@ func (i *RLSQueryInterceptor) mergeExpressions(userFilter, rlsExpr string) strin
 // SimpleContextProvider is a basic implementation of ContextProvider
 // It can be extended to read user context from request headers or tokens
 type SimpleContextProvider struct {
-	userName string
-	roles    []string
+	userName  string
+	userRoles []string
+	userTags  map[string]string
 }
 
 // NewSimpleContextProvider creates a simple context provider
 func NewSimpleContextProvider(userName string, roles []string) *SimpleContextProvider {
 	return &SimpleContextProvider{
-		userName: userName,
-		roles:    roles,
+		userName:  userName,
+		userRoles: roles,
 	}
 }
 
-// GetUserContext returns the stored user context
+// GetUserContext returns the stored user context (implements ContextProvider)
 func (p *SimpleContextProvider) GetUserContext(ctx context.Context) (*RLSQueryContext, error) {
 	if p.userName == "" {
 		return nil, nil
 	}
 	return &RLSQueryContext{
 		UserName:  p.userName,
-		UserRoles: p.roles,
+		UserRoles: p.userRoles,
+	}, nil
+}
+
+// GetRLSContext returns the full RLS context including user tags
+func (p *SimpleContextProvider) GetRLSContext(ctx context.Context) (*RLSContext, error) {
+	return &RLSContext{
+		CurrentUserName: p.userName,
+		CurrentRoles:    p.userRoles,
+		CurrentUserTags: p.userTags,
 	}, nil
 }
 
@@ -203,33 +217,39 @@ func NewRLSInsertInterceptor(
 	}
 }
 
-// InterceptInsert validates insert against RLS CHECK expressions
-// Returns error if insert violates RLS constraints
+// InterceptInsert validates insert against RLS CHECK expressions.
+// NOTE: Current implementation is a collection-level gate — it checks if the user
+// has any applicable policy with a non-false CheckExpr, but does NOT verify each
+// inserted row satisfies the expression. Full row-level validation requires
+// enforcement at the segment layer (tracked as follow-up work).
 func (i *RLSInsertInterceptor) InterceptInsert(
 	ctx context.Context,
 	dbID int64,
 	collectionID int64,
-) error {
+) (string, error) {
 	// Skip RLS if cache is not available
 	if i.cache == nil {
-		return nil
+		return "", nil
+	}
+	if i.contextProvider == nil {
+		return "", fmt.Errorf("RLS context provider is nil")
 	}
 
 	// Get user context
 	userContext, err := i.contextProvider.GetUserContext(ctx)
 	if err != nil {
 		log.Warn("failed to get user context for RLS insert validation", zap.Error(err))
-		return nil
+		return "", fmt.Errorf("RLS context error: %w", err)
 	}
 
 	if userContext == nil {
-		return nil
+		return "", fmt.Errorf("insert operation denied by RLS: missing user context")
 	}
 
 	// Get RLS policies for the collection
 	policies := i.cache.GetPoliciesForCollection(dbID, collectionID)
 	if len(policies) == 0 {
-		return nil
+		return "", fmt.Errorf("insert operation denied by RLS: no matching policies")
 	}
 
 	logger := log.Ctx(ctx).With(
@@ -265,20 +285,20 @@ func (i *RLSInsertInterceptor) InterceptInsert(
 	if err != nil {
 		logger.Error("failed to build RLS check expression", zap.Error(err))
 		// On error, deny insert
-		return fmt.Errorf("RLS check expression validation failed: %w", err)
+		return "", fmt.Errorf("RLS check expression validation failed: %w", err)
 	}
 
 	// If expression evaluates to false, deny insert
 	if checkExpr == "false" {
 		logger.Warn("insert denied by RLS policies")
-		return fmt.Errorf("insert operation denied by RLS policies")
+		return "", fmt.Errorf("insert operation denied by RLS policies")
 	}
 
 	logger.Debug("insert validated against RLS policies",
 		zap.String("checkExpr", checkExpr),
 	)
 
-	return nil
+	return checkExpr, nil
 }
 
 // DeleteInterceptor applies RLS filtering to delete operations
@@ -312,22 +332,25 @@ func (i *RLSDeleteInterceptor) InterceptDelete(
 	if i.cache == nil {
 		return deleteFilter, nil
 	}
+	if i.contextProvider == nil {
+		return "false", fmt.Errorf("RLS context provider is nil")
+	}
 
 	// Get user context
 	userContext, err := i.contextProvider.GetUserContext(ctx)
 	if err != nil {
-		log.Warn("failed to get user context for RLS delete", zap.Error(err))
-		return deleteFilter, nil
+		log.Warn("failed to get user context for RLS delete, denying access", zap.Error(err))
+		return "false", fmt.Errorf("RLS context error: %w", err)
 	}
 
 	if userContext == nil {
-		return deleteFilter, nil
+		return "false", nil
 	}
 
 	// Get RLS policies for the collection
 	policies := i.cache.GetPoliciesForCollection(dbID, collectionID)
 	if len(policies) == 0 {
-		return deleteFilter, nil
+		return "false", nil
 	}
 
 	logger := log.Ctx(ctx).With(

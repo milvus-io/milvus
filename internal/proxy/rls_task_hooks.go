@@ -163,7 +163,7 @@ func applyRLSInsertCheck(ctx context.Context, dbName string, collectionName stri
 		rlsMgr.EnsureUserTagsLoaded(ctx, username)
 	}
 
-	err := interceptor.InterceptInsert(ctx, dbID, collectionID)
+	_, err := interceptor.InterceptInsert(ctx, dbID, collectionID)
 	if err != nil {
 		log.Warn("RLS insert check failed",
 			zap.String("collection", collectionName),
@@ -198,7 +198,7 @@ func applyRLSUpsertCheck(ctx context.Context, dbName string, collectionName stri
 		rlsMgr.EnsureUserTagsLoaded(ctx, username)
 	}
 
-	err := interceptor.InterceptUpsert(ctx, dbID, collectionID)
+	_, err := interceptor.InterceptUpsert(ctx, dbID, collectionID)
 	if err != nil {
 		log.Warn("RLS upsert check failed",
 			zap.String("collection", collectionName),
