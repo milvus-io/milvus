@@ -1901,6 +1901,152 @@ func BuildFileResourceKey(resourceID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d", FileResourceMetaPrefix, resourceID)
 }
 
+// RLS Policy operations
+func (kc *Catalog) SaveRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error {
+	if policy == nil {
+		return fmt.Errorf("policy cannot be nil")
+	}
+	if err := policy.Validate(); err != nil {
+		return err
+	}
+
+	key := BuildRLSPolicyKey(policy.DBID, policy.CollectionID, policy.PolicyName)
+	value, err := json.Marshal(policy)
+	if err != nil {
+		return err
+	}
+
+	return kc.Txn.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) GetRLSPolicy(ctx context.Context, dbID int64, collectionID int64, policyName string) (*model.RLSPolicy, error) {
+	key := BuildRLSPolicyKey(dbID, collectionID, policyName)
+	value, err := kc.Txn.Load(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+
+	var policy model.RLSPolicy
+	if err := json.Unmarshal([]byte(value), &policy); err != nil {
+		return nil, err
+	}
+
+	return &policy, nil
+}
+
+func (kc *Catalog) DeleteRLSPolicy(ctx context.Context, dbID int64, collectionID int64, policyName string) error {
+	key := BuildRLSPolicyKey(dbID, collectionID, policyName)
+	return kc.Txn.Remove(ctx, key)
+}
+
+func (kc *Catalog) ListRLSPolicies(ctx context.Context, dbID int64, collectionID int64) ([]*model.RLSPolicy, error) {
+	prefix := BuildRLSPoliciesPrefix(dbID, collectionID)
+	_, values, err := kc.Txn.LoadWithPrefix(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	policies := make([]*model.RLSPolicy, 0, len(values))
+	for _, value := range values {
+		var policy model.RLSPolicy
+		if err := json.Unmarshal([]byte(value), &policy); err != nil {
+			log.Warn("failed to unmarshal RLS policy", zap.Error(err))
+			continue
+		}
+		policies = append(policies, &policy)
+	}
+
+	return policies, nil
+}
+
+// RLS Collection Config operations
+func (kc *Catalog) SaveRLSCollectionConfig(ctx context.Context, dbID int64, collectionID int64, enabled bool, force bool) error {
+	key := BuildRLSCollectionConfigKey(dbID, collectionID)
+	config := &model.RLSCollectionConfig{
+		CollectionID: collectionID,
+		Enabled:      enabled,
+		Force:        force,
+	}
+	value, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	return kc.Txn.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) GetRLSCollectionConfig(ctx context.Context, dbID int64, collectionID int64) (*model.RLSCollectionConfig, error) {
+	key := BuildRLSCollectionConfigKey(dbID, collectionID)
+	value, err := kc.Txn.Load(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+
+	var config model.RLSCollectionConfig
+	if err := json.Unmarshal([]byte(value), &config); err != nil {
+		return nil, err
+	}
+
+	return &config, nil
+}
+
+// RLS User Tags operations
+func (kc *Catalog) SaveUserTags(ctx context.Context, userTags *model.RLSUserTags) error {
+	if userTags == nil {
+		return fmt.Errorf("user tags cannot be nil")
+	}
+
+	key := BuildRLSUserTagsKey(userTags.UserName)
+	value, err := json.Marshal(userTags)
+	if err != nil {
+		return err
+	}
+
+	return kc.Txn.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) GetUserTags(ctx context.Context, userName string) (*model.RLSUserTags, error) {
+	key := BuildRLSUserTagsKey(userName)
+	value, err := kc.Txn.Load(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+
+	var userTags model.RLSUserTags
+	if err := json.Unmarshal([]byte(value), &userTags); err != nil {
+		return nil, err
+	}
+
+	return &userTags, nil
+}
+
+func (kc *Catalog) DeleteUserTags(ctx context.Context, userName string) error {
+	key := BuildRLSUserTagsKey(userName)
+	return kc.Txn.Remove(ctx, key)
+}
+
+func (kc *Catalog) ListUsersWithTag(ctx context.Context, tagKey string, tagValue string) ([]string, error) {
+	prefix := GetRLSUserTagsPrefix()
+	keys, values, err := kc.Txn.LoadWithPrefix(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	users := []string{}
+	for i, value := range values {
+		var userTags model.RLSUserTags
+		if err := json.Unmarshal([]byte(value), &userTags); err != nil {
+			log.Warn("failed to unmarshal user tags", zap.String("key", keys[i]), zap.Error(err))
+			continue
+		}
+
+		if v, ok := userTags.Tags[tagKey]; ok && v == tagValue {
+			users = append(users, userTags.UserName)
+		}
+	}
+
+	return users, nil
+}
+
 func (kc *Catalog) Close() {
 	// do nothing
 }
