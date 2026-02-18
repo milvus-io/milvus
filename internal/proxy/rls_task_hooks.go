@@ -56,7 +56,13 @@ func applyRLSFilter(ctx context.Context, dbName string, collectionName string, c
 		if config.IsStrictMode() {
 			return "", err
 		}
-		// In permissive mode, log the error and return original expression
+		// Permissive mode: intentionally fail-open. On RLS evaluation error, the
+		// unfiltered user expression is returned so the operation proceeds.
+		// WARNING: RLS is NOT enforced for this request.
+		// Use strict mode (proxy.rls.mode=strict) to reject the request instead.
+		log.Warn("RLS filter bypassed in permissive mode (fail-open)",
+			zap.String("collection", collectionName),
+			zap.String("reason", err.Error()))
 		return originalExpr, nil
 	}
 
@@ -95,6 +101,13 @@ func applyRLSDeleteFilter(ctx context.Context, dbName string, collectionName str
 		if config.IsStrictMode() {
 			return "", err
 		}
+		// Permissive mode: intentionally fail-open. On RLS evaluation error, the
+		// unfiltered user expression is returned so the operation proceeds.
+		// WARNING: RLS is NOT enforced for this request.
+		// Use strict mode (proxy.rls.mode=strict) to reject the request instead.
+		log.Warn("RLS filter bypassed in permissive mode (fail-open)",
+			zap.String("collection", collectionName),
+			zap.String("reason", err.Error()))
 		return originalExpr, nil
 	}
 
@@ -133,6 +146,13 @@ func applyRLSSearchFilter(ctx context.Context, dbName string, collectionName str
 		if config.IsStrictMode() {
 			return "", err
 		}
+		// Permissive mode: intentionally fail-open. On RLS evaluation error, the
+		// unfiltered user expression is returned so the operation proceeds.
+		// WARNING: RLS is NOT enforced for this request.
+		// Use strict mode (proxy.rls.mode=strict) to reject the request instead.
+		log.Warn("RLS filter bypassed in permissive mode (fail-open)",
+			zap.String("collection", collectionName),
+			zap.String("reason", err.Error()))
 		return originalExpr, nil
 	}
 
@@ -168,7 +188,13 @@ func applyRLSInsertCheck(ctx context.Context, dbName string, collectionName stri
 		log.Warn("RLS insert check failed",
 			zap.String("collection", collectionName),
 			zap.Error(err))
-		return err
+		if config.IsStrictMode() {
+			return err
+		}
+		// Permissive mode: intentionally fail-open.
+		log.Warn("RLS insert check bypassed in permissive mode (fail-open)",
+			zap.String("collection", collectionName))
+		return nil
 	}
 
 	return nil
@@ -203,7 +229,13 @@ func applyRLSUpsertCheck(ctx context.Context, dbName string, collectionName stri
 		log.Warn("RLS upsert check failed",
 			zap.String("collection", collectionName),
 			zap.Error(err))
-		return err
+		if config.IsStrictMode() {
+			return err
+		}
+		// Permissive mode: intentionally fail-open.
+		log.Warn("RLS upsert check bypassed in permissive mode (fail-open)",
+			zap.String("collection", collectionName))
+		return nil
 	}
 
 	return nil
