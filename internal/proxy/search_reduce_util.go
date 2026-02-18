@@ -7,7 +7,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -594,7 +593,7 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 		}
 
 		var partialResultData schemapb.SearchResultData
-		err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
+		err := partialResultData.UnmarshalVT(partialSearchResult.SlicedBlob)
 		if err != nil {
 			return nil, err
 		}

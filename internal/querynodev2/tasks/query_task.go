@@ -9,7 +9,6 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -92,7 +91,7 @@ func (t *QueryTask) PreExecute() error {
 		Observe(inQueueDurationMS)
 
 	// Unmarshal the origin plan
-	if err := proto.Unmarshal(t.req.Req.GetSerializedExprPlan(), t.plan); err != nil {
+	if err := t.plan.UnmarshalVT(t.req.Req.GetSerializedExprPlan()); err != nil {
 		return err
 	}
 

@@ -26,7 +26,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -963,7 +962,7 @@ func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
 
 func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, error) {
 	pb := &commonpb.PlaceholderGroup{}
-	proto.Unmarshal(req.GetPlaceholderGroup(), pb)
+	pb.UnmarshalVT(req.GetPlaceholderGroup())
 
 	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
 		return 0, merr.WrapErrParameterInvalidMsg("please provide varchar/text for BM25 Function based search")
@@ -1030,7 +1029,7 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 
 func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest) error {
 	pb := &commonpb.PlaceholderGroup{}
-	proto.Unmarshal(req.GetPlaceholderGroup(), pb)
+	pb.UnmarshalVT(req.GetPlaceholderGroup())
 
 	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
 		return merr.WrapErrParameterInvalidMsg("please provide varchar/text for MinHash Function based search")

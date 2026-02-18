@@ -412,7 +412,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) sha
 		outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
 		plan.OutputFieldIds = outputFieldIDs
 
-		serializedPlan, err := proto.Marshal(plan)
+		serializedPlan, err := plan.MarshalVT()
 		if err != nil {
 			return err
 		}

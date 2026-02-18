@@ -7,7 +7,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -28,7 +27,7 @@ func SetBM25Params(req *internalpb.SearchRequest, avgdl float64) error {
 	}
 
 	plan := planpb.PlanNode{}
-	err := proto.Unmarshal(serializedPlan, &plan)
+	err := plan.UnmarshalVT(serializedPlan)
 	if err != nil {
 		log.Warn("failed to unmarshal plan", zap.Error(err))
 		return merr.WrapErrParameterInvalid("valid serialized search plan", "no unmarshalable one", err.Error())
@@ -38,7 +37,7 @@ func SetBM25Params(req *internalpb.SearchRequest, avgdl float64) error {
 	case *planpb.PlanNode_VectorAnns:
 		queryInfo := plan.GetVectorAnns().GetQueryInfo()
 		queryInfo.Bm25Avgdl = avgdl
-		serializedExprPlan, err := proto.Marshal(&plan)
+		serializedExprPlan, err := plan.MarshalVT()
 		if err != nil {
 			log.Warn("failed to marshal optimized plan", zap.Error(err))
 			return merr.WrapErrParameterInvalid("marshalable search plan", "plan with marshal error", err.Error())

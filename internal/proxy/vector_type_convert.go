@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"math"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -107,7 +105,7 @@ func validateFloat32ForBFloat16(values []float32) error {
 // Otherwise returns an error for incompatible types.
 func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema) ([]byte, error) {
 	var phg commonpb.PlaceholderGroup
-	if err := proto.Unmarshal(phgBytes, &phg); err != nil {
+	if err := phg.UnmarshalVT(phgBytes); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal placeholder group: %w", err)
 	}
 
@@ -179,7 +177,7 @@ func convertPlaceholder(
 	placeholder.Type = targetType
 	placeholder.Values = convertedValues
 
-	return proto.Marshal(phg)
+	return phg.MarshalVT()
 }
 
 // bytesToFloat32Array converts byte slice to float32 array.
