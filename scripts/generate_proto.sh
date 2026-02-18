@@ -91,7 +91,15 @@ ${protoc_opt} --proto_path=$ROOT_DIR/cmd/tools/migration/backend --go_out=paths=
 ${protoc_opt} --proto_path=$ROOT_DIR/cmd/tools/migration/legacy/ \
   --go_out=paths=source_relative:../../cmd/tools/migration/legacy/legacypb legacy.proto || { echo 'generate legacy.proto failed'; exit 1; }
 
-# Generate vtproto for milvus-proto/go-api protos (external API types)
+# Generate vtproto for milvus-proto/go-api protos (external API types).
+#
+# NOTE: The generated *_vtproto.pb.go files are written to the local cmake build
+# directory (cmake_build/thirdparty/milvus-proto/go-api) which is NOT committed
+# to this repository. After running this script, the generated files must be
+# manually copied to the fork of milvus-proto/go-api and committed there:
+#   git@github.com:milvus-io/milvus-proto (branch: go-api-vtproto or similar)
+# The go.mod replace directive then points to the updated fork commit.
+# Tool: protoc-gen-go-vtproto pinned in Makefile install-proto-gen-go target.
 GO_API_DIR=$ROOT_DIR/cmake_build/thirdparty/milvus-proto/go-api
 
 ${protoc_opt} \

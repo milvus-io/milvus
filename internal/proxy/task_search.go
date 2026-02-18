@@ -591,7 +591,9 @@ func (t *searchTask) fillResult() {
 
 func (t *searchTask) getBM25SearchTexts(placeholder []byte) ([]string, error) {
 	pb := &commonpb.PlaceholderGroup{}
-	pb.UnmarshalVT(placeholder)
+	if err := pb.UnmarshalVT(placeholder); err != nil {
+		return nil, err
+	}
 
 	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("please provide varchar/text for BM25 Function based search")

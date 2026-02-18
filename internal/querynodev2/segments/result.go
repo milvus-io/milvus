@@ -259,11 +259,11 @@ func EncodeSearchResultData(ctx context.Context, searchResultData *schemapb.Sear
 		MetricType: metricType,
 		SlicedBlob: nil,
 	}
-	slicedBlob, err := searchResultData.MarshalVT()
-	if err != nil {
-		return nil, err
-	}
 	if searchResultData != nil && searchResultData.Ids != nil && typeutil.GetSizeOfIDs(searchResultData.Ids) != 0 {
+		slicedBlob, err := searchResultData.MarshalVT()
+		if err != nil {
+			return nil, err
+		}
 		searchResults.SlicedBlob = slicedBlob
 	}
 	return

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
+	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	tikvkv "github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/storage"
