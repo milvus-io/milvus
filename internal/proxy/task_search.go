@@ -218,6 +218,17 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	// Apply RLS filter to top-level search DSL (non-advanced search only)
+	// For advanced/hybrid search, RLS is applied per sub-request below.
+	if !t.SearchRequest.GetIsAdvanced() {
+		if rlsExpr, err := applyRLSSearchFilter(ctx, t.request.GetDbName(), collectionName, collID, t.request.GetDsl()); err != nil {
+			log.Warn("failed to apply RLS filter for search", zap.Error(err))
+			return err
+		} else {
+			t.request.Dsl = rlsExpr
+		}
+	}
+
 	nq, err := t.checkNq(ctx)
 	if err != nil {
 		log.Info("failed to check nq", zap.Error(err))
@@ -468,8 +479,15 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
 	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
+		// Apply RLS filter to each sub-request DSL before building the search plan.
+		subDsl := subReq.GetDsl()
+		subDsl, err = applyRLSSearchFilter(ctx, t.request.GetDbName(), t.collectionName, t.CollectionID, subDsl)
+		if err != nil {
+			log.Warn("failed to apply RLS filter for hybrid search sub-request", zap.Int("index", index), zap.Error(err))
+			return err
+		}
 		// For hybrid search, order_by_fields comes from main search params, not sub-search params
-		plan, queryInfo, offset, _, _, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
+		plan, queryInfo, offset, _, _, err := t.tryGeneratePlan(subReq.GetSearchParams(), subDsl, subReq.GetExprTemplateValues())
 		if err != nil {
 			return err
 		}
