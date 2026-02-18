@@ -522,7 +522,14 @@ func convertMilvuspbToInternalCreateRowPolicy(req *milvuspb.CreateRowPolicyReque
 		}
 	}
 
-	// Default to PERMISSIVE policy type
+	// Default to PERMISSIVE policy type.
+	// NOTE: milvuspb.CreateRowPolicyRequest does not yet carry a PolicyType field in the
+	// current proto version, so we always fall back to PERMISSIVE here.  When the proto is
+	// updated to include a RowPolicyType field this block should be replaced with:
+	//   policyType := messagespb.RLSPolicyType_PERMISSIVE
+	//   if req.GetPolicyType() == milvuspb.RowPolicyType_RESTRICTIVE {
+	//       policyType = messagespb.RLSPolicyType_RESTRICTIVE
+	//   }
 	policyType := messagespb.RLSPolicyType_PERMISSIVE
 
 	return &messagespb.CreateRowPolicyRequest{

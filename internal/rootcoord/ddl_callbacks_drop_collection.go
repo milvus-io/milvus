@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
@@ -114,6 +115,25 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 			// 3. drop the collection meta itself.
 			if err := c.meta.DropCollection(ctx, collectionID, result.TimeTick); err != nil {
 				return errors.Wrap(err, "failed to drop collection")
+			}
+
+			// Clean up RLS policies for dropped collection
+			if err := c.meta.DeleteAllRLSPoliciesForCollection(ctx, header.DbId, header.CollectionId); err != nil {
+				log.Warn("failed to clean up RLS policies for dropped collection", zap.Int64("collectionID", header.CollectionId), zap.Error(err))
+				// Don't fail the drop collection operation for RLS cleanup failure
+			} else {
+				// Broadcast RLS cache invalidation to all proxies so they stop enforcing
+				// stale policies for the dropped collection.  Non-fatal: proxies will
+				// expire the cache via TTL even if broadcast fails.
+				if broadcastErr := c.broadcastRLSCacheRefresh(ctx, &messagespb.RefreshRLSCacheRequest{
+					OpType:         messagespb.RLSCacheOpType_DropPolicy,
+					DbName:         body.DbName,
+					CollectionName: body.CollectionName,
+				}); broadcastErr != nil {
+					log.Warn("failed to broadcast RLS cache invalidation after drop collection",
+						zap.String("collection", body.CollectionName),
+						zap.Error(broadcastErr))
+				}
 			}
 			continue
 		}

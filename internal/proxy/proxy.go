@@ -244,6 +244,18 @@ func (node *Proxy) Init() error {
 	}
 	log.Debug("init meta cache done", zap.String("role", typeutil.ProxyRole))
 
+	// Initialize RLS (Row Level Security).
+	// InitRLSConfigFromParams must run first so that interceptors created by
+	// SetContextProvider / SetPolicyLoader see the correct configuration values.
+	InitRLSConfigFromParams()
+	InitRLSManager()
+	rlsMgr := GetRLSManager()
+	if rlsMgr != nil {
+		rlsMgr.SetContextProvider(NewAuthContextProvider())
+		rlsMgr.SetPolicyLoader(NewProxyPolicyLoader(node.mixCoord))
+	}
+	log.Debug("init RLS manager done", zap.String("role", typeutil.ProxyRole))
+
 	node.shardMgr = shardclient.NewShardClientMgr(node.mixCoord)
 	node.lbPolicy = shardclient.NewLBPolicyImpl(node.shardMgr)
 
