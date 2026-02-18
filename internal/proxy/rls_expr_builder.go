@@ -125,10 +125,7 @@ func (b *RLSExpressionBuilder) buildPermissiveExpression(policies []*model.RLSPo
 
 	expressions := []string{}
 	for _, policy := range policies {
-		expr := policy.UsingExpr
-		if expr == "" {
-			expr = policy.CheckExpr
-		}
+		expr := b.selectPolicyExpression(policy, action)
 		if expr == "" {
 			continue
 		}
@@ -154,10 +151,7 @@ func (b *RLSExpressionBuilder) buildRestrictiveExpression(policies []*model.RLSP
 
 	expressions := []string{}
 	for _, policy := range policies {
-		expr := policy.UsingExpr
-		if expr == "" {
-			expr = policy.CheckExpr
-		}
+		expr := b.selectPolicyExpression(policy, action)
 		if expr == "" {
 			continue
 		}
@@ -189,6 +183,19 @@ func (b *RLSExpressionBuilder) mergeExpressions(permExpr string, restrictExpr st
 	return fmt.Sprintf("(%s) AND (%s)", permExpr, restrictExpr)
 }
 
+func (b *RLSExpressionBuilder) selectPolicyExpression(policy *model.RLSPolicy, action string) string {
+	if policy == nil {
+		return ""
+	}
+
+	switch strings.ToLower(action) {
+	case string(model.RLSActionInsert), string(model.RLSActionUpsert):
+		return strings.TrimSpace(policy.CheckExpr)
+	default:
+		return strings.TrimSpace(policy.UsingExpr)
+	}
+}
+
 // substituteVariables performs variable substitution in expressions
 func (b *RLSExpressionBuilder) substituteVariables(expr string, rlsContext *RLSContext) string {
 	result := expr
@@ -202,13 +209,29 @@ func (b *RLSExpressionBuilder) substituteVariables(expr string, rlsContext *RLSC
 		result = strings.ReplaceAll(result, placeholder, fmt.Sprintf("'%s'", escapeString(value)))
 	}
 
+	// Replace any remaining $current_user_tags[...] placeholders (tags not present on user)
+	// with a sentinel that never matches real data — policy should deny access for missing tags.
+	for strings.Contains(result, "$current_user_tags[") {
+		start := strings.Index(result, "$current_user_tags[")
+		end := strings.Index(result[start:], "]")
+		if end < 0 {
+			break // malformed placeholder, leave as-is (expression parser will reject it)
+		}
+		placeholder := result[start : start+end+1]
+		result = strings.Replace(result, placeholder, "'__rls_no_tag__'", 1)
+	}
+
 	return result
 }
 
 // escapeString escapes special characters in string values
 func escapeString(s string) string {
-	// Simple escaping for SQL/expression contexts
-	return strings.ReplaceAll(s, "'", "\\'")
+	// Escape backslashes first, then single quotes
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "'", "\\'")
+	// Also escape double quotes and special chars that could affect expression parsing
+	s = strings.ReplaceAll(s, "\"", "\\\"")
+	return s
 }
 
 // ValidateExpression performs basic validation on an expression
