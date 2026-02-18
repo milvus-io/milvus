@@ -24,7 +24,6 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -238,7 +237,7 @@ func DecodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 		}
 
 		var partialResultData schemapb.SearchResultData
-		err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
+		err := partialResultData.UnmarshalVT(partialSearchResult.SlicedBlob)
 		if err != nil {
 			return nil, err
 		}
@@ -260,7 +259,7 @@ func EncodeSearchResultData(ctx context.Context, searchResultData *schemapb.Sear
 		MetricType: metricType,
 		SlicedBlob: nil,
 	}
-	slicedBlob, err := proto.Marshal(searchResultData)
+	slicedBlob, err := searchResultData.MarshalVT()
 	if err != nil {
 		return nil, err
 	}

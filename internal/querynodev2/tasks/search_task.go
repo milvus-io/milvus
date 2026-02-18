@@ -14,7 +14,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -132,7 +131,7 @@ func (t *SearchTask) PreExecute() error {
 	}
 
 	// Unmarshal the plan for segment filtering
-	if err := proto.Unmarshal(t.req.GetReq().GetSerializedExprPlan(), t.plan); err != nil {
+	if err := t.plan.UnmarshalVT(t.req.GetReq().GetSerializedExprPlan()); err != nil {
 		return err
 	}
 
@@ -376,7 +375,7 @@ func (t *SearchTask) combinePlaceHolderGroups() error {
 	}
 
 	ret := &commonpb.PlaceholderGroup{}
-	if err := proto.Unmarshal(t.placeholderGroup, ret); err != nil {
+	if err := ret.UnmarshalVT(t.placeholderGroup); err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid search vector placeholder: %v", err)
 	}
 
@@ -385,7 +384,7 @@ func (t *SearchTask) combinePlaceHolderGroups() error {
 	}
 	for _, t := range t.others {
 		x := &commonpb.PlaceholderGroup{}
-		if err := proto.Unmarshal(t.placeholderGroup, x); err != nil {
+		if err := x.UnmarshalVT(t.placeholderGroup); err != nil {
 			return merr.WrapErrParameterInvalidMsg("invalid search vector placeholder: %v", err)
 		}
 		if len(x.GetPlaceholders()) == 0 {
@@ -393,6 +392,6 @@ func (t *SearchTask) combinePlaceHolderGroups() error {
 		}
 		ret.Placeholders[0].Values = append(ret.Placeholders[0].Values, x.Placeholders[0].Values...)
 	}
-	t.placeholderGroup, _ = proto.Marshal(ret)
+	t.placeholderGroup, _ = ret.MarshalVT()
 	return nil
 }

@@ -9,7 +9,6 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -72,7 +71,7 @@ func PruneSegments(ctx context.Context,
 	if typeutil.IsVectorType(clusteringKeyField.GetDataType()) {
 		// parse searched vectors
 		var vectorsHolder commonpb.PlaceholderGroup
-		err := proto.Unmarshal(searchReq.GetPlaceholderGroup(), &vectorsHolder)
+		err := vectorsHolder.UnmarshalVT(searchReq.GetPlaceholderGroup())
 		if err != nil || len(vectorsHolder.GetPlaceholders()) == 0 {
 			return
 		}
@@ -93,7 +92,7 @@ func PruneSegments(ctx context.Context,
 	} else {
 		// 0. parse expr from plan
 		plan := planpb.PlanNode{}
-		err := proto.Unmarshal(expr, &plan)
+		err := plan.UnmarshalVT(expr)
 		if err != nil {
 			log.Ctx(ctx).Error("failed to unmarshall serialized expr from bytes, failed the operation")
 			return

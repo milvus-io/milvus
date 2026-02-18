@@ -10,7 +10,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -598,7 +597,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.plan.Namespace = t.request.Namespace
 
-	t.RetrieveRequest.SerializedExprPlan, err = proto.Marshal(t.plan)
+	t.RetrieveRequest.SerializedExprPlan, err = t.plan.MarshalVT()
 	if err != nil {
 		return err
 	}

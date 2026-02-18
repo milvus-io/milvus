@@ -12,7 +12,6 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -534,7 +533,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 		plan.Namespace = t.request.Namespace
 
-		internalSubReq.SerializedExprPlan, err = proto.Marshal(plan)
+		internalSubReq.SerializedExprPlan, err = plan.MarshalVT()
 		if err != nil {
 			return err
 		}
@@ -592,7 +591,7 @@ func (t *searchTask) fillResult() {
 
 func (t *searchTask) getBM25SearchTexts(placeholder []byte) ([]string, error) {
 	pb := &commonpb.PlaceholderGroup{}
-	proto.Unmarshal(placeholder, pb)
+	pb.UnmarshalVT(placeholder)
 
 	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("please provide varchar/text for BM25 Function based search")
@@ -746,7 +745,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	}
 	plan.Namespace = t.request.Namespace
 
-	t.SearchRequest.SerializedExprPlan, err = proto.Marshal(plan)
+	t.SearchRequest.SerializedExprPlan, err = plan.MarshalVT()
 	if err != nil {
 		return err
 	}

@@ -3,8 +3,6 @@ package tasks
 import (
 	"context"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -61,7 +59,7 @@ func (t *QueryStreamTask) IsGpuIndex() bool {
 
 // PreExecute the task, only call once.
 func (t *QueryStreamTask) PreExecute() error {
-	if err := proto.Unmarshal(t.req.Req.GetSerializedExprPlan(), t.plan); err != nil {
+	if err := t.plan.UnmarshalVT(t.req.Req.GetSerializedExprPlan()); err != nil {
 		return err
 	}
 	return nil
