@@ -347,6 +347,14 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		}
 	}
 
+	// Validate nprobe > 0 for IVF indexes
+	if indexType := sd.getIndexTypeForField(sealed, growing, req.GetReq().GetFieldId()); indexType != "" {
+		if err := ValidateNprobeForIVF(req.GetReq(), indexType); err != nil {
+			log.Warn("nprobe validation failed for IVF index", zap.Error(err))
+			return nil, err
+		}
+	}
+
 	// get final sealedNum after possible segment prune
 	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
 	log.Debug("search segments...",
@@ -1318,6 +1326,40 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	sd.tsCond = sync.NewCond(&m)
 	log.Info("finish build new shardDelegator")
 	return sd, nil
+}
+
+func (sd *shardDelegator) getIndexTypeForField(sealed []SnapshotItem, growing []SegmentEntry, fieldID int64) string {
+	for _, item := range sealed {
+		for _, segEntry := range item.Segments {
+			seg := sd.segmentManager.Get(segments.SegmentTypeSealed, segEntry.SegmentID)
+			if seg != nil {
+				indexInfos := seg.GetIndex(fieldID)
+				for _, info := range indexInfos {
+					for _, param := range info.IndexInfo.GetIndexParams() {
+						if param.Key == common.IndexTypeKey {
+							return param.Value
+						}
+					}
+				}
+			}
+		}
+	}
+
+	for _, segEntry := range growing {
+		seg := sd.segmentManager.Get(segments.SegmentTypeGrowing, segEntry.SegmentID)
+		if seg != nil {
+			indexInfos := seg.GetIndex(fieldID)
+			for _, info := range indexInfos {
+				for _, param := range info.IndexInfo.GetIndexParams() {
+					if param.Key == common.IndexTypeKey {
+						return param.Value
+					}
+				}
+			}
+		}
+	}
+
+	return ""
 }
 
 func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
