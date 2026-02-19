@@ -503,7 +503,8 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, 2, Params.BloomFilterApplyParallelFactor.GetAsInt())
 		assert.Equal(t, true, Params.SkipGrowingSegmentBF.GetAsBool())
-		assert.Equal(t, true, Params.EnableSparseFilterInQuery.GetAsBool())
+		assert.Equal(t, true, Params.EnableSegmentPkHint.GetAsBool())
+		assert.Equal(t, "hints", Params.SegmentPkFilterMode.GetValue())
 
 		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
 

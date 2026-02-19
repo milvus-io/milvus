@@ -24,17 +24,44 @@
 #include "common/QueryInfo.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "log/Log.h"
+#include "pb/plan.pb.h"
 #include "query/Plan.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "segcore/Collection.h"
 #include "segcore/plan_c.h"
 
+// Helper: parse serialized SegmentPkHintList into a segment_hints_ map.
+// Returns false on failure (caller should fall back to no-hint mode).
+static bool
+ParseSegmentHints(
+    const void* data,
+    int64_t size,
+    std::unordered_map<int64_t, std::vector<milvus::proto::plan::GenericValue>>&
+        out) {
+    milvus::proto::plan::SegmentPkHintList hint_list;
+    if (!hint_list.ParseFromArray(data, static_cast<int>(size))) {
+        return false;
+    }
+
+    for (const auto& hint : hint_list.hints()) {
+        auto& values = out[hint.segment_id()];
+        values.reserve(hint.filtered_pk_values_size());
+        for (const auto& v : hint.filtered_pk_values()) {
+            values.push_back(v);
+        }
+    }
+    return true;
+}
+
 // Note: serialized_expr_plan is of binary format
 CStatus
 CreateSearchPlanByExpr(CCollection c_col,
                        const void* serialized_expr_plan,
                        const int64_t size,
+                       const void* hints_data,
+                       const int64_t hints_size,
                        CSearchPlan* res_plan) {
     auto col = static_cast<milvus::segcore::Collection*>(c_col);
     auto schema = col->get_schema();
@@ -63,6 +90,14 @@ CreateSearchPlanByExpr(CCollection c_col,
             col_index_meta->GetFieldIndexMeta(milvus::FieldId(field_id));
         res->plan_node_->search_info_.metric_type_ =
             field_index_meta.GeMetricType();
+
+        if (hints_data != nullptr && hints_size > 0) {
+            if (!ParseSegmentHints(
+                    hints_data, hints_size, res->segment_hints_)) {
+                LOG_WARN("failed to parse segment hints, ignoring");
+                res->segment_hints_.clear();
+            }
+        }
 
         auto status = CStatus();
         status.error_code = milvus::Success;
@@ -168,12 +203,22 @@ CStatus
 CreateRetrievePlanByExpr(CCollection c_col,
                          const void* serialized_expr_plan,
                          const int64_t size,
+                         const void* hints_data,
+                         const int64_t hints_size,
                          CRetrievePlan* res_plan) {
     auto col = static_cast<milvus::segcore::Collection*>(c_col);
 
     try {
         auto res = milvus::query::CreateRetrievePlanByExpr(
             col->get_schema(), serialized_expr_plan, size);
+
+        if (hints_data != nullptr && hints_size > 0) {
+            if (!ParseSegmentHints(
+                    hints_data, hints_size, res->segment_hints_)) {
+                LOG_WARN("failed to parse segment hints, ignoring");
+                res->segment_hints_.clear();
+            }
+        }
 
         auto status = CStatus();
         status.error_code = milvus::Success;

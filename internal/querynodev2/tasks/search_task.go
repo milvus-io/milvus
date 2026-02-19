@@ -173,7 +173,6 @@ func (t *SearchTask) Execute() error {
 			req.GetReq().GetCollectionID(),
 			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
-			t.plan,
 		)
 	} else if req.GetScope() == querypb.DataScope_Streaming {
 		results, searchedSegments, err = segments.SearchStreaming(
@@ -183,7 +182,6 @@ func (t *SearchTask) Execute() error {
 			req.GetReq().GetCollectionID(),
 			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
-			t.plan,
 		)
 	}
 	defer t.segmentManager.Segment.Unpin(searchedSegments)

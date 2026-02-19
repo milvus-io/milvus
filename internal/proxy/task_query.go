@@ -602,6 +602,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	t.RetrieveRequest.PkFilterHint = computePkFilterHint(t.plan)
 
 	// Set username for this query request,
 	if username, _ := GetCurUserFromContext(ctx); username != "" {

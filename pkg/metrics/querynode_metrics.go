@@ -386,6 +386,45 @@ var (
 			queryTypeLabelName,
 		})
 
+	QueryNodeSegmentPkHintHitSegmentNum = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_pk_hint_hit_segment_num",
+			Help:      "the number of segments with non-empty PK hint values",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			queryTypeLabelName,
+		})
+
+	QueryNodeSegmentPkHintSkippedSegmentNum = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_pk_hint_skipped_segment_num",
+			Help:      "the number of segments skipped by PK hint optimization",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			queryTypeLabelName,
+		})
+
+	QueryNodeSegmentPkHintFilteredPkNum = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_pk_hint_filtered_pk_num",
+			Help:      "the number of PK values remaining after segment PK hint filtering",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			queryTypeLabelName,
+		})
+
 	QueryNodeSegmentPruneRatio = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -894,6 +933,9 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeApplyBFCost)
 	registry.MustRegister(QueryNodeForwardDeleteCost)
 	registry.MustRegister(QueryNodeSearchHitSegmentNum)
+	registry.MustRegister(QueryNodeSegmentPkHintHitSegmentNum)
+	registry.MustRegister(QueryNodeSegmentPkHintSkippedSegmentNum)
+	registry.MustRegister(QueryNodeSegmentPkHintFilteredPkNum)
 	registry.MustRegister(QueryNodeDeleteBufferSize)
 	registry.MustRegister(QueryNodeDeleteBufferRowNum)
 	registry.MustRegister(QueryNodeCGOCallLatency)
@@ -955,6 +997,27 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 			})
 
 	QueryNodeSearchHitSegmentNum.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodeSegmentPkHintHitSegmentNum.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodeSegmentPkHintSkippedSegmentNum.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodeSegmentPkHintFilteredPkNum.
 		DeletePartialMatch(
 			prometheus.Labels{
 				nodeIDLabelName:       nodeIDLabel,

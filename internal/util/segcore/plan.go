@@ -30,8 +30,12 @@ import (
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -43,9 +47,15 @@ type SearchPlan struct {
 	cSearchPlan C.CSearchPlan
 }
 
-func createSearchPlanByExpr(col *CCollection, expr []byte) (*SearchPlan, error) {
+func createSearchPlanByExpr(col *CCollection, expr []byte, hintsData []byte) (*SearchPlan, error) {
 	var cPlan C.CSearchPlan
-	status := C.CreateSearchPlanByExpr(col.rawPointer(), unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
+	var hintsPtr unsafe.Pointer
+	var hintsSize C.int64_t
+	if len(hintsData) > 0 {
+		hintsPtr = unsafe.Pointer(&hintsData[0])
+		hintsSize = C.int64_t(len(hintsData))
+	}
+	status := C.CreateSearchPlanByExpr(col.rawPointer(), unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), hintsPtr, hintsSize, &cPlan)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, errors.Wrap(err, "Create Plan by expr failed")
 	}
@@ -82,12 +92,25 @@ type SearchRequest struct {
 	mvccTimestamp     typeutil.Timestamp
 	consistencyLevel  commonpb.ConsistencyLevel
 	collectionTTL     typeutil.Timestamp
+	segmentPkHints    *planpb.SegmentPkHintList
 }
 
 func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
 	metricType := req.GetReq().GetMetricType()
 	expr := req.Req.SerializedExprPlan
-	plan, err := createSearchPlanByExpr(collection, expr)
+
+	// Marshal per-segment PK hints if present
+	var hintsData []byte
+	if hints := req.GetSegmentPkHints(); hints != nil && len(hints.GetHints()) > 0 {
+		var err error
+		hintsData, err = proto.Marshal(hints)
+		if err != nil {
+			log.Warn("failed to marshal segment PK hints, proceeding without hints", zap.Error(err))
+			hintsData = nil
+		}
+	}
+
+	plan, err := createSearchPlanByExpr(collection, expr, hintsData)
 	if err != nil {
 		return nil, err
 	}
@@ -127,6 +150,7 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 		mvccTimestamp:     req.GetReq().GetMvccTimestamp(),
 		consistencyLevel:  req.GetReq().GetConsistencyLevel(),
 		collectionTTL:     req.GetReq().GetCollectionTtlTimestamps(),
+		segmentPkHints:    req.GetSegmentPkHints(),
 	}, nil
 }
 
@@ -137,6 +161,10 @@ func (req *SearchRequest) GetNumOfQuery() int64 {
 
 func (req *SearchRequest) MVCC() typeutil.Timestamp {
 	return req.mvccTimestamp
+}
+
+func (req *SearchRequest) GetSegmentPkHints() *planpb.SegmentPkHintList {
+	return req.segmentPkHints
 }
 
 func (req *SearchRequest) Plan() *SearchPlan {
@@ -165,12 +193,27 @@ type RetrievePlan struct {
 	collectionTTL    typeutil.Timestamp
 }
 
-func NewRetrievePlan(col *CCollection, expr []byte, timestamp typeutil.Timestamp, msgID int64, consistencylevel commonpb.ConsistencyLevel, collectionTTL typeutil.Timestamp) (*RetrievePlan, error) {
+func NewRetrievePlan(col *CCollection, expr []byte, timestamp typeutil.Timestamp, msgID int64, consistencylevel commonpb.ConsistencyLevel, collectionTTL typeutil.Timestamp, hints *planpb.SegmentPkHintList) (*RetrievePlan, error) {
 	if col.rawPointer() == nil {
 		return nil, errors.New("collection is released")
 	}
 	var cPlan C.CRetrievePlan
-	status := C.CreateRetrievePlanByExpr(col.rawPointer(), unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
+	var hintsData []byte
+	if hints != nil && len(hints.GetHints()) > 0 {
+		var marshalErr error
+		hintsData, marshalErr = proto.Marshal(hints)
+		if marshalErr != nil {
+			log.Warn("failed to marshal segment PK hints for retrieve, proceeding without hints", zap.Error(marshalErr))
+			hintsData = nil
+		}
+	}
+	var hintsPtr unsafe.Pointer
+	var hintsSize C.int64_t
+	if len(hintsData) > 0 {
+		hintsPtr = unsafe.Pointer(&hintsData[0])
+		hintsSize = C.int64_t(len(hintsData))
+	}
+	status := C.CreateRetrievePlanByExpr(col.rawPointer(), unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), hintsPtr, hintsSize, &cPlan)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, errors.Wrap(err, "Create retrieve plan by expr failed")
 	}

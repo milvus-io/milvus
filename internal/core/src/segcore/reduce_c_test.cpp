@@ -81,7 +81,7 @@ TEST(CApiTest, ReduceNullResult) {
 
     void* plan = nullptr;
     status = CreateSearchPlanByExpr(
-        collection, plan_str.data(), plan_str.size(), &plan);
+        collection, plan_str.data(), plan_str.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -169,7 +169,7 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
 
     void* plan = nullptr;
     status = CreateSearchPlanByExpr(
-        collection, plan_str.data(), plan_str.size(), &plan);
+        collection, plan_str.data(), plan_str.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -308,7 +308,7 @@ testReduceSearchWithExpr(int N,
                                   "L2",                  // metric_type
                                   R"({"nprobe": 10})");  // search_params
     status = CreateSearchPlanByExpr(
-        collection, binary_plan.data(), binary_plan.size(), &plan);
+        collection, binary_plan.data(), binary_plan.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;

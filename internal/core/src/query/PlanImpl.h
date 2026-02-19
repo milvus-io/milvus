@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "Plan.h"
@@ -24,6 +25,7 @@
 #include "common/Consts.h"
 #include "common/Schema.h"
 #include "common/Utils.h"
+#include "pb/plan.pb.h"
 
 namespace milvus::query {
 
@@ -64,6 +66,9 @@ struct Plan {
 
  public:
     std::optional<ExtractedPlanInfo> extra_info_opt_;
+    // Per-segment PK hints from Delegator (set via CGo, not parsed from plan proto)
+    std::unordered_map<int64_t, std::vector<proto::plan::GenericValue>>
+        segment_hints_;
     // TODO: add move extra info
 };
 
@@ -124,6 +129,9 @@ struct RetrievePlan {
     std::unique_ptr<RetrievePlanNode> plan_node_;
     std::vector<FieldId> field_ids_;
     std::vector<std::string> target_dynamic_fields_;
+    // Per-segment PK hints from Delegator (set via CGo, not parsed from plan proto)
+    std::unordered_map<int64_t, std::vector<proto::plan::GenericValue>>
+        segment_hints_;
 };
 
 using PlanPtr = std::unique_ptr<Plan>;

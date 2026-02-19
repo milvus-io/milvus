@@ -17,6 +17,7 @@
 #include <memory>
 #include <optional>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 #include "PlanNodeVisitor.h"
@@ -36,6 +37,9 @@ namespace milvus::query {
 
 class ExecPlanNodeVisitor : public PlanNodeVisitor {
  public:
+    using SegmentHintMap =
+        std::unordered_map<int64_t, std::vector<proto::plan::GenericValue>>;
+
     void
     visit(VectorPlanNode& node) override;
 
@@ -89,7 +93,6 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     RetrieveResult
     get_retrieve_result(PlanNode& node) {
         assert(!retrieve_result_opt_.has_value());
-        std::cout.flush();
         node.accept(*this);
         assert(retrieve_result_opt_.has_value());
         auto ret = std::move(retrieve_result_opt_).value();
@@ -106,6 +109,11 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     bool
     GetExprUsePkIndex() {
         return expr_use_pk_index_;
+    }
+
+    void
+    SetSegmentHints(const SegmentHintMap* hints) {
+        segment_hints_ = hints;
     }
 
     static RowVectorPtr
@@ -131,6 +139,9 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     RetrieveResultOpt retrieve_result_opt_;
 
     bool expr_use_pk_index_ = false;
+
+    // Per-segment PK hints from Delegator (borrowed pointer; owned by plan).
+    const SegmentHintMap* segment_hints_{nullptr};
 };
 
 // for test use only

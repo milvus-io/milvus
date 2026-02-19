@@ -27,16 +27,15 @@ type candidateKey struct {
 	typ         commonpb.SegmentState
 }
 
-// MayPkExist checks whether primary key could exists in this candidate.
+// MayPkExist always returns true for candidateKey since it has no bloom filter.
 func (k candidateKey) MayPkExist(lc *storage.LocationsCache) bool {
-	// always return true to prevent miuse
 	return true
 }
 
 func (k candidateKey) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
-	ret := make([]bool, 0)
-	for i := 0; i < lc.Size(); i++ {
-		ret = append(ret, true)
+	ret := make([]bool, lc.Size())
+	for i := range ret {
+		ret[i] = true
 	}
 	return ret
 }

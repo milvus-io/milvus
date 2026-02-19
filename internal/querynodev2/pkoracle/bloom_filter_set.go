@@ -43,7 +43,7 @@ var _ Candidate = (*BloomFilterSet)(nil)
 type BloomFilterSet struct {
 	statsMutex   sync.RWMutex
 	segmentID    int64
-	paritionID   int64
+	partitionID  int64
 	segType      commonpb.SegmentState
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
@@ -85,27 +85,29 @@ func (s *BloomFilterSet) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
 	return hits
 }
 
-// ID implement candidate.
+// ID implements Candidate.
 func (s *BloomFilterSet) ID() int64 {
 	return s.segmentID
 }
 
-// Partition implements candidate.
+// Partition implements Candidate.
 func (s *BloomFilterSet) Partition() int64 {
-	return s.paritionID
+	return s.partitionID
 }
 
-// Type implements candidate.
+// Type implements Candidate.
 func (s *BloomFilterSet) Type() commonpb.SegmentState {
 	return s.segType
 }
 
-// Get stats
+// Stats returns the current bloom filter statistics.
+// Lock-free: BloomFilterSet is immutable after construction and registration.
 func (s *BloomFilterSet) Stats() *storage.PkStatistics {
 	return s.currentStat
 }
 
-// Have BloomFilter exist
+// BloomFilterExist returns true if any bloom filter (current or historical) is present.
+// Lock-free: BloomFilterSet is immutable after construction and registration.
 func (s *BloomFilterSet) BloomFilterExist() bool {
 	return s.currentStat != nil || s.historyStats != nil
 }
@@ -249,12 +251,10 @@ func (s *BloomFilterSet) memSizeLocked() int64 {
 }
 
 // NewBloomFilterSet returns a new BloomFilterSet.
-func NewBloomFilterSet(segmentID int64, paritionID int64, segType commonpb.SegmentState) *BloomFilterSet {
-	bfs := &BloomFilterSet{
-		segmentID:  segmentID,
-		paritionID: paritionID,
-		segType:    segType,
+func NewBloomFilterSet(segmentID int64, partitionID int64, segType commonpb.SegmentState) *BloomFilterSet {
+	return &BloomFilterSet{
+		segmentID:   segmentID,
+		partitionID: partitionID,
+		segType:     segType,
 	}
-	// does not need to init current
-	return bfs
 }

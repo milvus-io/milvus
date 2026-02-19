@@ -288,6 +288,8 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
                                                      consistency_level_,
                                                      node.plan_options_);
 
+    query_context->set_segment_hints(segment_hints_);
+
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
     query_context->set_op_context(&op_context);
@@ -384,6 +386,8 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     query_context->set_search_info(node.search_info_);
     query_context->set_placeholder_group(placeholder_group_);
+
+    query_context->set_segment_hints(segment_hints_);
 
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);

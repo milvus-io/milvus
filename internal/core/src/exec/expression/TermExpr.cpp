@@ -202,24 +202,32 @@ PhyTermFilterExpr::CanSkipSegment() {
 
 void
 PhyTermFilterExpr::InitPkCacheOffset() {
+    const bool has_filtered_hints = pk_hints_ != nullptr && !pk_hints_->empty();
+
+    // If per-segment PK hints are available and non-empty, use the filtered
+    // PK values instead of the original TermExpr values. An empty hints
+    // vector means "fall back to original PKs" (segment passed the merged
+    // filter stage but no specific filtering was done).
+    const auto& vals_to_use = has_filtered_hints ? *pk_hints_ : expr_->vals_;
+
     auto id_array = std::make_unique<IdArray>();
     switch (pk_type_) {
         case DataType::INT64: {
-            if (CanSkipSegment<int64_t>()) {
+            if (!has_filtered_hints && CanSkipSegment<int64_t>()) {
                 return;
             }
             auto dst_ids = id_array->mutable_int_id();
-            for (const auto& id : expr_->vals_) {
+            for (const auto& id : vals_to_use) {
                 dst_ids->add_data(GetValueFromProto<int64_t>(id));
             }
             break;
         }
         case DataType::VARCHAR: {
-            if (CanSkipSegment<std::string>()) {
+            if (!has_filtered_hints && CanSkipSegment<std::string>()) {
                 return;
             }
             auto dst_ids = id_array->mutable_str_id();
-            for (const auto& id : expr_->vals_) {
+            for (const auto& id : vals_to_use) {
                 dst_ids->add_data(GetValueFromProto<std::string>(id));
             }
             break;

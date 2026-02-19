@@ -200,7 +200,8 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
 		typeutil.MaxTimestamp,
 		0,
 		0,
-		0)
+		0,
+		nil)
 	suite.Error(err)
 	suite.Nil(retrievePlan)
 
@@ -219,7 +220,8 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
 		typeutil.MaxTimestamp,
 		0,
 		0,
-		0)
+		0,
+		nil)
 	suite.NotNil(retrievePlan)
 	suite.NoError(err)
 
