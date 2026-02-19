@@ -230,3 +230,67 @@ func Test_VecIndex_IsMvSupported(t *testing.T) {
 		}
 	}
 }
+
+func Test_VecIndex_IsIVFIndexType(t *testing.T) {
+	mgr := GetVecIndexMgrInstance()
+	tests := []struct {
+		indexType IndexType
+		want      bool
+	}{
+		{
+			indexType: "IVF_FLAT",
+			want:      true,
+		},
+		{
+			indexType: "IVF_PQ",
+			want:      true,
+		},
+		{
+			indexType: "IVF_SQ8",
+			want:      true,
+		},
+		{
+			indexType: "SCANN",
+			want:      true,
+		},
+		{
+			indexType: "BIN_IVF_FLAT",
+			want:      true,
+		},
+		{
+			indexType: "GPU_IVF_FLAT",
+			want:      true,
+		},
+		{
+			indexType: "GPU_IVF_PQ",
+			want:      true,
+		},
+		{
+			indexType: "IVF_RABITQ",
+			want:      true,
+		},
+		{
+			indexType: "FLAT",
+			want:      false,
+		},
+		{
+			indexType: "HNSW",
+			want:      false,
+		},
+		{
+			indexType: "DISKANN",
+			want:      false,
+		},
+		{
+			indexType: "UNKNOWN",
+			want:      false,
+		},
+	}
+
+	for _, test := range tests {
+		got := mgr.IsIVFIndexType(test.indexType)
+		if got != test.want {
+			t.Errorf("IsIVFIndexType(%v) = %v, want %v", test.indexType, got, test.want)
+		}
+	}
+}

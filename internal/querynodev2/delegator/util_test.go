@@ -19,6 +19,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 )
 
 func TestBytesOffsetToRuneOffset(t *testing.T) {
@@ -35,4 +39,97 @@ func TestBytesOffsetToRuneOffset(t *testing.T) {
 	err = bytesOffsetToRuneOffset(text, spans)
 	assert.NoError(t, err)
 	assert.Equal(t, SpanList{{0, 5}, {5, 6}, {6, 11}}, spans)
+}
+
+func TestValidateNprobeForIVF(t *testing.T) {
+	createSearchRequest := func(searchParams string) *internalpb.SearchRequest {
+		plan := &planpb.PlanNode{
+			Node: &planpb.PlanNode_VectorAnns{
+				VectorAnns: &planpb.VectorANNS{
+					QueryInfo: &planpb.QueryInfo{
+						SearchParams: searchParams,
+					},
+				},
+			},
+		}
+		serializedPlan, _ := proto.Marshal(plan)
+		return &internalpb.SearchRequest{
+			SerializedExprPlan: serializedPlan,
+		}
+	}
+
+	tests := []struct {
+		name        string
+		req         *internalpb.SearchRequest
+		indexType   string
+		expectError bool
+	}{
+		{
+			name:        "non-IVF index type should pass",
+			req:         createSearchRequest(`{"nprobe": 0}`),
+			indexType:   "HNSW",
+			expectError: false,
+		},
+		{
+			name:        "IVF_FLAT with valid nprobe",
+			req:         createSearchRequest(`{"nprobe": 10}`),
+			indexType:   "IVF_FLAT",
+			expectError: false,
+		},
+		{
+			name:        "IVF_FLAT with nprobe 0 should fail",
+			req:         createSearchRequest(`{"nprobe": 0}`),
+			indexType:   "IVF_FLAT",
+			expectError: true,
+		},
+		{
+			name:        "IVF_PQ with nprobe 0 should fail",
+			req:         createSearchRequest(`{"nprobe": 0}`),
+			indexType:   "IVF_PQ",
+			expectError: true,
+		},
+		{
+			name:        "IVF_FLAT with missing nprobe should pass",
+			req:         createSearchRequest(`{}`),
+			indexType:   "IVF_FLAT",
+			expectError: false,
+		},
+		{
+			name:        "IVF_FLAT with empty search params should pass",
+			req:         createSearchRequest(``),
+			indexType:   "IVF_FLAT",
+			expectError: false,
+		},
+		{
+			name: "IVF_FLAT with nil serialized plan should pass",
+			req: &internalpb.SearchRequest{
+				SerializedExprPlan: nil,
+			},
+			indexType:   "IVF_FLAT",
+			expectError: false,
+		},
+		{
+			name:        "SCANN with nprobe 0 should fail",
+			req:         createSearchRequest(`{"nprobe": 0}`),
+			indexType:   "SCANN",
+			expectError: true,
+		},
+		{
+			name:        "GPU_IVF_FLAT with nprobe 0 should fail",
+			req:         createSearchRequest(`{"nprobe": 0}`),
+			indexType:   "GPU_IVF_FLAT",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateNprobeForIVF(tt.req, tt.indexType)
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
