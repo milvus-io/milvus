@@ -1331,7 +1331,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 func (sd *shardDelegator) getIndexTypeForField(sealed []SnapshotItem, growing []SegmentEntry, fieldID int64) string {
 	for _, item := range sealed {
 		for _, segEntry := range item.Segments {
-			seg := sd.segmentManager.Get(segments.SegmentTypeSealed, segEntry.SegmentID)
+			seg := sd.segmentManager.Get(segEntry.SegmentID)
 			if seg != nil {
 				indexInfos := seg.GetIndex(fieldID)
 				for _, info := range indexInfos {
@@ -1346,7 +1346,7 @@ func (sd *shardDelegator) getIndexTypeForField(sealed []SnapshotItem, growing []
 	}
 
 	for _, segEntry := range growing {
-		seg := sd.segmentManager.Get(segments.SegmentTypeGrowing, segEntry.SegmentID)
+		seg := sd.segmentManager.Get(segEntry.SegmentID)
 		if seg != nil {
 			indexInfos := seg.GetIndex(fieldID)
 			for _, info := range indexInfos {
