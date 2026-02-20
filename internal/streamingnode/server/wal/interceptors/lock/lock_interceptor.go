@@ -8,7 +8,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 )
 
@@ -31,7 +30,7 @@ func (r *lockAppendInterceptor) acquireLockGuard(_ context.Context, msg message.
 	// Acquire the write lock for the vchannel.
 	vchannel := msg.VChannel()
 	if msg.MessageType().IsExclusiveRequired() {
-		if vchannel == "" || vchannel == r.channel.Name || (funcutil.IsControlChannel(vchannel) && (msg.MessageType() == message.MessageTypeAlterReplicateConfig || msg.MessageType().IsBroadcastToAll())) {
+		if vchannel == "" || vchannel == r.channel.Name || msg.IsPChannelLevel() {
 			r.glock.Lock()
 			return func() {
 				// fail all transactions at all vchannels.

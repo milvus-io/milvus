@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 )
 
 type messageImpl struct {
@@ -65,6 +66,20 @@ func (m *messageImpl) Properties() RProperties {
 // IsPersisted returns true if the message is persisted.
 func (m *messageImpl) IsPersisted() bool {
 	return !m.properties.Exist(messageNotPersisteted)
+}
+
+// IsPChannelLevel returns true if the message is a pchannel-level message.
+// A message is pchannel-level if it has the explicit property set, or if it is
+// a broadcast-to-all or AlterReplicateConfig message sent on the control channel.
+func (m *messageImpl) IsPChannelLevel() bool {
+	if m.properties.Exist(messagePChannelLevel) {
+		return true
+	}
+	msgType := m.MessageType()
+	if msgType.IsBroadcastToAll() || msgType == MessageTypeAlterReplicateConfig {
+		return funcutil.IsControlChannel(m.VChannel())
+	}
+	return false
 }
 
 // IntoMessageProto converts the message to a protobuf message.
@@ -276,6 +291,11 @@ func (m *messageImpl) BarrierTimeTick() uint64 {
 		panic(fmt.Sprintf("there's a bug in the message codes, dirty barrier timetick %s in properties of message", value))
 	}
 	return tt
+}
+
+// PChannel returns the physical channel derived from VChannel.
+func (m *messageImpl) PChannel() string {
+	return funcutil.ToPhysicalChannel(m.VChannel())
 }
 
 // VChannel returns the vchannel of current message.
