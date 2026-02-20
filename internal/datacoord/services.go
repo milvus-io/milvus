@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
@@ -195,35 +194,11 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 	}
 	defer broadcaster.Close()
 
-	// Get broadcast pchannels
-	balancer, err := balance.GetWithContext(ctx)
-	if err != nil {
-		return &datapb.FlushAllResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	latestAssignment, err := balancer.GetLatestChannelAssignment()
-	if err != nil {
-		return &datapb.FlushAllResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	controlChannel := streaming.WAL().ControlChannel()
-	pchannels := lo.MapToSlice(latestAssignment.PChannelView.Channels, func(_ channel.ChannelID, channel *channel.PChannelMeta) string {
-		return channel.Name()
-	})
-	broadcastPChannels := lo.Map(pchannels, func(pchannel string, _ int) string {
-		if funcutil.IsOnPhysicalChannel(controlChannel, pchannel) {
-			// return control channel if the control channel is on the pchannel.
-			return controlChannel
-		}
-		return pchannel
-	})
-
+	cc := channel.GetClusterChannels()
 	broadcastFlushAllMsg := message.NewFlushAllMessageBuilderV2().
 		WithHeader(&message.FlushAllMessageHeader{}).
 		WithBody(&message.FlushAllMessageBody{}).
-		WithBroadcast(broadcastPChannels).
+		WithClusterLevelBroadcast(cc).
 		MustBuildBroadcast()
 	res, err := broadcaster.Broadcast(ctx, broadcastFlushAllMsg)
 	if err != nil {
@@ -238,20 +213,20 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 	for _, msg := range msgs {
 		appendResult := res.GetAppendResult(msg.VChannel())
 		// if is control channel, convert it to physical channel.
-		channel := funcutil.ToPhysicalChannel(msg.VChannel())
-		flushAllMsgs[channel] = msg.WithTimeTick(appendResult.TimeTick).
+		pchannel := msg.PChannel()
+		flushAllMsgs[pchannel] = msg.WithTimeTick(appendResult.TimeTick).
 			WithLastConfirmed(appendResult.LastConfirmedMessageID).
 			IntoImmutableMessage(appendResult.MessageID).
 			IntoImmutableMessageProto()
 	}
-	log.Ctx(ctx).Info("FlushAll successfully", zap.Strings("broadcastedPChannels", broadcastPChannels), log.FieldMessages(msgs))
+	log.Ctx(ctx).Info("FlushAll successfully", log.FieldMessages(msgs))
 	return &datapb.FlushAllResponse{
 		Status:       merr.Success(),
 		FlushAllMsgs: flushAllMsgs,
 		ClusterInfo: &milvuspb.ClusterInfo{
 			ClusterId: Params.CommonCfg.ClusterID.GetValue(),
-			Cchannel:  controlChannel,
-			Pchannels: pchannels,
+			Cchannel:  cc.ControlChannel,
+			Pchannels: cc.Channels,
 		},
 	}, nil
 }
