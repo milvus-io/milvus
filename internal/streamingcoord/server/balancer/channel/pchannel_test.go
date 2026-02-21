@@ -9,6 +9,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
+func TestPChannelAvailableInReplication(t *testing.T) {
+	// Default: available
+	pchannel := NewPChannelMeta("ch1", types.AccessModeRW)
+	assert.True(t, pchannel.AvailableInReplication())
+
+	// Explicitly unavailable
+	pchannel = newPChannelMetaWithAvailability("ch2", types.AccessModeRW, false)
+	assert.False(t, pchannel.AvailableInReplication())
+
+	// Explicitly available
+	pchannel = newPChannelMetaWithAvailability("ch3", types.AccessModeRW, true)
+	assert.True(t, pchannel.AvailableInReplication())
+
+	// From proto: defaults to available (proto doesn't store this)
+	pchannel = newPChannelMetaFromProto(&streamingpb.PChannelMeta{
+		Channel: &streamingpb.PChannelInfo{Name: "ch4", Term: 1},
+		State:   streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED,
+	})
+	assert.True(t, pchannel.AvailableInReplication())
+}
+
 func TestPChannel(t *testing.T) {
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
