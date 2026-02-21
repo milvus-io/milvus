@@ -238,9 +238,10 @@ func (cm *ChannelManager) ReplicateRole() replicateutil.Role {
 }
 
 // AddPChannels adds new PChannels dynamically. Channels that already exist are skipped.
-// Only newly added channels are persisted and version is incremented.
+// Only newly added channels are persisted. Local version is not incremented
+// because new PChannels should not trigger service discovery.
 func (cm *ChannelManager) AddPChannels(ctx context.Context, newChannels []string) error {
-	cm.cond.LockAndBroadcast()
+	cm.cond.L.Lock()
 	defer cm.cond.L.Unlock()
 
 	newMetas := make([]*streamingpb.PChannelMeta, 0, len(newChannels))
@@ -273,9 +274,6 @@ func (cm *ChannelManager) AddPChannels(ctx context.Context, newChannels []string
 		cm.Logger().Error("failed to save new pchannels", zap.Error(err))
 		return err
 	}
-
-	cm.version.Local++
-	cm.metrics.UpdateAssignmentVersion(cm.version.Local)
 
 	cm.Logger().Info("dynamically added new pchannels",
 		zap.Int("count", len(newMetas)),

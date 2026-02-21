@@ -608,6 +608,49 @@ func TestChannelManager_AddPChannels_ROWhenStreamingNotEnabled(t *testing.T) {
 	assert.Equal(t, types.AccessModeRO, ch.ChannelInfo().AccessMode)
 }
 
+func TestChannelManager_AddPChannels_PersistFailureRollback(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+
+	ctx := context.Background()
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "test-channel",
+	}, nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{
+		Version: 1,
+	}, nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+		{
+			Channel: &streamingpb.PChannelInfo{Name: "test-channel", Term: 1},
+			Node:    &streamingpb.StreamingNodeInfo{ServerId: 1},
+		},
+	}, nil)
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+
+	persistErr := errors.New("persist failure")
+	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(persistErr)
+
+	m, err := RecoverChannelManager(ctx, "test-channel")
+	assert.NoError(t, err)
+
+	// Attempt to add channels; persist fails
+	err = m.AddPChannels(ctx, []string{"fail-channel-1", "fail-channel-2"})
+	assert.ErrorIs(t, err, persistErr)
+
+	// Channels should be rolled back — still only the original channel
+	view := m.CurrentPChannelsView()
+	assert.Len(t, view.Channels, 1)
+	_, ok := view.Channels[ChannelID{Name: "test-channel"}]
+	assert.True(t, ok)
+	_, ok = view.Channels[ChannelID{Name: "fail-channel-1"}]
+	assert.False(t, ok)
+}
+
 func newChannelID(name string) ChannelID {
 	return ChannelID{
 		Name: name,
