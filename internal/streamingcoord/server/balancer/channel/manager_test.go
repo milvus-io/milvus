@@ -523,6 +523,91 @@ func TestChannelManagerWatch(t *testing.T) {
 	<-done
 }
 
+func TestChannelManager_AddPChannels(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+
+	ctx := context.Background()
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "test-channel",
+	}, nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{
+		Version: 1,
+	}, nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+		{
+			Channel: &streamingpb.PChannelInfo{Name: "test-channel", Term: 1},
+			Node:    &streamingpb.StreamingNodeInfo{ServerId: 1},
+		},
+	}, nil)
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil)
+
+	m, err := RecoverChannelManager(ctx, "test-channel")
+	assert.NoError(t, err)
+	assert.NotNil(t, m)
+
+	// Initial state: 1 channel
+	view := m.CurrentPChannelsView()
+	assert.Len(t, view.Channels, 1)
+
+	// Add new channels
+	err = m.AddPChannels(ctx, []string{"new-channel-1", "new-channel-2"})
+	assert.NoError(t, err)
+
+	// Should now have 3 channels
+	view = m.CurrentPChannelsView()
+	assert.Len(t, view.Channels, 3)
+
+	// Adding existing channels should be idempotent
+	err = m.AddPChannels(ctx, []string{"test-channel", "new-channel-1"})
+	assert.NoError(t, err)
+	view = m.CurrentPChannelsView()
+	assert.Len(t, view.Channels, 3) // No change
+
+	// Adding a mix of existing and new
+	err = m.AddPChannels(ctx, []string{"test-channel", "brand-new-channel"})
+	assert.NoError(t, err)
+	view = m.CurrentPChannelsView()
+	assert.Len(t, view.Channels, 4)
+}
+
+func TestChannelManager_AddPChannels_ROWhenStreamingNotEnabled(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+
+	ctx := context.Background()
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "test-channel",
+	}, nil)
+	// streamingVersion is nil => streaming never enabled
+	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil)
+
+	m, err := RecoverChannelManager(ctx, "test-channel")
+	assert.NoError(t, err)
+
+	err = m.AddPChannels(ctx, []string{"new-ro-channel"})
+	assert.NoError(t, err)
+
+	view := m.CurrentPChannelsView()
+	ch, ok := view.Channels[ChannelID{Name: "new-ro-channel"}]
+	assert.True(t, ok)
+	assert.Equal(t, types.AccessModeRO, ch.ChannelInfo().AccessMode)
+}
+
 func newChannelID(name string) ChannelID {
 	return ChannelID{
 		Name: name,

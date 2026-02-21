@@ -2,7 +2,6 @@ package balancer
 
 import (
 	"context"
-	"sort"
 	"sync"
 	"time"
 
@@ -34,18 +33,15 @@ const (
 // RecoverBalancer recover the balancer working.
 func RecoverBalancer(
 	ctx context.Context,
-	incomingNewChannel ...string, // Concurrent incoming new channel directly from the configuration.
-	// we should add a rpc interface for creating new incoming new channel.
+	provider ChannelProvider,
 ) (Balancer, error) {
-	sort.Strings(incomingNewChannel)
-
 	policyBuilder := mustGetPolicy(paramtable.Get().StreamingCfg.WALBalancerPolicyName.GetValue())
 	policy := policyBuilder.Build()
 	logger := resource.Resource().Logger().With(log.FieldComponent("balancer"), zap.String("policy", policyBuilder.Name()))
 	policy.SetLogger(logger)
 
 	// Recover the channel view from catalog.
-	manager, err := channel.RecoverChannelManager(ctx, incomingNewChannel...)
+	manager, err := channel.RecoverChannelManager(ctx, provider.GetInitialChannels()...)
 	if err != nil {
 		return nil, errors.Wrap(err, "fail to recover channel manager")
 	}
@@ -55,6 +51,7 @@ func RecoverBalancer(
 		ctx:                    ctx,
 		cancel:                 cancel,
 		lifetime:               typeutil.NewLifetime(),
+		provider:               provider,
 		channelMetaManager:     manager,
 		policy:                 policy,
 		reqCh:                  make(chan *request, 5),
@@ -77,6 +74,7 @@ type balancerImpl struct {
 	ctx                    context.Context
 	cancel                 context.CancelCauseFunc
 	lifetime               *typeutil.Lifetime
+	provider               ChannelProvider
 	channelMetaManager     *channel.ChannelManager
 	policy                 Policy                                // policy is the balance policy, TODO: should be dynamic in future.
 	reqCh                  chan *request                         // reqCh is the request channel, send the operation to background task.
@@ -231,6 +229,7 @@ func (b *balancerImpl) sendRequestAndWaitFinish(ctx context.Context, newReq *req
 // Close close the balancer.
 func (b *balancerImpl) Close() {
 	b.lifetime.SetState(typeutil.LifetimeStateStopped)
+	b.provider.Close()
 	// cancel all watch opeartion by context.
 	b.cancel(ErrBalancerClosed)
 	b.lifetime.Wait()
@@ -301,6 +300,14 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 		case <-channelChanged.WaitChan():
 			// balance triggered by channel changed.
 			channelChanged.Sync()
+		case newChannels, ok := <-b.provider.NewIncomingChannels():
+			if !ok {
+				return
+			}
+			if err := b.channelMetaManager.AddPChannels(b.backgroundTaskNotifier.Context(), newChannels); err != nil {
+				b.Logger().Warn("failed to add dynamic channels", zap.Error(err), zap.Strings("channels", newChannels))
+			}
+			// new pchannels added dynamically, trigger rebalance
 		}
 		if err := b.balanceUntilNoChanged(b.backgroundTaskNotifier.Context()); err != nil {
 			if b.backgroundTaskNotifier.Context().Err() != nil {

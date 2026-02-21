@@ -237,6 +237,52 @@ func (cm *ChannelManager) ReplicateRole() replicateutil.Role {
 	return cm.replicateConfig.GetCurrentCluster().Role()
 }
 
+// AddPChannels adds new PChannels dynamically. Channels that already exist are skipped.
+// Only newly added channels are persisted and version is incremented.
+func (cm *ChannelManager) AddPChannels(ctx context.Context, newChannels []string) error {
+	cm.cond.LockAndBroadcast()
+	defer cm.cond.L.Unlock()
+
+	newMetas := make([]*streamingpb.PChannelMeta, 0, len(newChannels))
+	for _, name := range newChannels {
+		id := ChannelID{Name: name}
+		if _, ok := cm.channels[id]; ok {
+			continue
+		}
+		var meta *PChannelMeta
+		if cm.streamingVersion == nil {
+			meta = NewPChannelMeta(name, types.AccessModeRO)
+		} else {
+			meta = NewPChannelMeta(name, types.AccessModeRW)
+		}
+		cm.channels[id] = meta
+		cm.metrics.AssignPChannelStatus(meta)
+		newMetas = append(newMetas, meta.CopyForWrite().IntoRawMeta())
+	}
+
+	if len(newMetas) == 0 {
+		return nil
+	}
+
+	if err := resource.Resource().StreamingCatalog().SavePChannels(ctx, newMetas); err != nil {
+		// Rollback in-memory changes on persist failure
+		for _, m := range newMetas {
+			c := newPChannelMetaFromProto(m)
+			delete(cm.channels, c.ChannelID())
+		}
+		cm.Logger().Error("failed to save new pchannels", zap.Error(err))
+		return err
+	}
+
+	cm.version.Local++
+	cm.metrics.UpdateAssignmentVersion(cm.version.Local)
+
+	cm.Logger().Info("dynamically added new pchannels",
+		zap.Int("count", len(newMetas)),
+		zap.Strings("channels", newChannels))
+	return nil
+}
+
 // TriggerWatchUpdate triggers the watch update.
 // Because current watch must see new incoming streaming node right away,
 // so a watch updating trigger will be called if there's new incoming streaming node.

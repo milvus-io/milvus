@@ -145,7 +145,7 @@ func TestBalancer(t *testing.T) {
 	resource.Resource().ETCD().Put(context.Background(), dataNodePath, string(data))
 
 	ctx := context.Background()
-	b, err := balancer.RecoverBalancer(ctx, "test-channel-1")
+	b, err := balancer.RecoverBalancer(ctx, newStaticChannelProvider("test-channel-1"))
 	assert.NoError(t, err)
 	assert.NotNil(t, b)
 
@@ -364,7 +364,7 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
 
 	ctx := context.Background()
-	b, err := balancer.RecoverBalancer(ctx, "test-channel-1")
+	b, err := balancer.RecoverBalancer(ctx, newStaticChannelProvider("test-channel-1"))
 	assert.NoError(t, err)
 	assert.NotNil(t, b)
 
@@ -398,3 +398,26 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 		return nil
 	})
 }
+
+// staticChannelProvider is a test helper implementing balancer.ChannelProvider with static channels.
+type staticChannelProvider struct {
+	channels []string
+	ch       chan []string
+}
+
+func newStaticChannelProvider(channels ...string) *staticChannelProvider {
+	return &staticChannelProvider{
+		channels: channels,
+		ch:       make(chan []string),
+	}
+}
+
+func (p *staticChannelProvider) GetInitialChannels() []string {
+	return p.channels
+}
+
+func (p *staticChannelProvider) NewIncomingChannels() <-chan []string {
+	return p.ch
+}
+
+func (p *staticChannelProvider) Close() {}
