@@ -10,7 +10,13 @@ import (
 )
 
 // NewPChannelMeta creates a new PChannelMeta.
+// By default, the channel is available in replication.
 func NewPChannelMeta(name string, accessMode types.AccessMode) *PChannelMeta {
+	return newPChannelMetaWithAvailability(name, accessMode, true)
+}
+
+// newPChannelMetaWithAvailability creates a new PChannelMeta with explicit availability in replication.
+func newPChannelMetaWithAvailability(name string, accessMode types.AccessMode, availableInReplication bool) *PChannelMeta {
 	return &PChannelMeta{
 		inner: &streamingpb.PChannelMeta{
 			Channel: &streamingpb.PChannelInfo{
@@ -22,20 +28,30 @@ func NewPChannelMeta(name string, accessMode types.AccessMode) *PChannelMeta {
 			State:     streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED,
 			Histories: make([]*streamingpb.PChannelAssignmentLog, 0),
 		},
+		availableInReplication: availableInReplication,
 	}
 }
 
 // newPChannelMetaFromProto creates a new PChannelMeta from proto.
+// By default, channels recovered from proto are available in replication.
 func newPChannelMetaFromProto(channel *streamingpb.PChannelMeta) *PChannelMeta {
 	return &PChannelMeta{
-		inner: channel,
+		inner:                  channel,
+		availableInReplication: true,
 	}
 }
 
 // PChannelMeta is the read only version of PChannelInfo, to be used in balancer,
 // If you need to update PChannelMeta, please use CopyForWrite to get mutablePChannel.
 type PChannelMeta struct {
-	inner *streamingpb.PChannelMeta
+	inner                  *streamingpb.PChannelMeta
+	availableInReplication bool
+}
+
+// AvailableInReplication returns whether the channel is available for VChannel allocation
+// and DDL broadcasts. Dynamically-added PChannels are gated until they appear in ReplicateConfig.
+func (c *PChannelMeta) AvailableInReplication() bool {
+	return c.availableInReplication
 }
 
 // Name returns the name of the channel.
@@ -113,7 +129,8 @@ func (c *PChannelMeta) State() streamingpb.PChannelMetaState {
 func (c *PChannelMeta) CopyForWrite() *mutablePChannel {
 	return &mutablePChannel{
 		PChannelMeta: &PChannelMeta{
-			inner: proto.Clone(c.inner).(*streamingpb.PChannelMeta),
+			inner:                  proto.Clone(c.inner).(*streamingpb.PChannelMeta),
+			availableInReplication: c.availableInReplication,
 		},
 	}
 }

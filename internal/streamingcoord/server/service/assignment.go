@@ -142,7 +142,7 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 		return nil, errReplicateConfigurationSame
 	}
 
-	cc := channel.GetClusterChannels()
+	cc := channel.GetClusterChannels(channel.OptIncludeUnavailableInReplication())
 
 	// validate the configuration itself
 	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
