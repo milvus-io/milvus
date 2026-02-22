@@ -1804,7 +1804,6 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 		Key:          "rootCoord.dmlChannelNum",
 		Version:      "2.0.0",
 		DefaultValue: "16",
-		Forbidden:    true,
 		Doc:          "The number of DML-Channels to create at the root coord startup.",
 		Export:       true,
 	}

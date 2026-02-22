@@ -2,8 +2,6 @@ package balancer
 
 import (
 	"context"
-	"sort"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
