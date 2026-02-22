@@ -14,7 +14,7 @@
 # Update milvus-storage_VERSION for the first occurrence
 milvus_add_pkg_config("milvus-storage")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( milvus-storage_VERSION f372333)
+set( milvus-storage_VERSION 5040225)
 set( GIT_REPOSITORY  "https://github.com/milvus-io/milvus-storage.git")
 message(STATUS "milvus-storage repo: ${GIT_REPOSITORY}")
 message(STATUS "milvus-storage version: ${milvus-storage_VERSION}")
@@ -28,7 +28,31 @@ else ()
     set(WITH_AZURE_FS OFF CACHE BOOL "" FORCE )
 endif ()
 
-set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} )
+# Disable benchmark for milvus-storage (we don't need it and it may have missing deps)
+set(WITH_BENCHMARK OFF CACHE BOOL "" FORCE)
+
+set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} ${CONAN_PROTOBUF_ROOT} )
+
+# Make Conan's protoc visible to milvus-storage's find_package(Protobuf)
+find_program(_PROTOC_PROGRAM protoc
+    PATHS ${CONAN_BIN_DIRS_PROTOBUF} ${CONAN_BIN_DIRS}
+          "${CMAKE_BINARY_DIR}/bin"
+    NO_DEFAULT_PATH)
+if(NOT _PROTOC_PROGRAM)
+    file(GLOB _PROTOC_CANDIDATES
+        "${CONAN_BIN_DIRS_PROTOBUF}/protoc-*"
+        "${CMAKE_BINARY_DIR}/bin/protoc-*")
+    if(_PROTOC_CANDIDATES)
+        list(SORT _PROTOC_CANDIDATES)
+        list(GET _PROTOC_CANDIDATES -1 _PROTOC_PROGRAM)
+    endif()
+endif()
+if(_PROTOC_PROGRAM)
+    message(STATUS "Setting Protobuf_PROTOC_EXECUTABLE for milvus-storage: ${_PROTOC_PROGRAM}")
+    set(Protobuf_PROTOC_EXECUTABLE "${_PROTOC_PROGRAM}" CACHE FILEPATH "" FORCE)
+    # Also set env for Rust cargo builds (e.g. prost-build)
+    set(ENV{PROTOC} "${_PROTOC_PROGRAM}")
+endif()
 FetchContent_Declare(
         milvus-storage
         GIT_REPOSITORY  ${GIT_REPOSITORY}
@@ -42,46 +66,6 @@ FetchContent_GetProperties( milvus-storage )
 if ( NOT milvus-storage_POPULATED )
     FetchContent_Populate( milvus-storage )
 
-    if(APPLE)
-        # On macOS, Conan's aws-c-* packages use deprecated Security framework APIs
-        # removed in macOS 15+. Instead, use Homebrew's aws-sdk-cpp (1.11.735+)
-        # which has the compatibility fixes.
-        #
-        # Strategy: create an IMPORTED target with the Conan target name
-        # (AWS::aws-sdk-cpp-identity-management) that wraps Homebrew's AWS SDK.
-        # This way milvus-storage's unmodified CMakeLists.txt links correctly.
-        execute_process(
-            COMMAND brew --prefix
-            OUTPUT_VARIABLE _HOMEBREW_PREFIX
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_QUIET
-        )
-        if(NOT _HOMEBREW_PREFIX)
-            set(_HOMEBREW_PREFIX "/opt/homebrew")
-        endif()
-        if(EXISTS "${_HOMEBREW_PREFIX}/lib/cmake/AWSSDK")
-            set(AWSSDK_DIR "${_HOMEBREW_PREFIX}/lib/cmake/AWSSDK")
-        else()
-            message(FATAL_ERROR "AWS SDK cmake config not found in Homebrew "
-                "(searched ${_HOMEBREW_PREFIX}/lib/cmake/AWSSDK). "
-                "Install with: brew install aws-sdk-cpp")
-        endif()
-        find_package(AWSSDK REQUIRED COMPONENTS core s3 identity-management)
-
-        if(NOT TARGET AWS::aws-sdk-cpp-identity-management)
-            add_library(AWS::aws-sdk-cpp-identity-management INTERFACE IMPORTED)
-            set_target_properties(AWS::aws-sdk-cpp-identity-management PROPERTIES
-                INTERFACE_LINK_LIBRARIES "${AWSSDK_LINK_LIBRARIES}")
-        endif()
-
-        # Ignore Homebrew paths so milvus-storage's find_package(Boost) uses
-        # Conan's Boost 1.83, not Homebrew's Boost 1.90+ (ABI incompatible).
-        set(_SAVED_CMAKE_IGNORE_PATH "${CMAKE_IGNORE_PATH}")
-        list(APPEND CMAKE_IGNORE_PATH
-            "/opt/homebrew" "/opt/homebrew/include" "/opt/homebrew/lib"
-            "/usr/local" "/usr/local/include" "/usr/local/lib")
-    endif()
-
     # Adding the following target:
     # milvus-storage
     add_subdirectory( ${milvus-storage_SOURCE_DIR}/cpp
@@ -90,8 +74,9 @@ if ( NOT milvus-storage_POPULATED )
     # Enable S3 filesystem support on all platforms
     target_compile_definitions(milvus-storage PRIVATE MILVUS_S3_FS)
 
+    # On macOS, aws-c-io uses Apple's Network.framework for socket operations
     if(APPLE)
-        set(CMAKE_IGNORE_PATH "${_SAVED_CMAKE_IGNORE_PATH}")
+        target_link_libraries(milvus-storage PUBLIC "-framework Network")
     endif()
 endif()
 

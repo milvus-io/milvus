@@ -345,7 +345,7 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
         default: {
             ThrowInfo(NotImplemented,
                       "internal error: unknown GIS op : {}",
-                      expr_->op_);
+                      static_cast<int>(expr_->op_));
         }
     }
     return res_vec;
@@ -455,7 +455,9 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                 // Distance-based operation - no prepared version
                 return left.dwithin(query_geometry, expr_->distance_);
             default:
-                ThrowInfo(NotImplemented, "unknown GIS op : {}", expr_->op_);
+                ThrowInfo(NotImplemented,
+                          "unknown GIS op : {}",
+                          static_cast<int>(expr_->op_));
         }
     };
 

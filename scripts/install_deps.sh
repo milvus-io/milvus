@@ -198,11 +198,6 @@ install_mac_deps() {
     if [[ "$arch" == "arm64" ]]; then
         print_info "Installing Apple Silicon specific dependencies..."
         brew install --quiet openssl librdkafka
-        # AWS SDK for S3 support on macOS (needed for milvus-storage)
-        brew install --quiet aws-sdk-cpp
-    else
-        # Intel Mac
-        brew install --quiet aws-sdk-cpp
     fi
 
     # Create symlink for LLVM (for scripts that expect /usr/local/opt/llvm)
@@ -397,6 +392,7 @@ install_rocky_deps() {
         conan profile new default --detect --force 2>/dev/null || true
         conan profile update settings.compiler.version="$gcc_ver" default
         conan profile update settings.compiler.libcxx=libstdc++11 default
+        conan profile update settings.compiler.cppstd=17 default
     fi
 
     # Install Rust

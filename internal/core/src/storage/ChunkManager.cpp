@@ -120,13 +120,7 @@ GcpChunkManager::GcpChunkManager(const StorageConfig& storage_config) {
     remote_root_path_ = storage_config.root_path;
 
     if (storage_config.useIAM) {
-        sdk_options_.httpOptions.httpClientFactory_create_fn = []() {
-            auto credentials = std::make_shared<
-                google::cloud::oauth2_internal::GOOGLE_CLOUD_CPP_NS::
-                    ComputeEngineCredentials>();
-            return Aws::MakeShared<GoogleHttpClientFactory>(
-                GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, credentials);
-        };
+        ConfigureGoogleCloudIAMHttpClientFactory(sdk_options_);
     }
 
     InitSDKAPIDefault(storage_config.log_level);

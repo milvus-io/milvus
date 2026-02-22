@@ -74,9 +74,25 @@ case "${unameOut}" in
       export CXX=${llvm_prefix}/bin/clang++
       export ASM=${llvm_prefix}/bin/clang
       macos_sdk_path="$(xcrun --show-sdk-path)"
-      export CFLAGS="-Wno-deprecated-declarations -I$(brew --prefix libomp)/include -isysroot ${macos_sdk_path}"
+      # LLVM from Homebrew doesn't set TARGET_OS_OSX=1 (unlike Apple's clang), causing
+      # macOS SDK headers to exclude macOS-specific APIs. Define it explicitly.
+      export CFLAGS="-Wno-deprecated-declarations -I$(brew --prefix libomp)/include -isysroot ${macos_sdk_path} -DTARGET_OS_OSX=1"
       export CXXFLAGS=${CFLAGS}
       export LDFLAGS="-L$(brew --prefix libomp)/lib"
+      # Rust cc-rs crate uses the Xcode SDK version as deployment target if
+      # MACOSX_DEPLOYMENT_TARGET is unset. When the SDK version (e.g. 26.2) is
+      # newer than what this LLVM version understands, compilation fails.
+      # Cap it at the current macOS major version to stay compatible.
+      sdk_ver="$(xcrun --show-sdk-version 2>/dev/null)"
+      os_major="$(sw_vers -productVersion | cut -d. -f1)"
+      if [ -n "${sdk_ver}" ] && [ -n "${os_major}" ] && \
+         [ "$(echo "${sdk_ver}" | cut -d. -f1)" -gt "${os_major}" ]; then
+        export MACOSX_DEPLOYMENT_TARGET="${os_major}.0"
+      fi
+      # Rust cc-rs needs TARGET_OS_OSX for correct platform detection in aws-lc-sys.
+      # Set for both ARM and Intel targets so cross-compilation also works.
+      export CFLAGS_aarch64_apple_darwin="-DTARGET_OS_OSX=1"
+      export CFLAGS_x86_64_apple_darwin="-DTARGET_OS_OSX=1"
       export CGO_CFLAGS="${CFLAGS}"
       export CGO_LDFLAGS="${LDFLAGS} -framework Security -framework CoreFoundation"
 

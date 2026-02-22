@@ -65,6 +65,9 @@ enum class RemoteStorageType {
     ALIYUN_CLOUD = 2,
 };
 
+void
+ConfigureGoogleCloudIAMHttpClientFactory(Aws::SDKOptions& sdk_options);
+
 template <typename... Args>
 static std::string
 S3ErrorMessage(const std::string& func,
@@ -359,7 +362,8 @@ class GoogleHttpClientFactory : public Aws::Http::HttpClientFactory {
             Aws::MakeShared<Aws::Http::Standard::StandardHttpRequest>(
                 GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, uri, method);
         request->SetResponseStreamFactory(streamFactory);
-        auto auth_header = credentials_->AuthorizationHeader();
+        auto auth_header =
+            google::cloud::oauth2_internal::AuthorizationHeader(*credentials_);
         if (!auth_header.ok()) {
             ThrowInfo(
                 S3Error,
