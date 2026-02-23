@@ -136,7 +136,6 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 	}
 	dialOptions := cfg.GetDialOptionsFromConfig()
 	dialOptions = append(dialOptions,
-		grpc.WithBlock(),
 		grpc.WithResolvers(rb),
 		grpc.WithTransportCredentials(creds),
 		grpc.WithChainUnaryInterceptor(

@@ -289,7 +289,6 @@ func TestZillizClient_Embedding(t *testing.T) {
 		"bufnet",
 		grpc.WithContextDialer(dialer),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 	)
 	require.NoError(t, err)
 	defer conn.Close()
@@ -336,7 +335,6 @@ func TestZillizClient_Embedding_Error(t *testing.T) {
 		"bufnet",
 		grpc.WithContextDialer(dialer),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 	)
 	require.NoError(t, err)
 	defer conn.Close()
@@ -384,7 +382,6 @@ func TestZillizClient_Rerank(t *testing.T) {
 		"bufnet",
 		grpc.WithContextDialer(dialer),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 	)
 	require.NoError(t, err)
 	defer conn.Close()
@@ -430,7 +427,6 @@ func TestZillizClient_Rerank_Error(t *testing.T) {
 		"bufnet",
 		grpc.WithContextDialer(dialer),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 	)
 	require.NoError(t, err)
 	defer conn.Close()
@@ -552,7 +548,6 @@ func TestZillizClient_Embedding_EmptyResponse(t *testing.T) {
 		"bufnet",
 		grpc.WithContextDialer(dialer),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 	)
 	require.NoError(t, err)
 	defer conn.Close()
@@ -609,7 +604,6 @@ func TestZillizClient_Highlight(t *testing.T) {
 		"bufnet",
 		grpc.WithContextDialer(dialer),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 	)
 	require.NoError(t, err)
 	defer conn.Close()
@@ -655,7 +649,6 @@ func TestZillizClient_Highlight_Error(t *testing.T) {
 		"bufnet",
 		grpc.WithContextDialer(dialer),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 	)
 	require.NoError(t, err)
 	defer conn.Close()
@@ -778,7 +771,6 @@ func TestZillizClient_Highlight_MismatchLength(t *testing.T) {
 				"bufnet",
 				grpc.WithContextDialer(dialer),
 				grpc.WithTransportCredentials(insecure.NewCredentials()),
-				grpc.WithBlock(),
 			)
 			require.NoError(t, err)
 			defer conn.Close()

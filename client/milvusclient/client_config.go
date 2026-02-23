@@ -26,7 +26,7 @@ var regexValidScheme = regexp.MustCompile(`^https?:\/\/`)
 
 // DefaultGrpcOpts is GRPC options for milvus client.
 var DefaultGrpcOpts = []grpc.DialOption{
-	grpc.WithBlock(),
+	grpc.WithBlock(), //nolint:staticcheck // SDK compatibility: New() must block until connected
 	grpc.WithKeepaliveParams(keepalive.ClientParameters{
 		Time:                5 * time.Second,
 		Timeout:             10 * time.Second,

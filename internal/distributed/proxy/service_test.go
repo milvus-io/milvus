@@ -134,12 +134,12 @@ func waitForGrpcReady(opt *WaitOption) {
 				ch <- err
 				return
 			}
-			conn, err := grpc.Dial(address, grpc.WithBlock(), grpc.WithTransportCredentials(creds))
+			conn, err := grpc.Dial(address, grpc.WithTransportCredentials(creds))
 			ch <- err
 			conn.Close()
 			return
 		}
-		if conn, err := grpc.Dial(address, grpc.WithBlock(), grpc.WithTransportCredentials(insecure.NewCredentials())); true {
+		if conn, err := grpc.Dial(address, grpc.WithTransportCredentials(insecure.NewCredentials())); true {
 			ch <- err
 			conn.Close()
 		}
