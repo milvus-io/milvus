@@ -9,7 +9,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -168,13 +167,8 @@ func (bm *broadcastTaskManager) broadcast(ctx context.Context, msg message.Broad
 	}
 	defer bm.lifetime.Done()
 
-	// check if the message is valid to be broadcasted.
-	// TODO: the message check callback should not be an component of broadcaster,
-	// it should be removed after the import operation refactory.
-	if err := registry.CallMessageCheckCallback(ctx, msg); err != nil {
-		guards.Unlock()
-		return nil, err
-	}
+	// Validation is now done before calling broadcast (in DataCoord for import operations)
+	// CheckCallback mechanism has been removed as part of the import refactoring
 
 	task := bm.addBroadcastTask(msg, broadcastID, guards)
 	pendingTask := newPendingBroadcastTask(task)

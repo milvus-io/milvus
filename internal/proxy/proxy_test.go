@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/allocator"
 	grpcdatanode "github.com/milvus-io/milvus/internal/distributed/datanode"
 	grpcmixcoord "github.com/milvus-io/milvus/internal/distributed/mixcoord"
 	mixc "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
@@ -4287,22 +4286,22 @@ func TestProxy_Import(t *testing.T) {
 			CollectionSchema: &schemapb.CollectionSchema{},
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
+			dbID: 1,
+		}, nil)
 		globalMetaCache = mc
 
 		chMgr := NewMockChannelsMgr(t)
 		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"foo"}, nil)
 		proxy.chMgr = chMgr
 
-		rc := mocks.NewMockRootCoordClient(t)
-		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
-			ID:    rand.Int63(),
-			Count: 1,
-		}, nil).Once()
-		idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
-		assert.NoError(t, err)
-		err = idAllocator.Start()
-		assert.NoError(t, err)
-		proxy.rowIDAllocator = idAllocator
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			JobID:  "123456789",
+		}, nil)
+		proxy.mixCoord = mixCoord
+
 		proxy.tsoAllocator = &timestampAllocator{
 			tso: newMockTimestampAllocatorInterface(),
 		}

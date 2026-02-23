@@ -1803,6 +1803,8 @@ func (s *Server) GetGcStatus(ctx context.Context) (*datapb.GetGcStatusResponse, 
 	}, nil
 }
 
+// ImportV2 handles import requests from proxy by broadcasting import messages.
+// This is the entry point for all user-initiated imports.
 func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{
@@ -1817,8 +1819,76 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	log := log.Ctx(ctx).With(zap.Int64("collection", in.GetCollectionID()),
 		zap.Int64s("partitions", in.GetPartitionIDs()),
 		zap.Strings("channels", in.GetChannelNames()))
-	log.Info("receive import request", zap.Int("fileNum", len(in.GetFiles())),
-		zap.Any("files", in.GetFiles()), zap.Any("options", in.GetOptions()))
+
+	log.Info("receive import request from proxy, will broadcast",
+		zap.Int("fileNum", len(in.GetFiles())),
+		zap.Any("files", in.GetFiles()),
+		zap.Any("options", in.GetOptions()))
+
+	// Validate timeout before allocating resources
+	// Full validation will happen during broadcast
+	_, err := importutilv2.GetTimeoutTs(in.GetOptions())
+	if err != nil {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(err.Error()))
+		return resp, nil
+	}
+
+	// Allocate job ID
+	if s.allocator == nil {
+		resp.Status = merr.Status(merr.WrapErrImportFailed("allocator not initialized"))
+		return resp, nil
+	}
+	jobID, _, err := s.allocator.AllocN(1)
+	if err != nil {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("failed to allocate job ID: %v", err)))
+		return resp, nil
+	}
+
+	// Broadcast the import message
+	// dbName is retrieved inside broadcastImport via broker.DescribeCollectionInternal
+	err = s.broadcastImport(
+		ctx,
+		in.GetCollectionName(),
+		in.GetCollectionID(),
+		in.GetPartitionIDs(),
+		in.GetFiles(),
+		in.GetOptions(),
+		in.GetSchema(),
+		jobID,
+		in.GetChannelNames(),
+	)
+	if err != nil {
+		log.Warn("failed to broadcast import message", zap.Error(err))
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("failed to broadcast import: %v", err)))
+		return resp, nil
+	}
+
+	resp.JobID = fmt.Sprint(jobID)
+	log.Info("import request broadcasted successfully", zap.String("jobID", resp.JobID))
+	return resp, nil
+}
+
+// createImportJobFromAck creates an import job from ack callback.
+// This is called internally when broadcast ack is received.
+func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &internalpb.ImportResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	resp := &internalpb.ImportResponse{
+		Status: merr.Success(),
+	}
+
+	log := log.Ctx(ctx).With(zap.Int64("collection", in.GetCollectionID()),
+		zap.Int64s("partitions", in.GetPartitionIDs()),
+		zap.Strings("channels", in.GetChannelNames()))
+
+	log.Info("creating import job from ack callback",
+		zap.Int("fileNum", len(in.GetFiles())),
+		zap.Any("files", in.GetFiles()),
+		zap.Any("options", in.GetOptions()))
 
 	timeoutTs, err := importutilv2.GetTimeoutTs(in.GetOptions())
 	if err != nil {
@@ -1839,7 +1909,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	// Allocate file ids.
 	idStart, _, err := s.allocator.AllocN(int64(len(files)) + 1)
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("alloc id failed, err=%w", err)))
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("alloc id failed: %v", err)))
 		return resp, nil
 	}
 	files = lo.Map(files, func(importFile *internalpb.ImportFile, i int) *internalpb.ImportFile {
@@ -1852,7 +1922,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		return resp, nil
 	}
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("get collection failed, err=%w", err)))
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("get collection failed: %v", err)))
 		return resp, nil
 	}
 	if importCollectionInfo == nil {
@@ -1886,7 +1956,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	}
 	err = s.importMeta.AddJob(ctx, job)
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("add import job failed, err=%w", err)))
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("add import job failed: %v", err)))
 		return resp, nil
 	}
 
@@ -1913,7 +1983,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	}
 	jobID, err := strconv.ParseInt(in.GetJobID(), 10, 64)
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("parse job id failed, err=%w", err)))
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("parse job id failed: %v", err)))
 		return resp, nil
 	}
 
