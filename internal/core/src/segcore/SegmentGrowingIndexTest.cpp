@@ -57,7 +57,7 @@
 
 using namespace milvus;
 using namespace milvus::segcore;
-namespace pb = milvus::proto;
+namespace milvus_pb = milvus::proto;
 
 using Param = std::tuple<DataType,
                          /*index type*/ std::string,

@@ -50,8 +50,6 @@ endif()
 if(_PROTOC_PROGRAM)
     message(STATUS "Setting Protobuf_PROTOC_EXECUTABLE for milvus-storage: ${_PROTOC_PROGRAM}")
     set(Protobuf_PROTOC_EXECUTABLE "${_PROTOC_PROGRAM}" CACHE FILEPATH "" FORCE)
-    # Also set env for Rust cargo builds (e.g. prost-build)
-    set(ENV{PROTOC} "${_PROTOC_PROGRAM}")
 endif()
 FetchContent_Declare(
         milvus-storage

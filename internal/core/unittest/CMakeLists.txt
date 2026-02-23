@@ -161,4 +161,7 @@ target_link_libraries(bitset_test
         gtest
         ${CONAN_LIBS}
 )
+if (LINUX)
+    target_link_libraries(bitset_test aio)
+endif()
 install(TARGETS bitset_test DESTINATION unittest)

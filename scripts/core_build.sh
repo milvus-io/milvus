@@ -254,6 +254,15 @@ echo "CC $CC"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD} -G "${CMAKE_GENERATOR}"
 
+# Export PROTOC for Rust crates (e.g. lance-encoding) that need it at build time
+if [ -z "$PROTOC" ]; then
+  _PROTOC=$(grep -m1 "^Protobuf_PROTOC_EXECUTABLE" CMakeCache.txt 2>/dev/null | cut -d= -f2-)
+  if [ -n "$_PROTOC" ] && [ -f "$_PROTOC" ]; then
+    export PROTOC="$_PROTOC"
+    echo "Exported PROTOC=$PROTOC for Rust builds"
+  fi
+fi
+
 if [[ ${RUN_CPPLINT} == "ON" ]]; then
   if [ "$CMAKE_GENERATOR" = "Ninja" ]; then
     BUILD_CMD="ninja"

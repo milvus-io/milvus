@@ -22,7 +22,7 @@
 
 using namespace milvus::segcore;
 using namespace milvus;
-namespace pb = milvus::proto;
+namespace milvus_pb = milvus::proto;
 class ChunkVectorTest : public ::testing::TestWithParam<bool> {
  public:
     void
