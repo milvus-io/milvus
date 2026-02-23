@@ -359,6 +359,8 @@ func getSortStatus(sorted bool) string {
 	return "unsorted"
 }
 
+// calculateIndexTaskSlot calculates the old-style single slot for index tasks (deprecated).
+// This function is kept for backward compatibility. New code should use calculateIndexTaskSlotV2.
 func calculateIndexTaskSlot(fieldSize int64, isVectorIndex bool) int64 {
 	defaultSlots := Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()
 	if !isVectorIndex {
@@ -375,6 +377,50 @@ func calculateIndexTaskSlot(fieldSize int64, isVectorIndex bool) int64 {
 	return max(defaultSlots/64, 1)
 }
 
+// calculateIndexTaskSlotV2 calculates separate CPU and memory slots for index tasks.
+// Returns (cpuSlot, memorySlot) based on field size and whether it's a vector index.
+//
+// Memory estimation:
+// - Scalar indexes: uses ScalarIndexTaskMemoryFactor
+// - Vector indexes: uses VectorIndexTaskMemoryFactor
+// - Memory slot = fieldSizeGB * memoryFactor
+//
+// CPU estimation (size-based scaling):
+// - Small data (<10MB): 1/8 CPU (enable batching)
+// - Medium data (10-100MB): 1/4 CPU
+// - Large data (100-512MB): 1/2 CPU
+// - Very large data (>512MB): full CPU
+func calculateIndexTaskSlotV2(fieldSize int64, isVectorIndex bool) (float64, float64) {
+	cpuSlot := paramtable.Get().DataCoordCfg.ScalarIndexTaskCPUFactor.GetAsFloat()
+	memoryFactor := paramtable.Get().DataCoordCfg.ScalarIndexTaskMemoryFactor.GetAsFloat()
+
+	if isVectorIndex {
+		cpuSlot = paramtable.Get().DataCoordCfg.VectorIndexTaskCPUFactor.GetAsFloat()
+		memoryFactor = paramtable.Get().DataCoordCfg.VectorIndexTaskMemoryFactor.GetAsFloat()
+	}
+
+	// Ensure fieldSize is non-negative
+	if fieldSize < 0 {
+		fieldSize = 0
+	}
+
+	fieldSizeGB := float64(fieldSize) / 1024 / 1024 / 1024
+	memorySlot := fieldSizeGB * memoryFactor
+
+	// Scale down CPU for small tasks to enable better batching
+	// Small tasks can be processed together to reduce overhead
+	if fieldSize > 512*1024*1024 {
+		return cpuSlot, memorySlot
+	} else if fieldSize > 100*1024*1024 {
+		return cpuSlot / 2, memorySlot
+	} else if fieldSize > 10*1024*1024 {
+		return cpuSlot / 4, memorySlot
+	}
+	return cpuSlot / 8, memorySlot
+}
+
+// calculateStatsTaskSlot calculates the old-style single slot for stats tasks (deprecated).
+// This function is kept for backward compatibility. New code should use calculateStatsTaskSlotV2.
 func calculateStatsTaskSlot(segmentSize int64) int64 {
 	defaultSlots := Params.DataCoordCfg.StatsTaskSlotUsage.GetAsInt64()
 	if segmentSize > 512*1024*1024 {
@@ -386,6 +432,21 @@ func calculateStatsTaskSlot(segmentSize int64) int64 {
 		return max(defaultSlots/4, 1)
 	}
 	return max(defaultSlots/8, 1)
+}
+
+// calculateStatsTaskSlotV2 calculates separate CPU and memory slots for stats tasks.
+// Returns (cpuSlot, memorySlot) based on segment size.
+func calculateStatsTaskSlotV2(segmentSize int64) (float64, float64) {
+	cpuSlot := paramtable.Get().DataCoordCfg.StatsTaskCPUFactor.GetAsFloat()
+	memoryFactor := paramtable.Get().DataCoordCfg.StatsTaskMemoryFactor.GetAsFloat()
+
+	// Calculate memory slot based on segment size in GB
+	segmentSizeGB := float64(segmentSize) / 1024 / 1024 / 1024
+	memorySlot := segmentSizeGB * memoryFactor
+
+	// Stats tasks use fixed CPU slot (no scaling)
+	// Default configuration is 1 CPU per task
+	return cpuSlot, memorySlot
 }
 
 func enableSortCompaction() bool {

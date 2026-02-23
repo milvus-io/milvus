@@ -47,4 +47,5 @@ type Task interface {
 	Reset()
 	GetSlot() int64
 	IsVectorIndex() bool
+	GetSlotV2() (float64, float64)
 }

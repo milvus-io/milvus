@@ -44,6 +44,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
+var _ Task = (*indexBuildTask)(nil)
+
 // IndexBuildTask is used to record the information of the index tasks.
 type indexBuildTask struct {
 	ident  string
@@ -146,6 +148,10 @@ func (it *indexBuildTask) GetSlot() int64 {
 func (it *indexBuildTask) IsVectorIndex() bool {
 	indexType := GetIndexType(it.req.GetIndexParams())
 	return vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
+}
+
+func (it *indexBuildTask) GetSlotV2() (float64, float64) {
+	return it.req.GetCpuSlot(), it.req.GetMemorySlot()
 }
 
 func (it *indexBuildTask) PreExecute(ctx context.Context) error {

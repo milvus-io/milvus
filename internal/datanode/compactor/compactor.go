@@ -33,4 +33,5 @@ type Compactor interface {
 	GetCompactionType() datapb.CompactionType
 	GetSlotUsage() int64
 	GetStorageConfig() *indexpb.StorageConfig
+	GetSlotUsageV2() (float64, float64)
 }

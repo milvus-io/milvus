@@ -1108,3 +1108,7 @@ func (t *clusteringCompactionTask) GetSlotUsage() int64 {
 func (t *clusteringCompactionTask) GetStorageConfig() *indexpb.StorageConfig {
 	return t.compactionParams.StorageConfig
 }
+
+func (t *clusteringCompactionTask) GetSlotUsageV2() (float64, float64) {
+	return t.plan.GetCpuSlot(), t.plan.GetMemorySlot()
+}

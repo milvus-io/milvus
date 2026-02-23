@@ -185,6 +185,7 @@ type Task interface {
 	GetReason() string
 	GetSchema() *schemapb.CollectionSchema
 	GetSlots() int64
+	GetSlotsV2() (float64, float64)
 	GetBufferSize() int64
 	Cancel()
 	Clone() Task
