@@ -209,12 +209,6 @@ UpdateSealedSegmentIndex(CSegmentInterface c_segment,
                          CLoadIndexInfo c_load_index_info);
 
 CStatus
-LoadTextIndex(CSegmentInterface c_segment,
-              const uint8_t* serialized_load_text_index_info,
-              const uint64_t len,
-              CLoadCancellationSource source);
-
-CStatus
 LoadJsonKeyIndex(CTraceContext c_trace,
                  CSegmentInterface c_segment,
                  const uint8_t* serialied_load_json_key_index_info,
@@ -256,11 +250,6 @@ Delete(CSegmentInterface c_segment,
 
 void
 RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id);
-
-CStatus
-CreateTextIndex(CSegmentInterface c_segment,
-                int64_t field_id,
-                CLoadCancellationSource source);
 
 CStatus
 ExprResCacheEraseSegment(int64_t segment_id);

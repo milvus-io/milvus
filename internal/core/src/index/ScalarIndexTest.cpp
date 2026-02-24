@@ -46,6 +46,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/AssertUtils.h"
+#include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -79,7 +80,7 @@ auto
 GetTempFileManagerCtx(CDataType data_type) {
     milvus::storage::StorageConfig storage_config;
     storage_config.storage_type = "local";
-    storage_config.root_path = "/tmp/local/";
+    storage_config.root_path = TestLocalPath;
     auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
     auto ctx = milvus::storage::FileManagerContext(chunk_manager);
     ctx.fieldDataMeta.field_schema.set_data_type(
@@ -391,16 +392,16 @@ TestBuildIndex(int N, int cardinality, int index_type) {
     if (index_type == 0) {
         auto index = std::make_unique<milvus::index::BitmapIndex<T>>();
         index->Build(N, raw_data.data());
-        return std::move(index);
+        return index;
     } else if (index_type == 1) {
         if constexpr (std::is_same_v<T, std::string>) {
             auto index = std::make_unique<milvus::index::StringIndexMarisa>();
             index->Build(N, raw_data.data());
-            return std::move(index);
+            return index;
         } else {
             auto index = milvus::index::CreateScalarIndexSort<T>();
             index->Build(N, raw_data.data());
-            return std::move(index);
+            return index;
         }
     }
 }

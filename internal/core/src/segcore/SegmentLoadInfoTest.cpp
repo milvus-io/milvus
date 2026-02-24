@@ -29,6 +29,7 @@
 #include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/common.pb.h"
+#include "pb/index_cgo_msg.pb.h"
 #include "pb/segcore.pb.h"
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/Types.h"
@@ -1052,4 +1053,452 @@ TEST_F(SegmentLoadInfoTest, LoadDiffHasChangesWithDefaultFields) {
 
     diff.fields_to_fill_default.push_back(FieldId(102));
     EXPECT_TRUE(diff.HasChanges());
+}
+
+// ==================== Text Index Tests ====================
+
+// Helper: create a schema with varchar field that has enable_match=true
+static SchemaPtr
+CreateSchemaWithTextMatchField() {
+    auto schema = std::make_shared<Schema>();
+    // 100=pk, 101=vec, 102=varchar_match, 103=varchar_no_match
+    schema->AddDebugField("pk", DataType::INT64);
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+
+    // Varchar field with enable_match=true (field 102)
+    std::map<std::string, std::string> params;
+    schema->AddDebugVarcharField(FieldName("text_field"),
+                                 DataType::VARCHAR,
+                                 /*max_length=*/65535,
+                                 /*nullable=*/false,
+                                 /*enable_match=*/true,
+                                 /*enable_analyzer=*/true,
+                                 params,
+                                 std::nullopt);
+
+    // Varchar field without enable_match (field 103)
+    schema->AddDebugField("plain_varchar", DataType::VARCHAR);
+
+    schema->set_primary_field_id(FieldId(100));
+    return schema;
+}
+
+TEST_F(SegmentLoadInfoTest, SetTextIndexCreatedAndHas) {
+    // Test SetTextIndexCreated/HasTextIndexCreated tracking
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    SegmentLoadInfo info(proto, schema_);
+
+    EXPECT_FALSE(info.HasTextIndexCreated(FieldId(101)));
+
+    info.SetTextIndexCreated(FieldId(101));
+    EXPECT_TRUE(info.HasTextIndexCreated(FieldId(101)));
+    EXPECT_FALSE(info.HasTextIndexCreated(FieldId(102)));
+
+    info.SetTextIndexCreated(FieldId(102));
+    EXPECT_TRUE(info.HasTextIndexCreated(FieldId(102)));
+}
+
+TEST_F(SegmentLoadInfoTest, CreatedTextIndexesCopyConstructor) {
+    // Test that created_text_indexes_ is preserved via copy constructor
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    SegmentLoadInfo info1(proto, schema_);
+    info1.SetTextIndexCreated(FieldId(101));
+    info1.SetTextIndexCreated(FieldId(102));
+
+    // Copy constructor
+    SegmentLoadInfo info2(info1);
+    EXPECT_TRUE(info2.HasTextIndexCreated(FieldId(101)));
+    EXPECT_TRUE(info2.HasTextIndexCreated(FieldId(102)));
+    EXPECT_FALSE(info2.HasTextIndexCreated(FieldId(103)));
+}
+
+TEST_F(SegmentLoadInfoTest, CreatedTextIndexesMoveConstructor) {
+    // Test that created_text_indexes_ is preserved via move constructor
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    SegmentLoadInfo info1(proto, schema_);
+    info1.SetTextIndexCreated(FieldId(101));
+
+    SegmentLoadInfo info2(std::move(info1));
+    EXPECT_TRUE(info2.HasTextIndexCreated(FieldId(101)));
+}
+
+TEST_F(SegmentLoadInfoTest, CreatedTextIndexesCopyAssignment) {
+    // Test that created_text_indexes_ is preserved via copy assignment
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    SegmentLoadInfo info1(proto, schema_);
+    info1.SetTextIndexCreated(FieldId(101));
+
+    proto::segcore::SegmentLoadInfo empty_proto;
+    SegmentLoadInfo info2(empty_proto, schema_);
+    info2 = info1;
+
+    EXPECT_TRUE(info2.HasTextIndexCreated(FieldId(101)));
+}
+
+TEST_F(SegmentLoadInfoTest, CreatedTextIndexesMoveAssignment) {
+    // Test that created_text_indexes_ is preserved via move assignment
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    SegmentLoadInfo info1(proto, schema_);
+    info1.SetTextIndexCreated(FieldId(101));
+
+    proto::segcore::SegmentLoadInfo empty_proto;
+    SegmentLoadInfo info2(empty_proto, schema_);
+    info2 = std::move(info1);
+
+    EXPECT_TRUE(info2.HasTextIndexCreated(FieldId(101)));
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffTextIndexesFromStats) {
+    // Test GetLoadDiff loads pre-built text indexes from textstatslogs
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_collectionid(200);
+    proto.set_partitionid(300);
+    proto.set_num_of_rows(1000);
+
+    // Add a binlog to satisfy GetLoadDiff precondition
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(100);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/pk_binlog");
+    log->set_entries_num(1000);
+
+    // Add text stats for field 101 (simulates pre-built text index)
+    auto& text_stats = (*proto.mutable_textstatslogs())[101];
+    text_stats.set_fieldid(101);
+    text_stats.set_version(1);
+    text_stats.set_buildid(5001);
+    text_stats.set_memory_size(1024);
+    text_stats.set_current_scalar_index_version(2);
+    text_stats.add_files("/path/to/text_index_file1");
+    text_stats.add_files("/path/to/text_index_file2");
+
+    SegmentLoadInfo info(proto, schema_);
+    auto diff = info.GetLoadDiff();
+
+    // The text index should be in text_indexes_to_load
+    EXPECT_EQ(diff.text_indexes_to_load.size(), 1);
+    EXPECT_TRUE(diff.text_indexes_to_load.count(FieldId(101)) > 0);
+
+    // Verify the converted LoadTextIndexInfo
+    auto& load_info = diff.text_indexes_to_load[FieldId(101)];
+    EXPECT_NE(load_info, nullptr);
+    EXPECT_EQ(load_info->fieldid(), 101);
+    EXPECT_EQ(load_info->version(), 1);
+    EXPECT_EQ(load_info->buildid(), 5001);
+    EXPECT_EQ(load_info->files_size(), 2);
+    EXPECT_EQ(load_info->files(0), "/path/to/text_index_file1");
+    EXPECT_EQ(load_info->files(1), "/path/to/text_index_file2");
+    EXPECT_EQ(load_info->collectionid(), 200);
+    EXPECT_EQ(load_info->partitionid(), 300);
+    EXPECT_EQ(load_info->index_size(), 1024);
+    EXPECT_EQ(load_info->current_scalar_index_version(), 2);
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffTextIndexesToCreate) {
+    // Test GetLoadDiff creates text indexes for enable_match fields
+    // without pre-built text indexes
+    auto text_schema = CreateSchemaWithTextMatchField();
+
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    // Add a binlog to satisfy GetLoadDiff precondition
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(100);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/pk_binlog");
+    log->set_entries_num(1000);
+
+    // No text stats provided - the text_field (102) has enable_match
+    // so it should be in text_indexes_to_create
+    SegmentLoadInfo info(proto, text_schema);
+    auto diff = info.GetLoadDiff();
+
+    // text_field (102) should be in text_indexes_to_create
+    EXPECT_TRUE(diff.text_indexes_to_create.count(FieldId(102)) > 0);
+    // plain_varchar (103) should NOT be (no enable_match)
+    EXPECT_TRUE(diff.text_indexes_to_create.count(FieldId(103)) == 0);
+    // No text indexes to load (no stats)
+    EXPECT_TRUE(diff.text_indexes_to_load.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffTextIndexesPreBuiltSkipsCreate) {
+    // When a pre-built text index exists, the field should NOT be
+    // in text_indexes_to_create
+    auto text_schema = CreateSchemaWithTextMatchField();
+
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_collectionid(200);
+    proto.set_partitionid(300);
+    proto.set_num_of_rows(1000);
+
+    // Add a binlog to satisfy GetLoadDiff precondition
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(100);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/pk_binlog");
+    log->set_entries_num(1000);
+
+    // Add pre-built text index for field 102 (text_field)
+    auto& text_stats = (*proto.mutable_textstatslogs())[102];
+    text_stats.set_fieldid(102);
+    text_stats.set_version(1);
+    text_stats.set_buildid(5001);
+    text_stats.add_files("/path/to/text_index");
+
+    SegmentLoadInfo info(proto, text_schema);
+    auto diff = info.GetLoadDiff();
+
+    // Field 102 should be in text_indexes_to_load (pre-built)
+    EXPECT_EQ(diff.text_indexes_to_load.size(), 1);
+    EXPECT_TRUE(diff.text_indexes_to_load.count(FieldId(102)) > 0);
+
+    // Field 102 should NOT be in text_indexes_to_create (has pre-built)
+    EXPECT_TRUE(diff.text_indexes_to_create.count(FieldId(102)) == 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexNewTextStats) {
+    // ComputeDiff: new_info has text stats that current doesn't -> load
+    auto text_schema = CreateSchemaWithTextMatchField();
+
+    // Current: no text stats
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    // New: has text stats for field 102
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_collectionid(200);
+    new_proto.set_partitionid(300);
+    new_proto.set_num_of_rows(1000);
+    auto& text_stats = (*new_proto.mutable_textstatslogs())[102];
+    text_stats.set_fieldid(102);
+    text_stats.set_version(1);
+    text_stats.set_buildid(5001);
+    text_stats.add_files("/path/to/text_index");
+
+    SegmentLoadInfo current_info(current_proto, text_schema);
+    SegmentLoadInfo new_info(new_proto, text_schema);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // Field 102 should be in text_indexes_to_load
+    EXPECT_EQ(diff.text_indexes_to_load.size(), 1);
+    EXPECT_TRUE(diff.text_indexes_to_load.count(FieldId(102)) > 0);
+
+    // Field 102 should NOT be in text_indexes_to_create (has pre-built in new)
+    EXPECT_TRUE(diff.text_indexes_to_create.count(FieldId(102)) == 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexAlreadyLoaded) {
+    // ComputeDiff: both current and new have same text stats -> no diff
+    auto text_schema = CreateSchemaWithTextMatchField();
+
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_collectionid(200);
+    proto.set_partitionid(300);
+    proto.set_num_of_rows(1000);
+
+    // Add a binlog to satisfy GetLoadDiff precondition
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(100);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/pk_binlog");
+    log->set_entries_num(1000);
+
+    auto& text_stats = (*proto.mutable_textstatslogs())[102];
+    text_stats.set_fieldid(102);
+    text_stats.set_version(1);
+    text_stats.set_buildid(5001);
+    text_stats.add_files("/path/to/text_index");
+
+    SegmentLoadInfo current_info(proto, text_schema);
+    // Calculate first diff to populate default fields etc.
+    auto first_diff = current_info.GetLoadDiff();
+    SegmentLoadInfo new_info(proto, text_schema);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // No text index changes - both have the same text stats
+    EXPECT_TRUE(diff.text_indexes_to_load.empty());
+    EXPECT_TRUE(diff.text_indexes_to_create.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexCreatedFromRawData) {
+    // ComputeDiff: current already created text index from raw data ->
+    // should not be re-created or re-loaded
+    auto text_schema = CreateSchemaWithTextMatchField();
+
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    SegmentLoadInfo current_info(proto, text_schema);
+    // Mark field 102 as having been created from raw data
+    current_info.SetTextIndexCreated(FieldId(102));
+
+    SegmentLoadInfo new_info(proto, text_schema);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // Field 102 should NOT be in text_indexes_to_create (already created)
+    EXPECT_TRUE(diff.text_indexes_to_create.count(FieldId(102)) == 0);
+    // Field 102 should NOT be in text_indexes_to_load (no stats in new)
+    EXPECT_TRUE(diff.text_indexes_to_load.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexCreateForUnindexed) {
+    // ComputeDiff: enable_match field without pre-built index and not yet
+    // created -> should be in text_indexes_to_create
+    auto text_schema = CreateSchemaWithTextMatchField();
+
+    // Current: no text stats, no created indexes
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    // New: also no text stats for field 102
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+
+    SegmentLoadInfo current_info(current_proto, text_schema);
+    SegmentLoadInfo new_info(new_proto, text_schema);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // Field 102 (enable_match=true) should be in text_indexes_to_create
+    EXPECT_TRUE(diff.text_indexes_to_create.count(FieldId(102)) > 0);
+    // Field 103 (no enable_match) should NOT be in text_indexes_to_create
+    EXPECT_TRUE(diff.text_indexes_to_create.count(FieldId(103)) == 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ConvertTextIndexStatsToLoadTextIndexInfo) {
+    // Test the conversion of TextIndexStats to LoadTextIndexInfo
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_collectionid(200);
+    proto.set_partitionid(300);
+    proto.set_num_of_rows(1000);
+    proto.set_priority(proto::common::LoadPriority::HIGH);
+
+    proto::segcore::TextIndexStats text_stats;
+    text_stats.set_fieldid(101);
+    text_stats.set_version(3);
+    text_stats.set_buildid(5001);
+    text_stats.set_memory_size(2048);
+    text_stats.set_current_scalar_index_version(2);
+    text_stats.add_files("/path/to/file1");
+    text_stats.add_files("/path/to/file2");
+    text_stats.add_files("/path/to/file3");
+
+    SegmentLoadInfo info(proto, schema_);
+    auto load_info =
+        info.ConvertTextIndexStatsToLoadTextIndexInfo(text_stats, FieldId(101));
+
+    EXPECT_NE(load_info, nullptr);
+    EXPECT_EQ(load_info->fieldid(), 101);
+    EXPECT_EQ(load_info->version(), 3);
+    EXPECT_EQ(load_info->buildid(), 5001);
+    EXPECT_EQ(load_info->index_size(), 2048);
+    EXPECT_EQ(load_info->current_scalar_index_version(), 2);
+    EXPECT_EQ(load_info->files_size(), 3);
+    EXPECT_EQ(load_info->files(0), "/path/to/file1");
+    EXPECT_EQ(load_info->files(1), "/path/to/file2");
+    EXPECT_EQ(load_info->files(2), "/path/to/file3");
+    EXPECT_EQ(load_info->collectionid(), 200);
+    EXPECT_EQ(load_info->partitionid(), 300);
+    EXPECT_EQ(load_info->load_priority(), proto::common::LoadPriority::HIGH);
+    // Schema should be populated
+    EXPECT_TRUE(load_info->has_schema());
+}
+
+TEST_F(SegmentLoadInfoTest, LoadDiffHasChangesWithTextIndexesToLoad) {
+    // Test that HasChanges returns true when text_indexes_to_load is non-empty
+    LoadDiff diff;
+    EXPECT_FALSE(diff.HasChanges());
+
+    diff.text_indexes_to_load[FieldId(101)] =
+        std::make_shared<proto::indexcgo::LoadTextIndexInfo>();
+    EXPECT_TRUE(diff.HasChanges());
+}
+
+TEST_F(SegmentLoadInfoTest, LoadDiffHasChangesWithTextIndexesToCreate) {
+    // Test that HasChanges returns true when text_indexes_to_create is non-empty
+    LoadDiff diff;
+    EXPECT_FALSE(diff.HasChanges());
+
+    diff.text_indexes_to_create.insert(FieldId(102));
+    EXPECT_TRUE(diff.HasChanges());
+}
+
+TEST_F(SegmentLoadInfoTest, LoadDiffToStringIncludesTextIndexes) {
+    // Test that ToString includes text index fields
+    LoadDiff diff;
+    diff.text_indexes_to_load[FieldId(101)] =
+        std::make_shared<proto::indexcgo::LoadTextIndexInfo>();
+    diff.text_indexes_to_create.insert(FieldId(102));
+
+    std::string str = diff.ToString();
+    EXPECT_TRUE(str.find("text_indexes_to_load") != std::string::npos);
+    EXPECT_TRUE(str.find("101") != std::string::npos);
+    EXPECT_TRUE(str.find("text_indexes_to_create") != std::string::npos);
+    EXPECT_TRUE(str.find("102") != std::string::npos);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexMultipleFields) {
+    // Test with multiple text stats fields in new_info
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    // Current has text stats for field 101
+    auto& current_stats = (*current_proto.mutable_textstatslogs())[101];
+    current_stats.set_fieldid(101);
+    current_stats.set_version(1);
+    current_stats.add_files("/path/to/old_text_index");
+
+    // New has text stats for fields 101 and 102
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_collectionid(200);
+    new_proto.set_partitionid(300);
+    new_proto.set_num_of_rows(1000);
+
+    auto& new_stats1 = (*new_proto.mutable_textstatslogs())[101];
+    new_stats1.set_fieldid(101);
+    new_stats1.set_version(1);
+    new_stats1.add_files("/path/to/old_text_index");
+
+    auto& new_stats2 = (*new_proto.mutable_textstatslogs())[102];
+    new_stats2.set_fieldid(102);
+    new_stats2.set_version(1);
+    new_stats2.set_buildid(5002);
+    new_stats2.add_files("/path/to/new_text_index");
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // Only field 102 should be in text_indexes_to_load (101 already exists)
+    EXPECT_EQ(diff.text_indexes_to_load.size(), 1);
+    EXPECT_TRUE(diff.text_indexes_to_load.count(FieldId(102)) > 0);
+    EXPECT_TRUE(diff.text_indexes_to_load.count(FieldId(101)) == 0);
 }

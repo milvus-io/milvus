@@ -1829,7 +1829,7 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
 
 void
 SegmentGrowingImpl::CreateTextIndexes() {
-    for (auto [field_id, field_meta] : schema_->get_fields()) {
+    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
         if (IsStringDataType(field_meta.get_data_type()) &&
             field_meta.enable_match()) {
             CreateTextIndex(FieldId(field_id));
@@ -1866,7 +1866,7 @@ void
 SegmentGrowingImpl::BulkGetJsonData(
     milvus::OpContext* op_ctx,
     FieldId field_id,
-    std::function<void(milvus::Json, size_t, bool)> fn,
+    const std::function<void(milvus::Json, size_t, bool)>& fn,
     const int64_t* offsets,
     int64_t count) const {
     auto vec_ptr = dynamic_cast<const ConcurrentVector<Json>*>(
@@ -2306,7 +2306,7 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
     } else {
         auto vec_base = insert_record_.get_data_base(field_id);
         if (vec_base != nullptr) {
-            const auto& valid_data_vec = vec_base->get_valid_data();
+            auto valid_data_vec = vec_base->get_valid_data();
             bool is_mapping_storage = vec_base->is_mapping_storage();
             if (!valid_data_vec.empty()) {
                 result.valid_data = std::make_unique<bool[]>(count);

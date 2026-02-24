@@ -670,7 +670,7 @@ NgramInvertedIndex::ExecuteQueryForUT(const std::string& literal,
     if (pre_filter != nullptr) {
         candidates &= *pre_filter;
         if (candidates.none()) {
-            return std::move(candidates);
+            return candidates;
         }
     }
 
@@ -678,7 +678,7 @@ NgramInvertedIndex::ExecuteQueryForUT(const std::string& literal,
     ExecutePhase1(literal, op_type, candidates);
 
     if (candidates.none()) {
-        return std::move(candidates);
+        return candidates;
     }
 
     // Phase 2: post-filter verification (full segment)

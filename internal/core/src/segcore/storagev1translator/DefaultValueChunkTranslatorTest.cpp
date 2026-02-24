@@ -36,6 +36,7 @@
 #include "pb/schema.pb.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
+#include "test_utils/Constants.h"
 
 using namespace milvus;
 using namespace milvus::segcore::storagev1translator;
@@ -45,7 +46,7 @@ class DefaultValueChunkTranslatorTest : public ::testing::TestWithParam<bool> {
     void
     SetUp() override {
         // Create a unique temp directory for mmap tests
-        temp_dir_ = std::filesystem::temp_directory_path() /
+        temp_dir_ = std::filesystem::path(TestLocalPath) /
                     ("milvus_param_test_" + std::to_string(segment_id_) + "_" +
                      std::to_string(reinterpret_cast<uintptr_t>(this)));
         std::filesystem::create_directories(temp_dir_);
@@ -600,7 +601,7 @@ class DefaultValueChunkTranslatorMmapTest : public ::testing::Test {
     SetUp() override {
         // Create a unique temp directory for each test
         temp_dir_ =
-            std::filesystem::temp_directory_path() /
+            std::filesystem::path(TestLocalPath) /
             ("milvus_test_" + std::to_string(::testing::UnitTest::GetInstance()
                                                  ->current_test_info()
                                                  ->line()));

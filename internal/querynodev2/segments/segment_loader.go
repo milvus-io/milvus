@@ -965,21 +965,6 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		})
 	}
 
-	// load text indexes.
-	for _, info := range textIndexes {
-		if err := segment.LoadTextIndex(ctx, info, schemaHelper); err != nil {
-			return err
-		}
-	}
-	loadTextIndexesSpan := tr.RecordSpan()
-
-	// create index for unindexed text fields.
-	for fieldID := range unindexedTextFields {
-		if err := segment.CreateTextIndex(ctx, fieldID); err != nil {
-			return err
-		}
-	}
-
 	for _, info := range jsonKeyStats {
 		if err := segment.LoadJSONKeyIndex(ctx, info, schemaHelper); err != nil {
 			return err
@@ -995,11 +980,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	}
 	patchEntryNumberSpan := tr.RecordSpan()
 	log.Info("Finish loading segment",
-		// zap.Duration("loadFieldsIndexSpan", loadFieldsIndexSpan),
-		// zap.Duration("complementScalarDataSpan", complementScalarDataSpan),
-		// zap.Duration("loadRawDataSpan", loadRawDataSpan),
 		zap.Duration("patchEntryNumberSpan", patchEntryNumberSpan),
-		zap.Duration("loadTextIndexesSpan", loadTextIndexesSpan),
 		zap.Duration("loadJsonKeyIndexSpan", loadJSONKeyIndexesSpan),
 	)
 	return nil

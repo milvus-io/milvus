@@ -612,7 +612,8 @@ TEST_P(IndexTest, Mmap) {
     ASSERT_GT(serializedSize, 0);
     load_conf = generate_load_conf(index_type, metric_type, 0);
     load_conf["index_files"] = index_files;
-    load_conf["mmap_filepath"] = "mmap/test_index_mmap_" + index_type;
+    load_conf["mmap_filepath"] =
+        TestLocalPath + "mmap/test_index_mmap_" + index_type;
     load_conf[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
     vec_index->Load(milvus::tracer::TraceContext{}, load_conf);

@@ -4396,3 +4396,23 @@ def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
             row[timestamptz_field_name] = convert_one(row[timestamptz_field_name])
         new_rows.append(row)
     return new_rows
+
+
+def get_field_warmup(describe_res, field_name):
+    """Get warmup value from describe_collection result for a specific field"""
+    for field in describe_res["fields"]:
+        if field["name"] == field_name:
+            return field.get("params", {}).get("warmup", None)
+    return None
+
+
+def get_collection_warmup(describe_res, key):
+    """Get collection level warmup value from describe_collection result
+       key: "warmup.scalarField" / "warmup.scalarIndex" / "warmup.vectorField" / "warmup.vectorIndex"
+    """
+    return describe_res.get("properties", {}).get(key, None)
+
+
+def get_index_warmup(describe_index_res):
+    """Get index warmup value from describe_index result"""
+    return describe_index_res.get("warmup", None)

@@ -98,12 +98,12 @@ class BitmapIndex : public ScalarIndex<T> {
     IsNotNull() override;
 
     const TargetBitmap
-    Range(T value, OpType op) override;
+    Range(const T& value, OpType op) override;
 
     const TargetBitmap
-    Range(T lower_bound_value,
+    Range(const T& lower_bound_value,
           bool lb_inclusive,
-          T upper_bound_value,
+          const T& upper_bound_value,
           bool ub_inclusive) override;
 
     std::optional<T>
@@ -286,30 +286,30 @@ class BitmapIndex : public ScalarIndex<T> {
     ConvertRoaringToBitset(const roaring::Roaring& values);
 
     TargetBitmap
-    RangeForRoaring(T value, OpType op);
+    RangeForRoaring(const T& value, OpType op);
 
     TargetBitmap
-    RangeForBitset(T value, OpType op);
+    RangeForBitset(const T& value, OpType op);
 
     TargetBitmap
-    RangeForMmap(T value, OpType op);
+    RangeForMmap(const T& value, OpType op);
 
     TargetBitmap
-    RangeForRoaring(T lower_bound_value,
+    RangeForRoaring(const T& lower_bound_value,
                     bool lb_inclusive,
-                    T upper_bound_value,
+                    const T& upper_bound_value,
                     bool ub_inclusive);
 
     TargetBitmap
-    RangeForBitset(T lower_bound_value,
+    RangeForBitset(const T& lower_bound_value,
                    bool lb_inclusive,
-                   T upper_bound_value,
+                   const T& upper_bound_value,
                    bool ub_inclusive);
 
     TargetBitmap
-    RangeForMmap(T lower_bound_value,
+    RangeForMmap(const T& lower_bound_value,
                  bool lb_inclusive,
-                 T upper_bound_value,
+                 const T& upper_bound_value,
                  bool ub_inclusive);
 
     void

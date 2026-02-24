@@ -406,7 +406,7 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
             {vec_field_id, fieldIndexMeta}};
         IndexMetaPtr metaPtr =
             std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
-        return std::move(metaPtr);
+        return metaPtr;
     }
 
     void
@@ -659,12 +659,12 @@ GenerateTestParams() {
     for (const auto& [data_type, metric, index_type, interim_index] :
          base_configs) {
         for (const auto& [nullable, null_percent] : null_configs) {
-            params.push_back(std::make_tuple(data_type,
-                                             metric,
-                                             index_type,
-                                             interim_index,
-                                             nullable,
-                                             null_percent));
+            params.emplace_back(data_type,
+                                metric,
+                                index_type,
+                                interim_index,
+                                nullable,
+                                null_percent);
         }
     }
     return params;

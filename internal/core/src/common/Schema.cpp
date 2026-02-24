@@ -132,9 +132,9 @@ const FieldMeta FieldMeta::RowIdMeta(
 const ArrowSchemaPtr
 Schema::ConvertToArrowSchema() const {
     arrow::FieldVector arrow_fields;
-    arrow_fields.reserve(fields_.size());
-    for (const auto& field : fields_) {
-        const auto& meta = field.second;
+    arrow_fields.reserve(field_ids_.size());
+    for (const auto& field_id : field_ids_) {
+        const auto& meta = fields_.at(field_id);
         int dim = IsVectorDataType(meta.get_data_type()) &&
                           !IsSparseFloatVectorDataType(meta.get_data_type())
                       ? meta.get_dim()
@@ -155,6 +155,35 @@ Schema::ConvertToArrowSchema() const {
             meta.is_nullable(),
             arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
                                       {std::to_string(meta.get_id().get())}));
+        arrow_fields.push_back(arrow_field);
+    }
+    return arrow::schema(arrow_fields);
+}
+
+const ArrowSchemaPtr
+Schema::ConvertToLoonArrowSchema() const {
+    arrow::FieldVector arrow_fields;
+    arrow_fields.reserve(field_ids_.size());
+    for (const auto& field_id : field_ids_) {
+        const auto& meta = fields_.at(field_id);
+        int dim = IsVectorDataType(meta.get_data_type()) &&
+                          !IsSparseFloatVectorDataType(meta.get_data_type())
+                      ? meta.get_dim()
+                      : 1;
+
+        std::shared_ptr<arrow::DataType> arrow_data_type = nullptr;
+        auto data_type = meta.get_data_type();
+        if (data_type == DataType::VECTOR_ARRAY) {
+            arrow_data_type = GetArrowDataTypeForVectorArray(
+                meta.get_element_type(), meta.get_dim());
+        } else {
+            arrow_data_type = GetArrowDataType(data_type, dim);
+        }
+
+        auto arrow_field =
+            std::make_shared<arrow::Field>(std::to_string(field_id.get()),
+                                           arrow_data_type,
+                                           meta.is_nullable());
         arrow_fields.push_back(arrow_field);
     }
     return arrow::schema(arrow_fields);

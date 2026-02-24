@@ -248,9 +248,16 @@ func (mt *MetaTable) reload() error {
 			return err
 		}
 		for _, collection := range collections {
-			if collection.DBName == "" {
-				collection.DBName = dbName
+			if collection.DBName != "" && collection.DBName != dbName {
+				log.Ctx(mt.ctx).Warn(
+					"collection dbname is not correct, it will be fixed",
+					zap.Int64("collection_id", collection.CollectionID),
+					zap.String("db_name", dbName),
+					zap.String("collection_name", collection.Name),
+					zap.String("collection_dbname", collection.DBName),
+				)
 			}
+			collection.DBName = dbName // some collections may not have db name or its dbname is not correct, we should fix it here.
 			mt.collID2Meta[collection.CollectionID] = collection
 			if collection.Available() {
 				mt.names.insert(dbName, collection.Name, collection.CollectionID)

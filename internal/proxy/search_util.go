@@ -237,7 +237,7 @@ func parseOrderByFieldSpec(fieldSpec string, fieldSchemaMap map[string]*schemapb
 				if err != nil {
 					return "", 0, "", "", false, fmt.Errorf("invalid JSON path in order_by field '%s': %w", fieldSpec, err)
 				}
-				outputFieldName = fieldSpec // Pass full spec for dynamic field extraction
+				outputFieldName = fieldSpec // Explicit $meta["key"] path; single-level, parser accepts it
 				isDynamicField = true
 			} else if typeutil.IsJSONType(field.GetDataType()) {
 				// Regular JSON field with path: metadata["price"]
@@ -263,8 +263,8 @@ func parseOrderByFieldSpec(fieldSpec string, fieldSchemaMap map[string]*schemapb
 			if err != nil {
 				return "", 0, "", "", false, fmt.Errorf("invalid JSON path in order_by field '%s': %w", fieldSpec, err)
 			}
-			// For dynamic fields, pass the original spec so translateOutputFields can extract subfields
-			outputFieldName = fieldSpec
+			// Request the base dynamic field; full path is in jsonPath
+			outputFieldName = baseName
 			isDynamicField = true
 		} else {
 			return "", 0, "", "", false, fmt.Errorf("order_by field '%s' not found in schema and no dynamic field available", baseName)

@@ -72,6 +72,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -107,11 +108,6 @@ class TestVectorArrayStorageV2 : public testing::Test {
             segcore::SegcoreConfig::default_config(),
             true);
 
-        // Initialize file system
-        auto conf = milvus_storage::ArrowFileSystemConfig();
-        conf.storage_type = "local";
-        conf.root_path = "/tmp/test_vector_array_for_storage_v2";
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
 
@@ -269,11 +265,9 @@ class TestVectorArrayStorageV2 : public testing::Test {
 
     void
     TearDown() override {
-        // Clean up test data directory
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
-        fs->DeleteDir("/tmp/test_vector_array_for_storage_v2");
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Release();
+        fs->DeleteDir("test_data");
     }
 
  protected:
@@ -318,8 +312,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
         segment_id, vector_array_field_id.get(), index_build_id, index_version);
 
     // Create storage config pointing to the test data location
-    auto storage_config =
-        gen_local_storage_config("/tmp/test_vector_array_for_storage_v2");
+    auto storage_config = gen_local_storage_config(TestLocalPath);
     auto cm = CreateChunkManager(storage_config);
 
     // Create index using storage v2 config
@@ -426,8 +419,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
         segment_id, vector_array_field_id.get(), index_build_id, index_version);
 
     // Create storage config pointing to the test data location
-    auto storage_config =
-        gen_local_storage_config("/tmp/test_vector_array_for_storage_v2");
+    auto storage_config = gen_local_storage_config(TestLocalPath);
     auto cm = CreateChunkManager(storage_config);
 
     // Create index using storage v2 config
@@ -483,8 +475,9 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
         auto load_conf = generate_load_conf(
             knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::MAX_SIM_IP, 0);
         load_conf["index_files"] = index_files;
-        load_conf["mmap_filepath"] = "mmap/test_emb_list_index";
-        load_conf["emb_list_meta_file_path"] = "mmap/test_index_meta";
+        load_conf["mmap_filepath"] = TestLocalPath + "mmap/test_emb_list_index";
+        load_conf["emb_list_meta_file_path"] =
+            TestLocalPath + "mmap/test_index_meta";
         load_conf[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
         vec_index->Load(milvus::tracer::TraceContext{}, load_conf);

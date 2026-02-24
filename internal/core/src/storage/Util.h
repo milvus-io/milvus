@@ -252,6 +252,33 @@ WaitAllFutures(std::vector<std::future<T>> futures) {
     return results;
 }
 
+// Process futures in order, invoking processor on each result as soon as it's
+// ready.  This reduces peak memory compared to WaitAllFutures because each
+// result can be consumed (and freed) before later futures resolve.
+// On exception, we continue waiting for all remaining futures to avoid
+// use-after-free on resources captured by background threads (see #46958).
+template <typename T, typename Processor>
+void
+ProcessFuturesInOrder(std::vector<std::future<T>>& futures,
+                      Processor&& processor) {
+    std::exception_ptr first_exception = nullptr;
+    for (auto& future : futures) {
+        try {
+            auto result = future.get();
+            if (!first_exception) {
+                processor(std::move(result));
+            }
+        } catch (...) {
+            if (!first_exception) {
+                first_exception = std::current_exception();
+            }
+        }
+    }
+    if (first_exception) {
+        std::rethrow_exception(first_exception);
+    }
+}
+
 std::vector<FieldDataPtr>
 GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,

@@ -55,6 +55,7 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/memory_planner.h"
+#include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 
 using namespace milvus;
@@ -64,10 +65,6 @@ namespace pb = milvus::proto;
 class TestGrowingStorageV2 : public ::testing::Test {
     void
     SetUp() override {
-        auto conf = milvus_storage::ArrowFileSystemConfig();
-        conf.storage_type = "local";
-        conf.root_path = path_;
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
         fs_ = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                   .GetArrowFileSystem();
         SetUpCommonData();
@@ -144,7 +141,7 @@ class TestGrowingStorageV2 : public ::testing::Test {
     std::shared_ptr<arrow::Schema> schema_;
     std::shared_ptr<arrow::RecordBatch> record_batch_;
     std::shared_ptr<arrow::Table> table_;
-    std::string path_ = "/tmp";
+    std::string path_ = TestLocalPath;
 
     std::vector<int64_t> ts_values;
     std::vector<int64_t> pk_values;

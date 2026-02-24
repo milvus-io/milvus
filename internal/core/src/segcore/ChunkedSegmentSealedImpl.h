@@ -98,7 +98,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                       bool is_sorted_by_pk = false);
     ~ChunkedSegmentSealedImpl() override;
     void
-    LoadIndex(const LoadIndexInfo& info) override;
+    LoadIndex(LoadIndexInfo& info) override;
     void
     LoadFieldData(const LoadFieldDataInfo& info,
                   milvus::OpContext* op_ctx = nullptr) override;
@@ -171,9 +171,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                     milvus::OpContext* op_ctx = nullptr) override;
 
     void
-    LoadTextIndex(
-        std::unique_ptr<milvus::proto::indexcgo::LoadTextIndexInfo> info_proto,
-        milvus::OpContext* op_ctx = nullptr) override;
+    LoadTextIndex(milvus::OpContext* op_ctx,
+                  std::shared_ptr<milvus::proto::indexcgo::LoadTextIndexInfo>
+                      info_proto) override;
 
     void
     RemoveJsonStats(FieldId field_id) override {
@@ -218,7 +218,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     BulkGetJsonData(milvus::OpContext* op_ctx,
                     FieldId field_id,
-                    std::function<void(milvus::Json, size_t, bool)> fn,
+                    const std::function<void(milvus::Json, size_t, bool)>& fn,
                     const int64_t* offsets,
                     int64_t count) const override {
         auto column = fields_.rlock()->at(field_id);
@@ -992,10 +992,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     search_ids(BitsetType& bitset, const IdArray& id_array) const override;
 
     void
-    LoadVecIndex(const LoadIndexInfo& info);
+    LoadVecIndex(LoadIndexInfo& info);
 
     void
-    LoadScalarIndex(const LoadIndexInfo& info);
+    LoadScalarIndex(LoadIndexInfo& info);
 
     bool
     generate_interim_index(const FieldId field_id, int64_t num_rows);
@@ -1079,6 +1079,19 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     ReloadColumns(const std::vector<FieldId>& field_ids_to_reload,
                   milvus::OpContext* op_ctx = nullptr);
+
+    /**
+     * @brief Load text indexes in batch
+     *
+     * @param op_ctx The operation context
+     * @param text_indices_to_load a map from field id to text indexes to load
+     */
+    void
+    LoadBatchTextIndexes(
+        milvus::OpContext* op_ctx,
+        std::unordered_map<FieldId,
+                           std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>>&
+            text_indexes_to_load);
 
     /**
      * @brief Apply load differences to update segment load information

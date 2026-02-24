@@ -1102,55 +1102,6 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 	return err
 }
 
-func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextIndexStats, schemaHelper *typeutil.SchemaHelper) error {
-	log.Ctx(ctx).Info("load text index", zap.Int64("field id", textLogs.GetFieldID()), zap.Any("text logs", textLogs))
-
-	if !s.ptrLock.PinIf(state.IsNotReleased) {
-		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
-	}
-	defer s.ptrLock.Unpin()
-
-	f, err := schemaHelper.GetFieldFromID(textLogs.GetFieldID())
-	if err != nil {
-		return err
-	}
-
-	// Text match index mmap config is based on the raw data mmap.
-	enableMmap := isDataMmapEnable(f)
-	// Text match index should based on scala field's warmup policy like mmap
-	warmupPolicy := getScalarDataWarmupPolicy(f)
-	cgoProto := &indexcgopb.LoadTextIndexInfo{
-		FieldID:                   textLogs.GetFieldID(),
-		Version:                   textLogs.GetVersion(),
-		BuildID:                   textLogs.GetBuildID(),
-		Files:                     textLogs.GetFiles(),
-		Schema:                    f,
-		CollectionID:              s.Collection(),
-		PartitionID:               s.Partition(),
-		LoadPriority:              s.LoadInfo().GetPriority(),
-		EnableMmap:                enableMmap,
-		IndexSize:                 textLogs.GetMemorySize(),
-		CurrentScalarIndexVersion: textLogs.GetCurrentScalarIndexVersion(),
-		WarmupPolicy:              warmupPolicy,
-	}
-
-	marshaled, err := proto.Marshal(cgoProto)
-	if err != nil {
-		return err
-	}
-
-	guard := segcore.NewCancellationGuard(ctx)
-	defer guard.Close()
-
-	var status C.CStatus
-	_, _ = GetLoadPool().Submit(func() (any, error) {
-		status = C.LoadTextIndex(s.ptr, (*C.uint8_t)(unsafe.Pointer(&marshaled[0])), (C.uint64_t)(len(marshaled)), (C.CLoadCancellationSource)(guard.Source()))
-		return nil, nil
-	}).Await()
-
-	return HandleCStatus(ctx, &status, "LoadTextIndex failed")
-}
-
 func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datapb.JsonKeyStats, schemaHelper *typeutil.SchemaHelper) error {
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
@@ -1276,27 +1227,6 @@ func (s *LocalSegment) UpdateFieldRawDataSize(ctx context.Context, numRows int64
 	}
 
 	log.Ctx(ctx).Info("updateFieldRawDataSize done", zap.Int64("segmentID", s.ID()))
-
-	return nil
-}
-
-func (s *LocalSegment) CreateTextIndex(ctx context.Context, fieldID int64) error {
-	var status C.CStatus
-	log.Ctx(ctx).Info("create text index for segment", zap.Int64("segmentID", s.ID()), zap.Int64("fieldID", fieldID))
-
-	guard := segcore.NewCancellationGuard(ctx)
-	defer guard.Close()
-
-	GetLoadPool().Submit(func() (any, error) {
-		status = C.CreateTextIndex(s.ptr, C.int64_t(fieldID), (C.CLoadCancellationSource)(guard.Source()))
-		return nil, nil
-	}).Await()
-
-	if err := HandleCStatus(ctx, &status, "CreateTextIndex failed"); err != nil {
-		return err
-	}
-
-	log.Ctx(ctx).Info("create text index for segment done", zap.Int64("segmentID", s.ID()), zap.Int64("fieldID", fieldID))
 
 	return nil
 }

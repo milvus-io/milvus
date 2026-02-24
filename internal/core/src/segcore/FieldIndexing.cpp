@@ -284,7 +284,7 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
     auto size_per_chunk = field_raw_data->get_size_per_chunk();
     auto build_threshold = get_build_threshold();
     bool is_mapping_storage = field_raw_data->is_mapping_storage();
-    auto& valid_data = field_raw_data->get_valid_data();
+    auto valid_data = field_raw_data->get_valid_data();
 
     if (!built_) {
         const void* data_ptr = nullptr;
@@ -411,7 +411,7 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
     auto size_per_chunk = field_raw_data->get_size_per_chunk();
     auto build_threshold = get_build_threshold();
     bool is_mapping_storage = field_raw_data->is_mapping_storage();
-    auto& valid_data = field_raw_data->get_valid_data();
+    auto valid_data = field_raw_data->get_valid_data();
 
     AssertInfo(ConcurrentDenseVectorCheck(field_raw_data, get_data_type()),
                "vec_base can't cast to ConcurrentVector type");

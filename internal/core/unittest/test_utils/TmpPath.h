@@ -12,12 +12,14 @@
 #include <boost/filesystem.hpp>
 #include <string>
 
+#include "test_utils/Constants.h"
+
 namespace milvus::test {
 struct TmpPath {
     TmpPath() {
-        temp_path_ = boost::filesystem::temp_directory_path() /
+        temp_path_ = boost::filesystem::path(TestLocalPath) /
                      boost::filesystem::unique_path();
-        boost::filesystem::create_directory(temp_path_);
+        boost::filesystem::create_directories(temp_path_);
     }
     ~TmpPath() {
         boost::filesystem::remove_all(temp_path_);

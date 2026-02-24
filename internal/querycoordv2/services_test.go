@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
@@ -244,6 +245,8 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.taskScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.jobScheduler.Start()
+	assign.ResetGlobalAssignPolicyFactoryForTest()
+	assign.InitGlobalAssignPolicyFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
 	suite.balancer = balance.NewRowCountBasedBalancer(
 		suite.taskScheduler,
 		suite.nodeMgr,
@@ -304,10 +307,11 @@ func (suite *ServiceSuite) SetupTest() {
 		for _, collection := range suite.collections {
 			if collection == collectionID {
 				return &milvuspb.DescribeCollectionResponse{
-					DbName:         util.DefaultDBName,
-					DbId:           1,
-					CollectionID:   collectionID,
-					CollectionName: fmt.Sprintf("collection_%d", collectionID),
+					DbName:              util.DefaultDBName,
+					DbId:                1,
+					CollectionID:        collectionID,
+					CollectionName:      fmt.Sprintf("collection_%d", collectionID),
+					VirtualChannelNames: suite.channels[collectionID],
 					Schema: &schemapb.CollectionSchema{
 						Fields: []*schemapb.FieldSchema{
 							{FieldID: 100},
@@ -456,8 +460,6 @@ func (suite *ServiceSuite) TestLoadCollection() {
 
 	// Test load all collections
 	for _, collection := range suite.collections {
-		suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
-			Return(nil, nil)
 		suite.expectGetRecoverInfo(collection)
 
 		req := &querypb.LoadCollectionRequest{
@@ -992,8 +994,6 @@ func (suite *ServiceSuite) TestLoadPartition() {
 
 	// Test load all partitions
 	for _, collection := range suite.collections {
-		suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
-			Return(nil, nil)
 		suite.expectGetRecoverInfo(collection)
 
 		req := &querypb.LoadPartitionsRequest{
@@ -2079,8 +2079,6 @@ func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
 }
 
 func (suite *ServiceSuite) expectLoadMetaRPCs() {
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
-		Return(nil, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).
 		Return(nil, nil).Maybe()
 }
@@ -2265,6 +2263,7 @@ func (suite *ServiceSuite) TearDownTest() {
 	suite.targetObserver.Stop()
 	suite.collectionObserver.Stop()
 	suite.jobScheduler.Stop()
+	assign.ResetGlobalAssignPolicyFactoryForTest()
 }
 
 func TestService(t *testing.T) {

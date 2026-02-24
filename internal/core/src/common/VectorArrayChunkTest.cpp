@@ -38,6 +38,7 @@
 #include "common/VectorArray.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
+#include "test_utils/Constants.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/schema.pb.h"
 
@@ -300,7 +301,7 @@ TEST_F(VectorArrayChunkTest, TestWriteWithMmap) {
 
     // Create temp file path
     std::string temp_file =
-        "/tmp/test_vector_array_chunk_" +
+        TestLocalPath + "test_vector_array_chunk_" +
         std::to_string(
             std::chrono::steady_clock::now().time_since_epoch().count());
 
