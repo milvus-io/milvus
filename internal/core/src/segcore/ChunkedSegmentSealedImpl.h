@@ -443,8 +443,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     const ConcurrentVector<Timestamp>&
     get_timestamps() const override {
         // Sealed segments no longer store timestamps in ConcurrentVector.
-        // This method is only called by dead code (timestamp_filter) and
-        // growing segment paths. Sealed segments should never reach here.
+        // Only growing segments use this method.
         ThrowInfo(NotImplemented,
                   "sealed segment does not support get_timestamps()");
     }
