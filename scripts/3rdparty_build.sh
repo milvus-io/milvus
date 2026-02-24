@@ -99,6 +99,13 @@ fi
 
 pushd ${BUILD_OUTPUT_DIR}
 
+# Unset LD_PRELOAD to prevent jemalloc (set by setenv.sh) from being injected
+# into conan's Python process, which causes segfaults.
+# NOTE: Do NOT unset LD_LIBRARY_PATH here — conan sub-builds (e.g.
+# opentelemetry-cpp) need it to locate shared libraries like libprotoc.so
+# when running tools like grpc_cpp_plugin.
+unset LD_PRELOAD
+
 export CONAN_REVISIONS_ENABLED=1
 export CXXFLAGS="-Wno-error=address -Wno-error=deprecated-declarations -include cstdint"
 export CFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"
