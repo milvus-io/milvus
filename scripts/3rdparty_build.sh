@@ -127,7 +127,41 @@ case "${unameOut}" in
     export CMAKE_CXX_COMPILER_LAUNCHER=ccache
     echo "Using CXX: $CXX"
     echo "Using CC: $CC"
-    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=17 -u || { echo 'conan install failed'; exit 1; }
+    CONAN_ARGS="--install-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=17 -u"
+
+    # On macOS, Conan packages with shared libraries (protobuf, grpc) produce
+    # binaries (protoc, grpc_cpp_plugin) whose install rpaths don't include
+    # dependency lib dirs (e.g. abseil). This causes dyld failures when
+    # downstream packages (e.g. opentelemetry-cpp) invoke them during build.
+    #
+    # Strategy: run conan install once (may fail on downstream packages),
+    # fix rpaths on the already-built binaries, then retry.
+    conan install ${CPP_SRC_DIR} ${CONAN_ARGS} || {
+        echo "First conan install attempt failed, fixing shared library rpaths and retrying..."
+
+        ABSEIL_LIB=$(find ~/.conan/data/abseil/ -path "*/package/*/lib/libabsl_base.*.dylib" 2>/dev/null | head -1 | xargs dirname 2>/dev/null)
+        PROTOBUF_LIB=$(find ~/.conan/data/protobuf/ -path "*/package/*/lib/libprotoc.*.dylib" 2>/dev/null | head -1 | xargs dirname 2>/dev/null)
+
+        # Fix protoc: needs rpath to abseil
+        PROTOC=$(find ~/.conan/data/protobuf/ -path "*/package/*/bin/protoc" 2>/dev/null | head -1)
+        if [[ -n "$PROTOC" && -n "$ABSEIL_LIB" ]]; then
+            install_name_tool -add_rpath "$ABSEIL_LIB" "$PROTOC" 2>/dev/null
+            echo "Fixed protoc rpath -> abseil"
+        fi
+
+        # Fix grpc plugins: need rpaths to protobuf and abseil
+        GRPC_CPP_PLUGIN=$(find ~/.conan/data/grpc/ -path "*/package/*/bin/grpc_cpp_plugin" 2>/dev/null | head -1)
+        if [[ -n "$GRPC_CPP_PLUGIN" ]]; then
+            GRPC_BIN_DIR=$(dirname "$GRPC_CPP_PLUGIN")
+            for plugin in "$GRPC_BIN_DIR"/grpc_*_plugin; do
+                [ -n "$PROTOBUF_LIB" ] && install_name_tool -add_rpath "$PROTOBUF_LIB" "$plugin" 2>/dev/null
+                [ -n "$ABSEIL_LIB" ] && install_name_tool -add_rpath "$ABSEIL_LIB" "$plugin" 2>/dev/null
+            done
+            echo "Fixed grpc plugin rpaths -> protobuf, abseil"
+        fi
+
+        conan install ${CPP_SRC_DIR} ${CONAN_ARGS} || { echo 'conan install failed'; exit 1; }
+    }
     ;;
   Linux*)
     if [ -f /etc/os-release ]; then
