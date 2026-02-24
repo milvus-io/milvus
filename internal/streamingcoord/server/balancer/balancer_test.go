@@ -230,6 +230,13 @@ func TestBalancer(t *testing.T) {
 	})
 	assert.ErrorIs(t, err, doneErr)
 
+	// Verify GetAllStreamingNodes filters out frozen node 1.
+	nodes, err := b.GetAllStreamingNodes(ctx)
+	assert.NoError(t, err)
+	assert.NotContains(t, nodes, int64(1))
+	assert.Contains(t, nodes, int64(2))
+	assert.Contains(t, nodes, int64(3))
+
 	resp, err = b.UpdateBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{
 		Config: &streamingpb.WALBalancePolicyConfig{
 			AllowRebalance: true,
@@ -260,6 +267,13 @@ func TestBalancer(t *testing.T) {
 	assert.True(t, paramtable.Get().StreamingCfg.WALBalancerPolicyAllowRebalance.GetAsBool())
 	assert.NoError(t, err)
 	b.Trigger(ctx)
+
+	// Verify GetAllStreamingNodes returns all nodes after defreeze.
+	nodes, err = b.GetAllStreamingNodes(ctx)
+	assert.NoError(t, err)
+	assert.Contains(t, nodes, int64(1))
+	assert.Contains(t, nodes, int64(2))
+	assert.Contains(t, nodes, int64(3))
 
 	b.Close()
 	assert.ErrorIs(t, f.Get(), balancer.ErrBalancerClosed)
