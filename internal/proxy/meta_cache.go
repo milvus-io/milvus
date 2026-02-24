@@ -122,11 +122,12 @@ type databaseInfo struct {
 // with extra fields mapping and methods
 type schemaInfo struct {
 	*schemapb.CollectionSchema
-	fieldMap              *typeutil.ConcurrentMap[string, int64] // field name to id mapping
+	fieldMap              *typeutil.ConcurrentMap[string, int64]  // field name to id mapping
 	hasPartitionKeyField  bool
 	pkField               *schemapb.FieldSchema
-	multiAnalyzerFieldMap *typeutil.ConcurrentMap[int64, int64] // multi analzyer field id to dependent field id mapping
+	multiAnalyzerFieldMap *typeutil.ConcurrentMap[int64, int64]  // multi analzyer field id to dependent field id mapping
 	schemaHelper          *typeutil.SchemaHelper
+	dynamicFieldTypes     *typeutil.ConcurrentMap[string, string] // tracks JSON value types per dynamic field key
 }
 
 func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
@@ -158,6 +159,7 @@ func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
 		pkField:               pkField,
 		multiAnalyzerFieldMap: typeutil.NewConcurrentMap[int64, int64](),
 		schemaHelper:          schemaHelper,
+		dynamicFieldTypes:     typeutil.NewConcurrentMap[string, string](),
 	}
 }
 

@@ -2168,7 +2168,7 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
 		jsonFieldData := autoGenDynamicFieldData(jsonData)
-		schema := newTestSchema()
+		schema := newSchemaInfo(newTestSchema())
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2197,7 +2197,7 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
 		jsonFieldData := autoGenDynamicFieldData(jsonData)
-		schema := newTestSchema()
+		schema := newSchemaInfo(newTestSchema())
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2226,7 +2226,7 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
 		jsonFieldData := autoGenDynamicFieldData(jsonData)
-		schema := newTestSchema()
+		schema := newSchemaInfo(newTestSchema())
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2254,7 +2254,9 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		assert.NoError(t, err)
 		jsonData = append(jsonData, jsonBytes)
 		jsonFieldData := autoGenDynamicFieldData(jsonData)
-		schema := newTestSchema()
+		rawSchema := newTestSchema()
+		rawSchema.EnableDynamicField = false
+		schema := newSchemaInfo(rawSchema)
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2263,14 +2265,13 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 				Version:        msgpb.InsertDataVersion_ColumnBased,
 			},
 		}
-		schema.EnableDynamicField = false
 		err = checkDynamicFieldData(schema, insertMsg)
 		assert.Error(t, err)
 	})
 	t.Run("json data is string", func(t *testing.T) {
 		data := "abcdefg"
 		jsonFieldData := autoGenDynamicFieldData([][]byte{[]byte(data)})
-		schema := newTestSchema()
+		schema := newSchemaInfo(newTestSchema())
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2283,7 +2284,7 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("no json data", func(t *testing.T) {
-		schema := newTestSchema()
+		schema := newSchemaInfo(newTestSchema())
 		insertMsg := &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
 				CollectionName: "collectionName",
@@ -2295,6 +2296,166 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 		err := checkDynamicFieldData(schema, insertMsg)
 		assert.NoError(t, err)
 	})
+	t.Run("intra-batch type mismatch", func(t *testing.T) {
+		row1, _ := json.Marshal(map[string]interface{}{"text_field": "hello"})
+		row2, _ := json.Marshal(map[string]interface{}{"text_field": 12345})
+		jsonFieldData := autoGenDynamicFieldData([][]byte{row1, row2})
+		schema := newSchemaInfo(newTestSchema())
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData},
+				NumRows:        2,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err := checkDynamicFieldData(schema, insertMsg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "text_field")
+		assert.Contains(t, err.Error(), "string")
+		assert.Contains(t, err.Error(), "number")
+	})
+	t.Run("intra-batch type consistent", func(t *testing.T) {
+		row1, _ := json.Marshal(map[string]interface{}{"text_field": "hello"})
+		row2, _ := json.Marshal(map[string]interface{}{"text_field": "world"})
+		jsonFieldData := autoGenDynamicFieldData([][]byte{row1, row2})
+		schema := newSchemaInfo(newTestSchema())
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData},
+				NumRows:        2,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err := checkDynamicFieldData(schema, insertMsg)
+		assert.NoError(t, err)
+	})
+	t.Run("cross-batch type mismatch", func(t *testing.T) {
+		schema := newSchemaInfo(newTestSchema())
+
+		// First batch: establish text_field as string
+		row1, _ := json.Marshal(map[string]interface{}{"text_field": "hello"})
+		jsonFieldData1 := autoGenDynamicFieldData([][]byte{row1})
+		insertMsg1 := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData1},
+				NumRows:        1,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err := checkDynamicFieldData(schema, insertMsg1)
+		assert.NoError(t, err)
+
+		// Second batch: insert integer for same field
+		row2, _ := json.Marshal(map[string]interface{}{"text_field": 12345})
+		jsonFieldData2 := autoGenDynamicFieldData([][]byte{row2})
+		insertMsg2 := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData2},
+				NumRows:        1,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err = checkDynamicFieldData(schema, insertMsg2)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "text_field")
+		assert.Contains(t, err.Error(), "string")
+		assert.Contains(t, err.Error(), "number")
+	})
+	t.Run("cross-batch type consistent", func(t *testing.T) {
+		schema := newSchemaInfo(newTestSchema())
+
+		// First batch
+		row1, _ := json.Marshal(map[string]interface{}{"text_field": "hello"})
+		jsonFieldData1 := autoGenDynamicFieldData([][]byte{row1})
+		insertMsg1 := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData1},
+				NumRows:        1,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err := checkDynamicFieldData(schema, insertMsg1)
+		assert.NoError(t, err)
+
+		// Second batch: same type
+		row2, _ := json.Marshal(map[string]interface{}{"text_field": "world"})
+		jsonFieldData2 := autoGenDynamicFieldData([][]byte{row2})
+		insertMsg2 := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData2},
+				NumRows:        1,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err = checkDynamicFieldData(schema, insertMsg2)
+		assert.NoError(t, err)
+	})
+	t.Run("null value compatible with any type", func(t *testing.T) {
+		schema := newSchemaInfo(newTestSchema())
+
+		// First batch: establish text_field as string
+		row1, _ := json.Marshal(map[string]interface{}{"text_field": "hello"})
+		jsonFieldData1 := autoGenDynamicFieldData([][]byte{row1})
+		insertMsg1 := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData1},
+				NumRows:        1,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err := checkDynamicFieldData(schema, insertMsg1)
+		assert.NoError(t, err)
+
+		// Second batch: null for same field should be accepted
+		row2, _ := json.Marshal(map[string]interface{}{"text_field": nil})
+		jsonFieldData2 := autoGenDynamicFieldData([][]byte{row2})
+		insertMsg2 := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData2},
+				NumRows:        1,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err = checkDynamicFieldData(schema, insertMsg2)
+		assert.NoError(t, err)
+	})
+	t.Run("different keys different types allowed", func(t *testing.T) {
+		row1, _ := json.Marshal(map[string]interface{}{
+			"bool_field":   true,
+			"int_field":    100,
+			"string_field": "abc",
+		})
+		jsonFieldData := autoGenDynamicFieldData([][]byte{row1})
+		schema := newSchemaInfo(newTestSchema())
+		insertMsg := &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				CollectionName: "collectionName",
+				FieldsData:     []*schemapb.FieldData{jsonFieldData},
+				NumRows:        1,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+			},
+		}
+		err := checkDynamicFieldData(schema, insertMsg)
+		assert.NoError(t, err)
+	})
+}
+
+func Test_jsonValueType(t *testing.T) {
+	assert.Equal(t, "string", jsonValueType("hello"))
+	assert.Equal(t, "number", jsonValueType(float64(123)))
+	assert.Equal(t, "bool", jsonValueType(true))
+	assert.Equal(t, "null", jsonValueType(nil))
+	assert.Equal(t, "object", jsonValueType(map[string]interface{}{"a": 1}))
+	assert.Equal(t, "array", jsonValueType([]interface{}{1, 2}))
+	assert.Equal(t, "unknown", jsonValueType(struct{}{}))
 }
 
 func Test_validateMaxCapacityPerRow(t *testing.T) {

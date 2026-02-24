@@ -2415,12 +2415,36 @@ func ErrWithLog(logger *log.MLogger, msg string, err error) error {
 	return wrapErr
 }
 
-func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+// jsonValueType classifies a Go value produced by json.Unmarshal into
+// map[string]interface{} and returns its JSON type name.
+func jsonValueType(v interface{}) string {
+	switch v.(type) {
+	case string:
+		return "string"
+	case float64:
+		return "number"
+	case bool:
+		return "bool"
+	case nil:
+		return "null"
+	case map[string]interface{}:
+		return "object"
+	case []interface{}:
+		return "array"
+	default:
+		return "unknown"
+	}
+}
+
+func verifyDynamicFieldData(schema *schemaInfo, insertMsg *msgstream.InsertMsg) error {
 	for _, field := range insertMsg.FieldsData {
 		if field.GetFieldName() == common.MetaFieldName {
 			if !schema.EnableDynamicField {
 				return fmt.Errorf("without dynamic schema enabled, the field name cannot be set to %s", common.MetaFieldName)
 			}
+
+			// Phase 1: validate all rows and check intra-batch type consistency
+			batchTypes := make(map[string]string)
 			for _, rowData := range field.GetScalars().GetJsonData().GetData() {
 				jsonData := make(map[string]interface{})
 				if err := json.Unmarshal(rowData, &jsonData); err != nil {
@@ -2439,6 +2463,28 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 						return fmt.Errorf("dynamic field name cannot include the static field name: %s", f.GetName())
 					}
 				}
+
+				for key, value := range jsonData {
+					valType := jsonValueType(value)
+					if valType == "null" {
+						continue
+					}
+					if existing, ok := batchTypes[key]; ok {
+						if existing != valType {
+							return fmt.Errorf("dynamic field '%s' expects type %s but got %s", key, existing, valType)
+						}
+					} else {
+						batchTypes[key] = valType
+					}
+				}
+			}
+
+			// Phase 2: check cross-batch type consistency and register new types
+			for key, valType := range batchTypes {
+				existing, loaded := schema.dynamicFieldTypes.GetOrInsert(key, valType)
+				if loaded && existing != valType {
+					return fmt.Errorf("dynamic field '%s' expects type %s but got %s", key, existing, valType)
+				}
 			}
 		}
 	}
@@ -2446,7 +2492,7 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 	return nil
 }
 
-func checkDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+func checkDynamicFieldData(schema *schemaInfo, insertMsg *msgstream.InsertMsg) error {
 	for _, data := range insertMsg.FieldsData {
 		if data.IsDynamic {
 			data.FieldName = common.MetaFieldName
