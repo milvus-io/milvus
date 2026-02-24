@@ -6659,7 +6659,7 @@ if this parameter <= 0, will set it as 10`,
 		Version:      "2.6.0",
 		DefaultValue: "1000000",
 		Doc:          "Target number of rows per segment for external collections",
-		Export:       true,
+		Export:       false,
 	}
 	p.ExternalCollectionTargetRowsPerSegment.Init(base.mgr)
 }
