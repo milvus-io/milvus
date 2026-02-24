@@ -137,7 +137,12 @@ mkdir -p "$CONAN_HOME_DIR/hooks"
 cat > "$CONAN_HOME_DIR/hooks/fix_shared_lib_env.py" << 'HOOK_EOF'
 import os, platform
 
+_saved_env = {}
+
 def pre_build(output, conanfile, **kwargs):
+    """Set library path before build so tools like grpc_cpp_plugin can find
+    shared libs (e.g. libprotoc.so). Saved state is restored in post_build
+    to avoid polluting the conan process environment."""
     dep_lib_dirs = []
     try:
         for _, dep in conanfile.deps_cpp_info.dependencies:
@@ -149,10 +154,20 @@ def pre_build(output, conanfile, **kwargs):
     if not dep_lib_dirs:
         return
     env_var = "DYLD_LIBRARY_PATH" if platform.system() == "Darwin" else "LD_LIBRARY_PATH"
+    _saved_env[env_var] = os.environ.get(env_var)
     existing = os.environ.get(env_var, "")
     new_val = ":".join(dep_lib_dirs) + (":" + existing if existing else "")
     os.environ[env_var] = new_val
     output.info("Set %s for %d dependency lib dirs" % (env_var, len(dep_lib_dirs)))
+
+def post_build(output, conanfile, **kwargs):
+    """Restore library path after build to prevent conan process corruption."""
+    for env_var, old_val in _saved_env.items():
+        if old_val is None:
+            os.environ.pop(env_var, None)
+        else:
+            os.environ[env_var] = old_val
+    _saved_env.clear()
 HOOK_EOF
 conan config set hooks.fix_shared_lib_env 2>/dev/null
 
