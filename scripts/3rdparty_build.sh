@@ -126,6 +126,33 @@ if [[ ! `conan remote list` == *default-conan-local* ]]; then
     conan remote add default-conan-local $CONAN_ARTIFACTORY_URL
 fi
 
+# Install a conan pre_build hook that sets LD_LIBRARY_PATH (Linux) or
+# DYLD_LIBRARY_PATH (macOS) before each package build. This ensures that
+# tools like grpc_cpp_plugin can find shared libraries (e.g. libprotoc.so)
+# when invoked during downstream package builds (opentelemetry-cpp, googleapis).
+mkdir -p ~/.conan/hooks
+cat > ~/.conan/hooks/fix_shared_lib_env.py << 'HOOK_EOF'
+import os, platform
+
+def pre_build(output, conanfile, **kwargs):
+    dep_lib_dirs = []
+    try:
+        for _, dep in conanfile.deps_cpp_info.dependencies:
+            for p in dep.lib_paths:
+                if os.path.isdir(p):
+                    dep_lib_dirs.append(p)
+    except Exception:
+        return
+    if not dep_lib_dirs:
+        return
+    env_var = "DYLD_LIBRARY_PATH" if platform.system() == "Darwin" else "LD_LIBRARY_PATH"
+    existing = os.environ.get(env_var, "")
+    new_val = ":".join(dep_lib_dirs) + (":" + existing if existing else "")
+    os.environ[env_var] = new_val
+    output.info("Set %s for %d dependency lib dirs" % (env_var, len(dep_lib_dirs)))
+HOOK_EOF
+conan config set hooks.fix_shared_lib_env 2>/dev/null
+
 unameOut="$(uname -s)"
 case "${unameOut}" in
   Darwin*)
