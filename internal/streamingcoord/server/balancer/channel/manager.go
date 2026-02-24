@@ -148,8 +148,7 @@ func recoverFromConfigurationAndMeta(ctx context.Context, streamingVersion *stre
 	// TODO: only support rw channel here now, add ro channel in future.
 	channels := make(map[ChannelID]*PChannelMeta, len(channelMetas))
 	for _, channel := range channelMetas {
-		c := newPChannelMetaFromProto(channel)
-		c.availableInReplication = isChannelAvailableInReplication(c.Name(), replicateConfig)
+		c := newPChannelMetaFromProto(channel, replicateConfig)
 		metrics.AssignPChannelStatus(c)
 		channels[c.ChannelID()] = c
 	}
@@ -303,7 +302,7 @@ func (cm *ChannelManager) AddPChannels(ctx context.Context, newChannels []string
 	if err := resource.Resource().StreamingCatalog().SavePChannels(ctx, newMetas); err != nil {
 		// Rollback in-memory changes on persist failure
 		for _, m := range newMetas {
-			c := newPChannelMetaFromProto(m)
+			c := newPChannelMetaFromProto(m, cm.replicateConfig)
 			delete(cm.channels, c.ChannelID())
 		}
 		cm.Logger().Error("failed to save new pchannels", zap.Error(err))
@@ -464,7 +463,7 @@ func (cm *ChannelManager) AssignPChannels(ctx context.Context, pChannelToStreami
 	}
 	updates := make(map[ChannelID]*PChannelMeta, len(pChannelMetas))
 	for _, pchannel := range pChannelMetas {
-		meta := newPChannelMetaFromProto(pchannel)
+		meta := newPChannelMetaFromProto(pchannel, cm.replicateConfig)
 		updates[meta.ChannelID()] = meta
 		cm.metrics.AssignPChannelStatus(meta)
 	}
@@ -497,7 +496,7 @@ func (cm *ChannelManager) AssignPChannelsDone(ctx context.Context, pChannels []C
 
 	// Update metrics.
 	for _, pchannel := range pChannelMetas {
-		cm.metrics.AssignPChannelStatus(newPChannelMetaFromProto(pchannel))
+		cm.metrics.AssignPChannelStatus(newPChannelMetaFromProto(pchannel, cm.replicateConfig))
 	}
 	return nil
 }
@@ -523,7 +522,7 @@ func (cm *ChannelManager) MarkAsUnavailable(ctx context.Context, pChannels []typ
 		return err
 	}
 	for _, pchannel := range pChannelMetas {
-		cm.metrics.AssignPChannelStatus(newPChannelMetaFromProto(pchannel))
+		cm.metrics.AssignPChannelStatus(newPChannelMetaFromProto(pchannel, cm.replicateConfig))
 	}
 	return nil
 }
@@ -541,7 +540,7 @@ func (cm *ChannelManager) updatePChannelMeta(ctx context.Context, pChannelMetas 
 
 	// update in-memory copy and increase the version.
 	for _, pchannel := range pChannelMetas {
-		c := newPChannelMetaFromProto(pchannel)
+		c := newPChannelMetaFromProto(pchannel, cm.replicateConfig)
 		cm.channels[c.ChannelID()] = c
 	}
 	cm.version.Local++

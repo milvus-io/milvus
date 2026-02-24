@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 )
 
 // NewPChannelMeta creates a new PChannelMeta.
@@ -33,11 +34,11 @@ func newPChannelMetaWithAvailability(name string, accessMode types.AccessMode, a
 }
 
 // newPChannelMetaFromProto creates a new PChannelMeta from proto.
-// By default, channels recovered from proto are available in replication.
-func newPChannelMetaFromProto(channel *streamingpb.PChannelMeta) *PChannelMeta {
+// The availableInReplication flag is computed from the given replicateConfig.
+func newPChannelMetaFromProto(channel *streamingpb.PChannelMeta, replicateConfig *replicateutil.ConfigHelper) *PChannelMeta {
 	return &PChannelMeta{
 		inner:                  channel,
-		availableInReplication: true,
+		availableInReplication: isChannelAvailableInReplication(channel.GetChannel().GetName(), replicateConfig),
 	}
 }
 

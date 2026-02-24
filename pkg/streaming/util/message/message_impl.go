@@ -69,17 +69,8 @@ func (m *messageImpl) IsPersisted() bool {
 }
 
 // IsPChannelLevel returns true if the message is a pchannel-level message.
-// A message is pchannel-level if it has the explicit property set, or if it is
-// a broadcast-to-all or AlterReplicateConfig message sent on the control channel.
 func (m *messageImpl) IsPChannelLevel() bool {
-	if m.properties.Exist(messagePChannelLevel) {
-		return true
-	}
-	msgType := m.MessageType()
-	if msgType.IsBroadcastToAll() || msgType == MessageTypeAlterReplicateConfig {
-		return funcutil.IsControlChannel(m.VChannel())
-	}
-	return false
+	return m.properties.Exist(messagePChannelLevel)
 }
 
 // IntoMessageProto converts the message to a protobuf message.
