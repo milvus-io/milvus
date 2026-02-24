@@ -866,7 +866,12 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	it.result.SuccIndex = sliceIndex
 
 	if it.schema.EnableDynamicField {
-		err := checkDynamicFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+		var err error
+		if it.req.GetPartialUpdate() {
+			err = checkDynamicFieldDataForPartialUpdate(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+		} else {
+			err = checkDynamicFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+		}
 		if err != nil {
 			return err
 		}
