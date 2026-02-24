@@ -12,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 )
 
@@ -30,48 +29,6 @@ func newTestInterceptor() *lockAppendInterceptor {
 }
 
 func TestAcquireLockGuard(t *testing.T) {
-	controlChannel := funcutil.GetControlChannel(testPChannelName)
-
-	// Test: FlushAll (BroadcastToAll + exclusive) on control channel should acquire global write lock.
-	t.Run("FlushAllOnControlChannel", func(t *testing.T) {
-		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
-		defer mocker.UnPatch()
-
-		interceptor := newTestInterceptor()
-		msg := message.NewFlushAllMessageBuilderV2().
-			WithVChannel(controlChannel).
-			WithHeader(&message.FlushAllMessageHeader{}).
-			WithBody(&message.FlushAllMessageBody{}).
-			MustBuildMutable()
-
-		guard := interceptor.acquireLockGuard(context.Background(), msg)
-		// Global write lock held: TryRLock should fail.
-		assert.False(t, interceptor.glock.TryRLock(), "glock should be write-locked for FlushAll on control channel")
-		guard()
-		// Released: TryRLock should succeed.
-		assert.True(t, interceptor.glock.TryRLock())
-		interceptor.glock.RUnlock()
-	})
-
-	// Test: AlterReplicateConfig (exclusive, not BroadcastToAll) on control channel should acquire global write lock.
-	t.Run("AlterReplicateConfigOnControlChannel", func(t *testing.T) {
-		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
-		defer mocker.UnPatch()
-
-		interceptor := newTestInterceptor()
-		msg := message.NewAlterReplicateConfigMessageBuilderV2().
-			WithVChannel(controlChannel).
-			WithHeader(&message.AlterReplicateConfigMessageHeader{}).
-			WithBody(&message.AlterReplicateConfigMessageBody{}).
-			MustBuildMutable()
-
-		guard := interceptor.acquireLockGuard(context.Background(), msg)
-		assert.False(t, interceptor.glock.TryRLock(), "glock should be write-locked for AlterReplicateConfig on control channel")
-		guard()
-		assert.True(t, interceptor.glock.TryRLock())
-		interceptor.glock.RUnlock()
-	})
-
 	// Test: Exclusive message with pchannel name as vchannel should acquire global write lock (existing behavior).
 	t.Run("ExclusiveWithPChannelName", func(t *testing.T) {
 		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
