@@ -361,7 +361,12 @@ func (c *MockMixCoordClientInterface) AlterAlias(ctx context.Context, req *milvu
 
 // DescribeAlias describe alias
 func (c *MockMixCoordClientInterface) DescribeAlias(ctx context.Context, req *milvuspb.DescribeAliasRequest, opts ...grpc.CallOption) (*milvuspb.DescribeAliasResponse, error) {
-	panic("implement me")
+	return &milvuspb.DescribeAliasResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
+			Reason:    "alias not found",
+		},
+	}, nil
 }
 
 // ListAliases list all aliases of db or collection

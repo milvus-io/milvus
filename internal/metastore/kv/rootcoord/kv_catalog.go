@@ -1421,6 +1421,87 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 	return entities, nil
 }
 
+func (kc *Catalog) DeleteGrantByCollectionName(ctx context.Context, tenant string, dbName string, collectionName string) error {
+	granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
+	keys, values, err := kc.Txn.LoadWithPrefix(ctx, granteeKey)
+	if err != nil {
+		log.Ctx(ctx).Warn("fail to load grant privilege entities for collection cleanup",
+			zap.String("key", granteeKey), zap.Error(err))
+		return err
+	}
+
+	var removeKeys []string
+	for i, key := range keys {
+		grantInfos := typeutil.AfterN(key, granteeKey+"/", "/")
+		if len(grantInfos) != 3 {
+			continue
+		}
+		// grantInfos: [role, objectType, dbName.objectName]
+		if grantInfos[1] != "Collection" {
+			continue
+		}
+		grantDB, grantObj := funcutil.SplitObjectName(grantInfos[2])
+		if grantObj == collectionName && grantDB == dbName {
+			removeKeys = append(removeKeys, key)
+			// value is the granteeID, also remove its privilege entries
+			granteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, values[i]+"/")
+			removeKeys = append(removeKeys, granteeIDKey)
+		}
+	}
+
+	if len(removeKeys) == 0 {
+		return nil
+	}
+
+	if err = kc.Txn.MultiSaveAndRemoveWithPrefix(ctx, nil, removeKeys); err != nil {
+		log.Ctx(ctx).Warn("fail to remove grants for collection",
+			zap.String("dbName", dbName), zap.String("collectionName", collectionName), zap.Error(err))
+	}
+	return err
+}
+
+func (kc *Catalog) MigrateGrantCollectionName(ctx context.Context, tenant string, oldDBName string, oldName string, newDBName string, newName string) error {
+	granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
+	keys, values, err := kc.Txn.LoadWithPrefix(ctx, granteeKey)
+	if err != nil {
+		log.Ctx(ctx).Warn("fail to load grant privilege entities for collection migration",
+			zap.String("key", granteeKey), zap.Error(err))
+		return err
+	}
+
+	saves := make(map[string]string)
+	var removeKeys []string
+	for i, key := range keys {
+		grantInfos := typeutil.AfterN(key, granteeKey+"/", "/")
+		if len(grantInfos) != 3 {
+			continue
+		}
+		if grantInfos[1] != "Collection" {
+			continue
+		}
+		grantDB, grantObj := funcutil.SplitObjectName(grantInfos[2])
+		if grantObj == oldName && grantDB == oldDBName {
+			// Build new key with new collection name
+			newObjName := funcutil.CombineObjectName(newDBName, newName)
+			newKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
+				fmt.Sprintf("%s/%s/%s", grantInfos[0], grantInfos[1], newObjName))
+			saves[newKey] = values[i]
+			removeKeys = append(removeKeys, key)
+		}
+	}
+
+	if len(removeKeys) == 0 {
+		return nil
+	}
+
+	if err = kc.Txn.MultiSaveAndRemoveWithPrefix(ctx, saves, removeKeys); err != nil {
+		log.Ctx(ctx).Warn("fail to migrate grants for renamed collection",
+			zap.String("oldDBName", oldDBName), zap.String("oldName", oldName),
+			zap.String("newDBName", newDBName), zap.String("newName", newName), zap.Error(err))
+	}
+	return err
+}
+
 func (kc *Catalog) DeleteGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {
 	var (
 		k          = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, role.Name+"/")
