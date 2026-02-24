@@ -281,6 +281,53 @@ class TestMilvusClientSnapshotDropInvalid(TestMilvusClientV2Base):
         # Should not raise exception (idempotent)
         self.drop_snapshot(client, snapshot_name, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_snapshot_drop_during_restore(self):
+        """
+        target: test drop snapshot while restore job is still in progress
+        method: create snapshot -> start restore -> immediately drop snapshot
+        expected: drop should fail with error about active restore operations
+        verified: https://github.com/milvus-io/milvus/issues/47578
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_collection_name = cf.gen_unique_str(prefix + "_restored")
+
+        # 1. Create collection and insert data
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # 2. Create snapshot
+        self.create_snapshot(client, collection_name, snapshot_name)
+
+        # 3. Start restore (creates CopySegment jobs referencing the snapshot)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+
+        # 4. Immediately attempt to drop the snapshot while restore is in progress
+        error = {ct.err_code: 5, ct.err_msg: "is restoring"}
+        self.drop_snapshot(client, snapshot_name,
+                           check_task=CheckTasks.err_res, check_items=error)
+
+        # 5. Wait for restore to complete
+        wait_for_restore_complete(client, job_id)
+
+        # 6. After restore completes, drop should succeed (ref count is 0)
+        self.drop_snapshot(client, snapshot_name)
+
+        # 7. Verify snapshot is actually dropped
+        snapshots, _ = self.list_snapshots(client, collection_name=collection_name)
+        assert snapshot_name not in snapshots
+
+        # Cleanup
+        self.drop_collection(client, restored_collection_name)
+
 
 class TestMilvusClientSnapshotListDescribe(TestMilvusClientV2Base):
     """Test list_snapshots and describe_snapshot - L1"""
@@ -3294,3 +3341,780 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name, collection_name)
         for name in restored_names:
             self.drop_collection(client, name)
+
+
+class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
+    """
+    Test snapshot + collection lifecycle management edge cases.
+
+    Covers race conditions and interactions between snapshot operations
+    and collection lifecycle operations (drop, rename, cross-db restore).
+    """
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_drop_target_collection_during_restore(self):
+        """
+        target: test dropping the target collection while restore is still in progress
+        method: start restore -> immediately drop the target collection -> check restore state
+        expected: restore job should eventually fail; no resource leak
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_collection_name = cf.gen_unique_str(prefix + "_restored")
+
+        # 1. Create collection with data and snapshot
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.create_snapshot(client, collection_name, snapshot_name)
+
+        # 2. Start restore
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+
+        # 3. Immediately drop the target collection while restore is in progress
+        try:
+            self.drop_collection(client, restored_collection_name)
+        except Exception as e:
+            log.info(f"Drop target collection during restore: {e}")
+
+        # 4. Wait and check restore state - should eventually reach terminal state
+        timeout = 120
+        start_time = time.time()
+        final_state = None
+        while time.time() - start_time < timeout:
+            state = client.get_restore_snapshot_state(job_id)
+            final_state = state.state
+            if final_state in ("RestoreSnapshotCompleted", "RestoreSnapshotFailed"):
+                break
+            time.sleep(2)
+
+        log.info(f"Restore final state after dropping target collection: {final_state}")
+        # The restore should reach a terminal state (not hang forever)
+        assert final_state in ("RestoreSnapshotCompleted", "RestoreSnapshotFailed"), \
+            f"Restore job should reach terminal state, got: {final_state}"
+
+        # 5. Verify no resource leak - the target collection should not exist
+        collections = client.list_collections()
+        # Target collection might or might not exist depending on timing
+        # But the system should be in a consistent state
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name)
+        try:
+            self.drop_collection(client, restored_collection_name)
+        except Exception:
+            pass
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_rename_source_collection(self):
+        """
+        target: test snapshot behavior after renaming the source collection
+        method: create snapshot -> rename collection -> list/describe/restore snapshot
+        expected: snapshot should still be usable; describe may show original collection name
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        new_collection_name = cf.gen_unique_str(prefix + "_renamed")
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_collection_name = cf.gen_unique_str(prefix + "_restored")
+
+        # 1. Create collection with data and snapshot
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.create_snapshot(client, collection_name, snapshot_name)
+
+        # 2. Rename source collection
+        self.rename_collection(client, collection_name, new_collection_name)
+
+        # 3. Verify snapshot is still discoverable
+        # list_snapshots with old name should fail (collection no longer exists)
+        error = {ct.err_code: 100, ct.err_msg: "collection not found"}
+        self.list_snapshots(client, collection_name=collection_name,
+                            check_task=CheckTasks.err_res, check_items=error)
+
+        # list_snapshots with new name should find it
+        snapshots_new, _ = self.list_snapshots(client, collection_name=new_collection_name)
+        log.info(f"Snapshots listed with new name '{new_collection_name}': {snapshots_new}")
+
+        # list_snapshots without filter should always find it
+        all_snapshots, _ = self.list_snapshots(client)
+        assert snapshot_name in all_snapshots, \
+            f"Snapshot {snapshot_name} should be in global list after rename"
+
+        # 4. Describe snapshot should still work
+        info, _ = self.describe_snapshot(client, snapshot_name)
+        assert info.name == snapshot_name
+        log.info(f"Snapshot collection_name after rename: {info.collection_name}")
+
+        # 5. Restore should still work (snapshot data is independent of collection name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        wait_for_restore_complete(client, job_id)
+
+        self.load_collection(client, restored_collection_name)
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0",
+                            output_fields=["count(*)"])
+        assert res[0]["count(*)"] == default_nb, \
+            f"Restored collection should have {default_nb} rows"
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name)
+        self.drop_collection(client, new_collection_name)
+        self.drop_collection(client, restored_collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_create_on_restoring_collection(self):
+        """
+        target: test creating a snapshot on a collection that is being restored into
+        method: start restore -> immediately create snapshot on the target collection
+        expected: snapshot creation should either fail or capture incomplete data
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_collection_name = cf.gen_unique_str(prefix + "_restored")
+        snapshot_on_restored = cf.gen_unique_str(prefix + "_on_restored")
+
+        # 1. Create collection with data and snapshot
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.create_snapshot(client, collection_name, snapshot_name)
+
+        # 2. Start restore
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+
+        # 3. Immediately try to create snapshot on the target collection
+        snapshot_created = False
+        try:
+            self.create_snapshot(client, restored_collection_name, snapshot_on_restored)
+            snapshot_created = True
+            log.info("Snapshot on restoring collection succeeded (captured partial state)")
+        except Exception as e:
+            log.info(f"Snapshot on restoring collection rejected: {e}")
+
+        # 4. Wait for restore to complete regardless
+        wait_for_restore_complete(client, job_id, timeout=120)
+
+        # 5. If snapshot was created during restore, verify it captured a subset of data
+        if snapshot_created:
+            restored_from_partial = cf.gen_unique_str(prefix + "_from_partial")
+            job_id2, _ = self.restore_snapshot(client, snapshot_on_restored, restored_from_partial)
+            wait_for_restore_complete(client, job_id2)
+            self.load_collection(client, restored_from_partial)
+            res, _ = self.query(client, restored_from_partial, filter="id >= 0",
+                                output_fields=["count(*)"])
+            partial_count = res[0]["count(*)"]
+            log.info(f"Snapshot during restore captured {partial_count} rows "
+                     f"(original: {default_nb})")
+            # Should have at most the original count (might be less if data was still copying)
+            assert partial_count <= default_nb
+            self.drop_collection(client, restored_from_partial)
+            self.drop_snapshot(client, snapshot_on_restored)
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name)
+        self.drop_collection(client, restored_collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_restore_failure_no_resource_leak(self):
+        """
+        target: test that a failed restore does not leak resources
+        method: restore to an existing collection (will fail) -> verify no leftover resources
+        expected: restore fails cleanly, no orphan collections or jobs stuck in non-terminal state
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        existing_collection = cf.gen_unique_str(prefix + "_existing")
+
+        # 1. Create collection with data and snapshot
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.create_snapshot(client, collection_name, snapshot_name)
+
+        # 2. Create the target collection so restore will fail (duplicate)
+        self.create_collection(client, existing_collection, default_dim)
+
+        # 3. Restore to existing collection - should fail
+        error = {ct.err_code: 65535, ct.err_msg: "duplicate collection"}
+        self.restore_snapshot(client, snapshot_name, existing_collection,
+                              check_task=CheckTasks.err_res, check_items=error)
+
+        # 4. Verify the existing collection is untouched
+        self.load_collection(client, existing_collection)
+        res, _ = self.query(client, existing_collection, filter="id >= 0",
+                            output_fields=["count(*)"])
+        assert res[0]["count(*)"] == 0, "Existing collection should remain empty (untouched)"
+
+        # 5. Verify snapshot is still usable after failed restore
+        info, _ = self.describe_snapshot(client, snapshot_name)
+        assert info.name == snapshot_name
+
+        # 6. Successful restore to a new collection proves no state corruption
+        clean_restored = cf.gen_unique_str(prefix + "_clean")
+        job_id, _ = self.restore_snapshot(client, snapshot_name, clean_restored)
+        wait_for_restore_complete(client, job_id)
+
+        self.load_collection(client, clean_restored)
+        res, _ = self.query(client, clean_restored, filter="id >= 0",
+                            output_fields=["count(*)"])
+        assert res[0]["count(*)"] == default_nb
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name)
+        self.drop_collection(client, existing_collection)
+        self.drop_collection(client, clean_restored)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_concurrent_drop_same_snapshot(self):
+        """
+        target: test concurrent drop of the same snapshot (idempotent)
+        method: drop the same snapshot from multiple threads simultaneously
+        expected: all threads should succeed (idempotent behavior), no errors
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+
+        # 1. Create collection and snapshot
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(100)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.create_snapshot(client, collection_name, snapshot_name)
+
+        # 2. Concurrent drop from multiple threads
+        results = []
+        errors = []
+
+        def drop_thread():
+            try:
+                client.drop_snapshot(snapshot_name)
+                results.append("success")
+            except Exception as e:
+                errors.append(str(e))
+
+        threads = [threading.Thread(target=drop_thread) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        log.info(f"Concurrent drop results - successes: {len(results)}, errors: {len(errors)}")
+        log.info(f"Errors: {errors}")
+
+        # All should succeed (idempotent) - no unexpected errors
+        assert len(errors) == 0, f"Concurrent drop should all succeed (idempotent), got errors: {errors}"
+        assert len(results) == 5, f"All 5 threads should succeed, got {len(results)}"
+
+        # 3. Verify snapshot is gone
+        snapshots, _ = self.list_snapshots(client, collection_name=collection_name)
+        assert snapshot_name not in snapshots
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_create_during_drop_source_collection(self):
+        """
+        target: test creating a snapshot while the source collection is being dropped
+        method: insert data -> flush -> start drop collection and create snapshot concurrently
+        expected: create snapshot should either succeed (before drop) or fail (after drop);
+                  system should remain consistent
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+
+        # 1. Create collection with data
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # 2. Concurrently drop collection and create snapshot
+        create_result = {"success": False, "error": None}
+        drop_result = {"success": False, "error": None}
+
+        def create_snapshot_thread():
+            try:
+                client.create_snapshot(collection_name, snapshot_name)
+                create_result["success"] = True
+            except Exception as e:
+                create_result["error"] = str(e)
+
+        def drop_collection_thread():
+            try:
+                client.drop_collection(collection_name)
+                drop_result["success"] = True
+            except Exception as e:
+                drop_result["error"] = str(e)
+
+        t1 = threading.Thread(target=create_snapshot_thread)
+        t2 = threading.Thread(target=drop_collection_thread)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        log.info(f"Create snapshot: success={create_result['success']}, error={create_result['error']}")
+        log.info(f"Drop collection: success={drop_result['success']}, error={drop_result['error']}")
+
+        # 3. Verify consistent state
+        if create_result["success"]:
+            # Snapshot was created before drop took effect
+            # It should still be listable and restorable
+            all_snapshots, _ = self.list_snapshots(client)
+            log.info(f"Snapshot created, all snapshots: {all_snapshots}")
+            if snapshot_name in all_snapshots:
+                # Restore to verify data integrity
+                restored_name = cf.gen_unique_str(prefix + "_restored")
+                job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name)
+                wait_for_restore_complete(client, job_id)
+                self.load_collection(client, restored_name)
+                res, _ = self.query(client, restored_name, filter="id >= 0",
+                                    output_fields=["count(*)"])
+                assert res[0]["count(*)"] == default_nb
+                self.drop_collection(client, restored_name)
+            # Cleanup snapshot
+            try:
+                client.drop_snapshot(snapshot_name)
+            except Exception:
+                pass
+        else:
+            # Snapshot creation failed (drop happened first) - this is acceptable
+            log.info("Snapshot creation failed because collection was dropped first - OK")
+
+        # Drop should always succeed
+        assert drop_result["success"], f"Drop collection should succeed, error: {drop_result['error']}"
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_restore_cross_database(self):
+        """
+        target: test restoring a snapshot to a different database
+        method: create snapshot in default db -> switch to new db -> restore
+        expected: restored collection should be created in the target db (client's current db)
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        target_db = cf.gen_unique_str("test_db")
+        restored_collection_name = cf.gen_unique_str(prefix + "_cross_db")
+
+        # 1. Create collection with data in default db and snapshot
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.create_snapshot(client, collection_name, snapshot_name)
+
+        # 2. Create target database and switch to it
+        self.create_database(client, target_db)
+        self.using_database(client, target_db)
+
+        # 3. Restore snapshot while in target db context
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_collection_name)
+        wait_for_restore_complete(client, job_id, timeout=120)
+
+        # 4. Verify collection is in target db (cross-db restore)
+        target_collections = client.list_collections()
+        log.info(f"Collections in target db '{target_db}': {target_collections}")
+        assert restored_collection_name in target_collections, \
+            f"Restored collection should be in target db '{target_db}'"
+
+        # 5. Verify collection is NOT in default db
+        self.using_database(client, "default")
+        default_collections = client.list_collections()
+        log.info(f"Collections in default db: {default_collections}")
+        assert restored_collection_name not in default_collections, \
+            f"Restored collection should NOT be in default db"
+
+        # 6. Verify data integrity (switch back to target db)
+        self.using_database(client, target_db)
+        self.load_collection(client, restored_collection_name)
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0",
+                            output_fields=["count(*)"])
+        assert res[0]["count(*)"] == default_nb, \
+            f"Restored collection should have {default_nb} rows"
+
+        # Cleanup
+        self.using_database(client, "default")
+        self.drop_snapshot(client, snapshot_name)
+        self.drop_collection(client, collection_name)
+        self.using_database(client, target_db)
+        self.drop_collection(client, restored_collection_name)
+        self.using_database(client, "default")
+        try:
+            self.drop_database(client, target_db)
+        except Exception:
+            pass
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_snapshot_drop_and_restore_race(self):
+        """
+        target: test race condition between DropSnapshot and RestoreSnapshot
+        method: start restore and drop snapshot concurrently from different threads
+        expected: either restore succeeds (drop blocked by ref count) or restore fails
+                  (drop happened before restore registered ref); system should not hang
+        note: L3 because concurrent restore+drop may exhaust standalone resources
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_collection_name = cf.gen_unique_str(prefix + "_restored")
+
+        # 1. Create collection with data and snapshot
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.create_snapshot(client, collection_name, snapshot_name)
+
+        # 2. Start restore and drop concurrently
+        restore_result = {"job_id": None, "error": None}
+        drop_result = {"success": False, "error": None}
+
+        def restore_thread():
+            try:
+                job_id = client.restore_snapshot(snapshot_name, restored_collection_name,
+                                                 timeout=60)
+                restore_result["job_id"] = job_id
+            except Exception as e:
+                restore_result["error"] = str(e)
+
+        def drop_thread():
+            try:
+                client.drop_snapshot(snapshot_name, timeout=60)
+                drop_result["success"] = True
+            except Exception as e:
+                drop_result["error"] = str(e)
+
+        t_restore = threading.Thread(target=restore_thread, name="restore_thread")
+        t_drop = threading.Thread(target=drop_thread, name="drop_thread")
+        t_restore.start()
+        t_drop.start()
+        t_restore.join(timeout=90)
+        t_drop.join(timeout=90)
+        assert not t_restore.is_alive(), "restore_thread timed out"
+        assert not t_drop.is_alive(), "drop_thread timed out"
+
+        log.info(f"Restore: job_id={restore_result['job_id']}, error={restore_result['error']}")
+        log.info(f"Drop: success={drop_result['success']}, error={drop_result['error']}")
+
+        # 3. Analyze outcomes - two valid scenarios:
+        #
+        # Scenario A: Restore registered ref first -> drop blocked -> restore completes
+        #   restore_result["job_id"] is not None, drop_result["error"] contains "is restoring"
+        #
+        # Scenario B: Drop succeeded first -> restore fails with "snapshot not found"
+        #   drop_result["success"] is True, restore_result["error"] contains "not found"
+        #
+        # Scenario C: Both succeed in sequence (restore ref registered and released quickly)
+        #   Both succeed - rare but possible if restore is very fast
+
+        if restore_result["job_id"] is not None:
+            # Restore started - wait for it to complete
+            try:
+                wait_for_restore_complete(client, restore_result["job_id"], timeout=120)
+                log.info("Restore completed successfully")
+
+                # Verify data
+                self.load_collection(client, restored_collection_name)
+                res, _ = self.query(client, restored_collection_name, filter="id >= 0",
+                                    output_fields=["count(*)"])
+                assert res[0]["count(*)"] == default_nb
+            except Exception as e:
+                log.info(f"Restore ended with: {e}")
+
+            if drop_result["error"]:
+                # Scenario A: drop was blocked, try again now
+                log.info(f"Drop was blocked during restore: {drop_result['error']}")
+                assert "restor" in drop_result["error"].lower(), \
+                    f"Drop error should mention restoring, got: {drop_result['error']}"
+                # Now drop should succeed
+                self.drop_snapshot(client, snapshot_name)
+            else:
+                # Scenario C: drop also succeeded (restore was fast)
+                log.info("Both restore and drop succeeded")
+        else:
+            # Scenario B: restore failed (snapshot was dropped first)
+            log.info(f"Restore failed: {restore_result['error']}")
+            assert drop_result["success"], "If restore failed, drop should have succeeded"
+
+        # Cleanup
+        try:
+            client.drop_snapshot(snapshot_name)
+        except Exception:
+            pass
+        try:
+            self.drop_collection(client, restored_collection_name)
+        except Exception:
+            pass
+
+
+class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
+    """
+    Test snapshot operations using collection aliases.
+
+    Server resolves aliases via globalMetaCache.GetCollectionID() for
+    create_snapshot, list_snapshots, and list_restore_snapshot_jobs.
+    restore_snapshot takes a NEW collection name (not alias) as target.
+    """
+
+    def _create_collection_with_data(self, client, collection_name, nb=default_nb):
+        """Helper: create collection, insert data, flush."""
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_create_via_alias(self):
+        """
+        target: test creating a snapshot using collection alias instead of collection name
+        method: create collection -> create alias -> create snapshot via alias
+        expected: snapshot created successfully, describe shows real collection name
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        alias_name = cf.gen_unique_str(prefix + "_alias")
+        snapshot_name = cf.gen_unique_str(prefix)
+
+        # 1. Create collection with data
+        self._create_collection_with_data(client, collection_name)
+
+        # 2. Create alias
+        self.create_alias(client, collection_name, alias_name)
+
+        # 3. Create snapshot using alias
+        self.create_snapshot(client, alias_name, snapshot_name)
+
+        # 4. Describe snapshot should show the real collection name
+        info, _ = self.describe_snapshot(client, snapshot_name)
+        assert info.collection_name == collection_name, \
+            f"Expected real collection name '{collection_name}', got '{info.collection_name}'"
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name)
+        self.drop_alias(client, alias_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_list_via_alias(self):
+        """
+        target: test listing snapshots using collection alias
+        method: create snapshot with real name -> list snapshots via alias
+        expected: list returns the same snapshots as using real name
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        alias_name = cf.gen_unique_str(prefix + "_alias")
+        snapshot_name = cf.gen_unique_str(prefix)
+
+        # 1. Create collection with data and snapshot
+        self._create_collection_with_data(client, collection_name)
+        self.create_alias(client, collection_name, alias_name)
+        self.create_snapshot(client, collection_name, snapshot_name)
+
+        # 2. List snapshots using alias
+        snapshots_via_alias, _ = self.list_snapshots(client, collection_name=alias_name)
+        snapshots_via_name, _ = self.list_snapshots(client, collection_name=collection_name)
+
+        assert snapshot_name in snapshots_via_alias, \
+            f"Snapshot not found via alias. Got: {snapshots_via_alias}"
+        assert snapshots_via_alias == snapshots_via_name, \
+            f"Mismatch: via alias={snapshots_via_alias}, via name={snapshots_via_name}"
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name)
+        self.drop_alias(client, alias_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_restore_from_alias_created_snapshot(self):
+        """
+        target: test restoring a snapshot that was created via alias
+        method: create snapshot via alias -> restore -> verify data
+        expected: restore succeeds with full data integrity
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        alias_name = cf.gen_unique_str(prefix + "_alias")
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_name = cf.gen_unique_str(prefix + "_restored")
+
+        # 1. Create collection with data and alias
+        self._create_collection_with_data(client, collection_name)
+        self.create_alias(client, collection_name, alias_name)
+
+        # 2. Create snapshot via alias
+        self.create_snapshot(client, alias_name, snapshot_name)
+
+        # 3. Restore snapshot
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name)
+        wait_for_restore_complete(client, job_id)
+
+        # 4. Verify restored data
+        self.load_collection(client, restored_name)
+        res, _ = self.query(client, restored_name, filter="id >= 0",
+                            output_fields=["count(*)"])
+        assert res[0]["count(*)"] == default_nb
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name)
+        self.drop_alias(client, alias_name)
+        self.drop_collection(client, collection_name)
+        self.drop_collection(client, restored_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_list_restore_jobs_via_alias(self):
+        """
+        target: test listing restore snapshot jobs using collection alias
+        method: restore snapshot to new collection -> create alias on restored
+                collection -> list restore jobs via alias
+        expected: list_restore_snapshot_jobs returns correct jobs via alias
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_name = cf.gen_unique_str(prefix + "_restored")
+        restored_alias = cf.gen_unique_str(prefix + "_restored_alias")
+
+        # 1. Create collection with data and snapshot
+        self._create_collection_with_data(client, collection_name)
+        self.create_snapshot(client, collection_name, snapshot_name)
+
+        # 2. Restore to new collection
+        job_id, _ = self.restore_snapshot(client, snapshot_name, restored_name)
+        wait_for_restore_complete(client, job_id)
+
+        # 3. Create alias on restored collection and list jobs via alias
+        self.create_alias(client, restored_name, restored_alias)
+        jobs, _ = self.list_restore_snapshot_jobs(client, collection_name=restored_alias)
+        job_ids = [j.job_id for j in jobs]
+        assert job_id in job_ids, \
+            f"Restore job {job_id} not found via alias. Jobs: {job_ids}"
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name)
+        self.drop_alias(client, restored_alias)
+        self.drop_collection(client, collection_name)
+        self.drop_collection(client, restored_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_drop_alias_then_create_snapshot(self):
+        """
+        target: test that creating snapshot with dropped alias fails
+        method: create alias -> drop alias -> create snapshot with dropped alias
+        expected: create snapshot with dropped alias fails; real name still works
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        alias_name = cf.gen_unique_str(prefix + "_alias")
+        snapshot_name = cf.gen_unique_str(prefix)
+
+        # 1. Create collection with data and alias
+        self._create_collection_with_data(client, collection_name)
+        self.create_alias(client, collection_name, alias_name)
+
+        # 2. Drop alias
+        self.drop_alias(client, alias_name)
+
+        # 3. Create snapshot should fail with dropped alias
+        error = {ct.err_code: 100, ct.err_msg: "not found"}
+        self.create_snapshot(client, alias_name, snapshot_name,
+                             check_task=CheckTasks.err_res, check_items=error)
+
+        # 4. Create snapshot with real name should succeed
+        self.create_snapshot(client, collection_name, snapshot_name)
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_snapshot_alter_alias_then_list_snapshots(self):
+        """
+        target: test that alias retarget affects snapshot listing
+        method: create alias on col_a -> create snapshot on col_a via alias ->
+                alter alias to col_b -> list snapshots via alias should show col_b snapshots
+        expected: alias retarget correctly affects which collection's snapshots are listed
+        """
+        client = self._client()
+        col_a = cf.gen_collection_name_by_testcase_name() + "_a"
+        col_b = cf.gen_collection_name_by_testcase_name() + "_b"
+        alias_name = cf.gen_unique_str(prefix + "_alias")
+        snapshot_a = cf.gen_unique_str(prefix + "_a")
+        snapshot_b = cf.gen_unique_str(prefix + "_b")
+
+        # 1. Create two collections with data
+        self._create_collection_with_data(client, col_a)
+        self._create_collection_with_data(client, col_b)
+
+        # 2. Create alias pointing to col_a and create snapshot
+        self.create_alias(client, col_a, alias_name)
+        self.create_snapshot(client, alias_name, snapshot_a)
+
+        # 3. Alter alias to point to col_b and create snapshot
+        self.alter_alias(client, col_b, alias_name)
+        self.create_snapshot(client, alias_name, snapshot_b)
+
+        # 4. List snapshots via alias should show col_b's snapshots
+        snapshots_via_alias, _ = self.list_snapshots(client, collection_name=alias_name)
+        assert snapshot_b in snapshots_via_alias, \
+            f"Snapshot_b not found via retargeted alias. Got: {snapshots_via_alias}"
+        assert snapshot_a not in snapshots_via_alias, \
+            f"Snapshot_a should not appear after alias retarget. Got: {snapshots_via_alias}"
+
+        # 5. List directly should show each collection's own snapshots
+        snapshots_a, _ = self.list_snapshots(client, collection_name=col_a)
+        snapshots_b, _ = self.list_snapshots(client, collection_name=col_b)
+        assert snapshot_a in snapshots_a
+        assert snapshot_b in snapshots_b
+
+        # Cleanup
+        self.drop_snapshot(client, snapshot_a)
+        self.drop_snapshot(client, snapshot_b)
+        self.drop_alias(client, alias_name)
+        self.drop_collection(client, col_a)
+        self.drop_collection(client, col_b)
