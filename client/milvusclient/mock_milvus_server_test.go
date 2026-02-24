@@ -7571,7 +7571,8 @@ func (_c *MilvusServiceServer_Upsert_Call) RunAndReturn(run func(context.Context
 func NewMilvusServiceServer(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MilvusServiceServer {
+},
+) *MilvusServiceServer {
 	mock := &MilvusServiceServer{}
 	mock.Mock.Test(t)
 
