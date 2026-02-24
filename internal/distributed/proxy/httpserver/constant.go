@@ -167,6 +167,7 @@ const (
 	HTTPReturnIndexType            = "indexType"
 	HTTPIndexOffsetCacheEnabledKey = "indexoffsetcache.enabled"
 	HTTPMmapEnabledKey             = "mmap.enabled"
+	HTTPWarmupKey                  = "warmup"
 	HTTPReturnIndexTotalRows       = "totalRows"
 	HTTPReturnIndexPendingRows     = "pendingRows"
 	HTTPReturnIndexIndexedRows     = "indexedRows"
