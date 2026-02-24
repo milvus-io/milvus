@@ -47,6 +47,12 @@ source ${ROOT_DIR}/scripts/setenv.sh
 MILVUS_CORE_DIR="${ROOT_DIR}/internal/core"
 MILVUS_CORE_UNITTEST_DIR="${MILVUS_CORE_DIR}/output/unittest"
 
+# Suppress known LeakSanitizer false positives from uninstrumented shared libraries
+LSAN_SUPPRESSIONS="${MILVUS_CORE_DIR}/lsan_suppressions.txt"
+if [ -f "${LSAN_SUPPRESSIONS}" ]; then
+    export LSAN_OPTIONS="suppressions=${LSAN_SUPPRESSIONS}"
+fi
+
 echo "=============================================="
 echo "=== C++ Unit Tests (No Coverage) ==="
 echo "=============================================="
