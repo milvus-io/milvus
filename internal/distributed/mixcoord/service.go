@@ -1009,6 +1009,10 @@ func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRe
 	return s.mixCoord.ListRestoreSnapshotJobs(ctx, req)
 }
 
+func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest) (*commonpb.Status, error) {
+	return s.mixCoord.BatchUpdateManifest(ctx, req)
+}
+
 // ClientHeartbeat handles client telemetry heartbeat requests
 func (s *Server) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
 	return s.mixCoord.ClientHeartbeat(ctx, req)

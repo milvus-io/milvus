@@ -2516,3 +2516,69 @@ func TestHybridSearchRequestExprLogger_String(t *testing.T) {
 		assert.Equal(t, "[No.0 req, expr: ]", result)
 	})
 }
+
+func TestProxy_BatchUpdateManifest(t *testing.T) {
+	t.Run("unhealthy", func(t *testing.T) {
+		mockey.PatchConvey("TestProxy_BatchUpdateManifest_unhealthy", t, func() {
+			globalMetaCache = &MetaCache{}
+			mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+				return UniqueID(0), nil
+			}).Build()
+			mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
+				return nil
+			}).Build()
+
+			mockey.Mock(paramtable.Init).Return().Build()
+			mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
+
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			node.UpdateStateCode(commonpb.StateCode_Abnormal)
+			resp, err := node.BatchUpdateManifest(context.Background(), &milvuspb.BatchUpdateManifestRequest{
+				CollectionName: "test_collection",
+				Items: []*milvuspb.BatchUpdateManifestItem{
+					{SegmentId: 1, ManifestVersion: 10},
+				},
+			})
+
+			assert.NoError(t, err)
+			assert.ErrorIs(t, merr.Error(resp), merr.ErrServiceNotReady)
+		})
+	})
+
+	t.Run("success", func(t *testing.T) {
+		mockey.PatchConvey("TestProxy_BatchUpdateManifest_success", t, func() {
+			globalMetaCache = &MetaCache{}
+			mockey.Mock((*MetaCache).GetCollectionID).To(func(m *MetaCache, ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+				return UniqueID(100), nil
+			}).Build()
+			mockey.Mock((*MetaCache).RemoveDatabase).To(func(m *MetaCache, ctx context.Context, dbName string) error {
+				return nil
+			}).Build()
+
+			mockey.Mock(paramtable.Init).Return().Build()
+			mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
+
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mixcoord := &grpcmixcoordclient.Client{}
+			node.mixCoord = mixcoord
+			mockey.Mock((*grpcmixcoordclient.Client).BatchUpdateManifest).To(func(c *grpcmixcoordclient.Client, ctx context.Context, req *datapb.BatchUpdateManifestRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				return merr.Success(), nil
+			}).Build()
+
+			resp, err := node.BatchUpdateManifest(context.Background(), &milvuspb.BatchUpdateManifestRequest{
+				CollectionName: "test_collection",
+				Items: []*milvuspb.BatchUpdateManifestItem{
+					{SegmentId: 1, ManifestVersion: 10},
+					{SegmentId: 2, ManifestVersion: 20},
+				},
+			})
+
+			assert.NoError(t, err)
+			assert.True(t, merr.Ok(resp))
+		})
+	})
+}

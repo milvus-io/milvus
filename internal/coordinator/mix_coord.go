@@ -1284,6 +1284,10 @@ func (s *mixCoordImpl) ListSnapshots(ctx context.Context, req *datapb.ListSnapsh
 	return s.datacoordServer.ListSnapshots(ctx, req)
 }
 
+func (s *mixCoordImpl) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.BatchUpdateManifest(ctx, req)
+}
+
 // Client Telemetry methods - forwarded to rootcoord
 
 func (s *mixCoordImpl) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {

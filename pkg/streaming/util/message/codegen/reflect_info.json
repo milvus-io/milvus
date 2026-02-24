@@ -494,6 +494,16 @@
                 "MessageType": "MessageTypeAlterWAL",
                 "Version": 2
             }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.BatchUpdateManifestMessageHeader",
+                "BodyType": "messagespb.BatchUpdateManifestMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeBatchUpdateManifest",
+                "Version": 2
+            }
         }
     ]
 }

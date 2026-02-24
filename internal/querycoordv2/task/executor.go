@@ -175,7 +175,7 @@ func (ex *Executor) removeTask(task Task, step int) {
 
 func (ex *Executor) executeSegmentAction(task *SegmentTask, step int) {
 	switch task.Actions()[step].Type() {
-	case ActionTypeGrow, ActionTypeUpdate, ActionTypeStatsUpdate:
+	case ActionTypeGrow, ActionTypeUpdate, ActionTypeStatsUpdate, ActionTypeReopen:
 		ex.loadSegment(task, step)
 
 	case ActionTypeReduce:

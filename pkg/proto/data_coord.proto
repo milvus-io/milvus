@@ -116,6 +116,9 @@ service DataCoord {
   rpc RestoreSnapshot(RestoreSnapshotRequest) returns(RestoreSnapshotResponse){}
   rpc GetRestoreSnapshotState(GetRestoreSnapshotStateRequest) returns(GetRestoreSnapshotStateResponse){}
   rpc ListRestoreSnapshotJobs(ListRestoreSnapshotJobsRequest) returns(ListRestoreSnapshotJobsResponse){}
+
+  // batch update manifest
+  rpc BatchUpdateManifest(BatchUpdateManifestRequest) returns(common.Status){}
 }
 
 service DataNode {
@@ -1544,4 +1547,15 @@ message ListRestoreSnapshotJobsRequest {
 message ListRestoreSnapshotJobsResponse {
   common.Status status = 1;
   repeated RestoreSnapshotInfo jobs = 2; // list of restore snapshot jobs
+}
+
+message BatchUpdateManifestRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+  repeated BatchUpdateManifestItem items = 3;
+}
+
+message BatchUpdateManifestItem {
+  int64 segment_id = 1;
+  int64 manifest_version = 2;
 }

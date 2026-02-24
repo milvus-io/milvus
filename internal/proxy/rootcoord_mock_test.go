@@ -1754,6 +1754,10 @@ func (coord *MixCoordMock) PushClientCommand(ctx context.Context, req *milvuspb.
 	return &milvuspb.PushClientCommandResponse{}, nil
 }
 
+func (coord *MixCoordMock) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)
 
 type ShowPartitionsFunc func(ctx context.Context, request *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error)

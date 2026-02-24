@@ -70,6 +70,7 @@ const (
 	MessageTypeDropSnapshot         MessageType = MessageType(messagespb.MessageType_DropSnapshot)
 	MessageTypeRestoreSnapshot      MessageType = MessageType(messagespb.MessageType_RestoreSnapshot)
 	MessageTypeAlterWAL             MessageType = MessageType(messagespb.MessageType_AlterWAL)
+	MessageTypeBatchUpdateManifest  MessageType = MessageType(messagespb.MessageType_BatchUpdateManifest)
 )
 
 // Export extra message type
@@ -182,6 +183,8 @@ type (
 	RestoreSnapshotMessageBody        = messagespb.RestoreSnapshotMessageBody
 	AlterWALMessageHeader             = messagespb.AlterWALMessageHeader
 	AlterWALMessageBody               = messagespb.AlterWALMessageBody
+	BatchUpdateManifestMessageHeader  = messagespb.BatchUpdateManifestMessageHeader
+	BatchUpdateManifestMessageBody    = messagespb.BatchUpdateManifestMessageBody
 )
 
 // Type aliases for TimeTickMessageV1
@@ -2137,6 +2140,48 @@ var MustAsBroadcastAlterWALMessageV2 = MustAsSpecializedBroadcastMessage[*AlterW
 // NewAlterWALMessageBuilderV2 creates a new message builder for AlterWALMessageV2
 var NewAlterWALMessageBuilderV2 = newMutableMessageBuilder[*AlterWALMessageHeader, *AlterWALMessageBody]
 
+// Type aliases for BatchUpdateManifestMessageV2
+type (
+	MutableBatchUpdateManifestMessageV2         = specializedMutableMessage[*BatchUpdateManifestMessageHeader, *BatchUpdateManifestMessageBody]
+	ImmutableBatchUpdateManifestMessageV2       = SpecializedImmutableMessage[*BatchUpdateManifestMessageHeader, *BatchUpdateManifestMessageBody]
+	BroadcastBatchUpdateManifestMessageV2       = SpecializedBroadcastMessage[*BatchUpdateManifestMessageHeader, *BatchUpdateManifestMessageBody]
+	BroadcastResultBatchUpdateManifestMessageV2 = BroadcastResult[*BatchUpdateManifestMessageHeader, *BatchUpdateManifestMessageBody]
+	AckResultBatchUpdateManifestMessageV2       = AckResult[*BatchUpdateManifestMessageHeader, *BatchUpdateManifestMessageBody]
+)
+
+// MessageTypeWithVersion for BatchUpdateManifestMessageV2
+var MessageTypeBatchUpdateManifestV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeBatchUpdateManifest,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for BatchUpdateManifestMessageV2
+var SpecializedTypeBatchUpdateManifestV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*BatchUpdateManifestMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*BatchUpdateManifestMessageHeader)(nil)),
+}
+
+// AsMutableBatchUpdateManifestMessageV2 converts a BasicMessage to MutableBatchUpdateManifestMessageV2
+var AsMutableBatchUpdateManifestMessageV2 = asSpecializedMutableMessage[*BatchUpdateManifestMessageHeader, *BatchUpdateManifestMessageBody]
+
+// MustAsMutableBatchUpdateManifestMessageV2 converts a BasicMessage to MutableBatchUpdateManifestMessageV2, panics on error
+var MustAsMutableBatchUpdateManifestMessageV2 = mustAsSpecializedMutableMessage[*BatchUpdateManifestMessageHeader, *BatchUpdateManifestMessageBody]
+
+// AsImmutableBatchUpdateManifestMessageV2 converts an ImmutableMessage to ImmutableBatchUpdateManifestMessageV2
+var AsImmutableBatchUpdateManifestMessageV2 = asSpecializedImmutableMessage[*BatchUpdateManifestMessageHeader, *BatchUpdateManifestMessageBody]
+
+// MustAsImmutableBatchUpdateManifestMessageV2 converts an ImmutableMessage to ImmutableBatchUpdateManifestMessageV2, panics on error
+var MustAsImmutableBatchUpdateManifestMessageV2 = MustAsSpecializedImmutableMessage[*BatchUpdateManifestMessageHeader, *BatchUpdateManifestMessageBody]
+
+// AsBroadcastBatchUpdateManifestMessageV2 converts a BasicMessage to BroadcastBatchUpdateManifestMessageV2
+var AsBroadcastBatchUpdateManifestMessageV2 = asSpecializedBroadcastMessage[*BatchUpdateManifestMessageHeader, *BatchUpdateManifestMessageBody]
+
+// MustAsBroadcastBatchUpdateManifestMessageV2 converts a BasicMessage to BroadcastBatchUpdateManifestMessageV2, panics on error
+var MustAsBroadcastBatchUpdateManifestMessageV2 = MustAsSpecializedBroadcastMessage[*BatchUpdateManifestMessageHeader, *BatchUpdateManifestMessageBody]
+
+// NewBatchUpdateManifestMessageBuilderV2 creates a new message builder for BatchUpdateManifestMessageV2
+var NewBatchUpdateManifestMessageBuilderV2 = newMutableMessageBuilder[*BatchUpdateManifestMessageHeader, *BatchUpdateManifestMessageBody]
+
 // messageTypeMap make the contriants that one header type can only be used for one message type.
 var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.AlterAliasMessageHeader{}):           MessageTypeAlterAlias,
@@ -2152,6 +2197,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.AlterUserMessageHeader{}):            MessageTypeAlterUser,
 	reflect.TypeOf(&messagespb.AlterUserRoleMessageHeader{}):        MessageTypeAlterUserRole,
 	reflect.TypeOf(&messagespb.AlterWALMessageHeader{}):             MessageTypeAlterWAL,
+	reflect.TypeOf(&messagespb.BatchUpdateManifestMessageHeader{}):  MessageTypeBatchUpdateManifest,
 	reflect.TypeOf(&messagespb.BeginTxnMessageHeader{}):             MessageTypeBeginTxn,
 	reflect.TypeOf(&messagespb.CommitTxnMessageHeader{}):            MessageTypeCommitTxn,
 	reflect.TypeOf(&messagespb.CreateCollectionMessageHeader{}):     MessageTypeCreateCollection,
@@ -2219,6 +2265,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeAlterUserRoleV2:        SpecializedTypeAlterUserRoleV2,
 	MessageTypeAlterUserV2:            SpecializedTypeAlterUserV2,
 	MessageTypeAlterWALV2:             SpecializedTypeAlterWALV2,
+	MessageTypeBatchUpdateManifestV2:  SpecializedTypeBatchUpdateManifestV2,
 	MessageTypeBeginTxnV2:             SpecializedTypeBeginTxnV2,
 	MessageTypeCommitTxnV2:            SpecializedTypeCommitTxnV2,
 	MessageTypeCreateCollectionV1:     SpecializedTypeCreateCollectionV1,
@@ -2270,6 +2317,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeAlterUserRoleV2:        MessageTypeAlterUserRoleV2,
 	SpecializedTypeAlterUserV2:            MessageTypeAlterUserV2,
 	SpecializedTypeAlterWALV2:             MessageTypeAlterWALV2,
+	SpecializedTypeBatchUpdateManifestV2:  MessageTypeBatchUpdateManifestV2,
 	SpecializedTypeBeginTxnV2:             MessageTypeBeginTxnV2,
 	SpecializedTypeCommitTxnV2:            MessageTypeCommitTxnV2,
 	SpecializedTypeCreateCollectionV1:     MessageTypeCreateCollectionV1,

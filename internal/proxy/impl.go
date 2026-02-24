@@ -7234,3 +7234,49 @@ func (node *Proxy) DeleteClientCommand(ctx context.Context, req *milvuspb.Delete
 	// Forward to rootcoord
 	return node.mixCoord.DeleteClientCommand(ctx, req)
 }
+
+func (node *Proxy) BatchUpdateManifest(ctx context.Context, req *milvuspb.BatchUpdateManifestRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("collectionName", req.GetCollectionName()),
+		zap.Int("itemCount", len(req.GetItems())),
+	)
+
+	method := "BatchUpdateManifest"
+	tr := timerecord.NewTimeRecorder(method)
+	log.Info(rpcReceived(method))
+	nodeID := fmt.Sprint(paramtable.GetNodeID())
+
+	bt := &batchUpdateManifestTask{
+		ctx:       ctx,
+		Condition: NewTaskCondition(ctx),
+		req:       req,
+		mixCoord:  node.mixCoord,
+	}
+
+	if err := node.sched.ddQueue.Enqueue(bt); err != nil {
+		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", bt.BeginTs()),
+		zap.Uint64("EndTs", bt.EndTs()))
+
+	if err := bt.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", bt.BeginTs()),
+			zap.Uint64("EndTs", bt.EndTs()))
+		return merr.Status(err), nil
+	}
+
+	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return bt.result, nil
+}
