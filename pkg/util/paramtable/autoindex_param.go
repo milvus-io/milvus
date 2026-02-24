@@ -114,7 +114,7 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 	p.IntVectorIndexParams.Init(base.mgr)
 
 	p.BinaryIndexParams = ParamItem{
-		Key:          "autoIndex.params.binary.build",
+		Key:          "autoIndex.params.binary.build ",
 		Version:      "2.4.5",
 		DefaultValue: `{"nlist": 1024, "index_type": "BIN_IVF_FLAT", "metric_type": "HAMMING"}`,
 		Formatter:    GetBuildParamFormatter(BinaryVectorDefaultMetricType, "autoIndex.params.binary.build"),
