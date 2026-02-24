@@ -130,8 +130,11 @@ fi
 # DYLD_LIBRARY_PATH (macOS) before each package build. This ensures that
 # tools like grpc_cpp_plugin can find shared libraries (e.g. libprotoc.so)
 # when invoked during downstream package builds (opentelemetry-cpp, googleapis).
-mkdir -p ~/.conan/hooks
-cat > ~/.conan/hooks/fix_shared_lib_env.py << 'HOOK_EOF'
+# Use "conan config home" to get the correct conan home directory, as ~ may
+# differ from the conan home in CI containers.
+CONAN_HOME_DIR=$(conan config home 2>/dev/null || echo "${CONAN_USER_HOME:-$HOME}/.conan")
+mkdir -p "$CONAN_HOME_DIR/hooks"
+cat > "$CONAN_HOME_DIR/hooks/fix_shared_lib_env.py" << 'HOOK_EOF'
 import os, platform
 
 def pre_build(output, conanfile, **kwargs):
@@ -171,9 +174,9 @@ case "${unameOut}" in
     # Fix: install a Conan post_package hook that adds dependency rpaths to
     # each package's binaries right after it is built (before the manifest is
     # sealed), so every tool binary works the first time it is invoked.
-    mkdir -p ~/.conan/hooks
+    mkdir -p "$CONAN_HOME_DIR/hooks"
     conan config set hooks.fix_macos_rpaths 2>/dev/null
-    cat > ~/.conan/hooks/fix_macos_rpaths.py << 'HOOK_EOF'
+    cat > "$CONAN_HOME_DIR/hooks/fix_macos_rpaths.py" << 'HOOK_EOF'
 import os, platform, subprocess, stat
 
 def post_package(output, conanfile, conanfile_path, **kwargs):
