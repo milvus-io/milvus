@@ -60,7 +60,6 @@
 
 using namespace milvus;
 using namespace milvus::segcore;
-namespace milvus_pb = milvus::proto;
 
 class TestGrowingStorageV2 : public ::testing::Test {
     void

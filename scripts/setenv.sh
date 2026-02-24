@@ -97,7 +97,7 @@ case "${unameOut}" in
       export CGO_LDFLAGS="${LDFLAGS} -framework Security -framework CoreFoundation"
 
       export PKG_CONFIG_PATH="${PKG_CONFIG_PATH}:$ROOT_DIR/internal/core/output/lib/pkgconfig"
-      export DYLD_LIBRARY_PATH=$ROOT_DIR/internal/core/output/lib
+      export DYLD_LIBRARY_PATH=$ROOT_DIR/internal/core/output/lib:$ROOT_DIR/cmake_build/lib
       export RPATH=$DYLD_LIBRARY_PATH;;
     MINGW*)
       extra_path=$(cygpath -w "$ROOT_DIR/internal/core/output/lib")

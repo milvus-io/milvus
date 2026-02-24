@@ -57,7 +57,7 @@ print_error() {
 # Minimum version requirements
 MIN_CMAKE_VERSION="3.26"
 MIN_GO_VERSION="1.21"
-CONAN_VERSION="1.64.1"
+CONAN_VERSION="1.66.0"
 RUST_VERSION="1.89"
 
 #######################################

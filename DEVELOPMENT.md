@@ -172,7 +172,7 @@ Milvus uses Conan to manage third-party dependencies for c++.
 Install Conan:
 
 ```shell
-pip install conan==1.64.1
+pip install conan==1.66.0
 ```
 
 Note: Conan version 2.x is not currently supported, please use version 1.64.1.
