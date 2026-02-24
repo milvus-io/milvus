@@ -693,8 +693,9 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffWithBinlogsLegacyFormat) {
     EXPECT_EQ(diff.binlogs_to_load[0].first.size(), 1);
     EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(), 102);
 
-    // No fields should be dropped
+    // No fields should be dropped or replaced
     EXPECT_TRUE(diff.field_data_to_drop.empty());
+    EXPECT_TRUE(diff.binlogs_to_replace.empty());
 }
 
 TEST_F(SegmentLoadInfoTest, ComputeDiffDropFieldLegacyFormat) {
@@ -733,8 +734,9 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffDropFieldLegacyFormat) {
     auto diff = current_info.ComputeDiff(new_info);
 
     EXPECT_TRUE(diff.HasChanges());
-    // No new binlogs to load
+    // No new binlogs to load or replace
     EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.binlogs_to_replace.empty());
     // Field 102 should be dropped
     EXPECT_EQ(diff.field_data_to_drop.size(), 1);
     EXPECT_TRUE(diff.field_data_to_drop.count(FieldId(102)) > 0);
@@ -801,6 +803,17 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffMixedFormats) {
     // Field 103 (legacy) and field 107 (in column group) should be loaded
     EXPECT_EQ(diff.binlogs_to_load.size(), 2);
 
+    // Fields 105, 106 were in current (group 104) and group 104 is not found
+    // as a child_id key in current_fields, so they go to binlogs_to_replace
+    EXPECT_EQ(diff.binlogs_to_replace.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_replace[0].first.size(), 2);
+    std::set<int64_t> replace_field_ids;
+    for (const auto& fid : diff.binlogs_to_replace[0].first) {
+        replace_field_ids.insert(fid.get());
+    }
+    EXPECT_TRUE(replace_field_ids.count(105) > 0);
+    EXPECT_TRUE(replace_field_ids.count(106) > 0);
+
     // No fields should be dropped
     EXPECT_TRUE(diff.field_data_to_drop.empty());
 }
@@ -825,6 +838,8 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffNoChangesLegacyFormat) {
 
     EXPECT_FALSE(diff.HasChanges());
     EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.binlogs_to_replace.empty());
+    EXPECT_TRUE(diff.indexes_to_replace.empty());
     EXPECT_TRUE(diff.field_data_to_drop.empty());
 }
 
@@ -1501,4 +1516,322 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffTextIndexMultipleFields) {
     EXPECT_EQ(diff.text_indexes_to_load.size(), 1);
     EXPECT_TRUE(diff.text_indexes_to_load.count(FieldId(102)) > 0);
     EXPECT_TRUE(diff.text_indexes_to_load.count(FieldId(101)) == 0);
+}
+
+// ==================== Replace Tests ====================
+// Tests for indexes_to_replace, binlogs_to_replace, column_groups_to_replace
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffIndexReplace) {
+    // When current has index for field 101 (index_id=1001) and new has
+    // index for field 101 with different index_id (2001), it should go
+    // to indexes_to_replace (not indexes_to_load)
+
+    // Current: field 101 has index 1001
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_index = current_proto.add_index_infos();
+    cur_index->set_fieldid(101);
+    cur_index->set_indexid(1001);
+    cur_index->add_index_file_paths("/path/to/old_index");
+    auto* cur_param = cur_index->add_index_params();
+    cur_param->set_key("index_type");
+    cur_param->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+
+    // New: field 101 has different index 2001
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_index = new_proto.add_index_infos();
+    new_index->set_fieldid(101);
+    new_index->set_indexid(2001);
+    new_index->add_index_file_paths("/path/to/new_index");
+    auto* new_param = new_index->add_index_params();
+    new_param->set_key("index_type");
+    new_param->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "Index replace diff: " << diff.ToString() << "\n";
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Field 101 should be in indexes_to_replace (already had index)
+    EXPECT_EQ(diff.indexes_to_replace.size(), 1);
+    EXPECT_TRUE(diff.indexes_to_replace.count(FieldId(101)) > 0);
+    EXPECT_EQ(diff.indexes_to_replace[FieldId(101)].size(), 1);
+    EXPECT_EQ(diff.indexes_to_replace[FieldId(101)][0].index_id, 2001);
+
+    // Not in indexes_to_load
+    EXPECT_TRUE(diff.indexes_to_load.empty());
+    // Old index should be dropped
+    EXPECT_EQ(diff.indexes_to_drop.size(), 1);
+    EXPECT_TRUE(diff.indexes_to_drop.count(FieldId(101)) > 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffIndexReplaceMixed) {
+    // Mixed scenario: some indexes replaced, some new, some unchanged
+
+    // Current: field 101 index_id=1001, field 102 index_id=1002
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    auto* cur_idx1 = current_proto.add_index_infos();
+    cur_idx1->set_fieldid(101);
+    cur_idx1->set_indexid(1001);
+    cur_idx1->add_index_file_paths("/path/to/idx1");
+    auto* cur_param1 = cur_idx1->add_index_params();
+    cur_param1->set_key("index_type");
+    cur_param1->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+
+    auto* cur_idx2 = current_proto.add_index_infos();
+    cur_idx2->set_fieldid(102);
+    cur_idx2->set_indexid(1002);
+    cur_idx2->add_index_file_paths("/path/to/idx2");
+    auto* cur_param2 = cur_idx2->add_index_params();
+    cur_param2->set_key("index_type");
+    cur_param2->set_value(milvus::index::INVERTED_INDEX_TYPE);
+
+    // New: field 101 index_id=2001 (replace), field 102 index_id=1002 (same),
+    //      field 103 index_id=3001 (new)
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+
+    auto* new_idx1 = new_proto.add_index_infos();
+    new_idx1->set_fieldid(101);
+    new_idx1->set_indexid(2001);
+    new_idx1->add_index_file_paths("/path/to/new_idx1");
+    auto* new_param1 = new_idx1->add_index_params();
+    new_param1->set_key("index_type");
+    new_param1->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+
+    auto* new_idx2 = new_proto.add_index_infos();
+    new_idx2->set_fieldid(102);
+    new_idx2->set_indexid(1002);
+    new_idx2->add_index_file_paths("/path/to/idx2");
+    auto* new_param2 = new_idx2->add_index_params();
+    new_param2->set_key("index_type");
+    new_param2->set_value(milvus::index::INVERTED_INDEX_TYPE);
+
+    auto* new_idx3 = new_proto.add_index_infos();
+    new_idx3->set_fieldid(103);
+    new_idx3->set_indexid(3001);
+    new_idx3->add_index_file_paths("/path/to/idx3");
+    auto* new_param3 = new_idx3->add_index_params();
+    new_param3->set_key("index_type");
+    new_param3->set_value(milvus::index::INVERTED_INDEX_TYPE);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "Index replace mixed diff: " << diff.ToString() << "\n";
+
+    // Field 101: old index_id=1001 dropped, new index_id=2001 in replace
+    EXPECT_EQ(diff.indexes_to_replace.size(), 1);
+    EXPECT_TRUE(diff.indexes_to_replace.count(FieldId(101)) > 0);
+    EXPECT_EQ(diff.indexes_to_replace[FieldId(101)][0].index_id, 2001);
+
+    // Field 103: new index, should be in indexes_to_load
+    EXPECT_EQ(diff.indexes_to_load.size(), 1);
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(103)) > 0);
+
+    // Field 102: unchanged (same index_id), should not appear
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(102)) == 0);
+    EXPECT_TRUE(diff.indexes_to_replace.count(FieldId(102)) == 0);
+
+    // Old index_id=1001 for field 101 should be dropped
+    EXPECT_EQ(diff.indexes_to_drop.size(), 1);
+    EXPECT_TRUE(diff.indexes_to_drop.count(FieldId(101)) > 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffBinlogReplace) {
+    // When a field's binlog group changes, it goes to binlogs_to_replace
+
+    // Current: field 101 in group 101 (legacy format)
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(101);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/binlog_old");
+    cur_log->set_entries_num(500);
+
+    // New: field 101 in a column group 200 with children 101, 102
+    // Field 101 already exists -> replace; field 102 is new -> load
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog = new_proto.add_binlog_paths();
+    new_binlog->set_fieldid(200);
+    new_binlog->add_child_fields(101);
+    new_binlog->add_child_fields(102);
+    auto* new_log = new_binlog->add_binlogs();
+    new_log->set_log_path("/path/to/group_binlog");
+    new_log->set_entries_num(1000);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "Binlog replace diff: " << diff.ToString() << "\n";
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Field 102 is new -> binlogs_to_load
+    EXPECT_EQ(diff.binlogs_to_load.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(), 102);
+
+    // Field 101 already existed -> binlogs_to_replace
+    EXPECT_EQ(diff.binlogs_to_replace.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_replace[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_replace[0].first[0].get(), 101);
+
+    // Nothing dropped (field 101 still present, just in different group)
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffBinlogNoReplace) {
+    // When binlogs don't change, no replacement should occur
+
+    // Current and new: same field 101 in same group (legacy)
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(101);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/binlog");
+    log->set_entries_num(500);
+
+    SegmentLoadInfo current_info(proto, schema_);
+    // First GetLoadDiff to initialize default fields
+    auto first_diff = current_info.GetLoadDiff();
+
+    SegmentLoadInfo new_info(proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_FALSE(diff.HasChanges());
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.binlogs_to_replace.empty());
+    EXPECT_TRUE(diff.indexes_to_load.empty());
+    EXPECT_TRUE(diff.indexes_to_replace.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, LoadDiffHasChangesWithReplace) {
+    // Test that HasChanges returns true for each replace field
+    {
+        LoadDiff diff;
+        EXPECT_FALSE(diff.HasChanges());
+        diff.indexes_to_replace[FieldId(101)].push_back(LoadIndexInfo{});
+        EXPECT_TRUE(diff.HasChanges());
+    }
+    {
+        LoadDiff diff;
+        diff.binlogs_to_replace.emplace_back(std::vector<FieldId>{FieldId(101)},
+                                             proto::segcore::FieldBinlog{});
+        EXPECT_TRUE(diff.HasChanges());
+    }
+    {
+        LoadDiff diff;
+        diff.column_groups_to_replace.emplace_back(
+            0, std::vector<FieldId>{FieldId(101)});
+        EXPECT_TRUE(diff.HasChanges());
+    }
+    {
+        LoadDiff diff;
+        diff.column_groups_to_lazyreplace.emplace_back(
+            0, std::vector<FieldId>{FieldId(101)});
+        EXPECT_TRUE(diff.HasChanges());
+    }
+}
+
+TEST_F(SegmentLoadInfoTest, LoadDiffToStringIncludesReplace) {
+    // Test that ToString includes all replace fields
+    LoadDiff diff;
+    diff.indexes_to_replace[FieldId(101)].push_back(LoadIndexInfo{});
+    diff.binlogs_to_replace.emplace_back(std::vector<FieldId>{FieldId(102)},
+                                         proto::segcore::FieldBinlog{});
+    diff.column_groups_to_replace.emplace_back(
+        0, std::vector<FieldId>{FieldId(103)});
+    diff.column_groups_to_lazyreplace.emplace_back(
+        1, std::vector<FieldId>{FieldId(104)});
+
+    std::string str = diff.ToString();
+    EXPECT_TRUE(str.find("indexes_to_replace") != std::string::npos);
+    EXPECT_TRUE(str.find("binlogs_to_replace") != std::string::npos);
+    EXPECT_TRUE(str.find("column_groups_to_replace") != std::string::npos);
+    EXPECT_TRUE(str.find("column_groups_to_lazyreplace") != std::string::npos);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFilledFieldBecomesReplace) {
+    // When a field was previously filled with default values (no binlog)
+    // and the new LoadInfo provides actual binlog data for it,
+    // it should go to binlogs_to_replace (not binlogs_to_load)
+    // because the segment already has data loaded for it.
+
+    // Step 1: Initial load with only pk field (100).
+    // Fields 101-110 will be filled with default values.
+    proto::segcore::SegmentLoadInfo initial_proto;
+    initial_proto.set_segmentid(100);
+    initial_proto.set_num_of_rows(1000);
+    auto* binlog1 = initial_proto.add_binlog_paths();
+    binlog1->set_fieldid(100);
+    auto* log1 = binlog1->add_binlogs();
+    log1->set_log_path("/path/to/pk_binlog");
+    log1->set_entries_num(1000);
+
+    SegmentLoadInfo current_info(initial_proto, schema_);
+    // GetLoadDiff populates fields_filled_with_default_ for fields 101-110
+    auto initial_diff = current_info.GetLoadDiff();
+    EXPECT_FALSE(initial_diff.fields_to_fill_default.empty());
+
+    // Step 2: New LoadInfo adds binlog for field 101 (was default-filled)
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog1 = new_proto.add_binlog_paths();
+    new_binlog1->set_fieldid(100);
+    auto* new_log1 = new_binlog1->add_binlogs();
+    new_log1->set_log_path("/path/to/pk_binlog");
+    new_log1->set_entries_num(1000);
+
+    auto* new_binlog2 = new_proto.add_binlog_paths();
+    new_binlog2->set_fieldid(101);
+    auto* new_log2 = new_binlog2->add_binlogs();
+    new_log2->set_log_path("/path/to/vec_binlog");
+    new_log2->set_entries_num(1000);
+
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "Default-filled replace diff: " << diff.ToString() << "\n";
+
+    // Field 101 was default-filled → should be in binlogs_to_replace
+    EXPECT_FALSE(diff.binlogs_to_replace.empty());
+    bool found_101_in_replace = false;
+    for (const auto& [field_ids, binlog] : diff.binlogs_to_replace) {
+        for (const auto& fid : field_ids) {
+            if (fid.get() == 101) {
+                found_101_in_replace = true;
+            }
+        }
+    }
+    EXPECT_TRUE(found_101_in_replace);
+
+    // Field 101 should NOT be in binlogs_to_load
+    bool found_101_in_load = false;
+    for (const auto& [field_ids, binlog] : diff.binlogs_to_load) {
+        for (const auto& fid : field_ids) {
+            if (fid.get() == 101) {
+                found_101_in_load = true;
+            }
+        }
+    }
+    EXPECT_FALSE(found_101_in_load);
+
+    // Field 101 should NOT be in fields_to_fill_default (has data source now)
+    for (const auto& fid : diff.fields_to_fill_default) {
+        EXPECT_NE(fid.get(), 101);
+    }
 }

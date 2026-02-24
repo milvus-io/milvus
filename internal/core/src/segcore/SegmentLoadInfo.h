@@ -48,21 +48,36 @@ namespace milvus::segcore {
  * Cross-category changes (binlog <-> manifest) are not supported.
  */
 struct LoadDiff {
-    // Indexes that need to be loaded (field_id -> list of LoadIndexInfo)
+    // Indexes that need to be loaded for fields without existing index
     std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes_to_load;
 
-    // Field binlog paths that need to be loaded [field_ids,FieldBinlog]
+    // Indexes that need to replace existing indexes (field already has an index)
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes_to_replace;
+
+    // Field binlog paths that need to be loaded (new fields)
     // Only populated when both current and new use binlog mode
     std::vector<std::pair<std::vector<FieldId>, proto::segcore::FieldBinlog>>
         binlogs_to_load;
 
-    // list of column group indices and related field ids to load
+    // Field binlog paths that need to replace existing field data
+    std::vector<std::pair<std::vector<FieldId>, proto::segcore::FieldBinlog>>
+        binlogs_to_replace;
+
+    // list of column group indices and related field ids to load (new fields)
     // same index could appear multiple times if same group using different setups
     std::vector<std::pair<int, std::vector<FieldId>>> column_groups_to_load;
 
-    // list of column group indices and related field ids to lazy load
+    // list of column group indices and related field ids to replace
+    // (field moved between column groups or column group data changed)
+    std::vector<std::pair<int, std::vector<FieldId>>> column_groups_to_replace;
+
+    // list of column group indices and related field ids to lazy load (new fields)
     // used for lazy load fields or fields with index has raw data
     std::vector<std::pair<int, std::vector<FieldId>>> column_groups_to_lazyload;
+
+    // list of column group indices and related field ids to lazy replace
+    std::vector<std::pair<int, std::vector<FieldId>>>
+        column_groups_to_lazyreplace;
 
     std::vector<FieldId> fields_to_reload;
 
@@ -94,10 +109,14 @@ struct LoadDiff {
 
     [[nodiscard]] bool
     HasChanges() const {
-        return !indexes_to_load.empty() || !binlogs_to_load.empty() ||
-               !column_groups_to_load.empty() || !fields_to_reload.empty() ||
-               !indexes_to_drop.empty() || !field_data_to_drop.empty() ||
-               !fields_to_fill_default.empty() ||
+        return !indexes_to_load.empty() || !indexes_to_replace.empty() ||
+               !binlogs_to_load.empty() || !binlogs_to_replace.empty() ||
+               !column_groups_to_load.empty() ||
+               !column_groups_to_replace.empty() ||
+               !column_groups_to_lazyload.empty() ||
+               !column_groups_to_lazyreplace.empty() ||
+               !fields_to_reload.empty() || !indexes_to_drop.empty() ||
+               !field_data_to_drop.empty() || !fields_to_fill_default.empty() ||
                !text_indexes_to_load.empty() ||
                !text_indexes_to_create.empty() || manifest_updated;
     }
@@ -123,10 +142,38 @@ struct LoadDiff {
         }
         oss << "], ";
 
+        // indexes_to_replace
+        oss << "indexes_to_replace=[";
+        first = true;
+        for (const auto& [field_id, infos] : indexes_to_replace) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << field_id.get() << ":" << infos.size() << " indexes";
+        }
+        oss << "], ";
+
         // binlogs_to_load
         oss << "binlogs_to_load=[";
         first = true;
         for (const auto& [field_ids, binlog] : binlogs_to_load) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << "[";
+            for (size_t i = 0; i < field_ids.size(); ++i) {
+                if (i > 0)
+                    oss << ",";
+                oss << field_ids[i].get();
+            }
+            oss << "]";
+        }
+        oss << "], ";
+
+        // binlogs_to_replace
+        oss << "binlogs_to_replace=[";
+        first = true;
+        for (const auto& [field_ids, binlog] : binlogs_to_replace) {
             if (!first)
                 oss << ", ";
             first = false;
@@ -157,10 +204,45 @@ struct LoadDiff {
         }
         oss << "], ";
 
+        // column_groups_to_replace
+        oss << "column_groups_to_replace=[";
+        first = true;
+        for (const auto& [group_idx, field_ids] : column_groups_to_replace) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << "group" << group_idx << ":[";
+            for (size_t i = 0; i < field_ids.size(); ++i) {
+                if (i > 0)
+                    oss << ",";
+                oss << field_ids[i].get();
+            }
+            oss << "]";
+        }
+        oss << "], ";
+
         // column_groups_to_lazyload
         oss << "column_groups_to_lazyload=[";
         first = true;
         for (const auto& [group_idx, field_ids] : column_groups_to_lazyload) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << "group" << group_idx << ":[";
+            for (size_t i = 0; i < field_ids.size(); ++i) {
+                if (i > 0)
+                    oss << ",";
+                oss << field_ids[i].get();
+            }
+            oss << "]";
+        }
+        oss << "], ";
+
+        // column_groups_to_lazyreplace
+        oss << "column_groups_to_lazyreplace=[";
+        first = true;
+        for (const auto& [group_idx, field_ids] :
+             column_groups_to_lazyreplace) {
             if (!first)
                 oss << ", ";
             first = false;
