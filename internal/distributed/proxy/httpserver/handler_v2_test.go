@@ -1226,9 +1226,9 @@ func TestCreateCollection(t *testing.T) {
 
 	postTestCases := []requestBodyTestCase{}
 	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(13)
-	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
-	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
+	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(14)
+	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(7)
+	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(7)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
 	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
 	testEngine := initHTTPServerV2(mp, false)
@@ -1372,6 +1372,17 @@ func TestCreateCollection(t *testing.T) {
 		            {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
 		        ]
 		    }, "params": {"partitionKeyIsolation": "true"}}`),
+	})
+	// collection-level warmup params
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+		        "fields": [
+		            {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+		            {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
+		        ]
+		    }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
+		    "params": {"warmup.scalarField": "sync", "warmup.scalarIndex": "sync", "warmup.vectorField": "sync", "warmup.vectorIndex": "disable"}}`),
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
