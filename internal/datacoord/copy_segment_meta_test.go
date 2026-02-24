@@ -1010,6 +1010,8 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_CrashRecoveryRefFiltering(
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
