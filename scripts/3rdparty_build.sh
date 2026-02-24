@@ -132,36 +132,52 @@ case "${unameOut}" in
     # On macOS, Conan packages with shared libraries (protobuf, grpc) produce
     # binaries (protoc, grpc_cpp_plugin) whose install rpaths don't include
     # dependency lib dirs (e.g. abseil). This causes dyld failures when
-    # downstream packages (e.g. opentelemetry-cpp) invoke them during build.
+    # downstream packages (opentelemetry-cpp, googleapis) invoke them.
     #
-    # Strategy: run conan install once (may fail on downstream packages),
-    # fix rpaths on the already-built binaries, then retry.
-    conan install ${CPP_SRC_DIR} ${CONAN_ARGS} || {
-        echo "First conan install attempt failed, fixing shared library rpaths and retrying..."
+    # Fix: install a Conan post_package hook that adds dependency rpaths to
+    # each package's binaries right after it is built (before the manifest is
+    # sealed), so every tool binary works the first time it is invoked.
+    mkdir -p ~/.conan/hooks
+    conan config set hooks.fix_macos_rpaths 2>/dev/null
+    cat > ~/.conan/hooks/fix_macos_rpaths.py << 'HOOK_EOF'
+import os, platform, subprocess, stat
 
-        ABSEIL_LIB=$(find ~/.conan/data/abseil/ -path "*/package/*/lib/libabsl_base.*.dylib" 2>/dev/null | head -1 | xargs dirname 2>/dev/null)
-        PROTOBUF_LIB=$(find ~/.conan/data/protobuf/ -path "*/package/*/lib/libprotoc.*.dylib" 2>/dev/null | head -1 | xargs dirname 2>/dev/null)
+def post_package(output, conanfile, conanfile_path, **kwargs):
+    if platform.system() != "Darwin":
+        return
+    pkg = conanfile.package_folder
+    if not pkg:
+        return
+    bin_dir = os.path.join(pkg, "bin")
+    if not os.path.isdir(bin_dir):
+        return
+    dep_lib_dirs = []
+    try:
+        for _, dep in conanfile.deps_cpp_info.dependencies:
+            for p in dep.lib_paths:
+                if os.path.isdir(p):
+                    dep_lib_dirs.append(p)
+    except Exception:
+        return
+    if not dep_lib_dirs:
+        return
+    fixed = []
+    for name in os.listdir(bin_dir):
+        fp = os.path.join(bin_dir, name)
+        if not os.path.isfile(fp) or not (os.stat(fp).st_mode & stat.S_IXUSR):
+            continue
+        r = subprocess.run(["file", fp], capture_output=True, text=True)
+        if "Mach-O" not in r.stdout:
+            continue
+        for lib_path in dep_lib_dirs:
+            subprocess.run(["install_name_tool", "-add_rpath", lib_path, fp],
+                           capture_output=True)
+        fixed.append(name)
+    if fixed:
+        output.info("Fixed macOS rpaths for: %s" % ", ".join(fixed))
+HOOK_EOF
 
-        # Fix protoc: needs rpath to abseil
-        PROTOC=$(find ~/.conan/data/protobuf/ -path "*/package/*/bin/protoc" 2>/dev/null | head -1)
-        if [[ -n "$PROTOC" && -n "$ABSEIL_LIB" ]]; then
-            install_name_tool -add_rpath "$ABSEIL_LIB" "$PROTOC" 2>/dev/null
-            echo "Fixed protoc rpath -> abseil"
-        fi
-
-        # Fix grpc plugins: need rpaths to protobuf and abseil
-        GRPC_CPP_PLUGIN=$(find ~/.conan/data/grpc/ -path "*/package/*/bin/grpc_cpp_plugin" 2>/dev/null | head -1)
-        if [[ -n "$GRPC_CPP_PLUGIN" ]]; then
-            GRPC_BIN_DIR=$(dirname "$GRPC_CPP_PLUGIN")
-            for plugin in "$GRPC_BIN_DIR"/grpc_*_plugin; do
-                [ -n "$PROTOBUF_LIB" ] && install_name_tool -add_rpath "$PROTOBUF_LIB" "$plugin" 2>/dev/null
-                [ -n "$ABSEIL_LIB" ] && install_name_tool -add_rpath "$ABSEIL_LIB" "$plugin" 2>/dev/null
-            done
-            echo "Fixed grpc plugin rpaths -> protobuf, abseil"
-        fi
-
-        conan install ${CPP_SRC_DIR} ${CONAN_ARGS} || { echo 'conan install failed'; exit 1; }
-    }
+    conan install ${CPP_SRC_DIR} ${CONAN_ARGS} || { echo 'conan install failed'; exit 1; }
     ;;
   Linux*)
     if [ -f /etc/os-release ]; then
