@@ -83,7 +83,7 @@ func (c *run) injectVariablesToEnv() {
 			zap.Error(err))
 	}
 
-	err = os.Setenv(metricsinfo.GitBuildTagsEnvKey, common.Version.String())
+	err = os.Setenv(metricsinfo.GitBuildTagsEnvKey, MilvusVersion)
 	if err != nil {
 		log.Warn(fmt.Sprintf("failed to inject %s to environment variable", metricsinfo.GitBuildTagsEnvKey),
 			zap.Error(err))
