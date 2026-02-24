@@ -99,12 +99,17 @@ fi
 
 pushd ${BUILD_OUTPUT_DIR}
 
-# Unset LD_PRELOAD to prevent jemalloc (set by setenv.sh) from being injected
-# into conan's Python process, which causes segfaults.
-# NOTE: Do NOT unset LD_LIBRARY_PATH here — conan sub-builds (e.g.
-# opentelemetry-cpp) need it to locate shared libraries like libprotoc.so
-# when running tools like grpc_cpp_plugin.
+# Unset LD_PRELOAD and LD_LIBRARY_PATH to prevent jemalloc and other shared
+# libraries (set by setenv.sh) from being injected into conan's Python process.
+# - LD_PRELOAD with jemalloc causes immediate segfaults in Python.
+# - LD_LIBRARY_PATH with cmake_build/lib/ (populated by conan imports on
+#   previous runs) causes the Python ssl module to load a mismatched
+#   libssl.so during the conan update check, also triggering segfaults.
+# The pre_build hook (below) handles setting LD_LIBRARY_PATH per-build
+# for tools like grpc_cpp_plugin that need shared libs at build time.
+SAVED_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 unset LD_PRELOAD
+unset LD_LIBRARY_PATH
 
 export CONAN_REVISIONS_ENABLED=1
 export CXXFLAGS="-Wno-error=address -Wno-error=deprecated-declarations -include cstdint"
@@ -250,6 +255,11 @@ HOOK_EOF
     echo "Cannot build on windows"
     ;;
 esac
+
+# Restore LD_LIBRARY_PATH so downstream build steps can find shared libs
+if [[ -n "${SAVED_LD_LIBRARY_PATH}" ]]; then
+    export LD_LIBRARY_PATH="${SAVED_LD_LIBRARY_PATH}"
+fi
 
 popd
 
