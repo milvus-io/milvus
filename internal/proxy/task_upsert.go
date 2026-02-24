@@ -17,7 +17,6 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -1030,45 +1029,6 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.DataType.String()))
 	}
-}
-
-// checkDynamicFieldDataForPartialUpdate is a relaxed version of checkDynamicFieldData
-// for partial updates. After schema evolution, $meta may legitimately contain keys
-// matching static field names (e.g., a dynamic field "end_timestamp" that was later
-// added as a static column). This function validates JSON format and rejects the
-// reserved $meta key, but skips the static field name conflict check so that
-// existing dynamic field data is preserved.
-func checkDynamicFieldDataForPartialUpdate(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
-	for _, data := range insertMsg.FieldsData {
-		if data.IsDynamic {
-			data.FieldName = common.MetaFieldName
-			if !schema.EnableDynamicField {
-				return fmt.Errorf("without dynamic schema enabled, the field name cannot be set to %s", common.MetaFieldName)
-			}
-			for _, rowData := range data.GetScalars().GetJsonData().GetData() {
-				jsonData := make(map[string]interface{})
-				if err := json.Unmarshal(rowData, &jsonData); err != nil {
-					return merr.WrapErrIoFailedReason(err.Error())
-				}
-				if _, ok := jsonData[common.MetaFieldName]; ok {
-					return fmt.Errorf("cannot set json key to: %s", common.MetaFieldName)
-				}
-				// Note: we intentionally skip the static field name check here.
-				// For partial updates, merged data from queryPreExecute may contain
-				// $meta keys matching static field names due to schema evolution.
-				// This is expected — the data was already stored and must be preserved.
-			}
-			return nil
-		}
-	}
-	// No dynamic field found — auto-generate empty ones
-	defaultData := make([][]byte, insertMsg.NRows())
-	for i := range defaultData {
-		defaultData[i] = []byte("{}")
-	}
-	dynamicData := autoGenDynamicFieldData(defaultData)
-	insertMsg.FieldsData = append(insertMsg.FieldsData, dynamicData)
-	return nil
 }
 
 func (it *upsertTask) insertPreExecute(ctx context.Context) error {
