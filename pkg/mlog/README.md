@@ -508,7 +508,6 @@ mlog.Info(ctx, "segment loaded",
 | MlogInfoWithContextFields | 415 | 0 | 0 |
 | MlogInfoWithContext+CallFields | 647 | 192 | 1 |
 | MlogInfoDisabledLevel | 2.7 | 0 | 0 |
-| MlogInfoNilContext | 478 | 64 | 1 |
 
 ### Logger Methods
 
