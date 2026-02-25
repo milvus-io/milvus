@@ -2394,7 +2394,8 @@ func TestGarbageCollector_recycleUnusedTextIndexFiles_SnapshotReference(t *testi
 	// Mock WalkWithPrefix to simulate text index files
 	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
 		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
-			recursive bool, fn storage.ChunkObjectWalkFunc) error {
+			recursive bool, fn storage.ChunkObjectWalkFunc,
+		) error {
 			if strings.Contains(prefix, "text_index") {
 				chunkInfo := &storage.ChunkObjectInfo{
 					FilePath:   "gc/text_index/401/1/100/10/1001/101/file1",
@@ -2481,7 +2482,8 @@ func TestGarbageCollector_recycleUnusedJSONIndexFiles_SnapshotReference(t *testi
 	// Mock WalkWithPrefix to simulate JSON index files
 	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
 		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
-			recursive bool, fn storage.ChunkObjectWalkFunc) error {
+			recursive bool, fn storage.ChunkObjectWalkFunc,
+		) error {
 			if strings.Contains(prefix, "json_index") {
 				chunkInfo := &storage.ChunkObjectInfo{
 					FilePath:   "gc/json_index/402/1/100/10/1002/102/json_file1",
@@ -2632,7 +2634,8 @@ func TestGarbageCollector_recycleUnusedTextIndexFiles_SkipWhenRefIndexNotLoaded(
 
 	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
 		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
-			recursive bool, fn storage.ChunkObjectWalkFunc) error {
+			recursive bool, fn storage.ChunkObjectWalkFunc,
+		) error {
 			if strings.Contains(prefix, "text_index") {
 				chunkInfo := &storage.ChunkObjectInfo{
 					FilePath:   "gc/text_index/401/1/100/10/1001/101/file1",
@@ -2710,7 +2713,8 @@ func TestGarbageCollector_recycleUnusedJSONIndexFiles_SkipWhenRefIndexNotLoaded(
 
 	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
 		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
-			recursive bool, fn storage.ChunkObjectWalkFunc) error {
+			recursive bool, fn storage.ChunkObjectWalkFunc,
+		) error {
 			if strings.Contains(prefix, "json_index") {
 				chunkInfo := &storage.ChunkObjectInfo{
 					FilePath:   "gc/json_index/402/1/100/10/1002/102/json_file1",

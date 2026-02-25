@@ -71,8 +71,8 @@ func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionI
 }
 
 // startBroadcastForRestoreSnapshot starts a broadcast for restore snapshot operations.
-// Unlike startBroadcastRestoreSnapshot, this function does NOT validate resources -
-// it only creates the broadcaster with appropriate resource keys (collection + snapshot).
+// It only creates the broadcaster with appropriate resource keys (DB, collection, snapshot)
+// without performing resource validation.
 // Use this when you need a broadcaster before all resources are created (e.g., for index restoration).
 func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error) {
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
@@ -99,46 +99,22 @@ func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectio
 }
 
 // validateRestoreSnapshotResources validates that all required resources exist for restore.
-// This includes collection, partitions, and indexes.
+// This includes snapshot, collection, partitions, and indexes.
 func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectionID int64, snapshotData *SnapshotData) error {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 
-	// Validate partitions exist
-	partitionsResp, err := s.broker.ShowPartitions(ctx, collectionID)
+	// ========== Validate Snapshot Exists ==========
+	snapshot, err := s.meta.snapshotMeta.GetSnapshot(ctx, snapshotData.SnapshotInfo.GetName())
 	if err != nil {
-		return fmt.Errorf("failed to get partitions for collection %d: %w", collectionID, err)
+		return fmt.Errorf("snapshot %s does not exist for collection %d: %w",
+			snapshotData.SnapshotInfo.GetName(), collectionID, err)
 	}
-
-	existingPartitions := make(map[string]bool)
-	for _, name := range partitionsResp.GetPartitionNames() {
-		existingPartitions[name] = true
-	}
-
-	for partName := range snapshotData.Collection.GetPartitions() {
-		if !existingPartitions[partName] {
-			return fmt.Errorf("partition %s does not exist in collection %d", partName, collectionID)
-		}
-	}
-	log.Info("partitions validated", zap.Int("count", len(existingPartitions)))
-
-	return nil
-}
-
-// startBroadcastRestoreSnapshot starts a broadcast for restore snapshot.
-// It validates that all previously created resources (collection, partitions, indexes)
-// exist before starting the broadcast.
-// Deprecated: Use startBroadcastForRestoreSnapshot + validateRestoreSnapshotResources instead.
-func (s *Server) startBroadcastRestoreSnapshot(
-	ctx context.Context,
-	collectionID int64,
-	snapshotData *SnapshotData,
-) (broadcaster.BroadcastAPI, error) {
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
+	log.Info("snapshot validated", zap.String("snapshotName", snapshot.GetName()))
 
 	// ========== Validate Collection Exists ==========
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
-		return nil, fmt.Errorf("collection %d does not exist: %w", collectionID, err)
+		return fmt.Errorf("collection %d does not exist: %w", collectionID, err)
 	}
 	dbName := coll.GetDbName()
 	collectionName := coll.GetCollectionName()
@@ -149,7 +125,7 @@ func (s *Server) startBroadcastRestoreSnapshot(
 	// ========== Validate Partitions Exist ==========
 	partitionsResp, err := s.broker.ShowPartitions(ctx, collectionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get partitions for collection %d: %w", collectionID, err)
+		return fmt.Errorf("failed to get partitions for collection %d: %w", collectionID, err)
 	}
 
 	// Build set of existing partition names
@@ -161,7 +137,7 @@ func (s *Server) startBroadcastRestoreSnapshot(
 	// Check all snapshot partitions exist
 	for partName := range snapshotData.Collection.GetPartitions() {
 		if !existingPartitions[partName] {
-			return nil, fmt.Errorf("partition %s does not exist in collection %d",
+			return fmt.Errorf("partition %s does not exist in collection %d",
 				partName, collectionID)
 		}
 	}
@@ -180,23 +156,11 @@ func (s *Server) startBroadcastRestoreSnapshot(
 			}
 		}
 		if !indexFound {
-			return nil, fmt.Errorf("index %s for field %d does not exist in collection %d",
+			return fmt.Errorf("index %s for field %d does not exist in collection %d",
 				indexInfo.GetIndexName(), indexInfo.GetFieldID(), collectionID)
 		}
 	}
 	log.Info("indexes validated", zap.Int("count", len(snapshotData.Indexes)))
 
-	// ========== Start Broadcast ==========
-	b, err := broadcast.StartBroadcastWithResourceKeys(
-		ctx,
-		message.NewSharedDBNameResourceKey(dbName),
-		message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
-		message.NewExclusiveSnapshotNameResourceKey(snapshotData.SnapshotInfo.GetName()),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	log.Info("broadcast started for restore snapshot")
-	return b, nil
+	return nil
 }
