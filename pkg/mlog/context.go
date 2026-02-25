@@ -92,14 +92,17 @@ func GetPropagated(ctx context.Context) map[string]string {
 	return result
 }
 
+// emptyLogContext is a shared sentinel to avoid allocating an empty logContext on every call.
+var emptyLogContext = &logContext{}
+
 func getLogContext(ctx context.Context) *logContext {
 	if ctx == nil {
-		return &logContext{}
+		return emptyLogContext
 	}
 	if lc, ok := ctx.Value(fieldsKey).(*logContext); ok && lc != nil {
 		return lc
 	}
-	return &logContext{}
+	return emptyLogContext
 }
 
 // FieldsFromContext extracts fields from context as a slice.
@@ -113,12 +116,6 @@ func FieldsFromContext(ctx context.Context) []Field {
 		fields = append(fields, *f)
 	}
 	return fields
-}
-
-// loggerFromContext returns the cached logger from context.
-// If no cached logger exists, returns nil.
-func loggerFromContext(ctx context.Context) *zap.Logger {
-	return getLogContext(ctx).logger
 }
 
 // fieldCount returns the number of fields in the logContext.
