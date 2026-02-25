@@ -40,7 +40,12 @@ scripts/standalone_embed.sh    # embedded standalone (no external deps)
 ## PR and Commit Conventions
 
 PR title format: `{type}: {description}`. Valid types: `feat:`, `fix:`, `enhance:`, `test:`, `doc:`, `auto:`, `build(deps):`.
-PR body must be non-empty. Link related issues with `related: #xxx`.
+PR body must be non-empty. Issue/doc linking rules:
+- `fix:` — must link issue (e.g. `issue: #123`)
+- `feat:` — must link issue + design doc from milvus-io/milvus-design-docs
+- `enhance:` — must link issue if size L/XL/XXL
+- `doc:`, `test:` — no issue required
+- 2.x branch PRs must link the corresponding master PR (e.g. `pr: #123`)
 
 DCO check is required. Always use `-s` so the developer's Signed-off-by is appended last:
 
