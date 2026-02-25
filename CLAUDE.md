@@ -1,7 +1,7 @@
 # Milvus
 
 Vector database. Go + C++ (internal/core/) + Rust (tantivy).
-pkg module path is `pkg/v2` (e.g. `github.com/milvus-io/milvus/pkg/v2/util/merr`).
+pkg has its own go.mod (module: `github.com/milvus-io/milvus/pkg/v2`). Run `go get` from `pkg/` when adding dependencies there, not from root.
 
 ## Architecture
 
