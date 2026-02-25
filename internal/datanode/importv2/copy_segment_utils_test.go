@@ -555,7 +555,7 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 	}
 
 	mappings := map[string]string{
-		"files/index_files/1002/1/222/333/index1":                            "files/index_files/1002/1/555/666/index1",
+		"files/index_files/1002/1/222/333/index1":                           "files/index_files/1002/1/555/666/index1",
 		"files/text_log/123/1/111/222/333/100/text1":                        "files/text_log/123/1/444/555/666/100/text1",
 		"files/json_key_index_log/123/1/111/222/333/101/json1":              "files/json_key_index_log/123/1/444/555/666/101/json1",
 		"files/json_stats/2/3002/1/111/222/333/102/shared_key_index/index1": "files/json_stats/2/3002/1/444/555/666/102/shared_key_index/index1",
