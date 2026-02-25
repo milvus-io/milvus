@@ -35,6 +35,9 @@ struct GroupCTMeta : public milvus::cachinglayer::Meta {
     size_t num_fields_;
     // total number of row groups
     size_t total_row_groups_;
+    // Per-cell [start, end) row group range (global indices).
+    // Cells never span files — each cell's row groups come from the same file.
+    std::vector<std::pair<size_t, size_t>> cell_row_group_ranges_;
 
     GroupCTMeta(size_t num_fields,
                 milvus::cachinglayer::StorageType storage_type,
@@ -54,9 +57,7 @@ struct GroupCTMeta : public milvus::cachinglayer::Meta {
     // Get the range of row groups for a cell [start, end)
     std::pair<size_t, size_t>
     get_row_group_range(size_t cid) const {
-        size_t start = cid * kRowGroupsPerCell;
-        size_t end = std::min(start + kRowGroupsPerCell, total_row_groups_);
-        return {start, end};
+        return cell_row_group_ranges_[cid];
     }
 };
 

@@ -18,6 +18,24 @@
 #include "common/type_c.h"
 #include "segcore/Utils.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
+#include <cassert>
+#include <algorithm>
+#include <cstdint>
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "NamedType/named_type_impl.hpp"
+#include "arrow/api.h"
+#include "cachinglayer/Utils.h"
+#include "common/Chunk.h"
+#include "common/ChunkWriter.h"
+#include "common/Common.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
 #include "common/GroupChunk.h"
 #include "mmap/Types.h"
 #include "common/Types.h"
@@ -160,10 +178,23 @@ GroupChunkTranslator::GroupChunkTranslator(
         }
     }
 
-    // Build cell mapping: each cell contains up to kRowGroupsPerCell row groups
+    // Build cell mapping: cells DO NOT span files — each cell's row groups
+    // come entirely from one file.
     meta_.total_row_groups_ = total_row_groups;
-    size_t num_cells =
-        (total_row_groups + kRowGroupsPerCell - 1) / kRowGroupsPerCell;
+    size_t global_rg_offset = 0;
+    for (const auto& rg_meta : row_group_meta_list_) {
+        size_t file_rg_count = rg_meta.size();
+        for (size_t local_start = 0; local_start < file_rg_count;
+             local_start += kRowGroupsPerCell) {
+            size_t local_end =
+                std::min(local_start + kRowGroupsPerCell, file_rg_count);
+            meta_.cell_row_group_ranges_.push_back(
+                {global_rg_offset + local_start, global_rg_offset + local_end});
+        }
+        global_rg_offset += file_rg_count;
+    }
+
+    size_t num_cells = meta_.cell_row_group_ranges_.size();
 
     // Merge row groups into group chunks(cache cells)
     meta_.num_rows_until_chunk_.reserve(num_cells + 1);
@@ -301,87 +332,61 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
             meta_.chunk_memory_size_.size());
     }
 
-    // Collect all row group indices needed for the requested cells
-    std::vector<size_t> needed_row_group_indices;
-    needed_row_group_indices.reserve(kRowGroupsPerCell * cids.size());
+    // Build CellSpec for each requested cid
+    std::vector<milvus::segcore::CellSpec> cell_specs;
+    cell_specs.reserve(cids.size());
     for (auto cid : cids) {
-        auto [start, end] = meta_.get_row_group_range(cid);
-        for (size_t i = start; i < end; ++i) {
-            needed_row_group_indices.push_back(i);
-        }
+        auto [rg_start, rg_end] = meta_.get_row_group_range(cid);
+        auto [file_idx, local_off] = get_file_and_row_group_offset(rg_start);
+        cell_specs.push_back({cid,
+                              file_idx,
+                              static_cast<int64_t>(local_off),
+                              static_cast<int64_t>(rg_end - rg_start)});
     }
 
-    // Create row group lists for file loading
-    std::vector<std::vector<int64_t>> row_group_lists(insert_files_.size());
-    for (auto rg_idx : needed_row_group_indices) {
-        auto [file_idx, row_group_off] = get_file_and_row_group_offset(rg_idx);
-        row_group_lists[file_idx].push_back(row_group_off);
-    }
-
-    auto parallel_degree =
-        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-    auto strategy =
-        std::make_unique<ParallelDegreeSplitStrategy>(parallel_degree);
-
-    auto channel = std::make_shared<ArrowReaderChannel>();
+    // Submit cell-batch loading tasks
+    auto channel = std::make_shared<milvus::segcore::CellReaderChannel>();
     auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                   .GetArrowFileSystem();
 
-    auto load_futures = LoadWithStrategyAsync(ctx,
-                                              insert_files_,
-                                              channel,
-                                              DEFAULT_FIELD_MAX_MEMORY_LIMIT,
-                                              std::move(strategy),
-                                              row_group_lists,
-                                              fs,
-                                              nullptr,
-                                              load_priority_);
+    auto load_futures =
+        milvus::segcore::LoadCellBatchAsync(ctx,
+                                            insert_files_,
+                                            std::move(cell_specs),
+                                            channel,
+                                            DEFAULT_FIELD_MAX_MEMORY_LIMIT,
+                                            fs,
+                                            load_priority_);
+
     LOG_INFO(
-        "[StorageV2] translator {} submits load column group {} task to thread "
-        "pool",
+        "[StorageV2] translator {} submits {} batch tasks for column group {}",
         key_,
+        load_futures.size(),
         column_group_info_.field_id);
 
-    // Collect loaded tables by row group index
-    std::unordered_map<size_t, std::shared_ptr<arrow::Table>> row_group_tables;
-    row_group_tables.reserve(needed_row_group_indices.size());
+    // Pop loop — convert each cell immediately, no ArrowTable accumulation
+    std::unordered_map<cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>
+        completed_cells;
+    completed_cells.reserve(cids.size());
 
-    std::shared_ptr<milvus::ArrowDataWrapper> r;
-    // !!! NOTE: the popped row group tables are sorted by the global row group index
-    // !!! Never rely on the order of the popped row group tables.
-    while (channel->pop(r)) {
-        // Check cancellation while processing results
+    std::shared_ptr<milvus::segcore::CellLoadResult> cell_data;
+    while (channel->pop(cell_data)) {
         CheckCancellation(
             ctx, segment_id_, "GroupChunkTranslator::get_cells()");
-        for (const auto& table_info : r->arrow_tables) {
-            // Convert file_index and row_group_index (file inner index, not global index) to global row group index
-            auto rg_idx = get_global_row_group_idx(table_info.file_index,
-                                                   table_info.row_group_index);
-            row_group_tables[rg_idx] = table_info.table;
-        }
+        completed_cells[cell_data->cid] =
+            load_group_chunk(cell_data->tables, cell_data->cid);
     }
 
     // access underlying future to get exception if any
     storage::WaitAllFutures(load_futures);
 
-    // Build cells from collected tables
     for (auto cid : cids) {
-        auto [start, end] = meta_.get_row_group_range(cid);
-        std::vector<std::shared_ptr<arrow::Table>> tables;
-        tables.reserve(end - start);
-
-        for (size_t i = start; i < end; ++i) {
-            auto it = row_group_tables.find(i);
-            AssertInfo(it != row_group_tables.end(),
-                       fmt::format("[StorageV2] translator {} row group {} "
-                                   "for cell {} was not loaded",
-                                   key_,
-                                   i,
-                                   cid));
-            tables.push_back(it->second);
-        }
-
-        cells.emplace_back(cid, load_group_chunk(tables, cid));
+        auto it = completed_cells.find(cid);
+        AssertInfo(
+            it != completed_cells.end(),
+            fmt::format(
+                "[StorageV2] translator {} cell {} not loaded", key_, cid));
+        cells.emplace_back(cid, std::move(it->second));
     }
 
     return cells;
