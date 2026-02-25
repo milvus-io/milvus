@@ -232,6 +232,11 @@ message DropPartitionMessageHeader {
 // AlterReplicateConfigMessageHeader is the header of alter replicate configuration message.
 message AlterReplicateConfigMessageHeader {
     common.ReplicateConfiguration replicate_configuration = 1;
+    // is_pchannel_increasing is set to true when this config change only adds new pchannels
+    // (append-only growth). When set, the secondary uses the new config from the message header
+    // (instead of the current config) to map all broadcast channels including newly added ones,
+    // and CDC uses nil checkpoint for new pchannels.
+    bool is_pchannel_increasing = 2;
 }
 
 // AlterReplicateConfigMessageBody is the body of alter replicate configuration message.

@@ -120,17 +120,36 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 	if sourceCluster == nil {
 		return nil, status.NewReplicateViolation("source cluster %s not found in replicate configuration", rh.ClusterID)
 	}
-	targetVChannel, err := s.getTargetVChannel(sourceCluster, msg.VChannel())
+
+	// For pchannel-increasing AlterReplicateConfig messages, use the NEW config from the
+	// message header to map ALL channels (including newly added ones).
+	// The current config only knows about old pchannels, so both the main vchannel and
+	// broadcast vchannels need the new config for mapping.
+	channelMappingSourceCluster := sourceCluster
+	if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
+		alterMsg := message.MustAsMutableAlterReplicateConfigMessageV2(msg)
+		if alterMsg.Header().GetIsPchannelIncreasing() {
+			newCfg, newCfgErr := replicateutil.NewConfigHelper(s.clusterID, alterMsg.Header().GetReplicateConfiguration())
+			if newCfgErr != nil {
+				return nil, status.NewReplicateViolation("failed to parse new replicate config from message header: %s", newCfgErr.Error())
+			}
+			channelMappingSourceCluster = newCfg.GetCluster(rh.ClusterID)
+			if channelMappingSourceCluster == nil {
+				return nil, status.NewReplicateViolation("source cluster %s not found in new replicate configuration", rh.ClusterID)
+			}
+		}
+	}
+
+	targetVChannel, err := s.getTargetVChannel(channelMappingSourceCluster, msg.VChannel())
 	if err != nil {
 		return nil, err
 	}
 
 	// Get target broadcast vchannels on current cluster that should be written to
 	if bh := msg.BroadcastHeader(); bh != nil {
-		// broadcast header have vchannels, so we need to overwrite it.
 		targetBroadcastVChannels := make([]string, 0, len(bh.VChannels))
 		for _, vchannel := range bh.VChannels {
-			targetBroadcastVChannel, err := s.getTargetVChannel(sourceCluster, vchannel)
+			targetBroadcastVChannel, err := s.getTargetVChannel(channelMappingSourceCluster, vchannel)
 			if err != nil {
 				return nil, status.NewReplicateViolation("failed to get target channel, %s", err.Error())
 			}
