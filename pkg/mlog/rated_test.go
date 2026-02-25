@@ -462,23 +462,23 @@ func TestRatedEntryConcurrentIgnoreCount(t *testing.T) {
 	assert.Equal(t, int64(100), entry.ignoreCount.Load())
 }
 
-func TestRatedInfoNilContext(t *testing.T) {
+func TestRatedInfoBackgroundContext(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
 	Init(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
-	RatedInfo(nil, rate.Inf, "nil context rated")
+	RatedInfo(context.Background(), rate.Inf, "background context rated")
 
 	var entry map[string]interface{}
 	err := json.Unmarshal(buf.Bytes(), &entry)
 	require.NoError(t, err)
-	assert.Equal(t, "nil context rated", entry["msg"])
-	assert.Equal(t, true, entry["_ctx_nil"])
+	assert.Equal(t, "background context rated", entry["msg"])
+	assert.Nil(t, entry["_ctx_nil"])
 }
 
-func TestLoggerRatedInfoNilContext(t *testing.T) {
+func TestLoggerRatedInfoBackgroundContext(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
 	Init(logger)
@@ -486,13 +486,13 @@ func TestLoggerRatedInfoNilContext(t *testing.T) {
 	defer resetRatedRegistry()
 
 	componentLogger := With(String("module", "test"))
-	componentLogger.RatedInfo(nil, rate.Inf, "nil context rated")
+	componentLogger.RatedInfo(context.Background(), rate.Inf, "background context rated")
 
 	var entry map[string]interface{}
 	err := json.Unmarshal(buf.Bytes(), &entry)
 	require.NoError(t, err)
-	assert.Equal(t, "nil context rated", entry["msg"])
-	assert.Equal(t, true, entry["_ctx_nil"])
+	assert.Equal(t, "background context rated", entry["msg"])
+	assert.Nil(t, entry["_ctx_nil"])
 	assert.Equal(t, "test", entry["module"])
 }
 

@@ -133,15 +133,6 @@ func BenchmarkMlogInfoDisabledLevel(b *testing.B) {
 	}
 }
 
-func BenchmarkMlogInfoNilContext(b *testing.B) {
-	setupBench()
-	defer resetLogger()
-	b.ResetTimer()
-	for b.Loop() {
-		Info(nil, "benchmark message")
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Logger methods
 // ---------------------------------------------------------------------------
