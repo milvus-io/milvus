@@ -972,6 +972,377 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_all_null_vectors(self):
+        """
+        target: test search when all vectors are null
+        method: create collection with nullable vector, insert all-null vectors, search
+        expected: search returns empty results without panic
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 128
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        schema.add_field("text", DataType.VARCHAR, max_length=64)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("vec", index_type="HNSW", metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        # insert 100 rows with ALL null vectors
+        rows = [{"id": i, "vec": None, "text": f"text_{i}"} for i in range(100)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # search should return empty results (not panic)
+        vectors_to_search = cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        self.search(client, collection_name, vectors_to_search,
+                    search_params={}, anns_field="vec", limit=10,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": 1, "limit": 0, "pk_name": "id"})
+
+        # also verify on growing segment (no flush)
+        rows2 = [{"id": i + 100, "vec": None, "text": f"text_{i + 100}"} for i in range(50)]
+        self.insert(client, collection_name, rows2)
+        self.search(client, collection_name, vectors_to_search,
+                    search_params={}, anns_field="vec", limit=10,
+                    consistency_level="Strong",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": 1, "limit": 0, "pk_name": "id"})
+
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_iterator_null_vector(self):
+        """
+        target: test search iterator with nullable vector field
+        method: create collection with nullable vector, insert mixed data, run search iterator
+        expected: 1. all-null: iterator returns 0 results without panic
+                  2. mixed: iterator only returns non-null vector rows
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 128
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("vec", index_type="HNSW", metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        # insert all-null vectors
+        rows = [{"id": i, "vec": None} for i in range(100)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        vectors_to_search = cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        # search iterator on all-null data should return 0 results
+        self.search_iterator(client, collection_name, vectors_to_search,
+                             batch_size=10, limit=50, anns_field="vec",
+                             search_params={},
+                             check_task=CheckTasks.check_search_iterator,
+                             check_items={"batch_size": 10, "iterate_times": 1})
+
+        # insert 50 non-null vectors (id 100-149)
+        non_null_rows = [{"id": i + 100,
+                          "vec": cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0]}
+                         for i in range(50)]
+        self.insert(client, collection_name, non_null_rows)
+        self.flush(client, collection_name)
+
+        # search iterator on mixed data should only return non-null vector rows
+        self.search_iterator(client, collection_name, vectors_to_search,
+                             batch_size=10, limit=50, anns_field="vec",
+                             search_params={},
+                             check_task=CheckTasks.check_search_iterator,
+                             check_items={"batch_size": 10})
+
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_iterator_null_vector(self):
+        """
+        target: test query iterator with nullable vector field
+        method: create collection with nullable vector, insert mixed data, run query iterator
+        expected: query iterator returns all rows including those with null vectors
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 128
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        schema.add_field("tag", DataType.VARCHAR, max_length=64)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("vec", index_type="HNSW", metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        # insert 100 rows: even ids have null vectors, odd ids have valid vectors
+        total = 100
+        rows = []
+        for i in range(total):
+            if i % 2 == 0:
+                rows.append({"id": i, "vec": None, "tag": "null_vec"})
+            else:
+                rows.append({"id": i,
+                             "vec": cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0],
+                             "tag": "valid_vec"})
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # query iterator should return ALL rows (including null vectors)
+        it = self.query_iterator(client, collection_name, batch_size=20,
+                                 output_fields=["id", "vec", "tag"])[0]
+        all_results = []
+        while True:
+            batch = it.next()
+            if not batch:
+                break
+            all_results.extend(batch)
+        it.close()
+        assert len(all_results) == total, f"Expected {total} results but got {len(all_results)}"
+        # verify null vector rows are included
+        null_vec_ids = [r["id"] for r in all_results if r.get("vec") is None]
+        valid_vec_ids = [r["id"] for r in all_results if r.get("vec") is not None]
+        assert len(null_vec_ids) == total // 2
+        assert len(valid_vec_ids) == total // 2
+        for _id in null_vec_ids:
+            assert _id % 2 == 0
+        for _id in valid_vec_ids:
+            assert _id % 2 == 1
+
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_upsert_null_vector_transitions(self):
+        """
+        target: test upsert transitions between null and non-null vectors
+        method: 1. insert data with valid vectors
+                2. upsert same PKs with null vectors -> verify search cannot find them
+                3. upsert same PKs back with valid vectors -> verify search finds them
+        expected: upsert correctly transitions vectors between null and non-null states
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 128
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        schema.add_field("tag", DataType.VARCHAR, max_length=64)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("vec", index_type="HNSW", metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        # step 1: insert 20 rows with valid vectors
+        nb = 20
+        vectors = cf.gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        rows = [{"id": i, "vec": vectors[i], "tag": "valid"} for i in range(nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # verify all 20 rows can be found by search
+        vectors_to_search = cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        self.search(client, collection_name, vectors_to_search,
+                    search_params={}, anns_field="vec", limit=nb,
+                    consistency_level="Strong",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": 1, "limit": nb, "pk_name": "id"})
+
+        # step 2: upsert ids 0-9 with null vectors (non-null -> null)
+        upsert_null_rows = [{"id": i, "vec": None, "tag": "null"} for i in range(10)]
+        self.upsert(client, collection_name, upsert_null_rows)
+        self.flush(client, collection_name)
+
+        # search should only find 10 rows (ids 10-19)
+        self.search(client, collection_name, vectors_to_search,
+                    search_params={}, anns_field="vec", limit=nb,
+                    consistency_level="Strong",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": 1, "limit": 10, "pk_name": "id"})
+        # query to verify the upserted rows have tag="null"
+        res = self.query(client, collection_name, filter="id < 10",
+                         output_fields=["id", "vec", "tag"],
+                         consistency_level="Strong")[0]
+        for r in res:
+            assert r["tag"] == "null"
+            assert r["vec"] is None
+
+        # step 3: upsert ids 0-9 back with valid vectors (null -> non-null)
+        new_vectors = cf.gen_vectors(10, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        upsert_valid_rows = [{"id": i, "vec": new_vectors[i], "tag": "restored"} for i in range(10)]
+        self.upsert(client, collection_name, upsert_valid_rows)
+        self.flush(client, collection_name)
+
+        # search should find all 20 rows again
+        self.search(client, collection_name, vectors_to_search,
+                    search_params={}, anns_field="vec", limit=nb,
+                    consistency_level="Strong",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": 1, "limit": nb, "pk_name": "id"})
+        # query to verify the restored rows
+        res = self.query(client, collection_name, filter="id < 10",
+                         output_fields=["id", "vec", "tag"],
+                         consistency_level="Strong")[0]
+        for r in res:
+            assert r["tag"] == "restored"
+            assert r["vec"] is not None
+
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_multi_vector_output_null(self):
+        """
+        target: test search and query output with multiple vector fields containing null vectors
+        method: create collection with 2 vector fields (one nullable), insert mixed data,
+                verify search and query output correctly include null vectors
+        expected: output fields correctly return None for null vectors in multi-vector schema
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 128
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vec_required", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("vec_nullable", DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        schema.add_field("tag", DataType.VARCHAR, max_length=64)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("vec_required", index_type="HNSW", metric_type="COSINE")
+        index_params.add_index("vec_nullable", index_type="HNSW", metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        # insert 20 rows: even ids have null vec_nullable, odd ids have valid vec_nullable
+        nb = 20
+        rows = []
+        for i in range(nb):
+            row = {
+                "id": i,
+                "vec_required": cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0],
+                "vec_nullable": None if i % 2 == 0 else cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0],
+                "tag": "null" if i % 2 == 0 else "valid"
+            }
+            rows.append(row)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # search on vec_required with output of both vector fields
+        vectors_to_search = cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        res = self.search(client, collection_name, vectors_to_search,
+                          search_params={}, anns_field="vec_required", limit=nb,
+                          output_fields=["vec_required", "vec_nullable", "tag"])[0]
+        assert len(res[0]) == nb
+        for hit in res[0]:
+            entity = hit.fields if hasattr(hit, 'fields') else hit.entity.fields
+            _id = hit.id if hasattr(hit, 'id') else hit['id']
+            if _id % 2 == 0:
+                assert entity["vec_nullable"] is None
+                assert entity["tag"] == "null"
+            else:
+                assert entity["vec_nullable"] is not None
+                assert entity["tag"] == "valid"
+            # vec_required should always be present
+            assert entity["vec_required"] is not None
+
+        # query output with both vector fields
+        res = self.query(client, collection_name, filter="id < 10",
+                         output_fields=["id", "vec_required", "vec_nullable", "tag"])[0]
+        assert len(res) == 10
+        for r in res:
+            if r["id"] % 2 == 0:
+                assert r["vec_nullable"] is None
+            else:
+                assert r["vec_nullable"] is not None
+            assert r["vec_required"] is not None
+
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_compact_with_null_vector(self):
+        """
+        target: test compaction with nullable vector field
+        method: create collection with nullable vector, insert multiple batches with null vectors,
+                trigger compaction, verify data integrity after compaction
+        expected: compaction completes successfully and all data (including null vectors) is preserved
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 128
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        schema.add_field("tag", DataType.VARCHAR, max_length=64, is_clustering_key=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("vec", index_type="HNSW", metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        # insert multiple small batches to create multiple segments for compaction
+        total = 0
+        null_count = 0
+        valid_count = 0
+        for batch in range(5):
+            rows = []
+            for i in range(200):
+                pk = batch * 200 + i
+                if pk % 3 == 0:
+                    rows.append({"id": pk, "vec": None, "tag": f"batch_{batch}"})
+                    null_count += 1
+                else:
+                    rows.append({"id": pk,
+                                 "vec": cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0],
+                                 "tag": f"batch_{batch}"})
+                    valid_count += 1
+                total += 1
+            self.insert(client, collection_name, rows)
+            self.flush(client, collection_name)
+
+        # verify data before compaction
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == total
+
+        # trigger compaction
+        compact_id = self.compact(client, collection_name, is_clustering=False)[0]
+        start = time.time()
+        while True:
+            time.sleep(1)
+            state = self.get_compaction_state(client, compact_id, is_clustering=False)[0]
+            if state == "Completed":
+                break
+            if time.time() - start > 180:
+                raise Exception("Compaction did not complete within 180s")
+
+        # verify data integrity after compaction
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == total
+
+        # verify null vectors are still null, valid vectors are still valid
+        res = self.query(client, collection_name, filter="id >= 0",
+                         output_fields=["id", "vec"], limit=total)[0]
+        actual_null = sum(1 for r in res if r["vec"] is None)
+        actual_valid = sum(1 for r in res if r["vec"] is not None)
+        assert actual_null == null_count, f"Expected {null_count} null vectors, got {actual_null}"
+        assert actual_valid == valid_count, f"Expected {valid_count} valid vectors, got {actual_valid}"
+
+        # search should still work correctly after compaction
+        vectors_to_search = cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        self.search(client, collection_name, vectors_to_search,
+                    search_params={}, anns_field="vec", limit=default_limit,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": 1, "limit": default_limit, "pk_name": "id"})
+
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_key_type", ["int64", "varchar"])
     def test_milvus_client_collection_max_fields_and_max_vector_fields(self, primary_key_type):
