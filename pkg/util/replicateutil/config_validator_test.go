@@ -833,7 +833,39 @@ func TestReplicateConfigValidator_validateConfigComparison(t *testing.T) {
 		assert.Contains(t, err.Error(), "connection_param.token cannot be changed")
 	})
 
-	t.Run("error - pchannels changed", func(t *testing.T) {
+	t.Run("success - pchannels increased (appended)", func(t *testing.T) {
+		currentConfig := createConfigWithClusters([]*commonpb.MilvusCluster{
+			{
+				ClusterId: "cluster-1",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19530",
+					Token: "test-token",
+				},
+				Pchannels: []string{"channel-1", "channel-2"},
+			},
+		})
+
+		incomingCluster := &commonpb.MilvusCluster{
+			ClusterId: "cluster-1",
+			ConnectionParam: &commonpb.ConnectionParam{
+				Uri:   "localhost:19530",
+				Token: "test-token",
+			},
+			Pchannels: []string{"channel-1", "channel-2", "channel-3"},
+		}
+		incomingConfig := createConfigWithClusters([]*commonpb.MilvusCluster{incomingCluster})
+
+		validator := &ReplicateConfigValidator{
+			incomingConfig: incomingConfig,
+			currentConfig:  currentConfig,
+			clusterMap:     map[string]*commonpb.MilvusCluster{"cluster-1": incomingCluster},
+		}
+		err := validator.validateConfigComparison()
+		assert.NoError(t, err)
+		assert.True(t, validator.IsPChannelIncreasing())
+	})
+
+	t.Run("error - pchannels decreased", func(t *testing.T) {
 		currentConfig := createConfigWithClusters([]*commonpb.MilvusCluster{
 			{
 				ClusterId: "cluster-1",
@@ -852,18 +884,81 @@ func TestReplicateConfigValidator_validateConfigComparison(t *testing.T) {
 					Uri:   "localhost:19530",
 					Token: "test-token",
 				},
-				Pchannels: []string{"channel-1", "channel-3"}, // Different pchannels
+				Pchannels: []string{"channel-1"},
 			},
 		})
 
-		// Test the config comparison validation directly
 		validator := &ReplicateConfigValidator{
 			incomingConfig: incomingConfig,
 			currentConfig:  currentConfig,
 		}
 		err := validator.validateConfigComparison()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "pchannels cannot be changed")
+		assert.Contains(t, err.Error(), "pchannels cannot decrease")
+	})
+
+	t.Run("error - existing pchannels reordered", func(t *testing.T) {
+		currentConfig := createConfigWithClusters([]*commonpb.MilvusCluster{
+			{
+				ClusterId: "cluster-1",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19530",
+					Token: "test-token",
+				},
+				Pchannels: []string{"channel-1", "channel-2"},
+			},
+		})
+
+		incomingConfig := createConfigWithClusters([]*commonpb.MilvusCluster{
+			{
+				ClusterId: "cluster-1",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19530",
+					Token: "test-token",
+				},
+				Pchannels: []string{"channel-2", "channel-1", "channel-3"},
+			},
+		})
+
+		validator := &ReplicateConfigValidator{
+			incomingConfig: incomingConfig,
+			currentConfig:  currentConfig,
+		}
+		err := validator.validateConfigComparison()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "existing pchannels must be preserved")
+	})
+
+	t.Run("error - existing pchannels replaced", func(t *testing.T) {
+		currentConfig := createConfigWithClusters([]*commonpb.MilvusCluster{
+			{
+				ClusterId: "cluster-1",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19530",
+					Token: "test-token",
+				},
+				Pchannels: []string{"channel-1", "channel-2"},
+			},
+		})
+
+		incomingConfig := createConfigWithClusters([]*commonpb.MilvusCluster{
+			{
+				ClusterId: "cluster-1",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri:   "localhost:19530",
+					Token: "test-token",
+				},
+				Pchannels: []string{"channel-1", "channel-3"},
+			},
+		})
+
+		validator := &ReplicateConfigValidator{
+			incomingConfig: incomingConfig,
+			currentConfig:  currentConfig,
+		}
+		err := validator.validateConfigComparison()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "existing pchannels must be preserved")
 	})
 
 	t.Run("error - ConnectionParam URI changed", func(t *testing.T) {
@@ -929,5 +1024,124 @@ func TestReplicateConfigValidator_validateConfigComparison(t *testing.T) {
 		}
 		err := validator.validateConfigComparison()
 		assert.NoError(t, err) // This should pass since it's the same cluster
+	})
+}
+
+func TestReplicateConfigValidator_PChannelIncreasingConstraints(t *testing.T) {
+	makeCluster := func(id, uri string, pchannels []string) *commonpb.MilvusCluster {
+		return &commonpb.MilvusCluster{
+			ClusterId:       id,
+			ConnectionParam: &commonpb.ConnectionParam{Uri: uri, Token: "t"},
+			Pchannels:       pchannels,
+		}
+	}
+
+	t.Run("success - pchannel increase with identical topology and clusters", func(t *testing.T) {
+		currentConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				makeCluster("c1", "localhost:19530", []string{"ch-1"}),
+				makeCluster("c2", "localhost:19531", []string{"ch-1"}),
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "c1", TargetClusterId: "c2"},
+			},
+		}
+		incomingConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				makeCluster("c1", "localhost:19530", []string{"ch-1", "ch-2"}),
+				makeCluster("c2", "localhost:19531", []string{"ch-1", "ch-2"}),
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "c1", TargetClusterId: "c2"},
+			},
+		}
+		validator := NewReplicateConfigValidator(incomingConfig, currentConfig, "c1", []string{"ch-1", "ch-2"})
+		err := validator.Validate()
+		assert.NoError(t, err)
+		assert.True(t, validator.IsPChannelIncreasing())
+	})
+
+	t.Run("error - topology changed during pchannel increase", func(t *testing.T) {
+		currentConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				makeCluster("c1", "localhost:19530", []string{"ch-1"}),
+				makeCluster("c2", "localhost:19531", []string{"ch-1"}),
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "c1", TargetClusterId: "c2"},
+			},
+		}
+		incomingConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				makeCluster("c1", "localhost:19530", []string{"ch-1", "ch-2"}),
+				makeCluster("c2", "localhost:19531", []string{"ch-1", "ch-2"}),
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "c2", TargetClusterId: "c1"}, // flipped
+			},
+		}
+		validator := NewReplicateConfigValidator(incomingConfig, currentConfig, "c1", []string{"ch-1", "ch-2"})
+		err := validator.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "topology must remain identical")
+	})
+
+	t.Run("error - new cluster added during pchannel increase", func(t *testing.T) {
+		currentConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				makeCluster("c1", "localhost:19530", []string{"ch-1"}),
+				makeCluster("c2", "localhost:19531", []string{"ch-1"}),
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "c1", TargetClusterId: "c2"},
+			},
+		}
+		incomingConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				makeCluster("c1", "localhost:19530", []string{"ch-1", "ch-2"}),
+				makeCluster("c2", "localhost:19531", []string{"ch-1", "ch-2"}),
+				makeCluster("c3", "localhost:19532", []string{"ch-1", "ch-2"}),
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "c1", TargetClusterId: "c2"},
+				{SourceClusterId: "c1", TargetClusterId: "c3"},
+			},
+		}
+		validator := NewReplicateConfigValidator(incomingConfig, currentConfig, "c1", []string{"ch-1", "ch-2"})
+		err := validator.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cluster set must remain identical")
+	})
+
+	t.Run("no pchannel increase - IsPChannelIncreasing is false", func(t *testing.T) {
+		config := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				makeCluster("c1", "localhost:19530", []string{"ch-1", "ch-2"}),
+				makeCluster("c2", "localhost:19531", []string{"ch-1", "ch-2"}),
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "c1", TargetClusterId: "c2"},
+			},
+		}
+		validator := NewReplicateConfigValidator(config, config, "c1", []string{"ch-1", "ch-2"})
+		err := validator.Validate()
+		assert.NoError(t, err)
+		assert.False(t, validator.IsPChannelIncreasing())
+	})
+
+	t.Run("no current config - IsPChannelIncreasing is false", func(t *testing.T) {
+		config := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				makeCluster("c1", "localhost:19530", []string{"ch-1"}),
+				makeCluster("c2", "localhost:19531", []string{"ch-1"}),
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "c1", TargetClusterId: "c2"},
+			},
+		}
+		validator := NewReplicateConfigValidator(config, nil, "c1", []string{"ch-1"})
+		err := validator.Validate()
+		assert.NoError(t, err)
+		assert.False(t, validator.IsPChannelIncreasing())
 	})
 }

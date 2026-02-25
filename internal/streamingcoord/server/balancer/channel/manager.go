@@ -637,14 +637,36 @@ func (cm *ChannelManager) getNewIncomingTask(newConfig *replicateutil.ConfigHelp
 	}
 	incomingReplicatingTasks := make([]*streamingpb.ReplicatePChannelMeta, 0, len(incoming.TargetClusters()))
 	for _, targetCluster := range incoming.TargetClusters() {
-		if current != nil && current.TargetCluster(targetCluster.GetClusterId()) != nil {
-			// target already exists, skip it.
-			continue
+		// Determine which pchannels are new and need CDC tasks.
+		// If the target cluster already exists, only create tasks for newly appended pchannels.
+		newPchannels := targetCluster.GetPchannels()
+		skipGetReplicateCheckpoint := false
+		if current != nil {
+			if currentTarget := current.TargetCluster(targetCluster.GetClusterId()); currentTarget != nil {
+				existingCount := len(currentTarget.GetPchannels())
+				if existingCount >= len(newPchannels) {
+					// No new pchannels, skip this target cluster.
+					continue
+				}
+				// Only process newly appended pchannels (validator ensures existing pchannels are preserved at same positions).
+				newPchannels = newPchannels[existingCount:]
+				// For pchannel-increasing tasks, the secondary WAL for new pchannels hasn't received
+				// the AlterReplicateConfig yet, so GetReplicateInfo would fail. Skip it and use
+				// InitializedCheckpoint directly. The secondary filters out duplicates on restart.
+				skipGetReplicateCheckpoint = true
+			}
 		}
-		// TODO: support add new pchannels into existing clusters.
-		for _, pchannel := range targetCluster.GetPchannels() {
+		for _, pchannel := range newPchannels {
 			sourceClusterID := targetCluster.SourceCluster().ClusterId
 			sourcePChannel := targetCluster.MustGetSourceChannel(pchannel)
+			checkpointTimeTick := appendResults[sourcePChannel].TimeTick
+			if skipGetReplicateCheckpoint {
+				// For pchannel-increasing tasks, the CDC scanner uses DeliverFilterTimeTickGT
+				// (strictly greater than). Subtract 1 so the AlterReplicateConfig message itself
+				// (whose TimeTick == appendResults.TimeTick) is included in the scan.
+				// The secondary needs this message on ALL pchannels for the broadcast to complete.
+				checkpointTimeTick--
+			}
 			incomingReplicatingTasks = append(incomingReplicatingTasks, &streamingpb.ReplicatePChannelMeta{
 				SourceChannelName: sourcePChannel,
 				TargetChannelName: pchannel,
@@ -658,8 +680,9 @@ func (cm *ChannelManager) getNewIncomingTask(newConfig *replicateutil.ConfigHelp
 					ClusterId: sourceClusterID,
 					Pchannel:  sourcePChannel,
 					MessageId: appendResults[sourcePChannel].LastConfirmedMessageID.IntoProto(),
-					TimeTick:  appendResults[sourcePChannel].TimeTick,
+					TimeTick:  checkpointTimeTick,
 				},
+				SkipGetReplicateCheckpoint: skipGetReplicateCheckpoint,
 			})
 		}
 	}
