@@ -41,7 +41,7 @@ class TestMilvusClientV2Base(Base):
         res, is_succ = self.init_milvus_client(uri=uri, token=cf.param_info.param_token, active_trace=active_trace, **kwargs)
         if is_succ:
             # self.milvus_client = res
-            log.info(f"server version: {res.get_server_version()}")
+            log.info(f"server version: {res.get_server_version(detail=True)}")
         return res
 
     def init_milvus_client(self, uri, user="", password="", db_name="", token="", timeout=None,
