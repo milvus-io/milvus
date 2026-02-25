@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -70,13 +71,13 @@ func TestGetUpdatedConfigs(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 
 	configs := map[string]string{"key": "value"}
-	handler := getConfigs(func() map[string]string { return configs })
+	handler := getConfigs(func() map[string]string { return maps.Clone(configs) })
 	handler(c)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "key")
 	assert.Contains(t, w.Body.String(), "value")
-	
+
 	configs["key"] = "value2"
 	configs["new_key"] = "new_value"
 	handler(c)
