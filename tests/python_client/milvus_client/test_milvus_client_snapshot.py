@@ -4446,6 +4446,88 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.RBAC)
     @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/47855 "
                                "v2 built-in privilege groups missing snapshot privileges")
+    def test_snapshot_v2_privilege_group_cluster_readonly(self, host, port):
+        """
+        target: verify ClusterReadOnly v2 privilege group grants read snapshot ops
+        method: grant ClusterReadOnly, attempt describe and list
+        expected: describe/list succeed, create/drop/restore denied (currently all denied due to #47855)
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
+
+        user_client, role_name = self._setup_user_with_role(client, host, port)
+
+        # grant ClusterReadOnly
+        self.grant_privilege_v2(client, role_name, "ClusterReadOnly", "*", "*")
+        time.sleep(10)
+
+        # read ops should succeed after #47855 is fixed
+        snapshots, _ = self.list_snapshots(user_client, collection_name=collection_name)
+        assert snapshot_name in snapshots
+
+        info, _ = self.describe_snapshot(user_client, snapshot_name)
+        assert info.name == snapshot_name
+
+        # write ops should still be denied
+        new_snap = cf.gen_unique_str(prefix)
+        self.create_snapshot(user_client, collection_name, new_snap,
+                             check_task=CheckTasks.check_permission_deny)
+        self.drop_snapshot(user_client, snapshot_name,
+                           check_task=CheckTasks.check_permission_deny)
+        restored_name = cf.gen_unique_str(prefix + "_restored")
+        self.restore_snapshot(user_client, snapshot_name, restored_name,
+                              check_task=CheckTasks.check_permission_deny)
+
+        # cleanup
+        self.drop_snapshot(client, snapshot_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/47855 "
+                               "v2 built-in privilege groups missing snapshot privileges")
+    def test_snapshot_v2_privilege_group_cluster_readwrite(self, host, port):
+        """
+        target: verify ClusterReadWrite v2 privilege group grants CRUD snapshot ops
+        method: grant ClusterReadWrite, attempt create/drop/describe/list
+        expected: create/drop/describe/list succeed, restore denied (currently all denied due to #47855)
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(500)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        user_client, role_name = self._setup_user_with_role(client, host, port)
+
+        # grant ClusterReadWrite
+        self.grant_privilege_v2(client, role_name, "ClusterReadWrite", "*", "*")
+        time.sleep(10)
+
+        # create/list/describe/drop should succeed after #47855 is fixed
+        snapshot_name = cf.gen_unique_str(prefix)
+        self.create_snapshot(user_client, collection_name, snapshot_name)
+
+        snapshots, _ = self.list_snapshots(user_client, collection_name=collection_name)
+        assert snapshot_name in snapshots
+
+        info, _ = self.describe_snapshot(user_client, snapshot_name)
+        assert info.name == snapshot_name
+
+        # restore should still be denied (not in ReadWrite group)
+        restored_name = cf.gen_unique_str(prefix + "_restored")
+        self.restore_snapshot(user_client, snapshot_name, restored_name,
+                              check_task=CheckTasks.check_permission_deny)
+
+        # drop should succeed
+        self.drop_snapshot(user_client, snapshot_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/47855 "
+                               "v2 built-in privilege groups missing snapshot privileges")
     def test_snapshot_v2_privilege_group_cluster_admin(self, host, port):
         """
         target: verify ClusterAdmin v2 privilege group grants all snapshot ops
