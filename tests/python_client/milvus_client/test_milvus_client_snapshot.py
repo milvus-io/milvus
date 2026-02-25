@@ -3379,7 +3379,7 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
 
         # 3. Immediately drop the target collection while restore is in progress
         try:
-            self.drop_collection(client, restored_collection_name)
+            self.drop_collection(client, restored_collection_name, timeout=30)
         except Exception as e:
             log.info(f"Drop target collection during restore: {e}")
 
@@ -3407,7 +3407,7 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         # Cleanup
         self.drop_snapshot(client, snapshot_name)
         try:
-            self.drop_collection(client, restored_collection_name)
+            self.drop_collection(client, restored_collection_name, timeout=30)
         except Exception:
             pass
 
@@ -3781,14 +3781,13 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         except Exception:
             pass
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_snapshot_drop_and_restore_race(self):
         """
         target: test race condition between DropSnapshot and RestoreSnapshot
         method: start restore and drop snapshot concurrently from different threads
         expected: either restore succeeds (drop blocked by ref count) or restore fails
                   (drop happened before restore registered ref); system should not hang
-        note: L3 because concurrent restore+drop may exhaust standalone resources
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -3877,13 +3876,22 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
             log.info(f"Restore failed: {restore_result['error']}")
             assert drop_result["success"], "If restore failed, drop should have succeeded"
 
-        # Cleanup
+        # Verify system is in a clean state after race condition:
+        # The restored collection should either not exist or be droppable
+        # within a reasonable timeout. If drop_collection hangs or times out,
+        # it indicates the server is stuck (e.g., broadcaster infinite retry loop).
+        collections = client.list_collections()
+        if restored_collection_name in collections:
+            log.info(f"Restored collection {restored_collection_name} exists, verifying it can be dropped")
+            self.drop_collection(client, restored_collection_name, timeout=30)
+            collections_after = client.list_collections()
+            assert restored_collection_name not in collections_after, \
+                f"Restored collection {restored_collection_name} should be droppable after race condition, " \
+                f"but drop_collection did not remove it. Server may be stuck in infinite retry loop."
+
+        # Cleanup snapshot (idempotent)
         try:
-            client.drop_snapshot(snapshot_name)
-        except Exception:
-            pass
-        try:
-            self.drop_collection(client, restored_collection_name)
+            client.drop_snapshot(snapshot_name, timeout=30)
         except Exception:
             pass
 
