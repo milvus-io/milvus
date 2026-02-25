@@ -1364,6 +1364,24 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 			for _, idx := range dataIndices {
 				dstScalar.GetTimestamptzData().Data = append(dstScalar.GetTimestamptzData().Data, srcScalar.TimestamptzData.Data[idx])
 			}
+		case *schemapb.ScalarField_MolData:
+			if dstScalar.GetMolData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_MolData{
+					MolData: &schemapb.MolArray{Data: make([][]byte, 0, len(dataIndices))},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetMolData().Data = append(dstScalar.GetMolData().Data, srcScalar.MolData.Data[idx])
+			}
+		case *schemapb.ScalarField_MolSmilesData:
+			if dstScalar.GetMolSmilesData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_MolSmilesData{
+					MolSmilesData: &schemapb.MolSmilesArray{Data: make([]string, 0, len(dataIndices))},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetMolSmilesData().Data = append(dstScalar.GetMolSmilesData().Data, srcScalar.MolSmilesData.Data[idx])
+			}
 		}
 	case *schemapb.FieldData_Vectors:
 		dim := srcField.Vectors.Dim
@@ -1856,6 +1874,18 @@ func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, upda
 		case *schemapb.ScalarField_TimestamptzData:
 			baseData := baseScalar.GetTimestamptzData().Data
 			updateData := updateScalar.GetTimestamptzData().Data
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
+			}
+		case *schemapb.ScalarField_MolData:
+			baseData := baseScalar.GetMolData().Data
+			updateData := updateScalar.GetMolData().Data
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
+			}
+		case *schemapb.ScalarField_MolSmilesData:
+			baseData := baseScalar.GetMolSmilesData().Data
+			updateData := updateScalar.GetMolSmilesData().Data
 			for i, baseIdx := range baseIndices {
 				baseData[baseIdx] = updateData[updateIndices[i]]
 			}

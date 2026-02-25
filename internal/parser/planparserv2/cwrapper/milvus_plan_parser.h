@@ -36,7 +36,7 @@ constexpr SchemaHandle kInvalidSchemaHandle = 0;
 //   auto plan = PlanParser::Parse(handle, "field > 10");
 //   PlanParser::UnregisterSchema(handle);
 class PlanParser {
- public:
+public:
     /**
      * @brief Register a schema to the plan parser.
      *
@@ -47,8 +47,7 @@ class PlanParser {
      * @return SchemaHandle A unique handle for the registered schema (> 0).
      * @throws std::runtime_error if registration fails (e.g., invalid protobuf).
      */
-    static SchemaHandle
-    RegisterSchema(const std::vector<uint8_t>& schema_proto);
+    static SchemaHandle RegisterSchema(const std::vector<uint8_t>& schema_proto);
 
     /**
      * @brief Unregister a schema from the plan parser.
@@ -58,8 +57,7 @@ class PlanParser {
      * @param handle The handle returned by RegisterSchema.
      * @return Empty string on success, error message on failure.
      */
-    static std::string
-    UnregisterSchema(SchemaHandle handle);
+    static std::string UnregisterSchema(SchemaHandle handle);
 
     /**
      * @brief Parse an expression string into a serialized PlanNode protobuf (RetrievePlan).
@@ -75,8 +73,7 @@ class PlanParser {
      *   - schema was unregistered
      *   - parsing fails
      */
-    static std::vector<uint8_t>
-    Parse(SchemaHandle handle, const std::string& expr);
+    static std::vector<uint8_t> Parse(SchemaHandle handle, const std::string& expr);
 
     /**
      * @brief Parse an expression string into a serialized SearchPlan PlanNode protobuf.
@@ -94,12 +91,11 @@ class PlanParser {
      *   - vector field not found
      *   - parsing fails
      */
-    static std::vector<uint8_t>
-    ParseSearch(SchemaHandle handle,
-                const std::string& expr,
-                const std::string& vector_field_name,
-                const std::vector<uint8_t>& query_info_proto);
+    static std::vector<uint8_t> ParseSearch(SchemaHandle handle,
+                                            const std::string& expr,
+                                            const std::string& vector_field_name,
+                                            const std::vector<uint8_t>& query_info_proto);
 };
 
-}  // namespace planparserv2
-}  // namespace milvus
+} // namespace planparserv2
+} // namespace milvus
