@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // RegisterDDLCallbacks registers the ddl callbacks.
@@ -57,7 +58,7 @@ func (c *DDLCallbacks) registerSnapshotCallbacks() {
 
 // startBroadcastWithCollectionID starts a broadcast with collection name.
 func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, error) {
-	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID, typeutil.MaxTimestamp)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +76,7 @@ func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionI
 // it only creates the broadcaster with appropriate resource keys (collection + snapshot).
 // Use this when you need a broadcaster before all resources are created (e.g., for index restoration).
 func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error) {
-	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID, typeutil.MaxTimestamp)
 	if err != nil {
 		return nil, fmt.Errorf("collection %d does not exist: %w", collectionID, err)
 	}
@@ -136,7 +137,7 @@ func (s *Server) startBroadcastRestoreSnapshot(
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 
 	// ========== Validate Collection Exists ==========
-	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID, typeutil.MaxTimestamp)
 	if err != nil {
 		return nil, fmt.Errorf("collection %d does not exist: %w", collectionID, err)
 	}

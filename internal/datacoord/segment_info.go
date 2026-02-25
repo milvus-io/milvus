@@ -309,7 +309,10 @@ func (s *SegmentsInfo) SetIsCompacting(segmentID UniqueID, isCompacting bool) {
 	st := fmt.Sprintf("%s", debug.Stack())
 	log.Info("set compacting", zap.Int64("segmentID", segmentID), zap.Bool("isCompacting", isCompacting), zap.Any("stacktrace", st))
 	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = segment.ShadowClone(SetIsCompacting(isCompacting))
+		newSegment := segment.ShadowClone(SetIsCompacting(isCompacting))
+		s.segments[segmentID] = newSegment
+		s.secondaryIndexes.coll2Segments[segment.GetCollectionID()][segmentID] = newSegment
+		s.secondaryIndexes.channel2Segments[segment.GetInsertChannel()][segmentID] = newSegment
 	}
 }
 
