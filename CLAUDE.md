@@ -37,7 +37,10 @@ scripts/standalone_embed.sh    # embedded standalone (no external deps)
 - Import order: standard → third-party → github.com/milvus-io (enforced by gci)
 - Config params: paramtable (`pkg/v2/util/paramtable`), config in `configs/milvus.yaml`
 
-## Git Commits
+## PR and Commit Conventions
+
+PR title format: `{type}: {description}`. Valid types: `feat:`, `fix:`, `enhance:`, `test:`, `doc:`, `auto:`, `build(deps):`.
+PR body must be non-empty. Link related issues with `related: #xxx`.
 
 DCO check is required. Always use `-s` so the developer's Signed-off-by is appended last:
 
