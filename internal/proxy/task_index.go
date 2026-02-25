@@ -115,6 +115,7 @@ type createIndexTask struct {
 	functionSchema                   *schemapb.FunctionSchema
 	fieldSchema                      *schemapb.FieldSchema
 	userAutoIndexMetricTypeSpecified bool
+	collectionProperties             []*commonpb.KeyValuePair
 }
 
 func (cit *createIndexTask) TraceCtx() context.Context {
@@ -313,9 +314,16 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
 
 			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) {
-				// override float vector index params by autoindex
+				var autoIndexParams map[string]string
+				if common.IsBigTopKOptimizationEnabled(cit.collectionProperties...) {
+					// Use BigTopK-optimized index params
+					autoIndexParams = Params.AutoIndexConfig.BigTopKIndexParams.GetAsJSONMap()
+				} else {
+					// Use regular autoindex float vector index params
+					autoIndexParams = Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
+				}
 				// filter incompatible refine_type for fp16/bf16 vectors
-				autoIndexParams := adjustAutoIndexParamsByDataType(Params.AutoIndexConfig.IndexParams.GetAsJSONMap(), cit.fieldSchema.DataType)
+				autoIndexParams = adjustAutoIndexParamsByDataType(autoIndexParams, cit.fieldSchema.DataType)
 				for k, v := range autoIndexParams {
 					indexParamsMap[k] = v
 				}
@@ -396,13 +404,19 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			var config map[string]string
 			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsDenseFloatVectorType(cit.fieldSchema.ElementType)) {
-				// override float vector index params by autoindex
+				if common.IsBigTopKOptimizationEnabled(cit.collectionProperties...) {
+					// Use BigTopK-optimized index params
+					config = Params.AutoIndexConfig.BigTopKIndexParams.GetAsJSONMap()
+				} else {
+					// Use regular autoindex float vector index params
+					config = Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
+				}
 				// filter incompatible refine_type for fp16/bf16 vectors
 				dataType := cit.fieldSchema.DataType
 				if typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) {
 					dataType = cit.fieldSchema.ElementType
 				}
-				config = adjustAutoIndexParamsByDataType(Params.AutoIndexConfig.IndexParams.GetAsJSONMap(), dataType)
+				config = adjustAutoIndexParamsByDataType(config, dataType)
 			} else if typeutil.IsSparseFloatVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsSparseFloatVectorType(cit.fieldSchema.ElementType)) {
 				// override sparse float vector index params by autoindex
@@ -621,6 +635,12 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	cit.collectionID = collID
+
+	collInfo, err := globalMetaCache.GetCollectionInfo(ctx, cit.req.GetDbName(), cit.req.GetCollectionName(), cit.collectionID)
+	if err != nil {
+		return err
+	}
+	cit.collectionProperties = collInfo.properties
 
 	if err = validateIndexName(cit.req.GetIndexName()); err != nil {
 		return err
