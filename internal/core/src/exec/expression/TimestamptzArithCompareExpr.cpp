@@ -2,12 +2,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <memory>
 #include <variant>
 
 #include "BinaryArithOpEvalRangeExpr.h"
-#include "absl/time/civil_time.h"
-#include "absl/time/time.h"
 #include "bitset/bitset.h"
 #include "common/EasyAssert.h"
 #include "common/Types.h"
@@ -103,43 +102,44 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             TargetBitmapView valid_res,
             T compare_value,
             proto::plan::Interval interval) {
-        absl::TimeZone utc = absl::UTCTimeZone();
-        absl::Time compare_t = absl::FromUnixMicros(compare_value);
+        const int64_t compare_us = compare_value;
         for (int i = 0; i < size; ++i) {
             auto offset = (offsets) ? offsets[i] : i;
             const int64_t current_ts_us = data[i];
             const int op_sign =
                 (arith_op == proto::plan::ArithOpType::Add) ? 1 : -1;
-            absl::Time t = absl::FromUnixMicros(current_ts_us);
-            // CivilSecond can handle calendar time for us
-            absl::CivilSecond cs = absl::ToCivilSecond(t, utc);
-            absl::CivilSecond new_cs(
-                cs.year() + (interval.years() * op_sign),
-                cs.month() + (interval.months() * op_sign),
-                cs.day() + (interval.days() * op_sign),
-                cs.hour() + (interval.hours() * op_sign),
-                cs.minute() + (interval.minutes() * op_sign),
-                cs.second() + (interval.seconds() * op_sign));
-            absl::Time final_time = absl::FromCivil(new_cs, utc);
+            // Convert microseconds to broken-down UTC time
+            std::time_t epoch_sec = current_ts_us / 1000000;
+            struct std::tm tm_buf;
+            ::gmtime_r(&epoch_sec, &tm_buf);
+            // Apply interval with normalization via timegm
+            tm_buf.tm_year += static_cast<int>(interval.years() * op_sign);
+            tm_buf.tm_mon += static_cast<int>(interval.months() * op_sign);
+            tm_buf.tm_mday += static_cast<int>(interval.days() * op_sign);
+            tm_buf.tm_hour += static_cast<int>(interval.hours() * op_sign);
+            tm_buf.tm_min += static_cast<int>(interval.minutes() * op_sign);
+            tm_buf.tm_sec += static_cast<int>(interval.seconds() * op_sign);
+            std::time_t new_epoch_sec = ::timegm(&tm_buf);
+            int64_t final_us = static_cast<int64_t>(new_epoch_sec) * 1000000;
             bool match = false;
             switch (compare_op) {
                 case proto::plan::OpType::Equal:
-                    match = (final_time == compare_t);
+                    match = (final_us == compare_us);
                     break;
                 case proto::plan::OpType::NotEqual:
-                    match = (final_time != compare_t);
+                    match = (final_us != compare_us);
                     break;
                 case proto::plan::OpType::GreaterThan:
-                    match = (final_time > compare_t);
+                    match = (final_us > compare_us);
                     break;
                 case proto::plan::OpType::GreaterEqual:
-                    match = (final_time >= compare_t);
+                    match = (final_us >= compare_us);
                     break;
                 case proto::plan::OpType::LessThan:
-                    match = (final_time < compare_t);
+                    match = (final_us < compare_us);
                     break;
                 case proto::plan::OpType::LessEqual:
-                    match = (final_time <= compare_t);
+                    match = (final_us <= compare_us);
                     break;
                 default:  // Should not happen
                     ThrowInfo(OpTypeInvalid,

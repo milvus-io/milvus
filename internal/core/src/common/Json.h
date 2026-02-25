@@ -34,10 +34,7 @@
 #include "simdjson/dom/element.h"
 #include "simdjson/error.h"
 #include "simdjson/padded_string.h"
-#include "rapidjson/document.h"
-#include "rapidjson/error/en.h"
-#include "rapidjson/writer.h"
-#include "rapidjson/stringbuffer.h"
+#include "nlohmann/json.hpp"
 
 #define SIMDJSON_CHECK_ERROR(result)               \
     do {                                           \
@@ -52,34 +49,21 @@ bool
 isDocEmpty(simdjson::ondemand::document document);
 
 // function to extract specific keys and convert them to json
-// rapidjson is suitable for extract and reconstruct serialization
-// instead of simdjson which not suitable for serialization
 inline std::string
 ExtractSubJson(const std::string& json, const std::vector<std::string>& keys) {
-    rapidjson::Document doc;
-    doc.Parse(json.c_str());
-    if (doc.HasParseError()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "json parse failed, error:{}",
-                  rapidjson::GetParseError_En(doc.GetParseError()));
+    auto doc = nlohmann::json::parse(json, nullptr, false);
+    if (doc.is_discarded()) {
+        ThrowInfo(ErrorCode::UnexpectedError, "json parse failed");
     }
 
-    rapidjson::Document result_doc;
-    result_doc.SetObject();
-    rapidjson::Document::AllocatorType& allocator = result_doc.GetAllocator();
-
+    nlohmann::json result = nlohmann::json::object();
     for (const auto& key : keys) {
-        if (doc.HasMember(key.c_str())) {
-            result_doc.AddMember(rapidjson::Value(key.c_str(), allocator),
-                                 doc[key.c_str()],
-                                 allocator);
+        if (doc.contains(key)) {
+            result[key] = doc[key];
         }
     }
 
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-    result_doc.Accept(writer);
-    return buffer.GetString();
+    return result.dump();
 }
 
 using document = simdjson::ondemand::document;
