@@ -9,8 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "common/ChunkWriter.h"
-
 #include <cstdint>
 #include <memory>
 #include <tuple>
@@ -26,6 +24,8 @@
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/ChunkWriter.h"
+#include "common/VectorTrait.h"
 #include "common/Types.h"
 #include "glog/logging.h"
 #include "knowhere/operands.h"
@@ -632,109 +632,102 @@ make_chunk(const FieldMeta& field_meta,
     bool nullable = field_meta.is_nullable();
     switch (field_meta.get_data_type()) {
         case milvus::DataType::BOOL:
-            return std::make_unique<FixedWidthChunk>(row_nums,
-                                                     dim,
-                                                     data,
-                                                     size,
-                                                     sizeof(bool),
-                                                     nullable,
-                                                     chunk_mmap_guard);
+            return std::make_unique<FixedWidthChunk<bool>>(
+                row_nums, data, size, sizeof(bool), nullable, chunk_mmap_guard);
         case milvus::DataType::INT8:
-            return std::make_unique<FixedWidthChunk>(row_nums,
-                                                     dim,
-                                                     data,
-                                                     size,
-                                                     sizeof(int8_t),
-                                                     nullable,
-                                                     chunk_mmap_guard);
+            return std::make_unique<FixedWidthChunk<int8_t>>(row_nums,
+                                                             data,
+                                                             size,
+                                                             sizeof(int8_t),
+                                                             nullable,
+                                                             chunk_mmap_guard);
         case milvus::DataType::INT16:
-            return std::make_unique<FixedWidthChunk>(row_nums,
-                                                     dim,
-                                                     data,
-                                                     size,
-                                                     sizeof(int16_t),
-                                                     nullable,
-                                                     chunk_mmap_guard);
+            return std::make_unique<FixedWidthChunk<int16_t>>(row_nums,
+                                                              data,
+                                                              size,
+                                                              sizeof(int16_t),
+                                                              nullable,
+                                                              chunk_mmap_guard);
         case milvus::DataType::INT32:
-            return std::make_unique<FixedWidthChunk>(row_nums,
-                                                     dim,
-                                                     data,
-                                                     size,
-                                                     sizeof(int32_t),
-                                                     nullable,
-                                                     chunk_mmap_guard);
+            return std::make_unique<FixedWidthChunk<int32_t>>(row_nums,
+                                                              data,
+                                                              size,
+                                                              sizeof(int32_t),
+                                                              nullable,
+                                                              chunk_mmap_guard);
         case milvus::DataType::INT64:
-            return std::make_unique<FixedWidthChunk>(row_nums,
-                                                     dim,
-                                                     data,
-                                                     size,
-                                                     sizeof(int64_t),
-                                                     nullable,
-                                                     chunk_mmap_guard);
+            return std::make_unique<FixedWidthChunk<int64_t>>(row_nums,
+                                                              data,
+                                                              size,
+                                                              sizeof(int64_t),
+                                                              nullable,
+                                                              chunk_mmap_guard);
         case milvus::DataType::FLOAT:
-            return std::make_unique<FixedWidthChunk>(row_nums,
-                                                     dim,
-                                                     data,
-                                                     size,
-                                                     sizeof(float),
-                                                     nullable,
-                                                     chunk_mmap_guard);
+            return std::make_unique<FixedWidthChunk<float>>(row_nums,
+                                                            data,
+                                                            size,
+                                                            sizeof(float),
+                                                            nullable,
+                                                            chunk_mmap_guard);
         case milvus::DataType::DOUBLE:
-            return std::make_unique<FixedWidthChunk>(row_nums,
-                                                     dim,
-                                                     data,
-                                                     size,
-                                                     sizeof(double),
-                                                     nullable,
-                                                     chunk_mmap_guard);
+            return std::make_unique<FixedWidthChunk<double>>(row_nums,
+                                                             data,
+                                                             size,
+                                                             sizeof(double),
+                                                             nullable,
+                                                             chunk_mmap_guard);
         case milvus::DataType::TIMESTAMPTZ:
-            return std::make_unique<FixedWidthChunk>(row_nums,
-                                                     dim,
-                                                     data,
-                                                     size,
-                                                     sizeof(int64_t),
-                                                     nullable,
-                                                     chunk_mmap_guard);
+            return std::make_unique<FixedWidthChunk<int64_t>>(row_nums,
+                                                              data,
+                                                              size,
+                                                              sizeof(int64_t),
+                                                              nullable,
+                                                              chunk_mmap_guard);
         case milvus::DataType::VECTOR_FLOAT:
-            return std::make_unique<FixedWidthChunk>(row_nums,
-                                                     dim,
-                                                     data,
-                                                     size,
-                                                     sizeof(knowhere::fp32),
-                                                     nullable,
-                                                     chunk_mmap_guard);
+            return std::make_unique<FixedWidthChunk<milvus::FloatVector>>(
+                row_nums,
+                dim,
+                data,
+                size,
+                sizeof(knowhere::fp32),
+                nullable,
+                chunk_mmap_guard);
         case milvus::DataType::VECTOR_BINARY:
-            return std::make_unique<FixedWidthChunk>(row_nums,
-                                                     dim / 8,
-                                                     data,
-                                                     size,
-                                                     sizeof(knowhere::bin1),
-                                                     nullable,
-                                                     chunk_mmap_guard);
+            return std::make_unique<FixedWidthChunk<milvus::BinaryVector>>(
+                row_nums,
+                dim / 8,
+                data,
+                size,
+                sizeof(knowhere::bin1),
+                nullable,
+                chunk_mmap_guard);
         case milvus::DataType::VECTOR_FLOAT16:
-            return std::make_unique<FixedWidthChunk>(row_nums,
-                                                     dim,
-                                                     data,
-                                                     size,
-                                                     sizeof(knowhere::fp16),
-                                                     nullable,
-                                                     chunk_mmap_guard);
+            return std::make_unique<FixedWidthChunk<milvus::Float16Vector>>(
+                row_nums,
+                dim,
+                data,
+                size,
+                sizeof(knowhere::fp16),
+                nullable,
+                chunk_mmap_guard);
         case milvus::DataType::VECTOR_BFLOAT16:
-            return std::make_unique<FixedWidthChunk>(row_nums,
-                                                     dim,
-                                                     data,
-                                                     size,
-                                                     sizeof(knowhere::bf16),
-                                                     nullable,
-                                                     chunk_mmap_guard);
+            return std::make_unique<FixedWidthChunk<milvus::BFloat16Vector>>(
+                row_nums,
+                dim,
+                data,
+                size,
+                sizeof(knowhere::bf16),
+                nullable,
+                chunk_mmap_guard);
         case milvus::DataType::VECTOR_INT8:
-            return std::make_unique<FixedWidthChunk>(row_nums,
-                                                     dim,
-                                                     data,
-                                                     size,
-                                                     sizeof(knowhere::int8),
-                                                     nullable,
-                                                     chunk_mmap_guard);
+            return std::make_unique<FixedWidthChunk<milvus::Int8Vector>>(
+                row_nums,
+                dim,
+                data,
+                size,
+                sizeof(knowhere::int8),
+                nullable,
+                chunk_mmap_guard);
         case milvus::DataType::VARCHAR:
         case milvus::DataType::STRING:
         case milvus::DataType::TEXT:

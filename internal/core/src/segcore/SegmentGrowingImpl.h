@@ -51,7 +51,6 @@
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
-#include "common/Span.h"
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
@@ -584,45 +583,23 @@ class SegmentGrowingImpl : public SegmentGrowing {
     int64_t
     num_chunk(FieldId field_id) const override;
 
-    PinWrapper<SpanBase>
-    chunk_data_impl(milvus::OpContext* op_ctx,
+    PinWrapper<AnyDataView>
+    chunk_view_impl(milvus::OpContext* op_ctx,
                     FieldId field_id,
                     int64_t chunk_id) const override;
 
-    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    chunk_string_view_impl(
-        milvus::OpContext* op_ctx,
-        FieldId field_id,
-        int64_t chunk_id,
-        std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
+    PinWrapper<AnyDataView>
+    chunk_view_impl(milvus::OpContext* op_ctx,
+                    FieldId field_id,
+                    int64_t chunk_id,
+                    int64_t start_offset,
+                    int64_t length) const override;
 
-    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-    chunk_array_view_impl(
-        milvus::OpContext* op_ctx,
-        FieldId field_id,
-        int64_t chunk_id,
-        std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
-
-    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
-    chunk_vector_array_view_impl(
-        milvus::OpContext* op_ctx,
-        FieldId field_id,
-        int64_t chunk_id,
-        std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
-
-    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    chunk_string_views_by_offsets(
-        milvus::OpContext* op_ctx,
-        FieldId field_id,
-        int64_t chunk_id,
-        const FixedVector<int32_t>& offsets) const override;
-
-    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-    chunk_array_views_by_offsets(
-        milvus::OpContext* op_ctx,
-        FieldId field_id,
-        int64_t chunk_id,
-        const FixedVector<int32_t>& offsets) const override;
+    PinWrapper<AnyDataView>
+    chunk_view_impl(milvus::OpContext* op_ctx,
+                    FieldId field_id,
+                    int64_t chunk_id,
+                    const FixedVector<int32_t>& offsets) const override;
 
     void
     check_search(const query::Plan* plan) const override {

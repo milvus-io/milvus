@@ -48,7 +48,6 @@
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
-#include "common/Span.h"
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
@@ -375,45 +374,23 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
  protected:
     // blob and row_count
-    PinWrapper<SpanBase>
-    chunk_data_impl(milvus::OpContext* op_ctx,
+    PinWrapper<AnyDataView>
+    chunk_view_impl(milvus::OpContext* op_ctx,
                     FieldId field_id,
                     int64_t chunk_id) const override;
 
-    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    chunk_string_view_impl(
-        milvus::OpContext* op_ctx,
-        FieldId field_id,
-        int64_t chunk_id,
-        std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
+    PinWrapper<AnyDataView>
+    chunk_view_impl(milvus::OpContext* op_ctx,
+                    FieldId field_id,
+                    int64_t chunk_id,
+                    int64_t start_offset,
+                    int64_t length) const override;
 
-    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-    chunk_array_view_impl(
-        milvus::OpContext* op_ctx,
-        FieldId field_id,
-        int64_t chunk_id,
-        std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
-
-    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
-    chunk_vector_array_view_impl(
-        milvus::OpContext* op_ctx,
-        FieldId field_id,
-        int64_t chunk_id,
-        std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
-
-    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    chunk_string_views_by_offsets(
-        milvus::OpContext* op_ctx,
-        FieldId field_id,
-        int64_t chunk_id,
-        const FixedVector<int32_t>& offsets) const override;
-
-    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-    chunk_array_views_by_offsets(
-        milvus::OpContext* op_ctx,
-        FieldId field_id,
-        int64_t chunk_id,
-        const FixedVector<int32_t>& offsets) const override;
+    PinWrapper<AnyDataView>
+    chunk_view_impl(milvus::OpContext* op_ctx,
+                    FieldId field_id,
+                    int64_t chunk_id,
+                    const FixedVector<int32_t>& offsets) const override;
 
     // Calculate: output[i] = Vec[seg_offset[i]],
     // where Vec is determined from field_offset
@@ -707,8 +684,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                 int in_chunk_offset) -> PKViewType {
             auto& pw = all_chunk_pins[chunk_id];
             if constexpr (std::is_same_v<PK, int64_t>) {
-                auto src =
-                    reinterpret_cast<const int64_t*>(pw.get()->RawData());
+                auto src = reinterpret_cast<const int64_t*>(pw.get()->Data());
                 return src[in_chunk_offset];
             } else {
                 auto string_chunk = static_cast<StringChunk*>(pw.get());
@@ -816,8 +792,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                 int in_chunk_offset) -> PKViewType {
             auto pw = all_chunk_pins[chunk_id];
             if constexpr (std::is_same_v<PK, int64_t>) {
-                auto src =
-                    reinterpret_cast<const int64_t*>(pw.get()->RawData());
+                auto src = reinterpret_cast<const int64_t*>(pw.get()->Data());
                 return src[in_chunk_offset];
             } else {
                 auto string_chunk = static_cast<StringChunk*>(pw.get());

@@ -40,7 +40,6 @@
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/ScopedTimer.h"
-#include "common/Span.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/type_c.h"
@@ -169,13 +168,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex<proto::plan::Array>(
                         context);
                 }
                 case DataType::VARCHAR: {
-                    if (segment_->type() == SegmentType::Growing) {
-                        return ExecArrayEqualForIndex<std::string>(
-                            context, expr_->op_type_ == proto::plan::NotEqual);
-                    } else {
-                        return ExecArrayEqualForIndex<std::string_view>(
-                            context, expr_->op_type_ == proto::plan::NotEqual);
-                    }
+                    return ExecArrayEqualForIndex<std::string_view>(
+                        context, expr_->op_type_ == proto::plan::NotEqual);
                 }
                 default:
                     ThrowInfo(DataTypeInvalid,
@@ -237,14 +231,7 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::VARCHAR: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                result = ExecRangeVisitorImpl<std::string>(context);
-            } else {
-                result = ExecRangeVisitorImpl<std::string_view>(context);
-            }
+            result = ExecRangeVisitorImpl<std::string_view>(context);
             break;
         }
         case DataType::JSON: {
@@ -571,14 +558,13 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
     };
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size =
-            ProcessDataByOffsets<milvus::ArrayView>(execute_sub_batch,
-                                                    std::nullptr_t{},
-                                                    input,
-                                                    res,
-                                                    valid_res,
-                                                    val,
-                                                    index);
+        processed_size = ProcessDataByOffsets<ArrayView>(execute_sub_batch,
+                                                         std::nullptr_t{},
+                                                         input,
+                                                         res,
+                                                         valid_res,
+                                                         val,
+                                                         index);
     } else {
         processed_size = ProcessDataChunks<milvus::ArrayView>(
             execute_sub_batch, std::nullptr_t{}, res, valid_res, val, index);
@@ -612,86 +598,88 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
     }
 
     // cache the result to suit the framework.
-    auto batch_res = ProcessIndexChunks<IndexInnerType>([this, &val, reverse](
-                                                            Index* _) {
-        boost::container::vector<IndexInnerType> elems;
-        for (auto const& element : val.array()) {
-            auto e = GetValueFromProto<IndexInnerType>(element);
-            if (std::find(elems.begin(), elems.end(), e) == elems.end()) {
-                elems.push_back(e);
+    auto batch_res =
+        ProcessIndexChunks<IndexInnerType>([this, &val, reverse](Index* _) {
+            boost::container::vector<IndexInnerType> elems;
+            for (auto const& element : val.array()) {
+                auto e = GetValueFromProto<IndexInnerType>(element);
+                if (std::find(elems.begin(), elems.end(), e) == elems.end()) {
+                    elems.push_back(e);
+                }
             }
-        }
 
-        // filtering by index, get candidates.
-        std::function<bool(milvus::proto::plan::Array& /*val*/,
-                           int64_t /*offset*/)>
-            is_same;
+            // filtering by index, get candidates.
+            std::function<bool(milvus::proto::plan::Array& /*val*/,
+                               int64_t /*offset*/)>
+                is_same;
 
-        if (segment_->is_chunked()) {
-            is_same = [this, reverse](milvus::proto::plan::Array& val,
-                                      int64_t offset) -> bool {
-                auto [chunk_idx, chunk_offset] =
-                    segment_->get_chunk_by_offset(field_id_, offset);
-                auto pw = segment_->template chunk_view<milvus::ArrayView>(
-                    op_ctx_, field_id_, chunk_idx);
-                auto chunk = pw.get();
-                return chunk.first[chunk_offset].is_same_array(val) ^ reverse;
-            };
-        } else {
-            auto size_per_chunk = segment_->size_per_chunk();
-            is_same = [this, size_per_chunk, reverse](
-                          milvus::proto::plan::Array& val,
-                          int64_t offset) -> bool {
-                auto chunk_idx = offset / size_per_chunk;
-                auto chunk_offset = offset % size_per_chunk;
-                auto pw = segment_->template chunk_data<milvus::ArrayView>(
-                    op_ctx_, field_id_, chunk_idx);
-                auto chunk = pw.get();
-                auto array_view = chunk.data() + chunk_offset;
-                return array_view->is_same_array(val) ^ reverse;
-            };
-        }
-
-        // collect all candidates.
-        std::unordered_set<size_t> candidates;
-        std::unordered_set<size_t> tmp_candidates;
-        auto first_callback = [&candidates](size_t offset) -> void {
-            candidates.insert(offset);
-        };
-        auto callback = [&candidates, &tmp_candidates](size_t offset) -> void {
-            if (candidates.find(offset) != candidates.end()) {
-                tmp_candidates.insert(offset);
-            }
-        };
-        auto execute_sub_batch =
-            [](Index* index_ptr,
-               const IndexInnerType& val,
-               const std::function<void(size_t /* offset */)>& callback) {
-                index_ptr->InApplyCallback(1, &val, callback);
-            };
-
-        // run in-filter.
-        for (size_t idx = 0; idx < elems.size(); idx++) {
-            if (idx == 0) {
-                ProcessIndexChunksV2<IndexInnerType>(
-                    execute_sub_batch, elems[idx], first_callback);
+            if (segment_->is_chunked()) {
+                is_same = [this, reverse](milvus::proto::plan::Array& val,
+                                          int64_t offset) -> bool {
+                    auto [chunk_idx, chunk_offset] =
+                        segment_->get_chunk_by_offset(field_id_, offset);
+                    auto pw = segment_->template chunk_view<ArrayView>(
+                        op_ctx_, field_id_, chunk_idx);
+                    auto data_view = pw.get();
+                    return data_view->Data()[chunk_offset].is_same_array(val) ^
+                           reverse;
+                };
             } else {
-                ProcessIndexChunksV2<IndexInnerType>(
-                    execute_sub_batch, elems[idx], callback);
-                candidates = std::move(tmp_candidates);
+                auto size_per_chunk = segment_->size_per_chunk();
+                is_same = [this, size_per_chunk, reverse](
+                              milvus::proto::plan::Array& val,
+                              int64_t offset) -> bool {
+                    auto chunk_idx = offset / size_per_chunk;
+                    auto chunk_offset = offset % size_per_chunk;
+                    auto pw = segment_->template chunk_view<ArrayView>(
+                        op_ctx_, field_id_, chunk_idx);
+                    auto data_view = pw.get();
+                    auto array_view = data_view->Data() + chunk_offset;
+                    return array_view->is_same_array(val) ^ reverse;
+                };
             }
-            // the size of candidates is small enough.
-            if (candidates.size() * 100 < active_count_) {
-                break;
+
+            // collect all candidates.
+            std::unordered_set<size_t> candidates;
+            std::unordered_set<size_t> tmp_candidates;
+            auto first_callback = [&candidates](size_t offset) -> void {
+                candidates.insert(offset);
+            };
+            auto callback = [&candidates,
+                             &tmp_candidates](size_t offset) -> void {
+                if (candidates.find(offset) != candidates.end()) {
+                    tmp_candidates.insert(offset);
+                }
+            };
+            auto execute_sub_batch =
+                [](Index* index_ptr,
+                   const IndexInnerType& val,
+                   const std::function<void(size_t /* offset */)>& callback) {
+                    index_ptr->InApplyCallback(1, &val, callback);
+                };
+
+            // run in-filter.
+            for (size_t idx = 0; idx < elems.size(); idx++) {
+                if (idx == 0) {
+                    ProcessIndexChunksV2<IndexInnerType>(
+                        execute_sub_batch, elems[idx], first_callback);
+                } else {
+                    ProcessIndexChunksV2<IndexInnerType>(
+                        execute_sub_batch, elems[idx], callback);
+                    candidates = std::move(tmp_candidates);
+                }
+                // the size of candidates is small enough.
+                if (candidates.size() * 100 < active_count_) {
+                    break;
+                }
             }
-        }
-        TargetBitmap res(active_count_);
-        // run post-filter. The filter will only be executed once in the framework.
-        for (const auto& candidate : candidates) {
-            res[candidate] = is_same(val, candidate);
-        }
-        return res;
-    });
+            TargetBitmap res(active_count_);
+            // run post-filter. The filter will only be executed once in the framework.
+            for (const auto& candidate : candidates) {
+                res[candidate] = is_same(val, candidate);
+            }
+            return res;
+        });
     AssertInfo(batch_res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",

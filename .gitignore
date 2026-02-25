@@ -11,6 +11,7 @@
 **/cmake_build/*
 **/CMakeFiles/*
 **/.cmake/*
+**/.claude/*
 CMakeCache.txt
 .cache
 coverage_report/
@@ -122,5 +123,6 @@ WARP.md
 # Gocache
 **/.gocache/
 claude.md
+CLAUDE.md
 docs/plans/
 

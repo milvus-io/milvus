@@ -44,7 +44,7 @@
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
-#include "common/Span.h"
+#include "common/ChunkDataView.h"
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
@@ -273,91 +273,46 @@ class SegmentInternalInterface : public SegmentInterface {
         // do nothing
     }
 
+    // Basic version - get entire chunk
     template <typename T>
-    PinWrapper<Span<T>>
-    chunk_data(milvus::OpContext* op_ctx,
+    PinWrapper<std::shared_ptr<ChunkDataView<T>>>
+    chunk_view(milvus::OpContext* op_ctx,
                FieldId field_id,
                int64_t chunk_id) const {
-        return chunk_data_impl(op_ctx, field_id, chunk_id)
-            .transform<Span<T>>([](SpanBase&& span_base) {
-                return static_cast<Span<T>>(span_base);
-            });
+        return chunk_view_impl(op_ctx, field_id, chunk_id)
+            .transform<std::shared_ptr<ChunkDataView<T>>>(
+                [](AnyDataView&& any_data_view) {
+                    return any_data_view.as<T>();
+                });
     }
 
-    template <typename ViewType>
-    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
+    // With offset/length filter - get a contiguous sub-range of chunk
+    template <typename T>
+    PinWrapper<std::shared_ptr<ChunkDataView<T>>>
     chunk_view(milvus::OpContext* op_ctx,
                FieldId field_id,
                int64_t chunk_id,
-               std::optional<std::pair<int64_t, int64_t>> offset_len =
-                   std::nullopt) const {
-        if constexpr (std::is_same_v<ViewType, std::string_view>) {
-            return chunk_string_view_impl(
-                op_ctx, field_id, chunk_id, offset_len);
-        } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
-            return chunk_array_view_impl(
-                op_ctx, field_id, chunk_id, offset_len);
-        } else if constexpr (std::is_same_v<ViewType, VectorArrayView>) {
-            return chunk_vector_array_view_impl(
-                op_ctx, field_id, chunk_id, offset_len);
-        } else if constexpr (std::is_same_v<ViewType, Json>) {
-            auto pw =
-                chunk_string_view_impl(op_ctx, field_id, chunk_id, offset_len);
-            auto [string_views, valid_data] = pw.get();
-            std::vector<Json> res;
-            res.reserve(string_views.size());
-            for (const auto& str_view : string_views) {
-                res.emplace_back(Json(str_view));
-            }
-            return PinWrapper<
-                std::pair<std::vector<ViewType>, FixedVector<bool>>>(
-                pw, {std::move(res), std::move(valid_data)});
-        }
+               int64_t start_offset,
+               int64_t length) const {
+        return chunk_view_impl(op_ctx, field_id, chunk_id, start_offset, length)
+            .transform<std::shared_ptr<ChunkDataView<T>>>(
+                [](AnyDataView&& any_data_view) {
+                    return any_data_view.as<T>();
+                });
     }
 
-    template <typename ViewType>
-    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
-    get_batch_views(milvus::OpContext* op_ctx,
-                    FieldId field_id,
-                    int64_t chunk_id,
-                    int64_t start_offset,
-                    int64_t length) const {
-        if (this->type() == SegmentType::Growing) {
-            ThrowInfo(ErrorCode::Unsupported,
-                      "get chunk views not supported for growing segment");
-        }
-        return chunk_view<ViewType>(
-            op_ctx, field_id, chunk_id, std::make_pair(start_offset, length));
-    }
-
-    template <typename ViewType>
-    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
-    get_views_by_offsets(milvus::OpContext* op_ctx,
-                         FieldId field_id,
-                         int64_t chunk_id,
-                         const FixedVector<int32_t>& offsets) const {
-        if (this->type() == SegmentType::Growing) {
-            ThrowInfo(ErrorCode::Unsupported,
-                      "get chunk views not supported for growing segment");
-        }
-        if constexpr (std::is_same_v<ViewType, std::string_view>) {
-            return chunk_string_views_by_offsets(
-                op_ctx, field_id, chunk_id, offsets);
-        } else if constexpr (std::is_same_v<ViewType, Json>) {
-            auto pw = chunk_string_views_by_offsets(
-                op_ctx, field_id, chunk_id, offsets);
-            std::vector<ViewType> res;
-            res.reserve(pw.get().first.size());
-            for (const auto& view : pw.get().first) {
-                res.emplace_back(view);
-            }
-            return PinWrapper<
-                std::pair<std::vector<ViewType>, FixedVector<bool>>>(
-                {std::move(res), pw.get().second});
-        } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
-            return chunk_array_views_by_offsets(
-                op_ctx, field_id, chunk_id, offsets);
-        }
+    // With offsets filter - get specific positions from chunk
+    template <typename T>
+    PinWrapper<std::shared_ptr<ChunkDataView<T>>>
+    chunk_view(milvus::OpContext* op_ctx,
+               FieldId field_id,
+               int64_t chunk_id,
+               const FixedVector<int32_t>& offsets) const {
+        return chunk_view_impl(op_ctx, field_id, chunk_id, offsets)
+            .transform<std::shared_ptr<ChunkDataView<T>>>(
+                [](AnyDataView&& any_data_view) {
+                    return any_data_view.as<T>();
+                });
     }
 
     // union(segment_id, field_id) as unique id
@@ -594,48 +549,23 @@ class SegmentInternalInterface : public SegmentInterface {
  protected:
     // todo: use an Unified struct for all type in growing/seal segment to store data and valid_data.
     // internal API: return chunk_data in span
-    virtual PinWrapper<SpanBase>
-    chunk_data_impl(milvus::OpContext* op_ctx,
+    virtual PinWrapper<AnyDataView>
+    chunk_view_impl(milvus::OpContext* op_ctx,
                     FieldId field_id,
                     int64_t chunk_id) const = 0;
 
-    // internal API: return chunk string views in vector
-    virtual PinWrapper<
-        std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    chunk_string_view_impl(
-        milvus::OpContext* op_ctx,
-        FieldId field_id,
-        int64_t chunk_id,
-        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
+    virtual PinWrapper<AnyDataView>
+    chunk_view_impl(milvus::OpContext* op_ctx,
+                    FieldId field_id,
+                    int64_t chunk_id,
+                    int64_t start_offset,
+                    int64_t length) const = 0;
 
-    virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-    chunk_array_view_impl(
-        milvus::OpContext* op_ctx,
-        FieldId field_id,
-        int64_t chunk_id,
-        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
-
-    virtual PinWrapper<
-        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
-    chunk_vector_array_view_impl(
-        milvus::OpContext* op_ctx,
-        FieldId field_id,
-        int64_t chunk_id,
-        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
-
-    virtual PinWrapper<
-        std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    chunk_string_views_by_offsets(
-        milvus::OpContext* op_ctx,
-        FieldId field_id,
-        int64_t chunk_id,
-        const FixedVector<int32_t>& offsets) const = 0;
-
-    virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-    chunk_array_views_by_offsets(milvus::OpContext* op_ctx,
-                                 FieldId field_id,
-                                 int64_t chunk_id,
-                                 const FixedVector<int32_t>& offsets) const = 0;
+    virtual PinWrapper<AnyDataView>
+    chunk_view_impl(milvus::OpContext* op_ctx,
+                    FieldId field_id,
+                    int64_t chunk_id,
+                    const FixedVector<int32_t>& offsets) const = 0;
 
     virtual void
     check_search(const query::Plan* plan) const = 0;

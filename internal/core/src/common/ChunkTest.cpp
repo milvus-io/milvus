@@ -30,12 +30,12 @@
 #include "boost/filesystem/operations.hpp"
 #include "common/Array.h"
 #include "common/Chunk.h"
+#include "common/ChunkDataView.h"
 #include "common/ChunkWriter.h"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
 #include "common/Json.h"
-#include "common/Span.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "filemanager/InputStream.h"
@@ -85,12 +85,11 @@ TEST(chunk, test_int64_field) {
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, array_vec);
-    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
-    auto span = fixed_chunk->Span();
-    EXPECT_EQ(span.row_count(), data.size());
+    auto data_view = chunk->GetDataView<int64_t>();
+    EXPECT_EQ(data_view->RowCount(), data.size());
+    auto view_data = data_view->Data();
     for (size_t i = 0; i < data.size(); ++i) {
-        auto n = *(int64_t*)((char*)span.data() + i * span.element_sizeof());
-        EXPECT_EQ(n, data[i]);
+        EXPECT_EQ(view_data[i], data[i]);
     }
 }
 
@@ -127,12 +126,11 @@ TEST(chunk, test_timestmamptz_field) {
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, array_vec);
-    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
-    auto span = fixed_chunk->Span();
-    EXPECT_EQ(span.row_count(), data.size());
+    auto data_view = chunk->GetDataView<int64_t>();
+    EXPECT_EQ(data_view->RowCount(), data.size());
+    auto view_data = data_view->Data();
     for (size_t i = 0; i < data.size(); ++i) {
-        auto n = *(int64_t*)((char*)span.data() + i * span.element_sizeof());
-        EXPECT_EQ(n, data[i]);
+        EXPECT_EQ(view_data[i], data[i]);
     }
 }
 
@@ -170,10 +168,10 @@ TEST(chunk, test_variable_field) {
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, array_vec);
-    auto string_chunk = static_cast<StringChunk*>(chunk.get());
-    auto views = string_chunk->StringViews(std::nullopt);
+    auto data_view = chunk->GetDataView<std::string_view>();
+    auto view_data = data_view->Data();
     for (size_t i = 0; i < data.size(); ++i) {
-        EXPECT_EQ(views.first[i], data[i]);
+        EXPECT_EQ(view_data[i], data[i]);
     }
 }
 
@@ -215,12 +213,13 @@ TEST(chunk, test_variable_field_nullable) {
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, array_vec);
-    auto string_chunk = static_cast<StringChunk*>(chunk.get());
-    auto views = string_chunk->StringViews(std::nullopt);
+    auto data_view = chunk->GetDataView<std::string_view>();
+    auto view_data = data_view->Data();
+    auto view_valid = data_view->ValidData();
     for (size_t i = 0; i < data.size(); ++i) {
-        EXPECT_EQ(views.second[i], validity[i]);
+        EXPECT_EQ(view_valid[i], validity[i]);
         if (validity[i]) {
-            EXPECT_EQ(views.first[i], data[i]);
+            EXPECT_EQ(view_data[i], data[i]);
         }
     }
 }
@@ -276,21 +275,23 @@ TEST(chunk, test_json_field) {
         auto chunk = create_chunk(field_meta, array_vec);
         auto json_chunk = static_cast<JSONChunk*>(chunk.get());
         {
-            auto [views, valid] = json_chunk->StringViews(std::nullopt);
-            EXPECT_EQ(row_num, views.size());
-            for (size_t i = 0; i < row_num; ++i) {
-                EXPECT_EQ(views[i], data[i].data());
-                //nullable is false, no judging valid
+            // Test full data view
+            auto json_view = json_chunk->GetDataView<Json>();
+            EXPECT_EQ(row_num, json_view->RowCount());
+            auto view_data = json_view->Data();
+            for (int64_t i = 0; i < row_num; ++i) {
+                EXPECT_EQ(view_data[i].data(), data[i].data());
             }
         }
         {
-            auto start = 10;
-            auto len = 20;
-            auto [views, valid] =
-                json_chunk->StringViews(std::make_pair(start, len));
-            EXPECT_EQ(len, views.size());
-            for (size_t i = 0; i < len; ++i) {
-                EXPECT_EQ(views[i], data[i].data());
+            // Test partial data view with offset and length
+            int64_t start = 10;
+            int64_t len = 20;
+            auto json_view = json_chunk->GetDataView<Json>(start, len);
+            EXPECT_EQ(len, json_view->RowCount());
+            auto view_data = json_view->Data();
+            for (int64_t i = 0; i < len; ++i) {
+                EXPECT_EQ(view_data[i].data(), data[start + i].data());
             }
         }
     }
@@ -306,41 +307,198 @@ TEST(chunk, test_json_field) {
         auto chunk = create_chunk(field_meta, array_vec);
         auto json_chunk = static_cast<JSONChunk*>(chunk.get());
         {
-            auto [views, valid] = json_chunk->StringViews(std::nullopt);
-            EXPECT_EQ(row_num, views.size());
-            for (size_t i = 0; i < row_num; ++i) {
-                EXPECT_EQ(views[i], data[i].data());
-                EXPECT_TRUE(valid[i]);  //no input valid map, all padded as true
+            // Test full data view with validity
+            auto json_view = json_chunk->GetDataView<Json>();
+            EXPECT_EQ(row_num, json_view->RowCount());
+            auto view_data = json_view->Data();
+            auto valid_data = json_view->ValidData();
+            for (int64_t i = 0; i < row_num; ++i) {
+                EXPECT_EQ(view_data[i].data(), data[i].data());
+                EXPECT_TRUE(valid_data[i]);  // all valid in test data
             }
         }
         {
-            auto start = 10;
-            auto len = 20;
-            auto [views, valid] =
-                json_chunk->StringViews(std::make_pair(start, len));
-            EXPECT_EQ(len, views.size());
-            for (size_t i = 0; i < len; ++i) {
-                EXPECT_EQ(views[i], data[i].data());
-                EXPECT_TRUE(valid[i]);  //no input valid map, all padded as true
+            // Test partial data view with offset and length
+            int64_t start = 10;
+            int64_t len = 20;
+            auto json_view = json_chunk->GetDataView<Json>(start, len);
+            EXPECT_EQ(len, json_view->RowCount());
+            auto view_data = json_view->Data();
+            auto valid_data = json_view->ValidData();
+            for (int64_t i = 0; i < len; ++i) {
+                EXPECT_EQ(view_data[i].data(), data[start + i].data());
+                EXPECT_TRUE(valid_data[i]);  // all valid in test data
             }
         }
         {
-            auto start = -1;
-            auto len = 5;
-            EXPECT_THROW(json_chunk->StringViews(std::make_pair(start, len)),
+            // Test error cases: invalid offset
+            int64_t start = -1;
+            int64_t len = 5;
+            EXPECT_THROW(json_chunk->GetDataView<Json>(start, len),
                          milvus::SegcoreError);
         }
         {
-            auto start = 0;
-            auto len = row_num + 1;
-            EXPECT_THROW(json_chunk->StringViews(std::make_pair(start, len)),
+            // Test error cases: length exceeds bounds
+            int64_t start = 0;
+            int64_t len = row_num + 1;
+            EXPECT_THROW(json_chunk->GetDataView<Json>(start, len),
                          milvus::SegcoreError);
         }
         {
-            auto start = 95;
-            auto len = 11;
-            EXPECT_THROW(json_chunk->StringViews(std::make_pair(start, len)),
+            // Test error cases: offset + length exceeds bounds
+            int64_t start = 95;
+            int64_t len = 11;
+            EXPECT_THROW(json_chunk->GetDataView<Json>(start, len),
                          milvus::SegcoreError);
+        }
+    }
+}
+
+// Test JsonChunk::GetAnyDataView returns ContiguousDataView<Json>
+TEST(chunk, test_json_chunk_data_view) {
+    auto row_num = 100;
+    // Keep original strings alive so Json views remain valid for comparison
+    std::vector<std::string> json_strings;
+    json_strings.reserve(row_num);
+    FixedVector<Json> data;
+    data.reserve(row_num);
+    for (auto i = 0; i < row_num; i++) {
+        std::string json_str = "{\"key\": \"value" + std::to_string(i) +
+                               "\", \"num\": " + std::to_string(i) + "}";
+        json_strings.emplace_back(std::move(json_str));
+        auto json =
+            Json(json_strings.back().data(), json_strings.back().size());
+        data.push_back(std::move(json));
+    }
+    auto field_data = milvus::storage::CreateFieldData(storage::DataType::JSON,
+                                                       DataType::NONE);
+    field_data->FillFieldData(data.data(), data.size());
+
+    storage::InsertEventData event_data;
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
+    auto ser_data = event_data.Serialize();
+
+    auto get_record_batch_reader =
+        [&]() -> std::pair<std::shared_ptr<::arrow::RecordBatchReader>,
+                           std::unique_ptr<parquet::arrow::FileReader>> {
+        auto buffer = std::make_shared<arrow::io::BufferReader>(
+            ser_data.data() + 2 * sizeof(milvus::Timestamp),
+            ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+        parquet::arrow::FileReaderBuilder reader_builder;
+        auto s = reader_builder.Open(buffer);
+        EXPECT_TRUE(s.ok());
+        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+        s = reader_builder.Build(&arrow_reader);
+        EXPECT_TRUE(s.ok());
+
+        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+        s = arrow_reader->GetRecordBatchReader(&rb_reader);
+        EXPECT_TRUE(s.ok());
+        return {rb_reader, std::move(arrow_reader)};
+    };
+
+    // Test GetAnyDataView() - full chunk
+    {
+        auto [rb_reader, arrow_reader] = get_record_batch_reader();
+        FieldMeta field_meta(FieldName("json_field"),
+                             milvus::FieldId(1),
+                             DataType::JSON,
+                             false,
+                             std::nullopt);
+        arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
+        auto chunk = create_chunk(field_meta, array_vec);
+        auto json_chunk = static_cast<JSONChunk*>(chunk.get());
+
+        // GetAnyDataView should return ContiguousDataView<Json>
+        auto any_view = json_chunk->GetAnyDataView();
+        auto json_view = any_view.as<Json>();
+        ASSERT_NE(json_view, nullptr);
+        EXPECT_EQ(json_view->RowCount(), row_num);
+
+        // Verify data content
+        auto json_data = json_view->Data();
+        for (int64_t i = 0; i < row_num; ++i) {
+            EXPECT_EQ(json_data[i].data(), data[i].data());
+        }
+    }
+
+    // Test GetAnyDataView(offset, length) - sub-range
+    {
+        auto [rb_reader, arrow_reader] = get_record_batch_reader();
+        FieldMeta field_meta(FieldName("json_field"),
+                             milvus::FieldId(1),
+                             DataType::JSON,
+                             false,
+                             std::nullopt);
+        arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
+        auto chunk = create_chunk(field_meta, array_vec);
+        auto json_chunk = static_cast<JSONChunk*>(chunk.get());
+
+        int64_t start = 10;
+        int64_t len = 20;
+        auto any_view = json_chunk->GetAnyDataView(start, len);
+        auto json_view = any_view.as<Json>();
+        ASSERT_NE(json_view, nullptr);
+        EXPECT_EQ(json_view->RowCount(), len);
+
+        // Verify data content
+        auto json_data = json_view->Data();
+        for (int64_t i = 0; i < len; ++i) {
+            EXPECT_EQ(json_data[i].data(), data[start + i].data());
+        }
+    }
+
+    // Test GetAnyDataView(offsets) - specific offsets
+    {
+        auto [rb_reader, arrow_reader] = get_record_batch_reader();
+        FieldMeta field_meta(FieldName("json_field"),
+                             milvus::FieldId(1),
+                             DataType::JSON,
+                             false,
+                             std::nullopt);
+        arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
+        auto chunk = create_chunk(field_meta, array_vec);
+        auto json_chunk = static_cast<JSONChunk*>(chunk.get());
+
+        FixedVector<int32_t> offsets = {0, 5, 10, 50, 99};
+        auto any_view = json_chunk->GetAnyDataView(offsets);
+        auto json_view = any_view.as<Json>();
+        ASSERT_NE(json_view, nullptr);
+        EXPECT_EQ(json_view->RowCount(), static_cast<int64_t>(offsets.size()));
+
+        // Verify data content
+        auto json_data = json_view->Data();
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            EXPECT_EQ(json_data[i].data(), data[offsets[i]].data());
+        }
+    }
+
+    // Test with nullable JSON
+    {
+        auto [rb_reader, arrow_reader] = get_record_batch_reader();
+        FieldMeta field_meta(FieldName("json_field"),
+                             milvus::FieldId(1),
+                             DataType::JSON,
+                             true,  // nullable
+                             std::nullopt);
+        arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
+        auto chunk = create_chunk(field_meta, array_vec);
+        auto json_chunk = static_cast<JSONChunk*>(chunk.get());
+
+        auto any_view = json_chunk->GetAnyDataView();
+        auto json_view = any_view.as<Json>();
+        ASSERT_NE(json_view, nullptr);
+        EXPECT_EQ(json_view->RowCount(), row_num);
+
+        // ValidData should be non-null for nullable field
+        // (all values are valid in this test data)
+        auto valid_data = json_view->ValidData();
+        ASSERT_NE(valid_data, nullptr);
+        for (int64_t i = 0; i < row_num; ++i) {
+            EXPECT_TRUE(valid_data[i]);
         }
     }
 }
@@ -351,9 +509,9 @@ TEST(chunk, test_null_int64) {
         storage::DataType::INT64, DataType::NONE, true);
 
     // Set up validity bitmap: 10011 (1st, 4th, and 5th are valid)
-    uint8_t* valid_data = new uint8_t[1]{0x13};  // 10011 in binary
-    field_data->FillFieldData(data.data(), valid_data, data.size(), 0);
-    delete[] valid_data;
+    uint8_t* input_valid = new uint8_t[1]{0x13};  // 10011 in binary
+    field_data->FillFieldData(data.data(), input_valid, data.size(), 0);
+    delete[] input_valid;
 
     storage::InsertEventData event_data;
     auto payload_reader =
@@ -382,23 +540,22 @@ TEST(chunk, test_null_int64) {
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, array_vec);
-    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
-    auto span = fixed_chunk->Span();
-    EXPECT_EQ(span.row_count(), data.size());
+    auto data_view = chunk->GetDataView<int64_t>();
+    EXPECT_EQ(data_view->RowCount(), data.size());
+    auto view_data = data_view->Data();
+    auto valid_data = data_view->ValidData();
 
     // Check validity based on our bitmap pattern (10011)
-    EXPECT_TRUE(fixed_chunk->isValid(0));
-    EXPECT_TRUE(fixed_chunk->isValid(1));
-    EXPECT_FALSE(fixed_chunk->isValid(2));
-    EXPECT_FALSE(fixed_chunk->isValid(3));
-    EXPECT_TRUE(fixed_chunk->isValid(4));
+    EXPECT_TRUE(valid_data[0]);
+    EXPECT_TRUE(valid_data[1]);
+    EXPECT_FALSE(valid_data[2]);
+    EXPECT_FALSE(valid_data[3]);
+    EXPECT_TRUE(valid_data[4]);
 
     // Verify data for valid entries
     for (size_t i = 0; i < data.size(); ++i) {
-        if (fixed_chunk->isValid(i)) {
-            auto n =
-                *(int64_t*)((char*)span.data() + i * span.element_sizeof());
-            EXPECT_EQ(n, data[i]);
+        if (valid_data[i]) {
+            EXPECT_EQ(view_data[i], data[i]);
         }
     }
 }
@@ -443,10 +600,10 @@ TEST(chunk, test_array) {
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, array_vec);
-    auto array_chunk = static_cast<ArrayChunk*>(chunk.get());
-    auto [views, valid] = array_chunk->Views(std::nullopt);
-    EXPECT_EQ(views.size(), 1);
-    auto& arr = views[0];
+    auto data_view = chunk->GetDataView<ArrayView>();
+    EXPECT_EQ(data_view->RowCount(), 1);
+    auto view_data = data_view->Data();
+    auto& arr = view_data[0];
     for (size_t i = 0; i < arr.length(); ++i) {
         auto str = arr.get_data<std::string>(i);
         EXPECT_EQ(str, field_string_data.string_data().data(i));
@@ -506,11 +663,11 @@ TEST(chunk, test_null_array) {
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, array_vec);
-    auto array_chunk = static_cast<ArrayChunk*>(chunk.get());
-    auto [views, valid] = array_chunk->Views(std::nullopt);
+    auto data_view = chunk->GetDataView<ArrayView>();
 
-    EXPECT_EQ(views.size(), array_count);
-    EXPECT_EQ(valid.size(), array_count);
+    EXPECT_EQ(data_view->RowCount(), array_count);
+    auto view_data = data_view->Data();
+    auto valid = data_view->ValidData();
 
     // Check validity based on our bitmap pattern (10101)
     EXPECT_TRUE(valid[0]);
@@ -520,9 +677,9 @@ TEST(chunk, test_null_array) {
     EXPECT_TRUE(valid[4]);
 
     // Verify data for valid arrays
-    for (size_t i = 0; i < array_count; i++) {
+    for (int64_t i = 0; i < array_count; i++) {
         if (valid[i]) {
-            auto& arr = views[i];
+            auto& arr = view_data[i];
             EXPECT_EQ(arr.length(),
                       field_string_data.string_data().data_size());
             for (size_t j = 0; j < arr.length(); j++) {
@@ -580,12 +737,13 @@ TEST(chunk, test_array_views) {
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, array_vec);
-    auto array_chunk = static_cast<ArrayChunk*>(chunk.get());
     {
-        auto [views, valid] = array_chunk->Views(std::nullopt);
-        EXPECT_EQ(views.size(), array_count);
-        for (auto i = 0; i < array_count; i++) {
-            auto& arr = views[i];
+        // Test full data view
+        auto data_view = chunk->GetDataView<ArrayView>();
+        EXPECT_EQ(data_view->RowCount(), array_count);
+        auto view_data = data_view->Data();
+        for (int64_t i = 0; i < array_count; i++) {
+            auto& arr = view_data[i];
             for (size_t j = 0; j < arr.length(); ++j) {
                 auto str = arr.get_data<std::string>(j);
                 EXPECT_EQ(str, field_string_data.string_data().data(j));
@@ -593,12 +751,14 @@ TEST(chunk, test_array_views) {
         }
     }
     {
-        auto start = 2;
-        auto len = 5;
-        auto [views, valid] = array_chunk->Views(std::make_pair(start, len));
-        EXPECT_EQ(views.size(), len);
-        for (auto i = 0; i < len; i++) {
-            auto& arr = views[i];
+        // Test partial data view with offset and length
+        int64_t start = 2;
+        int64_t len = 5;
+        auto data_view = chunk->GetDataView<ArrayView>(start, len);
+        EXPECT_EQ(data_view->RowCount(), len);
+        auto view_data = data_view->Data();
+        for (int64_t i = 0; i < len; i++) {
+            auto& arr = view_data[i];
             for (size_t j = 0; j < arr.length(); ++j) {
                 auto str = arr.get_data<std::string>(j);
                 EXPECT_EQ(str, field_string_data.string_data().data(j));
@@ -606,21 +766,24 @@ TEST(chunk, test_array_views) {
         }
     }
     {
-        auto start = -1;
-        auto len = 5;
-        EXPECT_THROW(array_chunk->Views(std::make_pair(start, len)),
+        // Test error cases: invalid offset
+        int64_t start = -1;
+        int64_t len = 5;
+        EXPECT_THROW(chunk->GetDataView<ArrayView>(start, len),
                      milvus::SegcoreError);
     }
     {
-        auto start = 0;
-        auto len = array_count + 1;
-        EXPECT_THROW(array_chunk->Views(std::make_pair(start, len)),
+        // Test error cases: length exceeds bounds
+        int64_t start = 0;
+        int64_t len = array_count + 1;
+        EXPECT_THROW(chunk->GetDataView<ArrayView>(start, len),
                      milvus::SegcoreError);
     }
     {
-        auto start = 5;
-        auto len = 7;
-        EXPECT_THROW(array_chunk->Views(std::make_pair(start, len)),
+        // Test error cases: offset + length exceeds bounds
+        int64_t start = 5;
+        int64_t len = 7;
+        EXPECT_THROW(chunk->GetDataView<ArrayView>(start, len),
                      milvus::SegcoreError);
     }
 }
@@ -1108,32 +1271,31 @@ TEST(chunk, test_create_group_chunk_basic) {
     EXPECT_NE(chunks.find(FieldId(2)), chunks.end());
     EXPECT_NE(chunks.find(FieldId(3)), chunks.end());
 
-    // Verify INT64 chunk
-    auto int_chunk = static_cast<FixedWidthChunk*>(chunks[FieldId(1)].get());
-    auto int_span = int_chunk->Span();
-    EXPECT_EQ(int_span.row_count(), row_count);
+    // Verify INT64 chunk using DataView interface
+    auto int_chunk = chunks[FieldId(1)].get();
+    auto int_view = int_chunk->GetDataView<int64_t>();
+    EXPECT_EQ(int_view->RowCount(), row_count);
+    auto int_view_data = int_view->Data();
     for (size_t i = 0; i < row_count; ++i) {
-        auto value =
-            *(int64_t*)((char*)int_span.data() + i * int_span.element_sizeof());
-        EXPECT_EQ(value, int_data[i]);
+        EXPECT_EQ(int_view_data[i], int_data[i]);
     }
 
-    // Verify STRING chunk
-    auto str_chunk = static_cast<StringChunk*>(chunks[FieldId(2)].get());
-    auto [str_views, str_valid] = str_chunk->StringViews(std::nullopt);
-    EXPECT_EQ(str_views.size(), row_count);
+    // Verify STRING chunk using DataView interface
+    auto str_chunk = chunks[FieldId(2)].get();
+    auto str_view = str_chunk->GetDataView<std::string_view>();
+    EXPECT_EQ(str_view->RowCount(), row_count);
+    auto str_view_data = str_view->Data();
     for (size_t i = 0; i < row_count; ++i) {
-        EXPECT_EQ(str_views[i], str_data[i]);
+        EXPECT_EQ(str_view_data[i], str_data[i]);
     }
 
-    // Verify DOUBLE chunk
-    auto double_chunk = static_cast<FixedWidthChunk*>(chunks[FieldId(3)].get());
-    auto double_span = double_chunk->Span();
-    EXPECT_EQ(double_span.row_count(), row_count);
+    // Verify DOUBLE chunk using DataView interface
+    auto double_chunk = chunks[FieldId(3)].get();
+    auto double_view = double_chunk->GetDataView<double>();
+    EXPECT_EQ(double_view->RowCount(), row_count);
+    auto double_view_data = double_view->Data();
     for (size_t i = 0; i < row_count; ++i) {
-        auto value = *(double*)((char*)double_span.data() +
-                                i * double_span.element_sizeof());
-        EXPECT_DOUBLE_EQ(value, double_data[i]);
+        EXPECT_DOUBLE_EQ(double_view_data[i], double_data[i]);
     }
 }
 
@@ -1232,24 +1394,22 @@ TEST(chunk, test_create_group_chunk_with_mmap) {
     EXPECT_NE(chunks.find(FieldId(10)), chunks.end());
     EXPECT_NE(chunks.find(FieldId(11)), chunks.end());
 
-    // Verify INT32 chunk
-    auto int32_chunk = static_cast<FixedWidthChunk*>(chunks[FieldId(10)].get());
-    auto int32_span = int32_chunk->Span();
-    EXPECT_EQ(int32_span.row_count(), row_count);
+    // Verify INT32 chunk using DataView interface
+    auto int32_chunk = chunks[FieldId(10)].get();
+    auto int32_view = int32_chunk->GetDataView<int32_t>();
+    EXPECT_EQ(int32_view->RowCount(), row_count);
+    auto int32_view_data = int32_view->Data();
     for (size_t i = 0; i < row_count; ++i) {
-        auto value = *(int32_t*)((char*)int32_span.data() +
-                                 i * int32_span.element_sizeof());
-        EXPECT_EQ(value, int32_data[i]);
+        EXPECT_EQ(int32_view_data[i], int32_data[i]);
     }
 
-    // Verify FLOAT chunk
-    auto float_chunk = static_cast<FixedWidthChunk*>(chunks[FieldId(11)].get());
-    auto float_span = float_chunk->Span();
-    EXPECT_EQ(float_span.row_count(), row_count);
+    // Verify FLOAT chunk using DataView interface
+    auto float_chunk = chunks[FieldId(11)].get();
+    auto float_view = float_chunk->GetDataView<float>();
+    EXPECT_EQ(float_view->RowCount(), row_count);
+    auto float_view_data = float_view->Data();
     for (size_t i = 0; i < row_count; ++i) {
-        auto value = *(float*)((char*)float_span.data() +
-                               i * float_span.element_sizeof());
-        EXPECT_FLOAT_EQ(value, float_data[i]);
+        EXPECT_FLOAT_EQ(float_view_data[i], float_data[i]);
     }
 
     // Verify file exists
@@ -1354,17 +1514,21 @@ TEST(chunk, test_create_group_chunk_nullable_fields) {
 
     EXPECT_EQ(chunks.size(), 2);
 
-    // Verify nullable INT64 chunk (validity: 10101)
-    auto int_chunk = static_cast<FixedWidthChunk*>(chunks[FieldId(30)].get());
-    EXPECT_TRUE(int_chunk->isValid(0));
-    EXPECT_FALSE(int_chunk->isValid(1));
-    EXPECT_TRUE(int_chunk->isValid(2));
-    EXPECT_FALSE(int_chunk->isValid(3));
-    EXPECT_TRUE(int_chunk->isValid(4));
+    // Verify nullable INT64 chunk (validity: 10101) using DataView interface
+    auto int_chunk = chunks[FieldId(30)].get();
+    auto int_view = int_chunk->GetDataView<int64_t>();
+    auto int_valid = int_view->ValidData();
+    EXPECT_TRUE(int_valid[0]);
+    EXPECT_FALSE(int_valid[1]);
+    EXPECT_TRUE(int_valid[2]);
+    EXPECT_FALSE(int_valid[3]);
+    EXPECT_TRUE(int_valid[4]);
 
-    // Verify nullable VARCHAR chunk (validity: 11010)
-    auto str_chunk = static_cast<StringChunk*>(chunks[FieldId(31)].get());
-    auto [str_views, str_valid] = str_chunk->StringViews(std::nullopt);
+    // Verify nullable VARCHAR chunk (validity: 11010) using DataView interface
+    auto str_chunk = chunks[FieldId(31)].get();
+    auto str_view = str_chunk->GetDataView<std::string_view>();
+    auto str_valid = str_view->ValidData();
+    auto str_view_data = str_view->Data();
     EXPECT_FALSE(str_valid[0]);
     EXPECT_TRUE(str_valid[1]);
     EXPECT_FALSE(str_valid[2]);
@@ -1374,7 +1538,7 @@ TEST(chunk, test_create_group_chunk_nullable_fields) {
     // Verify data for valid entries
     for (size_t i = 0; i < row_count; ++i) {
         if (str_valid[i]) {
-            EXPECT_EQ(str_views[i], str_data[i]);
+            EXPECT_EQ(str_view_data[i], str_data[i]);
         }
     }
 }

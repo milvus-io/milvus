@@ -901,15 +901,14 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
 
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size =
-            ProcessDataByOffsets<milvus::ArrayView>(execute_sub_batch,
-                                                    std::nullptr_t{},
-                                                    input,
-                                                    res,
-                                                    valid_res,
-                                                    value,
-                                                    right_operand,
-                                                    index);
+        processed_size = ProcessDataByOffsets<ArrayView>(execute_sub_batch,
+                                                         std::nullptr_t{},
+                                                         input,
+                                                         res,
+                                                         valid_res,
+                                                         value,
+                                                         right_operand,
+                                                         index);
     } else {
         processed_size = ProcessDataChunks<milvus::ArrayView>(execute_sub_batch,
                                                               std::nullptr_t{},
