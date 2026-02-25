@@ -24,13 +24,6 @@ func newBenchLogger() *zap.Logger {
 	return zap.New(core)
 }
 
-// newBenchLoggerWithCaller creates a zap logger with caller enabled.
-func newBenchLoggerWithCaller() *zap.Logger {
-	enc := zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig())
-	core := zapcore.NewCore(enc, discardWriteSyncer{}, zapcore.DebugLevel)
-	return zap.New(core, zap.AddCaller())
-}
-
 // setupBench initializes mlog with a discard logger for benchmarks.
 func setupBench() {
 	SetLevel(DebugLevel)
@@ -51,26 +44,6 @@ func BenchmarkZapInfo(b *testing.B) {
 
 func BenchmarkZapInfoWithFields(b *testing.B) {
 	logger := newBenchLogger()
-	b.ResetTimer()
-	for b.Loop() {
-		logger.Info("benchmark message",
-			zap.String("key1", "value1"),
-			zap.Int64("key2", 42),
-			zap.String("key3", "value3"),
-		)
-	}
-}
-
-func BenchmarkZapInfoWithCaller(b *testing.B) {
-	logger := newBenchLoggerWithCaller()
-	b.ResetTimer()
-	for b.Loop() {
-		logger.Info("benchmark message")
-	}
-}
-
-func BenchmarkZapInfoWithCallerAndFields(b *testing.B) {
-	logger := newBenchLoggerWithCaller()
 	b.ResetTimer()
 	for b.Loop() {
 		logger.Info("benchmark message",
