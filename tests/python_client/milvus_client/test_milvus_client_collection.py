@@ -947,7 +947,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
                                  "nq": len(ids_to_search),
                                  "limit": num_entities_with_not_null_vector,
                                  "pk_name": "id_string"})
-        # search by ids that belong to null vectors (returns empty results after #47065 fix)
+        # search by ids that belong to null vectors
         ids_to_search = ["0", "2"]
         res = self.search(client, collection_name, ids=ids_to_search,
                           search_params={},
