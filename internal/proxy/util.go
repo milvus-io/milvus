@@ -193,8 +193,11 @@ func validateMaxQueryResultWindow(offset int64, limit int64) error {
 	return nil
 }
 
-func validateLimit(limit int64) error {
+func validateLimit(limit int64, bigTopKEnabled bool) error {
 	topKLimit := Params.QuotaConfig.TopKLimit.GetAsInt64()
+	if bigTopKEnabled {
+		topKLimit = Params.QuotaConfig.BigTopKLimit.GetAsInt64()
+	}
 	if limit <= 0 || limit > topKLimit {
 		return fmt.Errorf("it should be in range [1, %d], but got %d", topKLimit, limit)
 	}

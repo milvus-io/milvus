@@ -124,6 +124,7 @@ type quotaConfig struct {
 	MaxCollectionNum               ParamItem `refreshable:"true"`
 	MaxCollectionNumPerDB          ParamItem `refreshable:"true"`
 	TopKLimit                      ParamItem `refreshable:"true"`
+	BigTopKLimit                   ParamItem `refreshable:"true"`
 	NQLimit                        ParamItem `refreshable:"true"`
 	MaxQueryResultWindow           ParamItem `refreshable:"true"`
 	MaxOutputSize                  ParamItem `refreshable:"true"`
@@ -1453,6 +1454,15 @@ maximum # of results to return (topK).
 Check https://milvus.io/docs/limitations.md for more details.`,
 	}
 	p.TopKLimit.Init(base.mgr)
+
+	p.BigTopKLimit = ParamItem{
+		Key:          "quotaAndLimits.limits.bigTopK",
+		Version:      "2.6.13",
+		DefaultValue: "1000000",
+		Doc: `Search limit for collections with bigTopK optimization enabled, which applies on:
+maximum # of results to return (topK).`,
+	}
+	p.BigTopKLimit.Init(base.mgr)
 
 	p.NQLimit = ParamItem{
 		Key:          "quotaAndLimits.limits.nq",

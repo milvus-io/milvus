@@ -72,6 +72,7 @@ type searchTask struct {
 	schema                 *schemaInfo
 	needRequery            bool
 	partitionKeyMode       bool
+	bigTopKOptimization    bool
 	enableMaterializedView bool
 	mustUsePartitionKey    bool
 	resultSizeInsufficient bool
@@ -154,11 +155,15 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.SearchRequest.DbID = 0 // todo
 	t.SearchRequest.CollectionID = collID
 	log := log.Ctx(ctx).With(zap.Int64("collID", collID), zap.String("collName", collectionName))
-	t.schema, err = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
+
+	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, collID)
 	if err != nil {
-		log.Warn("get collection schema failed", zap.Error(err))
+		log.Warn("Proxy::searchTask::PreExecute failed to GetCollectionInfo from cache",
+			zap.String("collectionName", collectionName), zap.Int64("collectionID", collID), zap.Error(err))
 		return err
 	}
+	t.schema = collectionInfo.schema
+	t.bigTopKOptimization = collectionInfo.bigTopKOptimization
 
 	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
@@ -226,12 +231,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
-	if err2 != nil {
-		log.Warn("Proxy::searchTask::PreExecute failed to GetCollectionInfo from cache",
-			zap.String("collectionName", collectionName), zap.Int64("collectionID", t.CollectionID), zap.Error(err2))
-		return err2
-	}
 	guaranteeTs := t.request.GetGuaranteeTimestamp()
 	var consistencyLevel commonpb.ConsistencyLevel
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
@@ -775,7 +774,7 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 		}
 		annsFieldName = vecFields[0].Name
 	}
-	searchInfo, err := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams)
+	searchInfo, err := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams, t.bigTopKOptimization)
 	if err != nil {
 		return nil, nil, 0, false, err
 	}
