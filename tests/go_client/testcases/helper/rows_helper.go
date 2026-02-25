@@ -150,7 +150,8 @@ func GenNullableVarcharSparseRows(nb int, autoID bool, option GenDataOption) []i
 		if !autoID {
 			row.Int64 = int64(i + 1)
 		}
-		if option.validData != nil && i < len(option.validData) && option.validData[i] {
+		idx := i - start
+		if option.validData != nil && idx < len(option.validData) && option.validData[idx] {
 			v := strconv.Itoa(i + 1)
 			row.Varchar = &v
 		}
@@ -170,7 +171,8 @@ func GenNullableScalarRows(nb int, option GenDataOption) []interface{} {
 			Int64:    int64(i + 1),
 			FloatVec: common.GenFloatVector(dim),
 		}
-		if option.validData != nil && i < len(option.validData) && option.validData[i] {
+		idx := i - start
+		if option.validData != nil && idx < len(option.validData) && option.validData[idx] {
 			bVal := (i%2 == 0)
 			i8Val := int8(i + 1)
 			i16Val := int16(i + 1)
