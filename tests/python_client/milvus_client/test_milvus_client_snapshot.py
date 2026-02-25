@@ -4126,3 +4126,478 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
         self.drop_alias(client, alias_name)
         self.drop_collection(client, col_a)
         self.drop_collection(client, col_b)
+
+
+@pytest.mark.tags(CaseLabel.RBAC)
+class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
+    """
+    Test RBAC v2 privilege enforcement for snapshot operations.
+
+    All five snapshot privileges are Global-scoped (defined in common.proto):
+      PrivilegeCreateSnapshot=79  -> API name "CreateSnapshot"
+      PrivilegeDropSnapshot=80    -> API name "DropSnapshot"
+      PrivilegeDescribeSnapshot=81-> API name "DescribeSnapshot"
+      PrivilegeListSnapshots=82   -> API name "ListSnapshots"
+      PrivilegeRestoreSnapshot=83 -> API name "RestoreSnapshot"
+
+    GetRestoreSnapshotState and ListRestoreSnapshotJobs reuse PrivilegeRestoreSnapshot.
+
+    Known issue: v2 built-in privilege groups (ClusterReadOnly/ReadWrite/Admin)
+    do NOT include any snapshot privileges. See constant.go ClusterXxxPrivileges.
+    """
+
+    user_pre = "snap_user"
+    role_pre = "snap_role"
+
+    def teardown_method(self, method):
+        """Clean up users, roles, snapshots and collections created during test."""
+        log.info("[snapshot_rbac_teardown] Start teardown ...")
+        client = self._client()
+
+        # drop all non-root users
+        users, _ = self.list_users(client)
+        for user in users:
+            if user != ct.default_user:
+                self.drop_user(client, user)
+
+        # revoke privileges and drop non-builtin roles
+        roles, _ = self.list_roles(client)
+        for role in roles:
+            if role not in ['admin', 'public']:
+                res, _ = self.describe_role(client, role)
+                if res and res.get('privileges'):
+                    for privilege in res['privileges']:
+                        self.revoke_privilege(client, role,
+                                              privilege["object_type"],
+                                              privilege["privilege"],
+                                              privilege["object_name"])
+                self.drop_role(client, role)
+
+        super().teardown_method(method)
+
+    def _setup_user_with_role(self, root_client, host, port):
+        """Helper: create a user + role, assign role, return (user_client, role_name)."""
+        user_name = cf.gen_unique_str(self.user_pre)
+        role_name = cf.gen_unique_str(self.role_pre)
+        password = cf.gen_str_by_length(contain_numbers=True)
+        self.create_user(root_client, user_name=user_name, password=password)
+        self.create_role(root_client, role_name=role_name)
+        self.grant_role(root_client, user_name=user_name, role_name=role_name)
+
+        uri = f"http://{host}:{port}"
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
+        return user_client, role_name
+
+    def _prepare_collection_with_snapshot(self, client, nb=500):
+        """Helper: create collection, insert data, flush, create snapshot. Return (col_name, snap_name)."""
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.create_snapshot(client, collection_name, snapshot_name)
+        return collection_name, snapshot_name
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_create_denied_without_privilege(self, host, port):
+        """
+        target: verify CreateSnapshot is denied without privilege
+        method: create user with empty role, attempt create_snapshot
+        expected: permission denied
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)
+
+        user_client, role_name = self._setup_user_with_role(client, host, port)
+
+        # should be denied
+        snapshot_name = cf.gen_unique_str(prefix)
+        self.create_snapshot(user_client, collection_name, snapshot_name,
+                             check_task=CheckTasks.check_permission_deny)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_create_allowed_after_grant_v2(self, host, port):
+        """
+        target: verify CreateSnapshot succeeds after granting privilege via v2 API
+        method: grant_privilege_v2 CreateSnapshot to role, then create snapshot
+        expected: create snapshot succeeds
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(500)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        user_client, role_name = self._setup_user_with_role(client, host, port)
+
+        # grant via v2 API
+        self.grant_privilege_v2(client, role_name, "CreateSnapshot", "*", "*")
+        time.sleep(10)
+
+        # should succeed
+        snapshot_name = cf.gen_unique_str(prefix)
+        self.create_snapshot(user_client, collection_name, snapshot_name)
+
+        # cleanup
+        self.drop_snapshot(client, snapshot_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_drop_denied_without_privilege(self, host, port):
+        """
+        target: verify DropSnapshot is denied without privilege
+        method: create snapshot as root, attempt drop as unprivileged user
+        expected: permission denied
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
+
+        user_client, role_name = self._setup_user_with_role(client, host, port)
+
+        # should be denied
+        self.drop_snapshot(user_client, snapshot_name,
+                           check_task=CheckTasks.check_permission_deny)
+
+        # cleanup
+        self.drop_snapshot(client, snapshot_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_drop_allowed_after_grant_v2(self, host, port):
+        """
+        target: verify DropSnapshot succeeds after granting privilege via v2 API
+        method: grant_privilege_v2 DropSnapshot to role, then drop snapshot
+        expected: drop snapshot succeeds
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
+
+        user_client, role_name = self._setup_user_with_role(client, host, port)
+
+        # grant via v2 API
+        self.grant_privilege_v2(client, role_name, "DropSnapshot", "*", "*")
+        time.sleep(10)
+
+        # should succeed
+        self.drop_snapshot(user_client, snapshot_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_list_denied_without_privilege(self, host, port):
+        """
+        target: verify ListSnapshots is denied without privilege
+        method: create snapshot as root, attempt list as unprivileged user
+        expected: permission denied
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
+
+        user_client, role_name = self._setup_user_with_role(client, host, port)
+
+        # should be denied
+        self.list_snapshots(user_client, collection_name=collection_name,
+                            check_task=CheckTasks.check_permission_deny)
+
+        # cleanup
+        self.drop_snapshot(client, snapshot_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_list_allowed_after_grant_v2(self, host, port):
+        """
+        target: verify ListSnapshots succeeds after granting privilege via v2 API
+        method: grant_privilege_v2 ListSnapshots to role, then list snapshots
+        expected: list snapshots succeeds and returns the snapshot
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
+
+        user_client, role_name = self._setup_user_with_role(client, host, port)
+
+        # grant via v2 API
+        self.grant_privilege_v2(client, role_name, "ListSnapshots", "*", "*")
+        time.sleep(10)
+
+        # should succeed
+        snapshots, _ = self.list_snapshots(user_client, collection_name=collection_name)
+        assert snapshot_name in snapshots
+
+        # cleanup
+        self.drop_snapshot(client, snapshot_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_describe_denied_without_privilege(self, host, port):
+        """
+        target: verify DescribeSnapshot is denied without privilege
+        method: create snapshot as root, attempt describe as unprivileged user
+        expected: permission denied
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
+
+        user_client, role_name = self._setup_user_with_role(client, host, port)
+
+        # should be denied
+        self.describe_snapshot(user_client, snapshot_name,
+                               check_task=CheckTasks.check_permission_deny)
+
+        # cleanup
+        self.drop_snapshot(client, snapshot_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_describe_allowed_after_grant_v2(self, host, port):
+        """
+        target: verify DescribeSnapshot succeeds after granting privilege via v2 API
+        method: grant_privilege_v2 DescribeSnapshot to role, then describe snapshot
+        expected: describe snapshot succeeds with correct info
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
+
+        user_client, role_name = self._setup_user_with_role(client, host, port)
+
+        # grant via v2 API
+        self.grant_privilege_v2(client, role_name, "DescribeSnapshot", "*", "*")
+        time.sleep(10)
+
+        # should succeed
+        info, _ = self.describe_snapshot(user_client, snapshot_name)
+        assert info.name == snapshot_name
+
+        # cleanup
+        self.drop_snapshot(client, snapshot_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_restore_denied_without_privilege(self, host, port):
+        """
+        target: verify RestoreSnapshot is denied without privilege
+        method: create snapshot as root, attempt restore as unprivileged user
+        expected: permission denied
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
+
+        user_client, role_name = self._setup_user_with_role(client, host, port)
+
+        # should be denied
+        restored_name = cf.gen_unique_str(prefix + "_restored")
+        self.restore_snapshot(user_client, snapshot_name, restored_name,
+                              check_task=CheckTasks.check_permission_deny)
+
+        # cleanup
+        self.drop_snapshot(client, snapshot_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_restore_allowed_after_grant_v2(self, host, port):
+        """
+        target: verify RestoreSnapshot succeeds after granting privilege via v2 API
+        method: grant_privilege_v2 RestoreSnapshot to role, then restore snapshot
+        expected: restore snapshot succeeds
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
+
+        user_client, role_name = self._setup_user_with_role(client, host, port)
+
+        # grant via v2 API
+        self.grant_privilege_v2(client, role_name, "RestoreSnapshot", "*", "*")
+        time.sleep(10)
+
+        # should succeed
+        restored_name = cf.gen_unique_str(prefix + "_restored")
+        res, _ = self.restore_snapshot(user_client, snapshot_name, restored_name)
+        wait_for_restore_complete(client, res.job_id)
+
+        # cleanup
+        self.drop_snapshot(client, snapshot_name)
+        self.drop_collection(client, restored_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_revoke_privilege_v2_then_denied(self, host, port):
+        """
+        target: verify operation is denied after revoking privilege via v2 API
+        method: grant_privilege_v2 CreateSnapshot -> verify allowed -> revoke_privilege_v2 -> verify denied
+        expected: permission denied after revocation
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(500)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        user_client, role_name = self._setup_user_with_role(client, host, port)
+
+        # grant via v2 and verify allowed
+        self.grant_privilege_v2(client, role_name, "CreateSnapshot", "*", "*")
+        time.sleep(10)
+        snapshot_name = cf.gen_unique_str(prefix)
+        self.create_snapshot(user_client, collection_name, snapshot_name)
+        self.drop_snapshot(client, snapshot_name)
+
+        # revoke via v2 and verify denied
+        self.revoke_privilege_v2(client, role_name, "CreateSnapshot", "*", "*")
+        time.sleep(10)
+        snapshot_name2 = cf.gen_unique_str(prefix)
+        self.create_snapshot(user_client, collection_name, snapshot_name2,
+                             check_task=CheckTasks.check_permission_deny)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_v2_privilege_group_no_snapshot_access(self, host, port):
+        """
+        target: verify v2 built-in privilege groups do NOT include snapshot privileges
+        method: grant ClusterAdmin (highest v2 group), attempt all snapshot ops
+        expected: all snapshot ops denied (known issue: snapshot privileges missing from v2 groups)
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
+
+        user_client, role_name = self._setup_user_with_role(client, host, port)
+
+        # grant ClusterAdmin - the highest v2 privilege group
+        self.grant_privilege_v2(client, role_name, "ClusterAdmin", "*", "*")
+        time.sleep(10)
+
+        # all snapshot ops should be denied because v2 groups lack snapshot privileges
+        new_snap = cf.gen_unique_str(prefix)
+        self.create_snapshot(user_client, collection_name, new_snap,
+                             check_task=CheckTasks.check_permission_deny)
+        self.list_snapshots(user_client, collection_name=collection_name,
+                            check_task=CheckTasks.check_permission_deny)
+        self.describe_snapshot(user_client, snapshot_name,
+                               check_task=CheckTasks.check_permission_deny)
+        self.drop_snapshot(user_client, snapshot_name,
+                           check_task=CheckTasks.check_permission_deny)
+        restored_name = cf.gen_unique_str(prefix + "_restored")
+        self.restore_snapshot(user_client, snapshot_name, restored_name,
+                              check_task=CheckTasks.check_permission_deny)
+
+        # cleanup
+        self.drop_snapshot(client, snapshot_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_admin_role_has_full_access(self, host, port):
+        """
+        target: verify built-in admin role has full snapshot access
+        method: create user, assign admin role, test all snapshot ops
+        expected: all operations succeed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random(default_dim)),
+        } for i in range(500)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # create user with admin role
+        user_name = cf.gen_unique_str(self.user_pre)
+        password = cf.gen_str_by_length(contain_numbers=True)
+        self.create_user(client, user_name=user_name, password=password)
+        self.grant_role(client, user_name=user_name, role_name="admin")
+
+        uri = f"http://{host}:{port}"
+        admin_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
+
+        # all ops should succeed
+        snapshot_name = cf.gen_unique_str(prefix)
+        self.create_snapshot(admin_client, collection_name, snapshot_name)
+
+        snapshots, _ = self.list_snapshots(admin_client, collection_name=collection_name)
+        assert snapshot_name in snapshots
+
+        info, _ = self.describe_snapshot(admin_client, snapshot_name)
+        assert info.name == snapshot_name
+
+        restored_name = cf.gen_unique_str(prefix + "_restored")
+        res, _ = self.restore_snapshot(admin_client, snapshot_name, restored_name)
+        wait_for_restore_complete(client, res.job_id)
+
+        self.drop_snapshot(admin_client, snapshot_name)
+        self.drop_collection(client, restored_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_multiple_privileges_granular_v2(self, host, port):
+        """
+        target: verify granular privilege combination works correctly via v2 API
+        method: grant only ListSnapshots + DescribeSnapshot via v2, verify create/drop/restore denied
+        expected: only granted ops succeed, others denied
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
+
+        user_client, role_name = self._setup_user_with_role(client, host, port)
+
+        # grant only read-related privileges via v2 API
+        self.grant_privilege_v2(client, role_name, "ListSnapshots", "*", "*")
+        self.grant_privilege_v2(client, role_name, "DescribeSnapshot", "*", "*")
+        time.sleep(10)
+
+        # read ops should succeed
+        snapshots, _ = self.list_snapshots(user_client, collection_name=collection_name)
+        assert snapshot_name in snapshots
+
+        info, _ = self.describe_snapshot(user_client, snapshot_name)
+        assert info.name == snapshot_name
+
+        # write ops should be denied
+        new_snap = cf.gen_unique_str(prefix)
+        self.create_snapshot(user_client, collection_name, new_snap,
+                             check_task=CheckTasks.check_permission_deny)
+        self.drop_snapshot(user_client, snapshot_name,
+                           check_task=CheckTasks.check_permission_deny)
+        restored_name = cf.gen_unique_str(prefix + "_restored")
+        self.restore_snapshot(user_client, snapshot_name, restored_name,
+                              check_task=CheckTasks.check_permission_deny)
+
+        # cleanup
+        self.drop_snapshot(client, snapshot_name)
+
+    @pytest.mark.tags(CaseLabel.RBAC)
+    def test_snapshot_public_role_has_no_access(self, host, port):
+        """
+        target: verify public role has no snapshot privileges by default
+        method: create user with only public role, attempt all snapshot ops
+        expected: all operations denied
+        """
+        client = self._client()
+        collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
+
+        # create user without any custom role (only default public role)
+        user_name = cf.gen_unique_str(self.user_pre)
+        password = cf.gen_str_by_length(contain_numbers=True)
+        self.create_user(client, user_name=user_name, password=password)
+
+        uri = f"http://{host}:{port}"
+        user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
+
+        # all ops should be denied
+        new_snap = cf.gen_unique_str(prefix)
+        self.create_snapshot(user_client, collection_name, new_snap,
+                             check_task=CheckTasks.check_permission_deny)
+        self.list_snapshots(user_client, collection_name=collection_name,
+                            check_task=CheckTasks.check_permission_deny)
+        self.describe_snapshot(user_client, snapshot_name,
+                               check_task=CheckTasks.check_permission_deny)
+        self.drop_snapshot(user_client, snapshot_name,
+                           check_task=CheckTasks.check_permission_deny)
+        restored_name = cf.gen_unique_str(prefix + "_restored")
+        self.restore_snapshot(user_client, snapshot_name, restored_name,
+                              check_task=CheckTasks.check_permission_deny)
+
+        # cleanup
+        self.drop_snapshot(client, snapshot_name)
