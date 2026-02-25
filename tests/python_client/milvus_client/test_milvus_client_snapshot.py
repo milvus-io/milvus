@@ -4132,18 +4132,6 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientV2Base):
 class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
     """
     Test RBAC v2 privilege enforcement for snapshot operations.
-
-    All five snapshot privileges are Global-scoped (defined in common.proto):
-      PrivilegeCreateSnapshot=79  -> API name "CreateSnapshot"
-      PrivilegeDropSnapshot=80    -> API name "DropSnapshot"
-      PrivilegeDescribeSnapshot=81-> API name "DescribeSnapshot"
-      PrivilegeListSnapshots=82   -> API name "ListSnapshots"
-      PrivilegeRestoreSnapshot=83 -> API name "RestoreSnapshot"
-
-    GetRestoreSnapshotState and ListRestoreSnapshotJobs reuse PrivilegeRestoreSnapshot.
-
-    Known issue: v2 built-in privilege groups (ClusterReadOnly/ReadWrite/Admin)
-    do NOT include any snapshot privileges. See constant.go ClusterXxxPrivileges.
     """
 
     user_pre = "snap_user"
@@ -4161,16 +4149,18 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
                 self.drop_user(client, user)
 
         # revoke privileges and drop non-builtin roles
+        # Must use revoke_privilege_v2 for privileges granted via v2 API,
+        # because v2-granted privileges carry db_name="*" which v1 revoke cannot match.
         roles, _ = self.list_roles(client)
         for role in roles:
             if role not in ['admin', 'public']:
                 res, _ = self.describe_role(client, role)
                 if res and res.get('privileges'):
                     for privilege in res['privileges']:
-                        self.revoke_privilege(client, role,
-                                              privilege["object_type"],
-                                              privilege["privilege"],
-                                              privilege["object_name"])
+                        self.revoke_privilege_v2(client, role,
+                                                 privilege["privilege"],
+                                                 privilege.get("object_name", "*"),
+                                                 privilege.get("db_name", "*"))
                 self.drop_role(client, role)
 
         super().teardown_method(method)
@@ -4412,8 +4402,8 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
 
         # should succeed
         restored_name = cf.gen_unique_str(prefix + "_restored")
-        res, _ = self.restore_snapshot(user_client, snapshot_name, restored_name)
-        wait_for_restore_complete(client, res.job_id)
+        job_id, _ = self.restore_snapshot(user_client, snapshot_name, restored_name)
+        wait_for_restore_complete(client, job_id)
 
         # cleanup
         self.drop_snapshot(client, snapshot_name)
@@ -4524,8 +4514,8 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         assert info.name == snapshot_name
 
         restored_name = cf.gen_unique_str(prefix + "_restored")
-        res, _ = self.restore_snapshot(admin_client, snapshot_name, restored_name)
-        wait_for_restore_complete(client, res.job_id)
+        job_id, _ = self.restore_snapshot(admin_client, snapshot_name, restored_name)
+        wait_for_restore_complete(client, job_id)
 
         self.drop_snapshot(admin_client, snapshot_name)
         self.drop_collection(client, restored_name)
