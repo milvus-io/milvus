@@ -2130,7 +2130,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.MaxVectorFieldNum = ParamItem{
 		Key:          "proxy.maxVectorFieldNum",
 		Version:      "2.4.0",
-		DefaultValue: "4",
+		DefaultValue: "10",
 		PanicIfEmpty: true,
 		Doc:          "The maximum number of vector fields that can be specified in a collection",
 		Export:       true,

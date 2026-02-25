@@ -531,7 +531,10 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         for _ in range(ct.max_vector_field_num + 1):
             schema_2.add_field(cf.gen_unique_str("vector_field_name"), DataType.FLOAT_VECTOR, dim=default_dim)
         schema_2.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        error_vector_over = {ct.err_code: 65535, ct.err_msg: "maximum vector field's number should be limited to 4"}
+        error_vector_over = {
+            ct.err_code: 65535,
+            ct.err_msg: f"maximum vector field's number should be limited to {ct.max_vector_field_num}",
+        }
         self.create_collection(
             client,
             collection_name,
