@@ -156,18 +156,18 @@ func TestLogCombinesContextAndCallSiteFields(t *testing.T) {
 	assert.Equal(t, "call_value", entry["call_field"])
 }
 
-func TestNilContextAddsWarningField(t *testing.T) {
+func TestBackgroundContextNoWarningField(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
 	Init(logger)
 	defer resetLogger()
 
-	Info(nil, "test with nil context")
+	Info(context.Background(), "test with background context")
 
 	var entry map[string]interface{}
 	err := json.Unmarshal(buf.Bytes(), &entry)
 	require.NoError(t, err)
-	assert.Equal(t, true, entry["_ctx_nil"])
+	assert.Nil(t, entry["_ctx_nil"])
 }
 
 func TestLogLevelFiltering(t *testing.T) {
@@ -413,20 +413,20 @@ func TestLoggerAllLevels(t *testing.T) {
 	}
 }
 
-func TestLoggerNilContext(t *testing.T) {
+func TestLoggerBackgroundContext(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
 	Init(logger)
 	defer resetLogger()
 
 	componentLogger := With(String("module", "test"))
-	componentLogger.Info(nil, "nil context log")
+	componentLogger.Info(context.Background(), "background context log")
 
 	var entry map[string]interface{}
 	err := json.Unmarshal(buf.Bytes(), &entry)
 	require.NoError(t, err)
 	assert.Equal(t, "test", entry["module"])
-	assert.Equal(t, true, entry["_ctx_nil"])
+	assert.Nil(t, entry["_ctx_nil"])
 }
 
 func TestLoggerOptimizationUsesCtxLoggerWhenMoreFields(t *testing.T) {
@@ -728,8 +728,8 @@ func TestLoggerLogComponentMoreFieldsWithCtxNoExtra(t *testing.T) {
 	assert.Equal(t, "trace123", entry["trace_id"])
 }
 
-// Test Logger.log nil context with fields
-func TestLoggerLogNilContextWithFields(t *testing.T) {
+// Test Logger.log with background context and extra fields
+func TestLoggerLogBackgroundContextWithFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
 	Init(logger)
@@ -737,19 +737,18 @@ func TestLoggerLogNilContextWithFields(t *testing.T) {
 
 	componentLogger := With(String("module", "test"))
 
-	// Log with nil context and extra fields
-	componentLogger.Info(nil, "nil context message", String("extra", "value"))
+	componentLogger.Info(context.Background(), "background context message", String("extra", "value"))
 
 	var entry map[string]interface{}
 	err := json.Unmarshal(buf.Bytes(), &entry)
 	require.NoError(t, err)
 	assert.Equal(t, "test", entry["module"])
 	assert.Equal(t, "value", entry["extra"])
-	assert.Equal(t, true, entry["_ctx_nil"])
+	assert.Nil(t, entry["_ctx_nil"])
 }
 
-// Test Logger.log nil context without fields
-func TestLoggerLogNilContextNoFields(t *testing.T) {
+// Test Logger.log with background context without extra fields
+func TestLoggerLogBackgroundContextNoFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
 	Init(logger)
@@ -757,14 +756,13 @@ func TestLoggerLogNilContextNoFields(t *testing.T) {
 
 	componentLogger := With(String("module", "test"))
 
-	// Log with nil context and no extra fields
-	componentLogger.Info(nil, "nil context message")
+	componentLogger.Info(context.Background(), "background context message")
 
 	var entry map[string]interface{}
 	err := json.Unmarshal(buf.Bytes(), &entry)
 	require.NoError(t, err)
 	assert.Equal(t, "test", entry["module"])
-	assert.Equal(t, true, entry["_ctx_nil"])
+	assert.Nil(t, entry["_ctx_nil"])
 }
 
 // Test global log function with context that has cached logger
@@ -819,7 +817,7 @@ func TestLoggerLogComponentMoreFieldsWithCtxAndExtra(t *testing.T) {
 }
 
 // Test global log function with context that has fields but uses FieldsFromContext path
-// This tests the branch where ctx != nil, loggerFromContext returns nil, and ctxFields > 0
+// This tests the branch where ctx != nil, lc.logger is nil, and ctxFields > 0
 func TestGlobalLogWithContextFieldsNoCache(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
@@ -921,18 +919,18 @@ func TestDPanicIncludesFields(t *testing.T) {
 	assert.Equal(t, "value", entry["key"])
 }
 
-func TestDPanicNilContext(t *testing.T) {
+func TestDPanicBackgroundContext(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
 	Init(logger)
 	defer resetLogger()
 
-	DPanic(nil, "dpanic nil ctx")
+	DPanic(context.Background(), "dpanic background ctx")
 
 	var entry map[string]interface{}
 	err := json.Unmarshal(buf.Bytes(), &entry)
 	require.NoError(t, err)
-	assert.Equal(t, true, entry["_ctx_nil"])
+	assert.Nil(t, entry["_ctx_nil"])
 }
 
 func TestLoggerDPanic(t *testing.T) {

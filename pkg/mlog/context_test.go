@@ -74,8 +74,7 @@ func TestWithFieldsChildInheritsParent(t *testing.T) {
 }
 
 func TestWithFieldsNilContext(t *testing.T) {
-	// Should not panic, use background context
-	ctx := WithFields(nil, String("key", "value"))
+	ctx := WithFields(context.Background(), String("key", "value"))
 	assert.NotNil(t, ctx)
 
 	fields := FieldsFromContext(ctx)
@@ -85,7 +84,7 @@ func TestWithFieldsNilContext(t *testing.T) {
 }
 
 func TestFieldsFromContextNilContext(t *testing.T) {
-	fields := FieldsFromContext(nil)
+	fields := FieldsFromContext(context.Background())
 	assert.Nil(t, fields)
 }
 
@@ -201,7 +200,7 @@ func TestWithFieldsCombinesRegularAndPropagated(t *testing.T) {
 }
 
 func TestGetPropagatedNilContext(t *testing.T) {
-	props := GetPropagated(nil)
+	props := GetPropagated(context.Background())
 	assert.Nil(t, props)
 }
 
@@ -220,7 +219,7 @@ func TestGetPropagatedOnlyRegularFields(t *testing.T) {
 }
 
 func TestWithFieldsNilContextWithPropagated(t *testing.T) {
-	ctx := WithFields(nil, propagatedStringField("key", "value"))
+	ctx := WithFields(context.Background(), propagatedStringField("key", "value"))
 	assert.NotNil(t, ctx)
 
 	fields := FieldsFromContext(ctx)
