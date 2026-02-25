@@ -1,3 +1,4 @@
+import math
 import pytest
 import unittest
 from enum import Enum
@@ -256,6 +257,9 @@ class Op(Enum):
     bulk_insert = 'bulk_insert'
     alter_collection = 'alter_collection'
     add_field = 'add_field'
+    add_vector_field = 'add_vector_field'
+    null_vector_search = 'null_vector_search'
+    null_vector_query = 'null_vector_query'
     rename_collection = 'rename_collection'
     snapshot = 'snapshot'
     restore_snapshot = 'restore_snapshot'
@@ -2764,6 +2768,238 @@ class SnapshotRestoreChecker(Checker):
         while self._keep_running:
             self.run_task()
             sleep(constants.WAIT_PER_OP * 3)
+
+
+class NullVectorSearchChecker(Checker):
+    """check search operations on nullable vector fields, validate no NaN distances (null vector leak detection)"""
+
+    NAN_THRESHOLD = 3  # consecutive NaN detections before asserting failure
+
+    def __init__(self, collection_name=None, shards_num=2, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("NullVectorSearchChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        self.insert_data()
+        # Collect nullable dense vector fields
+        self.nullable_vector_fields = []
+        for field in self.schema.fields:
+            if field.dtype in ct.all_dense_vector_types and getattr(field, 'nullable', False):
+                self.nullable_vector_fields.append({
+                    "name": field.name,
+                    "dim": getattr(field, 'dim', ct.default_dim),
+                    "dtype": field.dtype
+                })
+        self.data = None
+        self.anns_field_name = None
+        self.search_param = None
+        self._nan_consecutive = 0
+
+    @trace()
+    def search(self):
+        try:
+            res = self.milvus_client.search(
+                collection_name=self.c_name,
+                data=self.data,
+                anns_field=self.anns_field_name,
+                search_params=self.search_param,
+                limit=5,
+                partition_names=self.p_names,
+                timeout=search_timeout
+            )
+            return res, True
+        except Exception as e:
+            return str(e), False
+
+    @exception_handler()
+    def run_task(self):
+        if not self.nullable_vector_fields:
+            log.warning("[NullVectorSearchChecker] No nullable vector fields available")
+            return None, True
+
+        field_item = random.choice(self.nullable_vector_fields)
+        self.anns_field_name = field_item["name"]
+        dim = field_item["dim"]
+        dtype = field_item["dtype"]
+
+        self.data = cf.gen_vectors(1, dim, vector_data_type=dtype)
+        if dtype == DataType.INT8_VECTOR:
+            self.search_param = constants.DEFAULT_INT8_SEARCH_PARAM
+        else:
+            self.search_param = constants.DEFAULT_SEARCH_PARAM
+
+        res, result = self.search()
+        if not result:
+            self._nan_consecutive = 0
+            return res, result
+
+        # Validate no NaN distances (null vector leak indicator)
+        has_nan = False
+        try:
+            for hits in res:
+                for hit in hits:
+                    if math.isnan(hit.get('distance', 0)):
+                        has_nan = True
+                        break
+                if has_nan:
+                    break
+        except Exception as e:
+            log.debug(f"[NullVectorSearchChecker] NaN check skipped: {e}")
+
+        if has_nan:
+            self._nan_consecutive += 1
+            log.warning(f"[NullVectorSearchChecker] NaN distance on '{self.anns_field_name}' "
+                        f"(consecutive={self._nan_consecutive}/{self.NAN_THRESHOLD})")
+            if self._nan_consecutive >= self.NAN_THRESHOLD:
+                self._nan_consecutive = 0
+                return "null vector leaked into search index (NaN distance)", False
+        else:
+            self._nan_consecutive = 0
+
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP / 10)
+
+
+class NullVectorQueryChecker(Checker):
+    """check query operations on nullable vector fields, validate null/non-null ratio consistency"""
+
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("NullVectorQueryChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
+        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
+        self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)
+        self.insert_data()
+        # Collect nullable dense vector field names
+        self.nullable_vector_fields = []
+        for field in self.schema.fields:
+            if field.dtype in ct.all_dense_vector_types and getattr(field, 'nullable', False):
+                self.nullable_vector_fields.append(field.name)
+        self.term_expr = f"{self.int64_field_name} > 0"
+
+    @trace()
+    def query(self):
+        try:
+            vec_field = random.choice(self.nullable_vector_fields)
+            res = self.milvus_client.query(
+                collection_name=self.c_name,
+                filter=self.term_expr,
+                output_fields=[self.int64_field_name, vec_field],
+                limit=50,
+                timeout=query_timeout
+            )
+            # Validate: all-null results indicate possible data corruption
+            null_count = sum(1 for r in res if r.get(vec_field) is None)
+            non_null_count = len(res) - null_count
+            log.debug(f"[NullVectorQueryChecker] field='{vec_field}': "
+                      f"{len(res)} results, {null_count} null, {non_null_count} non-null")
+            if len(res) > 10 and null_count == len(res):
+                return (f"all {len(res)} vectors are null for field '{vec_field}', "
+                        f"possible data corruption"), False
+            return res, True
+        except Exception as e:
+            log.info(f"[NullVectorQueryChecker] query error: {e}")
+            return str(e), False
+
+    @exception_handler()
+    def run_task(self):
+        if not self.nullable_vector_fields:
+            log.warning("[NullVectorQueryChecker] No nullable vector fields available")
+            return None, True
+        res, result = self.query()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP / 10)
+
+
+class AddVectorFieldChecker(Checker):
+    """check add nullable vector field operations: add field, create index, insert, query to verify"""
+
+    def __init__(self, collection_name=None, shards_num=2, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("AddVectorFieldChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
+        self.initial_entities = stats.get("row_count", 0)
+
+    @trace()
+    def add_vector_field(self):
+        """Add a nullable FLOAT_VECTOR field, create index, insert data, and query to verify."""
+        try:
+            # Check vector field limit before adding
+            schema_info = self.milvus_client.describe_collection(self.c_name)
+            fields = schema_info.get("fields", [])
+            current_vector_fields = sum(
+                1 for f in fields if f.get("type") in (
+                    DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR,
+                    DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
+                    DataType.INT8_VECTOR, DataType.SPARSE_FLOAT_VECTOR
+                )
+            )
+            if current_vector_fields >= 10:
+                log.info(f"[AddVectorFieldChecker] vector field limit reached "
+                         f"({current_vector_fields}), fallback to insert only")
+                _, insert_result = self.insert_data()
+                return None, insert_result
+
+            new_vec_field = cf.gen_unique_str("new_vec_")
+            dim = 32
+            self.milvus_client.add_collection_field(
+                collection_name=self.c_name,
+                field_name=new_vec_field,
+                data_type=DataType.FLOAT_VECTOR,
+                dim=dim,
+                nullable=True)
+            log.debug(f"[AddVectorFieldChecker] added field {new_vec_field} (dim={dim})")
+            time.sleep(1)
+
+            # Create HNSW index for new vector field
+            index_params = IndexParams()
+            index_params.add_index(field_name=new_vec_field, index_type="HNSW",
+                                   metric_type="COSINE",
+                                   params={"M": 16, "efConstruction": 200})
+            self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
+            log.debug(f"[AddVectorFieldChecker] created index for {new_vec_field}")
+
+            # Insert data (gen_row_data_by_schema handles nullable vectors)
+            _, insert_result = self.insert_data()
+            if not insert_result:
+                return "insert failed after add vector field", False
+
+            # Query old rows: new field should be None for pre-existing rows
+            res = self.milvus_client.query(
+                collection_name=self.c_name,
+                filter=f"{self.int64_field_name} > 0",
+                output_fields=[new_vec_field],
+                limit=10,
+                timeout=query_timeout
+            )
+            if len(res) == 0:
+                return "query returned 0 rows after add vector field", False
+            null_count = sum(1 for r in res if r.get(new_vec_field) is None)
+            log.debug(f"[AddVectorFieldChecker] query: {len(res)} rows, {null_count} null for {new_vec_field}")
+
+            return None, True
+        except Exception as e:
+            log.error(f"[AddVectorFieldChecker] error: {e}")
+            return str(e), False
+
+    @exception_handler()
+    def run_task(self):
+        res, result = self.add_vector_field()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP * 6)
 
 
 class TestResultAnalyzer(unittest.TestCase):
