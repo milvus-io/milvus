@@ -931,3 +931,93 @@ func TestReplicateConfigValidator_validateConfigComparison(t *testing.T) {
 		assert.NoError(t, err) // This should pass since it's the same cluster
 	})
 }
+
+func TestValidateClusterConsistency_TLSFields(t *testing.T) {
+	t.Run("tls_fields_changed_rejected", func(t *testing.T) {
+		currentConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{
+					ClusterId: "cluster-1",
+					ConnectionParam: &commonpb.ConnectionParam{
+						Uri:       "localhost:19530",
+						Token:     "token",
+						CaPemPath: "/old/ca.pem",
+					},
+					Pchannels: []string{"ch1"},
+				},
+				{
+					ClusterId: "cluster-2",
+					ConnectionParam: &commonpb.ConnectionParam{
+						Uri:   "localhost:19531",
+						Token: "token",
+					},
+					Pchannels: []string{"ch2"},
+				},
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "cluster-1", TargetClusterId: "cluster-2"},
+			},
+		}
+
+		incomingConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{
+					ClusterId: "cluster-1",
+					ConnectionParam: &commonpb.ConnectionParam{
+						Uri:       "localhost:19530",
+						Token:     "token",
+						CaPemPath: "/new/ca.pem",
+					},
+					Pchannels: []string{"ch1"},
+				},
+				{
+					ClusterId: "cluster-2",
+					ConnectionParam: &commonpb.ConnectionParam{
+						Uri:   "localhost:19531",
+						Token: "token",
+					},
+					Pchannels: []string{"ch2"},
+				},
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "cluster-1", TargetClusterId: "cluster-2"},
+			},
+		}
+
+		validator := NewReplicateConfigValidator(incomingConfig, currentConfig, "cluster-1", []string{"ch1"})
+		err := validator.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ca_pem_path")
+	})
+
+	t.Run("tls_fields_unchanged_passes", func(t *testing.T) {
+		config := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{
+					ClusterId: "cluster-1",
+					ConnectionParam: &commonpb.ConnectionParam{
+						Uri:       "localhost:19530",
+						Token:     "token",
+						CaPemPath: "/certs/ca.pem",
+					},
+					Pchannels: []string{"ch1"},
+				},
+				{
+					ClusterId: "cluster-2",
+					ConnectionParam: &commonpb.ConnectionParam{
+						Uri:   "localhost:19531",
+						Token: "token",
+					},
+					Pchannels: []string{"ch2"},
+				},
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "cluster-1", TargetClusterId: "cluster-2"},
+			},
+		}
+
+		validator := NewReplicateConfigValidator(config, config, "cluster-1", []string{"ch1"})
+		err := validator.Validate()
+		assert.NoError(t, err)
+	})
+}

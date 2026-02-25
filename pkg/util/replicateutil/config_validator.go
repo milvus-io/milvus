@@ -285,6 +285,18 @@ func (v *ReplicateConfigValidator) validateClusterConsistency(current, incoming 
 		return fmt.Errorf("cluster '%s' connection_param.token cannot be changed",
 			current.GetClusterId())
 	}
+	if currentConn.GetCaPemPath() != incomingConn.GetCaPemPath() {
+		return fmt.Errorf("cluster '%s' connection_param.ca_pem_path cannot be changed",
+			current.GetClusterId())
+	}
+	if currentConn.GetClientPemPath() != incomingConn.GetClientPemPath() {
+		return fmt.Errorf("cluster '%s' connection_param.client_pem_path cannot be changed",
+			current.GetClusterId())
+	}
+	if currentConn.GetClientKeyPath() != incomingConn.GetClientKeyPath() {
+		return fmt.Errorf("cluster '%s' connection_param.client_key_path cannot be changed",
+			current.GetClusterId())
+	}
 
 	return nil
 }

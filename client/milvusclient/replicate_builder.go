@@ -13,6 +13,9 @@ type MilvusClusterBuilder interface {
 	// WithURI sets the connection URI
 	WithURI(uri string) MilvusClusterBuilder
 
+	// WithTLS sets the TLS certificate paths for mTLS or one-way TLS
+	WithTLS(caPemPath, clientPemPath, clientKeyPath string) MilvusClusterBuilder
+
 	// Build constructs and returns the MilvusCluster object
 	Build() *commonpb.MilvusCluster
 }
@@ -40,10 +43,13 @@ func NewReplicateConfigurationBuilder() ReplicateConfigurationBuilder {
 }
 
 type milvusClusterBuilder struct {
-	clusterID string
-	uri       string
-	token     string
-	pchannels []string
+	clusterID     string
+	uri           string
+	token         string
+	pchannels     []string
+	caPemPath     string
+	clientPemPath string
+	clientKeyPath string
 }
 
 func newMilvusClusterBuilder(clusterID string) MilvusClusterBuilder {
@@ -70,12 +76,22 @@ func (b *milvusClusterBuilder) WithURI(uri string) MilvusClusterBuilder {
 	return b
 }
 
+func (b *milvusClusterBuilder) WithTLS(caPemPath, clientPemPath, clientKeyPath string) MilvusClusterBuilder {
+	b.caPemPath = caPemPath
+	b.clientPemPath = clientPemPath
+	b.clientKeyPath = clientKeyPath
+	return b
+}
+
 func (b *milvusClusterBuilder) Build() *commonpb.MilvusCluster {
 	return &commonpb.MilvusCluster{
 		ClusterId: b.clusterID,
 		ConnectionParam: &commonpb.ConnectionParam{
-			Uri:   b.uri,
-			Token: b.token,
+			Uri:           b.uri,
+			Token:         b.token,
+			CaPemPath:     b.caPemPath,
+			ClientPemPath: b.clientPemPath,
+			ClientKeyPath: b.clientKeyPath,
 		},
 		Pchannels: b.pchannels,
 	}

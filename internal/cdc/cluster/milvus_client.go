@@ -39,10 +39,29 @@ type MilvusClient interface {
 type CreateMilvusClientFunc func(ctx context.Context, cluster *commonpb.MilvusCluster) (MilvusClient, error)
 
 func NewMilvusClient(ctx context.Context, cluster *commonpb.MilvusCluster) (MilvusClient, error) {
-	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
-		Address: cluster.GetConnectionParam().GetUri(),
-		APIKey:  cluster.GetConnectionParam().GetToken(),
-	})
+	connParam := cluster.GetConnectionParam()
+	config := &milvusclient.ClientConfig{
+		Address: connParam.GetUri(),
+		APIKey:  connParam.GetToken(),
+	}
+
+	// Build TLS config if CA cert path is provided
+	caPemPath := connParam.GetCaPemPath()
+	if caPemPath != "" {
+		tlsConfig, err := milvusclient.BuildTLSConfig(
+			caPemPath,
+			connParam.GetClientPemPath(),
+			connParam.GetClientKeyPath(),
+		)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to build TLS config for cluster "+cluster.GetClusterId())
+		}
+		config.TLSConfig = tlsConfig
+	} else if connParam.GetClientPemPath() != "" || connParam.GetClientKeyPath() != "" {
+		return nil, errors.New("client cert/key paths provided without ca_pem_path for cluster " + cluster.GetClusterId())
+	}
+
+	cli, err := milvusclient.New(ctx, config)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create milvus client")
 	}

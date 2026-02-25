@@ -2,6 +2,7 @@ package milvusclient
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"math"
 	"net/url"
@@ -61,6 +62,8 @@ type ClientConfig struct {
 	RetryRateLimit *RetryRateLimitOption // option for retry on rate limit inteceptor
 
 	DisableConn bool
+
+	TLSConfig *tls.Config // Custom TLS configuration (e.g. for mTLS).
 
 	// TelemetryConfig for client telemetry settings
 	TelemetryConfig *TelemetryConfig
