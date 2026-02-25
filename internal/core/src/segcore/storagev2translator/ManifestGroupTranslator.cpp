@@ -119,6 +119,14 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     size_t num_cells =
         (total_row_groups + kRowGroupsPerCell - 1) / kRowGroupsPerCell;
 
+    // Populate cell_row_group_ranges_ (single data source, no multi-file)
+    meta_.cell_row_group_ranges_.reserve(num_cells);
+    for (size_t cid = 0; cid < num_cells; ++cid) {
+        size_t start = cid * kRowGroupsPerCell;
+        size_t end = std::min(start + kRowGroupsPerCell, total_row_groups);
+        meta_.cell_row_group_ranges_.push_back({start, end});
+    }
+
     // Build num_rows_until_chunk_ and chunk_memory_size_
     meta_.num_rows_until_chunk_.reserve(num_cells + 1);
     meta_.num_rows_until_chunk_.push_back(0);

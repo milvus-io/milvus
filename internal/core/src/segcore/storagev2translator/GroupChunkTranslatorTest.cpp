@@ -300,12 +300,12 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         /* warmup_policy */ "");
 
     // Test total number of cells across all files
+    // Cells never span files, so count per-file ceil
     int64_t expected_total_cells = 0;
     for (auto row_groups : expected_row_groups_per_file) {
-        expected_total_cells += row_groups;
+        expected_total_cells +=
+            (row_groups + kRowGroupsPerCell - 1) / kRowGroupsPerCell;
     }
-    expected_total_cells =
-        (expected_total_cells + kRowGroupsPerCell - 1) / kRowGroupsPerCell;
     EXPECT_EQ(translator->num_cells(), expected_total_cells);
 
     // Test get_file_and_row_group_offset for global row group indices across
@@ -379,9 +379,8 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         auto usage = translator->estimated_byte_size_of_cell(cid).first;
 
         // Calculate expected size by summing all row groups in this cell
-        size_t rg_start = cid * kRowGroupsPerCell;
-        size_t rg_end =
-            std::min(rg_start + kRowGroupsPerCell, total_row_groups);
+        auto [rg_start, rg_end] = static_cast<GroupCTMeta*>(translator->meta())
+                                      ->get_row_group_range(cid);
         int64_t expected_size = 0;
         for (size_t rg_idx = rg_start; rg_idx < rg_end; ++rg_idx) {
             auto [file_idx, local_rg_idx] =
