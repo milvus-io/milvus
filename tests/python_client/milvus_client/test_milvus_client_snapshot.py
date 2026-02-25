@@ -4444,11 +4444,13 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
                              check_task=CheckTasks.check_permission_deny)
 
     @pytest.mark.tags(CaseLabel.RBAC)
-    def test_snapshot_v2_privilege_group_no_snapshot_access(self, host, port):
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/47855 "
+                               "v2 built-in privilege groups missing snapshot privileges")
+    def test_snapshot_v2_privilege_group_cluster_admin(self, host, port):
         """
-        target: verify v2 built-in privilege groups do NOT include snapshot privileges
+        target: verify ClusterAdmin v2 privilege group grants all snapshot ops
         method: grant ClusterAdmin (highest v2 group), attempt all snapshot ops
-        expected: all snapshot ops denied (known issue: snapshot privileges missing from v2 groups)
+        expected: all snapshot ops succeed (currently fails due to #47855)
         """
         client = self._client()
         collection_name, snapshot_name = self._prepare_collection_with_snapshot(client)
@@ -4459,22 +4461,25 @@ class TestMilvusClientSnapshotRbac(TestMilvusClientV2Base):
         self.grant_privilege_v2(client, role_name, "ClusterAdmin", "*", "*")
         time.sleep(10)
 
-        # all snapshot ops should be denied because v2 groups lack snapshot privileges
+        # all snapshot ops should succeed after #47855 is fixed
         new_snap = cf.gen_unique_str(prefix)
-        self.create_snapshot(user_client, collection_name, new_snap,
-                             check_task=CheckTasks.check_permission_deny)
-        self.list_snapshots(user_client, collection_name=collection_name,
-                            check_task=CheckTasks.check_permission_deny)
-        self.describe_snapshot(user_client, snapshot_name,
-                               check_task=CheckTasks.check_permission_deny)
-        self.drop_snapshot(user_client, snapshot_name,
-                           check_task=CheckTasks.check_permission_deny)
+        self.create_snapshot(user_client, collection_name, new_snap)
+
+        snapshots, _ = self.list_snapshots(user_client, collection_name=collection_name)
+        assert new_snap in snapshots
+
+        info, _ = self.describe_snapshot(user_client, new_snap)
+        assert info.name == new_snap
+
         restored_name = cf.gen_unique_str(prefix + "_restored")
-        self.restore_snapshot(user_client, snapshot_name, restored_name,
-                              check_task=CheckTasks.check_permission_deny)
+        job_id, _ = self.restore_snapshot(user_client, new_snap, restored_name)
+        wait_for_restore_complete(client, job_id)
+
+        self.drop_snapshot(user_client, new_snap)
 
         # cleanup
         self.drop_snapshot(client, snapshot_name)
+        self.drop_collection(client, restored_name)
 
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_snapshot_admin_role_has_full_access(self, host, port):
