@@ -198,7 +198,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		assert.Contains(t, err.Error(), "not an external collection")
 	})
 
-	t.Run("alloc_task_id_failed", func(t *testing.T) {
+	t.Run("alloc_task_id_failed_rollback_job", func(t *testing.T) {
 		refreshMeta := createTestRefreshMeta(t)
 		alloc := &stubAllocator{}
 
@@ -228,6 +228,10 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 
 		_, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "")
 		assert.Error(t, err)
+
+		// Verify the job was rolled back and does not remain in meta
+		job := refreshMeta.GetJob(1)
+		assert.Nil(t, job, "job should be rolled back after task creation failure")
 	})
 
 	t.Run("reject_when_active_job_exists", func(t *testing.T) {
@@ -306,6 +310,29 @@ func TestExternalCollectionRefreshManager_GetJobProgress(t *testing.T) {
 		assert.Equal(t, int64(50), job.GetProgress())
 	})
 
+	t.Run("job_exists_no_tasks_keeps_persisted_state", func(t *testing.T) {
+		now := time.Now().UnixMilli()
+		existingJob := &datapb.ExternalCollectionRefreshJob{
+			JobId:        1,
+			CollectionId: 100,
+			State:        indexpb.JobState_JobStateInit,
+			StartTime:    now,
+		}
+		// No tasks for this job
+		refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{existingJob}, nil)
+
+		alloc := &stubAllocator{}
+		scheduler := newStubScheduler()
+
+		manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil)
+
+		job, err := manager.GetJobProgress(ctx, 1)
+		assert.NoError(t, err)
+		assert.NotNil(t, job)
+		// When no tasks exist, should keep the persisted state (Init), not overwrite to None
+		assert.Equal(t, indexpb.JobState_JobStateInit, job.GetState())
+	})
+
 	t.Run("job_not_found", func(t *testing.T) {
 		refreshMeta := createTestRefreshMeta(t)
 		alloc := &stubAllocator{}
@@ -348,6 +375,26 @@ func TestExternalCollectionRefreshManager_ListJobs(t *testing.T) {
 		assert.Equal(t, int64(3), result[0].GetJobId())
 		assert.Equal(t, int64(2), result[1].GetJobId())
 		assert.Equal(t, int64(1), result[2].GetJobId())
+	})
+
+	t.Run("jobs_without_tasks_keep_persisted_state", func(t *testing.T) {
+		now := time.Now().UnixMilli()
+		jobs := []*datapb.ExternalCollectionRefreshJob{
+			{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit, StartTime: now},
+		}
+		// No tasks
+		refreshMeta := createTestRefreshMetaWithJobs(t, jobs, nil)
+
+		alloc := &stubAllocator{}
+		scheduler := newStubScheduler()
+
+		manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil)
+
+		result, err := manager.ListJobs(ctx, 100)
+		assert.NoError(t, err)
+		assert.Len(t, result, 1)
+		// When no tasks exist, should keep the persisted state (Init), not overwrite to None
+		assert.Equal(t, indexpb.JobState_JobStateInit, result[0].GetState())
 	})
 
 	t.Run("empty_list", func(t *testing.T) {

@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // --- Test refreshExternalCollectionV2AckCallback ---
@@ -190,4 +191,71 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_EmptySource(t *test
 	// Should pass empty source and spec (manager will use collection defaults)
 	assert.Equal(t, "", capturedSource)
 	assert.Equal(t, "", capturedSpec)
+}
+
+func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_NonRetriableError(t *testing.T) {
+	ctx := context.Background()
+
+	// Mock SubmitRefreshJobWithID to return a non-retriable error
+	mockSubmit := mockey.Mock((*externalCollectionRefreshManager).SubmitRefreshJobWithID).To(func(
+		m *externalCollectionRefreshManager,
+		ctx context.Context,
+		jobID int64,
+		collectionID int64,
+		collectionName string,
+		externalSource, externalSpec string,
+	) (int64, error) {
+		return 0, merr.WrapErrCollectionNotFound(collectionID)
+	}).Build()
+	defer mockSubmit.UnPatch()
+
+	server := &Server{
+		externalCollectionRefreshManager: &externalCollectionRefreshManager{},
+	}
+	callbacks := &DDLCallbacks{Server: server}
+
+	broadcastMsg := message.NewRefreshExternalCollectionMessageBuilderV2().
+		WithHeader(&message.RefreshExternalCollectionMessageHeader{
+			JobId:          123,
+			CollectionId:   100,
+			CollectionName: "test_collection",
+			ExternalSource: "s3://bucket/path",
+		}).
+		WithBody(&message.RefreshExternalCollectionMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+
+	typedMsg := message.MustAsBroadcastRefreshExternalCollectionMessageV2(broadcastMsg)
+
+	result := message.BroadcastResultRefreshExternalCollectionMessageV2{
+		Message: typedMsg,
+	}
+
+	// Non-retriable error should return nil (not block WAL)
+	err := callbacks.refreshExternalCollectionV2AckCallback(ctx, result)
+	assert.NoError(t, err)
+}
+
+// --- Test isNonRetriableRefreshError ---
+
+func TestIsNonRetriableRefreshError(t *testing.T) {
+	t.Run("collection_not_found", func(t *testing.T) {
+		err := merr.WrapErrCollectionNotFound(100)
+		assert.True(t, isNonRetriableRefreshError(err))
+	})
+
+	t.Run("collection_illegal_schema", func(t *testing.T) {
+		err := merr.WrapErrCollectionIllegalSchema("test", "not external")
+		assert.True(t, isNonRetriableRefreshError(err))
+	})
+
+	t.Run("task_duplicate", func(t *testing.T) {
+		err := merr.WrapErrTaskDuplicate("refresh", "already in progress")
+		assert.True(t, isNonRetriableRefreshError(err))
+	})
+
+	t.Run("generic_error_is_retriable", func(t *testing.T) {
+		err := errors.New("connection timeout")
+		assert.False(t, isNonRetriableRefreshError(err))
+	})
 }

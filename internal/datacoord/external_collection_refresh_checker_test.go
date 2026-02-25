@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -457,6 +458,170 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 		// Should not GC recent job
 		assert.NotNil(t, meta.GetJob(1))
 	})
+}
+
+func TestExternalCollectionRefreshChecker_Run(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	catalog := &stubCatalog{}
+
+	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(nil, nil).Build()
+	defer mockListJobs.UnPatch()
+	mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+	defer mockListTasks.UnPatch()
+
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+
+	closeChan := make(chan struct{})
+	checker := newRefreshChecker(ctx, refreshMeta, closeChan)
+
+	// Run checker in goroutine and close immediately to test the run loop
+	done := make(chan struct{})
+	go func() {
+		checker.run()
+		close(done)
+	}()
+
+	// Close immediately to test exit path
+	close(closeChan)
+
+	// Wait for checker to exit
+	select {
+	case <-done:
+		// Success
+	case <-time.After(5 * time.Second):
+		t.Fatal("checker did not exit in time")
+	}
+}
+
+func TestExternalCollectionRefreshChecker_AggregateJobState_UpdateStateFailed(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	catalog := &stubCatalog{}
+	jobs := []*datapb.ExternalCollectionRefreshJob{
+		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInit, Progress: 0},
+	}
+	tasks := []*datapb.ExternalCollectionRefreshTask{
+		{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateInProgress, Progress: 50},
+	}
+
+	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+	defer mockListJobs.UnPatch()
+	mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+	defer mockListTasks.UnPatch()
+
+	// Mock save to fail
+	mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(errors.New("save failed")).Build()
+	defer mockSaveJob.UnPatch()
+
+	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+	closeChan := make(chan struct{})
+	checker := newRefreshChecker(ctx, meta, closeChan)
+
+	job := meta.GetJob(1)
+	checker.aggregateJobState(job)
+
+	// State should remain Init because save failed
+	assert.Equal(t, indexpb.JobState_JobStateInit, meta.GetJob(1).GetState())
+}
+
+func TestExternalCollectionRefreshChecker_AggregateJobState_FailedWithProgressUpdate(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	catalog := &stubCatalog{}
+	jobs := []*datapb.ExternalCollectionRefreshJob{
+		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, Progress: 10},
+	}
+	tasks := []*datapb.ExternalCollectionRefreshTask{
+		{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFailed, Progress: 30, FailReason: "worker error"},
+	}
+
+	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+	defer mockListJobs.UnPatch()
+	mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(tasks, nil).Build()
+	defer mockListTasks.UnPatch()
+	mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(nil).Build()
+	defer mockSaveJob.UnPatch()
+
+	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+	closeChan := make(chan struct{})
+	checker := newRefreshChecker(ctx, meta, closeChan)
+
+	job := meta.GetJob(1)
+	checker.aggregateJobState(job)
+
+	// Should update to Failed with progress snapshot
+	updatedJob := meta.GetJob(1)
+	assert.Equal(t, indexpb.JobState_JobStateFailed, updatedJob.GetState())
+	assert.Equal(t, "worker error", updatedJob.GetFailReason())
+}
+
+func TestExternalCollectionRefreshChecker_TryTimeoutJob_UpdateStateFailed(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	timeout := Params.DataCoordCfg.ExternalCollectionJobTimeout.GetAsDuration(time.Second)
+	oldStartTime := time.Now().Add(-timeout - time.Hour).UnixMilli()
+
+	catalog := &stubCatalog{}
+	jobs := []*datapb.ExternalCollectionRefreshJob{
+		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, StartTime: oldStartTime},
+	}
+
+	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+	defer mockListJobs.UnPatch()
+	mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+	defer mockListTasks.UnPatch()
+
+	// Mock save to fail
+	mockSaveJob := mockey.Mock(mockey.GetMethod(catalog, "SaveExternalCollectionRefreshJob")).Return(errors.New("save failed")).Build()
+	defer mockSaveJob.UnPatch()
+
+	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+	closeChan := make(chan struct{})
+	checker := newRefreshChecker(ctx, meta, closeChan)
+
+	job := meta.GetJob(1)
+	checker.tryTimeoutJob(job)
+
+	// State should remain InProgress because save failed
+	assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetJob(1).GetState())
+}
+
+func TestExternalCollectionRefreshChecker_CheckGC_DropJobFailed(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	retention := Params.DataCoordCfg.ExternalCollectionJobRetention.GetAsDuration(time.Second)
+	oldEndTime := time.Now().Add(-retention - time.Hour).UnixMilli()
+
+	catalog := &stubCatalog{}
+	jobs := []*datapb.ExternalCollectionRefreshJob{
+		{JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFinished, EndTime: oldEndTime},
+	}
+
+	mockListJobs := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshJobs")).Return(jobs, nil).Build()
+	defer mockListJobs.UnPatch()
+	mockListTasks := mockey.Mock(mockey.GetMethod(catalog, "ListExternalCollectionRefreshTasks")).Return(nil, nil).Build()
+	defer mockListTasks.UnPatch()
+
+	// Mock drop to fail
+	mockDropJob := mockey.Mock(mockey.GetMethod(catalog, "DropExternalCollectionRefreshJob")).Return(errors.New("drop failed")).Build()
+	defer mockDropJob.UnPatch()
+
+	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
+	closeChan := make(chan struct{})
+	checker := newRefreshChecker(ctx, meta, closeChan)
+
+	job := meta.GetJob(1)
+	checker.checkGC(job)
+
+	// Job should still exist because drop failed
+	assert.NotNil(t, meta.GetJob(1))
 }
 
 func TestExternalCollectionRefreshChecker_LogJobStats(t *testing.T) {

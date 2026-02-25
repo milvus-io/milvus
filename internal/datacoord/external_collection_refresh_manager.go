@@ -249,6 +249,12 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 	// Create task(s) for this job
 	tasks, err := m.createTasksForJob(ctx, job)
 	if err != nil {
+		// Rollback: remove the already-persisted job to avoid leaving it stuck in Init state
+		if rollbackErr := m.refreshMeta.DropJob(ctx, jobID); rollbackErr != nil {
+			log.Warn("failed to rollback job after task creation failure",
+				zap.Int64("jobID", jobID),
+				zap.Error(rollbackErr))
+		}
 		return 0, err
 	}
 
@@ -326,9 +332,11 @@ func (m *externalCollectionRefreshManager) GetJobProgress(ctx context.Context, j
 
 	// Aggregate state and progress from tasks
 	state, progress := m.refreshMeta.AggregateJobStateFromTasks(jobID)
-	// Return a real-time view computed from tasks. Persisted job state is updated by checker.
-	job.State = state
-	job.Progress = progress
+	// Only update if tasks exist. If state is None (no tasks yet), keep persisted state.
+	if state != indexpb.JobState_JobStateNone {
+		job.State = state
+		job.Progress = progress
+	}
 	return job, nil
 }
 
@@ -340,8 +348,11 @@ func (m *externalCollectionRefreshManager) ListJobs(ctx context.Context, collect
 	for _, job := range jobs {
 		// Aggregate state and progress from tasks
 		state, progress := m.refreshMeta.AggregateJobStateFromTasks(job.GetJobId())
-		job.State = state
-		job.Progress = progress
+		// Only update if tasks exist. If state is None (no tasks yet), keep persisted state.
+		if state != indexpb.JobState_JobStateNone {
+			job.State = state
+			job.Progress = progress
+		}
 		result = append(result, job)
 	}
 
