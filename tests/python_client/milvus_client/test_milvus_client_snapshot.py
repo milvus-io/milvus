@@ -1637,7 +1637,7 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
         desc = client.describe_collection(restored_collection_name)
         # Check auto_id is preserved
         pk_field = [f for f in desc["fields"] if f.get("is_primary")][0]
-        assert pk_field.get("auto_id", False) == True, "auto_id should be preserved"
+        assert pk_field.get("auto_id", False), "auto_id should be preserved"
 
         # Verify can insert without id
         new_rows = [{"vector": list(rng.random(default_dim))} for _ in range(10)]
@@ -2650,7 +2650,7 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
         fields = desc.get("fields", [])
         category_field = [f for f in fields if f.get("name") == "category"]
         assert len(category_field) == 1
-        assert category_field[0].get("is_partition_key") == True, \
+        assert category_field[0].get("is_partition_key"), \
             "Partition key should be preserved"
 
         # Verify data
@@ -3131,7 +3131,7 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
         assert res[0]["dynamic_str"] == "dynamic_50"
         assert res[0]["dynamic_int"] == 5000
         assert abs(res[0]["dynamic_float"] - 25.0) < 1e-5
-        assert res[0]["dynamic_bool"] == True
+        assert res[0]["dynamic_bool"] is True
 
         # Verify all data count
         res, _ = self.query(client, restored_collection_name,
@@ -3400,7 +3400,7 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
             f"Restore job should reach terminal state, got: {final_state}"
 
         # 5. Verify no resource leak - the target collection should not exist
-        collections = client.list_collections()
+        client.list_collections()
         # Target collection might or might not exist depending on timing
         # But the system should be in a consistent state
 
@@ -3759,7 +3759,7 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientV2Base):
         default_collections = client.list_collections()
         log.info(f"Collections in default db: {default_collections}")
         assert restored_collection_name not in default_collections, \
-            f"Restored collection should NOT be in default db"
+            "Restored collection should NOT be in default db"
 
         # 6. Verify data integrity (switch back to target db)
         self.using_database(client, target_db)
