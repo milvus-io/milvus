@@ -52,13 +52,15 @@ func prepareLog(ctx context.Context, fields []Field) (*zap.Logger, []Field) {
 		return getLogger(), append(fields, nilContextField)
 	}
 
-	logger := loggerFromContext(ctx)
-	if logger == nil {
-		logger = getLogger()
-		ctxFields := FieldsFromContext(ctx)
-		if len(ctxFields) > 0 {
-			fields = append(ctxFields, fields...)
-		}
+	lc := getLogContext(ctx)
+	if lc.logger != nil {
+		return lc.logger, fields
+	}
+
+	logger := getLogger()
+	ctxFields := lc.getFields()
+	if len(ctxFields) > 0 {
+		fields = append(ctxFields, fields...)
 	}
 
 	return logger, fields
@@ -208,6 +210,16 @@ func (l *Logger) WithLazy(fields ...Field) *Logger {
 // Level returns the current global log level.
 func (l *Logger) Level() Level {
 	return GetLevel()
+}
+
+// LevelEnabled reports whether a message at the given level would be logged.
+// Use this to guard expensive field construction on hot paths:
+//
+//	if l.LevelEnabled(mlog.DebugLevel) {
+//	    l.Debug(ctx, "details", mlog.String("dump", expensiveDump()))
+//	}
+func (l *Logger) LevelEnabled(level Level) bool {
+	return globalLevel.Enabled(level)
 }
 
 // prepareLog resolves the logger and fields for Logger methods.

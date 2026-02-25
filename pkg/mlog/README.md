@@ -255,16 +255,22 @@ atomicLevel := mlog.GetAtomicLevel()
 
 ## Performance Optimizations
 
-### 1. Early Return
+### 1. Early Return & LevelEnabled Guard
 
-Returns immediately when log level is disabled, avoiding field processing:
+Log functions return immediately when the level is disabled, avoiding field processing. For hot paths where field construction itself is expensive, use `LevelEnabled` to skip the entire block:
 
 ```go
+// Internal early return (automatic)
 func Log(ctx context.Context, level Level, msg string, fields ...Field) {
     if !globalLevel.Enabled(level) {
         return  // Fast return, zero overhead
     }
     // ...
+}
+
+// Caller-side guard for expensive field construction
+if mlog.LevelEnabled(mlog.DebugLevel) {
+    mlog.Debug(ctx, "details", mlog.String("dump", expensiveDump()))
 }
 ```
 
@@ -382,6 +388,7 @@ mloggrpc.UnaryServerInterceptor("datanode")
 | `WithFields(ctx, fields...)` | Add fields to context |
 | `FieldsFromContext(ctx)` | Extract fields from context |
 | `GetPropagated(ctx)` | Get propagated fields |
+| `LevelEnabled(level)` | Check if a level would be logged |
 | `SetLevel(level)` | Set log level |
 | `GetLevel()` | Get current log level |
 | `GetAtomicLevel()` | Get AtomicLevel for custom config integration |
@@ -395,6 +402,7 @@ mloggrpc.UnaryServerInterceptor("datanode")
 | `(*Logger) With(fields...)` | Add fields (immediately encoded), returns new Logger |
 | `(*Logger) WithLazy(fields...)` | Add fields (lazily encoded), returns new Logger |
 | `(*Logger) Level()` | Get current log level |
+| `(*Logger) LevelEnabled(level)` | Check if a level would be logged |
 | `(*Logger) Debug(ctx, msg, fields...)` | Log at Debug level |
 | `(*Logger) Info(ctx, msg, fields...)` | Log at Info level |
 | `(*Logger) Warn(ctx, msg, fields...)` | Log at Warn level |
@@ -487,46 +495,44 @@ mlog.Info(ctx, "segment loaded",
 
 | Benchmark | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|
-| ZapInfo | 367 | 0 | 0 |
-| ZapInfoWithFields (3 fields) | 605 | 192 | 1 |
-| ZapInfoWithCaller | 1015 | 272 | 2 |
-| ZapInfoWithCaller+Fields | 1296 | 465 | 3 |
-| ZapInfoDisabledLevel | 6.2 | 0 | 0 |
+| ZapInfo | 377 | 0 | 0 |
+| ZapInfoWithFields (3 fields) | 598 | 192 | 1 |
+| ZapInfoDisabledLevel | 6.4 | 0 | 0 |
 
 ### Package-Level Functions
 
 | Benchmark | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|
-| MlogInfo | 457 | 32 | 2 |
-| MlogInfoWithFields (3 fields) | 686 | 224 | 3 |
-| MlogInfoWithContextFields | 419 | 0 | 0 |
-| MlogInfoWithContext+CallFields | 638 | 192 | 1 |
-| MlogInfoDisabledLevel | 2.6 | 0 | 0 |
-| MlogInfoNilContext | 483 | 64 | 1 |
+| MlogInfo | 382 | 0 | 0 |
+| MlogInfoWithFields (3 fields) | 627 | 192 | 1 |
+| MlogInfoWithContextFields | 415 | 0 | 0 |
+| MlogInfoWithContext+CallFields | 647 | 192 | 1 |
+| MlogInfoDisabledLevel | 2.7 | 0 | 0 |
+| MlogInfoNilContext | 478 | 64 | 1 |
 
 ### Logger Methods
 
 | Benchmark | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|
-| LoggerInfo | 432 | 16 | 1 |
-| LoggerInfoWithFields (3 fields) | 661 | 208 | 2 |
-| LoggerInfoWithContextFields | 472 | 0 | 0 |
+| LoggerInfo | 404 | 0 | 0 |
+| LoggerInfoWithFields (3 fields) | 624 | 192 | 1 |
+| LoggerInfoWithContextFields | 471 | 0 | 0 |
 | LoggerInfoDisabledLevel | 2.9 | 0 | 0 |
 
 ### Rate-Limited Functions
 
 | Benchmark | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|
-| RatedInfoAllowed | 967 | 280 | 4 |
-| RatedInfoSuppressed | 501 | 248 | 2 |
-| RatedInfoDisabledLevel | 2.8 | 0 | 0 |
-| LoggerRatedInfoAllowed | 933 | 264 | 3 |
+| RatedInfoAllowed | 918 | 248 | 2 |
+| RatedInfoSuppressed | 521 | 248 | 2 |
+| RatedInfoDisabledLevel | 2.9 | 0 | 0 |
+| LoggerRatedInfoAllowed | 924 | 248 | 2 |
 | LoggerRatedInfoSuppressed | 507 | 248 | 2 |
 
 ### Key Takeaways
 
-1. **mlog vs zap (no caller)**: `mlog.Info` adds ~90ns (24%) overhead over bare `zap.Info` without caller, primarily from context lookup and atomic load of the global logger.
-2. **Zero allocation with context fields**: When fields are pre-encoded via `WithFields`, `MlogInfoWithContextFields` achieves 0 allocs at 419ns — faster than native `zap.Info` with 3 fields (605ns, 1 alloc).
-3. **Disabled level is extremely fast**: ~2.6ns with 0 allocs, 2.4x faster than zap's 6.2ns, because mlog returns before calling into zap.
-4. **Rate limiting (allowed)**: ~960ns total, with overhead from `runtime.Caller(1)` + `sync.Map` lookup + `rate.Limiter.Allow()`.
-5. **Rate limiting (suppressed)**: ~500ns, skips log encoding entirely, only performs atomic operations and `runtime.Caller`.
+1. **mlog vs zap (zero overhead)**: `mlog.Info` achieves 0 allocs and near-identical latency to bare `zap.Info`, with only ~5ns overhead from context lookup and atomic load of the global logger.
+2. **Zero allocation with context fields**: When fields are pre-encoded via `WithFields`, `MlogInfoWithContextFields` achieves 0 allocs at 415ns — faster than native `zap.Info` with 3 fields (598ns, 1 alloc).
+3. **Disabled level is extremely fast**: ~2.7ns with 0 allocs, 2.4x faster than zap's 6.4ns, because mlog returns before calling into zap.
+4. **Rate limiting (allowed)**: ~920ns total, with overhead from `runtime.Caller(1)` + `sync.Map` lookup + `rate.Limiter.Allow()`.
+5. **Rate limiting (suppressed)**: ~510ns, skips log encoding entirely, only performs atomic operations and `runtime.Caller`.
