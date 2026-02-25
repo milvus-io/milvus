@@ -26,6 +26,7 @@
 #include <GraphMol/Fingerprints/Fingerprints.h>
 #include <GraphMol/Fingerprints/MorganFingerprints.h>
 #include <GraphMol/Fingerprints/MACCS.h>
+#include <GraphMol/Substruct/SubstructMatch.h>
 #include <DataStructs/ExplicitBitVect.h>
 
 namespace {
@@ -161,6 +162,32 @@ MolDataResult GenerateRDKitFingerprint(const char* smiles, int min_path, int max
     return GenerateFingerprintImpl(smiles, [=](RDKit::ROMol& mol) {
         return RDKit::RDKFingerprintMol(mol, min_path, max_path, fingerprint_size);
     });
+}
+
+}  // extern "C"
+
+extern "C" {
+
+int HasSubstructMatch(const uint8_t* mol_pickle, size_t mol_size,
+                      const uint8_t* query_pickle, size_t query_size) {
+    if (!mol_pickle || mol_size == 0 || !query_pickle || query_size == 0) {
+        return -MOL_ERROR_SUBSTRUCT_FAILED;
+    }
+    try {
+        std::string mol_str(reinterpret_cast<const char*>(mol_pickle), mol_size);
+        std::string query_str(reinterpret_cast<const char*>(query_pickle), query_size);
+
+        RDKit::ROMol mol;
+        RDKit::MolPickler::molFromPickle(mol_str, &mol);
+
+        RDKit::ROMol query;
+        RDKit::MolPickler::molFromPickle(query_str, &query);
+
+        RDKit::MatchVectType matchV;
+        return RDKit::SubstructMatch(mol, query, matchV) ? 1 : 0;
+    } catch (const std::exception&) {
+        return -MOL_ERROR_SUBSTRUCT_FAILED;
+    }
 }
 
 }  // extern "C"

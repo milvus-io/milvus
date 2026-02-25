@@ -25,6 +25,7 @@ extern "C" {
 #define MOL_ERROR_PICKLE_FAILED 2
 #define MOL_ERROR_FINGERPRINT_FAILED 3
 #define MOL_ERROR_MEMORY 4
+#define MOL_ERROR_SUBSTRUCT_FAILED 5
 
 // Result structure for operations that return binary data
 typedef struct {
@@ -61,6 +62,11 @@ MolDataResult GenerateMACCSFingerprint(const char* smiles);
 // fingerprint_size: number of bits (e.g., 2048)
 // Returns MolDataResult with binary fingerprint on success, or error on failure
 MolDataResult GenerateRDKitFingerprint(const char* smiles, int min_path, int max_path, int fingerprint_size);
+
+// Check substructure match between two molecules in pickle format
+// Returns: 1=match, 0=no match, negative=error
+int HasSubstructMatch(const uint8_t* mol_pickle, size_t mol_size,
+                      const uint8_t* query_pickle, size_t query_size);
 
 #ifdef __cplusplus
 }

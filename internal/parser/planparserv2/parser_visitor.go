@@ -1986,6 +1986,64 @@ func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{}
 	}
 }
 
+func (v *ParserVisitor) VisitMolSubstructure(ctx *parser.MolSubstructureContext) interface{} {
+	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
+	if err != nil {
+		return err
+	}
+	columnInfo := toColumnInfo(childExpr)
+	if columnInfo == nil ||
+		(!typeutil.IsMolType(columnInfo.GetDataType())) {
+		return merr.WrapErrParameterInvalidMsg(
+			"mol_contains substructure operation is only supported on MOL fields, got: %s", ctx.GetText())
+	}
+	element := ctx.StringLiteral().GetText()
+	smilesString := element[1 : len(element)-1]
+
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_MolfunctionFilterExpr{
+			MolfunctionFilterExpr: &planpb.MolFunctionFilterExpr{
+				ColumnInfo:   columnInfo,
+				SmilesString: smilesString,
+				Op:           planpb.MolFunctionFilterExpr_Substructure,
+			},
+		},
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitMolSuperstructure(ctx *parser.MolSuperstructureContext) interface{} {
+	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
+	if err != nil {
+		return err
+	}
+	columnInfo := toColumnInfo(childExpr)
+	if columnInfo == nil ||
+		(!typeutil.IsMolType(columnInfo.GetDataType())) {
+		return merr.WrapErrParameterInvalidMsg(
+			"mol_contains superstructure operation is only supported on MOL fields, got: %s", ctx.GetText())
+	}
+	element := ctx.StringLiteral().GetText()
+	smilesString := element[1 : len(element)-1]
+
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_MolfunctionFilterExpr{
+			MolfunctionFilterExpr: &planpb.MolFunctionFilterExpr{
+				ColumnInfo:   columnInfo,
+				SmilesString: smilesString,
+				Op:           planpb.MolFunctionFilterExpr_Superstructure,
+			},
+		},
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
 // VisitTimestamptzCompareForward handles comparison expressions where the column
 // is on the left side of the operator.
 // Syntax example: column > '2025-01-01' [ + INTERVAL 'P1D' ]

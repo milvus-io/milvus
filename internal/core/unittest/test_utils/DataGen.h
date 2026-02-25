@@ -46,9 +46,7 @@
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "storage/Util.h"
 #include "milvus-storage/common/constants.h"
-#include "milvus_plan_parser.h"
-#include "pb/plan.pb.h"
-#include "query/Plan.h"
+#include "common/mol_c.h"
 
 using boost::algorithm::starts_with;
 
@@ -273,8 +271,9 @@ struct GeneratedData {
                         case DataType::MOL: {
                             auto ret_data =
                                 reinterpret_cast<std::string*>(ret.data());
-                            auto src_data =
-                                target_field_data.scalars().mol_data().data();
+                            auto src_data = target_field_data.scalars()
+                                                .mol_data()
+                                                .data();
                             std::copy(
                                 src_data.begin(), src_data.end(), ret_data);
                             break;
@@ -542,25 +541,29 @@ GenRandomGeometry() {
     }
 }
 
-// Generate random MOL data (SMILES strings as bytes)
-// Common SMILES examples for testing
+// Generate a random MOL pickle from a predefined set of SMILES strings
 inline std::string
-GenRandomMol() {
-    // Simple SMILES molecules for testing
+GenRandomMolPickle() {
     static const std::vector<std::string> smiles_list = {
-        "C",         // Methane
-        "CC",        // Ethane
-        "CCC",       // Propane
-        "CCO",       // Ethanol
-        "CCCO",      // Propanol
-        "c1ccccc1",  // Benzene
-        "CC(=O)O",   // Acetic acid
-        "CCN",       // Ethylamine
-        "CCOCC",     // Diethyl ether
-        "CC(C)C",    // Isobutane
+        "CCO",                    // ethanol
+        "c1ccccc1",              // benzene
+        "CC(=O)O",               // acetic acid
+        "CC(=O)Oc1ccccc1C(=O)O", // aspirin
+        "CC(C)CC1=CC=C(C=C1)C(C)C(=O)O", // ibuprofen
+        "C1CCCCC1",              // cyclohexane
+        "CC",                    // ethane
+        "CCCC",                  // butane
+        "c1ccc(O)cc1",          // phenol
+        "CC(=O)NC1=CC=C(O)C=C1", // acetaminophen
     };
     int idx = rand() % smiles_list.size();
-    return smiles_list[idx];
+    auto result = ConvertSMILESToPickle(smiles_list[idx].c_str());
+    std::string pickle;
+    if (result.error_code == MOL_SUCCESS && result.data != nullptr) {
+        pickle.assign(reinterpret_cast<const char*>(result.data), result.size);
+    }
+    FreeMolDataResult(&result);
+    return pickle;
 }
 
 inline GeneratedData
@@ -1038,9 +1041,9 @@ DataGen(SchemaPtr schema,
             case DataType::MOL: {
                 vector<std::string> data(N);
                 for (int i = 0; i < N / repeat_count; i++) {
-                    std::string mol = GenRandomMol();
+                    std::string pickle = GenRandomMolPickle();
                     for (int j = 0; j < repeat_count; j++) {
-                        data[i * repeat_count + j] = mol;
+                        data[i * repeat_count + j] = pickle;
                     }
                 }
                 insert_cols(data, N, field_meta, random_valid);
@@ -1695,8 +1698,10 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 }
                 if (field_meta.is_nullable()) {
                     auto raw_valid_data = data->valid_data().data();
-                    createNullableFieldData(
-                        data_raw.data(), raw_valid_data, DataType::MOL, dim);
+                    createNullableFieldData(data_raw.data(),
+                                            raw_valid_data,
+                                            DataType::MOL,
+                                            dim);
                 } else {
                     createFieldData(data_raw.data(), DataType::MOL, dim);
                 }

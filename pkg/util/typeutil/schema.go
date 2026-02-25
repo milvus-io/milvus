@@ -677,6 +677,10 @@ func IsGeometryType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_Geometry
 }
 
+func IsMolType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_Mol
+}
+
 func IsTimestamptzType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_Timestamptz
 }

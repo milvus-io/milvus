@@ -875,6 +875,28 @@ class GISFunctionFilterExpr : public ITypeFilterExpr {
     const double distance_;
 };
 
+class MolFunctionFilterExpr : public ITypeFilterExpr {
+ public:
+    MolFunctionFilterExpr(ColumnInfo column,
+                          MolFunctionType op,
+                          const std::string& smiles)
+        : column_(column), op_(op), smiles_(smiles){};
+    std::string
+    ToString() const override {
+        return fmt::format(
+            "MolFunctionFilterExpr:[Column: {}, Operator: {} "
+            "SMILES: {}]",
+            column_.ToString(),
+            MolFunctionFilterExpr_MolOp_Name(op_),
+            smiles_);
+    }
+
+ public:
+    const ColumnInfo column_;
+    const MolFunctionType op_;
+    const std::string smiles_;
+};
+
 class JsonContainsExpr : public ITypeFilterExpr {
  public:
     JsonContainsExpr(ColumnInfo column,

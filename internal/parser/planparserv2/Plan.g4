@@ -36,6 +36,8 @@ expr:
 	| op=(STEuqals | STTouches | STOverlaps | STCrosses | STContains | STIntersects | STWithin) '(' Identifier ',' StringLiteral ')'  # SpatialBinary
 	| STDWithin'('Identifier','StringLiteral',' expr')'                                                     # STDWithin
 	| STIsValid'('Identifier')'                                  			 	                            # STIsValid
+	| MOLContains '(' Identifier ',' StringLiteral ')'                                                      # MolSubstructure
+	| MOLContains '(' StringLiteral ',' Identifier ')'                                                      # MolSuperstructure
 	| ArrayLength'('(Identifier | JSONIdentifier)')'                                                        # ArrayLength
 	| Identifier '(' ( expr (',' expr )* ','? )? ')'                                                        # Call
 	| expr op1 = (LT | LE) (Identifier | JSONIdentifier | StructSubFieldIdentifier) op2 = (LT | LE) expr	# Range
@@ -122,6 +124,8 @@ STIntersects : 'st_intersects' | 'ST_INTERSECTS';
 STWithin :'st_within' | 'ST_WITHIN';
 STDWithin: 'st_dwithin' | 'ST_DWITHIN';
 STIsValid: 'st_isvalid' | 'ST_ISVALID';
+
+MOLContains: 'mol_contains' | 'MOL_CONTAINS';
 
 BooleanConstant: 'true' | 'True' | 'TRUE' | 'false' | 'False' | 'FALSE';
 

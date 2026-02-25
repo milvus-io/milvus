@@ -386,6 +386,7 @@ using GroupByValueType = std::optional<std::variant<std::monostate,
 using ContainsType = proto::plan::JSONContainsExpr_JSONOp;
 using NullExprType = proto::plan::NullExpr_NullOp;
 using GISFunctionType = proto::plan::GISFunctionFilterExpr_GISOp;
+using MolFunctionType = proto::plan::MolFunctionFilterExpr_MolOp;
 
 inline bool
 IsPrimaryKeyDataType(DataType data_type) {

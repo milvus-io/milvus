@@ -3260,3 +3260,100 @@ func TestExpr_BooleanLiteral(t *testing.T) {
 		assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
 	})
 }
+func TestExpr_MolFunctions(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	validExprs := []string{
+		// Substructure: mol_contains(field, smiles) — field contains query
+		`mol_contains(MolField, "CCO")`,
+		`MOL_CONTAINS(MolField, "c1ccccc1")`,
+		`mol_contains(MolField, "CC(=O)O")`,
+		`mol_contains(MolField, "C")`,
+		`mol_contains(MolField, "CC(=O)Oc1ccccc1C(=O)O")`,
+
+		// Superstructure: mol_contains(smiles, field) — query contains field
+		`mol_contains("CCO", MolField)`,
+		`MOL_CONTAINS("c1ccccc1", MolField)`,
+		`mol_contains("CC(=O)Oc1ccccc1C(=O)O", MolField)`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, schema, expr)
+	}
+}
+
+// PLACEHOLDER_MOL_TESTS
+func TestExpr_MolFunctionsInvalidExpressions(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	invalidExprs := []string{
+		// Invalid field type
+		`mol_contains(Int64Field, "CCO")`,
+		`mol_contains(StringField, "CCO")`,
+		`mol_contains(BoolField, "CCO")`,
+		`mol_contains("CCO", Int64Field)`,
+
+		// Non-existent field
+		`mol_contains(NonExistentField, "CCO")`,
+		`mol_contains("CCO", NonExistentField)`,
+	}
+
+	for _, expr := range invalidExprs {
+		assertInvalidExpr(t, schema, expr)
+	}
+}
+
+func TestExpr_MolFunctionsComplexExpressions(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	complexExprs := []string{
+		// AND combinations
+		`mol_contains(MolField, "CCO") and mol_contains(MolField, "c1ccccc1")`,
+		`mol_contains(MolField, "CCO") AND Int64Field > 100`,
+
+		// OR combinations
+		`mol_contains(MolField, "CCO") or mol_contains(MolField, "c1ccccc1")`,
+		`mol_contains(MolField, "CCO") OR Int64Field > 100`,
+
+		// NOT combinations
+		`not mol_contains(MolField, "CCO")`,
+		`!(mol_contains(MolField, "CCO"))`,
+
+		// Mixed with other field types
+		`mol_contains(MolField, "CCO") and StringField == "test"`,
+
+		// Nested expressions
+		`(mol_contains(MolField, "CCO") and Int64Field > 0) or (mol_contains("c1ccccc1", MolField) and StringField != "")`,
+	}
+
+	for _, expr := range complexExprs {
+		assertValidExpr(t, schema, expr)
+	}
+}
+
+func TestExpr_MolFunctionsPlanGeneration(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	molExprs := []string{
+		`mol_contains(MolField, "CCO")`,
+		`mol_contains("CCO", MolField)`,
+		`mol_contains(MolField, "c1ccccc1") and Int64Field > 100`,
+	}
+
+	for _, expr := range molExprs {
+		plan, err := CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         10,
+			MetricType:   "L2",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil, nil)
+		assert.NoError(t, err, "Failed to create plan for expression: %s", expr)
+		assert.NotNil(t, plan, "Plan should not be nil for expression: %s", expr)
+		assert.NotNil(t, plan.GetVectorAnns(), "Vector annotations should not be nil for expression: %s", expr)
+
+		if plan.GetVectorAnns().GetPredicates() != nil {
+			predicates := plan.GetVectorAnns().GetPredicates()
+			assert.NotNil(t, predicates, "Predicates should not be nil for MOL expression: %s", expr)
+		}
+	}
+}
