@@ -249,6 +249,7 @@ type QueryCoordCatalog interface {
 
 	SaveCollectionTargets(ctx context.Context, target ...*querypb.CollectionTarget) error
 	RemoveCollectionTarget(ctx context.Context, collectionID int64) error
+	RemoveCollectionTargets(ctx context.Context) error
 	GetCollectionTargets(ctx context.Context) (map[int64]*querypb.CollectionTarget, error)
 }
 

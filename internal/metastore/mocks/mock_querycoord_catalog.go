@@ -579,6 +579,52 @@ func (_c *QueryCoordCatalog_RemoveCollectionTarget_Call) RunAndReturn(run func(c
 	return _c
 }
 
+// RemoveCollectionTargets provides a mock function with given fields: ctx
+func (_m *QueryCoordCatalog) RemoveCollectionTargets(ctx context.Context) error {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveCollectionTargets")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// QueryCoordCatalog_RemoveCollectionTargets_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveCollectionTargets'
+type QueryCoordCatalog_RemoveCollectionTargets_Call struct {
+	*mock.Call
+}
+
+// RemoveCollectionTargets is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *QueryCoordCatalog_Expecter) RemoveCollectionTargets(ctx interface{}) *QueryCoordCatalog_RemoveCollectionTargets_Call {
+	return &QueryCoordCatalog_RemoveCollectionTargets_Call{Call: _e.mock.On("RemoveCollectionTargets", ctx)}
+}
+
+func (_c *QueryCoordCatalog_RemoveCollectionTargets_Call) Run(run func(ctx context.Context)) *QueryCoordCatalog_RemoveCollectionTargets_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *QueryCoordCatalog_RemoveCollectionTargets_Call) Return(_a0 error) *QueryCoordCatalog_RemoveCollectionTargets_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *QueryCoordCatalog_RemoveCollectionTargets_Call) RunAndReturn(run func(context.Context) error) *QueryCoordCatalog_RemoveCollectionTargets_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoveResourceGroup provides a mock function with given fields: ctx, rgName
 func (_m *QueryCoordCatalog) RemoveResourceGroup(ctx context.Context, rgName string) error {
 	ret := _m.Called(ctx, rgName)
