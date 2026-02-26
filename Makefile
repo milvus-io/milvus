@@ -96,7 +96,13 @@ ifeq (${ENABLE_AZURE}, false)
 	AZURE_OPTION := -Z
 endif
 
-milvus: build-cpp print-build-info build-go
+check-submodules:
+	@git submodule status | grep '^-' | awk '{print $$2}' | while read -r mod; do \
+		echo "Initializing submodule: $$mod"; \
+		git submodule update --init "$$mod"; \
+	done
+
+milvus: check-submodules build-cpp print-build-info build-go
 
 build-go:
 	@echo "Building Milvus ..."
