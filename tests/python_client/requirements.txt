@@ -12,6 +12,7 @@ pytest-print==0.2.1
 pytest-level==0.1.1
 pytest-xdist==2.5.0
 
+pytest-assume==2.4.3
 pytest-rerunfailures==14.0
 pytest_tagging==1.6.0
 pytest-html==3.1.1
@@ -58,6 +59,9 @@ fastparquet==2023.7.0
 
 # for bf16 datatype
 ml-dtypes==0.2.0
+
+# for text processing
+Unidecode==1.3.8
 
 # for full text search
 tantivy==0.22.0
