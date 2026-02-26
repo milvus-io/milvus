@@ -11,10 +11,11 @@ const (
 )
 
 var (
-	BuildTags = "unknown"
-	BuildTime = "unknown"
-	GitCommit = "unknown"
-	GoVersion = "unknown"
+	BuildTags     = "unknown"
+	BuildTime     = "unknown"
+	GitCommit     = "unknown"
+	GoVersion     = "unknown"
+	MilvusVersion = "unknown"
 )
 
 type command interface {
