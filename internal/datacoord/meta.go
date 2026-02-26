@@ -30,6 +30,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -186,63 +187,93 @@ type dbInfo struct {
 
 // NewMeta creates meta from provided `kv.TxnKV`
 func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, broker broker.Broker) (*meta, error) {
-	im, err := newIndexMeta(ctx, catalog)
-	if err != nil {
-		return nil, err
-	}
+	var (
+		im   *indexMeta
+		am   *analyzeMeta
+		psm  *partitionStatsMeta
+		ctm  *compactionTaskMeta
+		stm  *statsTaskMeta
+		ecrm *externalCollectionRefreshMeta
+		spm  *snapshotMeta
+	)
 
-	am, err := newAnalyzeMeta(ctx, catalog)
-	if err != nil {
-		return nil, err
-	}
-
-	psm, err := newPartitionStatsMeta(ctx, catalog)
-	if err != nil {
-		return nil, err
-	}
-
-	ctm, err := newCompactionTaskMeta(ctx, catalog)
-	if err != nil {
-		return nil, err
-	}
-
-	stm, err := newStatsTaskMeta(ctx, catalog)
-	if err != nil {
-		return nil, err
-	}
-
-	ecrm, err := newExternalCollectionRefreshMeta(ctx, catalog)
-	if err != nil {
-		return nil, err
-	}
-
-	spm, err := newSnapshotMeta(ctx, catalog, chunkManager)
-	if err != nil {
-		return nil, err
-	}
-
+	// Construct meta struct first so reloadFromKV can run in parallel with sub-meta loading.
+	// reloadFromKV uses m.catalog/m.segments/m.channelCPs which are independent of sub-metas.
 	mt := &meta{
-		ctx:                           ctx,
-		catalog:                       catalog,
-		collections:                   typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:                      NewSegmentsInfo(),
-		channelCPs:                    newChannelCps(),
-		indexMeta:                     im,
-		analyzeMeta:                   am,
-		chunkManager:                  chunkManager,
-		partitionStatsMeta:            psm,
-		compactionTaskMeta:            ctm,
-		statsTaskMeta:                 stm,
-		externalCollectionRefreshMeta: ecrm,
-		resourceIDMap:                 make(map[int64]*internalpb.FileResourceInfo),
-		resourceVersion:               0,
-		resourceLock:                  lock.RWMutex{},
-		snapshotMeta:                  spm,
+		ctx:             ctx,
+		catalog:         catalog,
+		collections:     typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:        NewSegmentsInfo(),
+		channelCPs:      newChannelCps(),
+		chunkManager:    chunkManager,
+		resourceIDMap:   make(map[int64]*internalpb.FileResourceInfo),
+		resourceVersion: 0,
+		resourceLock:    lock.RWMutex{},
 	}
-	err = mt.reloadFromKV(ctx, broker)
-	if err != nil {
+
+	g, _ := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		var err error
+		im, err = newIndexMeta(ctx, catalog)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		am, err = newAnalyzeMeta(ctx, catalog)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		psm, err = newPartitionStatsMeta(ctx, catalog)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		ctm, err = newCompactionTaskMeta(ctx, catalog)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		stm, err = newStatsTaskMeta(ctx, catalog)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		ecrm, err = newExternalCollectionRefreshMeta(ctx, catalog)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		spm, err = newSnapshotMeta(ctx, catalog, chunkManager)
+		return err
+	})
+
+	// reloadFromKV (ListSegments, ListChannelCheckpoint) runs in parallel with sub-meta loading.
+	// It only uses mt.catalog/mt.segments/mt.channelCPs, which are independent of sub-metas.
+	g.Go(func() error {
+		return mt.reloadFromKV(ctx, broker)
+	})
+
+	if err := g.Wait(); err != nil {
 		return nil, err
 	}
+
+	// Assign sub-metas after all goroutines complete
+	mt.indexMeta = im
+	mt.analyzeMeta = am
+	mt.partitionStatsMeta = psm
+	mt.compactionTaskMeta = ctm
+	mt.statsTaskMeta = stm
+	mt.externalCollectionRefreshMeta = ecrm
+	mt.snapshotMeta = spm
+
 	return mt, nil
 }
 

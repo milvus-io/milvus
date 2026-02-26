@@ -45,6 +45,7 @@ func TestReloadFromKV(t *testing.T) {
 	t.Run("ListIndexes_fail", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, errors.New("mock"))
+		catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil).Maybe()
 		_, err := newIndexMeta(context.TODO(), catalog)
 		assert.Error(t, err)
 	})

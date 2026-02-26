@@ -152,6 +152,21 @@ func TestCatalog_ListCollections(t *testing.T) {
 				return strings.HasPrefix(prefix, FieldMetaPrefix)
 			}), ts).
 			Return(nil, nil, targetErr)
+
+		// appendPartitionAndFieldsInfo runs all 4 list calls in parallel,
+		// so structArrayFields and functions calls also need mock expectations.
+		kv.On("LoadWithPrefix", mock.Anything, mock.MatchedBy(
+			func(prefix string) bool {
+				return strings.HasPrefix(prefix, StructArrayFieldMetaPrefix)
+			}), ts).
+			Return([]string{}, []string{}, nil).Maybe()
+
+		kv.On("LoadWithPrefix", mock.Anything, mock.MatchedBy(
+			func(prefix string) bool {
+				return strings.HasPrefix(prefix, FunctionMetaPrefix)
+			}), ts).
+			Return([]string{}, []string{}, nil).Maybe()
+
 		kc := NewCatalog(nil, kv)
 
 		ret, err := kc.ListCollections(ctx, util.NonDBID, ts)

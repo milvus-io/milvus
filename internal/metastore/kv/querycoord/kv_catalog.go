@@ -326,6 +326,10 @@ func (s Catalog) RemoveCollectionTarget(ctx context.Context, collectionID int64)
 	return s.cli.Remove(ctx, k)
 }
 
+func (s Catalog) RemoveCollectionTargets(ctx context.Context) error {
+	return s.cli.RemoveWithPrefix(ctx, CollectionTargetPrefix)
+}
+
 func (s Catalog) GetCollectionTargets(ctx context.Context) (map[int64]*querypb.CollectionTarget, error) {
 	ret := make(map[int64]*querypb.CollectionTarget)
 	applyFn := func(key []byte, value []byte) error {

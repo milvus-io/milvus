@@ -29,6 +29,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -148,28 +149,40 @@ func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*ind
 // reloadFromKV loads meta from KV storage
 func (m *indexMeta) reloadFromKV() error {
 	record := timerecord.NewTimeRecorder("indexMeta-reloadFromKV")
-	// load field indexes
-	fieldIndexes, err := m.catalog.ListIndexes(m.ctx)
-	if err != nil {
-		log.Error("indexMeta reloadFromKV load field indexes fail", zap.Error(err))
-		return err
-	}
-	for _, fieldIndex := range fieldIndexes {
-		m.updateCollectionIndex(fieldIndex)
-	}
-	segmentIndexes, err := m.catalog.ListSegmentIndexes(m.ctx)
-	if err != nil {
-		log.Error("indexMeta reloadFromKV load segment indexes fail", zap.Error(err))
-		return err
-	}
-	for _, segIdx := range segmentIndexes {
-		if segIdx.IndexMemSize == 0 {
-			segIdx.IndexMemSize = segIdx.IndexSerializedSize * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
+
+	// Parallel load and process: ListIndexes and ListSegmentIndexes have no dependency,
+	// and they update completely separate data structures so memory updates can also run in parallel.
+	g, _ := errgroup.WithContext(m.ctx)
+	g.Go(func() error {
+		fieldIndexes, err := m.catalog.ListIndexes(m.ctx)
+		if err != nil {
+			log.Error("indexMeta reloadFromKV load field indexes fail", zap.Error(err))
+			return err
 		}
-		m.updateSegmentIndex(segIdx)
-		metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
-		metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
-			fmt.Sprintf("%d", segIdx.CollectionID)).Add(float64(segIdx.IndexSerializedSize))
+		for _, fieldIndex := range fieldIndexes {
+			m.updateCollectionIndex(fieldIndex)
+		}
+		return nil
+	})
+	g.Go(func() error {
+		segmentIndexes, err := m.catalog.ListSegmentIndexes(m.ctx)
+		if err != nil {
+			log.Error("indexMeta reloadFromKV load segment indexes fail", zap.Error(err))
+			return err
+		}
+		for _, segIdx := range segmentIndexes {
+			if segIdx.IndexMemSize == 0 {
+				segIdx.IndexMemSize = segIdx.IndexSerializedSize * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
+			}
+			m.updateSegmentIndex(segIdx)
+			metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
+			metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
+				fmt.Sprintf("%d", segIdx.CollectionID)).Add(float64(segIdx.IndexSerializedSize))
+		}
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		return err
 	}
 	log.Info("indexMeta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
