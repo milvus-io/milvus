@@ -27,6 +27,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -590,6 +591,30 @@ func (s *statsTaskSuite) TestPrepareJobRequest() {
 		_, err := st.prepareJobRequest(context.Background(), segment)
 		s.Error(err)
 		s.Contains(err.Error(), "failed to get collection info")
+	})
+
+	s.Run("nil schema", func() {
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+			Schema: nil,
+		}, nil)
+		st.handler = handler
+
+		_, err := st.prepareJobRequest(context.Background(), segment)
+		s.Error(err)
+		s.Contains(err.Error(), "collection schema is nil or has no fields")
+	})
+
+	s.Run("empty schema fields", func() {
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{}},
+		}, nil)
+		st.handler = handler
+
+		_, err := st.prepareJobRequest(context.Background(), segment)
+		s.Error(err)
+		s.Contains(err.Error(), "collection schema is nil or has no fields")
 	})
 
 	s.Run("allocation failure", func() {
