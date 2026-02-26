@@ -74,7 +74,13 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
 
     void
     addSingleGroupRawInput(char* group,
+                           int64_t numRows,
                            const std::vector<VectorPtr>& input) override {
+        if (input.empty()) {
+            // count(*): count all rows regardless of null values
+            addToGroup(group, numRows);
+            return;
+        }
         AssertInfo(input.size() == 1,
                    fmt::format("input column count for count aggregation "
                                "must be exactly one for now, but got:{}",

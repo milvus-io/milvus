@@ -109,10 +109,11 @@ void
 GroupingSet::addGlobalAggregationInput(const milvus::RowVectorPtr& input) {
     initializeGlobalAggregation();
     auto* group = lookup_->hits_[0];
+    auto numRows = input->size();
     for (auto i = 0; i < aggregates_.size(); i++) {
         auto& function = aggregates_[i].function_;
         populateTempVectors(i, input);
-        function->addSingleGroupRawInput(group, tempVectors_);
+        function->addSingleGroupRawInput(group, numRows, tempVectors_);
     }
     tempVectors_.clear();
 }
@@ -215,14 +216,9 @@ void
 GroupingSet::populateTempVectors(int32_t aggregateIndex,
                                  const milvus::RowVectorPtr& input) {
     const auto& channel_idxes = aggregates_[aggregateIndex].input_column_idxes_;
-    if (channel_idxes.empty() && input->childrens().size() == 1) {
-        tempVectors_.resize(1);
-        tempVectors_[0] = input->child(0);
-    } else {
-        tempVectors_.resize(channel_idxes.size());
-        for (auto i = 0; i < channel_idxes.size(); i++) {
-            tempVectors_[i] = input->child(channel_idxes[i]);
-        }
+    tempVectors_.resize(channel_idxes.size());
+    for (auto i = 0; i < channel_idxes.size(); i++) {
+        tempVectors_[i] = input->child(channel_idxes[i]);
     }
 }
 
