@@ -353,11 +353,15 @@ var (
 	DatabaseReadOnlyPrivileges = ConvertPrivileges([]string{
 		commonpb.ObjectPrivilege_PrivilegeShowCollections.String(),
 		commonpb.ObjectPrivilege_PrivilegeDescribeDatabase.String(),
+		commonpb.ObjectPrivilege_PrivilegeDescribeSnapshot.String(),
+		commonpb.ObjectPrivilege_PrivilegeListSnapshots.String(),
 	})
 
 	DatabaseReadWritePrivileges = append(DatabaseReadOnlyPrivileges,
 		ConvertPrivileges([]string{
 			commonpb.ObjectPrivilege_PrivilegeAlterDatabase.String(),
+			commonpb.ObjectPrivilege_PrivilegeCreateSnapshot.String(),
+			commonpb.ObjectPrivilege_PrivilegeDropSnapshot.String(),
 		})...,
 	)
 
@@ -365,6 +369,7 @@ var (
 		ConvertPrivileges([]string{
 			commonpb.ObjectPrivilege_PrivilegeCreateCollection.String(),
 			commonpb.ObjectPrivilege_PrivilegeDropCollection.String(),
+			commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String(),
 		})...,
 	)
 

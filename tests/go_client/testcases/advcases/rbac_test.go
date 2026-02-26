@@ -767,3 +767,172 @@ func TestRevokePrivilegeInvalid(t *testing.T) {
 	err = mc.RevokePrivilegeV2(ctx, client.NewRevokePrivilegeV2Option(roleName, "CollectionAdmin", "*").WithDbName(common.GenRandomString("db", 6)))
 	common.CheckErr(t, err, true)
 }
+
+// TestSnapshotPrivilegesDatabaseLevel verifies that snapshot privileges are database-level,
+// meaning they can be granted per-database and actual API calls respect those permissions.
+// It tests a progression from read-only (List/Describe) to read-write (Create/Drop) privileges.
+func TestSnapshotPrivilegesDatabaseLevel(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
+	setupTest(t, ctx, mc)
+
+	// Step 1: Root user prepares test data - create collection, insert data, flush, create snapshot
+	collName := common.GenRandomString("snapshot", 6)
+	err := mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim))
+	common.CheckErr(t, err, true)
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	prepare, _ := hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema), hp.TNewDataOption())
+	prepare.FlushData(ctx, t, mc, collName)
+
+	snapName := common.GenRandomString("snap", 6)
+	err = mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapName, collName))
+	common.CheckErr(t, err, true)
+	snapName2 := common.GenRandomString("snap", 6)
+	t.Cleanup(func() {
+		_ = mc.DropSnapshot(ctx, client.NewDropSnapshotOption(snapName))
+		_ = mc.DropSnapshot(ctx, client.NewDropSnapshotOption(snapName2))
+		_ = mc.DropCollection(ctx, client.NewDropCollectionOption(collName))
+	})
+
+	// Step 2: Create user + role
+	userName := common.GenRandomString("user", 6)
+	pwd := common.GenRandomString("pwd", 6)
+	roleName := common.GenRandomString("role", 6)
+	err = mc.CreateUser(ctx, client.NewCreateUserOption(userName, pwd))
+	common.CheckErr(t, err, true)
+	err = mc.CreateRole(ctx, client.NewCreateRoleOption(roleName))
+	common.CheckErr(t, err, true)
+	err = mc.GrantRole(ctx, client.NewGrantRoleOption(userName, roleName))
+	common.CheckErr(t, err, true)
+
+	// Step 3: Grant read-only snapshot privileges on default database
+	err = mc.GrantPrivilegeV2(ctx, client.NewGrantPrivilegeV2Option(roleName, "ListSnapshots", AllObjectName).WithDbName("default"))
+	common.CheckErr(t, err, true)
+	err = mc.GrantPrivilegeV2(ctx, client.NewGrantPrivilegeV2Option(roleName, "DescribeSnapshot", AllObjectName).WithDbName("default"))
+	common.CheckErr(t, err, true)
+
+	mcUser := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: userName, Password: pwd})
+
+	// Step 4: ListSnapshots on default db → should succeed after privilege propagation
+	require.Eventuallyf(t, func() bool {
+		_, err = mcUser.ListSnapshots(ctx, client.NewListSnapshotsOption().WithDbName("default"))
+		return err == nil
+	}, time.Second*10, 2*time.Second, "Waiting for ListSnapshots permission to take effect")
+
+	// Step 5: DescribeSnapshot → should succeed (privilege granted, client connected to default db)
+	_, err = mcUser.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(snapName))
+	common.CheckErr(t, err, true)
+
+	// Step 6: CreateSnapshot → should be denied (no CreateSnapshot privilege yet)
+	err = mcUser.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapName2, collName).WithDbName("default"))
+	common.CheckErr(t, err, false, "permission deny")
+
+	// Step 7: Grant CreateSnapshot privilege
+	err = mc.GrantPrivilegeV2(ctx, client.NewGrantPrivilegeV2Option(roleName, "CreateSnapshot", AllObjectName).WithDbName("default"))
+	common.CheckErr(t, err, true)
+
+	// Step 8: CreateSnapshot → should succeed after privilege propagation
+	require.Eventuallyf(t, func() bool {
+		err = mcUser.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapName2, collName).WithDbName("default"))
+		return err == nil
+	}, time.Second*10, 2*time.Second, "Waiting for CreateSnapshot permission to take effect")
+
+	// Step 9: Grant DropSnapshot privilege
+	err = mc.GrantPrivilegeV2(ctx, client.NewGrantPrivilegeV2Option(roleName, "DropSnapshot", AllObjectName).WithDbName("default"))
+	common.CheckErr(t, err, true)
+
+	// Step 10: DropSnapshot → should succeed after privilege propagation
+	require.Eventuallyf(t, func() bool {
+		err = mcUser.DropSnapshot(ctx, client.NewDropSnapshotOption(snapName2))
+		return err == nil
+	}, time.Second*10, 2*time.Second, "Waiting for DropSnapshot permission to take effect")
+}
+
+// TestSnapshotPrivilegeDatabaseIsolation verifies that granting a snapshot privilege
+// on one database does NOT allow access to another database's snapshots.
+func TestSnapshotPrivilegeDatabaseIsolation(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
+	setupTest(t, ctx, mc)
+
+	// Step 1: Create two databases
+	dbA := common.GenRandomString("db", 6)
+	dbB := common.GenRandomString("db", 6)
+	err := mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbA))
+	common.CheckErr(t, err, true)
+	err = mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbB))
+	common.CheckErr(t, err, true)
+
+	// Step 2: Create collections, insert data, and create snapshots in both databases
+	mcA := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword(), DBName: dbA})
+	collA := common.GenRandomString("coll", 6)
+	err = mcA.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collA, common.DefaultDim))
+	common.CheckErr(t, err, true)
+	collADesc, err := mcA.DescribeCollection(ctx, client.NewDescribeCollectionOption(collA))
+	common.CheckErr(t, err, true)
+	prepareA, _ := hp.CollPrepare.InsertData(ctx, t, mcA, hp.NewInsertParams(collADesc.Schema), hp.TNewDataOption())
+	prepareA.FlushData(ctx, t, mcA, collA)
+	snapA := common.GenRandomString("snap", 6)
+	err = mcA.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapA, collA))
+	common.CheckErr(t, err, true)
+
+	mcB := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword(), DBName: dbB})
+	collB := common.GenRandomString("coll", 6)
+	err = mcB.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collB, common.DefaultDim))
+	common.CheckErr(t, err, true)
+	collBDesc, err := mcB.DescribeCollection(ctx, client.NewDescribeCollectionOption(collB))
+	common.CheckErr(t, err, true)
+	prepareB, _ := hp.CollPrepare.InsertData(ctx, t, mcB, hp.NewInsertParams(collBDesc.Schema), hp.TNewDataOption())
+	prepareB.FlushData(ctx, t, mcB, collB)
+	snapB := common.GenRandomString("snap", 6)
+	err = mcB.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapB, collB))
+	common.CheckErr(t, err, true)
+
+	snapUserA := common.GenRandomString("snap", 6)
+	t.Cleanup(func() {
+		_ = mcA.DropSnapshot(ctx, client.NewDropSnapshotOption(snapA))
+		_ = mcA.DropSnapshot(ctx, client.NewDropSnapshotOption(snapUserA))
+		_ = mcB.DropSnapshot(ctx, client.NewDropSnapshotOption(snapB))
+		_ = mcA.DropCollection(ctx, client.NewDropCollectionOption(collA))
+		_ = mcB.DropCollection(ctx, client.NewDropCollectionOption(collB))
+		_ = mc.DropDatabase(ctx, client.NewDropDatabaseOption(dbA))
+		_ = mc.DropDatabase(ctx, client.NewDropDatabaseOption(dbB))
+	})
+
+	// Step 3: Create user + role, grant ListSnapshots + CreateSnapshot only on dbA
+	userName := common.GenRandomString("user", 6)
+	pwd := common.GenRandomString("pwd", 6)
+	roleName := common.GenRandomString("role", 6)
+	err = mc.CreateUser(ctx, client.NewCreateUserOption(userName, pwd))
+	common.CheckErr(t, err, true)
+	err = mc.CreateRole(ctx, client.NewCreateRoleOption(roleName))
+	common.CheckErr(t, err, true)
+	err = mc.GrantRole(ctx, client.NewGrantRoleOption(userName, roleName))
+	common.CheckErr(t, err, true)
+	err = mc.GrantPrivilegeV2(ctx, client.NewGrantPrivilegeV2Option(roleName, "ListSnapshots", AllObjectName).WithDbName(dbA))
+	common.CheckErr(t, err, true)
+	err = mc.GrantPrivilegeV2(ctx, client.NewGrantPrivilegeV2Option(roleName, "CreateSnapshot", AllObjectName).WithDbName(dbA))
+	common.CheckErr(t, err, true)
+
+	mcUser := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: userName, Password: pwd})
+
+	// Step 4: ListSnapshots on dbA → should succeed
+	require.Eventuallyf(t, func() bool {
+		_, err = mcUser.ListSnapshots(ctx, client.NewListSnapshotsOption().WithDbName(dbA))
+		return err == nil
+	}, time.Second*10, 2*time.Second, "Waiting for ListSnapshots permission on dbA to take effect")
+
+	// Step 5: ListSnapshots on dbB → should be denied
+	_, err = mcUser.ListSnapshots(ctx, client.NewListSnapshotsOption().WithDbName(dbB))
+	common.CheckErr(t, err, false, "permission deny")
+
+	// Step 6: CreateSnapshot in dbA → should succeed
+	err = mcUser.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapUserA, collA).WithDbName(dbA))
+	common.CheckErr(t, err, true)
+
+	// Step 7: CreateSnapshot in dbB → should be denied
+	snapUserB := common.GenRandomString("snap", 6)
+	err = mcUser.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapUserB, collB).WithDbName(dbB))
+	common.CheckErr(t, err, false, "permission deny")
+}
