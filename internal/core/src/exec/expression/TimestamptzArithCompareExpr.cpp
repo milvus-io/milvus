@@ -118,18 +118,24 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
                                     (current_ts_us % 1000000 < 0 ? 1 : 0);
             int64_t sub_sec_us = current_ts_us - epoch_sec * 1000000;
             struct std::tm tm_buf;
-            ::gmtime_r(&epoch_sec, &tm_buf);
+            if (::gmtime_r(&epoch_sec, &tm_buf) == nullptr) {
+                ThrowInfo(OpTypeInvalid,
+                          "gmtime_r failed for timestamp {} us",
+                          current_ts_us);
+            }
             // Apply interval fields using int64_t intermediate arithmetic
             // to avoid int overflow UB, then validate range before assigning
             // back to struct tm (which uses int fields).
             auto safe_add = [](int base, int64_t delta) -> int {
                 int64_t result = static_cast<int64_t>(base) + delta;
-                AssertInfo(result >= INT_MIN && result <= INT_MAX,
-                           "timestamp interval arithmetic overflow: "
-                           "{} + {} = {}",
-                           base,
-                           delta,
-                           result);
+                if (result < INT_MIN || result > INT_MAX) {
+                    ThrowInfo(OpTypeInvalid,
+                              "timestamp interval arithmetic overflow: "
+                              "{} + {} = {}",
+                              base,
+                              delta,
+                              result);
+                }
                 return static_cast<int>(result);
             };
             tm_buf.tm_year =
@@ -144,12 +150,11 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
                 safe_add(tm_buf.tm_min, interval.minutes() * op_sign);
             tm_buf.tm_sec =
                 safe_add(tm_buf.tm_sec, interval.seconds() * op_sign);
+            // timegm normalizes the tm fields and converts back to epoch.
+            // It succeeds for all normalized inputs from gmtime_r + safe_add.
+            // No -1 check: -1 is a valid epoch second (1969-12-31T23:59:59Z)
+            // and is reachable via legal interval arithmetic (e.g., epoch 0 - 1s).
             std::time_t new_epoch_sec = ::timegm(&tm_buf);
-            // timegm returns (time_t)-1 on error. While -1 is technically
-            // a valid epoch second (1969-12-31T23:59:59Z), hitting it via
-            // interval arithmetic is near-impossible in practice.
-            AssertInfo(new_epoch_sec != static_cast<std::time_t>(-1),
-                       "timegm failed for timestamp interval arithmetic");
             // Restore sub-second microseconds from the original timestamp
             int64_t final_us =
                 static_cast<int64_t>(new_epoch_sec) * 1000000 + sub_sec_us;

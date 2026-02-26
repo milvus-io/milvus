@@ -76,14 +76,20 @@ ExtractSubJson(const std::string& json, const std::vector<std::string>& keys) {
         // unescaped_key() resolves escape sequences for correct comparison
         auto uk = field.unescaped_key();
         if (uk.error()) {
-            continue;
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "ExtractSubJson: failed to decode key: {}",
+                      simdjson::error_message(uk.error()));
         }
         if (key_set.count(uk.value())) {
             // raw_json() extracts the original JSON text of the value,
             // avoiding any re-serialization overhead
             auto raw = field.value().raw_json();
             if (raw.error()) {
-                continue;
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "ExtractSubJson: failed to extract value for "
+                          "key '{}': {}",
+                          uk.value(),
+                          simdjson::error_message(raw.error()));
             }
             if (!first) {
                 result += ',';
