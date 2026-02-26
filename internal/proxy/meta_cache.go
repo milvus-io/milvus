@@ -927,7 +927,6 @@ func (m *MetaCache) removeCollectionByID(ctx context.Context, collectionID Uniqu
 		for k, v := range db {
 			if v.collID == collectionID {
 				if version == 0 || curVersion <= version {
-
 					delete(m.collInfo[database], k)
 					collNames = append(collNames, k)
 					collectionKey := buildSfKeyByName(database, k)

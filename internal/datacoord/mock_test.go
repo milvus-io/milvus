@@ -1063,8 +1063,6 @@ func (s *mockMixCoord) PushClientCommand(ctx context.Context, req *milvuspb.Push
 	panic("implement me")
 }
 
-
-
 type mockHandler struct {
 	meta *meta
 }
