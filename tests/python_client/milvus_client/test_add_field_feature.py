@@ -9,6 +9,7 @@ from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import DataType
 from utils.util_log import test_log as log
+from pymilvus import AnnSearchRequest, RRFRanker
 from pymilvus.orm.types import CONSISTENCY_STRONG
 import numpy as np
 
@@ -205,6 +206,24 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
                                  "nq": ct.default_nq,
                                  "limit": ct.default_limit,
                                  "pk_name": pk_name})
+
+        # hybrid search on original + new nullable vector fields (issue #47873)
+        reqs = [
+            AnnSearchRequest(
+                data=cf.gen_vectors(1, dim),
+                anns_field=vec_field_name,
+                param={"metric_type": "COSINE"}, limit=ct.default_limit
+            ),
+            AnnSearchRequest(
+                data=cf.gen_vectors(1, dim),
+                anns_field=new_vec_field_name,
+                param={"metric_type": "COSINE"}, limit=ct.default_limit
+            ),
+        ]
+        self.hybrid_search(client, collection_name, reqs=reqs, ranker=RRFRanker(), limit=ct.default_limit,
+                           check_task=CheckTasks.check_search_results,
+                           check_items={"enable_milvus_client_api": True,
+                                        "nq": 1, "limit": ct.default_limit, "pk_name": pk_name})
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("index_type", ["HNSW", "IVF_FLAT", "IVF_SQ8", "IVF_RABITQ", "AUTOINDEX", "DISKANN"])
