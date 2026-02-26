@@ -74,8 +74,8 @@ func TestLockerKey(t *testing.T) {
 func TestGetLockerKey(t *testing.T) {
 	t.Run("describe collection task locker key", func(t *testing.T) {
 		metaMock := mockrootcoord.NewIMetaTable(t)
-		metaMock.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(ctx context.Context, s string, s2 string, u uint64) (*model.Collection, error) {
+		metaMock.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(ctx context.Context, s string, s2 string, u uint64, allowUnavailable bool) (*model.Collection, error) {
 				return nil, errors.New("not found")
 			})
 		c := &Core{
@@ -128,8 +128,8 @@ func TestGetLockerKey(t *testing.T) {
 	})
 	t.Run("has partition task locker key", func(t *testing.T) {
 		metaMock := mockrootcoord.NewIMetaTable(t)
-		metaMock.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(ctx context.Context, s string, s2 string, u uint64) (*model.Collection, error) {
+		metaMock.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(ctx context.Context, s string, s2 string, u uint64, allowUnavailable bool) (*model.Collection, error) {
 				return &model.Collection{
 					Name:         "real" + s2,
 					CollectionID: 111,
@@ -165,8 +165,8 @@ func TestGetLockerKey(t *testing.T) {
 	})
 	t.Run("show partition task locker key", func(t *testing.T) {
 		metaMock := mockrootcoord.NewIMetaTable(t)
-		metaMock.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(ctx context.Context, s string, s2 string, u uint64) (*model.Collection, error) {
+		metaMock.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(ctx context.Context, s string, s2 string, u uint64, allowUnavailable bool) (*model.Collection, error) {
 				return &model.Collection{
 					Name:         "real" + s2,
 					CollectionID: 111,

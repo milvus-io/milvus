@@ -395,6 +395,10 @@ func (m *mockMixCoord) CreatePartition(ctx context.Context, req *milvuspb.Create
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockMixCoord) CreatePartitionV2(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*rootcoordpb.CreatePartitionResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockMixCoord) DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
@@ -1058,6 +1062,8 @@ func (s *mockMixCoord) GetClientTelemetry(ctx context.Context, req *milvuspb.Get
 func (s *mockMixCoord) PushClientCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
 	panic("implement me")
 }
+
+
 
 type mockHandler struct {
 	meta *meta

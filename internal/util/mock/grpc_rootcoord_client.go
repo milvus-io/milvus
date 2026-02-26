@@ -170,6 +170,10 @@ func (m *GrpcRootCoordClient) CreatePartition(ctx context.Context, in *milvuspb.
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) CreatePartitionV2(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*rootcoordpb.CreatePartitionResponse, error) {
+	return &rootcoordpb.CreatePartitionResponse{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
