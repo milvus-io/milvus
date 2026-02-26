@@ -170,7 +170,7 @@ minio:
 mq:
   # Default value: "default"
   # Valid values: [default, pulsar, kafka, rocksmq, woodpecker]
-  type: pulsar
+  type: default
   enablePursuitMode: true # Default value: "true"
   pursuitLag: 10 # time tick lag threshold to enter pursuit mode, in seconds
   pursuitBufferSize: 8388608 # pursuit mode buffer size in bytes
