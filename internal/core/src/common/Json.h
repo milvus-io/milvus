@@ -34,7 +34,7 @@
 #include "simdjson/dom/element.h"
 #include "simdjson/error.h"
 #include "simdjson/padded_string.h"
-#include "nlohmann/json.hpp"
+#include <unordered_set>
 
 #define SIMDJSON_CHECK_ERROR(result)               \
     do {                                           \
@@ -48,22 +48,47 @@ isObjectEmpty(simdjson::ondemand::value value);
 bool
 isDocEmpty(simdjson::ondemand::document document);
 
-// function to extract specific keys and convert them to json
+// Extract specific top-level keys from a JSON string using simdjson ondemand.
+// Uses raw_json() to copy value fragments directly from the source without
+// re-parsing or re-serializing, which is faster than rapidjson or nlohmann.
 inline std::string
 ExtractSubJson(const std::string& json, const std::vector<std::string>& keys) {
-    auto doc = nlohmann::json::parse(json, nullptr, false);
-    if (doc.is_discarded()) {
-        ThrowInfo(ErrorCode::UnexpectedError, "json parse failed");
+    simdjson::padded_string padded(json);
+    simdjson::ondemand::parser parser;
+    auto doc = parser.iterate(padded);
+    if (doc.error()) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "json parse failed: {}",
+                  simdjson::error_message(doc.error()));
     }
 
-    nlohmann::json result = nlohmann::json::object();
-    for (const auto& key : keys) {
-        if (doc.contains(key)) {
-            result[key] = doc[key];
+    std::unordered_set<std::string_view> key_set(keys.begin(), keys.end());
+
+    std::string result = "{";
+    bool first = true;
+    for (auto field : doc.get_object()) {
+        // escaped_key() returns the key as-is from source (safe for JSON output)
+        std::string_view ek = field.escaped_key();
+        // unescaped_key() resolves escape sequences for correct comparison
+        auto uk = field.unescaped_key();
+        if (uk.error()) {
+            continue;
+        }
+        if (key_set.count(uk.value())) {
+            if (!first) {
+                result += ',';
+            }
+            result += '"';
+            result += ek;
+            result += "\":";
+            // raw_json() extracts the original JSON text of the value,
+            // avoiding any re-serialization overhead
+            result += field.value().raw_json().value();
+            first = false;
         }
     }
-
-    return result.dump();
+    result += '}';
+    return result;
 }
 
 using document = simdjson::ondemand::document;
