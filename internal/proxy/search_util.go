@@ -24,12 +24,13 @@ import (
 )
 
 type rankParams struct {
-	limit           int64
-	offset          int64
-	roundDecimal    int64
-	groupByFieldId  int64
-	groupSize       int64
-	strictGroupSize bool
+	limit            int64
+	offset           int64
+	roundDecimal     int64
+	groupByFieldId   int64
+	groupByFieldName string
+	groupSize        int64
+	strictGroupSize  bool
 }
 
 func (r *rankParams) GetLimit() int64 {
@@ -58,6 +59,13 @@ func (r *rankParams) GetGroupByFieldId() int64 {
 		return r.groupByFieldId
 	}
 	return -1
+}
+
+func (r *rankParams) GetGroupByFieldName() string {
+	if r != nil {
+		return r.groupByFieldName
+	}
+	return ""
 }
 
 func (r *rankParams) GetGroupSize() int64 {
@@ -678,12 +686,13 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 }
 
 type groupByInfo struct {
-	groupByFieldId  int64
-	groupSize       int64
-	strictGroupSize bool
-	jsonPath        string
-	jsonType        schemapb.DataType
-	strictCast      bool
+	groupByFieldId   int64
+	groupByFieldName string
+	groupSize        int64
+	strictGroupSize  bool
+	jsonPath         string
+	jsonType         schemapb.DataType
+	strictCast       bool
 }
 
 func (g *groupByInfo) GetGroupByFieldId() int64 {
@@ -691,6 +700,13 @@ func (g *groupByInfo) GetGroupByFieldId() int64 {
 		return g.groupByFieldId
 	}
 	return 0
+}
+
+func (g *groupByInfo) GetGroupByFieldName() string {
+	if g != nil {
+		return g.groupByFieldName
+	}
+	return ""
 }
 
 func (g *groupByInfo) GetGroupSize() int64 {
@@ -810,6 +826,7 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 		return nil, err
 	}
 	ret.groupByFieldId = groupByFieldId
+	ret.groupByFieldName = groupByFieldName
 	if jsonPath != "" {
 		ret.jsonPath = jsonPath
 	}
@@ -930,12 +947,13 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 	}
 
 	return &rankParams{
-		limit:           limit,
-		offset:          offset,
-		roundDecimal:    roundDecimal,
-		groupByFieldId:  groupByInfo.GetGroupByFieldId(),
-		groupSize:       groupByInfo.GetGroupSize(),
-		strictGroupSize: groupByInfo.GetStrictGroupSize(),
+		limit:            limit,
+		offset:           offset,
+		roundDecimal:     roundDecimal,
+		groupByFieldId:   groupByInfo.GetGroupByFieldId(),
+		groupByFieldName: groupByInfo.GetGroupByFieldName(),
+		groupSize:        groupByInfo.GetGroupSize(),
+		strictGroupSize:  groupByInfo.GetStrictGroupSize(),
 	}, nil
 }
 
