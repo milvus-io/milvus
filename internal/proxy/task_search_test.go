@@ -462,9 +462,9 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		qt.request.OutputFields = []string{"*"}
 		err = qt.PreExecute(ctx)
 		assert.NoError(t, err)
-		data1 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, testInt64Field, fieldNameId[testInt64Field], true)
+		data1 := genTestSearchResultData(2, 10, schemapb.DataType_Int32, testInt32Field, fieldNameId[testInt32Field], true)
 		data1.SubResults[0].ReqIndex = 0
-		data2 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, testInt64Field, fieldNameId[testInt64Field], true)
+		data2 := genTestSearchResultData(2, 10, schemapb.DataType_Int32, testInt32Field, fieldNameId[testInt32Field], true)
 		data1.SubResults[0].ReqIndex = 2
 		qt.resultBuf.Insert(data2)
 
@@ -911,7 +911,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		enqueueTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 		st.SetTs(enqueueTs)
 		assert.NoError(t, st.PreExecute(ctx))
-		assert.NotNil(t, st.functionScore)
+		assert.NotNil(t, st.rerankMeta)
 		assert.Equal(t, false, st.SearchRequest.GetIsAdvanced())
 
 		// Verify EntityTtlPhysicalTime is set (issue #47413)
@@ -940,7 +940,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		enqueueTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 		st.SetTs(enqueueTs)
 		assert.NoError(t, st.PreExecute(ctx))
-		assert.NotNil(t, st.functionScore)
+		assert.NotNil(t, st.rerankMeta)
 		assert.Equal(t, true, st.SearchRequest.GetIsAdvanced())
 	})
 
@@ -2533,7 +2533,8 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 			expectedIDs:    []int64{1, 3, 5, 7, 9, 1, 3, 5, 7, 9},
 			expectedScores: []float32{-10, -8, -6, -4, -2, -10, -8, -6, -4, -2},
 			expectedGroupByValues: &schemapb.FieldData{
-				Type: schemapb.DataType_Int64,
+				Type:    schemapb.DataType_Int64,
+				FieldId: 1,
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5, 1, 2, 3, 4, 5}}},
@@ -2550,7 +2551,8 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 			expectedIDs:    []int64{1, 2, 3, 4, 5, 1, 2, 3, 4, 5},
 			expectedScores: []float32{-10, -9, -8, -7, -6, -10, -9, -8, -7, -6},
 			expectedGroupByValues: &schemapb.FieldData{
-				Type: schemapb.DataType_Int64,
+				Type:    schemapb.DataType_Int64,
+				FieldId: 1,
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 6, 2, 8, 3, 1, 6, 2, 8, 3}}},
@@ -2567,7 +2569,8 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 			expectedIDs:    []int64{1, 3, 5, 7, 9, 1, 3, 5, 7, 9},
 			expectedScores: []float32{-10, -8, -6, -4, -2, -10, -8, -6, -4, -2},
 			expectedGroupByValues: &schemapb.FieldData{
-				Type: schemapb.DataType_Int64,
+				Type:    schemapb.DataType_Int64,
+				FieldId: 1,
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_LongData{
@@ -2834,7 +2837,7 @@ func TestTaskSearch_reduceAdvanceSearchGroupByShortCut(t *testing.T) {
 	groupSize := int64(3)
 
 	reducedRes, err := reduceSearchResult(context.Background(), subSearchResultData,
-		reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metric.L2).WithPkType(schemapb.DataType_Int64).WithGroupByField(groupByField).WithGroupSize(groupSize).WithAdvance(true))
+		reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metric.IP).WithPkType(schemapb.DataType_Int64).WithGroupByField(groupByField).WithGroupSize(groupSize).WithAdvance(true))
 
 	assert.NoError(t, err)
 	// reduce_advance_groupby will only merge results from different delegator without reducing any result
