@@ -71,6 +71,26 @@ func (s *DeleteLogSuite) TestParse() {
 			input:     "100,timestamp",
 			expectErr: true,
 		},
+		{
+			tag:       "bare_number",
+			input:     "123",
+			expectErr: true,
+		},
+		{
+			tag:       "missing_pkType",
+			input:     `{"ts":1000,"pk":100}`,
+			expectErr: true,
+		},
+		{
+			tag:       "missing_ts",
+			input:     `{"pkType":5,"pk":100}`,
+			expectErr: true,
+		},
+		{
+			tag:       "missing_pk",
+			input:     `{"pkType":5,"ts":1000}`,
+			expectErr: true,
+		},
 	}
 
 	for _, tc := range cases {
