@@ -113,9 +113,9 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             // C++ truncates toward zero, but we need floor for time decomposition.
             // e.g., -1500000 us should be epoch_sec=-2, sub_sec_us=500000
             //        not epoch_sec=-1, sub_sec_us=-500000
-            std::time_t epoch_sec = (current_ts_us >= 0)
-                                        ? current_ts_us / 1000000
-                                        : (current_ts_us - 999999) / 1000000;
+            // Uses div-then-adjust pattern to avoid signed overflow near INT64_MIN.
+            std::time_t epoch_sec = current_ts_us / 1000000 -
+                                    (current_ts_us % 1000000 < 0 ? 1 : 0);
             int64_t sub_sec_us = current_ts_us - epoch_sec * 1000000;
             struct std::tm tm_buf;
             ::gmtime_r(&epoch_sec, &tm_buf);

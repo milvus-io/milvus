@@ -51,10 +51,13 @@ isDocEmpty(simdjson::ondemand::document document);
 // Extract specific top-level keys from a JSON string using simdjson ondemand.
 // Uses raw_json() to copy value fragments directly from the source without
 // re-parsing or re-serializing, which is faster than rapidjson or nlohmann.
+// Note: output key order follows source JSON field order (not keys param order).
+// This is safe because JSON objects are unordered per RFC 8259, and downstream
+// consumers (Go protobuf → map) do not depend on key ordering.
 inline std::string
 ExtractSubJson(const std::string& json, const std::vector<std::string>& keys) {
     simdjson::padded_string padded(json);
-    simdjson::ondemand::parser parser;
+    thread_local simdjson::ondemand::parser parser;
     auto doc = parser.iterate(padded);
     if (doc.error()) {
         ThrowInfo(ErrorCode::UnexpectedError,
