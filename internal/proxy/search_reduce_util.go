@@ -24,20 +24,27 @@ import (
 
 func reduceSearchResult(ctx context.Context, subSearchResultData []*schemapb.SearchResultData, reduceInfo *reduce.ResultInfo) (*milvuspb.SearchResults, error) {
 	if reduceInfo.GetGroupByFieldId() > 0 {
+		var ret *milvuspb.SearchResults
+		var err error
 		if reduceInfo.GetIsAdvance() {
 			// for hybrid search group by, we cannot reduce result for results from one single search path,
 			// because the final score has not been accumulated, also, offset cannot be applied
-			return reduceAdvanceGroupBy(ctx,
+			ret, err = reduceAdvanceGroupBy(ctx,
 				subSearchResultData, reduceInfo.GetNq(), reduceInfo.GetTopK(), reduceInfo.GetPkType(), reduceInfo.GetMetricType())
+		} else {
+			ret, err = reduceSearchResultDataWithGroupBy(ctx,
+				subSearchResultData,
+				reduceInfo.GetNq(),
+				reduceInfo.GetTopK(),
+				reduceInfo.GetMetricType(),
+				reduceInfo.GetPkType(),
+				reduceInfo.GetOffset(),
+				reduceInfo.GetGroupSize())
 		}
-		return reduceSearchResultDataWithGroupBy(ctx,
-			subSearchResultData,
-			reduceInfo.GetNq(),
-			reduceInfo.GetTopK(),
-			reduceInfo.GetMetricType(),
-			reduceInfo.GetPkType(),
-			reduceInfo.GetOffset(),
-			reduceInfo.GetGroupSize())
+		if err == nil && ret.GetResults().GetGroupByFieldValue() != nil {
+			ret.Results.GroupByFieldValue.FieldId = reduceInfo.GetGroupByFieldId()
+		}
+		return ret, err
 	}
 	return reduceSearchResultDataNoGroupBy(ctx,
 		subSearchResultData,
@@ -77,6 +84,25 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 	log.Ctx(ctx).Debug("reduceAdvanceGroupBY", zap.Int("len(subSearchResultData)", len(subSearchResultData)), zap.Int64("nq", nq))
 	// for advance group by, offset is not applied, so just return when there's only one channel
 	if len(subSearchResultData) == 1 {
+		// segcore may return packed nullable GroupByFieldValue where ScalarData
+		// only contains valid entries. Downstream code expects unpacked format
+		// (ScalarData has entries for all rows with zero-values for NULLs).
+		// Unpack it here for consistency with the multi-shard path.
+		if gbv := subSearchResultData[0].GetGroupByFieldValue(); gbv != nil && gbv.GetValidData() != nil {
+			totalRows := len(gbv.GetValidData())
+			gpFieldBuilder, err := typeutil.NewFieldDataBuilder(gbv.GetType(), true, totalRows)
+			if err != nil {
+				return nil, err
+			}
+			iter := typeutil.GetDataIterator(gbv)
+			for i := 0; i < totalRows; i++ {
+				gpFieldBuilder.Add(iter(i))
+			}
+			built := gpFieldBuilder.Build()
+			built.FieldId = gbv.GetFieldId()
+			built.FieldName = gbv.GetFieldName()
+			subSearchResultData[0].GroupByFieldValue = built
+		}
 		return &milvuspb.SearchResults{
 			Status:  merr.Success(),
 			Results: subSearchResultData[0],

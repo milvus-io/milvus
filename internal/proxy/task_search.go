@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
-	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -96,9 +95,9 @@ type searchTask struct {
 	queryInfos      []*planpb.QueryInfo
 	relatedDataSize int64
 
-	// New reranker functions
-	functionScore *rerank.FunctionScore
-	rankParams    *rankParams
+	// Rerank configuration metadata (nil means no rerank)
+	rerankMeta rerankMeta
+	rankParams *rankParams
 
 	// Order by fields for sorting results
 	orderByFields []OrderByField
@@ -413,17 +412,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.partitionIDsSet = typeutil.NewConcurrentSet[UniqueID]()
 	log := log.Ctx(ctx).With(zap.Int64("collID", t.GetCollectionID()), zap.String("collName", t.collectionName))
 	var err error
-	// TODO: Use function score uniformly to implement related logic
 	if t.request.FunctionScore != nil {
-		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()}); err != nil {
-			log.Warn("Failed to create function score", zap.Error(err))
-			return err
-		}
+		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
 	} else {
-		if t.functionScore, err = rerank.NewFunctionScoreWithlegacy(t.schema.CollectionSchema, t.request.GetSearchParams()); err != nil {
-			log.Warn("Failed to create function by legacy info", zap.Error(err))
-			return err
-		}
+		t.rerankMeta = newRerankMetaFromLegacy(t.request.GetSearchParams())
 	}
 
 	allFields := typeutil.GetAllFieldSchemas(t.schema.CollectionSchema)
@@ -458,11 +450,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	default:
 		t.needRequery = len(t.request.GetOutputFields()) > 0
 	}
-	t.needRequery = t.needRequery || len(t.functionScore.GetAllInputFieldNames()) > 0
-
-	if !t.functionScore.IsSupportGroup() && t.rankParams.GetGroupByFieldId() >= 0 {
-		return merr.WrapErrParameterInvalidMsg("Current rerank does not support grouping search")
-	}
+	t.needRequery = t.needRequery || (t.rerankMeta != nil && len(t.rerankMeta.GetInputFieldNames()) > 0)
 
 	t.SearchRequest.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
@@ -525,15 +513,19 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			internalSubReq.PartitionIDs = t.SearchRequest.GetPartitionIDs()
 		}
 
+		var rerankInputFieldIDs []int64
+		if t.rerankMeta != nil {
+			rerankInputFieldIDs = t.rerankMeta.GetInputFieldIDs()
+		}
 		if t.needRequery {
-			plan.OutputFieldIds = t.functionScore.GetAllInputFieldIDs()
+			plan.OutputFieldIds = rerankInputFieldIDs
 		} else {
 			primaryFieldSchema, err := t.schema.GetPkField()
 			if err != nil {
 				return err
 			}
 			allFieldIDs := typeutil.NewSet(t.SearchRequest.OutputFieldsId...)
-			allFieldIDs.Insert(t.functionScore.GetAllInputFieldIDs()...)
+			allFieldIDs.Insert(rerankInputFieldIDs...)
 			allFieldIDs.Insert(primaryFieldSchema.FieldID)
 			plan.OutputFieldIds = allFieldIDs.Collect()
 			plan.DynamicFields = t.userDynamicFields
@@ -675,18 +667,11 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	t.orderByFields = orderByFields
 
 	if t.request.FunctionScore != nil {
-		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()}); err != nil {
-			log.Warn("Failed to create function score", zap.Error(err))
-			return err
-		}
-
-		if !t.functionScore.IsSupportGroup() && queryInfo.GetGroupByFieldId() > 0 {
-			return merr.WrapErrParameterInvalidMsg("Rerank %s does not support grouping search", t.functionScore.RerankName())
-		}
+		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
 	}
 
 	// order_by and function_score cannot be used together
-	if len(t.orderByFields) > 0 && t.functionScore != nil {
+	if len(t.orderByFields) > 0 && t.rerankMeta != nil {
 		return merr.WrapErrParameterInvalidMsg("order_by and function_score cannot be used together: they specify conflicting sort criteria")
 	}
 
@@ -728,15 +713,19 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
 	t.needRequery = len(vectorOutputFields) > 0
+	var rerankInputFieldIDs []int64
+	if t.rerankMeta != nil {
+		rerankInputFieldIDs = t.rerankMeta.GetInputFieldIDs()
+	}
 	if t.needRequery {
-		plan.OutputFieldIds = t.functionScore.GetAllInputFieldIDs()
+		plan.OutputFieldIds = rerankInputFieldIDs
 	} else {
 		primaryFieldSchema, err := t.schema.GetPkField()
 		if err != nil {
 			return err
 		}
 		allFieldIDs := typeutil.NewSet[int64](t.SearchRequest.OutputFieldsId...)
-		allFieldIDs.Insert(t.functionScore.GetAllInputFieldIDs()...)
+		allFieldIDs.Insert(rerankInputFieldIDs...)
 		allFieldIDs.Insert(primaryFieldSchema.FieldID)
 		plan.OutputFieldIds = allFieldIDs.Collect()
 		plan.DynamicFields = t.userDynamicFields

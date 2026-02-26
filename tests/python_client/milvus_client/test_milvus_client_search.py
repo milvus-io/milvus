@@ -1,3 +1,4 @@
+import math
 import time
 import os
 import json
@@ -578,12 +579,12 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
             }
         )
         if not_support_datatype == DataType.VARCHAR:
-            field_type = "VarChar"
+            err_msg = f"decay input field {default_string_field_name} must be numeric, got VarChar"
         if not_support_datatype == DataType.JSON:
-            field_type = "JSON"
+            err_msg = "unsupported field type: JSON"
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: f"Decay rerank: unsupported input field type:{field_type}, only support numberic field"}
+                 ct.err_msg: err_msg}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -628,7 +629,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: "Decay rerank: unsupported input field type:Array, only support numberic field"}
+                 ct.err_msg: "unsupported field type: Array"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -672,51 +673,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: "Decay rerank: unsupported input field type:FloatVector, only support numberic field"}
-        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
-                    check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_search_reranker_not_supported_nullable_field(self):
-        """
-        target: test search with reranker on not supported nullable field
-        method: create connection, collection, insert and search
-        expected: raise exception
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        dim = 5
-        # 1. create collection
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
-                         auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=True)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(default_vector_field_name, metric_type="COSINE")
-        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
-        # 2. insert
-        rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
-                 ct.default_reranker_field_name: i} for i in range(default_nb)]
-        self.insert(client, collection_name, rows)
-        # 3. search
-        my_rerank_fn = Function(
-            name="my_rerank_fn",
-            input_field_names=[ct.default_reranker_field_name],
-            function_type=FunctionType.RERANK,
-            params={
-                "reranker": "decay",
-                "function": "gauss",
-                "origin": 0,
-                "offset": 0,
-                "decay": 0.5,
-                "scale": 100
-            }
-        )
-        vectors_to_search = rng.random((1, dim))
-        error = {ct.err_code: 65535,
-                 ct.err_msg: "Function input field cannot be nullable: field reranker_field"}
+                 ct.err_msg: "unsupported field type: FloatVector"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -892,7 +849,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: "Function input field not found: not_exist_field"}
+                 ct.err_msg: "input field not_exist_field not found in collection schema"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -936,7 +893,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: "Decay function only supports single input, but gets [[reranker_field id]] input"}
+                 ct.err_msg: "decay reranker requires exactly 1 input field, got 2"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -1064,7 +1021,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: "Unsupported rerank function: [1]"}
+                 ct.err_msg: "unsupported reranker 1"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -1109,7 +1066,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: f"Unsupported rerank function: [{not_supported_reranker}]"}
+                 ct.err_msg: f"unsupported reranker {not_supported_reranker}"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -1154,7 +1111,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: "Invaild decay function: decay, only support [gauss,linear,exp]"}
+                 ct.err_msg: f"decay: invalid function \"{not_supported_function}\", must be one of [gauss, exp, linear]"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -1199,7 +1156,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: f"Param origin:{invalid_origin} is not a number"}
+                 ct.err_msg: f"decay param origin: {invalid_origin} is not a number"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -1242,7 +1199,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: "Decay function lost param: origin"}
+                 ct.err_msg: "decay origin not specified"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -1287,7 +1244,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: f"Param scale:{invalid_scale} is not a number"}
+                 ct.err_msg: f"decay param scale: {invalid_scale} is not a number"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -1330,7 +1287,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: "Decay function lost param: scale"}
+                 ct.err_msg: "decay scale not specified"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -1375,7 +1332,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: f"Decay function param: scale must > 0, but got {invalid_scale}"}
+                 ct.err_msg: f"decay: scale must be > 0, got {invalid_scale}"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -1420,7 +1377,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: f"Param offset:{invalid_offset} is not a number"}
+                 ct.err_msg: f"decay param offset: {invalid_offset} is not a number"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -1465,7 +1422,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: f"Decay function param: offset must >= 0, but got {invalid_offset}"}
+                 ct.err_msg: f"decay: offset must be >= 0, got {invalid_offset}"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -1556,7 +1513,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: f"Param decay:{invalid_decay} is not a number"}
+                 ct.err_msg: f"decay param decay: {invalid_decay} is not a number"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -1645,7 +1602,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: "Function input field not found: dynamic_fields"}
+                 ct.err_msg: "input field dynamic_fields not found in collection schema"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -4874,6 +4831,513 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
                                  "limit": default_limit}
                     )
 
+    @staticmethod
+    def _gauss_decay(origin, scale, decay, offset, distance):
+        adj = max(0, abs(distance - origin) - offset)
+        sigma_sq = scale ** 2 / math.log(decay)
+        return math.exp(adj ** 2 / sigma_sq)
+
+    @staticmethod
+    def _exp_decay(origin, scale, decay, offset, distance):
+        adj = max(0, abs(distance - origin) - offset)
+        lam = math.log(decay) / scale
+        return math.exp(lam * adj)
+
+    @staticmethod
+    def _linear_decay(origin, scale, decay, offset, distance):
+        adj = max(0, abs(distance - origin) - offset)
+        slope = (1 - decay) / scale
+        return max(decay, 1 - slope * adj)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("function", ["gauss", "linear", "exp"])
+    @pytest.mark.parametrize("decay", [0.1, 0.5, 0.9])
+    def test_milvus_client_search_reranker_decay_score_ordering(self, function, decay):
+        """
+        target: verify decay reranker produces scores ordered by distance from origin
+        method: insert rows with identical vectors and varying reranker_field values,
+                search with decay reranker, check score ordering matches distance ordering
+        expected: results ordered by distance from origin (closer = higher score), all scores > 0
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.FLOAT, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert rows with identical vectors but different reranker_field values
+        fixed_vector = [0.5] * dim
+        field_values = [0, 10, 50, 100, 200, 500]
+        rows = [{default_primary_key_field_name: i,
+                 default_vector_field_name: fixed_vector,
+                 ct.default_reranker_field_name: np.float32(field_values[i])}
+                for i in range(len(field_values))]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. search with decay reranker
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": function,
+                "origin": 0,
+                "offset": 0,
+                "decay": decay,
+                "scale": 100
+            }
+        )
+        vectors_to_search = [fixed_vector]
+        res = self.search(client, collection_name, vectors_to_search, limit=len(field_values),
+                          ranker=my_rerank_fn,
+                          output_fields=[ct.default_reranker_field_name])[0]
+        # 4. verify score ordering: closer to origin should have higher score
+        results = res[0]
+        assert len(results) == len(field_values), \
+            f"Expected {len(field_values)} results, got {len(results)}"
+        scores = [r["distance"] for r in results]
+        reranker_values = [r[ct.default_reranker_field_name] for r in results]
+        log.info(f"function={function}, decay={decay}, scores={scores}, reranker_values={reranker_values}")
+        # All scores must be positive
+        for i, score in enumerate(scores):
+            assert score > 0, f"Score at position {i} should be > 0, got {score}"
+        # Scores must be in descending order (higher score first)
+        for i in range(len(scores) - 1):
+            assert scores[i] >= scores[i + 1], \
+                f"Scores not in descending order: scores[{i}]={scores[i]} < scores[{i + 1}]={scores[i + 1]}"
+        # Distance from origin must be in ascending order (closer first)
+        distances = [abs(v) for v in reranker_values]
+        for i in range(len(distances) - 1):
+            assert distances[i] <= distances[i + 1], \
+                f"Distances not in ascending order: dist[{i}]={distances[i]} > dist[{i + 1}]={distances[i + 1]}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("function", ["gauss", "linear", "exp"])
+    def test_milvus_client_search_reranker_decay_score_ratio(self, function):
+        """
+        target: verify decay reranker produces mathematically correct score ratios
+        method: insert rows with identical vectors at known distances, search with decay reranker,
+                compare actual score ratios against Python-computed expected ratios
+        expected: score ratios match expected decay function ratios within tolerance
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.FLOAT, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert rows with identical vectors at specific distances
+        fixed_vector = [0.5] * dim
+        origin = 0
+        scale = 100
+        decay_param = 0.5
+        offset = 0
+        field_values = [0, 25, 50, 75, 100]
+        rows = [{default_primary_key_field_name: i,
+                 default_vector_field_name: fixed_vector,
+                 ct.default_reranker_field_name: np.float32(field_values[i])}
+                for i in range(len(field_values))]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. search with decay reranker
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": function,
+                "origin": origin,
+                "offset": offset,
+                "decay": decay_param,
+                "scale": scale
+            }
+        )
+        vectors_to_search = [fixed_vector]
+        res = self.search(client, collection_name, vectors_to_search, limit=len(field_values),
+                          ranker=my_rerank_fn,
+                          output_fields=[ct.default_reranker_field_name])[0]
+        # 4. build mapping from reranker_field value to actual score
+        results = res[0]
+        assert len(results) == len(field_values), \
+            f"Expected {len(field_values)} results, got {len(results)}"
+        actual_scores = {}
+        for r in results:
+            actual_scores[r[ct.default_reranker_field_name]] = r["distance"]
+        # 5. compute expected decay scores using Python formulas
+        decay_funcs = {"gauss": self._gauss_decay, "linear": self._linear_decay, "exp": self._exp_decay}
+        decay_fn = decay_funcs[function]
+        expected_scores = {}
+        for v in field_values:
+            expected_scores[v] = decay_fn(origin, scale, decay_param, offset, v)
+        log.info(f"function={function}, actual_scores={actual_scores}, expected_scores={expected_scores}")
+        # 6. verify score ratios match expected ratios
+        # Use distance=0 as reference point (decay score = 1.0, so actual score = base_score)
+        ref_value = 0
+        ref_actual = actual_scores[ref_value]
+        ref_expected = expected_scores[ref_value]
+        epsilon = 0.01
+        for v in field_values:
+            if v == ref_value:
+                continue
+            actual_ratio = actual_scores[v] / ref_actual
+            expected_ratio = expected_scores[v] / ref_expected
+            log.info(f"  distance={v}: actual_ratio={actual_ratio:.6f}, expected_ratio={expected_ratio:.6f}")
+            assert abs(actual_ratio - expected_ratio) < epsilon, \
+                f"Score ratio mismatch for distance={v}: actual_ratio={actual_ratio:.6f}, " \
+                f"expected_ratio={expected_ratio:.6f}, diff={abs(actual_ratio - expected_ratio):.6f}"
+        # 7. additionally verify that score at distance=scale equals decay * score at origin
+        if scale in actual_scores:
+            actual_decay_at_scale = actual_scores[scale] / actual_scores[ref_value]
+            assert abs(actual_decay_at_scale - decay_param) < epsilon, \
+                f"At distance=scale, expected decay≈{decay_param}, got {actual_decay_at_scale:.6f}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_reranker_decay_offset_effect(self):
+        """
+        target: verify decay reranker offset parameter works correctly
+        method: insert rows with identical vectors at various distances, search with decay reranker
+                using offset=10, verify items within offset zone have equal scores and items beyond
+                have decreasing scores
+        expected: items at distance <= offset have same score (decay=1.0), items beyond offset have
+                  strictly decreasing scores
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.FLOAT, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert rows with identical vectors
+        fixed_vector = [0.5] * dim
+        field_values = [0, 5, 10, 15, 50, 100]
+        rows = [{default_primary_key_field_name: i,
+                 default_vector_field_name: fixed_vector,
+                 ct.default_reranker_field_name: np.float32(field_values[i])}
+                for i in range(len(field_values))]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. search with decay reranker using offset=10
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 10,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = [fixed_vector]
+        res = self.search(client, collection_name, vectors_to_search, limit=len(field_values),
+                          ranker=my_rerank_fn,
+                          output_fields=[ct.default_reranker_field_name])[0]
+        # 4. build mapping from reranker_field value to actual score
+        results = res[0]
+        assert len(results) == len(field_values), \
+            f"Expected {len(field_values)} results, got {len(results)}"
+        score_map = {}
+        for r in results:
+            score_map[r[ct.default_reranker_field_name]] = r["distance"]
+        log.info(f"offset_test score_map={score_map}")
+        # 5. verify items within offset zone (distance <= 10) have the same score
+        within_offset = [0, 5, 10]
+        epsilon = 1e-4
+        ref_score = score_map[within_offset[0]]
+        for v in within_offset:
+            assert abs(score_map[v] - ref_score) < epsilon, \
+                f"Items within offset should have equal scores: score({v})={score_map[v]}, " \
+                f"score({within_offset[0]})={ref_score}"
+        # 6. verify items beyond offset have strictly decreasing scores
+        beyond_offset = [15, 50, 100]
+        # Items within offset should have higher score than items beyond offset
+        for v in beyond_offset:
+            assert score_map[v] < ref_score, \
+                f"Score beyond offset should be < offset zone score: score({v})={score_map[v]}, ref={ref_score}"
+        # Items beyond offset should be in strictly decreasing order by distance
+        for i in range(len(beyond_offset) - 1):
+            assert score_map[beyond_offset[i]] > score_map[beyond_offset[i + 1]], \
+                f"Scores beyond offset not decreasing: score({beyond_offset[i]})={score_map[beyond_offset[i]]} " \
+                f"<= score({beyond_offset[i + 1]})={score_map[beyond_offset[i + 1]]}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("function", ["gauss", "linear", "exp"])
+    def test_milvus_client_search_reranker_decay_nullable_field(self, function):
+        """
+        target: verify decay reranker works with nullable input field
+        method: create collection with nullable reranker field, insert rows with some null values,
+                search with decay reranker
+        expected: search successfully, results include both null and non-null rows
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection with nullable reranker field
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.FLOAT, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert rows: some with values, some with None
+        rng = np.random.default_rng(seed=19530)
+        rows = []
+        for i in range(default_nb):
+            row = {default_primary_key_field_name: i,
+                   default_vector_field_name: list(rng.random((1, dim))[0])}
+            if i % 5 == 0:
+                row[ct.default_reranker_field_name] = None
+            else:
+                row[ct.default_reranker_field_name] = np.float32(i)
+            rows.append(row)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. search with decay reranker
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": function,
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )
+        # search with output_fields
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    output_fields=[ct.default_reranker_field_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_reranker_decay_nullable_field_score_ordering(self):
+        """
+        target: verify decay reranker produces correct score ordering with nullable field,
+                null values should be ranked last
+        method: insert rows with identical vectors, some with null reranker_field values,
+                search with decay reranker, verify non-null rows are ranked before null rows
+        expected: non-null rows ranked by distance from origin, null rows ranked last
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection with nullable reranker field
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.FLOAT, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert rows with identical vectors: mix of non-null and null values
+        fixed_vector = [0.5] * dim
+        # ids 0-3: non-null values at known distances from origin
+        # ids 4-5: null values
+        rows = [
+            {default_primary_key_field_name: 0, default_vector_field_name: fixed_vector,
+             ct.default_reranker_field_name: np.float32(0)},
+            {default_primary_key_field_name: 1, default_vector_field_name: fixed_vector,
+             ct.default_reranker_field_name: np.float32(50)},
+            {default_primary_key_field_name: 2, default_vector_field_name: fixed_vector,
+             ct.default_reranker_field_name: np.float32(100)},
+            {default_primary_key_field_name: 3, default_vector_field_name: fixed_vector,
+             ct.default_reranker_field_name: np.float32(200)},
+            {default_primary_key_field_name: 4, default_vector_field_name: fixed_vector,
+             ct.default_reranker_field_name: None},
+            {default_primary_key_field_name: 5, default_vector_field_name: fixed_vector,
+             ct.default_reranker_field_name: None},
+        ]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. search with decay reranker
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = [fixed_vector]
+        res = self.search(client, collection_name, vectors_to_search, limit=len(rows),
+                          ranker=my_rerank_fn,
+                          output_fields=[ct.default_reranker_field_name])[0]
+        results = res[0]
+        log.info(f"nullable decay results: {results}")
+        # 4. verify: non-null rows should have positive scores and be ordered by distance
+        non_null_results = [r for r in results if r.get(ct.default_reranker_field_name) is not None]
+        null_results = [r for r in results if r.get(ct.default_reranker_field_name) is None]
+        # non-null scores should be positive and in descending order
+        non_null_scores = [r["distance"] for r in non_null_results]
+        for i, score in enumerate(non_null_scores):
+            assert score > 0, f"Non-null score at position {i} should be > 0, got {score}"
+        for i in range(len(non_null_scores) - 1):
+            assert non_null_scores[i] >= non_null_scores[i + 1], \
+                f"Non-null scores not in descending order: {non_null_scores[i]} < {non_null_scores[i + 1]}"
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_search_reranker_decay_nullable_all_types(self, rerank_fields):
+        """
+        target: verify decay reranker works with nullable fields of all supported numeric types
+        method: create collection with nullable reranker field of various types,
+                insert rows with some null values, search with decay reranker
+        expected: search successfully with all supported numeric types
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection with nullable reranker field
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, rerank_fields, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert rows with some null values
+        rng = np.random.default_rng(seed=19530)
+        rows = []
+        for i in range(default_nb):
+            row = {default_primary_key_field_name: i,
+                   default_vector_field_name: list(rng.random((1, dim))[0])}
+            if i % 5 == 0:
+                row[ct.default_reranker_field_name] = None
+            else:
+                if rerank_fields == DataType.INT8:
+                    row[ct.default_reranker_field_name] = np.int8(i % 127)
+                elif rerank_fields == DataType.INT16:
+                    row[ct.default_reranker_field_name] = np.int16(i)
+                elif rerank_fields == DataType.INT32:
+                    row[ct.default_reranker_field_name] = np.int32(i)
+                elif rerank_fields == DataType.FLOAT:
+                    row[ct.default_reranker_field_name] = np.float32(i)
+                elif rerank_fields == DataType.DOUBLE:
+                    row[ct.default_reranker_field_name] = np.float64(i)
+            rows.append(row)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. search with decay reranker
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    output_fields=[ct.default_reranker_field_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_reranker_decay_nullable_all_null(self):
+        """
+        target: verify decay reranker handles the case where all reranker field values are null
+        method: create collection with nullable reranker field, insert rows with all null values,
+                search with decay reranker
+        expected: search successfully, all results have null reranker field
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection with nullable reranker field
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.FLOAT, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert rows with all null reranker field values
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i,
+                 default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: None}
+                for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. search with decay reranker
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        res = self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                          output_fields=[ct.default_reranker_field_name],
+                          check_task=CheckTasks.check_search_results,
+                          check_items={"enable_milvus_client_api": True,
+                                       "nq": len(vectors_to_search),
+                                       "pk_name": default_primary_key_field_name,
+                                       "limit": default_limit}
+                          )
+
 
 class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
 
@@ -6164,6 +6628,144 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
                                                           max_chunks_per_doc=max_chunks_per_doc,
                                                           overlap_tokens=overlap_tokens)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_with_tei_model_rerank_nullable_field(self, tei_reranker_endpoint):
+        """
+        target: verify model reranker (TEI) works with nullable VarChar input field
+        method: create collection with nullable document field, insert rows with some null values,
+                search with TEI model reranker
+        expected: search successfully, null document rows treated as empty strings for reranking
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create schema with nullable document field
+        schema = client.create_schema(enable_dynamic_field=False, auto_id=True)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("document", DataType.VARCHAR, max_length=10000, nullable=True)
+        schema.add_field("dense", DataType.FLOAT_VECTOR, dim=768)
+        # 2. prepare index params
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="dense", index_type="FLAT", metric_type="COSINE")
+        # 3. create collection
+        client.create_collection(
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+        )
+        # 4. insert data: some rows with null document
+        rows = []
+        data_size = 100
+        for i in range(data_size):
+            row = {
+                "document": None if i % 10 == 0 else fake.text(),
+                "dense": [random.random() for _ in range(768)]
+            }
+            rows.append(row)
+        client.insert(collection_name, rows)
+        # 5. search with TEI model reranker
+        nq = 1
+        query_texts = [fake.text() for _ in range(nq)]
+        tei_ranker = Function(
+            name="rerank_model",
+            input_field_names=["document"],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "model",
+                "provider": "tei",
+                "queries": query_texts,
+                "endpoint": tei_reranker_endpoint,
+            },
+        )
+        data = [[random.random() for _ in range(768)] for _ in range(nq)]
+        rerank_results = client.search(
+            collection_name,
+            data=data,
+            anns_field="dense",
+            limit=10,
+            output_fields=["document"],
+            ranker=tei_ranker,
+            consistency_level="Strong",
+        )
+        assert len(rerank_results) == nq
+        assert len(rerank_results[0]) > 0
+        # verify scores are in descending order
+        scores = [r["distance"] for r in rerank_results[0]]
+        for i in range(len(scores) - 1):
+            assert scores[i] >= scores[i + 1], \
+                f"Scores not in descending order: scores[{i}]={scores[i]} < scores[{i + 1}]={scores[i + 1]}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_with_tei_model_rerank_nullable_all_null(self, tei_reranker_endpoint):
+        """
+        target: verify model reranker (TEI) handles the case where all document field values are null
+        method: create collection with nullable document field, insert rows with all null values,
+                search with TEI model reranker
+        expected: search successfully, all null documents treated as empty strings
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create schema with nullable document field
+        schema = client.create_schema(enable_dynamic_field=False, auto_id=True)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("document", DataType.VARCHAR, max_length=10000, nullable=True)
+        schema.add_field("dense", DataType.FLOAT_VECTOR, dim=768)
+        # 2. prepare index params
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="dense", index_type="FLAT", metric_type="COSINE")
+        # 3. create collection
+        client.create_collection(
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+        )
+        # 4. insert data with all null documents
+        rows = []
+        data_size = 100
+        for i in range(data_size):
+            row = {
+                "document": None,
+                "dense": [random.random() for _ in range(768)]
+            }
+            rows.append(row)
+        client.insert(collection_name, rows)
+        # 5. search with TEI model reranker
+        nq = 1
+        query_texts = [fake.text() for _ in range(nq)]
+        tei_ranker = Function(
+            name="rerank_model",
+            input_field_names=["document"],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "model",
+                "provider": "tei",
+                "queries": query_texts,
+                "endpoint": tei_reranker_endpoint,
+            },
+        )
+        data = [[random.random() for _ in range(768)] for _ in range(nq)]
+        rerank_results = client.search(
+            collection_name,
+            data=data,
+            anns_field="dense",
+            limit=10,
+            output_fields=["document"],
+            ranker=tei_ranker,
+            consistency_level="Strong",
+        )
+        assert len(rerank_results) == nq
+        assert len(rerank_results[0]) > 0
+        # verify all returned documents are null and scores are valid
+        # model reranker treats null as empty string "", so scores are non-null float values
+        scores = [r["distance"] for r in rerank_results[0]]
+        for r in rerank_results[0]:
+            assert r.get("document") is None, \
+                f"Expected null document, got {r.get('document')}"
+        for i in range(len(scores) - 1):
+            assert scores[i] >= scores[i + 1], \
+                f"Scores not in descending order: scores[{i}]={scores[i]} < scores[{i + 1}]={scores[i + 1]}"
+
 
 class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
     """ Test case of model rerank negative scenarios """
@@ -6316,7 +6918,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "Parse rerank params [queries] failed"}
+        error = {ct.err_code: 65535, ct.err_msg: "parse rerank params [queries] failed"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -6342,7 +6944,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "Rerank function lost params queries"}
+        error = {ct.err_code: 65535, ct.err_msg: "rerank function missing required param: queries"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -6374,7 +6976,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("invalid_reranker_type", ["invalid", "", None, 123])
+    @pytest.mark.parametrize("invalid_reranker_type", ["invalid", None, 123])
     def test_milvus_client_search_with_invalid_reranker_type(self, setup_collection, invalid_reranker_type,
                                                              tei_reranker_endpoint):
         """
@@ -6398,7 +7000,34 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "Unsupported rerank function"}
+        error = {ct.err_code: 65535, ct.err_msg: "unsupported reranker"}
+        self.search(client, collection_name, data, anns_field="dense", limit=5,
+                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_with_empty_reranker_type(self, setup_collection, tei_reranker_endpoint):
+        """
+        target: test model rerank with empty reranker type
+        method: use empty string as reranker type
+        expected: raise exception
+        """
+        client, collection_name = setup_collection
+        query_texts = ["test query"]
+
+        ranker = Function(
+            name="rerank_model",
+            input_field_names=["document"],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "",
+                "provider": "tei",
+                "queries": query_texts,
+                "endpoint": tei_reranker_endpoint,
+            },
+        )
+
+        data = [[0.1] * 128]
+        error = {ct.err_code: 65535, ct.err_msg: "reranker name not specified"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -6425,7 +7054,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]  # single search data
-        error = {ct.err_code: 65535, ct.err_msg: "nq must equal to queries size"}
+        error = {ct.err_code: 65535, ct.err_msg: "queries count (3) != nq count (1)"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -6452,7 +7081,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "Rerank model only support varchar"}
+        error = {ct.err_code: 65535, ct.err_msg: "model input field id must be VarChar, got Int64"}
         self.search(client, collection_name, data, anns_field="dense", limit=5, output_fields=["doc_id", "document"],
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -6507,7 +7136,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "Rerank model only supports single input"}
+        error = {ct.err_code: 65535, ct.err_msg: "model reranker requires exactly 1 input field, got 2"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 

@@ -1925,7 +1925,7 @@ func Test_SegmentScorers(t *testing.T) {
 
 	t.Run("error - not segment scorer flag", func(t *testing.T) {
 		fs := &schemapb.FunctionScore{
-			Functions: []*schemapb.FunctionSchema{{Params: []*commonpb.KeyValuePair{{Key: "reranker", Value: rerank.WeightedName}}}},
+			Functions: []*schemapb.FunctionSchema{{Params: []*commonpb.KeyValuePair{{Key: "reranker", Value: "weighted"}}}},
 		}
 		plan, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
 		assert.NoError(t, err)
