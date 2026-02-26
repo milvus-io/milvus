@@ -1,5 +1,6 @@
 #include "TimestamptzArithCompareExpr.h"
 
+#include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
@@ -108,19 +109,34 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             const int64_t current_ts_us = data[i];
             const int op_sign =
                 (arith_op == proto::plan::ArithOpType::Add) ? 1 : -1;
-            // Convert microseconds to broken-down UTC time
-            std::time_t epoch_sec = current_ts_us / 1000000;
+            // Floor division to correctly handle pre-epoch (negative) timestamps:
+            // C++ truncates toward zero, but we need floor for time decomposition.
+            // e.g., -1500000 us should be epoch_sec=-2, sub_sec_us=500000
+            //        not epoch_sec=-1, sub_sec_us=-500000
+            std::time_t epoch_sec = (current_ts_us >= 0)
+                                        ? current_ts_us / 1000000
+                                        : (current_ts_us - 999999) / 1000000;
+            int64_t sub_sec_us = current_ts_us - epoch_sec * 1000000;
             struct std::tm tm_buf;
             ::gmtime_r(&epoch_sec, &tm_buf);
+            // Validate interval fields fit in int before applying
+            auto safe_int = [](int64_t v) -> int {
+                AssertInfo(v >= INT_MIN && v <= INT_MAX,
+                           "interval field {} overflows int range",
+                           v);
+                return static_cast<int>(v);
+            };
             // Apply interval with normalization via timegm
-            tm_buf.tm_year += static_cast<int>(interval.years() * op_sign);
-            tm_buf.tm_mon += static_cast<int>(interval.months() * op_sign);
-            tm_buf.tm_mday += static_cast<int>(interval.days() * op_sign);
-            tm_buf.tm_hour += static_cast<int>(interval.hours() * op_sign);
-            tm_buf.tm_min += static_cast<int>(interval.minutes() * op_sign);
-            tm_buf.tm_sec += static_cast<int>(interval.seconds() * op_sign);
+            tm_buf.tm_year += safe_int(interval.years() * op_sign);
+            tm_buf.tm_mon += safe_int(interval.months() * op_sign);
+            tm_buf.tm_mday += safe_int(interval.days() * op_sign);
+            tm_buf.tm_hour += safe_int(interval.hours() * op_sign);
+            tm_buf.tm_min += safe_int(interval.minutes() * op_sign);
+            tm_buf.tm_sec += safe_int(interval.seconds() * op_sign);
             std::time_t new_epoch_sec = ::timegm(&tm_buf);
-            int64_t final_us = static_cast<int64_t>(new_epoch_sec) * 1000000;
+            // Restore sub-second microseconds from the original timestamp
+            int64_t final_us =
+                static_cast<int64_t>(new_epoch_sec) * 1000000 + sub_sec_us;
             bool match = false;
             switch (compare_op) {
                 case proto::plan::OpType::Equal:
