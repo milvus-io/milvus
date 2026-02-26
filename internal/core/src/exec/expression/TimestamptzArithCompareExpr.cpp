@@ -137,23 +137,34 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
                     result);
                 return static_cast<int>(result);
             };
-            tm_buf.tm_year =
-                safe_add(tm_buf.tm_year, interval.years() * op_sign);
-            tm_buf.tm_mon =
-                safe_add(tm_buf.tm_mon, interval.months() * op_sign);
-            tm_buf.tm_mday =
-                safe_add(tm_buf.tm_mday, interval.days() * op_sign);
-            tm_buf.tm_hour =
-                safe_add(tm_buf.tm_hour, interval.hours() * op_sign);
-            tm_buf.tm_min =
-                safe_add(tm_buf.tm_min, interval.minutes() * op_sign);
-            tm_buf.tm_sec =
-                safe_add(tm_buf.tm_sec, interval.seconds() * op_sign);
+            // Cast to int64_t before multiplying to avoid int * int overflow
+            // (e.g. interval.years() == INT32_MIN, op_sign == -1).
+            tm_buf.tm_year = safe_add(
+                tm_buf.tm_year, static_cast<int64_t>(interval.years()) * op_sign);
+            tm_buf.tm_mon = safe_add(
+                tm_buf.tm_mon, static_cast<int64_t>(interval.months()) * op_sign);
+            tm_buf.tm_mday = safe_add(
+                tm_buf.tm_mday, static_cast<int64_t>(interval.days()) * op_sign);
+            tm_buf.tm_hour = safe_add(
+                tm_buf.tm_hour, static_cast<int64_t>(interval.hours()) * op_sign);
+            tm_buf.tm_min = safe_add(
+                tm_buf.tm_min, static_cast<int64_t>(interval.minutes()) * op_sign);
+            tm_buf.tm_sec = safe_add(
+                tm_buf.tm_sec, static_cast<int64_t>(interval.seconds()) * op_sign);
             // timegm normalizes the tm fields and converts back to epoch.
             // It succeeds for all normalized inputs from gmtime_r + safe_add.
             // No -1 check: -1 is a valid epoch second (1969-12-31T23:59:59Z)
             // and is reachable via legal interval arithmetic (e.g., epoch 0 - 1s).
             std::time_t new_epoch_sec = ::timegm(&tm_buf);
+            // Guard against overflow in epoch_sec * 1000000.
+            // INT64_MAX / 1000000 ≈ ±9.2e12 sec ≈ ±292,271 years from epoch.
+            constexpr int64_t kMaxSec = (INT64_MAX - 999999) / 1000000;
+            constexpr int64_t kMinSec = (INT64_MIN + 999999) / 1000000;
+            AssertInfo(
+                new_epoch_sec >= kMinSec && new_epoch_sec <= kMaxSec,
+                "timestamp after interval arithmetic out of representable "
+                "range: {} seconds from epoch",
+                static_cast<int64_t>(new_epoch_sec));
             // Restore sub-second microseconds from the original timestamp
             int64_t final_us =
                 static_cast<int64_t>(new_epoch_sec) * 1000000 + sub_sec_us;
