@@ -158,13 +158,18 @@ func (dl *DeleteLog) Parse(val string) error {
 	// Try JSON parse first (single parse, no double validation)
 	result := gjson.Parse(val)
 	if result.Type == gjson.JSON {
-		dl.Ts = result.Get("ts").Uint()
+		tsRes := result.Get("ts")
+		pkRes := result.Get("pk")
+		if !tsRes.Exists() || !pkRes.Exists() {
+			return fmt.Errorf("invalid delete log json: missing required fields in %s", val)
+		}
+		dl.Ts = tsRes.Uint()
 		dl.PkType = result.Get("pkType").Int()
 		switch dl.PkType {
 		case int64(schemapb.DataType_Int64):
-			dl.Pk = &Int64PrimaryKey{Value: result.Get("pk").Int()}
+			dl.Pk = &Int64PrimaryKey{Value: pkRes.Int()}
 		case int64(schemapb.DataType_VarChar):
-			dl.Pk = &VarCharPrimaryKey{Value: result.Get("pk").String()}
+			dl.Pk = &VarCharPrimaryKey{Value: pkRes.String()}
 		}
 		return nil
 	}
