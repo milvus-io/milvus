@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -347,14 +348,16 @@ func applyCollectionMmapSetting(schema *schemapb.CollectionSchema,
 // Returns true when the AutoWarmupForNonPKIsolationCollection config is enabled AND the collection
 // does NOT have partition key isolation.
 func autoWarmupForNonPKIsolationCollection(collectionProperties []*commonpb.KeyValuePair) bool {
-	if !paramtable.Get().QueryNodeCfg.AutoWarmupForNonPKIsolationCollection.GetAsBool() {
+	if !paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.GetAsBool() {
 		return false
 	}
 	isPKI, isError := common.IsPartitionKeyIsolationKvEnabled(collectionProperties...)
 	if isError != nil {
-		// if error, regarding as non partition key isolation collection, so autowarmup is true
-		log.Warn("failed to parse partition key isolation, regarding as non partition key isolation collection")
-		return true
+		log.Warn("failed to parse partition key isolation, autowarmup is disabled", zap.Error(isError))
+		return false
+	}
+	if !isPKI {
+		log.Info("collection is not partition key isolated and autowarmup is enabled, force scalar field/index and vector index warmup to sync")
 	}
 	return !isPKI
 }
@@ -391,6 +394,7 @@ func applyCollectionWarmupSetting(schema *schemapb.CollectionSchema,
 			})
 		} else if autoWarmup && !isVector {
 			// autoWarmupForNonPKIsolationCollection fallback: force sync warmup for scalar fields (not vector fields)
+			// vector fields are excluded from autowarmup due to its large size
 			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
 				Key:   common.WarmupKey,
 				Value: common.WarmupSync,
@@ -430,6 +434,7 @@ func applyCollectionWarmupSetting(schema *schemapb.CollectionSchema,
 					})
 				} else if autoWarmup && !isVector {
 					// autoWarmupForNonPKIsolationCollection fallback for struct nested scalar fields
+					// vector fields are excluded from autowarmup due to its large size
 					field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
 						Key:   common.WarmupKey,
 						Value: common.WarmupSync,
@@ -492,6 +497,7 @@ func applyIndexWarmupSetting(loadInfo *querypb.SegmentLoadInfo, schema *schemapb
 			})
 		} else if autoWarmup {
 			// autoWarmupForNonPKIsolationCollection fallback: force sync warmup for ALL indexes (scalar and vector)
+			// here vector indexes are included in autowarmup bcz they are critical for search performance
 			indexInfo.IndexParams = append(indexInfo.IndexParams, &commonpb.KeyValuePair{
 				Key:   common.WarmupKey,
 				Value: common.WarmupSync,
