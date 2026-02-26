@@ -53,7 +53,7 @@ for conf_filename in conf_files:
             if k.startswith('#'):
                 k = k[1:]
             keys[k.strip()] = len(lines) - 1
-        except:
+        except Exception:
             if PF_ENV_DEBUG:
                 print("[%s] skip Processing %s" % (conf_filename, line))
 

@@ -37,7 +37,7 @@ class VectorDeserializer:
             decoded = bytes_data.decode('utf-8', errors='ignore')
             if decoded.startswith('{') or decoded.startswith('['):
                 return "JSON", len(bytes_data)
-        except:
+        except Exception:
             pass
         
         # Check for specific field name patterns
@@ -284,7 +284,7 @@ class VectorDeserializer:
                 # Try with different encoding
                 decoded = bytes_data.decode('latin-1')
                 return json.loads(decoded)
-            except:
+            except Exception:
                 pass
         except json.JSONDecodeError as e:
             print(f"JSON deserialization failed: {e}")
@@ -346,7 +346,7 @@ class VectorDeserializer:
                         try:
                             char = part.decode('latin-1')
                             array_items.append(char)
-                        except:
+                        except Exception:
                             pass
             
             return array_items

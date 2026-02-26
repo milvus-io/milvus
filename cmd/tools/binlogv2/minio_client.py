@@ -287,7 +287,7 @@ class MinioParquetAnalyzer:
                 try:
                     os.remove(local_path)
                     print(f"🧹 Cleaned up temporary file: {local_path}")
-                except:
+                except Exception:
                     pass
     
     def interactive_mode(self):

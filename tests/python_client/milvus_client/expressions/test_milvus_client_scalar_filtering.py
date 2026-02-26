@@ -424,7 +424,7 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                         regex_pattern = self._convert_like_to_regex(pat)
                         try:
                             return bool(re.match(regex_pattern, data_str))
-                        except:
+                        except Exception:
                             return False
 
                     expressions.append((expression, validate_like))
@@ -1672,7 +1672,7 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                             regex_pattern = self._convert_like_to_regex(pat)
                             try:
                                 return bool(re.match(regex_pattern, data_str))
-                            except:
+                            except Exception:
                                 return False
 
                         expressions.append((expression, lambda record, f=field_name, p=pattern:
@@ -1824,7 +1824,7 @@ class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
                     regex_pattern = self._convert_like_to_regex(pattern)
                     try:
                         return bool(re.match(regex_pattern, data_str))
-                    except:
+                    except Exception:
                         return False
 
                 expressions.append((expression, lambda record, f=field_name, p="str_%":

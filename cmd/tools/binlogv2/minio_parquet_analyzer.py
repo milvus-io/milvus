@@ -362,7 +362,7 @@ class MinioParquetAnalyzer:
             if result['local_path'] and result['local_path'].startswith(tempfile.gettempdir()):
                 try:
                     os.remove(result['local_path'])
-                except:
+                except Exception:
                     pass
         
         # Print summary

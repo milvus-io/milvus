@@ -925,7 +925,7 @@ def get_tags(url, token):
         else:
             print("Can not get the tag list")
         return tags
-    except:
+    except Exception:
         print("Can not get the tag list")
         return []
 
@@ -958,7 +958,7 @@ def get_config_digest(url, token):
         else:
             print("Can not get the digest")
         return digest
-    except:
+    except Exception:
         print("Can not get the digest")
         return ""
 

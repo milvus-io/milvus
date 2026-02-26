@@ -247,7 +247,7 @@ class ConditionalLogHandler(logging.Handler):
                             line_num = parts[1].split()[0]
                             try:
                                 error_info['line_number'] = int(line_num)
-                            except:
+                            except Exception:
                                 pass
                         break
 
