@@ -68,6 +68,7 @@ ExtractSubJson(const std::string& json, const std::vector<std::string>& keys) {
     std::unordered_set<std::string_view> key_set(keys.begin(), keys.end());
 
     std::string result = "{";
+    result.reserve(json.size());
     bool first = true;
     for (auto field : doc.get_object()) {
         // escaped_key() returns the key as-is from source (safe for JSON output)
@@ -78,15 +79,19 @@ ExtractSubJson(const std::string& json, const std::vector<std::string>& keys) {
             continue;
         }
         if (key_set.count(uk.value())) {
+            // raw_json() extracts the original JSON text of the value,
+            // avoiding any re-serialization overhead
+            auto raw = field.value().raw_json();
+            if (raw.error()) {
+                continue;
+            }
             if (!first) {
                 result += ',';
             }
             result += '"';
             result += ek;
             result += "\":";
-            // raw_json() extracts the original JSON text of the value,
-            // avoiding any re-serialization overhead
-            result += field.value().raw_json().value();
+            result += raw.value();
             first = false;
         }
     }

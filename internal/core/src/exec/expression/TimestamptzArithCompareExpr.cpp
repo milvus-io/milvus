@@ -119,21 +119,37 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             int64_t sub_sec_us = current_ts_us - epoch_sec * 1000000;
             struct std::tm tm_buf;
             ::gmtime_r(&epoch_sec, &tm_buf);
-            // Validate interval fields fit in int before applying
-            auto safe_int = [](int64_t v) -> int {
-                AssertInfo(v >= INT_MIN && v <= INT_MAX,
-                           "interval field {} overflows int range",
-                           v);
-                return static_cast<int>(v);
+            // Apply interval fields using int64_t intermediate arithmetic
+            // to avoid int overflow UB, then validate range before assigning
+            // back to struct tm (which uses int fields).
+            auto safe_add = [](int base, int64_t delta) -> int {
+                int64_t result = static_cast<int64_t>(base) + delta;
+                AssertInfo(result >= INT_MIN && result <= INT_MAX,
+                           "timestamp interval arithmetic overflow: "
+                           "{} + {} = {}",
+                           base,
+                           delta,
+                           result);
+                return static_cast<int>(result);
             };
-            // Apply interval with normalization via timegm
-            tm_buf.tm_year += safe_int(interval.years() * op_sign);
-            tm_buf.tm_mon += safe_int(interval.months() * op_sign);
-            tm_buf.tm_mday += safe_int(interval.days() * op_sign);
-            tm_buf.tm_hour += safe_int(interval.hours() * op_sign);
-            tm_buf.tm_min += safe_int(interval.minutes() * op_sign);
-            tm_buf.tm_sec += safe_int(interval.seconds() * op_sign);
+            tm_buf.tm_year =
+                safe_add(tm_buf.tm_year, interval.years() * op_sign);
+            tm_buf.tm_mon =
+                safe_add(tm_buf.tm_mon, interval.months() * op_sign);
+            tm_buf.tm_mday =
+                safe_add(tm_buf.tm_mday, interval.days() * op_sign);
+            tm_buf.tm_hour =
+                safe_add(tm_buf.tm_hour, interval.hours() * op_sign);
+            tm_buf.tm_min =
+                safe_add(tm_buf.tm_min, interval.minutes() * op_sign);
+            tm_buf.tm_sec =
+                safe_add(tm_buf.tm_sec, interval.seconds() * op_sign);
             std::time_t new_epoch_sec = ::timegm(&tm_buf);
+            // timegm returns (time_t)-1 on error. While -1 is technically
+            // a valid epoch second (1969-12-31T23:59:59Z), hitting it via
+            // interval arithmetic is near-impossible in practice.
+            AssertInfo(new_epoch_sec != static_cast<std::time_t>(-1),
+                       "timegm failed for timestamp interval arithmetic");
             // Restore sub-second microseconds from the original timestamp
             int64_t final_us =
                 static_cast<int64_t>(new_epoch_sec) * 1000000 + sub_sec_us;
