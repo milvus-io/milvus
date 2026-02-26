@@ -114,8 +114,8 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             // e.g., -1500000 us should be epoch_sec=-2, sub_sec_us=500000
             //        not epoch_sec=-1, sub_sec_us=-500000
             // Uses div-then-adjust pattern to avoid signed overflow near INT64_MIN.
-            std::time_t epoch_sec = current_ts_us / 1000000 -
-                                    (current_ts_us % 1000000 < 0 ? 1 : 0);
+            std::time_t epoch_sec =
+                current_ts_us / 1000000 - (current_ts_us % 1000000 < 0 ? 1 : 0);
             int64_t sub_sec_us = current_ts_us - epoch_sec * 1000000;
             struct std::tm tm_buf;
             if (::gmtime_r(&epoch_sec, &tm_buf) == nullptr) {
@@ -128,29 +128,34 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             // back to struct tm (which uses int fields).
             auto safe_add = [](int base, int64_t delta) -> int {
                 int64_t result = static_cast<int64_t>(base) + delta;
-                AssertInfo(
-                    result >= INT_MIN && result <= INT_MAX,
-                    "timestamp interval arithmetic overflow: "
-                    "{} + {} = {}",
-                    base,
-                    delta,
-                    result);
+                AssertInfo(result >= INT_MIN && result <= INT_MAX,
+                           "timestamp interval arithmetic overflow: "
+                           "{} + {} = {}",
+                           base,
+                           delta,
+                           result);
                 return static_cast<int>(result);
             };
             // Cast to int64_t before multiplying to avoid int * int overflow
             // (e.g. interval.years() == INT32_MIN, op_sign == -1).
-            tm_buf.tm_year = safe_add(
-                tm_buf.tm_year, static_cast<int64_t>(interval.years()) * op_sign);
-            tm_buf.tm_mon = safe_add(
-                tm_buf.tm_mon, static_cast<int64_t>(interval.months()) * op_sign);
-            tm_buf.tm_mday = safe_add(
-                tm_buf.tm_mday, static_cast<int64_t>(interval.days()) * op_sign);
-            tm_buf.tm_hour = safe_add(
-                tm_buf.tm_hour, static_cast<int64_t>(interval.hours()) * op_sign);
-            tm_buf.tm_min = safe_add(
-                tm_buf.tm_min, static_cast<int64_t>(interval.minutes()) * op_sign);
-            tm_buf.tm_sec = safe_add(
-                tm_buf.tm_sec, static_cast<int64_t>(interval.seconds()) * op_sign);
+            tm_buf.tm_year =
+                safe_add(tm_buf.tm_year,
+                         static_cast<int64_t>(interval.years()) * op_sign);
+            tm_buf.tm_mon =
+                safe_add(tm_buf.tm_mon,
+                         static_cast<int64_t>(interval.months()) * op_sign);
+            tm_buf.tm_mday =
+                safe_add(tm_buf.tm_mday,
+                         static_cast<int64_t>(interval.days()) * op_sign);
+            tm_buf.tm_hour =
+                safe_add(tm_buf.tm_hour,
+                         static_cast<int64_t>(interval.hours()) * op_sign);
+            tm_buf.tm_min =
+                safe_add(tm_buf.tm_min,
+                         static_cast<int64_t>(interval.minutes()) * op_sign);
+            tm_buf.tm_sec =
+                safe_add(tm_buf.tm_sec,
+                         static_cast<int64_t>(interval.seconds()) * op_sign);
             // timegm normalizes the tm fields and converts back to epoch.
             // It succeeds for all normalized inputs from gmtime_r + safe_add.
             // No -1 check: -1 is a valid epoch second (1969-12-31T23:59:59Z)
