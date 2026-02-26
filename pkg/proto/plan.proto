@@ -208,6 +208,12 @@ message MolFunctionFilterExpr {
     Superstructure = 2;
   }
   MolOp op = 3;
+  int64 fingerprint_field_id = 4;    // 0 = no fingerprint field
+  string fingerprint_type = 5;       // "morgan" | "maccs" | "rdkit"
+  int32 fingerprint_dim = 6;
+  int32 morgan_radius = 7;
+  int32 rdkit_min_path = 8;
+  int32 rdkit_max_path = 9;
 }
 
 message UnaryExpr {

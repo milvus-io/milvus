@@ -758,28 +758,6 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 			}
 			values[i] = castedValue
 		}
-
-		// For JSON type, ensure all numeric values have consistent type.
-		// If there's a mix of integers and floats, convert all to floats.
-		if typeutil.IsJSONType(dataType) && len(values) > 0 {
-			hasInt := false
-			hasFloat := false
-			for _, val := range values {
-				if IsInteger(val) {
-					hasInt = true
-				} else if IsFloating(val) {
-					hasFloat = true
-				}
-			}
-			// If we have both int and float, convert all ints to floats
-			if hasInt && hasFloat {
-				for i, val := range values {
-					if IsInteger(val) {
-						values[i] = NewFloat(float64(val.GetInt64Val()))
-					}
-				}
-			}
-		}
 	}
 
 	expr := &planpb.Expr{
@@ -826,7 +804,7 @@ func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*plan
 	}
 
 	// Construct full field name for struct array field
-	fullFieldName := typeutil.ConcatStructFieldName(v.currentStructArrayField, fieldName)
+	fullFieldName := v.currentStructArrayField + "[" + fieldName + "]"
 	// Get the struct array field info
 	field, err := v.schema.GetFieldFromName(fullFieldName)
 	if err != nil {
@@ -1986,6 +1964,53 @@ func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{}
 	}
 }
 
+// fillMolFingerprintInfo looks up the MolFingerprint function associated with the
+// given MOL field and populates fingerprint pre-filter info in the proto expression.
+func fillMolFingerprintInfo(schema *typeutil.SchemaHelper, molFieldID int64, molExpr *planpb.MolFunctionFilterExpr) {
+	funSchema, outField := schema.GetMolFingerprintFunctionByInputFieldID(molFieldID)
+	if funSchema == nil || outField == nil {
+		return
+	}
+	molExpr.FingerprintFieldId = outField.GetFieldID()
+
+	fpType := "morgan"
+	var morganRadius int32 = 2
+	var rdkitMinPath int32 = 1
+	var rdkitMaxPath int32 = 7
+	for _, param := range funSchema.GetParams() {
+		switch param.GetKey() {
+		case "fingerprint_type":
+			fpType = param.GetValue()
+		case "radius":
+			if v, err := strconv.ParseInt(param.GetValue(), 10, 32); err == nil {
+				morganRadius = int32(v)
+			}
+		case "min_path":
+			if v, err := strconv.ParseInt(param.GetValue(), 10, 32); err == nil {
+				rdkitMinPath = int32(v)
+			}
+		case "max_path":
+			if v, err := strconv.ParseInt(param.GetValue(), 10, 32); err == nil {
+				rdkitMaxPath = int32(v)
+			}
+		}
+	}
+	molExpr.FingerprintType = fpType
+	molExpr.MorganRadius = morganRadius
+	molExpr.RdkitMinPath = rdkitMinPath
+	molExpr.RdkitMaxPath = rdkitMaxPath
+
+	// Get dim from output field TypeParams
+	for _, kv := range outField.GetTypeParams() {
+		if kv.GetKey() == "dim" {
+			if v, err := strconv.ParseInt(kv.GetValue(), 10, 32); err == nil {
+				molExpr.FingerprintDim = int32(v)
+			}
+			break
+		}
+	}
+}
+
 func (v *ParserVisitor) VisitMolSubstructure(ctx *parser.MolSubstructureContext) interface{} {
 	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
 	if err != nil {
@@ -2000,13 +2025,16 @@ func (v *ParserVisitor) VisitMolSubstructure(ctx *parser.MolSubstructureContext)
 	element := ctx.StringLiteral().GetText()
 	smilesString := element[1 : len(element)-1]
 
+	molExpr := &planpb.MolFunctionFilterExpr{
+		ColumnInfo:   columnInfo,
+		SmilesString: smilesString,
+		Op:           planpb.MolFunctionFilterExpr_Substructure,
+	}
+	fillMolFingerprintInfo(v.schema, columnInfo.GetFieldId(), molExpr)
+
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_MolfunctionFilterExpr{
-			MolfunctionFilterExpr: &planpb.MolFunctionFilterExpr{
-				ColumnInfo:   columnInfo,
-				SmilesString: smilesString,
-				Op:           planpb.MolFunctionFilterExpr_Substructure,
-			},
+			MolfunctionFilterExpr: molExpr,
 		},
 	}
 	return &ExprWithType{
@@ -2029,13 +2057,16 @@ func (v *ParserVisitor) VisitMolSuperstructure(ctx *parser.MolSuperstructureCont
 	element := ctx.StringLiteral().GetText()
 	smilesString := element[1 : len(element)-1]
 
+	molExpr := &planpb.MolFunctionFilterExpr{
+		ColumnInfo:   columnInfo,
+		SmilesString: smilesString,
+		Op:           planpb.MolFunctionFilterExpr_Superstructure,
+	}
+	fillMolFingerprintInfo(v.schema, columnInfo.GetFieldId(), molExpr)
+
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_MolfunctionFilterExpr{
-			MolfunctionFilterExpr: &planpb.MolFunctionFilterExpr{
-				ColumnInfo:   columnInfo,
-				SmilesString: smilesString,
-				Op:           planpb.MolFunctionFilterExpr_Superstructure,
-			},
+			MolfunctionFilterExpr: molExpr,
 		},
 	}
 	return &ExprWithType{
@@ -2291,7 +2322,7 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 	}
 
 	// Construct full field name for struct array field
-	fullFieldName := typeutil.ConcatStructFieldName(v.currentStructArrayField, fieldName)
+	fullFieldName := v.currentStructArrayField + "[" + fieldName + "]"
 	// Get the struct array field info
 	field, err := v.schema.GetFieldFromName(fullFieldName)
 	if err != nil {

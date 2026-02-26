@@ -14,12 +14,14 @@
 #include <fmt/core.h>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "common/FieldDataInterface.h"
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "segcore/SegmentInterface.h"
+#include "segcore/SealedIndexingRecord.h"
 
 namespace milvus {
 namespace exec {
@@ -72,11 +74,29 @@ class PhyMolFunctionFilterExpr : public SegmentExpr {
     VectorPtr
     EvalForDataSegment();
 
+    // Fingerprint pre-filter: compute query fingerprint and search the
+    // BinaryVector index to get candidate rows (superset of true matches).
+    void
+    SearchFingerprintIndex();
+
+    // Generate query molecule fingerprint from SMILES.
+    void
+    EnsureQueryFingerprint();
+
+    // Fallback: read raw BinaryVector data and do inline bit subset check.
+    void
+    FallbackRawDataPreFilter();
+
  private:
     std::shared_ptr<const milvus::expr::MolFunctionFilterExpr> expr_;
     // Cached query pickle (converted from SMILES once per segment)
     std::string query_pickle_;
     bool query_pickle_cached_ = false;
+    // Fingerprint pre-filter state
+    std::vector<uint8_t> query_fingerprint_;
+    bool query_fp_cached_ = false;
+    TargetBitmap fp_candidates_;
+    bool fp_candidates_cached_ = false;
 };
 }  //namespace exec
 }  // namespace milvus
