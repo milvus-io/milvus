@@ -128,14 +128,13 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             // back to struct tm (which uses int fields).
             auto safe_add = [](int base, int64_t delta) -> int {
                 int64_t result = static_cast<int64_t>(base) + delta;
-                if (result < INT_MIN || result > INT_MAX) {
-                    ThrowInfo(OpTypeInvalid,
-                              "timestamp interval arithmetic overflow: "
-                              "{} + {} = {}",
-                              base,
-                              delta,
-                              result);
-                }
+                AssertInfo(
+                    result >= INT_MIN && result <= INT_MAX,
+                    "timestamp interval arithmetic overflow: "
+                    "{} + {} = {}",
+                    base,
+                    delta,
+                    result);
                 return static_cast<int>(result);
             };
             tm_buf.tm_year =
