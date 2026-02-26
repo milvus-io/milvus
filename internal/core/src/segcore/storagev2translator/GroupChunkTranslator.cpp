@@ -342,13 +342,13 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
     auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                   .GetArrowFileSystem();
 
+    auto factory = milvus::segcore::MakeFileReaderFactory(insert_files_, fs);
     auto load_futures =
         milvus::segcore::LoadCellBatchAsync(ctx,
-                                            insert_files_,
                                             std::move(cell_specs),
+                                            std::move(factory),
                                             channel,
                                             DEFAULT_FIELD_MAX_MEMORY_LIMIT,
-                                            fs,
                                             load_priority_);
 
     LOG_INFO(

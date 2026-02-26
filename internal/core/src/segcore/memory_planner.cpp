@@ -254,11 +254,10 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
 
 std::vector<std::future<void>>
 LoadCellBatchAsync(milvus::OpContext* op_ctx,
-                   const std::vector<std::string>& remote_files,
                    std::vector<CellSpec> cell_specs,
+                   BatchReaderFactory reader_factory,
                    std::shared_ptr<CellReaderChannel>& channel,
                    int64_t memory_limit,
-                   const milvus_storage::ArrowFileSystemPtr& fs,
                    milvus::proto::common::LoadPriority priority) {
     if (cell_specs.empty()) {
         channel->close();
@@ -281,7 +280,7 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
     size_t cells_per_batch = std::max<size_t>(
         1, (cell_specs.size() + parallel_degree - 1) / parallel_degree);
 
-    // Group consecutive, same-file cells into batches for IO merging
+    // Group consecutive, same-key cells into batches for IO merging
     struct CellBatch {
         size_t file_idx;
         int64_t rg_offset;
@@ -327,14 +326,15 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
     auto reader_memory_limit =
         std::max<int64_t>(memory_limit / static_cast<int64_t>(batches.size()),
                           FILE_SLICE_SIZE.load());
+    auto shared_factory =
+        std::make_shared<BatchReaderFactory>(std::move(reader_factory));
 
     std::vector<std::future<void>> futures;
     futures.reserve(batches.size());
 
     for (auto& batch : batches) {
         futures.emplace_back(pool.Submit([batch = std::move(batch),
-                                          fs,
-                                          &remote_files,
+                                          shared_factory,
                                           reader_memory_limit,
                                           channel,
                                           remaining,
@@ -346,44 +346,73 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
             });
             CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
 
-            auto result = milvus_storage::FileRowGroupReader::Make(
-                fs,
-                remote_files[batch.file_idx],
-                nullptr,
-                reader_memory_limit,
-                milvus::storage::GetReaderProperties());
-            AssertInfo(result.ok(),
-                       "[StorageV2] Failed to create reader: " +
-                           result.status().ToString());
-            auto reader = result.ValueOrDie();
-            auto status = reader->SetRowGroupOffsetAndCount(batch.rg_offset,
-                                                            batch.rg_count);
-            AssertInfo(status.ok(),
-                       "[StorageV2] Failed to set row group range: " +
-                           status.ToString());
+            auto reader_result = (*shared_factory)(batch.file_idx,
+                                                   batch.rg_offset,
+                                                   batch.rg_count,
+                                                   reader_memory_limit);
+            AssertInfo(reader_result.ok(),
+                       "[StorageV2] Failed to create batch reader: " +
+                           reader_result.status().ToString());
+            auto sequential_reader = std::move(reader_result).ValueOrDie();
 
             for (const auto& cell : batch.cells) {
                 auto cell_result = std::make_shared<CellLoadResult>();
                 cell_result->cid = cell.cid;
                 cell_result->tables.reserve(cell.rg_count);
                 for (int64_t i = 0; i < cell.rg_count; ++i) {
-                    std::shared_ptr<arrow::Table> table;
-                    auto s = reader->ReadNextRowGroup(&table);
-                    AssertInfo(s.ok(),
+                    auto table_result = sequential_reader();
+                    AssertInfo(table_result.ok(),
                                "[StorageV2] Failed to read row group: " +
-                                   s.ToString());
-                    cell_result->tables.push_back(std::move(table));
+                                   table_result.status().ToString());
+                    cell_result->tables.push_back(
+                        std::move(table_result).ValueOrDie());
                 }
                 channel->push(std::move(cell_result));
             }
-            auto close_status = reader->Close();
-            AssertInfo(close_status.ok(),
-                       "[StorageV2] Failed to close reader: " +
-                           close_status.ToString());
         }));
     }
 
     return futures;
+}
+
+BatchReaderFactory
+MakeFileReaderFactory(std::vector<std::string> remote_files,
+                      milvus_storage::ArrowFileSystemPtr fs) {
+    auto files =
+        std::make_shared<std::vector<std::string>>(std::move(remote_files));
+    return [files, fs](size_t batch_key,
+                       int64_t rg_offset,
+                       int64_t total_rg_count,
+                       int64_t reader_memory_limit)
+               -> arrow::Result<SequentialRowGroupReader> {
+        auto result = milvus_storage::FileRowGroupReader::Make(
+            fs,
+            (*files)[batch_key],
+            nullptr,
+            reader_memory_limit,
+            milvus::storage::GetReaderProperties());
+        if (!result.ok()) {
+            return result.status();
+        }
+        auto reader = result.ValueOrDie();
+        auto status =
+            reader->SetRowGroupOffsetAndCount(rg_offset, total_rg_count);
+        if (!status.ok()) {
+            return status;
+        }
+
+        auto reads_remaining = std::make_shared<int64_t>(total_rg_count);
+        return SequentialRowGroupReader(
+            [reader = std::move(reader), reads_remaining]()
+                -> arrow::Result<std::shared_ptr<arrow::Table>> {
+                std::shared_ptr<arrow::Table> table;
+                ARROW_RETURN_NOT_OK(reader->ReadNextRowGroup(&table));
+                if (--(*reads_remaining) == 0) {
+                    ARROW_RETURN_NOT_OK(reader->Close());
+                }
+                return table;
+            });
+    };
 }
 
 }  // namespace milvus::segcore

@@ -27,6 +27,7 @@
 
 #include "NamedType/underlying_functionalities.hpp"
 #include "arrow/record_batch.h"
+#include "arrow/table.h"
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 #include "common/FieldMeta.h"
@@ -168,19 +169,18 @@ class ManifestGroupTranslator
 
  private:
     /**
-     * @brief Load a cell from multiple Arrow RecordBatches
+     * @brief Load a cell from multiple Arrow Tables
      *
-     * Converts multiple Arrow RecordBatches (from row groups) into a single
+     * Converts multiple Arrow Tables (from row groups) into a single
      * GroupChunk containing merged field data for all columns.
      *
-     * @param record_batches Arrow RecordBatches from row groups
+     * @param tables Arrow Tables from row groups
      * @param cid Cell ID of the chunk being loaded
      * @return GroupChunk containing the loaded field data
      */
     std::unique_ptr<milvus::GroupChunk>
-    load_group_chunk(
-        const std::vector<std::shared_ptr<arrow::RecordBatch>>& record_batches,
-        milvus::cachinglayer::cid_t cid);
+    load_group_chunk(const std::vector<std::shared_ptr<arrow::Table>>& tables,
+                     milvus::cachinglayer::cid_t cid);
 
     int64_t segment_id_;
     GroupChunkType group_chunk_type_;
