@@ -31,8 +31,15 @@ function(add_milvus_common)
     set( milvus_common_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/milvus-common )
 
     if ( NOT EXISTS "${milvus_common_SOURCE_DIR}/CMakeLists.txt" )
-        message(FATAL_ERROR "The milvus-common submodule is not initialized. Please run:\n"
-                            "  git submodule update --init internal/core/thirdparty/milvus-common")
+        message(STATUS "milvus-common submodule not initialized, running git submodule update --init...")
+        execute_process(
+            COMMAND git submodule update --init internal/core/thirdparty/milvus-common
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            RESULT_VARIABLE ret)
+        if ( NOT ret EQUAL 0 OR NOT EXISTS "${milvus_common_SOURCE_DIR}/CMakeLists.txt" )
+            message(FATAL_ERROR "Failed to initialize milvus-common submodule. Please run manually:\n"
+                                "  git submodule update --init internal/core/thirdparty/milvus-common")
+        endif()
     endif()
 
     set(WITH_JAEGER ON CACHE BOOL "" FORCE )
@@ -59,8 +66,15 @@ function(add_knowhere)
     set( knowhere_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/knowhere )
 
     if ( NOT EXISTS "${knowhere_SOURCE_DIR}/CMakeLists.txt" )
-        message(FATAL_ERROR "The knowhere submodule is not initialized. Please run:\n"
-                            "  git submodule update --init internal/core/thirdparty/knowhere")
+        message(STATUS "knowhere submodule not initialized, running git submodule update --init...")
+        execute_process(
+            COMMAND git submodule update --init internal/core/thirdparty/knowhere
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            RESULT_VARIABLE ret)
+        if ( NOT ret EQUAL 0 OR NOT EXISTS "${knowhere_SOURCE_DIR}/CMakeLists.txt" )
+            message(FATAL_ERROR "Failed to initialize knowhere submodule. Please run manually:\n"
+                                "  git submodule update --init internal/core/thirdparty/knowhere")
+        endif()
     endif()
 
     if ( BUILD_DISK_ANN STREQUAL "ON" )
