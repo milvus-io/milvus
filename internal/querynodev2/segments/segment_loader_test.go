@@ -1011,7 +1011,345 @@ func (suite *SegmentLoaderDetailSuite) TestCheckSegmentSizeWithMemoryLimit() {
 	suite.True(errors.Is(err, merr.ErrSegmentRequestResourceFailed))
 }
 
+// SegmentLoaderTextIndexEstimateSuite tests resource estimation for text index (TextStatsLogs).
+// These tests directly call estimateLoadingResourceUsageOfSegment and
+// estimateLogicalResourceUsageOfSegment to verify that TextStatsLogs are correctly
+// accounted for in both physical loading and logical resource estimates.
+type SegmentLoaderTextIndexEstimateSuite struct {
+	suite.Suite
+	schema *schemapb.CollectionSchema
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) SetupSuite() {
+	paramtable.Init()
+	// Minimal schema: just a PK field + one VarChar field; no need for full schema
+	// since text stats estimation only iterates loadInfo.GetTextStatsLogs() directly.
+	suite.schema = &schemapb.CollectionSchema{
+		Name: "test_text_estimate",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+			{FieldID: 102, Name: "text2", DataType: schemapb.DataType_VarChar},
+		},
+	}
+}
+
+// baseLoadInfo returns a minimal SegmentLoadInfo with the given TextStatsLogs.
+func (suite *SegmentLoaderTextIndexEstimateSuite) baseLoadInfo(textStats map[int64]*datapb.TextIndexStats) *querypb.SegmentLoadInfo {
+	return &querypb.SegmentLoadInfo{
+		SegmentID:     1,
+		PartitionID:   2,
+		CollectionID:  3,
+		NumOfRows:     100,
+		TextStatsLogs: textStats,
+	}
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_NonMmap_NoTieredEviction() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	const textIndexSize = int64(50 * 1024 * 1024) // 50 MB
+	loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+		101: {FieldID: 101, MemorySize: textIndexSize},
+	})
+
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:       false,
+		textIndexExpansionFactor:    1.0,
+		deltaDataExpansionFactor:    2.0,
+		jsonKeyStatsExpansionFactor: 1.0,
+	}
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.EqualValues(textIndexSize, usage.MemorySize, "non-mmap text index must be counted in memory")
+	suite.EqualValues(0, usage.DiskSize, "non-mmap text index must not be counted in disk")
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_Mmap_NoTieredEviction() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	const textIndexSize = int64(50 * 1024 * 1024) // 50 MB
+	loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+		101: {FieldID: 101, MemorySize: textIndexSize},
+	})
+
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:       false,
+		textIndexExpansionFactor:    1.0,
+		deltaDataExpansionFactor:    2.0,
+		jsonKeyStatsExpansionFactor: 1.0,
+	}
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.EqualValues(0, usage.MemorySize, "mmap text index must not be counted in memory")
+	suite.EqualValues(textIndexSize, usage.DiskSize, "mmap text index must be counted in disk")
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_TieredEvictionEnabled_TextIndexSkipped() {
+	// When tiered eviction is enabled the caching layer manages text indexes,
+	// so they must NOT be added to the physical loading estimate.
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	const textIndexSize = int64(50 * 1024 * 1024)
+	loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+		101: {FieldID: 101, MemorySize: textIndexSize},
+	})
+
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:    true,
+		textIndexExpansionFactor: 1.0,
+		deltaDataExpansionFactor: 2.0,
+	}
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.EqualValues(0, usage.MemorySize, "text index must be skipped when tiered eviction is enabled")
+	suite.EqualValues(0, usage.DiskSize)
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_MultipleTextFields() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	const size1 = int64(30 * 1024 * 1024) // 30 MB
+	const size2 = int64(20 * 1024 * 1024) // 20 MB
+	loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+		101: {FieldID: 101, MemorySize: size1},
+		102: {FieldID: 102, MemorySize: size2},
+	})
+
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:    false,
+		textIndexExpansionFactor: 1.0,
+		deltaDataExpansionFactor: 2.0,
+	}
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.EqualValues(size1+size2, usage.MemorySize, "all text index sizes must be summed")
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_ExpansionFactor() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	const textIndexSize = int64(40 * 1024 * 1024) // 40 MB
+	const expansionFactor = 1.5
+	loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+		101: {FieldID: 101, MemorySize: textIndexSize},
+	})
+
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:    false,
+		textIndexExpansionFactor: expansionFactor,
+		deltaDataExpansionFactor: 2.0,
+	}
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	expected := uint64(float64(textIndexSize) * expansionFactor)
+	suite.EqualValues(expected, usage.MemorySize, "expansion factor must be applied to text index size")
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_EmptyTextStats_NoContribution() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	loadInfo := suite.baseLoadInfo(nil) // no TextStatsLogs
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:    false,
+		textIndexExpansionFactor: 1.0,
+		deltaDataExpansionFactor: 2.0,
+	}
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.EqualValues(0, usage.MemorySize)
+	suite.EqualValues(0, usage.DiskSize)
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_Mmap_TieredEvictionEnabled_TextIndexSkipped() {
+	// When tiered eviction is enabled, text index is managed by caching layer
+	// regardless of mmap setting — must NOT appear in physical loading estimate.
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	const textIndexSize = int64(50 * 1024 * 1024)
+	loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+		101: {FieldID: 101, MemorySize: textIndexSize},
+	})
+
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:    true,
+		textIndexExpansionFactor: 1.0,
+		deltaDataExpansionFactor: 2.0,
+	}
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.EqualValues(0, usage.MemorySize, "text index must be skipped when tiered eviction is enabled (mmap)")
+	suite.EqualValues(0, usage.DiskSize, "text index must be skipped when tiered eviction is enabled (mmap)")
+}
+
+// --- estimateLogicalResourceUsageOfSegment tests ---
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_NonMmap_EvictableMemory() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	const textIndexSize = int64(60 * 1024 * 1024) // 60 MB
+	loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+		101: {FieldID: 101, MemorySize: textIndexSize},
+	})
+
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:           true,
+		textIndexExpansionFactor:        1.0,
+		deltaDataExpansionFactor:        2.0,
+		TieredEvictableMemoryCacheRatio: 1.0, // 100% of evictable memory is counted
+		TieredEvictableDiskCacheRatio:   1.0,
+	}
+	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.EqualValues(textIndexSize, usage.MemorySize, "non-mmap text index must be in evictable memory")
+	suite.EqualValues(0, usage.DiskSize)
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_Mmap_EvictableDisk() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	const textIndexSize = int64(60 * 1024 * 1024) // 60 MB
+	loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+		101: {FieldID: 101, MemorySize: textIndexSize},
+	})
+
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:           true,
+		textIndexExpansionFactor:        1.0,
+		deltaDataExpansionFactor:        2.0,
+		TieredEvictableMemoryCacheRatio: 1.0,
+		TieredEvictableDiskCacheRatio:   1.0,
+	}
+	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.EqualValues(0, usage.MemorySize, "mmap text index must not be in memory")
+	suite.EqualValues(textIndexSize, usage.DiskSize, "mmap text index must be in evictable disk")
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_CacheRatioApplied() {
+	// Verify TieredEvictableMemoryCacheRatio is applied to the evictable text index size.
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	const textIndexSize = int64(100 * 1024 * 1024) // 100 MB
+	loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+		101: {FieldID: 101, MemorySize: textIndexSize},
+	})
+
+	const cacheRatio = 0.5
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:           true,
+		textIndexExpansionFactor:        1.0,
+		deltaDataExpansionFactor:        2.0,
+		TieredEvictableMemoryCacheRatio: cacheRatio,
+		TieredEvictableDiskCacheRatio:   1.0,
+	}
+	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	expected := uint64(float64(textIndexSize) * cacheRatio)
+	suite.EqualValues(expected, usage.MemorySize, "cache ratio must be applied to evictable text index memory")
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_EmptyTextStats_NoContribution() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	loadInfo := suite.baseLoadInfo(nil) // no TextStatsLogs
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:           true,
+		textIndexExpansionFactor:        1.0,
+		deltaDataExpansionFactor:        2.0,
+		TieredEvictableMemoryCacheRatio: 1.0,
+		TieredEvictableDiskCacheRatio:   1.0,
+	}
+	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.EqualValues(0, usage.MemorySize)
+	suite.EqualValues(0, usage.DiskSize)
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_MultipleTextFields() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	const size1 = int64(30 * 1024 * 1024)
+	const size2 = int64(20 * 1024 * 1024)
+	loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+		101: {FieldID: 101, MemorySize: size1},
+		102: {FieldID: 102, MemorySize: size2},
+	})
+
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:           true,
+		textIndexExpansionFactor:        1.0,
+		deltaDataExpansionFactor:        2.0,
+		TieredEvictableMemoryCacheRatio: 1.0,
+		TieredEvictableDiskCacheRatio:   1.0,
+	}
+	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.EqualValues(size1+size2, usage.MemorySize, "all text index sizes must be summed in logical estimate")
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_DiskCacheRatioApplied() {
+	// Verify TieredEvictableDiskCacheRatio is applied to mmap text index size.
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	const textIndexSize = int64(100 * 1024 * 1024)
+	loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+		101: {FieldID: 101, MemorySize: textIndexSize},
+	})
+
+	const diskCacheRatio = 0.3
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:           true,
+		textIndexExpansionFactor:        1.0,
+		deltaDataExpansionFactor:        2.0,
+		TieredEvictableMemoryCacheRatio: 1.0,
+		TieredEvictableDiskCacheRatio:   diskCacheRatio,
+	}
+	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	suite.EqualValues(0, usage.MemorySize, "mmap text index must not be in memory")
+	expected := uint64(float64(textIndexSize) * diskCacheRatio)
+	suite.EqualValues(expected, usage.DiskSize, "disk cache ratio must be applied to mmap text index")
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_ExpansionFactor() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	const textIndexSize = int64(40 * 1024 * 1024)
+	const expansionFactor = 2.0
+	loadInfo := suite.baseLoadInfo(map[int64]*datapb.TextIndexStats{
+		101: {FieldID: 101, MemorySize: textIndexSize},
+	})
+
+	factor := resourceEstimateFactor{
+		TieredEvictionEnabled:           true,
+		textIndexExpansionFactor:        expansionFactor,
+		deltaDataExpansionFactor:        2.0,
+		TieredEvictableMemoryCacheRatio: 1.0,
+		TieredEvictableDiskCacheRatio:   1.0,
+	}
+	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
+	suite.NoError(err)
+	expected := uint64(float64(textIndexSize) * expansionFactor)
+	suite.EqualValues(expected, usage.MemorySize)
+}
+
 func TestSegmentLoader(t *testing.T) {
 	suite.Run(t, &SegmentLoaderSuite{})
 	suite.Run(t, &SegmentLoaderDetailSuite{})
+	suite.Run(t, &SegmentLoaderTextIndexEstimateSuite{})
 }
