@@ -98,9 +98,9 @@ ifeq (${ENABLE_AZURE}, false)
 endif
 
 check-submodules:
-	@git submodule status | grep '^-' | awk '{print $$2}' | while read -r mod; do \
+	@git -c safe.directory='*' submodule status | grep '^-' | awk '{print $$2}' | while read -r mod; do \
 		echo "Initializing submodule: $$mod"; \
-		git submodule update --init "$$mod"; \
+		git -c safe.directory='*' submodule update --init "$$mod"; \
 	done
 
 milvus: build-cpp print-build-info build-go
