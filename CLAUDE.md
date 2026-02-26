@@ -12,11 +12,11 @@ Coordinators manage metadata and scheduling; nodes execute work.
 
 ## Testing
 
-Go tests MUST use `-tags dynamic,test` or they won't compile:
+Go tests MUST use `-tags dynamic,test` and `-gcflags="all=-N -l"` (disable optimizations/inlining) or they won't compile / mockey-based monkey patching will fail:
 
 ```bash
-go test -tags dynamic,test -count=1 ./internal/querycoordv2/...
-go test -tags dynamic,test -count=1 ./internal/proxy/... -run TestXxx
+go test -tags dynamic,test -gcflags="all=-N -l" -count=1 ./internal/querycoordv2/...
+go test -tags dynamic,test -gcflags="all=-N -l" -count=1 ./internal/proxy/... -run TestXxx
 ```
 
 Per-module shortcuts: `make test-querycoord`, `make test-proxy`, etc.
