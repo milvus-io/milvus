@@ -217,27 +217,23 @@ def _assert_distance_order(results, metric_type):
                 f"Results not sorted ascending: distances[{k}]={distances[k]} > distances[{k+1}]={distances[k+1]}"
 
 
-def _generate_float16_bytes(dim, seed=None):
-    """Generate Float16 vector bytes."""
+def _generate_float16_vector(dim, seed=None):
+    """Generate Float16 vector as np.ndarray(dtype=float16)."""
     rng = np.random.RandomState(seed)
-    vec = rng.rand(dim).astype(np.float16)
-    return vec.tobytes()
+    return rng.rand(dim).astype(np.float16)
 
 
-def _generate_bfloat16_bytes(dim, seed=None):
-    """Generate BFloat16 vector bytes."""
+def _generate_bfloat16_vector(dim, seed=None):
+    """Generate BFloat16 vector as np.ndarray(dtype=bfloat16) via ml_dtypes."""
+    import ml_dtypes  # noqa: F811
     rng = np.random.RandomState(seed)
-    vec = rng.rand(dim).astype(np.float32)
-    # Convert float32 to bfloat16 by truncating lower 16 bits
-    int_repr = np.frombuffer(vec.tobytes(), dtype=np.uint32)
-    bfloat16 = (int_repr >> 16).astype(np.uint16)
-    return bfloat16.tobytes()
+    return rng.rand(dim).astype(ml_dtypes.bfloat16)
 
 
 def _generate_int8_vector(dim, seed=None):
-    """Generate Int8 vector as list of ints."""
+    """Generate Int8 vector as np.ndarray(dtype=int8)."""
     rng = np.random.RandomState(seed)
-    return rng.randint(-128, 127, size=dim).astype(np.int8).tobytes()
+    return rng.randint(-128, 127, size=dim).astype(np.int8)
 
 
 def _generate_binary_vector(dim, seed=None):
@@ -2595,9 +2591,9 @@ class TestStructArrayNonFloatVectors(TestMilvusClientV2Base):
         if vec_type == DataType.FLOAT_VECTOR:
             return _seed_vector(seed, dim)
         elif vec_type == DataType.FLOAT16_VECTOR:
-            return _generate_float16_bytes(dim, seed)
+            return _generate_float16_vector(dim, seed)
         elif vec_type == DataType.BFLOAT16_VECTOR:
-            return _generate_bfloat16_bytes(dim, seed)
+            return _generate_bfloat16_vector(dim, seed)
         elif vec_type == DataType.INT8_VECTOR:
             return _generate_int8_vector(dim, seed)
         elif vec_type == DataType.BINARY_VECTOR:
@@ -2810,7 +2806,6 @@ class TestStructArrayNonFloatVectors(TestMilvusClientV2Base):
         assert check
         assert len(results) == 10
 
-    @pytest.mark.xfail(reason="pymilvus search does not serialize non-float vectors in struct array correctly")
     @pytest.mark.tags(CaseLabel.L1)
     def test_max_sim_search_float16_struct(self):
         """
@@ -2835,7 +2830,6 @@ class TestStructArrayNonFloatVectors(TestMilvusClientV2Base):
         assert check
         assert len(results) > 0
 
-    @pytest.mark.xfail(reason="pymilvus search does not serialize non-float vectors in struct array correctly")
     @pytest.mark.tags(CaseLabel.L1)
     def test_max_sim_search_bfloat16_struct(self):
         """
@@ -2860,7 +2854,6 @@ class TestStructArrayNonFloatVectors(TestMilvusClientV2Base):
         assert check
         assert len(results) > 0
 
-    @pytest.mark.xfail(reason="pymilvus search does not serialize non-float vectors in struct array correctly")
     @pytest.mark.tags(CaseLabel.L1)
     def test_max_sim_search_int8_struct(self):
         """
@@ -2885,7 +2878,6 @@ class TestStructArrayNonFloatVectors(TestMilvusClientV2Base):
         assert check
         assert len(results) > 0
 
-    @pytest.mark.xfail(reason="pymilvus search does not serialize non-float vectors in struct array correctly")
     @pytest.mark.tags(CaseLabel.L1)
     def test_max_sim_search_binary_struct(self):
         """
@@ -2910,7 +2902,6 @@ class TestStructArrayNonFloatVectors(TestMilvusClientV2Base):
         assert check
         assert len(results) > 0
 
-    @pytest.mark.xfail(reason="pymilvus search does not serialize non-float vectors in struct array correctly")
     @pytest.mark.tags(CaseLabel.L1)
     def test_element_filter_search_float16(self):
         """
@@ -2935,7 +2926,6 @@ class TestStructArrayNonFloatVectors(TestMilvusClientV2Base):
         assert check
         assert len(results) > 0
 
-    @pytest.mark.xfail(reason="pymilvus search does not serialize non-float vectors in struct array correctly")
     @pytest.mark.tags(CaseLabel.L1)
     def test_element_filter_search_bfloat16(self):
         """
@@ -3008,7 +2998,6 @@ class TestStructArrayNonFloatVectors(TestMilvusClientV2Base):
 
     # ---- L2 tests ----
 
-    @pytest.mark.xfail(reason="pymilvus search does not serialize non-float vectors in struct array correctly")
     @pytest.mark.tags(CaseLabel.L2)
     def test_element_filter_search_int8(self):
         """
@@ -3033,7 +3022,6 @@ class TestStructArrayNonFloatVectors(TestMilvusClientV2Base):
         assert check
         assert len(results) > 0
 
-    @pytest.mark.xfail(reason="pymilvus search does not serialize non-float vectors in struct array correctly")
     @pytest.mark.tags(CaseLabel.L2)
     def test_element_filter_search_binary(self):
         """
@@ -3103,7 +3091,7 @@ class TestStructArrayNonFloatVectors(TestMilvusClientV2Base):
             for j in range(num_elems):
                 struct_array.append({
                     "float_emb": _seed_vector(i * 100 + j),
-                    "float16_emb": _generate_float16_bytes(default_dim, seed=i * 100 + j),
+                    "float16_emb": _generate_float16_vector(default_dim, seed=i * 100 + j),
                     "int_val": i * 10 + j,
                 })
             data.append({
