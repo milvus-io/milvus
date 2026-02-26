@@ -540,44 +540,42 @@ _FILE_RESOURCE_DATA = {
 
 
 def _generate_file_resource_testdata(tmpdir):
-    """Generate test data files in a temporary directory and return a
-    mapping of {minio_remote_path: local_file_path}."""
-    files = {}
+    """Generate test data files in a temporary directory, preserving the
+    remote directory structure so that file paths are usable with
+    ``copy_files_to_minio``.  Returns a list of relative paths."""
+    rel_paths = []
     for remote_path, content in _FILE_RESOURCE_DATA.items():
-        local_path = os.path.join(tmpdir, remote_path.replace("/", "_"))
+        local_path = os.path.join(tmpdir, remote_path)
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
         with open(local_path, "w", encoding="utf-8") as f:
             f.write(content)
-        files[remote_path] = local_path
-    return files
+        rel_paths.append(remote_path)
+    return rel_paths
 
 
 @pytest.fixture(scope="module")
-def minio_client(request):
-    """Create a MinIO client for file resource tests."""
-    from minio import Minio
-    minio_host = request.config.getoption("--minio_host")
-    return Minio(f"{minio_host}:9000", access_key="minioadmin",
-                 secret_key="minioadmin", secure=False)
-
-
-@pytest.fixture(scope="module")
-def file_resource_env(request, minio_client, tmp_path_factory):
+def file_resource_env(request, tmp_path_factory):
     """Generate testdata, upload to MinIO for file resource tests.
 
     Files are uploaded to the bucket root (no rootPath prefix) because
     AddFileResource's Exist check uses RemoteChunkManager which does NOT
     prepend minio.rootPath.
 
-    Returns a dict with keys: bucket.
+    Returns a dict with keys: bucket, minio_endpoint.
     """
+    from common.minio_comm import copy_files_to_minio
+
+    minio_host = request.config.getoption("--minio_host")
     bucket = request.config.getoption("--minio_bucket")
-
-    if not minio_client.bucket_exists(bucket):
-        minio_client.make_bucket(bucket)
-
     tmpdir = str(tmp_path_factory.mktemp("file_resource_testdata"))
-    files = _generate_file_resource_testdata(tmpdir)
-    for remote_rel, local_path in files.items():
-        minio_client.fput_object(bucket, remote_rel, local_path)
+    rel_paths = _generate_file_resource_testdata(tmpdir)
+    minio_endpoint = f"{minio_host}:9000"
+    copy_files_to_minio(
+        host=minio_endpoint,
+        r_source=tmpdir,
+        files=rel_paths,
+        bucket_name=bucket,
+        force=True,
+    )
 
-    yield {"bucket": bucket}
+    yield {"bucket": bucket, "minio_endpoint": minio_endpoint}
