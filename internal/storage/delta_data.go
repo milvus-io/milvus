@@ -23,15 +23,12 @@ import (
 	"sync"
 
 	"github.com/samber/lo"
-	"github.com/valyala/fastjson"
+	"github.com/tidwall/gjson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
-
-// parserPool use object pooling to reduce fastjson.Parser allocation.
-var parserPool = &fastjson.ParserPool{}
 
 // DeltaData stores delta data
 // currently only delete tuples are stored
@@ -158,39 +155,37 @@ func NewDeleteLog(pk PrimaryKey, ts Timestamp) *DeleteLog {
 // Parse tries to parse string format delete log
 // it try json first then use "," split int,ts format
 func (dl *DeleteLog) Parse(val string) error {
-	p := parserPool.Get()
-	defer parserPool.Put(p)
-	v, err := p.Parse(val)
-	if err != nil {
-		// compatible with versions that only support int64 type primary keys
-		// compatible with fmt.Sprintf("%d,%d", pk, ts)
-		// compatible error info (unmarshal err invalid character ',' after top-level value)
-		splits := strings.Split(val, ",")
-		if len(splits) != 2 {
-			return fmt.Errorf("the format of delta log is incorrect, %v can not be split", val)
-		}
-		pk, err := strconv.ParseInt(splits[0], 10, 64)
-		if err != nil {
-			return err
-		}
-		dl.Pk = &Int64PrimaryKey{
-			Value: pk,
-		}
-		dl.PkType = int64(schemapb.DataType_Int64)
-		dl.Ts, err = strconv.ParseUint(splits[1], 10, 64)
-		if err != nil {
-			return err
+	// Try JSON parse first (single parse, no double validation)
+	result := gjson.Parse(val)
+	if result.Type == gjson.JSON {
+		dl.Ts = result.Get("ts").Uint()
+		dl.PkType = result.Get("pkType").Int()
+		switch dl.PkType {
+		case int64(schemapb.DataType_Int64):
+			dl.Pk = &Int64PrimaryKey{Value: result.Get("pk").Int()}
+		case int64(schemapb.DataType_VarChar):
+			dl.Pk = &VarCharPrimaryKey{Value: result.Get("pk").String()}
 		}
 		return nil
 	}
 
-	dl.Ts = v.GetUint64("ts")
-	dl.PkType = v.GetInt64("pkType")
-	switch dl.PkType {
-	case int64(schemapb.DataType_Int64):
-		dl.Pk = &Int64PrimaryKey{Value: v.GetInt64("pk")}
-	case int64(schemapb.DataType_VarChar):
-		dl.Pk = &VarCharPrimaryKey{Value: string(v.GetStringBytes("pk"))}
+	// compatible with versions that only support int64 type primary keys
+	// compatible with fmt.Sprintf("%d,%d", pk, ts)
+	splits := strings.Split(val, ",")
+	if len(splits) != 2 {
+		return fmt.Errorf("the format of delta log is incorrect, %v can not be split", val)
+	}
+	pk, err := strconv.ParseInt(splits[0], 10, 64)
+	if err != nil {
+		return err
+	}
+	dl.Pk = &Int64PrimaryKey{
+		Value: pk,
+	}
+	dl.PkType = int64(schemapb.DataType_Int64)
+	dl.Ts, err = strconv.ParseUint(splits[1], 10, 64)
+	if err != nil {
+		return err
 	}
 	return nil
 }

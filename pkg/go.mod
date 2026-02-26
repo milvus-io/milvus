@@ -27,7 +27,6 @@ require (
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/prometheus/client_golang v1.20.5
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
-	github.com/remeh/sizedwaitgroup v1.0.0
 	github.com/samber/lo v1.27.0
 	github.com/shirou/gopsutil/v3 v3.23.12
 	github.com/sirupsen/logrus v1.9.3
