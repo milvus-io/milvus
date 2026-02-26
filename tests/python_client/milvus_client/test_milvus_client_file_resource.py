@@ -22,12 +22,22 @@ DECOMPOUNDER_PATH = "decompounder/decompounder_dict.txt"
 class FileResourceTestBase(TestMilvusClientV2Base):
     """Base class with shared helpers for file resource tests."""
 
+    @pytest.fixture(autouse=True)
+    def init_minio_client(self, minio_host):
+        """Initialise a MinIO client reusing the existing --minio_host option."""
+        from minio import Minio
+        self._minio_client = Minio(
+            f"{minio_host}:9000",
+            access_key="minioadmin",
+            secret_key="minioadmin",
+            secure=False,
+        )
+
     def setup_method(self, method):
         super().setup_method(method)
         self._file_resources_to_cleanup = []
         self._minio_objects_to_cleanup = []
         self._teardown_client = None
-        self._minio_client = None
 
     def teardown_method(self, method):
         # Phase 1: drop collections first (releases file resource references)
@@ -350,9 +360,6 @@ class TestMilvusClientFileResourceList(FileResourceTestBase):
         assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(
-        reason="Known bug: ListFileResources returns empty (PR #47568 not merged)"
-    )
     def test_list_after_add(self, file_resource_env):
         """
         target: list shows added resources
@@ -379,9 +386,6 @@ class TestMilvusClientFileResourceList(FileResourceTestBase):
             assert n in listed, f"{n} missing from list"
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(
-        reason="Known bug: ListFileResources returns empty (PR #47568 not merged)"
-    )
     def test_list_after_remove(self, file_resource_env):
         """
         target: list updates after removal
@@ -1199,17 +1203,16 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
             chunks.append("".join(chunk_lines))
         return "".join(chunks)
 
-    def _upload_and_add(self, client, minio_client, bucket, remote_path, content):
+    def _upload_and_add(self, client, bucket, remote_path, content):
         """Upload content to MinIO and register for teardown cleanup."""
-        self._minio_client = minio_client
         self._minio_objects_to_cleanup.append((bucket, remote_path))
         content_bytes = content.encode("utf-8")
-        minio_client.put_object(
+        self._minio_client.put_object(
             bucket, remote_path, io.BytesIO(content_bytes), len(content_bytes)
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_large_jieba_dict_5mb(self, file_resource_env, minio_client):
+    def test_large_jieba_dict_5mb(self, file_resource_env):
         """
         target: add and use a ~5MB jieba dictionary
         method: generate ~5MB dict -> upload -> add -> create collection -> search
@@ -1222,7 +1225,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         remote_path = "large_test/jieba_5mb.txt"
         # 1. generate and upload large dict
         content = self._generate_large_jieba_dict(5)
-        self._upload_and_add(client, minio_client, bucket, remote_path, content)
+        self._upload_and_add(client, bucket, remote_path, content)
         # 2. add file resource
         self.add_file_resource(client, res_name, remote_path)
         # 3. create collection with jieba analyzer
@@ -1257,7 +1260,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_large_jieba_dict_50mb(self, file_resource_env, minio_client):
+    def test_large_jieba_dict_50mb(self, file_resource_env):
         """
         target: stress test with ~50MB jieba dictionary
         method: generate ~50MB dict -> upload -> add -> create collection -> search
@@ -1270,7 +1273,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         remote_path = "large_test/jieba_50mb.txt"
         # 1. generate and upload large dict
         content = self._generate_large_jieba_dict(50)
-        self._upload_and_add(client, minio_client, bucket, remote_path, content)
+        self._upload_and_add(client, bucket, remote_path, content)
         # 2. add file resource
         self.add_file_resource(client, res_name, remote_path)
         # 3. create collection with jieba analyzer
@@ -1304,7 +1307,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_large_stopwords_5mb(self, file_resource_env, minio_client):
+    def test_large_stopwords_5mb(self, file_resource_env):
         """
         target: add and use a ~5MB stop words file
         method: generate ~5MB stop words -> upload -> add -> create collection -> verify
@@ -1319,7 +1322,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         real_stops = "的\n是\n在\n了\n和\n"
         generated = self._generate_large_stopwords(5)
         content = real_stops + generated
-        self._upload_and_add(client, minio_client, bucket, remote_path, content)
+        self._upload_and_add(client, bucket, remote_path, content)
         # 2. add file resource
         self.add_file_resource(client, res_name, remote_path)
         # 3. create collection with stop words filter
@@ -1354,7 +1357,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_large_stopwords_50mb(self, file_resource_env, minio_client):
+    def test_large_stopwords_50mb(self, file_resource_env):
         """
         target: stress test with ~50MB stop words file
         method: generate ~50MB stop words -> upload -> add -> create collection -> verify
@@ -1369,7 +1372,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         real_stops = "的\n是\n在\n了\n和\n"
         generated = self._generate_large_stopwords(50)
         content = real_stops + generated
-        self._upload_and_add(client, minio_client, bucket, remote_path, content)
+        self._upload_and_add(client, bucket, remote_path, content)
         # 2. add file resource
         self.add_file_resource(client, res_name, remote_path)
         # 3. create collection with stop words filter
@@ -1424,7 +1427,7 @@ class TestMilvusClientFileResourceUpdate(FileResourceTestBase):
         self.add_file_resource(client, res_name, SYNONYMS_PATH)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_overwrite_file_content_same_path(self, file_resource_env, minio_client):
+    def test_overwrite_file_content_same_path(self, file_resource_env):
         """
         target: overwrite MinIO file then re-add (same name+path)
         method: upload v1 -> add -> upload v2 -> add again (idempotent)
@@ -1435,18 +1438,17 @@ class TestMilvusClientFileResourceUpdate(FileResourceTestBase):
         res_name = cf.gen_unique_str(prefix)
         remote_path = "update_test/custom_stop.txt"
         # 1. upload v1, register MinIO cleanup, and add
-        self._minio_client = minio_client
         self._minio_objects_to_cleanup.append((bucket, remote_path))
         content1 = "的\n是\n"
         content1_bytes = content1.encode("utf-8")
-        minio_client.put_object(
+        self._minio_client.put_object(
             bucket, remote_path, io.BytesIO(content1_bytes), len(content1_bytes)
         )
         self.add_file_resource(client, res_name, remote_path)
         # 2. overwrite with v2 and re-add (idempotent)
         content2 = "的\n是\n在\n了\n和\n"
         content2_bytes = content2.encode("utf-8")
-        minio_client.put_object(
+        self._minio_client.put_object(
             bucket, remote_path, io.BytesIO(content2_bytes), len(content2_bytes)
         )
         self.add_file_resource(client, res_name, remote_path)
