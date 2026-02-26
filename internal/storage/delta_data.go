@@ -168,9 +168,17 @@ func (dl *DeleteLog) Parse(val string) error {
 		dl.PkType = pkTypeRes.Int()
 		switch dl.PkType {
 		case int64(schemapb.DataType_Int64):
+			if pkRes.Type != gjson.Number {
+				return fmt.Errorf("invalid delete log: pkType is Int64 but pk is not a number in %s", val)
+			}
 			dl.Pk = &Int64PrimaryKey{Value: pkRes.Int()}
 		case int64(schemapb.DataType_VarChar):
+			if pkRes.Type != gjson.String {
+				return fmt.Errorf("invalid delete log: pkType is VarChar but pk is not a string in %s", val)
+			}
 			dl.Pk = &VarCharPrimaryKey{Value: pkRes.String()}
+		default:
+			return fmt.Errorf("invalid delete log: unsupported pkType %d in %s", dl.PkType, val)
 		}
 		return nil
 	}
