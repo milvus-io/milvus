@@ -34,7 +34,6 @@
 #include "simdjson/dom/element.h"
 #include "simdjson/error.h"
 #include "simdjson/padded_string.h"
-#include <unordered_set>
 
 #define SIMDJSON_CHECK_ERROR(result)               \
     do {                                           \
@@ -65,12 +64,17 @@ ExtractSubJson(const std::string& json, const std::vector<std::string>& keys) {
                   simdjson::error_message(doc.error()));
     }
 
-    std::unordered_set<std::string_view> key_set(keys.begin(), keys.end());
+    auto obj = doc.get_object();
+    if (obj.error()) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "ExtractSubJson: input is not a JSON object: {}",
+                  simdjson::error_message(obj.error()));
+    }
 
     std::string result = "{";
     result.reserve(json.size());
     bool first = true;
-    for (auto field : doc.get_object()) {
+    for (auto field : obj) {
         // escaped_key() returns the key as-is from source (safe for JSON output)
         std::string_view ek = field.escaped_key();
         // unescaped_key() resolves escape sequences for correct comparison
@@ -80,7 +84,7 @@ ExtractSubJson(const std::string& json, const std::vector<std::string>& keys) {
                       "ExtractSubJson: failed to decode key: {}",
                       simdjson::error_message(uk.error()));
         }
-        if (key_set.count(uk.value())) {
+        if (std::find(keys.begin(), keys.end(), uk.value()) != keys.end()) {
             // raw_json() extracts the original JSON text of the value,
             // avoiding any re-serialization overhead
             auto raw = field.value().raw_json();
