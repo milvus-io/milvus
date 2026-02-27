@@ -35,13 +35,12 @@ package log
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"math"
 	"sync"
 	"time"
 	"unicode/utf8"
-
-	"encoding/json"
 
 	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/zapcore"
