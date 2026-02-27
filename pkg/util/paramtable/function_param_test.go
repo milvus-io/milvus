@@ -59,6 +59,9 @@ func TestFunctionConfig(t *testing.T) {
 		"vertexai.url",
 		"vertexai.credential",
 		"vertexai.enable",
+		"yc.credential",
+		"yc.url",
+		"yc.enable",
 	}
 	for _, key := range keys {
 		assert.True(t, cfg.TextEmbeddingProviders.GetDoc(key) != "")
