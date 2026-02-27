@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -79,6 +80,58 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 			s.Error(err)
 		})
 	})
+}
+
+func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
+	// Verify initial collection has IndexMeta set from SetupTest.
+	coll := s.cm.Get(1)
+	s.Require().NotNil(coll)
+	s.Require().NotNil(coll.GetCCollection().IndexMeta())
+
+	// Add a new vector field to simulate schema evolution.
+	schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
+	newVecFieldID := int64(200)
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:  newVecFieldID,
+		Name:     "new_float_vector",
+		DataType: schemapb.DataType_FloatVector,
+		Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: "dim", Value: "128"},
+		},
+	})
+
+	// Build IndexMeta from the updated schema (should include the new field).
+	newIndexMeta := mock_segcore.GenTestIndexMeta(1, schema)
+	hasNewField := false
+	for _, meta := range newIndexMeta.GetIndexMetas() {
+		if meta.GetFieldID() == newVecFieldID {
+			hasNewField = true
+			break
+		}
+	}
+	s.Require().True(hasNewField, "precondition: new IndexMeta should contain field %d", newVecFieldID)
+
+	// PutOrRef on an existing collection should update its IndexMeta.
+	err := s.cm.PutOrRef(1, schema, newIndexMeta, &querypb.LoadMetaInfo{
+		LoadType:      querypb.LoadType_LoadCollection,
+		SchemaVersion: 100,
+	})
+	s.Require().NoError(err)
+	defer s.cm.Unref(1, 1)
+
+	// Verify IndexMeta now contains the new field.
+	updatedIndexMeta := s.cm.Get(1).GetCCollection().IndexMeta()
+	found := false
+	for _, meta := range updatedIndexMeta.GetIndexMetas() {
+		if meta.GetFieldID() == newVecFieldID {
+			found = true
+			break
+		}
+	}
+	s.True(found,
+		"PutOrRef should update IndexMeta for existing collections; field %d is missing",
+		newVecFieldID)
 }
 
 func TestCollectionManager(t *testing.T) {

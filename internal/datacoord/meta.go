@@ -98,12 +98,12 @@ type meta struct {
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
 
-	indexMeta                  *indexMeta
-	analyzeMeta                *analyzeMeta
-	partitionStatsMeta         *partitionStatsMeta
-	compactionTaskMeta         *compactionTaskMeta
-	statsTaskMeta              *statsTaskMeta
-	externalCollectionTaskMeta *externalCollectionTaskMeta
+	indexMeta                     *indexMeta
+	analyzeMeta                   *analyzeMeta
+	partitionStatsMeta            *partitionStatsMeta
+	compactionTaskMeta            *compactionTaskMeta
+	statsTaskMeta                 *statsTaskMeta
+	externalCollectionRefreshMeta *externalCollectionRefreshMeta
 
 	// File Resource Meta
 	resourceIDMap   map[int64]*internalpb.FileResourceInfo // id -> info
@@ -211,33 +211,33 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		return nil, err
 	}
 
-	// TODO: add external collection task meta
-	// ectm, err := newExternalCollectionTaskMeta(ctx, catalog)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	ecrm, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	if err != nil {
+		return nil, err
+	}
+
 	spm, err := newSnapshotMeta(ctx, catalog, chunkManager)
 	if err != nil {
 		return nil, err
 	}
 
 	mt := &meta{
-		ctx:                ctx,
-		catalog:            catalog,
-		collections:        typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:           NewSegmentsInfo(),
-		channelCPs:         newChannelCps(),
-		indexMeta:          im,
-		analyzeMeta:        am,
-		chunkManager:       chunkManager,
-		partitionStatsMeta: psm,
-		compactionTaskMeta: ctm,
-		statsTaskMeta:      stm,
-		// externalCollectionTaskMeta: ectm,
-		resourceIDMap:   make(map[int64]*internalpb.FileResourceInfo),
-		resourceVersion: 0,
-		resourceLock:    lock.RWMutex{},
-		snapshotMeta:    spm,
+		ctx:                           ctx,
+		catalog:                       catalog,
+		collections:                   typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:                      NewSegmentsInfo(),
+		channelCPs:                    newChannelCps(),
+		indexMeta:                     im,
+		analyzeMeta:                   am,
+		chunkManager:                  chunkManager,
+		partitionStatsMeta:            psm,
+		compactionTaskMeta:            ctm,
+		statsTaskMeta:                 stm,
+		externalCollectionRefreshMeta: ecrm,
+		resourceIDMap:                 make(map[int64]*internalpb.FileResourceInfo),
+		resourceVersion:               0,
+		resourceLock:                  lock.RWMutex{},
+		snapshotMeta:                  spm,
 	}
 	err = mt.reloadFromKV(ctx, broker)
 	if err != nil {

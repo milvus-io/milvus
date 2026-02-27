@@ -72,6 +72,13 @@ func (c *run) printHardwareInfo(w io.Writer) {
 	fmt.Fprintln(w)
 }
 
+func getEffectiveVersion() string {
+	if MilvusVersion != "" && MilvusVersion != "unknown" {
+		return MilvusVersion
+	}
+	return common.Version.String()
+}
+
 func (c *run) injectVariablesToEnv() {
 	// inject in need
 
@@ -83,7 +90,7 @@ func (c *run) injectVariablesToEnv() {
 			zap.Error(err))
 	}
 
-	err = os.Setenv(metricsinfo.GitBuildTagsEnvKey, common.Version.String())
+	err = os.Setenv(metricsinfo.GitBuildTagsEnvKey, getEffectiveVersion())
 	if err != nil {
 		log.Warn(fmt.Sprintf("failed to inject %s to environment variable", metricsinfo.GitBuildTagsEnvKey),
 			zap.Error(err))

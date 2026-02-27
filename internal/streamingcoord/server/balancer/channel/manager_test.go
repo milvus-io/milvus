@@ -64,6 +64,14 @@ func TestChannelManager(t *testing.T) {
 	assert.NotNil(t, m)
 	assert.NoError(t, err)
 
+	// Test getClusterChannels and singleton GetClusterChannels.
+	cc := m.getClusterChannels()
+	assert.Equal(t, []string{"test-channel"}, cc.Channels)
+	assert.NotEmpty(t, cc.ControlChannel)
+	assert.True(t, strings.HasPrefix(cc.ControlChannel, "test"))
+	singletonCC := GetClusterChannels()
+	assert.Equal(t, cc, singletonCC)
+
 	// Test update non exist pchannel
 	modified, err := m.AssignPChannels(ctx, map[ChannelID]types.PChannelInfoAssigned{newChannelID("non-exist-channel"): {
 		Channel: types.PChannelInfo{
@@ -513,6 +521,392 @@ func TestChannelManagerWatch(t *testing.T) {
 	<-called
 	cancel()
 	<-done
+}
+
+func TestChannelManager_AddPChannels(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+
+	ctx := context.Background()
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "test-channel",
+	}, nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{
+		Version: 1,
+	}, nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+		{
+			Channel: &streamingpb.PChannelInfo{Name: "test-channel", Term: 1},
+			Node:    &streamingpb.StreamingNodeInfo{ServerId: 1},
+		},
+	}, nil)
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil)
+
+	m, err := RecoverChannelManager(ctx, "test-channel")
+	assert.NoError(t, err)
+	assert.NotNil(t, m)
+
+	// Initial state: 1 channel
+	view := m.CurrentPChannelsView()
+	assert.Len(t, view.Channels, 1)
+
+	// Add new channels
+	err = m.AddPChannels(ctx, []string{"new-channel-1", "new-channel-2"})
+	assert.NoError(t, err)
+
+	// Should now have 3 channels
+	view = m.CurrentPChannelsView()
+	assert.Len(t, view.Channels, 3)
+
+	// Adding existing channels should be idempotent
+	err = m.AddPChannels(ctx, []string{"test-channel", "new-channel-1"})
+	assert.NoError(t, err)
+	view = m.CurrentPChannelsView()
+	assert.Len(t, view.Channels, 3) // No change
+
+	// Adding a mix of existing and new
+	err = m.AddPChannels(ctx, []string{"test-channel", "brand-new-channel"})
+	assert.NoError(t, err)
+	view = m.CurrentPChannelsView()
+	assert.Len(t, view.Channels, 4)
+}
+
+func TestChannelManager_AddPChannels_ROWhenStreamingNotEnabled(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+
+	ctx := context.Background()
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "test-channel",
+	}, nil)
+	// streamingVersion is nil => streaming never enabled
+	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil)
+
+	m, err := RecoverChannelManager(ctx, "test-channel")
+	assert.NoError(t, err)
+
+	err = m.AddPChannels(ctx, []string{"new-ro-channel"})
+	assert.NoError(t, err)
+
+	view := m.CurrentPChannelsView()
+	ch, ok := view.Channels[ChannelID{Name: "new-ro-channel"}]
+	assert.True(t, ok)
+	assert.Equal(t, types.AccessModeRO, ch.ChannelInfo().AccessMode)
+}
+
+func TestChannelManager_AddPChannels_PersistFailureRollback(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+
+	ctx := context.Background()
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "test-channel",
+	}, nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{
+		Version: 1,
+	}, nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+		{
+			Channel: &streamingpb.PChannelInfo{Name: "test-channel", Term: 1},
+			Node:    &streamingpb.StreamingNodeInfo{ServerId: 1},
+		},
+	}, nil)
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+
+	persistErr := errors.New("persist failure")
+	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(persistErr)
+
+	m, err := RecoverChannelManager(ctx, "test-channel")
+	assert.NoError(t, err)
+
+	// Attempt to add channels; persist fails
+	err = m.AddPChannels(ctx, []string{"fail-channel-1", "fail-channel-2"})
+	assert.ErrorIs(t, err, persistErr)
+
+	// Channels should be rolled back — still only the original channel
+	view := m.CurrentPChannelsView()
+	assert.Len(t, view.Channels, 1)
+	_, ok := view.Channels[ChannelID{Name: "test-channel"}]
+	assert.True(t, ok)
+	_, ok = view.Channels[ChannelID{Name: "fail-channel-1"}]
+	assert.False(t, ok)
+}
+
+func TestAddPChannels_UnavailableInReplication(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+
+	ctx := context.Background()
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "ch1",
+	}, nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: 1}, nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+		{Channel: &streamingpb.PChannelInfo{Name: "ch1", Term: 1}, Node: &streamingpb.StreamingNodeInfo{ServerId: 1}},
+		{Channel: &streamingpb.PChannelInfo{Name: "ch2", Term: 1}, Node: &streamingpb.StreamingNodeInfo{ServerId: 1}},
+	}, nil)
+	replicateCfg := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "by-dev", Pchannels: []string{"ch1", "ch2"}},
+			{ClusterId: "by-dev2", Pchannels: []string{"ch3", "ch4"}},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
+			{SourceClusterId: "by-dev", TargetClusterId: "by-dev2"},
+		},
+	}
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(
+		&streamingpb.ReplicateConfigurationMeta{ReplicateConfiguration: replicateCfg}, nil)
+	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil)
+
+	m, err := RecoverChannelManager(ctx, "ch1", "ch2")
+	assert.NoError(t, err)
+
+	// ch1 and ch2 should be available (in replicateConfig)
+	assert.True(t, m.channels[ChannelID{Name: "ch1"}].AvailableInReplication())
+	assert.True(t, m.channels[ChannelID{Name: "ch2"}].AvailableInReplication())
+
+	// Dynamically add ch5 — not in replicateConfig, should be unavailable
+	err = m.AddPChannels(ctx, []string{"ch5"})
+	assert.NoError(t, err)
+	assert.False(t, m.channels[ChannelID{Name: "ch5"}].AvailableInReplication())
+}
+
+func TestRecovery_NoReplicateConfig_AllAvailable(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+
+	ctx := context.Background()
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{Pchannel: "ch1"}, nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: 1}, nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+		{Channel: &streamingpb.PChannelInfo{Name: "ch1", Term: 1}, Node: &streamingpb.StreamingNodeInfo{ServerId: 1}},
+	}, nil)
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+
+	m, err := RecoverChannelManager(ctx, "ch1")
+	assert.NoError(t, err)
+	assert.True(t, m.channels[ChannelID{Name: "ch1"}].AvailableInReplication())
+}
+
+func TestAllocVirtualChannels_SkipsUnavailableChannels(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+
+	ctx := context.Background()
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{Pchannel: "ch1"}, nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: 1}, nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+		{Channel: &streamingpb.PChannelInfo{Name: "ch1", Term: 1}},
+		{Channel: &streamingpb.PChannelInfo{Name: "ch2", Term: 1}},
+		{Channel: &streamingpb.PChannelInfo{Name: "ch3", Term: 1}},
+	}, nil)
+	replicateCfg := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "by-dev", Pchannels: []string{"ch1", "ch2"}},
+			{ClusterId: "by-dev2", Pchannels: []string{"ch4", "ch5"}},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
+			{SourceClusterId: "by-dev", TargetClusterId: "by-dev2"},
+		},
+	}
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(
+		&streamingpb.ReplicateConfigurationMeta{ReplicateConfiguration: replicateCfg}, nil)
+
+	m, err := RecoverChannelManager(ctx, "ch1", "ch2", "ch3")
+	assert.NoError(t, err)
+
+	// ch3 is unavailable — only ch1, ch2 are allocatable
+	vchannels, err := m.AllocVirtualChannels(ctx, AllocVChannelParam{CollectionID: 1, Num: 2})
+	assert.NoError(t, err)
+	assert.Len(t, vchannels, 2)
+	for _, vc := range vchannels {
+		assert.False(t, strings.HasPrefix(vc, "ch3"))
+	}
+
+	// Requesting more than available channels should fail
+	_, err = m.AllocVirtualChannels(ctx, AllocVChannelParam{CollectionID: 2, Num: 3})
+	assert.Error(t, err)
+}
+
+func TestGetClusterChannels_ExcludesUnavailable(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+
+	ctx := context.Background()
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{Pchannel: "ch1"}, nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: 1}, nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+		{Channel: &streamingpb.PChannelInfo{Name: "ch1", Term: 1}},
+		{Channel: &streamingpb.PChannelInfo{Name: "ch2", Term: 1}},
+		{Channel: &streamingpb.PChannelInfo{Name: "ch3", Term: 1}},
+	}, nil)
+	replicateCfg := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "by-dev", Pchannels: []string{"ch1", "ch2"}},
+			{ClusterId: "by-dev2", Pchannels: []string{"ch4", "ch5"}},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
+			{SourceClusterId: "by-dev", TargetClusterId: "by-dev2"},
+		},
+	}
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(
+		&streamingpb.ReplicateConfigurationMeta{ReplicateConfiguration: replicateCfg}, nil)
+
+	m, err := RecoverChannelManager(ctx, "ch1", "ch2", "ch3")
+	assert.NoError(t, err)
+
+	// getClusterChannels should only return ch1, ch2
+	cc := m.getClusterChannels()
+	assert.Len(t, cc.Channels, 2)
+	assert.ElementsMatch(t, []string{"ch1", "ch2"}, cc.Channels)
+
+	// getClusterChannels with OptIncludeUnavailableInReplication should return all 3
+	allCC := m.getClusterChannels(OptIncludeUnavailableInReplication())
+	assert.Len(t, allCC.Channels, 3)
+	assert.ElementsMatch(t, []string{"ch1", "ch2", "ch3"}, allCC.Channels)
+}
+
+func TestUpdateReplicateConfiguration_FlipsAvailability(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+
+	ctx := context.Background()
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{Pchannel: "ch1"}, nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: 1}, nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+		{Channel: &streamingpb.PChannelInfo{Name: "ch1", Term: 1}},
+		{Channel: &streamingpb.PChannelInfo{Name: "ch2", Term: 1}},
+		{Channel: &streamingpb.PChannelInfo{Name: "ch3", Term: 1}},
+	}, nil)
+	// Initial config: only ch1, ch2 in current cluster
+	replicateCfg := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "by-dev", Pchannels: []string{"ch1", "ch2"}},
+			{ClusterId: "by-dev2", Pchannels: []string{"ch4", "ch5"}},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
+			{SourceClusterId: "by-dev", TargetClusterId: "by-dev2"},
+		},
+	}
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(
+		&streamingpb.ReplicateConfigurationMeta{ReplicateConfiguration: replicateCfg}, nil)
+
+	m, err := RecoverChannelManager(ctx, "ch1", "ch2", "ch3")
+	assert.NoError(t, err)
+
+	// ch3 should be unavailable initially
+	assert.False(t, m.channels[ChannelID{Name: "ch3"}].AvailableInReplication())
+	assert.True(t, m.channels[ChannelID{Name: "ch1"}].AvailableInReplication())
+	assert.True(t, m.channels[ChannelID{Name: "ch2"}].AvailableInReplication())
+
+	// Update config to include ch3
+	newCfg := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "by-dev", Pchannels: []string{"ch1", "ch2", "ch3"}},
+			{ClusterId: "by-dev2", Pchannels: []string{"ch4", "ch5", "ch6"}},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
+			{SourceClusterId: "by-dev", TargetClusterId: "by-dev2"},
+		},
+	}
+	msg := message.NewAlterReplicateConfigMessageBuilderV2().
+		WithHeader(&message.AlterReplicateConfigMessageHeader{ReplicateConfiguration: newCfg}).
+		WithBody(&message.AlterReplicateConfigMessageBody{}).
+		WithBroadcast([]string{"ch1", "ch2", "ch3"}).
+		MustBuildBroadcast()
+	result := message.BroadcastResultAlterReplicateConfigMessageV2{
+		Message: message.MustAsBroadcastAlterReplicateConfigMessageV2(msg),
+		Results: map[string]*message.AppendResult{
+			"ch1": {MessageID: walimplstest.NewTestMessageID(1), LastConfirmedMessageID: walimplstest.NewTestMessageID(2), TimeTick: 1},
+			"ch2": {MessageID: walimplstest.NewTestMessageID(3), LastConfirmedMessageID: walimplstest.NewTestMessageID(4), TimeTick: 1},
+			"ch3": {MessageID: walimplstest.NewTestMessageID(5), LastConfirmedMessageID: walimplstest.NewTestMessageID(6), TimeTick: 1},
+		},
+	}
+	catalog.EXPECT().SaveReplicateConfiguration(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	err = m.UpdateReplicateConfiguration(ctx, result)
+	assert.NoError(t, err)
+
+	// ch3 should now be available
+	assert.True(t, m.channels[ChannelID{Name: "ch3"}].AvailableInReplication())
+	// ch1, ch2 still available
+	assert.True(t, m.channels[ChannelID{Name: "ch1"}].AvailableInReplication())
+	assert.True(t, m.channels[ChannelID{Name: "ch2"}].AvailableInReplication())
+}
+
+func TestIsChannelAvailableInReplication(t *testing.T) {
+	// No replicateConfig → always available
+	assert.True(t, isChannelAvailableInReplication("ch1", nil))
+
+	// Single cluster (no cross-cluster topology) → always available
+	singleCluster := replicateutil.MustNewConfigHelper("by-dev", &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "by-dev", Pchannels: []string{"ch1", "ch2"}},
+		},
+	})
+	assert.True(t, isChannelAvailableInReplication("ch1", singleCluster))
+	assert.True(t, isChannelAvailableInReplication("ch99", singleCluster))
+
+	// Multi-cluster: channel in current cluster's list → available
+	multiCluster := replicateutil.MustNewConfigHelper("by-dev", &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "by-dev", Pchannels: []string{"ch1", "ch2"}},
+			{ClusterId: "by-dev2", Pchannels: []string{"ch3", "ch4"}},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
+			{SourceClusterId: "by-dev", TargetClusterId: "by-dev2"},
+		},
+	})
+	assert.True(t, isChannelAvailableInReplication("ch1", multiCluster))
+	assert.True(t, isChannelAvailableInReplication("ch2", multiCluster))
+
+	// Multi-cluster: channel NOT in current cluster's list → unavailable
+	assert.False(t, isChannelAvailableInReplication("ch5", multiCluster))
+	assert.False(t, isChannelAvailableInReplication("new-channel", multiCluster))
 }
 
 func newChannelID(name string) ChannelID {

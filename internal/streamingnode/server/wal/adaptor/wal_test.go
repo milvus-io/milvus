@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/remeh/sizedwaitgroup"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -313,11 +312,13 @@ func (f *testOneWALFramework) testSendDropCollection(ctx context.Context, w wal.
 
 func (f *testOneWALFramework) testAppend(ctx context.Context, w wal.WAL) ([]message.ImmutableMessage, error) {
 	messages := make([]message.ImmutableMessage, f.messageCount)
-	swg := sizedwaitgroup.New(10)
+	sem := make(chan struct{}, 10)
+	var wg sync.WaitGroup
 	for i := 0; i < f.messageCount-1; i++ {
-		swg.Add()
+		sem <- struct{}{}
+		wg.Add(1)
 		go func(i int) {
-			defer swg.Done()
+			defer func() { <-sem; wg.Done() }()
 			time.Sleep(time.Duration(5+rand.Int31n(10)) * time.Millisecond)
 
 			createPartOfTxn := func() (*message.ImmutableTxnMessageBuilder, *message.TxnContext) {
@@ -405,7 +406,7 @@ func (f *testOneWALFramework) testAppend(ctx context.Context, w wal.WAL) ([]mess
 			}
 		}(i)
 	}
-	swg.Wait()
+	wg.Wait()
 
 	msg := message.CreateTestEmptyInsertMesage(int64(f.messageCount-1), map[string]string{
 		"id":    fmt.Sprintf("%d", f.messageCount-1),

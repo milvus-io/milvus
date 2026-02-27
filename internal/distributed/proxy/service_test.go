@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -1263,4 +1264,61 @@ func Test_Service_GracefulStop(t *testing.T) {
 	err = group.Wait()
 	assert.Nil(t, err)
 	assert.Equal(t, count, int32(3))
+}
+
+func TestServer_RefreshExternalCollection(t *testing.T) {
+	mockProxy := mocks.NewMockProxy(t)
+	server := &Server{proxy: mockProxy}
+
+	ctx := context.Background()
+	req := &milvuspb.RefreshExternalCollectionRequest{
+		CollectionName: "test_external",
+	}
+
+	m := mockey.Mock(mockey.GetMethod(mockProxy, "RefreshExternalCollection")).Return(&milvuspb.RefreshExternalCollectionResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		JobId:  12345,
+	}, nil).Build()
+	defer m.UnPatch()
+
+	resp, err := server.RefreshExternalCollection(ctx, req)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(12345), resp.GetJobId())
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+}
+
+func TestServer_GetRefreshExternalCollectionProgress(t *testing.T) {
+	mockProxy := mocks.NewMockProxy(t)
+	server := &Server{proxy: mockProxy}
+
+	ctx := context.Background()
+	req := &milvuspb.GetRefreshExternalCollectionProgressRequest{
+		JobId: 12345,
+	}
+
+	m := mockey.Mock(mockey.GetMethod(mockProxy, "GetRefreshExternalCollectionProgress")).Return(&milvuspb.GetRefreshExternalCollectionProgressResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+	}, nil).Build()
+	defer m.UnPatch()
+
+	resp, err := server.GetRefreshExternalCollectionProgress(ctx, req)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+}
+
+func TestServer_ListRefreshExternalCollectionJobs(t *testing.T) {
+	mockProxy := mocks.NewMockProxy(t)
+	server := &Server{proxy: mockProxy}
+
+	ctx := context.Background()
+	req := &milvuspb.ListRefreshExternalCollectionJobsRequest{}
+
+	m := mockey.Mock(mockey.GetMethod(mockProxy, "ListRefreshExternalCollectionJobs")).Return(&milvuspb.ListRefreshExternalCollectionJobsResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+	}, nil).Build()
+	defer m.UnPatch()
+
+	resp, err := server.ListRefreshExternalCollectionJobs(ctx, req)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 }

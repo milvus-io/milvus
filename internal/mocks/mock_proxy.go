@@ -4724,6 +4724,65 @@ func (_c *MockProxy_GetRateLimiter_Call) RunAndReturn(run func() (types.Limiter,
 	return _c
 }
 
+// GetRefreshExternalCollectionProgress provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetRefreshExternalCollectionProgress(_a0 context.Context, _a1 *milvuspb.GetRefreshExternalCollectionProgressRequest) (*milvuspb.GetRefreshExternalCollectionProgressResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRefreshExternalCollectionProgress")
+	}
+
+	var r0 *milvuspb.GetRefreshExternalCollectionProgressResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetRefreshExternalCollectionProgressRequest) (*milvuspb.GetRefreshExternalCollectionProgressResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetRefreshExternalCollectionProgressRequest) *milvuspb.GetRefreshExternalCollectionProgressResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetRefreshExternalCollectionProgressResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetRefreshExternalCollectionProgressRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_GetRefreshExternalCollectionProgress_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRefreshExternalCollectionProgress'
+type MockProxy_GetRefreshExternalCollectionProgress_Call struct {
+	*mock.Call
+}
+
+// GetRefreshExternalCollectionProgress is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetRefreshExternalCollectionProgressRequest
+func (_e *MockProxy_Expecter) GetRefreshExternalCollectionProgress(_a0 interface{}, _a1 interface{}) *MockProxy_GetRefreshExternalCollectionProgress_Call {
+	return &MockProxy_GetRefreshExternalCollectionProgress_Call{Call: _e.mock.On("GetRefreshExternalCollectionProgress", _a0, _a1)}
+}
+
+func (_c *MockProxy_GetRefreshExternalCollectionProgress_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetRefreshExternalCollectionProgressRequest)) *MockProxy_GetRefreshExternalCollectionProgress_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetRefreshExternalCollectionProgressRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_GetRefreshExternalCollectionProgress_Call) Return(_a0 *milvuspb.GetRefreshExternalCollectionProgressResponse, _a1 error) *MockProxy_GetRefreshExternalCollectionProgress_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_GetRefreshExternalCollectionProgress_Call) RunAndReturn(run func(context.Context, *milvuspb.GetRefreshExternalCollectionProgressRequest) (*milvuspb.GetRefreshExternalCollectionProgressResponse, error)) *MockProxy_GetRefreshExternalCollectionProgress_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetReplicas provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) GetReplicas(_a0 context.Context, _a1 *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -6303,6 +6362,65 @@ func (_c *MockProxy_ListPrivilegeGroups_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
+// ListRefreshExternalCollectionJobs provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListRefreshExternalCollectionJobs(_a0 context.Context, _a1 *milvuspb.ListRefreshExternalCollectionJobsRequest) (*milvuspb.ListRefreshExternalCollectionJobsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRefreshExternalCollectionJobs")
+	}
+
+	var r0 *milvuspb.ListRefreshExternalCollectionJobsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRefreshExternalCollectionJobsRequest) (*milvuspb.ListRefreshExternalCollectionJobsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRefreshExternalCollectionJobsRequest) *milvuspb.ListRefreshExternalCollectionJobsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListRefreshExternalCollectionJobsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListRefreshExternalCollectionJobsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ListRefreshExternalCollectionJobs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRefreshExternalCollectionJobs'
+type MockProxy_ListRefreshExternalCollectionJobs_Call struct {
+	*mock.Call
+}
+
+// ListRefreshExternalCollectionJobs is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListRefreshExternalCollectionJobsRequest
+func (_e *MockProxy_Expecter) ListRefreshExternalCollectionJobs(_a0 interface{}, _a1 interface{}) *MockProxy_ListRefreshExternalCollectionJobs_Call {
+	return &MockProxy_ListRefreshExternalCollectionJobs_Call{Call: _e.mock.On("ListRefreshExternalCollectionJobs", _a0, _a1)}
+}
+
+func (_c *MockProxy_ListRefreshExternalCollectionJobs_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListRefreshExternalCollectionJobsRequest)) *MockProxy_ListRefreshExternalCollectionJobs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListRefreshExternalCollectionJobsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ListRefreshExternalCollectionJobs_Call) Return(_a0 *milvuspb.ListRefreshExternalCollectionJobsResponse, _a1 error) *MockProxy_ListRefreshExternalCollectionJobs_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ListRefreshExternalCollectionJobs_Call) RunAndReturn(run func(context.Context, *milvuspb.ListRefreshExternalCollectionJobsRequest) (*milvuspb.ListRefreshExternalCollectionJobsResponse, error)) *MockProxy_ListRefreshExternalCollectionJobs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListResourceGroups provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) ListResourceGroups(_a0 context.Context, _a1 *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -7184,6 +7302,65 @@ func (_c *MockProxy_Query_Call) Return(_a0 *milvuspb.QueryResults, _a1 error) *M
 }
 
 func (_c *MockProxy_Query_Call) RunAndReturn(run func(context.Context, *milvuspb.QueryRequest) (*milvuspb.QueryResults, error)) *MockProxy_Query_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RefreshExternalCollection provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) RefreshExternalCollection(_a0 context.Context, _a1 *milvuspb.RefreshExternalCollectionRequest) (*milvuspb.RefreshExternalCollectionResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RefreshExternalCollection")
+	}
+
+	var r0 *milvuspb.RefreshExternalCollectionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RefreshExternalCollectionRequest) (*milvuspb.RefreshExternalCollectionResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RefreshExternalCollectionRequest) *milvuspb.RefreshExternalCollectionResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.RefreshExternalCollectionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.RefreshExternalCollectionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_RefreshExternalCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RefreshExternalCollection'
+type MockProxy_RefreshExternalCollection_Call struct {
+	*mock.Call
+}
+
+// RefreshExternalCollection is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.RefreshExternalCollectionRequest
+func (_e *MockProxy_Expecter) RefreshExternalCollection(_a0 interface{}, _a1 interface{}) *MockProxy_RefreshExternalCollection_Call {
+	return &MockProxy_RefreshExternalCollection_Call{Call: _e.mock.On("RefreshExternalCollection", _a0, _a1)}
+}
+
+func (_c *MockProxy_RefreshExternalCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.RefreshExternalCollectionRequest)) *MockProxy_RefreshExternalCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.RefreshExternalCollectionRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_RefreshExternalCollection_Call) Return(_a0 *milvuspb.RefreshExternalCollectionResponse, _a1 error) *MockProxy_RefreshExternalCollection_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_RefreshExternalCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.RefreshExternalCollectionRequest) (*milvuspb.RefreshExternalCollectionResponse, error)) *MockProxy_RefreshExternalCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -8935,7 +9112,8 @@ func (_c *MockProxy_Upsert_Call) RunAndReturn(run func(context.Context, *milvusp
 func NewMockProxy(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockProxy {
+},
+) *MockProxy {
 	mock := &MockProxy{}
 	mock.Mock.Test(t)
 

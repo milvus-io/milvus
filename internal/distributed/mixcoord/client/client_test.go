@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	mock1 "github.com/stretchr/testify/mock"
@@ -30,7 +31,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
@@ -2879,4 +2882,253 @@ func TestClient_BatchUpdateManifest(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	_, err = client.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func Test_CreateExternalCollection(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	config := &Params.RootCoordGrpcClientCfg
+	grpcClient := grpcclient.NewClientBase[MixCoordClient](config, "milvus.proto.rootcoord.RootCoord")
+	client.(*Client).grpcClient = grpcClient
+	mockClose := mockey.Mock(mockey.GetMethod(&grpcClient, "Close")).
+		Return(nil).Build()
+	defer mockClose.UnPatch()
+	mockGetNodeID := mockey.Mock(mockey.GetMethod(&grpcClient, "GetNodeID")).
+		Return(1).Build()
+	defer mockGetNodeID.UnPatch()
+
+	req := &msgpb.CreateCollectionRequest{
+		CollectionName: "test_external_collection",
+	}
+
+	// 构造一个 MixCoordClient，用于在 ReCall 中使用
+	mockMix := MixCoordClient{
+		DataCoordClient: datapb.NewDataCoordClient(nil),
+	}
+
+	// Test success case
+	// Mock DataCoordClient 的 CreateExternalCollection 方法
+	mockCreate := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "CreateExternalCollection")).
+		Return(&datapb.CreateExternalCollectionResponse{
+			Status: merr.Success(),
+		}, nil).Build()
+
+	mockReCall := mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
+		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+			return f(mockMix)
+		}).Build()
+
+	_, err = client.CreateExternalCollection(ctx, req)
+	assert.Nil(t, err)
+	mockCreate.UnPatch()
+	mockReCall.UnPatch()
+
+	// Test error case
+	mockCreateErr := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "CreateExternalCollection")).
+		Return(nil, mockErr).Build()
+	defer mockCreateErr.UnPatch()
+
+	mockReCall = mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
+		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+			return f(mockMix)
+		}).Build()
+	defer mockReCall.UnPatch()
+
+	_, err = client.CreateExternalCollection(ctx, req)
+	assert.NotNil(t, err)
+}
+
+func Test_RefreshExternalCollection(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	config := &Params.RootCoordGrpcClientCfg
+	grpcClient := grpcclient.NewClientBase[MixCoordClient](config, "milvus.proto.rootcoord.RootCoord")
+	client.(*Client).grpcClient = grpcClient
+	mockClose := mockey.Mock(mockey.GetMethod(&grpcClient, "Close")).
+		Return(nil).Build()
+	defer mockClose.UnPatch()
+	mockGetNodeID := mockey.Mock(mockey.GetMethod(&grpcClient, "GetNodeID")).
+		Return(1).Build()
+	defer mockGetNodeID.UnPatch()
+
+	mockMix := MixCoordClient{
+		DataCoordClient: datapb.NewDataCoordClient(nil),
+	}
+
+	req := &datapb.RefreshExternalCollectionRequest{
+		CollectionId:   1001,
+		CollectionName: "test_collection",
+	}
+
+	// Test success case
+	mockRefresh := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "RefreshExternalCollection")).
+		Return(&datapb.RefreshExternalCollectionResponse{
+			Status: merr.Success(),
+			JobId:  54321,
+		}, nil).Build()
+
+	mockReCall := mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
+		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+			return f(mockMix)
+		}).Build()
+
+	resp, err := client.RefreshExternalCollection(ctx, req)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(54321), resp.GetJobId())
+	mockRefresh.UnPatch()
+	mockReCall.UnPatch()
+
+	// Test error case
+	mockRefreshErr := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "RefreshExternalCollection")).
+		Return(nil, mockErr).Build()
+	defer mockRefreshErr.UnPatch()
+
+	mockReCall = mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
+		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+			return f(mockMix)
+		}).Build()
+	defer mockReCall.UnPatch()
+
+	_, err = client.RefreshExternalCollection(ctx, req)
+	assert.NotNil(t, err)
+}
+
+func Test_GetRefreshExternalCollectionProgress(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	config := &Params.RootCoordGrpcClientCfg
+	grpcClient := grpcclient.NewClientBase[MixCoordClient](config, "milvus.proto.rootcoord.RootCoord")
+	client.(*Client).grpcClient = grpcClient
+	mockClose := mockey.Mock(mockey.GetMethod(&grpcClient, "Close")).
+		Return(nil).Build()
+	defer mockClose.UnPatch()
+	mockGetNodeID := mockey.Mock(mockey.GetMethod(&grpcClient, "GetNodeID")).
+		Return(1).Build()
+	defer mockGetNodeID.UnPatch()
+
+	mockMix := MixCoordClient{
+		DataCoordClient: datapb.NewDataCoordClient(nil),
+	}
+
+	req := &datapb.GetRefreshExternalCollectionProgressRequest{
+		JobId: 54321,
+	}
+
+	// Test success case
+	mockProgress := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "GetRefreshExternalCollectionProgress")).
+		Return(&datapb.GetRefreshExternalCollectionProgressResponse{
+			Status: merr.Success(),
+			JobInfo: &datapb.ExternalCollectionRefreshJob{
+				JobId:    54321,
+				Progress: 50,
+			},
+		}, nil).Build()
+
+	mockReCall := mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
+		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+			return f(mockMix)
+		}).Build()
+
+	resp, err := client.GetRefreshExternalCollectionProgress(ctx, req)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(54321), resp.GetJobInfo().GetJobId())
+	mockProgress.UnPatch()
+	mockReCall.UnPatch()
+
+	// Test error case
+	mockProgressErr := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "GetRefreshExternalCollectionProgress")).
+		Return(nil, mockErr).Build()
+	defer mockProgressErr.UnPatch()
+
+	mockReCall = mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
+		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+			return f(mockMix)
+		}).Build()
+	defer mockReCall.UnPatch()
+
+	_, err = client.GetRefreshExternalCollectionProgress(ctx, req)
+	assert.NotNil(t, err)
+}
+
+func Test_ListRefreshExternalCollectionJobs(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	config := &Params.RootCoordGrpcClientCfg
+	grpcClient := grpcclient.NewClientBase[MixCoordClient](config, "milvus.proto.rootcoord.RootCoord")
+	client.(*Client).grpcClient = grpcClient
+	mockClose := mockey.Mock(mockey.GetMethod(&grpcClient, "Close")).
+		Return(nil).Build()
+	defer mockClose.UnPatch()
+	mockGetNodeID := mockey.Mock(mockey.GetMethod(&grpcClient, "GetNodeID")).
+		Return(1).Build()
+	defer mockGetNodeID.UnPatch()
+
+	mockMix := MixCoordClient{
+		DataCoordClient: datapb.NewDataCoordClient(nil),
+	}
+
+	req := &datapb.ListRefreshExternalCollectionJobsRequest{
+		CollectionId: 1001,
+	}
+
+	// Test success case
+	mockList := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "ListRefreshExternalCollectionJobs")).
+		Return(&datapb.ListRefreshExternalCollectionJobsResponse{
+			Status: merr.Success(),
+			Jobs: []*datapb.ExternalCollectionRefreshJob{
+				{
+					JobId:    54321,
+					Progress: 100,
+				},
+			},
+		}, nil).Build()
+
+	mockReCall := mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
+		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+			return f(mockMix)
+		}).Build()
+
+	resp, err := client.ListRefreshExternalCollectionJobs(ctx, req)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(resp.GetJobs()))
+	mockList.UnPatch()
+	mockReCall.UnPatch()
+
+	// Test error case
+	mockListErr := mockey.Mock(mockey.GetMethod(mockMix.DataCoordClient, "ListRefreshExternalCollectionJobs")).
+		Return(nil, mockErr).Build()
+	defer mockListErr.UnPatch()
+
+	mockReCall = mockey.Mock(mockey.GetMethod(&grpcClient, "ReCall")).To(
+		func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+			return f(mockMix)
+		}).Build()
+	defer mockReCall.UnPatch()
+
+	_, err = client.ListRefreshExternalCollectionJobs(ctx, req)
+	assert.NotNil(t, err)
 }

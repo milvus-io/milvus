@@ -162,11 +162,11 @@ type Server struct {
 	// segReferManager  *SegmentReferenceManager
 	indexEngineVersionManager IndexEngineVersionManager
 
-	statsInspector              *statsInspector
-	indexInspector              *indexInspector
-	analyzeInspector            *analyzeInspector
-	externalCollectionInspector *externalCollectionInspector
-	globalScheduler             task.GlobalScheduler
+	statsInspector                   *statsInspector
+	indexInspector                   *indexInspector
+	analyzeInspector                 *analyzeInspector
+	externalCollectionRefreshManager ExternalCollectionRefreshManager
+	globalScheduler                  task.GlobalScheduler
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
@@ -340,9 +340,8 @@ func (s *Server) initDataCoord() error {
 	s.initStatsInspector()
 	log.Info("init statsJobManager done")
 
-	// TODO: enable external collection inspector
-	// s.initExternalCollectionInspector()
-	// log.Info("init external collection inspector done")
+	s.initExternalCollectionInspector()
+	log.Info("init external collection inspector done")
 
 	if err = s.initSegmentManager(); err != nil {
 		return err
@@ -753,8 +752,10 @@ func (s *Server) initStatsInspector() {
 }
 
 func (s *Server) initExternalCollectionInspector() {
-	if s.externalCollectionInspector == nil {
-		s.externalCollectionInspector = newExternalCollectionInspector(s.ctx, s.meta, s.globalScheduler, s.allocator)
+	// Initialize Manager (handles job submission, query, and internal inspector/checker)
+	if s.externalCollectionRefreshManager == nil {
+		s.externalCollectionRefreshManager = NewExternalCollectionRefreshManager(
+			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.handler.GetCollection)
 	}
 }
 
@@ -810,6 +811,9 @@ func (s *Server) startServerLoop() {
 	go s.copySegmentInspector.Start()
 	go s.copySegmentChecker.Start()
 
+	// Start external collection refresh manager (includes inspector and checker)
+	s.externalCollectionRefreshManager.Start()
+
 	s.garbageCollector.start()
 }
 
@@ -839,8 +843,7 @@ func (s *Server) startTaskScheduler() {
 	s.statsInspector.Start()
 	s.indexInspector.Start()
 	s.analyzeInspector.Start()
-	// TODO: enable external collection inspector
-	// s.externalCollectionInspector.Start()
+	// Note: externalCollectionInspector.Start() is called in startServerLoop as a goroutine
 	s.startCollectMetaMetrics(s.serverLoopCtx)
 }
 
@@ -1171,9 +1174,8 @@ func (s *Server) Stop() error {
 	if s.qnSessionWatcher != nil {
 		s.qnSessionWatcher.Stop()
 	}
-	// TODO: enable external collection inspector
-	// s.externalCollectionInspector.Stop()
-	// log.Info("datacoord external collection inspector stopped")
+	s.externalCollectionRefreshManager.Stop()
+	log.Info("datacoord external collection refresh manager stopped")
 
 	if s.session != nil {
 		s.session.Stop()

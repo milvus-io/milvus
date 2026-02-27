@@ -15,15 +15,19 @@
 // limitations under the License.
 #pragma once
 
-#include <vector>
-#include <cstdint>
+#include <arrow/record_batch.h>
+#include <arrow/table.h>
 #include <cstddef>
+#include <cstdint>
 #include <future>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "common/Channel.h"
+#include "common/FieldData.h"
 #include "common/OpContext.h"
 #include "milvus-storage/common/metadata.h"
-#include <arrow/record_batch.h>
-#include <vector>
-#include "common/FieldData.h"
 #include "milvus-storage/filesystem/fs.h"
 
 namespace milvus::segcore {
@@ -92,28 +96,47 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                  milvus::proto::common::LoadPriority priority =
                      milvus::proto::common::LoadPriority::HIGH);
 
+// ---- Cell-batch loading ----
+
+// A cell specification: identifies a cell's location within a specific file.
+struct CellSpec {
+    int64_t cid;              // cell id
+    size_t file_idx;          // index into the remote_files list
+    int64_t local_rg_offset;  // file-local row group start offset
+    int64_t rg_count;         // number of row groups in this cell
+};
+
+// Result of loading a single cell: cid + the arrow tables read.
+struct CellLoadResult {
+    int64_t cid;
+    std::vector<std::shared_ptr<arrow::Table>> tables;
+};
+
+using CellReaderChannel = milvus::Channel<std::shared_ptr<CellLoadResult>>;
+
 /**
- * Load storage v2 files with specified strategy. The number of row group readers is determined by the strategy.
+ * Load cells from storage v2 files in batches. Cells are sorted by
+ * (file_idx, local_rg_offset) and grouped into IO-merged batches.
+ * Each completed cell is pushed to the channel immediately, enabling
+ * streaming consumption without accumulating all ArrowTables.
  *
- * @param remote_files: list of remote files
- * @param memory_limit: memory limit for each chunk
- * @param strategy: strategy to split row groups
- * @param row_group_lists: list of row group lists
- * @param fs: the arrow filesystem pointer used to load
- * @param schema: schema of the data, if not provided, storage v2 will read all columns of the files.
- * @param priority: load priority
- * @return vector of futures, encapuslating the loading tasks and potential exceptions
+ * @param op_ctx operation context for cancellation
+ * @param remote_files list of remote files
+ * @param cell_specs cell specifications (sorted internally)
+ * @param channel channel to receive loaded cell data; closed when all done
+ * @param memory_limit total memory limit for readers
+ * @param fs arrow filesystem
+ * @param priority load priority
+ * @return vector of futures for the batch loading tasks
  */
 std::vector<std::future<void>>
-LoadWithStrategyAsync(milvus::OpContext* op_ctx,
-                      const std::vector<std::string>& remote_files,
-                      std::shared_ptr<ArrowReaderChannel>& channel,
-                      int64_t memory_limit,
-                      std::unique_ptr<RowGroupSplitStrategy> strategy,
-                      const std::vector<std::vector<int64_t>>& row_group_lists,
-                      const milvus_storage::ArrowFileSystemPtr& fs,
-                      const std::shared_ptr<arrow::Schema>& schema = nullptr,
-                      milvus::proto::common::LoadPriority priority =
-                          milvus::proto::common::LoadPriority::HIGH);
+LoadCellBatchAsync(milvus::OpContext* op_ctx,
+                   const std::vector<std::string>& remote_files,
+                   std::vector<CellSpec> cell_specs,
+                   std::shared_ptr<CellReaderChannel>& channel,
+                   int64_t memory_limit,
+                   const milvus_storage::ArrowFileSystemPtr& fs,
+                   milvus::proto::common::LoadPriority priority =
+                       milvus::proto::common::LoadPriority::HIGH);
 
 }  // namespace milvus::segcore

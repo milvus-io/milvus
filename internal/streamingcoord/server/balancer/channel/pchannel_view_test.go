@@ -19,13 +19,13 @@ func TestPChannelView(t *testing.T) {
 		}: newPChannelMetaFromProto(&streamingpb.PChannelMeta{
 			Channel: &streamingpb.PChannelInfo{Name: "test", Term: 1},
 			State:   streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED,
-		}),
+		}, nil),
 		types.ChannelID{
 			Name: "test2",
 		}: newPChannelMetaFromProto(&streamingpb.PChannelMeta{
 			Channel: &streamingpb.PChannelInfo{Name: "test2", Term: 1},
 			State:   streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED,
-		}),
+		}, nil),
 	}
 	view := newPChannelView(metas)
 	assert.Len(t, view.Channels, 2)

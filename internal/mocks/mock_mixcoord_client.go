@@ -6376,6 +6376,80 @@ func (_c *MockMixCoordClient_GetRecoveryInfoV2_Call) RunAndReturn(run func(conte
 	return _c
 }
 
+// GetRefreshExternalCollectionProgress provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) GetRefreshExternalCollectionProgress(ctx context.Context, in *datapb.GetRefreshExternalCollectionProgressRequest, opts ...grpc.CallOption) (*datapb.GetRefreshExternalCollectionProgressResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRefreshExternalCollectionProgress")
+	}
+
+	var r0 *datapb.GetRefreshExternalCollectionProgressResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetRefreshExternalCollectionProgressRequest, ...grpc.CallOption) (*datapb.GetRefreshExternalCollectionProgressResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetRefreshExternalCollectionProgressRequest, ...grpc.CallOption) *datapb.GetRefreshExternalCollectionProgressResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.GetRefreshExternalCollectionProgressResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetRefreshExternalCollectionProgressRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_GetRefreshExternalCollectionProgress_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRefreshExternalCollectionProgress'
+type MockMixCoordClient_GetRefreshExternalCollectionProgress_Call struct {
+	*mock.Call
+}
+
+// GetRefreshExternalCollectionProgress is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.GetRefreshExternalCollectionProgressRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) GetRefreshExternalCollectionProgress(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_GetRefreshExternalCollectionProgress_Call {
+	return &MockMixCoordClient_GetRefreshExternalCollectionProgress_Call{Call: _e.mock.On("GetRefreshExternalCollectionProgress",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_GetRefreshExternalCollectionProgress_Call) Run(run func(ctx context.Context, in *datapb.GetRefreshExternalCollectionProgressRequest, opts ...grpc.CallOption)) *MockMixCoordClient_GetRefreshExternalCollectionProgress_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.GetRefreshExternalCollectionProgressRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_GetRefreshExternalCollectionProgress_Call) Return(_a0 *datapb.GetRefreshExternalCollectionProgressResponse, _a1 error) *MockMixCoordClient_GetRefreshExternalCollectionProgress_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_GetRefreshExternalCollectionProgress_Call) RunAndReturn(run func(context.Context, *datapb.GetRefreshExternalCollectionProgressRequest, ...grpc.CallOption) (*datapb.GetRefreshExternalCollectionProgressResponse, error)) *MockMixCoordClient_GetRefreshExternalCollectionProgress_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetReplicas provides a mock function with given fields: ctx, in, opts
 func (_m *MockMixCoordClient) GetReplicas(ctx context.Context, in *milvuspb.GetReplicasRequest, opts ...grpc.CallOption) (*milvuspb.GetReplicasResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -8226,6 +8300,80 @@ func (_c *MockMixCoordClient_ListQueryNode_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// ListRefreshExternalCollectionJobs provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) ListRefreshExternalCollectionJobs(ctx context.Context, in *datapb.ListRefreshExternalCollectionJobsRequest, opts ...grpc.CallOption) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRefreshExternalCollectionJobs")
+	}
+
+	var r0 *datapb.ListRefreshExternalCollectionJobsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ListRefreshExternalCollectionJobsRequest, ...grpc.CallOption) (*datapb.ListRefreshExternalCollectionJobsResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ListRefreshExternalCollectionJobsRequest, ...grpc.CallOption) *datapb.ListRefreshExternalCollectionJobsResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.ListRefreshExternalCollectionJobsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ListRefreshExternalCollectionJobsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_ListRefreshExternalCollectionJobs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRefreshExternalCollectionJobs'
+type MockMixCoordClient_ListRefreshExternalCollectionJobs_Call struct {
+	*mock.Call
+}
+
+// ListRefreshExternalCollectionJobs is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.ListRefreshExternalCollectionJobsRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) ListRefreshExternalCollectionJobs(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_ListRefreshExternalCollectionJobs_Call {
+	return &MockMixCoordClient_ListRefreshExternalCollectionJobs_Call{Call: _e.mock.On("ListRefreshExternalCollectionJobs",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_ListRefreshExternalCollectionJobs_Call) Run(run func(ctx context.Context, in *datapb.ListRefreshExternalCollectionJobsRequest, opts ...grpc.CallOption)) *MockMixCoordClient_ListRefreshExternalCollectionJobs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.ListRefreshExternalCollectionJobsRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_ListRefreshExternalCollectionJobs_Call) Return(_a0 *datapb.ListRefreshExternalCollectionJobsResponse, _a1 error) *MockMixCoordClient_ListRefreshExternalCollectionJobs_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_ListRefreshExternalCollectionJobs_Call) RunAndReturn(run func(context.Context, *datapb.ListRefreshExternalCollectionJobsRequest, ...grpc.CallOption) (*datapb.ListRefreshExternalCollectionJobsResponse, error)) *MockMixCoordClient_ListRefreshExternalCollectionJobs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListResourceGroups provides a mock function with given fields: ctx, in, opts
 func (_m *MockMixCoordClient) ListResourceGroups(ctx context.Context, in *milvuspb.ListResourceGroupsRequest, opts ...grpc.CallOption) (*milvuspb.ListResourceGroupsResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -9110,6 +9258,80 @@ func (_c *MockMixCoordClient_PushClientCommand_Call) Return(_a0 *milvuspb.PushCl
 }
 
 func (_c *MockMixCoordClient_PushClientCommand_Call) RunAndReturn(run func(context.Context, *milvuspb.PushClientCommandRequest, ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error)) *MockMixCoordClient_PushClientCommand_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RefreshExternalCollection provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) RefreshExternalCollection(ctx context.Context, in *datapb.RefreshExternalCollectionRequest, opts ...grpc.CallOption) (*datapb.RefreshExternalCollectionResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RefreshExternalCollection")
+	}
+
+	var r0 *datapb.RefreshExternalCollectionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.RefreshExternalCollectionRequest, ...grpc.CallOption) (*datapb.RefreshExternalCollectionResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.RefreshExternalCollectionRequest, ...grpc.CallOption) *datapb.RefreshExternalCollectionResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.RefreshExternalCollectionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.RefreshExternalCollectionRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_RefreshExternalCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RefreshExternalCollection'
+type MockMixCoordClient_RefreshExternalCollection_Call struct {
+	*mock.Call
+}
+
+// RefreshExternalCollection is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.RefreshExternalCollectionRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) RefreshExternalCollection(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_RefreshExternalCollection_Call {
+	return &MockMixCoordClient_RefreshExternalCollection_Call{Call: _e.mock.On("RefreshExternalCollection",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_RefreshExternalCollection_Call) Run(run func(ctx context.Context, in *datapb.RefreshExternalCollectionRequest, opts ...grpc.CallOption)) *MockMixCoordClient_RefreshExternalCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.RefreshExternalCollectionRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_RefreshExternalCollection_Call) Return(_a0 *datapb.RefreshExternalCollectionResponse, _a1 error) *MockMixCoordClient_RefreshExternalCollection_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_RefreshExternalCollection_Call) RunAndReturn(run func(context.Context, *datapb.RefreshExternalCollectionRequest, ...grpc.CallOption) (*datapb.RefreshExternalCollectionResponse, error)) *MockMixCoordClient_RefreshExternalCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -12005,7 +12227,8 @@ func (_c *MockMixCoordClient_WatchChannels_Call) RunAndReturn(run func(context.C
 func NewMockMixCoordClient(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockMixCoordClient {
+},
+) *MockMixCoordClient {
 	mock := &MockMixCoordClient{}
 	mock.Mock.Test(t)
 

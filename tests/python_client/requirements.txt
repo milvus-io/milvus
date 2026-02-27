@@ -2,11 +2,9 @@
 pytest-cov==2.8.1
 requests>=2.32.4
 scikit-learn>=1.5.2
-timeout_decorator==0.5.0
 ujson==5.5.0
 pytest==8.3.4
 pytest-asyncio==0.24.0
-pytest-assume==2.4.3
 pytest-timeout==1.3.3
 pytest-repeat==0.8.0
 allure-pytest==2.7.0
@@ -14,17 +12,14 @@ pytest-print==0.2.1
 pytest-level==0.1.1
 pytest-xdist==2.5.0
 
+pytest-assume==2.4.3
 pytest-rerunfailures==14.0
 pytest_tagging==1.6.0
-ndg-httpsclient
-pyopenssl
-pyasn1
 pytest-html==3.1.1
 delayed-assert==0.3.5
 kubernetes==17.17.0
 PyYAML==6.0
 pytest-sugar==0.9.5
-pytest-parallel
 pytest-random-order
 
 # pymilvus
@@ -35,7 +30,6 @@ protobuf>=5.29.5
 
 # for customize config test
 python-benedict==0.24.3
-timeout-decorator==0.5.0
 
 # for bulk insert test
 minio==7.2.0
@@ -66,11 +60,13 @@ fastparquet==2023.7.0
 # for bf16 datatype
 ml-dtypes==0.2.0
 
+# for text processing
+Unidecode==1.3.8
+
 # for full text search
 tantivy==0.22.0
 bm25s==0.2.0
 jieba==0.42.1
-Unidecode==1.3.8
 
 
 # for perf test

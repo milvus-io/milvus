@@ -115,12 +115,12 @@ pkg/streaming/proto/**/*.pb.go
 
 #AI rules
 WARP.md
+.claude/
 
 # Antlr
 .antlr
 
 # Gocache
 **/.gocache/
-claude.md
 docs/plans/
 

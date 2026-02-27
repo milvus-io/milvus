@@ -174,7 +174,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
                                  "nq": ct.default_nq,
                                  "limit": ct.default_limit,
                                  "pk_name": pk_name})
-        # search by ids on nullable fields (issue #47065 fixed)
+        # search by ids on nullable fields
         # PKs 0-999: basic rows, embeddings_new is null (backfilled)
         # PKs 1000-1999: embeddings_new is null if pk%2==0, valid vector if pk%2==1
         res = self.search(client, collection_name, ids=query_pks,

@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -57,12 +58,13 @@ type PackWriterV3Suite struct {
 	logIDAlloc   allocator.Interface
 	mockBinlogIO *mock_util.MockBinlogIO
 
-	schema       *schemapb.CollectionSchema
-	cm           storage.ChunkManager
-	rootPath     string
-	maxRowNum    int64
-	chunkSize    uint64
-	currentSplit []storagecommon.ColumnGroup
+	schema        *schemapb.CollectionSchema
+	cm            storage.ChunkManager
+	rootPath      string
+	maxRowNum     int64
+	chunkSize     uint64
+	currentSplit  []storagecommon.ColumnGroup
+	storageConfig *indexpb.StorageConfig
 }
 
 func (s *PackWriterV3Suite) SetupTest() {
@@ -117,6 +119,10 @@ func (s *PackWriterV3Suite) SetupTest() {
 	allFields := typeutil.GetAllFieldSchemas(s.schema)
 	s.currentSplit = storagecommon.SplitColumns(allFields, map[int64]storagecommon.ColumnStats{}, storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
 	s.cm = storage.NewLocalChunkManager(objectstorage.RootPath(s.rootPath))
+	s.storageConfig = &indexpb.StorageConfig{
+		StorageType: "local",
+		RootPath:    s.rootPath,
+	}
 }
 
 func (s *PackWriterV3Suite) TearDownTest() {
@@ -160,7 +166,7 @@ func (s *PackWriterV3Suite) TestPackWriterV3_Write() {
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema)).WithDeleteData(deletes)
 
-	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, manifestPath)
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
 
 	gotInserts, _, _, _, writtenManifestPath, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
@@ -185,7 +191,7 @@ func (s *PackWriterV3Suite) TestWriteEmptyInsertData() {
 	manifestPath := packed.MarshalManifestPath(basePath, -1)
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName)
-	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, manifestPath)
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
 
 	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
@@ -219,7 +225,7 @@ func (s *PackWriterV3Suite) TestNoPkField() {
 	buf.Append(data)
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData([]*storage.InsertData{buf})
-	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, manifestPath)
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
 
 	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
@@ -245,7 +251,7 @@ func (s *PackWriterV3Suite) TestWriteInsertDataError() {
 	buf.Append(data)
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData([]*storage.InsertData{buf})
-	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, manifestPath)
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
 
 	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
@@ -266,7 +272,7 @@ func (s *PackWriterV3Suite) TestInvalidManifestPath() {
 	invalidManifestPath := "invalid-manifest-path"
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema))
-	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, invalidManifestPath)
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, invalidManifestPath)
 
 	_, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
@@ -308,13 +314,17 @@ func (s *PackWriterV3Suite) TestWriteWithDeleteData() {
 	// Test with only delete data (no inserts)
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithDeleteData(deletes)
 
-	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, manifestPath)
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
 
-	gotInserts, gotDeletes, _, _, _, _, err := bw.Write(context.Background(), pack)
+	gotInserts, gotDeletes, _, _, writtenManifestPath, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 	s.Equal(0, len(gotInserts)) // No insert binlogs when only deletes
-	s.NotNil(gotDeletes)
-	s.Equal(int64(rows), gotDeletes.Binlogs[0].GetEntriesNum())
+	// For V3, deltas are nil since deltalogs are stored in manifest
+	s.Nil(gotDeletes)
+	// Verify manifest was updated (version should be > -1)
+	_, revision, err := packed.UnmarshalManfestPath(writtenManifestPath)
+	s.NoError(err)
+	s.Greater(revision, int64(-1))
 }
 
 func (s *PackWriterV3Suite) TestV3InheritsV2Fields() {
@@ -329,7 +339,7 @@ func (s *PackWriterV3Suite) TestV3InheritsV2Fields() {
 	mc := metacache.NewMockMetaCache(s.T())
 
 	// Create V3 writer and verify it has access to V2 fields
-	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, packed.DefaultMultiPartUploadSize, nil, s.currentSplit, manifestPath)
+	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, packed.DefaultMultiPartUploadSize, s.storageConfig, s.currentSplit, manifestPath)
 
 	// Verify V3 can access fields from embedded V2
 	s.Equal(s.schema, bw.schema)

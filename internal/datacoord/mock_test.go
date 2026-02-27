@@ -241,6 +241,24 @@ func (m *mockMixCoord) CreateExternalCollection(ctx context.Context, req *msgpb.
 	}, nil
 }
 
+func (m *mockMixCoord) RefreshExternalCollection(ctx context.Context, req *datapb.RefreshExternalCollectionRequest) (*datapb.RefreshExternalCollectionResponse, error) {
+	return &datapb.RefreshExternalCollectionResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
+func (m *mockMixCoord) GetRefreshExternalCollectionProgress(ctx context.Context, req *datapb.GetRefreshExternalCollectionProgressRequest) (*datapb.GetRefreshExternalCollectionProgressResponse, error) {
+	return &datapb.GetRefreshExternalCollectionProgressResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
+func (m *mockMixCoord) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+	return &datapb.ListRefreshExternalCollectionJobsResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
 func newMockMixCoord() *mockMixCoord {
 	return &mockMixCoord{state: commonpb.StateCode_Healthy}
 }

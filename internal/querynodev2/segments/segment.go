@@ -862,6 +862,10 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 }
 
 func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.DeltaData) error {
+	if deltaData.DeleteRowCount() == 0 {
+		return nil
+	}
+
 	pks, tss := deltaData.DeletePks(), deltaData.DeleteTimestamps()
 	rowNum := deltaData.DeleteRowCount()
 

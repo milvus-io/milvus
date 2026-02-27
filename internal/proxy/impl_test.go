@@ -2524,8 +2524,7 @@ func TestProxy_BatchUpdateManifest(t *testing.T) {
 			mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
 				return UniqueID(0), nil
 			}).Build()
-			mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) {
-			}).Build()
+			mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) {}).Build()
 
 			mockey.Mock(paramtable.Init).Return().Build()
 			mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
@@ -2552,8 +2551,7 @@ func TestProxy_BatchUpdateManifest(t *testing.T) {
 			mockey.Mock((*MetaCache).GetCollectionID).To(func(m *MetaCache, ctx context.Context, dbName, collectionName string) (UniqueID, error) {
 				return UniqueID(100), nil
 			}).Build()
-			mockey.Mock((*MetaCache).RemoveDatabase).To(func(m *MetaCache, ctx context.Context, dbName string) {
-			}).Build()
+			mockey.Mock((*MetaCache).RemoveDatabase).To(func(m *MetaCache, ctx context.Context, dbName string) {}).Build()
 
 			mockey.Mock(paramtable.Init).Return().Build()
 			mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()

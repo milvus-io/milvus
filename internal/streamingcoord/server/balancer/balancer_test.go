@@ -145,7 +145,7 @@ func TestBalancer(t *testing.T) {
 	resource.Resource().ETCD().Put(context.Background(), dataNodePath, string(data))
 
 	ctx := context.Background()
-	b, err := balancer.RecoverBalancer(ctx, "test-channel-1")
+	b, err := balancer.RecoverBalancer(ctx, newStaticChannelProvider("test-channel-1"))
 	assert.NoError(t, err)
 	assert.NotNil(t, b)
 
@@ -364,7 +364,7 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
 
 	ctx := context.Background()
-	b, err := balancer.RecoverBalancer(ctx, "test-channel-1")
+	b, err := balancer.RecoverBalancer(ctx, newStaticChannelProvider("test-channel-1"))
 	assert.NoError(t, err)
 	assert.NotNil(t, b)
 
@@ -398,3 +398,173 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 		return nil
 	})
 }
+
+func TestBalancer_DynamicChannelFromProvider(t *testing.T) {
+	paramtable.Init()
+	etcdClient, _ := kvfactory.GetEtcdAndPath()
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+
+	streamingNodeManager := mock_manager.NewMockManagerClient(t)
+	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
+	streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).Return(nil).Maybe()
+	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Maybe()
+	streamingNodeManager.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{
+		1: {ServerID: 1, Address: "localhost:1"},
+		2: {ServerID: 2, Address: "localhost:2"},
+	}, nil).Maybe()
+	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything).Return(map[int64]*types.StreamingNodeStatus{
+		1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
+		2: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 2, Address: "localhost:2"}},
+	}, nil).Maybe()
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(
+		resource.OptETCD(etcdClient),
+		resource.OptStreamingCatalog(catalog),
+		resource.OptStreamingManagerClient(streamingNodeManager),
+		resource.OptSession(s),
+	)
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Unset()
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+		{
+			Channel: &streamingpb.PChannelInfo{
+				Name:       "initial-channel",
+				Term:       1,
+				AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READONLY,
+			},
+			State: streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED,
+			Node:  &streamingpb.StreamingNodeInfo{ServerId: 1},
+		},
+	}, nil)
+	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+
+	provider := newStaticChannelProvider("initial-channel")
+	ctx := context.Background()
+	b, err := balancer.RecoverBalancer(ctx, provider)
+	assert.NoError(t, err)
+	assert.NotNil(t, b)
+
+	// Wait for initial assignment to stabilize (1 channel assigned).
+	doneErr := errors.New("done")
+	err = b.WatchChannelAssignments(ctx, func(param balancer.WatchChannelAssignmentsCallbackParam) error {
+		if len(param.Relations) >= 1 {
+			return doneErr
+		}
+		return nil
+	})
+	assert.ErrorIs(t, err, doneErr)
+
+	// Send dynamic channels through the provider.
+	provider.ch <- []string{"dynamic-channel-1", "dynamic-channel-2"}
+
+	// The balancer should pick them up and assign them.
+	err = b.WatchChannelAssignments(ctx, func(param balancer.WatchChannelAssignmentsCallbackParam) error {
+		if len(param.Relations) >= 3 {
+			return doneErr
+		}
+		return nil
+	})
+	assert.ErrorIs(t, err, doneErr)
+
+	b.Close()
+}
+
+func TestBalancer_DynamicChannelProviderClosed(t *testing.T) {
+	paramtable.Init()
+	etcdClient, _ := kvfactory.GetEtcdAndPath()
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+
+	streamingNodeManager := mock_manager.NewMockManagerClient(t)
+	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
+	streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).Return(nil).Maybe()
+	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Maybe()
+	streamingNodeManager.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{
+		1: {ServerID: 1, Address: "localhost:1"},
+	}, nil).Maybe()
+	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything).Return(map[int64]*types.StreamingNodeStatus{
+		1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
+	}, nil).Maybe()
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(
+		resource.OptETCD(etcdClient),
+		resource.OptStreamingCatalog(catalog),
+		resource.OptStreamingManagerClient(streamingNodeManager),
+		resource.OptSession(s),
+	)
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Unset()
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+		{
+			Channel: &streamingpb.PChannelInfo{
+				Name:       "ch1",
+				Term:       1,
+				AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READONLY,
+			},
+			State: streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED,
+			Node:  &streamingpb.StreamingNodeInfo{ServerId: 1},
+		},
+	}, nil)
+	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+
+	provider := newStaticChannelProvider("ch1")
+	ctx := context.Background()
+	b, err := balancer.RecoverBalancer(ctx, provider)
+	assert.NoError(t, err)
+
+	// Wait for initial assignment.
+	doneErr := errors.New("done")
+	err = b.WatchChannelAssignments(ctx, func(param balancer.WatchChannelAssignmentsCallbackParam) error {
+		if len(param.Relations) >= 1 {
+			return doneErr
+		}
+		return nil
+	})
+	assert.ErrorIs(t, err, doneErr)
+
+	// Close the provider channel — execute loop should exit via the !ok branch.
+	close(provider.ch)
+	// Wait for execute goroutine to finish (backgroundTaskNotifier will be done).
+	time.Sleep(100 * time.Millisecond)
+
+	// Close should still work cleanly after execute has already returned.
+	b.Close()
+}
+
+// staticChannelProvider is a test helper implementing balancer.ChannelProvider with static channels.
+type staticChannelProvider struct {
+	channels []string
+	ch       chan []string
+}
+
+func newStaticChannelProvider(channels ...string) *staticChannelProvider {
+	return &staticChannelProvider{
+		channels: channels,
+		ch:       make(chan []string),
+	}
+}
+
+func (p *staticChannelProvider) GetInitialChannels() []string {
+	return p.channels
+}
+
+func (p *staticChannelProvider) NewIncomingChannels() <-chan []string {
+	return p.ch
+}
+
+func (p *staticChannelProvider) Close() {}

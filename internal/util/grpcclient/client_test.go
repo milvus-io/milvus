@@ -22,7 +22,6 @@ import (
 	"math/rand"
 	"net"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -32,7 +31,6 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/examples/helloworld/helloworld"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
@@ -404,18 +402,18 @@ func TestClientBase_CheckGrpcError(t *testing.T) {
 	assert.False(t, forceReset)
 }
 
-type server struct {
-	helloworld.UnimplementedGreeterServer
+type mockRootCoordRetryServer struct {
+	rootcoordpb.UnimplementedRootCoordServer
 	reqCounter   uint
 	SuccessCount uint
 }
 
-func (s *server) SayHello(ctx context.Context, in *helloworld.HelloRequest) (*helloworld.HelloReply, error) {
-	log.Printf("Received: %s", in.Name)
+func (s *mockRootCoordRetryServer) GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
+	log.Printf("Received GetComponentStates")
 	s.reqCounter++
 	if s.reqCounter%s.SuccessCount == 0 {
 		log.Printf("success %d", s.reqCounter)
-		return &helloworld.HelloReply{Message: strings.ToUpper(in.Name)}, nil
+		return &milvuspb.ComponentStates{}, nil
 	}
 	return nil, status.Error(codes.Unavailable, "server: fail it")
 }
@@ -441,7 +439,7 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 	)
-	helloworld.RegisterGreeterServer(s, &server{SuccessCount: uint(maxAttempts)})
+	rootcoordpb.RegisterRootCoordServer(s, &mockRootCoordRetryServer{SuccessCount: uint(maxAttempts)})
 	reflection.Register(s)
 	go func() {
 		if err := s.Serve(lis); err != nil {
@@ -456,7 +454,7 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 		DialTimeout:            60 * time.Second,
 		KeepAliveTime:          60 * time.Second,
 		KeepAliveTimeout:       60 * time.Second,
-		RetryServiceNameConfig: "rootcoordpb.GetComponentStates",
+		RetryServiceNameConfig: "milvus.proto.rootcoord.RootCoord",
 		MaxAttempts:            maxAttempts,
 		InitialBackoff:         10.0,
 		MaxBackoff:             60.0,
@@ -503,7 +501,7 @@ func TestClientBase_Compression(t *testing.T) {
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 	)
-	helloworld.RegisterGreeterServer(s, &server{SuccessCount: uint(1)})
+	rootcoordpb.RegisterRootCoordServer(s, &mockRootCoordRetryServer{SuccessCount: uint(1)})
 	reflection.Register(s)
 	go func() {
 		if err := s.Serve(lis); err != nil {
@@ -518,7 +516,7 @@ func TestClientBase_Compression(t *testing.T) {
 		DialTimeout:            60 * time.Second,
 		KeepAliveTime:          60 * time.Second,
 		KeepAliveTimeout:       60 * time.Second,
-		RetryServiceNameConfig: "helloworld.Greeter",
+		RetryServiceNameConfig: "milvus.proto.rootcoord.RootCoord",
 		MaxAttempts:            maxAttempts,
 		InitialBackoff:         10.0,
 		MaxBackoff:             60.0,

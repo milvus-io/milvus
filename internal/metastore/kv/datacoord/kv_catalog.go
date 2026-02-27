@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -1102,6 +1103,145 @@ func (kc *Catalog) SaveUpdateExternalCollectionTask(ctx context.Context, task *i
 func (kc *Catalog) DropUpdateExternalCollectionTask(ctx context.Context, taskID typeutil.UniqueID) error {
 	key := buildUpdateExternalCollectionTaskKey(taskID)
 	return kc.MetaKv.Remove(ctx, key)
+}
+
+// ListExternalCollectionRefreshJobs lists all external collection refresh jobs from etcd
+func (kc *Catalog) ListExternalCollectionRefreshJobs(ctx context.Context) ([]*datapb.ExternalCollectionRefreshJob, error) {
+	jobs := make([]*datapb.ExternalCollectionRefreshJob, 0)
+	applyFn := func(key []byte, value []byte) error {
+		job := &datapb.ExternalCollectionRefreshJob{}
+		if err := proto.Unmarshal(value, job); err != nil {
+			log.Ctx(ctx).Warn("failed to unmarshal external collection refresh job", zap.Error(err))
+			return err
+		}
+		jobs = append(jobs, job)
+		return nil
+	}
+	err := kc.MetaKv.WalkWithPrefix(ctx, ExternalCollectionRefreshJobPrefix, kc.paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
+// SaveExternalCollectionRefreshJob saves an external collection refresh job to etcd
+func (kc *Catalog) SaveExternalCollectionRefreshJob(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error {
+	key := buildExternalCollectionRefreshJobKey(job.JobId)
+	value, err := proto.Marshal(job)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, key, string(value))
+}
+
+// DropExternalCollectionRefreshJob removes an external collection refresh job from etcd
+func (kc *Catalog) DropExternalCollectionRefreshJob(ctx context.Context, jobID typeutil.UniqueID) error {
+	key := buildExternalCollectionRefreshJobKey(jobID)
+	return kc.MetaKv.Remove(ctx, key)
+}
+
+// ListExternalCollectionRefreshTasks lists all external collection refresh tasks from etcd
+func (kc *Catalog) ListExternalCollectionRefreshTasks(ctx context.Context) ([]*datapb.ExternalCollectionRefreshTask, error) {
+	tasks := make([]*datapb.ExternalCollectionRefreshTask, 0)
+	applyFn := func(key []byte, value []byte) error {
+		task := &datapb.ExternalCollectionRefreshTask{}
+		if err := proto.Unmarshal(value, task); err != nil {
+			log.Ctx(ctx).Warn("failed to unmarshal external collection refresh task", zap.Error(err))
+			return err
+		}
+		tasks = append(tasks, task)
+		return nil
+	}
+	err := kc.MetaKv.WalkWithPrefix(ctx, ExternalCollectionRefreshTaskPrefix, kc.paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+// SaveExternalCollectionRefreshTask saves an external collection refresh task to etcd
+func (kc *Catalog) SaveExternalCollectionRefreshTask(ctx context.Context, task *datapb.ExternalCollectionRefreshTask) error {
+	key := buildExternalCollectionRefreshTaskKey(task.TaskId)
+	value, err := proto.Marshal(task)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, key, string(value))
+}
+
+// DropExternalCollectionRefreshTask removes an external collection refresh task from etcd
+func (kc *Catalog) DropExternalCollectionRefreshTask(ctx context.Context, taskID typeutil.UniqueID) error {
+	key := buildExternalCollectionRefreshTaskKey(taskID)
+	return kc.MetaKv.Remove(ctx, key)
+}
+
+func (kc *Catalog) SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error {
+	kvs := make(map[string]string)
+
+	k := BuildFileResourceKey(resource.Id)
+	v, err := proto.Marshal(resource)
+	if err != nil {
+		log.Ctx(ctx).Error("failed to marshal resource info", zap.Error(err))
+		return err
+	}
+	kvs[k] = string(v)
+	kvs[FileResourceVersionKey] = fmt.Sprint(version)
+
+	if err = kc.MetaKv.MultiSave(ctx, kvs); err != nil {
+		log.Ctx(ctx).Warn("fail to save resource info", zap.String("key", k), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error {
+	k := BuildFileResourceKey(resourceID)
+	if err := kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{FileResourceVersionKey: fmt.Sprint(version)}, []string{k}); err != nil {
+		log.Ctx(ctx).Warn("fail to remove resource info", zap.String("key", k), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error) {
+	_, values, err := kc.MetaKv.LoadWithPrefix(ctx, FileResourceMetaPrefix)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var version uint64 = 0
+	exist, err := kc.MetaKv.Has(ctx, FileResourceVersionKey)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	if exist {
+		strVersion, err := kc.MetaKv.Load(ctx, FileResourceVersionKey)
+		if err != nil {
+			return nil, 0, err
+		}
+		v, err := strconv.ParseUint(strVersion, 10, 64)
+		if err != nil {
+			return nil, 0, err
+		}
+		version = v
+	}
+
+	infos := make([]*internalpb.FileResourceInfo, 0, len(values))
+	for _, v := range values {
+		info := &internalpb.FileResourceInfo{}
+		err := proto.Unmarshal([]byte(v), info)
+		if err != nil {
+			return nil, 0, err
+		}
+		infos = append(infos, info)
+	}
+
+	return infos, version, nil
+}
+
+func BuildFileResourceKey(resourceID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d", FileResourceMetaPrefix, resourceID)
 }
 
 func (kc *Catalog) SaveSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error {

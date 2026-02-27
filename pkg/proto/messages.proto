@@ -60,10 +60,11 @@ enum MessageType {
     DropIndex            = 36;
     FlushAll             = 37;
     TruncateCollection   = 38;
-    RestoreSnapshot      = 39;
-    CreateSnapshot       = 40;
-    DropSnapshot         = 41;
-    BatchUpdateManifest  = 42;
+    RestoreSnapshot              = 39;
+    CreateSnapshot               = 40;
+    DropSnapshot                 = 41;
+    BatchUpdateManifest          = 42;
+    RefreshExternalCollection    = 43;
 
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;
@@ -603,6 +604,20 @@ message AlterWALMessageHeader {
 }
 
 message AlterWALMessageBody {}
+
+// RefreshExternalCollectionMessageHeader is the header of refresh external collection message.
+// Used by DDL callback to trigger external collection data refresh.
+message RefreshExternalCollectionMessageHeader {
+    int64 collection_id = 1;       // Collection ID to refresh
+    string collection_name = 2;    // Collection name
+    int64 job_id = 3;              // Pre-allocated job ID for idempotency
+    string external_source = 4;    // External data source type
+    string external_spec = 5;      // External data specification
+}
+
+// RefreshExternalCollectionMessageBody is the body of refresh external collection message.
+// Empty - all info is in header.
+message RefreshExternalCollectionMessageBody {}
 
 // CacheExpirations is the cache expirations of proxy collection meta cache.
 message CacheExpirations {

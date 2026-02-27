@@ -589,39 +589,134 @@ func (w *LegacyDeltalogWriter) Close() error {
 		return err
 	}
 
-	return w.uploader(context.Background(), map[string][]byte{blob.Key: blob.Value})
+	return w.uploader(context.Background(), map[string][]byte{w.path: blob.Value})
 }
 
 func (w *LegacyDeltalogWriter) GetWrittenUncompressed() uint64 {
 	return w.writtenUncompressed
 }
 
-func NewLegacyDeltalogReader(pkField *schemapb.FieldSchema, downloader downloaderFn, paths []string) (RecordReader, error) {
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			pkField,
-			{
-				FieldID:  common.TimeStampField,
-				DataType: schemapb.DataType_Int64,
-			},
-		},
-	}
+// deleteLogToRecordReader wraps a DeserializeReaderImpl[*DeleteLog] and converts
+// DeleteLog entries to Records with pk and ts columns for use by common.readFromReader.
+type deleteLogToRecordReader struct {
+	reader  *DeserializeReaderImpl[*DeleteLog]
+	pkType  schemapb.DataType
+	current Record
+}
 
-	chunkPos := 0
-	blobsReader := func() ([]*Blob, error) {
-		path := paths[chunkPos]
-		chunkPos++
-		blobs, err := downloader(context.Background(), []string{path})
+func (r *deleteLogToRecordReader) Next() (Record, error) {
+	// Collect all values from the current batch
+	var deleteLogs []*DeleteLog
+	for {
+		dl, err := r.reader.NextValue()
+		if err == io.EOF {
+			if len(deleteLogs) == 0 {
+				return nil, io.EOF
+			}
+			break
+		}
 		if err != nil {
 			return nil, err
 		}
-		return []*Blob{{Key: path, Value: blobs[0]}}, nil
+		deleteLogs = append(deleteLogs, *dl)
 	}
 
-	return newIterativeCompositeBinlogRecordReader(
-		schema,
-		nil,
-		blobsReader,
-		nil,
-	), nil
+	// Build Arrow arrays from DeleteLog entries
+	allocator := memory.DefaultAllocator
+	numRows := len(deleteLogs)
+
+	var pkArray arrow.Array
+	switch r.pkType {
+	case schemapb.DataType_Int64:
+		builder := array.NewInt64Builder(allocator)
+		defer builder.Release()
+		for _, dl := range deleteLogs {
+			builder.Append(dl.Pk.GetValue().(int64))
+		}
+		pkArray = builder.NewArray()
+	case schemapb.DataType_VarChar:
+		builder := array.NewStringBuilder(allocator)
+		defer builder.Release()
+		for _, dl := range deleteLogs {
+			builder.Append(dl.Pk.GetValue().(string))
+		}
+		pkArray = builder.NewArray()
+	default:
+		return nil, fmt.Errorf("unsupported pk type: %v", r.pkType)
+	}
+
+	tsBuilder := array.NewInt64Builder(allocator)
+	defer tsBuilder.Release()
+	for _, dl := range deleteLogs {
+		tsBuilder.Append(int64(dl.Ts))
+	}
+	tsArray := tsBuilder.NewArray()
+
+	// Create arrow schema
+	var pkFieldType arrow.DataType
+	if r.pkType == schemapb.DataType_Int64 {
+		pkFieldType = arrow.PrimitiveTypes.Int64
+	} else {
+		pkFieldType = arrow.BinaryTypes.String
+	}
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "pk", Type: pkFieldType, Nullable: false},
+		{Name: "ts", Type: arrow.PrimitiveTypes.Int64, Nullable: false},
+	}, nil)
+
+	record := array.NewRecord(schema, []arrow.Array{pkArray, tsArray}, int64(numRows))
+
+	field2Col := map[FieldID]int{
+		0: 0, // pk column
+		1: 1, // ts column
+	}
+
+	if r.current != nil {
+		r.current.Release()
+	}
+	r.current = NewSimpleArrowRecord(record, field2Col)
+	return r.current, nil
+}
+
+func (r *deleteLogToRecordReader) SetNeededFields(_ typeutil.Set[int64]) {}
+
+func (r *deleteLogToRecordReader) Close() error {
+	if r.current != nil {
+		r.current.Release()
+	}
+	return r.reader.Close()
+}
+
+func NewLegacyDeltalogReader(pkField *schemapb.FieldSchema, downloader downloaderFn, paths []string) (RecordReader, error) {
+	if len(paths) == 0 {
+		return newSimpleArrowRecordReader(nil)
+	}
+
+	// Download all blobs first
+	blobData, err := downloader(context.Background(), paths)
+	if err != nil {
+		return nil, err
+	}
+
+	blobs := make([]*Blob, len(paths))
+	for i, path := range paths {
+		blobs[i] = &Blob{Key: path, Value: blobData[i]}
+	}
+
+	// Check if this is the multi-field format (parquet with pk+ts columns)
+	if supportMultiFieldFormat(blobs) {
+		return newSimpleArrowRecordReader(blobs)
+	}
+
+	// JSON format: use DeserializeReader and wrap it to produce pk/ts records
+	deserializeReader, err := newDeltalogOneFieldReader(blobs)
+	if err != nil {
+		return nil, err
+	}
+
+	return &deleteLogToRecordReader{
+		reader: deserializeReader,
+		pkType: pkField.GetDataType(),
+	}, nil
 }

@@ -1216,9 +1216,8 @@ func TestNullableDelete(t *testing.T) {
 	require.EqualValues(t, 0, count)
 }
 
-// TODO: test rows with nullable and default value
+// TestNullableRows tests row-based insert with nullable varchar using pointer fields.
 func TestNullableRows(t *testing.T) {
-	t.Skip("Waiting for rows-inserts to support nullable and defaultValue")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	fieldsOpt := hp.TNewFieldOptions().WithFieldOption(common.DefaultVarcharFieldName, hp.TNewFieldsOption().TWithNullable(true))
@@ -1231,7 +1230,7 @@ func TestNullableRows(t *testing.T) {
 	for i := 0; i < common.DefaultNb; i++ {
 		validData[i] = i%2 == 0
 	}
-	rows := hp.GenInt64VarcharSparseRows(common.DefaultNb, false, false, *hp.TNewDataOption().TWithValidData(validData))
+	rows := hp.GenNullableVarcharSparseRows(common.DefaultNb, false, *hp.TNewDataOption().TWithValidData(validData))
 	insertRes, err := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rows...))
 	common.CheckErr(t, err, true)
 	require.EqualValues(t, common.DefaultNb, insertRes.InsertCount)
@@ -1241,6 +1240,149 @@ func TestNullableRows(t *testing.T) {
 	common.CheckErr(t, err, true)
 	count, _ := countRes.Fields[0].GetAsInt64(0)
 	require.EqualValues(t, common.DefaultNb/2, count)
+}
+
+// TestNullableRowsAllScalarTypes tests row-based insert with all nullable scalar types using pointer fields.
+func TestNullableRowsAllScalarTypes(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	// Create collection with int64 PK + all nullable scalar fields + floatVec
+	collName := common.GenRandomString("nullable_scalar_rows", 5)
+	pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	boolField := entity.NewField().WithName(common.DefaultBoolFieldName).WithDataType(entity.FieldTypeBool).WithNullable(true)
+	int8Field := entity.NewField().WithName(common.DefaultInt8FieldName).WithDataType(entity.FieldTypeInt8).WithNullable(true)
+	int16Field := entity.NewField().WithName(common.DefaultInt16FieldName).WithDataType(entity.FieldTypeInt16).WithNullable(true)
+	int32Field := entity.NewField().WithName(common.DefaultInt32FieldName).WithDataType(entity.FieldTypeInt32).WithNullable(true)
+	floatField := entity.NewField().WithName(common.DefaultFloatFieldName).WithDataType(entity.FieldTypeFloat).WithNullable(true)
+	doubleField := entity.NewField().WithName(common.DefaultDoubleFieldName).WithDataType(entity.FieldTypeDouble).WithNullable(true)
+	varcharField := entity.NewField().WithName(common.DefaultVarcharFieldName).WithDataType(entity.FieldTypeVarChar).WithMaxLength(common.TestMaxLen).WithNullable(true)
+	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
+	schema := entity.NewSchema().WithName(collName).
+		WithField(pkField).WithField(boolField).WithField(int8Field).WithField(int16Field).WithField(int32Field).
+		WithField(floatField).WithField(doubleField).WithField(varcharField).WithField(vecField)
+
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+
+	// Create index and load
+	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, common.DefaultFloatVecFieldName, index.NewAutoIndex(entity.L2)))
+	common.CheckErr(t, err, true)
+	err = idxTask.Await(ctx)
+	common.CheckErr(t, err, true)
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	err = loadTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	// Generate rows with half null
+	nb := common.DefaultNb
+	validData := make([]bool, nb)
+	for i := 0; i < nb; i++ {
+		validData[i] = i%2 == 0
+	}
+	rows := hp.GenNullableScalarRows(nb, *hp.TNewDataOption().TWithValidData(validData))
+	insertRes, err := mc.Insert(ctx, client.NewRowBasedInsertOption(collName, rows...))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, nb, insertRes.InsertCount)
+
+	// Query null count for each nullable field
+	nullableFields := []string{
+		common.DefaultBoolFieldName, common.DefaultInt8FieldName, common.DefaultInt16FieldName,
+		common.DefaultInt32FieldName, common.DefaultFloatFieldName, common.DefaultDoubleFieldName,
+		common.DefaultVarcharFieldName,
+	}
+	for _, fieldName := range nullableFields {
+		expr := fmt.Sprintf("%s is null", fieldName)
+		countRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter(expr).WithOutputFields(common.QueryCountFieldName))
+		common.CheckErr(t, err, true)
+		count, _ := countRes.Fields[0].GetAsInt64(0)
+		require.EqualValues(t, nb/2, count, "unexpected null count for field %s", fieldName)
+	}
+}
+
+// TestNullableRowsAllNullAndAllValid tests edge cases: all null and all valid rows.
+func TestNullableRowsAllNullAndAllValid(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	fieldsOpt := hp.TNewFieldOptions().WithFieldOption(common.DefaultVarcharFieldName, hp.TNewFieldsOption().TWithNullable(true))
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), fieldsOpt, hp.TNewSchemaOption().TWithEnableDynamicField(false),
+		hp.TWithConsistencyLevel(entity.ClStrong))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	nb := common.DefaultNb
+	expr := fmt.Sprintf("%s is null", common.DefaultVarcharFieldName)
+
+	// Insert all null rows
+	allNullData := make([]bool, nb)
+	for i := 0; i < nb; i++ {
+		allNullData[i] = false
+	}
+	allNullRows := hp.GenNullableVarcharSparseRows(nb, false, *hp.TNewDataOption().TWithValidData(allNullData))
+	insertRes, err := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, allNullRows...))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, nb, insertRes.InsertCount)
+
+	countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, _ := countRes.Fields[0].GetAsInt64(0)
+	require.EqualValues(t, nb, count)
+
+	// Insert all valid rows (with start offset to avoid PK conflict)
+	allValidData := make([]bool, nb)
+	for i := 0; i < nb; i++ {
+		allValidData[i] = true
+	}
+	allValidRows := hp.GenNullableVarcharSparseRows(nb, false, *hp.TNewDataOption().TWithStart(nb).TWithValidData(allValidData))
+	insertRes, err = mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, allValidRows...))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, nb, insertRes.InsertCount)
+
+	// Total null count should still be nb (only the first batch is null)
+	countRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, _ = countRes.Fields[0].GetAsInt64(0)
+	require.EqualValues(t, nb, count)
+}
+
+// TestNullableRowsUpsert tests upserting with nullable pointer rows.
+func TestNullableRowsUpsert(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	fieldsOpt := hp.TNewFieldOptions().WithFieldOption(common.DefaultVarcharFieldName, hp.TNewFieldsOption().TWithNullable(true))
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), fieldsOpt, hp.TNewSchemaOption().TWithEnableDynamicField(false),
+		hp.TWithConsistencyLevel(entity.ClStrong))
+
+	// Insert non-null data using column-based insert
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewColumnOptions())
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	// Verify no nulls initially
+	expr := fmt.Sprintf("%s is null", common.DefaultVarcharFieldName)
+	countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, _ := countRes.Fields[0].GetAsInt64(0)
+	require.EqualValues(t, 0, count)
+
+	// Upsert with half null using row-based pointer rows
+	nb := common.DefaultNb
+	validData := make([]bool, nb)
+	for i := 0; i < nb; i++ {
+		validData[i] = i%2 == 0
+	}
+	rows := hp.GenNullableVarcharSparseRows(nb, false, *hp.TNewDataOption().TWithValidData(validData))
+	upsertRes, err := mc.Upsert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rows...))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, nb, upsertRes.UpsertCount)
+
+	// Verify half are null after upsert
+	countRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, _ = countRes.Fields[0].GetAsInt64(0)
+	require.EqualValues(t, nb/2, count)
 }
 
 func TestNullableVectorAllTypes(t *testing.T) {

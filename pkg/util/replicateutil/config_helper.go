@@ -135,6 +135,13 @@ func (g *ConfigHelper) GetCurrentCluster() *MilvusCluster {
 	return g.vs[g.currentClusterID]
 }
 
+// IsJoinReplication returns true if the current cluster participates in a
+// cross-cluster replication topology (either as primary with targets or as secondary with a source).
+func (g *ConfigHelper) IsJoinReplication() bool {
+	currentCluster := g.GetCurrentCluster()
+	return len(currentCluster.TargetClusters()) > 0 || currentCluster.SourceCluster() != nil
+}
+
 // GetCluster returns the cluster from the graph.
 func (g *ConfigHelper) GetCluster(clusterID string) *MilvusCluster {
 	return g.vs[clusterID]

@@ -104,6 +104,13 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 				zap.Any("schema", schema),
 			)
 		}
+		// Always update index meta to ensure newly indexed fields are visible
+		// for search plan creation (CollectionIndexMeta::HasField check).
+		if meta != nil {
+			if err := collection.ccollection.UpdateIndexMeta(meta); err != nil {
+				return err
+			}
+		}
 		collection.Ref(1)
 		return nil
 	}
