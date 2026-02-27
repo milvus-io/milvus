@@ -116,17 +116,14 @@ struct CellLoadResult {
 
 using CellReaderChannel = milvus::Channel<std::shared_ptr<CellLoadResult>>;
 
-// Reads one row group at a time. Called N times for N row groups.
-using SequentialRowGroupReader =
-    std::function<arrow::Result<std::shared_ptr<arrow::Table>>()>;
-
-// Creates a sequential reader for a batch of contiguous row groups.
+// Creates a batch reader for a range of contiguous row groups.
+// Returns all row groups as a vector of tables in one call.
 // batch_key: grouping key (file_idx for files, 0 for single reader)
 // rg_offset: start row group index for this batch
 // total_rg_count: total row groups across all cells in this batch
 // reader_memory_limit: memory budget for this batch's reader
 using BatchReaderFactory =
-    std::function<arrow::Result<SequentialRowGroupReader>(
+    std::function<arrow::Result<std::vector<std::shared_ptr<arrow::Table>>>(
         size_t batch_key,
         int64_t rg_offset,
         int64_t total_rg_count,
@@ -140,7 +137,7 @@ using BatchReaderFactory =
  *
  * @param op_ctx operation context for cancellation
  * @param cell_specs cell specifications (sorted internally)
- * @param reader_factory factory that creates a sequential reader per batch
+ * @param reader_factory factory that reads all row groups for a batch
  * @param channel channel to receive loaded cell data; closed when all done
  * @param memory_limit total memory limit for readers
  * @param priority load priority
@@ -166,9 +163,9 @@ MakeFileReaderFactory(std::vector<std::string> remote_files,
 
 /**
  * Creates a BatchReaderFactory that reads from a ChunkReader via batch
- * get_chunks(). Row groups are pre-loaded in a single IO call for IO merging,
- * then yielded sequentially. The factory captures the shared_ptr by value,
- * extending the ChunkReader's lifetime automatically.
+ * get_chunks(). Row groups are loaded in a single IO call for IO merging
+ * and returned as a vector of tables. The factory captures the shared_ptr
+ * by value, extending the ChunkReader's lifetime automatically.
  */
 BatchReaderFactory
 MakeChunkReaderFactory(

@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <memory>
 #include <stdexcept>
@@ -247,12 +248,22 @@ ManifestGroupTranslator::get_cells(
         completed_cells;
     completed_cells.reserve(cids.size());
 
-    std::shared_ptr<milvus::segcore::CellLoadResult> cell_data;
-    while (channel->pop(cell_data)) {
-        CheckCancellation(
-            ctx, segment_id_, "ManifestGroupTranslator::get_cells()");
-        completed_cells[cell_data->cid] =
-            load_group_chunk(cell_data->tables, cell_data->cid);
+    try {
+        std::shared_ptr<milvus::segcore::CellLoadResult> cell_data;
+        while (channel->pop(cell_data)) {
+            CheckCancellation(
+                ctx, segment_id_, "ManifestGroupTranslator::get_cells()");
+            completed_cells[cell_data->cid] =
+                load_group_chunk(cell_data->tables, cell_data->cid);
+        }
+    } catch (std::exception& ex) {
+        // make sure all futures are handled, but still throw pop & load ex
+        try {
+            storage::WaitAllFutures(load_futures);
+        } catch (...) {
+            LOG_WARN("WaitAllFutures exception swallowed");
+        }
+        throw;
     }
 
     storage::WaitAllFutures(load_futures);

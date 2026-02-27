@@ -204,6 +204,10 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                             "[StorageV2] Failed to create row group reader: " +
                                 result.status().ToString());
                         auto row_group_reader = result.ValueOrDie();
+                        auto close_guard =
+                            folly::makeGuard([&row_group_reader]() {
+                                (void)row_group_reader->Close();
+                            });
                         auto status =
                             row_group_reader->SetRowGroupOffsetAndCount(
                                 block.offset, block.count);
@@ -347,27 +351,25 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
             });
             CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
 
-            auto reader_result = (*shared_factory)(batch.file_idx,
+            auto tables_result = (*shared_factory)(batch.file_idx,
                                                    batch.rg_offset,
                                                    batch.rg_count,
                                                    reader_memory_limit);
-            AssertInfo(reader_result.ok(),
-                       "[StorageV2] Failed to create batch reader: " +
-                           reader_result.status().ToString());
-            auto sequential_reader = std::move(reader_result).ValueOrDie();
+            AssertInfo(tables_result.ok(),
+                       "[StorageV2] Failed to read batch: " +
+                           tables_result.status().ToString());
+            auto all_tables = std::move(tables_result).ValueOrDie();
 
+            int64_t table_offset = 0;
             for (const auto& cell : batch.cells) {
                 auto cell_result = std::make_shared<CellLoadResult>();
                 cell_result->cid = cell.cid;
                 cell_result->tables.reserve(cell.rg_count);
                 for (int64_t i = 0; i < cell.rg_count; ++i) {
-                    auto table_result = sequential_reader();
-                    AssertInfo(table_result.ok(),
-                               "[StorageV2] Failed to read row group: " +
-                                   table_result.status().ToString());
                     cell_result->tables.push_back(
-                        std::move(table_result).ValueOrDie());
+                        std::move(all_tables[table_offset + i]));
                 }
+                table_offset += cell.rg_count;
                 channel->push(std::move(cell_result));
             }
         }));
@@ -385,34 +387,26 @@ MakeFileReaderFactory(std::vector<std::string> remote_files,
                        int64_t rg_offset,
                        int64_t total_rg_count,
                        int64_t reader_memory_limit)
-               -> arrow::Result<SequentialRowGroupReader> {
-        auto result = milvus_storage::FileRowGroupReader::Make(
-            fs,
-            (*files)[batch_key],
-            nullptr,
-            reader_memory_limit,
-            milvus::storage::GetReaderProperties());
-        if (!result.ok()) {
-            return result.status();
+               -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
+        ARROW_ASSIGN_OR_RAISE(auto reader,
+                              milvus_storage::FileRowGroupReader::Make(
+                                  fs,
+                                  (*files)[batch_key],
+                                  nullptr,
+                                  reader_memory_limit,
+                                  milvus::storage::GetReaderProperties()));
+        auto close_guard =
+            folly::makeGuard([&reader]() { (void)reader->Close(); });
+        ARROW_RETURN_NOT_OK(
+            reader->SetRowGroupOffsetAndCount(rg_offset, total_rg_count));
+        std::vector<std::shared_ptr<arrow::Table>> tables;
+        tables.reserve(total_rg_count);
+        for (int64_t i = 0; i < total_rg_count; ++i) {
+            std::shared_ptr<arrow::Table> table;
+            ARROW_RETURN_NOT_OK(reader->ReadNextRowGroup(&table));
+            tables.push_back(std::move(table));
         }
-        auto reader = result.ValueOrDie();
-        auto status =
-            reader->SetRowGroupOffsetAndCount(rg_offset, total_rg_count);
-        if (!status.ok()) {
-            return status;
-        }
-
-        auto reads_remaining = std::make_shared<int64_t>(total_rg_count);
-        return SequentialRowGroupReader(
-            [reader = std::move(reader), reads_remaining]()
-                -> arrow::Result<std::shared_ptr<arrow::Table>> {
-                std::shared_ptr<arrow::Table> table;
-                ARROW_RETURN_NOT_OK(reader->ReadNextRowGroup(&table));
-                if (--(*reads_remaining) == 0) {
-                    ARROW_RETURN_NOT_OK(reader->Close());
-                }
-                return table;
-            });
+        return tables;
     };
 }
 
@@ -423,23 +417,21 @@ MakeChunkReaderFactory(
                           int64_t rg_offset,
                           int64_t total_rg_count,
                           int64_t /*reader_memory_limit*/)
-               -> arrow::Result<SequentialRowGroupReader> {
-        // Pre-load all row groups for this batch in one IO call
+               -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
         std::vector<int64_t> rg_indices(total_rg_count);
         std::iota(rg_indices.begin(), rg_indices.end(), rg_offset);
         ARROW_ASSIGN_OR_RAISE(
             auto batches,
             chunk_reader->get_chunks(rg_indices, /*parallelism=*/1));
-        auto shared_batches =
-            std::make_shared<std::vector<std::shared_ptr<arrow::RecordBatch>>>(
-                std::move(batches));
-        auto idx = std::make_shared<size_t>(0);
-        return SequentialRowGroupReader(
-            [shared_batches,
-             idx]() -> arrow::Result<std::shared_ptr<arrow::Table>> {
-                return arrow::Table::FromRecordBatches(
-                    {(*shared_batches)[(*idx)++]});
-            });
+        std::vector<std::shared_ptr<arrow::Table>> tables;
+        tables.reserve(batches.size());
+        for (auto& batch : batches) {
+            ARROW_ASSIGN_OR_RAISE(
+                auto table,
+                arrow::Table::FromRecordBatches({std::move(batch)}));
+            tables.push_back(std::move(table));
+        }
+        return tables;
     };
 }
 
