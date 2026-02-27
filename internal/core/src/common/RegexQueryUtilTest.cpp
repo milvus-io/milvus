@@ -139,8 +139,6 @@ TEST(RegexMatcherTest, StringViewMatchTest) {
 }
 
 TEST(RegexMatcherTest, NewLine) {
-    GTEST_SKIP() << "TODO: matching behavior on newline";
-
     using namespace milvus;
     std::string pattern("Hello.*");
     RegexMatcher matcher(pattern);
