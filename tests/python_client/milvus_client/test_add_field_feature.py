@@ -328,7 +328,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         # 4. insert new field after add field
         rows_new = [
             {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_string_field_name: str(i), default_new_field_name: random.randint(1, 1000)}
+             default_string_field_name: str(i), default_new_field_name: random.randint(default_value + 1, 1000)}
             for i in range(10 * default_nb, 11 * default_nb)]
         self.insert(client, collection_name, rows_new)
         # 5. compact
