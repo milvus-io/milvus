@@ -2198,6 +2198,163 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 	})
 }
 
+func TestInsertPreExecute_FilterFunctionOutputFields(t *testing.T) {
+	paramtable.Init()
+
+	// Schema with BM25 and MinHash functions
+	schema := newSchemaInfo(&schemapb.CollectionSchema{
+		Name:   "test_filter_func_output",
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "2000"}}},
+			{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+			{FieldID: 103, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+			{FieldID: 104, Name: "mh", DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "512"}}},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldIds:    []int64{101},
+				InputFieldNames:  []string{"text"},
+				OutputFieldIds:   []int64{103},
+				OutputFieldNames: []string{"sparse"},
+			},
+			{
+				Name:             "minhash",
+				Type:             schemapb.FunctionType_MinHash,
+				InputFieldIds:    []int64{101},
+				InputFieldNames:  []string{"text"},
+				OutputFieldIds:   []int64{104},
+				OutputFieldNames: []string{"mh"},
+			},
+		},
+	})
+
+	numRows := 2
+	fieldsData := []*schemapb.FieldData{
+		{
+			FieldName: "text", FieldId: 101, Type: schemapb.DataType_VarChar,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"hello", "world"}}}}},
+		},
+		{
+			FieldName: "vec", FieldId: 102, Type: schemapb.DataType_FloatVector,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 4, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, numRows*4)}}}},
+		},
+		{
+			FieldName: "sparse", FieldId: 103, Type: schemapb.DataType_SparseFloatVector,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Data: &schemapb.VectorField_SparseFloatVector{}}},
+		},
+		{
+			FieldName: "mh", FieldId: 104, Type: schemapb.DataType_BinaryVector,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 512, Data: &schemapb.VectorField_BinaryVector{BinaryVector: make([]byte, numRows*512/8)}}},
+		},
+	}
+
+	getFieldNames := func(data []*schemapb.FieldData) []string {
+		names := make([]string, 0, len(data))
+		for _, fd := range data {
+			names = append(names, fd.GetFieldName())
+		}
+		return names
+	}
+
+	t.Run("partial update filters all function output fields", func(t *testing.T) {
+		m := mockey.Mock(common.AllocAutoID).Return(int64(1000), int64(1000+numRows), nil).Build()
+		defer m.UnPatch()
+
+		copiedData := make([]*schemapb.FieldData, len(fieldsData))
+		copy(copiedData, fieldsData)
+
+		task := &upsertTask{
+			ctx:         context.Background(),
+			schema:      schema,
+			idAllocator: &allocator.IDAllocator{},
+			req: &milvuspb.UpsertRequest{
+				CollectionName: "test_filter_func_output",
+				PartialUpdate:  true,
+			},
+			upsertMsg: &msgstream.UpsertMsg{
+				InsertMsg: &msgstream.InsertMsg{
+					InsertRequest: &msgpb.InsertRequest{
+						CollectionName: "test_filter_func_output",
+						Version:        msgpb.InsertDataVersion_ColumnBased,
+						FieldsData:     copiedData,
+						NumRows:        uint64(numRows),
+						PartitionName:  Params.CommonCfg.DefaultPartitionName.GetValue(),
+					},
+				},
+			},
+			result: &milvuspb.MutationResult{},
+		}
+
+		_ = task.insertPreExecute(context.Background())
+
+		// Verify: sparse and mh (function outputs) should be filtered out
+		remainingFields := getFieldNames(task.upsertMsg.InsertMsg.GetFieldsData())
+		assert.NotContains(t, remainingFields, "sparse")
+		assert.NotContains(t, remainingFields, "mh")
+		assert.Contains(t, remainingFields, "text")
+		assert.Contains(t, remainingFields, "vec")
+	})
+
+	t.Run("partial update with no functions keeps all fields", func(t *testing.T) {
+		m := mockey.Mock(common.AllocAutoID).Return(int64(1000), int64(1000+numRows), nil).Build()
+		defer m.UnPatch()
+
+		noFuncSchema := newSchemaInfo(&schemapb.CollectionSchema{
+			Name:   "test_no_func",
+			AutoID: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "2000"}}},
+				{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+			},
+		})
+
+		noFuncFieldsData := []*schemapb.FieldData{
+			{
+				FieldName: "text", FieldId: 101, Type: schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"hello", "world"}}}}},
+			},
+			{
+				FieldName: "vec", FieldId: 102, Type: schemapb.DataType_FloatVector,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 4, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, numRows*4)}}}},
+			},
+		}
+
+		task := &upsertTask{
+			ctx:         context.Background(),
+			schema:      noFuncSchema,
+			idAllocator: &allocator.IDAllocator{},
+			req: &milvuspb.UpsertRequest{
+				CollectionName: "test_no_func",
+				PartialUpdate:  true,
+			},
+			upsertMsg: &msgstream.UpsertMsg{
+				InsertMsg: &msgstream.InsertMsg{
+					InsertRequest: &msgpb.InsertRequest{
+						CollectionName: "test_no_func",
+						Version:        msgpb.InsertDataVersion_ColumnBased,
+						FieldsData:     noFuncFieldsData,
+						NumRows:        uint64(numRows),
+						PartitionName:  Params.CommonCfg.DefaultPartitionName.GetValue(),
+					},
+				},
+			},
+			result: &milvuspb.MutationResult{},
+		}
+
+		_ = task.insertPreExecute(context.Background())
+
+		remainingFields := getFieldNames(task.upsertMsg.InsertMsg.GetFieldsData())
+		assert.Contains(t, remainingFields, "text")
+		assert.Contains(t, remainingFields, "vec")
+		assert.Len(t, remainingFields, 2)
+	})
+}
+
 func TestUpsertTask_queryPreExecute_NullableFields(t *testing.T) {
 	dim := int64(4)
 

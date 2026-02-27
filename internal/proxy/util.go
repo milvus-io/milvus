@@ -2768,26 +2768,6 @@ func GetFunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {
 	return fields
 }
 
-func GetBM25FunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {
-	fields := make([]string, 0)
-	for _, fSchema := range collSchema.Functions {
-		if fSchema.Type == schemapb.FunctionType_BM25 {
-			fields = append(fields, fSchema.OutputFieldNames...)
-		}
-	}
-	return fields
-}
-
-func GetMinHashFunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {
-	fields := make([]string, 0)
-	for _, fSchema := range collSchema.Functions {
-		if fSchema.Type == schemapb.FunctionType_MinHash {
-			fields = append(fields, fSchema.OutputFieldNames...)
-		}
-	}
-	return fields
-}
-
 // getCollectionTTL returns ttl if collection's ttl is specified
 // or return global ttl if collection's ttl is not specified
 // this is a helper util wrapping common.GetCollectionTTL without returning error
