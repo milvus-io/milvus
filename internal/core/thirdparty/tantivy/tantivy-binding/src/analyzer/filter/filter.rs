@@ -3,8 +3,8 @@ use tantivy::tokenizer::*;
 
 use super::util::*;
 use super::{
-    CnAlphaNumOnlyFilter, CnCharOnlyFilter, PinyinFilter, RegexFilter, RemovePunctFilter,
-    SynonymFilter,
+    ArabicNormalizationFilter, CnAlphaNumOnlyFilter, CnCharOnlyFilter, DecimalDigitFilter,
+    PinyinFilter, RegexFilter, RemovePunctFilter, SynonymFilter,
 };
 use crate::analyzer::options::FileResourcePathHelper;
 use crate::error::{Result, TantivyBindingError};
@@ -14,8 +14,10 @@ pub(crate) enum SystemFilter {
     LowerCase(LowerCaser),
     AsciiFolding(AsciiFoldingFilter),
     AlphaNumOnly(AlphaNumOnlyFilter),
+    ArabicNormalization(ArabicNormalizationFilter),
     CnCharOnly(CnCharOnlyFilter),
     CnAlphaNumOnly(CnAlphaNumOnlyFilter),
+    DecimalDigit(DecimalDigitFilter),
     Length(RemoveLongFilter),
     RemovePunct(RemovePunctFilter),
     Stop(StopWordFilter),
@@ -41,8 +43,10 @@ impl SystemFilter {
             Self::LowerCase(filter) => builder.filter(filter).dynamic(),
             Self::AsciiFolding(filter) => builder.filter(filter).dynamic(),
             Self::AlphaNumOnly(filter) => builder.filter(filter).dynamic(),
+            Self::ArabicNormalization(filter) => builder.filter(filter).dynamic(),
             Self::CnCharOnly(filter) => builder.filter(filter).dynamic(),
             Self::CnAlphaNumOnly(filter) => builder.filter(filter).dynamic(),
+            Self::DecimalDigit(filter) => builder.filter(filter).dynamic(),
             Self::Length(filter) => builder.filter(filter).dynamic(),
             Self::Stop(filter) => builder.filter(filter).dynamic(),
             Self::Decompounder(filter) => builder.filter(filter).dynamic(),
@@ -113,6 +117,8 @@ impl From<&str> for SystemFilter {
             "cnalphanumonly" => Self::CnAlphaNumOnly(CnAlphaNumOnlyFilter),
             "removepunct" => Self::RemovePunct(RemovePunctFilter),
             "pinyin" => Self::Pinyin(PinyinFilter::default()),
+            "decimaldigit" => Self::DecimalDigit(DecimalDigitFilter),
+            "arabic_normalization" => Self::ArabicNormalization(ArabicNormalizationFilter),
             _ => Self::Invalid,
         }
     }
