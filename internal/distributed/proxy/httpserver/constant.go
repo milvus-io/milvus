@@ -18,6 +18,7 @@ package httpserver
 
 import (
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 )
 
@@ -167,7 +168,6 @@ const (
 	HTTPReturnIndexType            = "indexType"
 	HTTPIndexOffsetCacheEnabledKey = "indexoffsetcache.enabled"
 	HTTPMmapEnabledKey             = "mmap.enabled"
-	HTTPWarmupKey                  = "warmup"
 	HTTPReturnIndexTotalRows       = "totalRows"
 	HTTPReturnIndexPendingRows     = "pendingRows"
 	HTTPReturnIndexIndexedRows     = "indexedRows"
@@ -194,6 +194,8 @@ const (
 	DefaultMetricType       = metric.COSINE
 	DefaultPrimaryFieldName = "id"
 	DefaultVectorFieldName  = "vector"
+
+	HTTPWarmupKey = common.WarmupKey
 
 	Dim = "dim"
 )
