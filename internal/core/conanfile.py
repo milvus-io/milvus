@@ -13,7 +13,7 @@ class MilvusConan(ConanFile):
         "lz4/1.9.4#c5afb86edd69ac0df30e3a9e192e43db",
         "snappy/1.1.9#0519333fef284acd04806243de7d3070",
         "arrow/17.0.0@milvus/dev-2.6#7af258a853e20887f9969f713110aac8",
-        "openssl/3.1.2#02594c4c0a6e2b4feb3cd15119993597",
+        "openssl/3.3.6",
         "googleapis/cci.20221108#65604e1b3b9a6b363044da625b201a2a",
         "gtest/1.13.0#f9548be18a41ccc6367efcb8146e92be",
         "benchmark/1.7.0#459f3bb1a64400a886ba43047576df3c",
