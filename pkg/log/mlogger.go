@@ -44,8 +44,8 @@ func (l *MLogger) WithRateGroup(groupName string, creditPerSecond, maxBalance fl
 	rl := NewRateLimiter(creditPerSecond, maxBalance)
 	actual, loaded := _namedRateLimiters.LoadOrStore(groupName, rl)
 	if loaded {
-		rl.Update(creditPerSecond, maxBalance)
 		rl = actual.(*RateLimiter)
+		rl.Update(creditPerSecond, maxBalance)
 	}
 	l.rl.Store(rl)
 	return l
