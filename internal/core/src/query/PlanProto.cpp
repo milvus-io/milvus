@@ -420,11 +420,13 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
 
             // Add element-level filter if needed
             if (is_element_level) {
+                bool has_doc_pred = (doc_expr != nullptr);
                 plannode = std::make_shared<plan::ElementFilterNode>(
                     milvus::plan::GetNextPlanNodeId(),
                     element_expr,
                     struct_name,
-                    sources);
+                    sources,
+                    has_doc_pred);
                 sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
             }
 
@@ -527,86 +529,115 @@ ProtoParser::RetrievePlanNodeFromProto(
     milvus::plan::PlanNodePtr plannode;
     std::vector<milvus::plan::PlanNodePtr> sources;
 
-    auto plan_node = [&]() -> std::unique_ptr<RetrievePlanNode> {
-        auto node = std::make_unique<RetrievePlanNode>();
-        if (plan_node_proto.has_predicates()) {  // version before 2023.03.30.
-            auto& predicate_proto = plan_node_proto.predicates();
-            auto expr_parser = [&]() -> plan::PlanNodePtr {
-                auto expr = ParseExprs(predicate_proto);
-                if (plan_node_proto.has_namespace_()) {
-                    expr = MergeExprWithNamespace(
-                        schema, expr, plan_node_proto.namespace_());
-                }
-                return std::make_shared<plan::FilterBitsNode>(
-                    milvus::plan::GetNextPlanNodeId(), expr);
-            }();
-            plannode = std::move(expr_parser);
-            sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
-            plannode = std::make_shared<milvus::plan::MvccNode>(
-                milvus::plan::GetNextPlanNodeId(), sources);
-            node->plannodes_ = std::move(plannode);
-        } else {
-            // mvccNode--->FilterBitsNode or
-            // aggNode---> projectNode --->mvccNode--->FilterBitsNode
-            auto& query = plan_node_proto.query();
+    auto plan_node = std::make_unique<RetrievePlanNode>();
+    if (plan_node_proto.has_predicates()) {  // version before 2023.03.30.
+        auto& predicate_proto = plan_node_proto.predicates();
+        auto expr = ParseExprs(predicate_proto);
+        if (plan_node_proto.has_namespace_()) {
+            expr = MergeExprWithNamespace(
+                schema, expr, plan_node_proto.namespace_());
+        }
+        plannode = std::make_shared<plan::FilterBitsNode>(
+            milvus::plan::GetNextPlanNodeId(), expr);
+        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+        plannode = std::make_shared<milvus::plan::MvccNode>(
+            milvus::plan::GetNextPlanNodeId(), sources);
+        plan_node->plannodes_ = std::move(plannode);
+    } else {
+        // mvccNode--->FilterBitsNode or
+        // aggNode---> projectNode --->mvccNode--->FilterBitsNode
+        auto& query = plan_node_proto.query();
 
-            // 1. Build FilterBitsNode and RandomSampleNode if needed
+        // 1. Build FilterBitsNode and RandomSampleNode if needed
+        expr::TypedExprPtr element_expr = nullptr;
+        std::string struct_name;
+        bool is_element_level = false;
+
+        if (query.has_predicates() &&
+            query.predicates().expr_case() ==
+                proto::plan::Expr::kElementFilterExpr) {
+            is_element_level = true;
+            auto& element_filter_expr =
+                query.predicates().element_filter_expr();
+            element_expr = ParseExprs(element_filter_expr.element_expr());
+            struct_name = element_filter_expr.struct_name();
+
+            if (element_filter_expr.has_predicate()) {
+                auto doc_expr = ParseExprs(element_filter_expr.predicate());
+                if (plan_node_proto.has_namespace_()) {
+                    doc_expr = MergeExprWithNamespace(
+                        schema, doc_expr, plan_node_proto.namespace_());
+                }
+                plannode = std::make_shared<plan::FilterBitsNode>(
+                    milvus::plan::GetNextPlanNodeId(), doc_expr, sources);
+                sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+            }
+        } else {
             auto filter_node = BuildFilterAndSampleNodes(
                 query, plan_node_proto, schema, sources, this);
             if (filter_node) {
                 plannode = filter_node;
                 sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
             }
-
-            // 2. Build MvccNode
-            plannode = std::make_shared<milvus::plan::MvccNode>(
-                milvus::plan::GetNextPlanNodeId(), sources);
-            sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
-
-            // 3. Build ProjectNode and AggregationNode if needed
-            auto group_by_field_count = query.group_by_field_ids_size();
-            auto agg_functions_count = query.aggregates_size();
-            if (group_by_field_count > 0 || agg_functions_count > 0) {
-                std::vector<FieldId> project_id_list;
-                std::vector<std::string> project_name_list;
-                std::vector<milvus::DataType> project_type_list;
-                std::vector<expr::FieldAccessTypeExprPtr> groupingKeys;
-                std::vector<plan::AggregationNode::Aggregate> aggregates;
-                std::vector<std::string> agg_names;
-
-                // Process group_by fields
-                ProcessGroupByFields(query,
-                                     schema,
-                                     groupingKeys,
-                                     project_id_list,
-                                     project_name_list,
-                                     project_type_list);
-
-                // Process aggregates
-                ProcessAggregates(query,
-                                  schema,
-                                  aggregates,
-                                  agg_names,
-                                  project_id_list,
-                                  project_name_list,
-                                  project_type_list);
-
-                // Build ProjectNode and AggregationNode
-                plannode = BuildProjectAndAggregationNodes(
-                    query,
-                    sources,
-                    std::move(groupingKeys),
-                    std::move(agg_names),
-                    std::move(aggregates),
-                    std::move(project_id_list),
-                    std::move(project_name_list),
-                    std::move(project_type_list));
-            }
-            node->plannodes_ = plannode;
-            node->limit_ = query.limit();
         }
-        return node;
-    }();
+
+        // 2. Build MvccNode
+        plannode = std::make_shared<milvus::plan::MvccNode>(
+            milvus::plan::GetNextPlanNodeId(), sources);
+        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+
+        // 3. Build ElementFilterBitsNode if element-level
+        if (is_element_level) {
+            plannode = std::make_shared<plan::ElementFilterBitsNode>(
+                milvus::plan::GetNextPlanNodeId(),
+                element_expr,
+                struct_name,
+                sources);
+            sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+        }
+
+        // 4. Build ProjectNode and AggregationNode if needed
+        auto group_by_field_count = query.group_by_field_ids_size();
+        auto agg_functions_count = query.aggregates_size();
+        if (group_by_field_count > 0 || agg_functions_count > 0) {
+            std::vector<FieldId> project_id_list;
+            std::vector<std::string> project_name_list;
+            std::vector<milvus::DataType> project_type_list;
+            std::vector<expr::FieldAccessTypeExprPtr> groupingKeys;
+            std::vector<plan::AggregationNode::Aggregate> aggregates;
+            std::vector<std::string> agg_names;
+
+            // Process group_by fields
+            ProcessGroupByFields(query,
+                                 schema,
+                                 groupingKeys,
+                                 project_id_list,
+                                 project_name_list,
+                                 project_type_list);
+
+            // Process aggregates
+            ProcessAggregates(query,
+                              schema,
+                              aggregates,
+                              agg_names,
+                              project_id_list,
+                              project_name_list,
+                              project_type_list);
+
+            // Build ProjectNode and AggregationNode
+            plannode =
+                BuildProjectAndAggregationNodes(query,
+                                                sources,
+                                                std::move(groupingKeys),
+                                                std::move(agg_names),
+                                                std::move(aggregates),
+                                                std::move(project_id_list),
+                                                std::move(project_name_list),
+                                                std::move(project_type_list));
+        }
+        plan_node->plannodes_ = plannode;
+        plan_node->limit_ = query.limit();
+    }
 
     PlanOptionsFromProto(plan_node_proto.plan_options(),
                          plan_node->plan_options_);

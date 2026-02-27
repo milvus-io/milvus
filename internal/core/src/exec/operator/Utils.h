@@ -30,6 +30,32 @@
 
 namespace milvus {
 namespace exec {
+// Binary search to find insert position for sorted order
+// Used by iterative filter and element filter nodes
+template <bool large_is_better>
+inline size_t
+find_binsert_position(const std::vector<float>& distances,
+                      size_t lo,
+                      size_t hi,
+                      float dist) {
+    while (lo < hi) {
+        size_t mid = lo + ((hi - lo) >> 1);
+        if constexpr (large_is_better) {
+            if (distances[mid] < dist) {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        } else {
+            if (distances[mid] > dist) {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        }
+    }
+    return lo;
+}
 
 static bool
 UseVectorIterator(const SearchInfo& search_info) {

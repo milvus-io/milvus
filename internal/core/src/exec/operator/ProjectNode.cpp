@@ -59,7 +59,7 @@ PhyProjectNode::GetOutput() {
     auto col_input = GetColumnVector(input_);
     // raw data view
     TargetBitmapView raw_data_view(col_input->GetRawData(), col_input->size());
-    auto result_pair = segment_->find_first(-1, raw_data_view);
+    auto result_pair = segment_->find_first_n(-1, raw_data_view);
     auto& selected_offsets = result_pair.first;
     auto selected_count = selected_offsets.size();
     auto row_type = OutputType();

@@ -896,6 +896,134 @@ func TestTaskQuery_functions(t *testing.T) {
 			// Should include the maxInt64PK result
 			assert.Equal(t, []int64{maxInt64PK}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
 		})
+
+		t.Run("test element-level reduce", func(t *testing.T) {
+			// Helper to create element-level retrieve result
+			makeElementLevelResult := func(pks []int64, elemIndices [][]int32) *internalpb.RetrieveResults {
+				elemIdxList := make([]*internalpb.ElementIndices, len(elemIndices))
+				for i, indices := range elemIndices {
+					elemIdxList[i] = &internalpb.ElementIndices{Indices: indices}
+				}
+				return &internalpb.RetrieveResults{
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{Data: pks},
+						},
+					},
+					FieldsData: []*schemapb.FieldData{
+						getFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, pks, 1),
+					},
+					ElementLevel:   true,
+					ElementIndices: elemIdxList,
+				}
+			}
+
+			t.Run("basic element-level merge", func(t *testing.T) {
+				r1 := makeElementLevelResult([]int64{1, 3}, [][]int32{{0, 1}, {2}})
+				r2 := makeElementLevelResult([]int64{2, 4}, [][]int32{{0}, {1, 2}})
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r1, r2},
+					&queryParams{limit: typeutil.Unlimited})
+				assert.NoError(t, err)
+				assert.Equal(t, 4, len(result.GetElementIndices()))
+				// Verify element_indices are converted to int64
+				assert.Equal(t, []int64{0, 1}, result.GetElementIndices()[0].GetIndices().GetData())
+				assert.Equal(t, []int64{0}, result.GetElementIndices()[1].GetIndices().GetData())
+				assert.Equal(t, []int64{2}, result.GetElementIndices()[2].GetIndices().GetData())
+				assert.Equal(t, []int64{1, 2}, result.GetElementIndices()[3].GetIndices().GetData())
+			})
+
+			t.Run("element-level limit counts elements not docs", func(t *testing.T) {
+				// doc1 has 3 elements, doc2 has 2 elements
+				r := makeElementLevelResult([]int64{1, 2}, [][]int32{{0, 1, 2}, {0, 1}})
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r},
+					&queryParams{limit: 3}) // limit=3 elements
+				assert.NoError(t, err)
+				// Should get doc1 (3 elements) only
+				assert.Equal(t, 1, len(result.GetFieldsData()[0].GetScalars().GetLongData().GetData()))
+				assert.Equal(t, int64(1), result.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
+				assert.Equal(t, 1, len(result.GetElementIndices()))
+			})
+
+			t.Run("element-level limit allows partial fill", func(t *testing.T) {
+				// doc1 has 2 elements, doc2 has 2 elements
+				r := makeElementLevelResult([]int64{1, 2}, [][]int32{{0, 1}, {0, 1}})
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r},
+					&queryParams{limit: 3}) // limit=3 elements
+				assert.NoError(t, err)
+				// Behavior: process docs while availableCount < limit
+				// doc1 (2 elements): 0 < 3, process, count=2
+				// doc2 (2 elements): 2 < 3, process, count=4
+				// Both docs are included because the check is done before processing each doc
+				assert.Equal(t, 2, len(result.GetFieldsData()[0].GetScalars().GetLongData().GetData()))
+			})
+
+			t.Run("element-level with offset", func(t *testing.T) {
+				r := makeElementLevelResult([]int64{1, 2, 3}, [][]int32{{0}, {1}, {2}})
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r},
+					&queryParams{limit: 2, offset: 1}) // skip 1 doc, get 2 docs
+				assert.NoError(t, err)
+				assert.Equal(t, 2, len(result.GetFieldsData()[0].GetScalars().GetLongData().GetData()))
+				assert.Equal(t, []int64{2, 3}, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+			})
+
+			t.Run("element-level validation: inconsistent flag", func(t *testing.T) {
+				r1 := makeElementLevelResult([]int64{1}, [][]int32{{0, 1}})
+				r2 := &internalpb.RetrieveResults{
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{Data: []int64{2}},
+						},
+					},
+					FieldsData: []*schemapb.FieldData{
+						getFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, []int64{2}, 1),
+					},
+					ElementLevel: false, // inconsistent
+				}
+				_, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r1, r2},
+					&queryParams{limit: typeutil.Unlimited})
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "inconsistent element-level flag")
+			})
+
+			t.Run("element-level validation: mismatched element_indices length", func(t *testing.T) {
+				r := &internalpb.RetrieveResults{
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{Data: []int64{1, 2}}, // 2 ids
+						},
+					},
+					FieldsData: []*schemapb.FieldData{
+						getFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, []int64{1, 2}, 1),
+					},
+					ElementLevel: true,
+					ElementIndices: []*internalpb.ElementIndices{
+						{Indices: []int32{0}}, // only 1 element_indices, should be 2
+					},
+				}
+				_, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r},
+					&queryParams{limit: typeutil.Unlimited})
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "element_indices length")
+			})
+
+			t.Run("element-level type conversion", func(t *testing.T) {
+				r := makeElementLevelResult([]int64{1}, [][]int32{{0, 100, 200}})
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r},
+					&queryParams{limit: typeutil.Unlimited})
+				assert.NoError(t, err)
+				assert.Equal(t, 1, len(result.GetElementIndices()))
+				// Verify int32 -> int64 conversion
+				indices := result.GetElementIndices()[0].GetIndices().GetData()
+				assert.Equal(t, []int64{0, 100, 200}, indices)
+			})
+		})
 	})
 }
 

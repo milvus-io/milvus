@@ -117,7 +117,8 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
                         const OpContext& op_context,
                         const RetrievePlanNode& node,
                         RetrieveResult& tmp_retrieve_result,
-                        const segcore::SegmentInternalInterface* segment);
+                        const segcore::SegmentInternalInterface* segment,
+                        std::shared_ptr<milvus::exec::QueryContext> query_context);
 
  private:
     const segcore::SegmentInterface& segment_;
