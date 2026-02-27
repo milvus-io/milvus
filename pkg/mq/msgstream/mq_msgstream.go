@@ -19,6 +19,7 @@ package msgstream
 import (
 	"context"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -27,8 +28,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"maps"
-
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 

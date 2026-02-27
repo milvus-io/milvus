@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"maps"
 	"math/rand"
 	"os"
 	"path"
@@ -30,8 +31,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"maps"
-
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"

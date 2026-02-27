@@ -18,10 +18,9 @@ package datacoord
 
 import (
 	"context"
-	"time"
-
 	"maps"
 	"slices"
+	"time"
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/samber/lo"

@@ -21,9 +21,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"strings"
-
 	"slices"
+	"strings"
 
 	"github.com/milvus-io/milvus/cmd/asan"
 	"github.com/milvus-io/milvus/cmd/milvus"

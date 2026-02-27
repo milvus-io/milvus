@@ -18,11 +18,10 @@ package datacoord
 
 import (
 	"context"
-	"math"
-	"sync"
-
 	"maps"
+	"math"
 	"slices"
+	"sync"
 
 	"go.uber.org/zap"
 

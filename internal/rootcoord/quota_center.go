@@ -19,7 +19,9 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,9 +29,6 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"maps"
-	"slices"
-
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"

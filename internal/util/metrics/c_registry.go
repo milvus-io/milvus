@@ -30,6 +30,7 @@ package metrics
 import "C"
 
 import (
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -40,8 +41,6 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"go.uber.org/zap"
-	"maps"
-
 	"google.golang.org/protobuf/proto"
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo"

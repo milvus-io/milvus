@@ -19,14 +19,13 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"maps"
 	"path"
 	"strconv"
 	"strings"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
-	"maps"
-
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
