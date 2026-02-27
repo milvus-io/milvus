@@ -66,13 +66,18 @@ if ( NOT milvus-storage_POPULATED )
                 "(searched ${_HOMEBREW_PREFIX}/lib/cmake/AWSSDK). "
                 "Install with: brew install aws-sdk-cpp")
         endif()
-        find_package(AWSSDK REQUIRED COMPONENTS core s3 identity-management)
+        find_package(AWSSDK REQUIRED COMPONENTS identity-management s3)
 
         if(NOT TARGET AWS::aws-sdk-cpp-identity-management)
             add_library(AWS::aws-sdk-cpp-identity-management INTERFACE IMPORTED)
             set_target_properties(AWS::aws-sdk-cpp-identity-management PROPERTIES
                 INTERFACE_LINK_LIBRARIES "${AWSSDK_LINK_LIBRARIES}")
         endif()
+        # Ensure Homebrew's full include tree is visible so transitive
+        # headers (e.g. sts → pagination) resolve correctly even when
+        # Conan's -isystem paths take precedence.
+        target_include_directories(AWS::aws-sdk-cpp-identity-management SYSTEM INTERFACE
+            "${_HOMEBREW_PREFIX}/include")
 
         # Ignore Homebrew paths so milvus-storage's find_package(Boost) uses
         # Conan's Boost 1.83, not Homebrew's Boost 1.90+ (ABI incompatible).
