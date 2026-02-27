@@ -76,6 +76,8 @@ type grpcConfig struct {
 	ServerPemPath ParamItem `refreshable:"false"`
 	ServerKeyPath ParamItem `refreshable:"false"`
 	CaPemPath     ParamItem `refreshable:"false"`
+	ClientPemPath ParamItem `refreshable:"false"`
+	ClientKeyPath ParamItem `refreshable:"false"`
 }
 
 func (p *grpcConfig) init(domain string, base *BaseTable) {
@@ -133,6 +135,20 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Export:  true,
 	}
 	p.CaPemPath.Init(base.mgr)
+
+	p.ClientPemPath = ParamItem{
+		Key:     "tls.clientPemPath",
+		Version: "2.6.0",
+		Export:  true,
+	}
+	p.ClientPemPath.Init(base.mgr)
+
+	p.ClientKeyPath = ParamItem{
+		Key:     "tls.clientKeyPath",
+		Version: "2.6.0",
+		Export:  true,
+	}
+	p.ClientKeyPath.Init(base.mgr)
 }
 
 // GetAddress return grpc address

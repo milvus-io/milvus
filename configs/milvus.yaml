@@ -904,6 +904,8 @@ tls:
   serverPemPath: configs/cert/server.pem
   serverKeyPath: configs/cert/server.key
   caPemPath: configs/cert/ca.pem
+  clientPemPath:  # Client certificate for outbound mTLS connections (e.g. CDC)
+  clientKeyPath:  # Client private key for outbound mTLS connections (e.g. CDC)
 
 # Configure internal tls.
 internaltls:

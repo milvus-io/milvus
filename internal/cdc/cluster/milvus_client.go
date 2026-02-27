@@ -18,6 +18,7 @@ package cluster
 
 import (
 	"context"
+	"crypto/tls"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
@@ -25,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type MilvusClient interface {
@@ -39,12 +41,39 @@ type MilvusClient interface {
 type CreateMilvusClientFunc func(ctx context.Context, cluster *commonpb.MilvusCluster) (MilvusClient, error)
 
 func NewMilvusClient(ctx context.Context, cluster *commonpb.MilvusCluster) (MilvusClient, error) {
-	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
-		Address: cluster.GetConnectionParam().GetUri(),
-		APIKey:  cluster.GetConnectionParam().GetToken(),
-	})
+	connParam := cluster.GetConnectionParam()
+	config := &milvusclient.ClientConfig{
+		Address: connParam.GetUri(),
+		APIKey:  connParam.GetToken(),
+	}
+
+	// Build TLS config from paramtable if CA cert is configured.
+	tlsConfig, err := buildCDCTLSConfig()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build CDC TLS config")
+	}
+	if tlsConfig != nil {
+		config.TLSConfig = tlsConfig
+	}
+
+	cli, err := milvusclient.New(ctx, config)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create milvus client")
 	}
 	return cli, nil
+}
+
+// buildCDCTLSConfig reads TLS config from paramtable for CDC outbound connections.
+// Returns nil if no CA cert is configured (TLS disabled).
+func buildCDCTLSConfig() (*tls.Config, error) {
+	params := paramtable.Get()
+	caPemPath := params.ProxyGrpcServerCfg.CaPemPath.GetValue()
+	if caPemPath == "" {
+		return nil, nil
+	}
+
+	clientPemPath := params.ProxyGrpcServerCfg.ClientPemPath.GetValue()
+	clientKeyPath := params.ProxyGrpcServerCfg.ClientKeyPath.GetValue()
+
+	return milvusclient.BuildTLSConfig(caPemPath, clientPemPath, clientKeyPath)
 }
