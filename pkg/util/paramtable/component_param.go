@@ -295,9 +295,10 @@ type commonConfig struct {
 	Stv2SplitAvgSizeThreshold            ParamItem `refreshable:"true"`
 	UseLoonFFI                           ParamItem `refreshable:"true"`
 
-	StoragePathPrefix        ParamItem `refreshable:"false"`
-	StorageZstdConcurrency   ParamItem `refreshable:"false"`
-	StorageReadRetryAttempts ParamItem `refreshable:"true"`
+	StoragePathPrefix             ParamItem `refreshable:"false"`
+	StorageZstdConcurrency        ParamItem `refreshable:"false"`
+	StorageReadRetryAttempts      ParamItem `refreshable:"true"`
+	StorageRetryableErrorPatterns ParamItem `refreshable:"true"`
 
 	TraceLogMode              ParamItem `refreshable:"true"`
 	BloomFilterSize           ParamItem `refreshable:"true"`
@@ -1061,6 +1062,15 @@ The default value is 1, which is enough for most cases.`,
 		Export:       false,
 	}
 	p.StorageReadRetryAttempts.Init(base.mgr)
+
+	p.StorageRetryableErrorPatterns = ParamItem{
+		Key:          "common.storage.retryableErrorPatterns",
+		Version:      "2.6.12",
+		DefaultValue: "",
+		Doc:          "Comma-separated list of error message substrings that should trigger retry for object storage operations. This is useful for custom S3-compatible backends that return non-standard error messages on transient failures.",
+		Export:       true,
+	}
+	p.StorageRetryableErrorPatterns.Init(base.mgr)
 
 	p.TraceLogMode = ParamItem{
 		Key:          "common.traceLogMode",

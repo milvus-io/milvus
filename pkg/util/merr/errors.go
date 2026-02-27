@@ -137,6 +137,7 @@ var (
 	ErrIoFailed          = newMilvusError("IO failed", 1001, false)
 	ErrIoUnexpectEOF     = newMilvusError("unexpected EOF", 1002, true)
 	ErrIoTooManyRequests = newMilvusError("too many requests", 1003, true)
+	ErrIoTransient       = newMilvusError("transient IO error", 1004, true)
 
 	// Parameter related
 	ErrParameterInvalid  = newMilvusError("invalid parameter", 1100, false)

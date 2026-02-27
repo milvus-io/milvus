@@ -18,8 +18,11 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"os"
 	"path"
 	"syscall"
 	"testing"
@@ -34,6 +37,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // TODO: NewRemoteChunkManager is deprecated. Rewrite this unittest.
@@ -1327,6 +1331,67 @@ func TestToMilvusIoError(t *testing.T) {
 	t.Run("googleapi other error", func(t *testing.T) {
 		googleErr := &googleapi.Error{Code: http.StatusForbidden}
 		err := ToMilvusIoError(fileName, googleErr)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+	})
+
+	t.Run("net timeout error", func(t *testing.T) {
+		// net.OpError with Timeout() == true, simulating "net/http: timeout awaiting response headers"
+		netErr := &net.OpError{
+			Op:  "read",
+			Err: &net.DNSError{IsTimeout: true},
+		}
+		err := ToMilvusIoError(fileName, netErr)
+		assert.ErrorIs(t, err, merr.ErrIoTransient)
+		assert.True(t, merr.IsRetryableErr(err))
+	})
+
+	t.Run("syscall.ECONNREFUSED", func(t *testing.T) {
+		err := ToMilvusIoError(fileName, &net.OpError{
+			Op:  "dial",
+			Err: &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED},
+		})
+		assert.ErrorIs(t, err, merr.ErrIoTransient)
+		assert.True(t, merr.IsRetryableErr(err))
+	})
+
+	t.Run("os.ErrDeadlineExceeded", func(t *testing.T) {
+		err := ToMilvusIoError(fileName, os.ErrDeadlineExceeded)
+		assert.ErrorIs(t, err, merr.ErrIoTransient)
+		assert.True(t, merr.IsRetryableErr(err))
+	})
+
+	t.Run("config pattern match", func(t *testing.T) {
+		paramtable.Get().Save("common.storage.retryableErrorPatterns", "server throttled,custom busy")
+		defer paramtable.Get().Reset("common.storage.retryableErrorPatterns")
+
+		err := ToMilvusIoError(fileName, fmt.Errorf("request failed: server throttled"))
+		assert.ErrorIs(t, err, merr.ErrIoTransient)
+		assert.True(t, merr.IsRetryableErr(err))
+	})
+
+	t.Run("config pattern match second pattern", func(t *testing.T) {
+		paramtable.Get().Save("common.storage.retryableErrorPatterns", "server throttled,custom busy")
+		defer paramtable.Get().Reset("common.storage.retryableErrorPatterns")
+
+		err := ToMilvusIoError(fileName, fmt.Errorf("request failed: custom busy"))
+		assert.ErrorIs(t, err, merr.ErrIoTransient)
+		assert.True(t, merr.IsRetryableErr(err))
+	})
+
+	t.Run("config pattern no match", func(t *testing.T) {
+		paramtable.Get().Save("common.storage.retryableErrorPatterns", "server throttled")
+		defer paramtable.Get().Reset("common.storage.retryableErrorPatterns")
+
+		err := ToMilvusIoError(fileName, fmt.Errorf("some other error"))
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+		assert.False(t, merr.IsRetryableErr(err))
+	})
+
+	t.Run("config pattern empty", func(t *testing.T) {
+		paramtable.Get().Save("common.storage.retryableErrorPatterns", "")
+		defer paramtable.Get().Reset("common.storage.retryableErrorPatterns")
+
+		err := ToMilvusIoError(fileName, fmt.Errorf("some random error"))
 		assert.ErrorIs(t, err, merr.ErrIoFailed)
 	})
 }

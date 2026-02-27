@@ -20,7 +20,9 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net"
 	"net/http"
+	"os"
 	"strings"
 	"syscall"
 
@@ -37,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
@@ -492,6 +495,33 @@ func checkObjectStorageError(fileName string, err error) error {
 	if err == io.ErrUnexpectedEOF {
 		return merr.WrapErrIoUnexpectEOF(fileName, err)
 	}
+
+	// Detect Go-level transient network errors (timeouts, connection refused).
+	// These are common with custom S3-compatible backends that return non-standard errors.
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return merr.WrapErrIoTransient(fileName, err)
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return merr.WrapErrIoTransient(fileName, err)
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return merr.WrapErrIoTransient(fileName, err)
+	}
+
+	// Check user-configured retryable error patterns.
+	// This allows custom storage backends to define retryable errors via config
+	// without code changes (e.g., common.storage.retryableErrorPatterns: "server throttled,custom error").
+	patterns := paramtable.Get().CommonCfg.StorageRetryableErrorPatterns.GetAsStrings()
+	if len(patterns) > 0 {
+		errMsg := err.Error()
+		for _, pattern := range patterns {
+			if pattern != "" && strings.Contains(errMsg, pattern) {
+				return merr.WrapErrIoTransient(fileName, err)
+			}
+		}
+	}
+
 	return merr.WrapErrIoFailed(fileName, err)
 }
 

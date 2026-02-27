@@ -20,6 +20,7 @@ import (
 	"context"
 	"io"
 	"math"
+	"net"
 	"testing"
 
 	"github.com/minio/minio-go/v7"
@@ -91,4 +92,25 @@ func TestRetryableReader_ReadWithNonRetryableError(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrIoFailed)
 	assert.Equal(t, 0, n)
+}
+
+func TestRetryableReader_ReadWithTimeoutError(t *testing.T) {
+	ctx := context.Background()
+	path := "/test/path"
+	expectedData := "data after timeout retry"
+
+	// Simulate a net timeout error that should be retryable
+	timeoutErr := &net.OpError{
+		Op:  "read",
+		Err: &net.DNSError{IsTimeout: true},
+	}
+	mockReader := newErrorMockReader(expectedData, timeoutErr, 3)
+
+	reader := NewRetryableReader(ctx, path, mockReader)
+	buf := make([]byte, len(expectedData))
+	n, err := reader.Read(buf)
+
+	assert.NoError(t, err)
+	assert.Equal(t, len(expectedData), n)
+	assert.Equal(t, expectedData, string(buf))
 }
