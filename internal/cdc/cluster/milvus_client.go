@@ -21,11 +21,13 @@ import (
 	"crypto/tls"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -64,16 +66,21 @@ func NewMilvusClient(ctx context.Context, cluster *commonpb.MilvusCluster) (Milv
 }
 
 // buildCDCTLSConfig reads TLS config from paramtable for CDC outbound connections.
-// Returns nil if no CA cert is configured (TLS disabled).
+// Returns nil if client cert paths are not configured (TLS disabled for CDC).
 func buildCDCTLSConfig() (*tls.Config, error) {
 	params := paramtable.Get()
-	caPemPath := params.ProxyGrpcServerCfg.CaPemPath.GetValue()
-	if caPemPath == "" {
+	clientPemPath := params.ProxyGrpcServerCfg.ClientPemPath.GetValue()
+	clientKeyPath := params.ProxyGrpcServerCfg.ClientKeyPath.GetValue()
+	// Only activate TLS when client cert paths are explicitly configured.
+	if clientPemPath == "" || clientKeyPath == "" {
 		return nil, nil
 	}
 
-	clientPemPath := params.ProxyGrpcServerCfg.ClientPemPath.GetValue()
-	clientKeyPath := params.ProxyGrpcServerCfg.ClientKeyPath.GetValue()
+	caPemPath := params.ProxyGrpcServerCfg.CaPemPath.GetValue()
+	log.Info("CDC outbound TLS enabled",
+		zap.String("caPemPath", caPemPath),
+		zap.String("clientPemPath", clientPemPath),
+		zap.String("clientKeyPath", clientKeyPath))
 
 	return milvusclient.BuildTLSConfig(caPemPath, clientPemPath, clientKeyPath)
 }

@@ -27,8 +27,7 @@ import (
 func TestBuildCDCTLSConfig(t *testing.T) {
 	paramtable.Init()
 
-	t.Run("no CA configured returns nil", func(t *testing.T) {
-		paramtable.Get().Save("tls.caPemPath", "")
+	t.Run("no client cert configured returns nil", func(t *testing.T) {
 		paramtable.Get().Save("tls.clientPemPath", "")
 		paramtable.Get().Save("tls.clientKeyPath", "")
 
@@ -37,9 +36,38 @@ func TestBuildCDCTLSConfig(t *testing.T) {
 		assert.Nil(t, tlsConfig)
 	})
 
+	t.Run("only caPemPath set returns nil", func(t *testing.T) {
+		// Even with caPemPath set, if client certs are not configured, TLS is not activated.
+		paramtable.Get().Save("tls.caPemPath", "/some/ca.pem")
+		paramtable.Get().Save("tls.clientPemPath", "")
+		paramtable.Get().Save("tls.clientKeyPath", "")
+		defer paramtable.Get().Save("tls.caPemPath", "")
+
+		tlsConfig, err := buildCDCTLSConfig()
+		assert.NoError(t, err)
+		assert.Nil(t, tlsConfig)
+	})
+
+	t.Run("partial client cert configured returns nil", func(t *testing.T) {
+		// Only clientPemPath set, clientKeyPath empty — should not activate.
+		paramtable.Get().Save("tls.clientPemPath", "/some/client.pem")
+		paramtable.Get().Save("tls.clientKeyPath", "")
+		defer paramtable.Get().Save("tls.clientPemPath", "")
+
+		tlsConfig, err := buildCDCTLSConfig()
+		assert.NoError(t, err)
+		assert.Nil(t, tlsConfig)
+	})
+
 	t.Run("invalid CA path returns error", func(t *testing.T) {
 		paramtable.Get().Save("tls.caPemPath", "/nonexistent/ca.pem")
-		defer paramtable.Get().Save("tls.caPemPath", "")
+		paramtable.Get().Save("tls.clientPemPath", "/some/client.pem")
+		paramtable.Get().Save("tls.clientKeyPath", "/some/client.key")
+		defer func() {
+			paramtable.Get().Save("tls.caPemPath", "")
+			paramtable.Get().Save("tls.clientPemPath", "")
+			paramtable.Get().Save("tls.clientKeyPath", "")
+		}()
 
 		_, err := buildCDCTLSConfig()
 		assert.Error(t, err)

@@ -176,6 +176,11 @@ func TestGrpcClientParams(t *testing.T) {
 	assert.Equal(t, clientConfig.ServerPemPath.GetValue(), "/pem")
 	assert.Equal(t, clientConfig.ServerKeyPath.GetValue(), "/key")
 	assert.Equal(t, clientConfig.CaPemPath.GetValue(), "/ca")
+
+	base.Save("tls.clientPemPath", "/client.pem")
+	base.Save("tls.clientKeyPath", "/client.key")
+	assert.Equal(t, clientConfig.ClientPemPath.GetValue(), "/client.pem")
+	assert.Equal(t, clientConfig.ClientKeyPath.GetValue(), "/client.key")
 }
 
 func TestInternalTLSParams(t *testing.T) {
