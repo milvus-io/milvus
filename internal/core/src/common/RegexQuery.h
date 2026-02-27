@@ -58,12 +58,14 @@ struct RegexMatcher {
 template <>
 inline bool
 RegexMatcher::operator()(const std::string& operand) {
-    // corner case:
-    // . don't match \n, but .* match \n.
+    // Note on newline handling with std::regex (ECMAScript mode):
+    // . does NOT match \n, and .* also does NOT match \n.
     // For example,
     // std::regex_match("Hello\n", std::regex("Hello.")) returns false
-    // but
-    // std::regex_match("Hello\n", std::regex("Hello.*")) returns true
+    // std::regex_match("Hello\n", std::regex("Hello.*")) returns false
+    // This differs from the old boost::regex (Perl mode) where a
+    // trailing \n was matched by .* due to special end-of-string handling.
+    // LIKE queries are unaffected: % maps to [\s\S]* which does match \n.
     return std::regex_match(operand, r_);
 }
 
