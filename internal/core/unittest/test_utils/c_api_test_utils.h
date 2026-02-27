@@ -16,10 +16,11 @@
 
 #pragma once
 
-#include <boost/format.hpp>
 #include <chrono>
 #include <iostream>
 #include <unordered_set>
+
+#include <fmt/format.h>
 
 #include "common/Types.h"
 #include "common/type_c.h"
@@ -163,11 +164,11 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results,
 template <class TraitType = milvus::FloatVector>
 const std::string
 get_default_schema_config() {
-    auto fmt = boost::format(R"(name: "default-collection"
+    return fmt::format(R"(name: "default-collection"
                                 fields: <
                                   fieldID: 100
                                   name: "fakevec"
-                                  data_type: %1%
+                                  data_type: {}
                                   type_params: <
                                     key: "dim"
                                     value: "4"
@@ -182,9 +183,8 @@ get_default_schema_config() {
                                   name: "age"
                                   data_type: Int64
                                   is_primary_key: true
-                                >)") %
-               (int(TraitType::data_type));
-    return fmt.str();
+                                >)",
+                       int(TraitType::data_type));
 }
 
 const char*

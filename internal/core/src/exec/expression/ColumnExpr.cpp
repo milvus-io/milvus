@@ -20,7 +20,6 @@
 #include <functional>
 
 #include "bitset/bitset.h"
-#include "boost/variant/get.hpp"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "opentelemetry/trace/span.h"
@@ -128,7 +127,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                 valid_res[processed_rows] = false;
             } else {
                 res_value[processed_rows] =
-                    boost::get<T>(chunk_data_by_offset.value());
+                    std::get<T>(chunk_data_by_offset.value());
             }
             processed_rows++;
         }
@@ -159,7 +158,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                 valid_res[i] = false;
                 continue;
             }
-            res_value[i] = boost::get<T>(data.value());
+            res_value[i] = std::get<T>(data.value());
         }
         return res_vec;
     } else {
@@ -198,7 +197,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                 if (!cda(i).has_value()) {
                     valid_res[processed_rows] = false;
                 } else {
-                    res_value[processed_rows] = boost::get<T>(cda(i).value());
+                    res_value[processed_rows] = std::get<T>(cda(i).value());
                 }
                 processed_rows++;
 

@@ -19,9 +19,9 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
-#include "boost/variant/variant.hpp"
 #include "cachinglayer/CacheSlot.h"
 #include "common/OpContext.h"
 #include "common/Types.h"
@@ -31,14 +31,14 @@
 
 namespace milvus::segcore {
 
-using data_access_type = std::optional<boost::variant<bool,
-                                                      int8_t,
-                                                      int16_t,
-                                                      int32_t,
-                                                      int64_t,
-                                                      float,
-                                                      double,
-                                                      std::string>>;
+using data_access_type = std::optional<std::variant<bool,
+                                                     int8_t,
+                                                     int16_t,
+                                                     int32_t,
+                                                     int64_t,
+                                                     float,
+                                                     double,
+                                                     std::string>>;
 
 using ChunkDataAccessor = std::function<const data_access_type(int)>;
 using MultipleChunkDataAccessor = std::function<const data_access_type()>;

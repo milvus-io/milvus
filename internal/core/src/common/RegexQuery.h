@@ -13,7 +13,6 @@
 
 #include <string>
 #include <regex>
-#include <boost/regex.hpp>
 #include <utility>
 
 #include "common/EasyAssert.h"
@@ -48,12 +47,12 @@ struct RegexMatcher {
     }
 
     explicit RegexMatcher(const std::string& pattern) {
-        r_ = boost::regex(pattern);
+        r_ = std::regex(pattern);
     }
 
  private:
     // avoid to construct the regex everytime.
-    boost::regex r_;
+    std::regex r_;
 };
 
 template <>
@@ -62,16 +61,16 @@ RegexMatcher::operator()(const std::string& operand) {
     // corner case:
     // . don't match \n, but .* match \n.
     // For example,
-    // boost::regex_match("Hello\n", boost::regex("Hello.")) returns false
+    // std::regex_match("Hello\n", std::regex("Hello.")) returns false
     // but
-    // boost::regex_match("Hello\n", boost::regex("Hello.*")) returns true
-    return boost::regex_match(operand, r_);
+    // std::regex_match("Hello\n", std::regex("Hello.*")) returns true
+    return std::regex_match(operand, r_);
 }
 
 template <>
 inline bool
 RegexMatcher::operator()(const std::string_view& operand) {
-    return boost::regex_match(operand.begin(), operand.end(), r_);
+    return std::regex_match(operand.begin(), operand.end(), r_);
 }
 
 // Extract fixed prefix from LIKE pattern (before first % or _)

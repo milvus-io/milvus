@@ -25,8 +25,8 @@ class MilvusConan(ConanFile):
         "glog/0.6.0#d22ebf9111fed68de86b0fa6bf6f9c3f",
         "fmt/9.1.0#95259249fb7ef8c6b5674a40b00abba3",
         "gflags/2.2.2#b15c28c567c7ade7449cf994168a559f",
+        # double-conversion: 0 direct includes but required as transitive dep for Arrow/folly
         "double-conversion/3.2.1#640e35791a4bac95b0545e2f54b7aceb",
-        "libsodium/cci.20220430#7429a9e5351cc67bea3537229921714d",
         "xsimd/9.0.1#ac9fd02a381698c4e08c5c4ca03b73e1",
         "xz_utils/5.4.0#a6d90890193dc851fa0d470163271c7a",
         "prometheus-cpp/1.1.0#ea9b101cb785943adb40ad82eda7856c",
@@ -39,7 +39,6 @@ class MilvusConan(ConanFile):
         "roaring/3.0.0#25a703f80eda0764a31ef939229e202d",
         "grpc/1.50.1@milvus/dev#75103960d1cac300cf425ccfccceac08",
         "rapidjson/cci.20230929#624c0094d741e6a3749d2e44d834b96c",
-        "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
         "xxhash/0.8.3#199e63ab9800302c232d030b27accec0",
         "unordered_dense/4.4.0#6a855c992618cc4c63019109a2e47298",
         "geos/3.12.0#0b177c90c25a8ca210578fb9e2899c37",

@@ -20,7 +20,6 @@
 
 #include <algorithm>
 #include <any>
-#include <boost/format.hpp>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <cstdint>

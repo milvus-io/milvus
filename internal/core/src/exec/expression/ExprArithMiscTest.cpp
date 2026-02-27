@@ -14,9 +14,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <boost/format.hpp>
 #include <boost/optional/optional.hpp>
 #include <folly/FBVector.h>
+
+#include <fmt/format.h>
 #include <stddef.h>
 #include <algorithm>
 #include <atomic>
@@ -2068,11 +2069,11 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMaris) {
             auto val2 = str2_col[i];
             auto ref = ref_func(val1, val2);
             ASSERT_EQ(ans, ref) << expr_str << "@" << i << "!!"
-                                << boost::format("[%1%, %2%]") % val1 % val2;
+                                << fmt::format("[{}, {}]", val1, val2);
             if (i % 2 == 0) {
                 ASSERT_EQ(view[int(i / 2)], ref)
                     << expr_str << "@" << i << "!!"
-                    << boost::format("[%1%, %2%]") % val1 % val2;
+                    << fmt::format("[{}, {}]", val1, val2);
             }
         }
     }
@@ -2198,11 +2199,11 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMarisNullable) {
             auto val2 = nullable_col[i];
             auto ref = ref_func(val1, val2, valid_data_col[i]);
             ASSERT_EQ(ans, ref) << expr_str << "@" << i << "!!"
-                                << boost::format("[%1%, %2%]") % val1 % val2;
+                                << fmt::format("[{}, {}]", val1, val2);
             if (i % 2 == 0) {
                 ASSERT_EQ(view[int(i / 2)], ref)
                     << expr_str << "@" << i << "!!"
-                    << boost::format("[%1%, %2%]") % val1 % val2;
+                    << fmt::format("[{}, {}]", val1, val2);
             }
         }
     }
@@ -2328,11 +2329,11 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMarisNullable2) {
             auto val2 = str1_col[i];
             auto ref = ref_func(val1, val2, valid_data_col[i]);
             ASSERT_EQ(ans, ref) << expr_str << "@" << i << "!!"
-                                << boost::format("[%1%, %2%]") % val1 % val2;
+                                << fmt::format("[{}, {}]", val1, val2);
             if (i % 2 == 0) {
                 ASSERT_EQ(view[int(i / 2)], ref)
                     << expr_str << "@" << i << "!!"
-                    << boost::format("[%1%, %2%]") % val1 % val2;
+                    << fmt::format("[{}, {}]", val1, val2);
             }
         }
     }

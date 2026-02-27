@@ -24,17 +24,12 @@
 #include <limits>
 #include <optional>
 #include <set>
+#include <regex>
 #include <unordered_set>
 #include <variant>
 
 #include "boost/container/vector.hpp"
 #include "boost/cstdint.hpp"
-#include "boost/regex/v5/basic_regex.hpp"
-#include "boost/regex/v5/perl_matcher_common.hpp"
-#include "boost/regex/v5/perl_matcher_non_recursive.hpp"
-#include "boost/regex/v5/regex.hpp"
-#include "boost/regex/v5/regex_fwd.hpp"
-#include "boost/regex/v5/regex_search.hpp"
 #include "bsoncxx/array/view.hpp"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -1004,9 +999,9 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
 
 std::pair<std::string, std::string>
 PhyUnaryRangeFilterExpr::SplitAtFirstSlashDigit(std::string input) {
-    boost::regex rgx("/\\d+");
-    boost::smatch match;
-    if (boost::regex_search(input, match, rgx)) {
+    std::regex rgx("/\\d+");
+    std::smatch match;
+    if (std::regex_search(input, match, rgx)) {
         std::string firstPart = input.substr(0, match.position());
         std::string secondPart = input.substr(match.position());
         return {firstPart, secondPart};
