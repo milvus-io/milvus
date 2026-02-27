@@ -113,6 +113,7 @@ func assertEqualCount(
 		typeutil.MaxTimestamp,
 		100,
 		0,
+		0,
 		0)
 	defer retrievePlan.Delete()
 

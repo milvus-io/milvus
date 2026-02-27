@@ -1670,5 +1670,9 @@ class ExprSet {
     ExecContext* exec_ctx_;
 };
 
+// Forward declaration for CreateTTLFieldFilterExpression
+expr::TypedExprPtr
+CreateTTLFieldFilterExpression(QueryContext* query_context);
+
 }  //namespace exec
 }  // namespace milvus
