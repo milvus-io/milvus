@@ -4,6 +4,8 @@ use super::filter::stop_words;
 use super::filter::*;
 use super::options::FileResourcePathHelper;
 use super::tokenizers::*;
+use crate::analyzer::filter::ArabicNormalizationFilter;
+use crate::analyzer::filter::DecimalDigitFilter;
 
 // default build-in analyzer
 pub(crate) fn standard_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
@@ -23,6 +25,38 @@ pub fn chinese_analyzer(
     let builder = jieba_builder(None, helper)
         .unwrap()
         .filter(CnAlphaNumOnlyFilter);
+    if stop_words.len() > 0 {
+        return builder.filter(StopWordFilter::remove(stop_words)).build();
+    }
+
+    builder.build()
+}
+
+pub fn arabic_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
+    let builder = standard_builder()
+        .filter(LowerCaser)
+        .filter(DecimalDigitFilter)
+        .filter(ArabicNormalizationFilter)
+        .filter(StopWordFilter::remove(
+            stop_words::ARABIC.iter().map(|&word| word.to_owned()),
+        ))
+        .filter(Stemmer::new(Language::Arabic));
+
+    if stop_words.len() > 0 {
+        return builder.filter(StopWordFilter::remove(stop_words)).build();
+    }
+
+    builder.build()
+}
+
+pub fn thai_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
+    let builder = thai_builder()
+        .filter(LowerCaser)
+        .filter(DecimalDigitFilter)
+        .filter(StopWordFilter::remove(
+            stop_words::THAI.iter().map(|&word| word.to_owned()),
+        ));
+
     if stop_words.len() > 0 {
         return builder.filter(StopWordFilter::remove(stop_words)).build();
     }

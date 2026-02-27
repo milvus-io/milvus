@@ -6,7 +6,7 @@ use tantivy::tokenizer::{TextAnalyzer, TextAnalyzerBuilder};
 
 use super::{
     CharGroupTokenizer, GrpcTokenizer, IcuTokenizer, JiebaTokenizer, LangIdentTokenizer,
-    LinderaTokenizer,
+    LinderaTokenizer, ThaiTokenizer,
 };
 
 use crate::error::{Result, TantivyBindingError};
@@ -21,6 +21,10 @@ pub fn whitespace_builder() -> TextAnalyzerBuilder {
 
 pub fn icu_builder() -> TextAnalyzerBuilder {
     TextAnalyzer::builder(IcuTokenizer::new()).dynamic()
+}
+
+pub fn thai_builder() -> TextAnalyzerBuilder {
+    TextAnalyzer::builder(ThaiTokenizer::new()).dynamic()
 }
 
 pub fn lang_ident_builder(
@@ -124,6 +128,7 @@ pub fn get_builder_with_tokenizer(
         "lindera" => lindera_builder(params_map),
         "char_group" => char_group_builder(params_map),
         "icu" => Ok(icu_builder()),
+        "thai" => Ok(thai_builder()),
         "language_identifier" => lang_ident_builder(params_map, helper, fc),
         "grpc" => grpc_builder(params_map),
         other => {
