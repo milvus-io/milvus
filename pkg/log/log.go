@@ -38,7 +38,6 @@ import (
 	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
-	"github.com/uber/jaeger-client-go/utils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
@@ -62,8 +61,8 @@ func init() {
 	s := _globalL.Load().(*zap.Logger).Sugar()
 	_globalS.Store(s)
 
-	r := utils.NewRateLimiter(1.0, 60.0)
-	_globalR.Store(r)
+	rl := NewRateLimiter(1.0, 60.0)
+	_globalR.Store(rl)
 }
 
 // InitLogger initializes a zap logger.
@@ -179,9 +178,9 @@ func S() *zap.SugaredLogger {
 	return _globalS.Load().(*zap.SugaredLogger)
 }
 
-// R returns utils.ReconfigurableRateLimiter.
-func R() *utils.ReconfigurableRateLimiter {
-	return _globalR.Load().(*utils.ReconfigurableRateLimiter)
+// R returns the global RateLimiter.
+func R() *RateLimiter {
+	return _globalR.Load().(*RateLimiter)
 }
 
 func ctxL() *zap.Logger {

@@ -19,7 +19,6 @@ package log
 import (
 	"sync/atomic"
 
-	"github.com/uber/jaeger-client-go/utils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -27,7 +26,7 @@ import (
 // MLogger is a wrapper type of zap.Logger.
 type MLogger struct {
 	*zap.Logger
-	rl atomic.Value // *utils.ReconfigurableRateLimiter
+	rl atomic.Value // *RateLimiter
 }
 
 // With encapsulates zap.Logger With method to return MLogger instance.
@@ -42,22 +41,22 @@ func (l *MLogger) With(fields ...zap.Field) *MLogger {
 
 // WithRateGroup uses named RateLimiter for this logger.
 func (l *MLogger) WithRateGroup(groupName string, creditPerSecond, maxBalance float64) *MLogger {
-	rl := utils.NewRateLimiter(creditPerSecond, maxBalance)
+	rl := NewRateLimiter(creditPerSecond, maxBalance)
 	actual, loaded := _namedRateLimiters.LoadOrStore(groupName, rl)
 	if loaded {
 		rl.Update(creditPerSecond, maxBalance)
-		rl = actual.(*utils.ReconfigurableRateLimiter)
+		rl = actual.(*RateLimiter)
 	}
 	l.rl.Store(rl)
 	return l
 }
 
-func (l *MLogger) r() utils.RateLimiter {
+func (l *MLogger) r() *RateLimiter {
 	val := l.rl.Load()
-	if l.rl.Load() == nil {
+	if val == nil {
 		return R()
 	}
-	return val.(*utils.ReconfigurableRateLimiter)
+	return val.(*RateLimiter)
 }
 
 // RatedDebug calls log.Debug with RateLimiter.
