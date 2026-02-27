@@ -91,12 +91,11 @@ INSTALL_PROTOC_GEN_GO_GRPC := $(findstring $(PROTOC_GEN_GO_GRPC_VERSION),$(PROTO
 index_engine = knowhere
 
 # Ensure git works inside containers where .git is owned by a different user.
-# Use GIT_CONFIG_COUNT env vars instead of -c flag because -c is processed too late
-# in some git versions (the ownership check happens before -c options are applied).
-GIT_SAFE_ENV := GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*
-GIT := $(GIT_SAFE_ENV) git
+# Must use git config --global because git's ownership check runs before
+# both -c options and GIT_CONFIG_COUNT env vars are processed.
+$(shell git config --global --add safe.directory '*' 2>/dev/null)
 
-export GIT_BRANCH=$(shell $(GIT) rev-parse --abbrev-ref HEAD 2>/dev/null | grep -v '^HEAD$$' || echo "$${GITHUB_REF_NAME:-$${BRANCH_NAME:-unknown}}")
+export GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null | grep -v '^HEAD$$' || echo "$${GITHUB_REF_NAME:-$${BRANCH_NAME:-unknown}}")
 GIT_BRANCH_SAFE=$(shell echo "$(GIT_BRANCH)" | tr '/' '-')
 
 ifeq (${ENABLE_AZURE}, false)
@@ -247,13 +246,13 @@ integration-test: getdeps
 	@echo "Building integration tests ..."
 	@(env bash $(PWD)/scripts/run_intergration_test.sh "$(INSTALL_PATH)/gotestsum --")
 
-BUILD_TAGS = $(shell $(GIT) describe --tags --always --dirty="-dev")
+BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
 BUILD_TAGS_GPU = ${BUILD_TAGS}-gpu
 BUILD_TIME = $(shell date -u)
-GIT_COMMIT = $(shell $(GIT) rev-parse --short HEAD)
+GIT_COMMIT = $(shell git rev-parse --short HEAD)
 GO_VERSION = $(shell go version)
 BUILD_DATE = $(shell date -u +%Y%m%d)
-MILVUS_VERSION := $(shell tag=$$($(GIT) describe --exact-match --tags 2>/dev/null) && echo "$$tag" | sed 's/^v//' || echo "$(GIT_BRANCH_SAFE)-$(BUILD_DATE)-$(GIT_COMMIT)")
+MILVUS_VERSION := $(shell tag=$$(git describe --exact-match --tags 2>/dev/null) && echo "$$tag" | sed 's/^v//' || echo "$(GIT_BRANCH_SAFE)-$(BUILD_DATE)-$(GIT_COMMIT)")
 
 print-build-info:
 	@echo "Build Tag: $(BUILD_TAGS)"
