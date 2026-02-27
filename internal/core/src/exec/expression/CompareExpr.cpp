@@ -150,10 +150,10 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
                 valid_res[i] = false;
                 continue;
             }
-            res[i] =
-                std::visit(milvus::query::Relational<decltype(op)>{},
-                                     left_value.value(),
-                                     right_value.value());
+            res[i] = std::visit(
+                milvus::query::Relational<decltype(op)>{},
+                left_value.value(),
+                right_value.value());
         }
         return res_vec;
     } else {

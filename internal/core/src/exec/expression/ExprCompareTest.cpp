@@ -14,7 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <boost/optional/optional.hpp>
 #include <folly/FBVector.h>
 
 #include <fmt/format.h>
