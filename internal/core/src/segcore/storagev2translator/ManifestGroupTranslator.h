@@ -69,7 +69,7 @@ class ManifestGroupTranslator
         int64_t segment_id,
         GroupChunkType group_chunk_type,
         int64_t column_group_index,
-        std::unique_ptr<milvus_storage::api::ChunkReader> chunk_reader,
+        std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
         const std::unordered_map<FieldId, FieldMeta>& field_metas,
         bool use_mmap,
         bool mmap_populate,
@@ -187,7 +187,7 @@ class ManifestGroupTranslator
     int64_t column_group_index_;
     std::string key_;
     std::unordered_map<FieldId, FieldMeta> field_metas_;
-    std::unique_ptr<milvus_storage::api::ChunkReader> chunk_reader_;
+    std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader_;
 
     GroupCTMeta meta_;
     bool use_mmap_;

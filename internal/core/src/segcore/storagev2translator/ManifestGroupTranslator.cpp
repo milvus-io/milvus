@@ -17,12 +17,10 @@
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
 
 #include <algorithm>
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
-#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -55,7 +53,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     int64_t segment_id,
     GroupChunkType group_chunk_type,
     int64_t column_group_index,
-    std::unique_ptr<milvus_storage::api::ChunkReader> chunk_reader,
+    std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
     bool use_mmap,
     bool mmap_populate,
@@ -223,29 +221,7 @@ ManifestGroupTranslator::get_cells(
     }
 
     // Create factory using ChunkReader — reads a batch of row groups at once
-    milvus::segcore::BatchReaderFactory factory =
-        [chunk_reader = chunk_reader_.get()](size_t /*batch_key*/,
-                                             int64_t rg_offset,
-                                             int64_t total_rg_count,
-                                             int64_t /*reader_memory_limit*/)
-        -> arrow::Result<milvus::segcore::SequentialRowGroupReader> {
-        // Pre-load all row groups for this batch via get_chunks
-        std::vector<int64_t> rg_indices(total_rg_count);
-        std::iota(rg_indices.begin(), rg_indices.end(), rg_offset);
-        ARROW_ASSIGN_OR_RAISE(
-            auto batches,
-            chunk_reader->get_chunks(rg_indices, /*parallelism=*/1));
-        auto shared_batches =
-            std::make_shared<std::vector<std::shared_ptr<arrow::RecordBatch>>>(
-                std::move(batches));
-        auto idx = std::make_shared<size_t>(0);
-        return milvus::segcore::SequentialRowGroupReader(
-            [shared_batches,
-             idx]() -> arrow::Result<std::shared_ptr<arrow::Table>> {
-                return arrow::Table::FromRecordBatches(
-                    {(*shared_batches)[(*idx)++]});
-            });
-    };
+    auto factory = milvus::segcore::MakeChunkReaderFactory(chunk_reader_);
 
     // Submit cell-batch loading tasks
     auto channel = std::make_shared<milvus::segcore::CellReaderChannel>();

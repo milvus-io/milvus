@@ -30,6 +30,7 @@
 #include "common/OpContext.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/reader.h"
 
 namespace milvus::segcore {
 
@@ -162,5 +163,15 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
 BatchReaderFactory
 MakeFileReaderFactory(std::vector<std::string> remote_files,
                       milvus_storage::ArrowFileSystemPtr fs);
+
+/**
+ * Creates a BatchReaderFactory that reads from a ChunkReader via batch
+ * get_chunks(). Row groups are pre-loaded in a single IO call for IO merging,
+ * then yielded sequentially. The factory captures the shared_ptr by value,
+ * extending the ChunkReader's lifetime automatically.
+ */
+BatchReaderFactory
+MakeChunkReaderFactory(
+    std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader);
 
 }  // namespace milvus::segcore

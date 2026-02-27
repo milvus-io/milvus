@@ -20,6 +20,7 @@
 #include <exception>
 #include <future>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <utility>
 #include <vector>
@@ -411,6 +412,33 @@ MakeFileReaderFactory(std::vector<std::string> remote_files,
                     ARROW_RETURN_NOT_OK(reader->Close());
                 }
                 return table;
+            });
+    };
+}
+
+BatchReaderFactory
+MakeChunkReaderFactory(
+    std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader) {
+    return [chunk_reader](size_t /*batch_key*/,
+                          int64_t rg_offset,
+                          int64_t total_rg_count,
+                          int64_t /*reader_memory_limit*/)
+               -> arrow::Result<SequentialRowGroupReader> {
+        // Pre-load all row groups for this batch in one IO call
+        std::vector<int64_t> rg_indices(total_rg_count);
+        std::iota(rg_indices.begin(), rg_indices.end(), rg_offset);
+        ARROW_ASSIGN_OR_RAISE(
+            auto batches,
+            chunk_reader->get_chunks(rg_indices, /*parallelism=*/1));
+        auto shared_batches =
+            std::make_shared<std::vector<std::shared_ptr<arrow::RecordBatch>>>(
+                std::move(batches));
+        auto idx = std::make_shared<size_t>(0);
+        return SequentialRowGroupReader(
+            [shared_batches,
+             idx]() -> arrow::Result<std::shared_ptr<arrow::Table>> {
+                return arrow::Table::FromRecordBatches(
+                    {(*shared_batches)[(*idx)++]});
             });
     };
 }
