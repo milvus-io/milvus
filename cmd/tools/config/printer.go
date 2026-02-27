@@ -56,7 +56,11 @@ func flattenYaml(prefix string, m map[string]interface{}, out map[string]string)
 				}
 			}
 		default:
-			out[fullKey] = fmt.Sprintf("%v", val)
+			if val == nil {
+				out[fullKey] = ""
+			} else {
+				out[fullKey] = fmt.Sprintf("%v", val)
+			}
 		}
 	}
 }
