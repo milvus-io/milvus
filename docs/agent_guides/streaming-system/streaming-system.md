@@ -1,4 +1,4 @@
-# Milvus WAL Knowledge Base
+# Milvus Streaming System
 
 > **How to use this knowledge base**: This README provides the architecture overview of the WAL system. Each component name is a link to its detailed doc. When your task involves a specific component, **read the linked doc** to get implementation details, interfaces, and code locations before making changes.
 
