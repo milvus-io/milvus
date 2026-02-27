@@ -60,10 +60,26 @@ func (r *RateLimiter) CheckCredit(itemCost float64) bool {
 	return false
 }
 
-// Update reconfigures the rate limiter.
+// Update reconfigures the rate limiter, pro-rating the current balance
+// proportionally to the change in maxBalance (matching Jaeger behavior).
 func (r *RateLimiter) Update(creditsPerSecond, maxBalance float64) {
 	r.Lock()
 	defer r.Unlock()
+
+	// Update balance based on elapsed time (same as CheckCredit).
+	now := time.Now()
+	elapsed := now.Sub(r.lastTime).Seconds()
+	r.lastTime = now
+	r.balance += elapsed * r.creditsPerSecond
+	if r.balance > r.maxBalance {
+		r.balance = r.maxBalance
+	}
+
+	// Pro-rate balance proportionally to the new maxBalance.
+	if r.maxBalance > 0 {
+		r.balance = r.balance * maxBalance / r.maxBalance
+	}
+
 	r.creditsPerSecond = creditsPerSecond
 	r.maxBalance = maxBalance
 }
