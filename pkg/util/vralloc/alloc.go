@@ -20,7 +20,7 @@ import (
 	"maps"
 	"sync"
 
-	"github.com/shirou/gopsutil/v3/disk"
+	"github.com/shirou/gopsutil/v4/disk"
 
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 )
