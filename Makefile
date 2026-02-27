@@ -90,7 +90,11 @@ INSTALL_PROTOC_GEN_GO_GRPC := $(findstring $(PROTOC_GEN_GO_GRPC_VERSION),$(PROTO
 
 index_engine = knowhere
 
-GIT := git -c safe.directory='*'
+# Ensure git works inside containers where .git is owned by a different user.
+# Use GIT_CONFIG_COUNT env vars instead of -c flag because -c is processed too late
+# in some git versions (the ownership check happens before -c options are applied).
+GIT_SAFE_ENV := GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*
+GIT := $(GIT_SAFE_ENV) git
 
 export GIT_BRANCH=$(shell $(GIT) rev-parse --abbrev-ref HEAD 2>/dev/null | grep -v '^HEAD$$' || echo "$${GITHUB_REF_NAME:-$${BRANCH_NAME:-unknown}}")
 GIT_BRANCH_SAFE=$(shell echo "$(GIT_BRANCH)" | tr '/' '-')
