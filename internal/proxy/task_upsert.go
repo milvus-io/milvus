@@ -823,12 +823,12 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
-	bm25Fields := typeutil.NewSet[string](GetBM25FunctionOutputFields(it.schema.CollectionSchema)...)
+	functionOutputFields := typeutil.NewSet[string](GetFunctionOutputFields(it.schema.CollectionSchema)...)
 	if it.req.PartialUpdate {
-		// remove the old bm25 fields
+		// remove the old function output fields (BM25, MinHash, etc.)
 		ret := make([]*schemapb.FieldData, 0)
 		for _, fieldData := range it.upsertMsg.InsertMsg.GetFieldsData() {
-			if bm25Fields.Contain(fieldData.GetFieldName()) {
+			if functionOutputFields.Contain(fieldData.GetFieldName()) {
 				continue
 			}
 			ret = append(ret, fieldData)
