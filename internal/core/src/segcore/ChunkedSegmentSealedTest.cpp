@@ -496,7 +496,6 @@ TEST_P(TestChunkSegment, TestPkRange) {
     }
 }
 
-<<<<<<< HEAD
 // Test DropIndex reloads field data when the dropped index had raw data
 // and field data was previously dropped.
 TEST_P(TestChunkSegment, TestDropIndexReloadsFieldData) {
@@ -584,7 +583,8 @@ TEST_P(TestChunkSegment, TestDropIndexReloadsFieldData) {
     auto pw = segment_impl->chunk_data<int64_t>(nullptr, fid, 0);
     auto d = pw.get();
     EXPECT_EQ(d.data()[0], 0) << "First data value should be 0";
-=======
+}
+
 TEST(TestTTLFieldFilter, TestMaskWithTTLField) {
     using namespace milvus::segcore;
 
@@ -844,5 +844,4 @@ TEST(TestTTLFieldFilter, TestMaskWithNullableTTLField) {
     }
 
     EXPECT_EQ(expired_count, test_data_count / 4);
->>>>>>> a16d04f5d1 (feat: Support ttl field for entity level expiration (#46342))
 }

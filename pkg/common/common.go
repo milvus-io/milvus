@@ -189,11 +189,8 @@ const (
 	CollectionTTLConfigKey      = "collection.ttl.seconds"
 	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
 	CollectionDescription       = "collection.description"
-<<<<<<< HEAD
 	MaxTTLSeconds               = 3155760000 // 100 years
-=======
 	CollectionTTLFieldKey       = "ttl_field"
->>>>>>> a16d04f5d1 (feat: Support ttl field for entity level expiration (#46342))
 
 	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
 	CollectionOnTruncatingKey = "collection.on.truncating" // when collection is on truncating, forbid the compaction of current collection.

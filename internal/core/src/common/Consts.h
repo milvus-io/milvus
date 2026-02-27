@@ -83,11 +83,9 @@ const int64_t DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE = 8192;
 
 const int64_t DEFAULT_DELETE_DUMP_BATCH_SIZE = 10000;
 
-<<<<<<< HEAD
 const bool DEFAULT_ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION = true;
-=======
+
 constexpr const char* COLLECTION_TTL_FIELD_KEY = "ttl_field";
->>>>>>> a16d04f5d1 (feat: Support ttl field for entity level expiration (#46342))
 
 constexpr const char* RADIUS = knowhere::meta::RADIUS;
 constexpr const char* RANGE_FILTER = knowhere::meta::RANGE_FILTER;
@@ -139,7 +137,6 @@ const float EPSILON = 0.0000000119;
 const std::string NAMESPACE_FIELD_NAME = "$namespace_id";
 const std::string MMAP_ENABLED_KEY = "mmap.enabled";
 
-<<<<<<< HEAD
 // Warmup policy keys
 // Field-level key (in field type_params)
 const std::string WARMUP_KEY = "warmup";
@@ -148,6 +145,5 @@ const std::string WARMUP_VECTOR_INDEX_KEY = "warmup.vectorIndex";
 const std::string WARMUP_SCALAR_INDEX_KEY = "warmup.scalarIndex";
 const std::string WARMUP_SCALAR_FIELD_KEY = "warmup.scalarField";
 const std::string WARMUP_VECTOR_FIELD_KEY = "warmup.vectorField";
-=======
+
 const int64_t LOGICAL_BITS = 18;
->>>>>>> a16d04f5d1 (feat: Support ttl field for entity level expiration (#46342))
