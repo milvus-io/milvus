@@ -572,6 +572,8 @@ queryNode:
   queryStreamBatchSize: 4194304 # return min batch size of stream query
   queryStreamMaxBatchSize: 134217728 # return max batch size of stream query
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
+  enableHints: true # enable delegator-side PK hint optimization for point lookups
+  hintMode: hints # hint mode: 'segment' only prunes segments, 'hints' also sends per-segment filtered PK values
   workerPooling:
     size: 10 # the size for worker querynode client pool
   idfOracle:

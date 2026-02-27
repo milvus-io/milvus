@@ -266,6 +266,14 @@ CompileExpression(const expr::TypedExprPtr& expr,
             compiled_inputs, casted_expr, "PhyLogicalUnaryExpr", op_ctx);
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::TermFilterExpr>(expr)) {
+        // Look up per-segment PK hints if available
+        const std::vector<milvus::proto::plan::GenericValue>* pk_hints =
+            nullptr;
+        if (context->has_segment_hints() &&
+            casted_expr->column_.is_primary_key_) {
+            auto seg_id = context->get_segment()->get_segment_id();
+            pk_hints = context->get_pk_hints_for_segment(seg_id);
+        }
         result = std::make_shared<PhyTermFilterExpr>(
             compiled_inputs,
             casted_expr,
@@ -275,7 +283,8 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_active_count(),
             context->get_query_timestamp(),
             context->query_config()->get_expr_batch_size(),
-            context->get_consistency_level());
+            context->get_consistency_level(),
+            pk_hints);
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::LogicalBinaryExpr>(expr)) {
         if (casted_expr->op_type_ ==

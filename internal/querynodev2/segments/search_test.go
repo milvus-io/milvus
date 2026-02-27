@@ -154,7 +154,7 @@ func (suite *SearchSuite) TestSearchSealed() {
 	searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection.GetCCollection(), []int64{suite.sealed.ID()}, mock_segcore.IndexFaissIDMap, nq)
 	suite.NoError(err)
 
-	_, segments, err := SearchHistorical(ctx, suite.manager, searchReq, suite.collectionID, nil, []int64{suite.sealed.ID()}, nil)
+	_, segments, err := SearchHistorical(ctx, suite.manager, searchReq, suite.collectionID, nil, []int64{suite.sealed.ID()})
 	suite.NoError(err)
 	suite.manager.Segment.Unpin(segments)
 }
@@ -167,7 +167,6 @@ func (suite *SearchSuite) TestSearchGrowing() {
 		suite.collectionID,
 		[]int64{suite.partitionID},
 		[]int64{suite.growing.ID()},
-		nil,
 	)
 	suite.NoError(err)
 	suite.Len(res, 1)
@@ -227,14 +226,14 @@ func (suite *SearchSuite) TestSearchWithFilter() {
 
 	segIDs := []int64{1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009}
 
-	suite.Run("SearchWithSparseFilter", func() {
+	suite.Run("SearchWithFilterExpression", func() {
 		searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection.GetCCollection(), segIDs, mock_segcore.IndexFaissIDMap, 1)
 		suite.NoError(err)
 
 		// create search plan with filter expression "int64Field == 5"
 		// this should filter out segments that don't contain pk=5
 		schemaHelper, _ := typeutil.CreateSchemaHelper(suite.schema)
-		planNode, err := planparserv2.CreateSearchPlan(schemaHelper, "int64Field == 5", "floatVectorField", &planpb.QueryInfo{
+		_, err = planparserv2.CreateSearchPlan(schemaHelper, "int64Field == 5", "floatVectorField", &planpb.QueryInfo{
 			Topk:         10,
 			MetricType:   "L2",
 			SearchParams: `{"nprobe": 10}`,
@@ -242,16 +241,15 @@ func (suite *SearchSuite) TestSearchWithFilter() {
 		}, nil, nil)
 		suite.NoError(err)
 
-		// search with filter - should only search segments containing pk=5 (seg6-seg10)
+		// search with filter - sparse filter removed, all segments searched
 		res, segments, err := SearchHistorical(ctx, suite.manager, searchReq,
 			suite.collectionID,
 			[]int64{suite.partitionID},
 			segIDs,
-			planNode,
 		)
 		suite.NoError(err)
-		// with sparse filter enabled, only 5 segments (seg6-seg10) should be searched
-		suite.Len(segments, 5)
+		// Segment-level sparse filter has been removed from QueryNode worker path.
+		suite.Len(segments, 10)
 		suite.manager.Segment.Unpin(segments)
 		DeleteSearchResults(res)
 	})
@@ -265,7 +263,6 @@ func (suite *SearchSuite) TestSearchWithFilter() {
 			suite.collectionID,
 			[]int64{suite.partitionID},
 			segIDs,
-			nil,
 		)
 		suite.NoError(err)
 		suite.Len(segments, 10)

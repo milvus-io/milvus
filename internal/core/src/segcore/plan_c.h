@@ -25,11 +25,14 @@ typedef void* CSearchPlan;
 typedef void* CPlaceholderGroup;
 typedef void* CRetrievePlan;
 
-// Note: serialized_expr_plan is of binary format
+// Note: serialized_expr_plan is of binary format.
+// hints_data/hints_size are optional (NULL/0 to skip) serialized SegmentPkHintList.
 CStatus
 CreateSearchPlanByExpr(CCollection c_col,
                        const void* serialized_expr_plan,
                        const int64_t size,
+                       const void* hints_data,
+                       const int64_t hints_size,
                        CSearchPlan* res_plan);
 
 CStatus
@@ -59,10 +62,13 @@ DeleteSearchPlan(CSearchPlan plan);
 void
 DeletePlaceholderGroup(CPlaceholderGroup placeholder_group);
 
+// hints_data/hints_size are optional (NULL/0 to skip) serialized SegmentPkHintList.
 CStatus
 CreateRetrievePlanByExpr(CCollection c_col,
                          const void* serialized_expr_plan,
                          const int64_t size,
+                         const void* hints_data,
+                         const int64_t hints_size,
                          CRetrievePlan* res_plan);
 
 void

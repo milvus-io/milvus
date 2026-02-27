@@ -119,6 +119,7 @@ struct ColumnInfo {
     std::vector<std::string> nested_path_;
     bool nullable_;
     bool element_level_;
+    bool is_primary_key_;
 
     ColumnInfo(const proto::plan::ColumnInfo& column_info)
         : field_id_(column_info.field_id()),
@@ -127,7 +128,8 @@ struct ColumnInfo {
           nested_path_(column_info.nested_path().begin(),
                        column_info.nested_path().end()),
           nullable_(column_info.nullable()),
-          element_level_(column_info.is_element_level()) {
+          element_level_(column_info.is_element_level()),
+          is_primary_key_(column_info.is_primary_key()) {
     }
 
     ColumnInfo(FieldId field_id,
@@ -139,7 +141,8 @@ struct ColumnInfo {
           element_type_(DataType::NONE),
           nested_path_(std::move(nested_path)),
           nullable_(nullable),
-          element_level_(false) {
+          element_level_(false),
+          is_primary_key_(false) {
     }
 
     ColumnInfo(FieldId field_id,
@@ -152,7 +155,8 @@ struct ColumnInfo {
           element_type_(element_type),
           nested_path_(std::move(nested_path)),
           nullable_(nullable),
-          element_level_(false) {
+          element_level_(false),
+          is_primary_key_(false) {
     }
 
     bool

@@ -1156,6 +1156,8 @@ type SearchRequest struct {
 	IsIterator              bool                      `protobuf:"varint,28,opt,name=is_iterator,json=isIterator,proto3" json:"is_iterator,omitempty"`
 	AnalyzerName            string                    `protobuf:"bytes,29,opt,name=analyzer_name,json=analyzerName,proto3" json:"analyzer_name,omitempty"`
 	CollectionTtlTimestamps uint64                    `protobuf:"varint,30,opt,name=collection_ttl_timestamps,json=collectionTtlTimestamps,proto3" json:"collection_ttl_timestamps,omitempty"`
+	// PK filter hint from proxy: 0 = not checked, 1 = has PK term filter, 2 = no PK term filter.
+	PkFilterHint int32 `protobuf:"varint,31,opt,name=pk_filter_hint,json=pkFilterHint,proto3" json:"pk_filter_hint,omitempty"`
 }
 
 func (x *SearchRequest) Reset() {
@@ -1396,6 +1398,13 @@ func (x *SearchRequest) GetAnalyzerName() string {
 func (x *SearchRequest) GetCollectionTtlTimestamps() uint64 {
 	if x != nil {
 		return x.CollectionTtlTimestamps
+	}
+	return 0
+}
+
+func (x *SearchRequest) GetPkFilterHint() int32 {
+	if x != nil {
+		return x.PkFilterHint
 	}
 	return 0
 }
@@ -1805,6 +1814,8 @@ type RetrieveRequest struct {
 	// for query agg
 	GroupByFieldIds []int64             `protobuf:"varint,21,rep,packed,name=group_by_field_ids,json=groupByFieldIds,proto3" json:"group_by_field_ids,omitempty"`
 	Aggregates      []*planpb.Aggregate `protobuf:"bytes,22,rep,name=aggregates,proto3" json:"aggregates,omitempty"`
+	// PK filter hint from proxy: 0 = not checked, 1 = has PK term filter, 2 = no PK term filter.
+	PkFilterHint int32 `protobuf:"varint,23,opt,name=pk_filter_hint,json=pkFilterHint,proto3" json:"pk_filter_hint,omitempty"`
 }
 
 func (x *RetrieveRequest) Reset() {
@@ -1991,6 +2002,13 @@ func (x *RetrieveRequest) GetAggregates() []*planpb.Aggregate {
 		return x.Aggregates
 	}
 	return nil
+}
+
+func (x *RetrieveRequest) GetPkFilterHint() int32 {
+	if x != nil {
+		return x.PkFilterHint
+	}
+	return 0
 }
 
 type RetrieveResults struct {

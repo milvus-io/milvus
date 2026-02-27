@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
@@ -191,6 +192,99 @@ func (suite *RetrieveSuite) TearDownTest() {
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 }
 
+func (suite *RetrieveSuite) loadSealedSegmentsWithIncrementalPKRange(ctx context.Context, startID int64, count int) []int64 {
+	loader := NewLoader(ctx, suite.manager, suite.chunkManager)
+	segmentIDs := make([]int64, 0, count)
+
+	for i := 0; i < count; i++ {
+		segID := startID + int64(i)
+		msgLen := i + 1
+		binlogs, statslogs, err := mock_segcore.SaveBinLog(ctx,
+			suite.collectionID,
+			suite.partitionID,
+			segID,
+			msgLen,
+			suite.schema,
+			suite.chunkManager,
+		)
+		suite.Require().NoError(err)
+
+		loadInfo := &querypb.SegmentLoadInfo{
+			SegmentID:     segID,
+			CollectionID:  suite.collectionID,
+			PartitionID:   suite.partitionID,
+			NumOfRows:     int64(msgLen),
+			BinlogPaths:   binlogs,
+			Statslogs:     statslogs,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+			Level:         datapb.SegmentLevel_Legacy,
+		}
+
+		seg, err := NewSegment(ctx,
+			suite.collection,
+			suite.manager.Segment,
+			SegmentTypeSealed,
+			0,
+			loadInfo,
+		)
+		suite.Require().NoError(err)
+
+		bfs, err := loader.loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeSealed)
+		suite.Require().NoError(err)
+		seg.SetBloomFilter(bfs)
+
+		for _, binlog := range binlogs {
+			err = seg.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLen), binlog)
+			suite.Require().NoError(err)
+		}
+		suite.manager.Segment.Put(ctx, SegmentTypeSealed, seg)
+		segmentIDs = append(segmentIDs, segID)
+	}
+
+	return segmentIDs
+}
+
+func (suite *RetrieveSuite) removeSealedSegments(ctx context.Context, segmentIDs []int64) {
+	for _, segID := range segmentIDs {
+		suite.manager.Segment.Remove(ctx, segID, querypb.DataScope_Historical)
+	}
+}
+
+func (suite *RetrieveSuite) createRetrievePlanWithExpr(expr string, hints *planpb.SegmentPkHintList) (*segcore.RetrievePlan, *planpb.PlanNode) {
+	schemaHelper, err := typeutil.CreateSchemaHelper(suite.schema)
+	suite.Require().NoError(err)
+
+	planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, expr, nil)
+	suite.Require().NoError(err)
+
+	planBytes, err := proto.Marshal(planNode)
+	suite.Require().NoError(err)
+
+	plan, err := segcore.NewRetrievePlan(
+		suite.collection.GetCCollection(),
+		planBytes,
+		typeutil.MaxTimestamp,
+		100,
+		0,
+		0,
+		hints,
+	)
+	suite.Require().NoError(err)
+
+	return plan, planNode
+}
+
+func collectInt64IDs(results []RetrieveSegmentResult) []int64 {
+	ids := make([]int64, 0)
+	for _, result := range results {
+		intIDs := result.Result.GetIds().GetIntId().GetData()
+		if len(intIDs) > 0 {
+			ids = append(ids, intIDs...)
+		}
+	}
+	return ids
+}
+
 func (suite *RetrieveSuite) TestRetrieveSealed() {
 	plan, err := mock_segcore.GenSimpleRetrievePlan(suite.collection.GetCCollection())
 	suite.NoError(err)
@@ -204,7 +298,7 @@ func (suite *RetrieveSuite) TestRetrieveSealed() {
 		Scope:      querypb.DataScope_Historical,
 	}
 
-	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req, nil)
+	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
 	suite.NoError(err)
 	suite.Len(res[0].Result.Offset, 3)
 	suite.manager.Segment.Unpin(segments)
@@ -225,7 +319,7 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 		// no exist pk
 		exprStr := "int64Field == 10000000"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(suite.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
+		_, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		suite.NoError(err)
 
 		req := &querypb.QueryRequest{
@@ -237,7 +331,7 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 			Scope:      querypb.DataScope_Historical,
 		}
 
-		res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req, planNode)
+		res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
 		suite.NoError(err)
 		suite.Len(res, 0)
 		suite.manager.Segment.Unpin(segments)
@@ -246,7 +340,7 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 	suite.Run("GrowingSegmentFilter", func() {
 		exprStr := "int64Field == 10000000"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(suite.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
+		_, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		suite.NoError(err)
 
 		req := &querypb.QueryRequest{
@@ -258,7 +352,7 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 			Scope:      querypb.DataScope_Streaming,
 		}
 
-		res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req, planNode)
+		res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
 		suite.NoError(err)
 		suite.Len(res, 0)
 		suite.manager.Segment.Unpin(segments)
@@ -349,16 +443,14 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 
 		for exprStr, expect := range exprs {
 			schemaHelper, _ := typeutil.CreateSchemaHelper(suite.schema)
-			var planNode *planpb.PlanNode
 			if exprStr == "" {
-				planNode = nil
 				err = nil
 			} else {
-				planNode, err = planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
+				_, err = planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 			}
 			suite.NoError(err)
 
-			res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req, planNode)
+			res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
 			suite.NoError(err)
 			suite.Len(res, expect)
 			suite.manager.Segment.Unpin(segments)
@@ -384,7 +476,7 @@ func (suite *RetrieveSuite) TestRetrieveGrowing() {
 		Scope:      querypb.DataScope_Streaming,
 	}
 
-	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req, nil)
+	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
 	suite.NoError(err)
 	suite.Len(res[0].Result.Offset, 3)
 	suite.manager.Segment.Unpin(segments)
@@ -417,7 +509,7 @@ func (suite *RetrieveSuite) TestRetrieveStreamSealed() {
 	server := client.CreateServer()
 
 	go func() {
-		segments, err := RetrieveStream(ctx, suite.manager, plan, req, nil, server)
+		segments, err := RetrieveStream(ctx, suite.manager, plan, req, server)
 		suite.NoError(err)
 		suite.manager.Segment.Unpin(segments)
 		server.FinishSend(err)
@@ -497,11 +589,11 @@ func (suite *RetrieveSuite) TestRetrieveStreamWithFilter() {
 
 	segIDs := []int64{2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009}
 
-	suite.Run("WithSparseFilter", func() {
+	suite.Run("WithFilterExpression", func() {
 		// filter expression "int64Field == 5" should filter out segments without pk=5
 		exprStr := "int64Field == 5"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(suite.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
+		_, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		suite.NoError(err)
 
 		req := &querypb.QueryRequest{
@@ -518,7 +610,7 @@ func (suite *RetrieveSuite) TestRetrieveStreamWithFilter() {
 
 		var retrievedSegments []Segment
 		go func() {
-			retrievedSegments, err = RetrieveStream(ctx, suite.manager, plan, req, planNode, server)
+			retrievedSegments, err = RetrieveStream(ctx, suite.manager, plan, req, server)
 			suite.NoError(err)
 			server.FinishSend(err)
 		}()
@@ -531,8 +623,8 @@ func (suite *RetrieveSuite) TestRetrieveStreamWithFilter() {
 			}
 		}
 
-		// with sparse filter, only 5 segments (seg6-seg10) should be retrieved
-		suite.Len(retrievedSegments, 5)
+		// Segment-level sparse filter has been removed from QueryNode worker path.
+		suite.Len(retrievedSegments, 10)
 		suite.manager.Segment.Unpin(retrievedSegments)
 	})
 
@@ -540,6 +632,103 @@ func (suite *RetrieveSuite) TestRetrieveStreamWithFilter() {
 	for _, segID := range segIDs {
 		suite.manager.Segment.Remove(ctx, segID, querypb.DataScope_Historical)
 	}
+}
+
+func (suite *RetrieveSuite) TestRetrieveSegmentPkHintConsistency() {
+	ctx := context.Background()
+	segIDs := suite.loadSealedSegmentsWithIncrementalPKRange(ctx, 3000, 10)
+	defer suite.removeSealedSegments(ctx, segIDs)
+
+	expr := "int64Field == 5"
+
+	planWithoutHints, _ := suite.createRetrievePlanWithExpr(expr, nil)
+	defer planWithoutHints.Delete()
+
+	baselineReq := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			CollectionID: suite.collectionID,
+			PartitionIDs: []int64{suite.partitionID},
+		},
+		SegmentIDs: segIDs,
+		Scope:      querypb.DataScope_Historical,
+	}
+	baselineResults, baselineSegments, err := Retrieve(ctx, suite.manager, planWithoutHints, baselineReq)
+	suite.NoError(err)
+	suite.Len(baselineSegments, 10)
+	suite.manager.Segment.Unpin(baselineSegments)
+	baselineIDs := collectInt64IDs(baselineResults)
+
+	// Segments with pk=5 are 3005..3009 (lengths 6..10).
+	filteredSegIDs := segIDs[5:]
+	allHitHints := make([]*planpb.SegmentPkHint, 0, len(filteredSegIDs))
+	for _, segID := range filteredSegIDs {
+		allHitHints = append(allHitHints, &planpb.SegmentPkHint{SegmentId: segID})
+	}
+	segmentHints := &planpb.SegmentPkHintList{Hints: allHitHints}
+
+	planWithHints, _ := suite.createRetrievePlanWithExpr(expr, segmentHints)
+	defer planWithHints.Delete()
+
+	hintedReq := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			CollectionID: suite.collectionID,
+			PartitionIDs: []int64{suite.partitionID},
+		},
+		SegmentIDs:     filteredSegIDs,
+		Scope:          querypb.DataScope_Historical,
+		SegmentPkHints: segmentHints,
+	}
+	hintedResults, hintedSegments, err := Retrieve(ctx, suite.manager, planWithHints, hintedReq)
+	suite.NoError(err)
+	suite.Len(hintedSegments, 5)
+	suite.manager.Segment.Unpin(hintedSegments)
+	hintedIDs := collectInt64IDs(hintedResults)
+
+	// Hinted path (all-hit empty hints + skipped segments) must be identical.
+	suite.Equal(baselineIDs, hintedIDs)
+}
+
+func (suite *RetrieveSuite) TestRetrieveSegmentPkFilterMarkerConsistency() {
+	ctx := context.Background()
+	segIDs := suite.loadSealedSegmentsWithIncrementalPKRange(ctx, 4000, 10)
+	defer suite.removeSealedSegments(ctx, segIDs)
+
+	expr := "int64Field == 5"
+
+	planWithoutHints, _ := suite.createRetrievePlanWithExpr(expr, nil)
+	defer planWithoutHints.Delete()
+
+	reqWithoutHints := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			CollectionID: suite.collectionID,
+			PartitionIDs: []int64{suite.partitionID},
+		},
+		SegmentIDs: segIDs,
+		Scope:      querypb.DataScope_Historical,
+	}
+	_, segmentsWithoutHints, err := Retrieve(ctx, suite.manager, planWithoutHints, reqWithoutHints)
+	suite.NoError(err)
+	suite.Len(segmentsWithoutHints, 10)
+	suite.manager.Segment.Unpin(segmentsWithoutHints)
+
+	// Empty message as PKFilter marker (segment-only mode).
+	segmentHints := &planpb.SegmentPkHintList{}
+	planWithHints, _ := suite.createRetrievePlanWithExpr(expr, segmentHints)
+	defer planWithHints.Delete()
+
+	reqWithHints := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			CollectionID: suite.collectionID,
+			PartitionIDs: []int64{suite.partitionID},
+		},
+		SegmentIDs:     segIDs,
+		Scope:          querypb.DataScope_Historical,
+		SegmentPkHints: segmentHints,
+	}
+	_, segmentsWithHints, err := Retrieve(ctx, suite.manager, planWithHints, reqWithHints)
+	suite.NoError(err)
+	suite.Len(segmentsWithHints, 10)
+	suite.manager.Segment.Unpin(segmentsWithHints)
 }
 
 func (suite *RetrieveSuite) TestRetrieveNonExistSegment() {
@@ -555,7 +744,7 @@ func (suite *RetrieveSuite) TestRetrieveNonExistSegment() {
 		Scope:      querypb.DataScope_Streaming,
 	}
 
-	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req, nil)
+	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
 	suite.Error(err)
 	suite.Len(res, 0)
 	suite.manager.Segment.Unpin(segments)
@@ -575,7 +764,7 @@ func (suite *RetrieveSuite) TestRetrieveNilSegment() {
 		Scope:      querypb.DataScope_Historical,
 	}
 
-	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req, nil)
+	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
 	suite.ErrorIs(err, merr.ErrSegmentNotLoaded)
 	suite.Len(res, 0)
 	suite.manager.Segment.Unpin(segments)

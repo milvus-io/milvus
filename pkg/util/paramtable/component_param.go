@@ -3396,7 +3396,8 @@ type queryNodeConfig struct {
 	QueryStreamMaxBatchSize                 ParamItem `refreshable:"false"`
 
 	// BF
-	EnableSparseFilterInQuery      ParamItem `refreshable:"true"`
+	EnableSegmentPkHint            ParamItem `refreshable:"true"`
+	SegmentPkFilterMode            ParamItem `refreshable:"true"`
 	SkipGrowingSegmentBF           ParamItem `refreshable:"true"`
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
@@ -4538,13 +4539,25 @@ user-task-polling:
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
 
-	p.EnableSparseFilterInQuery = ParamItem{
-		Key:          "queryNode.enableSparseFilterInQuery",
-		Version:      "2.6.2",
+	p.EnableSegmentPkHint = ParamItem{
+		Key:          "queryNode.enableHints",
+		FallbackKeys: []string{"queryNode.enableSegmentPkHint"},
+		Version:      "2.6.11",
 		DefaultValue: "true",
-		Doc:          "Enable use sparse filter in query.",
+		Doc:          "Enable delegator-side PK hint optimization for point lookups.",
+		Export:       true,
 	}
-	p.EnableSparseFilterInQuery.Init(base.mgr)
+	p.EnableSegmentPkHint.Init(base.mgr)
+
+	p.SegmentPkFilterMode = ParamItem{
+		Key:          "queryNode.hintMode",
+		FallbackKeys: []string{"queryNode.segmentPkFilterMode"},
+		Version:      "2.6.11",
+		DefaultValue: "hints",
+		Doc:          "Hint mode: 'segment' only prunes segments at delegator, 'hints' also sends per-segment filtered PK values to QueryNode.",
+		Export:       true,
+	}
+	p.SegmentPkFilterMode.Init(base.mgr)
 
 	p.SkipGrowingSegmentBF = ParamItem{
 		Key:          "queryNode.skipGrowingSegmentBF",

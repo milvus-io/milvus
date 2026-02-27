@@ -117,13 +117,14 @@ func (t *QueryTask) Execute() error {
 		t.req.Req.Base.GetMsgID(),
 		t.req.Req.GetConsistencyLevel(),
 		t.req.Req.GetCollectionTtlTimestamps(),
+		t.req.GetSegmentPkHints(),
 	)
 	if err != nil {
 		return err
 	}
 	defer retrievePlan.Delete()
 
-	results, pinnedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req, t.plan)
+	results, pinnedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
 	defer t.segmentManager.Segment.Unpin(pinnedSegments)
 	if err != nil {
 		return err

@@ -18,6 +18,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <folly/Executor.h>
@@ -30,6 +31,7 @@
 #include "common/Exception.h"
 #include "common/ArrayOffsets.h"
 #include "common/OpContext.h"
+#include "pb/plan.pb.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus::exec {
@@ -362,6 +364,31 @@ class QueryContext : public Context {
         return element_level_bitset_.has_value();
     }
 
+    using SegmentHintMap =
+        std::unordered_map<int64_t, std::vector<proto::plan::GenericValue>>;
+
+    void
+    set_segment_hints(const SegmentHintMap* hints) {
+        segment_hints_ = hints;
+    }
+
+    bool
+    has_segment_hints() const {
+        return segment_hints_ != nullptr && !segment_hints_->empty();
+    }
+
+    const std::vector<proto::plan::GenericValue>*
+    get_pk_hints_for_segment(int64_t segment_id) const {
+        if (segment_hints_ == nullptr) {
+            return nullptr;
+        }
+        auto it = segment_hints_->find(segment_id);
+        if (it != segment_hints_->end()) {
+            return &it->second;
+        }
+        return nullptr;
+    }
+
  private:
     folly::Executor* executor_;
     //folly::Executor::KeepAlive<> executor_keepalive_;
@@ -396,6 +423,9 @@ class QueryContext : public Context {
     std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
     int64_t active_element_count_{0};  // Total elements in active documents
     std::optional<TargetBitmap> element_level_bitset_;
+
+    // Per-segment PK hints from Delegator (borrowed pointer; owned by plan).
+    const SegmentHintMap* segment_hints_{nullptr};
 };
 
 // Represent the state of one thread of query execution.

@@ -23,6 +23,7 @@
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
 #include "exec/expression/Element.h"
+#include "pb/plan.pb.h"
 #include "segcore/SegmentInterface.h"
 #include "index/json_stats/bson_inverted.h"
 #include "cachinglayer/CacheSlot.h"
@@ -61,7 +62,8 @@ class PhyTermFilterExpr : public SegmentExpr {
         int64_t active_count,
         milvus::Timestamp timestamp,
         int64_t batch_size,
-        int32_t consistency_level)
+        int32_t consistency_level,
+        const std::vector<proto::plan::GenericValue>* pk_hints = nullptr)
         : SegmentExpr(std::move(input),
                       name,
                       op_ctx,
@@ -75,7 +77,8 @@ class PhyTermFilterExpr : public SegmentExpr {
                       batch_size,
                       consistency_level),
           expr_(expr),
-          query_timestamp_(timestamp) {
+          query_timestamp_(timestamp),
+          pk_hints_(pk_hints) {
     }
 
     void
@@ -158,6 +161,10 @@ class PhyTermFilterExpr : public SegmentExpr {
     SingleElement arg_val_;
     int32_t consistency_level_ = 0;
     PinWrapper<index::BsonInvertedIndex*> bson_index_{nullptr};
+    // Per-segment PK hints from Delegator (nullptr if not available).
+    // Lifetime: points to data owned by plan->segment_hints_, passed through
+    // QueryContext. Safe because the plan object outlives query execution.
+    const std::vector<proto::plan::GenericValue>* pk_hints_{nullptr};
 };
 }  //namespace exec
 }  // namespace milvus

@@ -57,6 +57,41 @@ const (
 	rangeFilterKey   = "range_filter"
 )
 
+// computePkFilterHint checks whether the plan contains any PK predicate.
+// Extracts predicates directly from plan to avoid redundant exprutil.ParseExprFromPlan calls.
+func computePkFilterHint(plan *planpb.PlanNode) int32 {
+	var predicates *planpb.Expr
+	if q := plan.GetQuery(); q != nil {
+		predicates = q.GetPredicates()
+	} else if v := plan.GetVectorAnns(); v != nil {
+		predicates = v.GetPredicates()
+	}
+	if predicates != nil && containsPkPredicateExpr(predicates) {
+		return common.PkFilterHintHasPkFilter
+	}
+	return common.PkFilterHintNoPkFilter
+}
+
+// containsPkPredicateExpr recursively checks whether the expression tree contains
+// a predicate on a primary key column.
+func containsPkPredicateExpr(expr *planpb.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	switch e := expr.GetExpr().(type) {
+	case *planpb.Expr_TermExpr:
+		return e.TermExpr.GetColumnInfo().GetIsPrimaryKey()
+	case *planpb.Expr_UnaryRangeExpr:
+		return e.UnaryRangeExpr.GetColumnInfo().GetIsPrimaryKey()
+	case *planpb.Expr_BinaryExpr:
+		return containsPkPredicateExpr(e.BinaryExpr.GetLeft()) || containsPkPredicateExpr(e.BinaryExpr.GetRight())
+	case *planpb.Expr_UnaryExpr:
+		return containsPkPredicateExpr(e.UnaryExpr.GetChild())
+	default:
+		return false
+	}
+}
+
 // type requery func(span trace.Span, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, error)
 
 type searchTask struct {
@@ -750,6 +785,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	t.SearchRequest.PkFilterHint = computePkFilterHint(plan)
 	if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, t.SearchRequest.FieldId) {
 		metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.SearchLabel, strconv.FormatInt(t.SearchRequest.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.GetPlaceholderGroup(), int(t.request.GetNq()))))
 	}

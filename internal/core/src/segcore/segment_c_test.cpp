@@ -598,7 +598,7 @@ TEST(CApiTest, SearchTestWhenNullable) {
 
     void* plan = nullptr;
     status = CreateSearchPlanByExpr(
-        c_collection, plan_str.data(), plan_str.size(), &plan);
+        c_collection, plan_str.data(), plan_str.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -875,7 +875,7 @@ TEST(CApiTest, SearchTest) {
 
     void* plan = nullptr;
     status = CreateSearchPlanByExpr(
-        c_collection, plan_str.data(), plan_str.size(), &plan);
+        c_collection, plan_str.data(), plan_str.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -935,8 +935,12 @@ TEST(CApiTest, SearchTestWithExpr) {
         schema_handle.ParseSearch("", "fakevec", 10, "L2", R"({"nprobe": 10})");
 
     void* plan = nullptr;
-    status = CreateSearchPlanByExpr(
-        c_collection, binary_plan.data(), binary_plan.size(), &plan);
+    status = CreateSearchPlanByExpr(c_collection,
+                                    binary_plan.data(),
+                                    binary_plan.size(),
+                                    nullptr,
+                                    0,
+                                    &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -1188,7 +1192,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     // search on segment's small index
     void* plan = nullptr;
     status = CreateSearchPlanByExpr(
-        collection, plan_str.data(), plan_str.size(), &plan);
+        collection, plan_str.data(), plan_str.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -1296,7 +1300,7 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
 
     void* plan = nullptr;
     status = CreateSearchPlanByExpr(
-        collection, plan_str.data(), plan_str.size(), &plan);
+        collection, plan_str.data(), plan_str.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -1360,7 +1364,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     // search on segment's small index
     void* plan = nullptr;
     auto status = CreateSearchPlanByExpr(
-        collection, binary_plan.data(), binary_plan.size(), &plan);
+        collection, binary_plan.data(), binary_plan.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -1815,7 +1819,7 @@ Test_Range_Search_With_Radius_And_Range_Filter() {
 
     void* plan = nullptr;
     status = CreateSearchPlanByExpr(
-        c_collection, plan_str.data(), plan_str.size(), &plan);
+        c_collection, plan_str.data(), plan_str.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;

@@ -135,6 +135,9 @@ message SearchRequest {
   bool is_iterator = 28;
   string analyzer_name = 29;
   uint64 collection_ttl_timestamps = 30;
+  // PK filter hint from proxy: 0 = not checked (backward compat), 1 = has optimizable PK term filter, 2 = no PK term filter.
+  // When 2, delegator can skip plan unmarshal for PK hint optimization.
+  int32 pk_filter_hint = 31;
 }
 
 message SubSearchResults {
@@ -207,6 +210,9 @@ message RetrieveRequest {
   // for query agg
   repeated int64 group_by_field_ids = 21;
   repeated plan.Aggregate aggregates = 22;
+  // PK filter hint from proxy: 0 = not checked (backward compat), 1 = has optimizable PK term filter, 2 = no PK term filter.
+  // When 2, delegator can skip plan unmarshal for PK hint optimization.
+  int32 pk_filter_hint = 23;
 }
 
 

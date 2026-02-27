@@ -75,6 +75,7 @@ func (t *QueryStreamTask) Execute() error {
 		t.req.Req.Base.GetMsgID(),
 		t.req.Req.GetConsistencyLevel(),
 		t.req.Req.GetCollectionTtlTimestamps(),
+		t.req.GetSegmentPkHints(),
 	)
 	if err != nil {
 		return err
@@ -84,7 +85,7 @@ func (t *QueryStreamTask) Execute() error {
 	srv := streamrpc.NewResultCacheServer(t.srv, t.minMsgSize, t.maxMsgSize)
 	defer srv.Flush()
 
-	segments, err := segments.RetrieveStream(t.ctx, t.segmentManager, retrievePlan, t.req, t.plan, srv)
+	segments, err := segments.RetrieveStream(t.ctx, t.segmentManager, retrievePlan, t.req, srv)
 	defer t.segmentManager.Segment.Unpin(segments)
 	if err != nil {
 		return err

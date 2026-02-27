@@ -12,6 +12,7 @@ import "schema.proto";
 import "msg.proto";
 import "data_coord.proto";
 import "index_coord.proto";
+import "plan.proto";
 
 service QueryCoord {
     rpc ShowLoadCollections(ShowCollectionsRequest)
@@ -479,6 +480,7 @@ message SearchRequest {
     bool from_shard_leader = 4;
     DataScope scope = 5;  // All, Streaming, Historical
     int32 total_channel_num = 6;
+    plan.SegmentPkHintList segment_pk_hints = 7;
 }
 
 message QueryRequest {
@@ -487,6 +489,7 @@ message QueryRequest {
     repeated int64 segmentIDs = 3;
     bool from_shard_leader = 4;
     DataScope scope = 5;  // All, Streaming, Historical
+    plan.SegmentPkHintList segment_pk_hints = 6;
 }
 
 message SyncReplicaSegmentsRequest {

@@ -203,7 +203,7 @@ Test_Indexing_Without_Predicate() {
     // search on segment's small index
     void* plan = nullptr;
     status = CreateSearchPlanByExpr(
-        collection, plan_str.data(), plan_str.size(), &plan);
+        collection, plan_str.data(), plan_str.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -333,7 +333,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     auto binary_plan = schema_handle.ParseSearch(
         "", "fakevec", 5, "L2", R"({"nprobe": 10})", -1);
     status = CreateSearchPlanByExpr(
-        collection, binary_plan.data(), binary_plan.size(), &plan);
+        collection, binary_plan.data(), binary_plan.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -461,7 +461,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
                                   R"({"nprobe": 10})",
                                   -1);
     status = CreateSearchPlanByExpr(
-        collection, plan_str.data(), plan_str.size(), &plan);
+        collection, plan_str.data(), plan_str.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -590,7 +590,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
                                   R"({"nprobe": 10})",
                                   -1);
     status = CreateSearchPlanByExpr(
-        collection, binary_plan.data(), binary_plan.size(), &plan);
+        collection, binary_plan.data(), binary_plan.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -717,7 +717,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
                                   R"({"nprobe": 10})",
                                   -1);
     status = CreateSearchPlanByExpr(
-        collection, plan_str.data(), plan_str.size(), &plan);
+        collection, plan_str.data(), plan_str.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -844,7 +844,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
                                   R"({"nprobe": 10})",
                                   -1);
     status = CreateSearchPlanByExpr(
-        collection, binary_plan.data(), binary_plan.size(), &plan);
+        collection, binary_plan.data(), binary_plan.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -974,7 +974,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
                                   R"({"nprobe": 10})",
                                   -1);
     status = CreateSearchPlanByExpr(
-        collection, plan_str.data(), plan_str.size(), &plan);
+        collection, plan_str.data(), plan_str.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -1105,7 +1105,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
                                   R"({"nprobe": 10})",
                                   -1);
     status = CreateSearchPlanByExpr(
-        collection, binary_plan.data(), binary_plan.size(), &plan);
+        collection, binary_plan.data(), binary_plan.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -1237,7 +1237,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
                                   R"({"nprobe": 10})",
                                   -1);
     status = CreateSearchPlanByExpr(
-        collection, plan_str.data(), plan_str.size(), &plan);
+        collection, plan_str.data(), plan_str.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -1388,7 +1388,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
                                   R"({"nprobe": 10})",
                                   -1);
     status = CreateSearchPlanByExpr(
-        collection, binary_plan.data(), binary_plan.size(), &plan);
+        collection, binary_plan.data(), binary_plan.size(), nullptr, 0, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;

@@ -378,6 +378,21 @@ message PlanOption {
    bool expr_use_json_stats = 1;
 };
 
+// SegmentPkHint contains filtered PK values for a specific segment.
+// Used by Delegator to pass bloom filter results to QueryNode via CGo.
+message SegmentPkHint {
+  int64 segment_id = 1;
+  // Filtered PK values that may exist in this segment (based on bloom filter).
+  // Empty means this segment passed the merged filter and should
+  // fallback to original TermExpr PK values.
+  repeated GenericValue filtered_pk_values = 2;
+}
+
+// SegmentPkHintList wraps a list of SegmentPkHint for serialization across CGo boundary.
+message SegmentPkHintList {
+  repeated SegmentPkHint hints = 1;
+}
+
 message PlanNode {
   oneof node {
     VectorANNS vector_anns = 1;

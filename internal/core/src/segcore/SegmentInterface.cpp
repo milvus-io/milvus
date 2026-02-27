@@ -131,6 +131,7 @@ SegmentInternalInterface::Search(
                                        cancel_token,
                                        consistency_level,
                                        collection_ttl);
+    visitor.SetSegmentHints(&plan->segment_hints_);
     auto results = std::make_unique<SearchResult>();
     *results = visitor.get_moved_result(*plan->plan_node_);
     results->segment_ = (void*)this;
@@ -151,6 +152,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     query::ExecPlanNodeVisitor visitor(
         *this, timestamp, cancel_token, consistency_level, collection_ttl);
+    visitor.SetSegmentHints(&plan->segment_hints_);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
     retrieve_results.segment_ = (void*)this;
     results->set_has_more_result(retrieve_results.has_more_result);

@@ -323,6 +323,17 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		}()
 	}
 
+	// Build segment hints using bloom filter for PK point lookups optimization.
+	segHint, sealed, growing := buildAndApplySegmentHints(
+		req.GetReq().GetSerializedExprPlan(),
+		req.GetReq().GetPkFilterHint(),
+		req.GetReq().GetPartitionIDs(),
+		sealed,
+		growing,
+		req.GetReq().GetCollectionID(),
+		metrics.SearchLabel,
+	)
+
 	if sd.functionFieldType[req.GetReq().GetFieldId()] == schemapb.FunctionType_BM25 {
 		if req.GetReq().GetMetricType() != metric.BM25 && req.GetReq().GetMetricType() != metric.EMPTY {
 			return nil, merr.WrapErrParameterInvalid("BM25", req.GetReq().GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
@@ -359,7 +370,15 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		log.Warn("failed to optimize search params", zap.Error(err))
 		return nil, err
 	}
-	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, sd.modifySearchRequest)
+	modifyFn := sd.modifySearchRequest
+	if segHint != nil {
+		modifyFn = func(req *querypb.SearchRequest, scope querypb.DataScope, segIDs []int64, targetID int64) *querypb.SearchRequest {
+			nodeReq := sd.modifySearchRequest(req, scope, segIDs, targetID)
+			nodeReq.SegmentPkHints = segHint.GetHintsForSegments(segIDs)
+			return nodeReq
+		}
+	}
+	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, modifyFn)
 	if err != nil {
 		log.Warn("Search organizeSubTask failed", zap.Error(err))
 		return nil, err
@@ -560,11 +579,30 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		growing = []SegmentEntry{}
 	}
 
+	// Build segment hints using bloom filter for PK point lookups optimization.
+	segHint, sealed, growing := buildAndApplySegmentHints(
+		req.GetReq().GetSerializedExprPlan(),
+		req.GetReq().GetPkFilterHint(),
+		req.GetReq().GetPartitionIDs(),
+		sealed,
+		growing,
+		req.GetReq().GetCollectionID(),
+		metrics.QueryLabel,
+	)
+
 	log.Info("query stream segments...",
 		zap.Int("sealedNum", len(sealed)),
 		zap.Int("growingNum", len(growing)),
 	)
-	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, sd.modifyQueryRequest)
+	modifyFn := sd.modifyQueryRequest
+	if segHint != nil {
+		modifyFn = func(req *querypb.QueryRequest, scope querypb.DataScope, segIDs []int64, targetID int64) *querypb.QueryRequest {
+			nodeReq := sd.modifyQueryRequest(req, scope, segIDs, targetID)
+			nodeReq.SegmentPkHints = segHint.GetHintsForSegments(segIDs)
+			return nodeReq
+		}
+	}
+	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, modifyFn)
 	if err != nil {
 		log.Warn("query organizeSubTask failed", zap.Error(err))
 		return err
@@ -654,13 +692,32 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		}()
 	}
 
+	// Build segment hints using bloom filter for PK point lookups optimization.
+	segHint, sealed, growing := buildAndApplySegmentHints(
+		req.GetReq().GetSerializedExprPlan(),
+		req.GetReq().GetPkFilterHint(),
+		req.GetReq().GetPartitionIDs(),
+		sealed,
+		growing,
+		req.GetReq().GetCollectionID(),
+		metrics.QueryLabel,
+	)
+
 	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
 	log.Debug("query segments...",
 		zap.Uint64("mvcc", req.GetReq().GetMvccTimestamp()),
 		zap.Int("sealedNum", sealedNum),
 		zap.Int("growingNum", len(growing)),
 	)
-	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, sd.modifyQueryRequest)
+	modifyFn := sd.modifyQueryRequest
+	if segHint != nil {
+		modifyFn = func(req *querypb.QueryRequest, scope querypb.DataScope, segIDs []int64, targetID int64) *querypb.QueryRequest {
+			nodeReq := sd.modifyQueryRequest(req, scope, segIDs, targetID)
+			nodeReq.SegmentPkHints = segHint.GetHintsForSegments(segIDs)
+			return nodeReq
+		}
+	}
+	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, modifyFn)
 	if err != nil {
 		log.Warn("query organizeSubTask failed", zap.Error(err))
 		return nil, err
