@@ -536,7 +536,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
 
         # Wait for TTL to expire
         log.info("Waiting 10 seconds for data to expire...")
-        time.sleep(10)
+        time.sleep(13)
 
         # Verify data expires based on original UTC timestamp
         res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
@@ -812,6 +812,352 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         assert res[0].get('count(*)') == 0
 
         self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_upsert_extend_entity_ttl(self):
+        """
+        target: test upsert with new future TTL extends entity lifetime
+        method:
+            1. Create collection with ttl_field
+            2. Insert data with ttl = now() + 8 seconds
+            3. After 4 seconds, upsert same IDs with ttl = now() + 12 seconds
+            4. Wait past original TTL
+            5. Verify data is still visible (TTL was extended)
+            6. Wait past new TTL and verify data expires
+        expected: Upsert with new TTL extends the expiration deadline
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 50
+        original_ttl_seconds = 8
+
+        # Create schema
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
+
+        # Create collection with ttl_field
+        properties = {"ttl_field": "ttl", "timezone": "UTC"}
+        self.create_collection(client, collection_name, schema=schema,
+                               properties=properties, consistency_level="Strong", index_params=index_params)
+
+        # Insert data with original TTL (8s)
+        original_ttl = (datetime.now(timezone.utc) + timedelta(seconds=original_ttl_seconds)).isoformat()
+        vectors = cf.gen_vectors(nb, dim=default_dim)
+        rows = [{default_primary_key_field_name: i, "ttl": original_ttl,
+                 default_vector_field_name: list(vectors[i])} for i in range(nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Wait 4 seconds, then upsert with extended TTL (12s from now)
+        time.sleep(4)
+        extended_ttl = (datetime.now(timezone.utc) + timedelta(seconds=12)).isoformat()
+        upsert_rows = [{default_primary_key_field_name: i, "ttl": extended_ttl,
+                        default_vector_field_name: list(vectors[i])} for i in range(nb)]
+        self.upsert(client, collection_name, upsert_rows)
+
+        # Wait past original TTL (4 more seconds) — data should still be alive
+        time.sleep(6)
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        log.info(f"Count after original TTL expired: {res[0].get('count(*)')}")
+        assert res[0].get('count(*)') == nb
+
+        # Wait past extended TTL
+        time.sleep(8)
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == 0
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_upsert_shorten_entity_ttl(self):
+        """
+        target: test upsert with shorter TTL makes entity expire sooner
+        method:
+            1. Create collection with ttl_field
+            2. Insert data with ttl = now() + 60 seconds (long TTL)
+            3. Upsert same IDs with ttl = now() + 8 seconds (short TTL)
+            4. Wait for short TTL to expire
+            5. Verify data expires at the shorter deadline
+        expected: Upsert with shorter TTL overrides the original deadline
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 50
+        short_ttl_seconds = 8
+
+        # Create schema
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
+
+        # Create collection with ttl_field
+        properties = {"ttl_field": "ttl", "timezone": "UTC"}
+        self.create_collection(client, collection_name, schema=schema,
+                               properties=properties, consistency_level="Strong", index_params=index_params)
+
+        # Insert data with long TTL (60s)
+        long_ttl = (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()
+        vectors = cf.gen_vectors(nb, dim=default_dim)
+        rows = [{default_primary_key_field_name: i, "ttl": long_ttl,
+                 default_vector_field_name: list(vectors[i])} for i in range(nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Verify data is visible
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == nb
+
+        # Upsert with short TTL (8s from now)
+        short_ttl = (datetime.now(timezone.utc) + timedelta(seconds=short_ttl_seconds)).isoformat()
+        upsert_rows = [{default_primary_key_field_name: i, "ttl": short_ttl,
+                        default_vector_field_name: list(vectors[i])} for i in range(nb)]
+        self.upsert(client, collection_name, upsert_rows)
+
+        # Wait for short TTL to expire
+        log.info(f"Waiting {short_ttl_seconds + 3} seconds for shortened TTL to expire...")
+        time.sleep(short_ttl_seconds + 3)
+
+        # Verify data expired at the shorter deadline
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == 0
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_entity_ttl_after_release_reload(self):
+        """
+        target: test entity TTL still works after release and reload
+        method:
+            1. Create collection with ttl_field
+            2. Insert data with ttl = now() + 10 seconds
+            3. Release and reload collection
+            4. Verify data is still visible
+            5. Wait for TTL to expire
+            6. Verify data is invisible after TTL expires
+        expected: TTL filtering persists across release/reload cycles
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 100
+        ttl_seconds = 10
+
+        # Create schema
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
+
+        # Create collection with ttl_field
+        properties = {"ttl_field": "ttl", "timezone": "UTC"}
+        self.create_collection(client, collection_name, schema=schema,
+                               properties=properties, consistency_level="Strong", index_params=index_params)
+
+        # Insert data with future ttl
+        ttl_timestamp = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        vectors = cf.gen_vectors(nb, dim=default_dim)
+        rows = [{default_primary_key_field_name: i, "ttl": ttl_timestamp,
+                 default_vector_field_name: list(vectors[i])} for i in range(nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Verify data is visible before release
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == nb
+
+        # Release and reload
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        # Verify data is still visible after reload
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == nb
+
+        # Wait for TTL to expire
+        log.info(f"Waiting {ttl_seconds + 3} seconds for data to expire after reload...")
+        time.sleep(ttl_seconds + 3)
+
+        # Verify data is invisible after TTL expires
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == 0
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_before_entity_ttl_expires(self):
+        """
+        target: test explicit delete removes entities immediately, not waiting for TTL
+        method:
+            1. Create collection with ttl_field
+            2. Insert data with ttl = now() + 60 seconds (long TTL)
+            3. Delete half of the entities explicitly
+            4. Verify deleted entities are gone immediately
+            5. Verify remaining entities are still visible
+        expected: Explicit delete takes effect immediately regardless of TTL
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 100
+        ttl_seconds = 60
+
+        # Create schema
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
+
+        # Create collection with ttl_field
+        properties = {"ttl_field": "ttl", "timezone": "UTC"}
+        self.create_collection(client, collection_name, schema=schema,
+                               properties=properties, consistency_level="Strong", index_params=index_params)
+
+        # Insert data with long TTL
+        ttl_timestamp = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        vectors = cf.gen_vectors(nb, dim=default_dim)
+        rows = [{default_primary_key_field_name: i, "ttl": ttl_timestamp,
+                 default_vector_field_name: list(vectors[i])} for i in range(nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Verify all data is visible
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == nb
+
+        # Delete first half of entities
+        delete_ids = list(range(nb // 2))
+        self.delete(client, collection_name, ids=delete_ids)
+
+        # Verify deleted entities are gone immediately
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == nb // 2
+
+        # Verify remaining entities are the second half
+        res = self.query(client, collection_name, filter=f"id >= {nb // 2}",
+                         output_fields=[default_primary_key_field_name],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert len(res) == nb // 2
+        for row in res:
+            assert row[default_primary_key_field_name] >= nb // 2
+
+        # Verify deleted entities are not returned even by ID filter
+        res = self.query(client, collection_name, filter=f"id < {nb // 2}",
+                         output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == 0
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_insert_new_data_after_entity_ttl_expiry(self):
+        """
+        target: test inserting new data after previous data expired by entity TTL
+        method:
+            1. Create collection with ttl_field
+            2. Insert first batch with ttl = now() + 8 seconds
+            3. Wait for TTL to expire, verify data is gone
+            4. Insert second batch with new future TTL
+            5. Verify new data is visible and queryable
+        expected: New inserts work normally after previous data expired
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 100
+        ttl_seconds = 8
+
+        # Create schema
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
+
+        # Create collection with ttl_field
+        properties = {"ttl_field": "ttl", "timezone": "UTC"}
+        self.create_collection(client, collection_name, schema=schema,
+                               properties=properties, consistency_level="Strong", index_params=index_params)
+
+        # Insert first batch with short TTL
+        ttl_str = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        vectors = cf.gen_vectors(nb, dim=default_dim)
+        rows = [{default_primary_key_field_name: i, "ttl": ttl_str,
+                 default_vector_field_name: list(vectors[i])} for i in range(nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Verify first batch is visible
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == nb
+
+        # Wait for TTL to expire
+        log.info(f"Waiting {ttl_seconds + 3} seconds for first batch to expire...")
+        time.sleep(ttl_seconds + 3)
+
+        # Verify first batch is gone
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == 0
+
+        # Re-insert using the same PKs (0..nb-1) — should succeed since originals are expired
+        reuse_ttl_str = (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()
+        reuse_vectors = cf.gen_vectors(nb, dim=default_dim)
+        reuse_rows = [{default_primary_key_field_name: i, "ttl": reuse_ttl_str,
+                       default_vector_field_name: list(reuse_vectors[i])} for i in range(nb)]
+        self.insert(client, collection_name, reuse_rows)
+        self.flush(client, collection_name)
+
+        # Verify reused PKs are visible
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == nb
+
+        # Verify the reused PK data is queryable by ID
+        res = self.query(client, collection_name, filter="id >= 0 and id < 10",
+                         output_fields=[default_primary_key_field_name, "ttl"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert len(res) == 10
+
+        # Insert additional batch with new PKs
+        new_ttl_str = (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()
+        new_vectors = cf.gen_vectors(nb, dim=default_dim)
+        new_rows = [{default_primary_key_field_name: nb + i, "ttl": new_ttl_str,
+                     default_vector_field_name: list(new_vectors[i])} for i in range(nb)]
+        self.insert(client, collection_name, new_rows)
+        self.flush(client, collection_name)
+
+        # Verify both batches are visible (reused PKs + new PKs)
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == nb * 2
+
+        # Verify search returns results from both batches
+        search_vectors = cf.gen_vectors(1, dim=default_dim)
+        res = self.search(client, collection_name, search_vectors, anns_field=default_vector_field_name,
+                          search_params={}, limit=10, consistency_level=CONSISTENCY_STRONG)[0]
+        assert len(res[0]) == 10
+
+        self.drop_collection(client, collection_name)
+
 
 @pytest.mark.xdist_group("TestMilvusClientEntityTTLQuery")
 class TestMilvusClientEntityTTLQuery(TestMilvusClientV2Base):
