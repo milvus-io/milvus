@@ -1534,6 +1534,7 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 					}
 				}
 			}
+		}
 	} else if len(t.GetDeleteKeys()) > 0 {
 		key := hasPropInDeletekeys(t.DeleteKeys)
 		if key != "" {
