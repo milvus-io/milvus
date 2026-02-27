@@ -5808,3 +5808,60 @@ func TestGetVarFieldLength_Mol(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, GetDynamicFieldEstimateLength(), length)
 }
+
+func TestAppendFieldDataByColumn_MolData(t *testing.T) {
+	src := &schemapb.FieldData{
+		Type: schemapb.DataType_Mol,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_MolData{
+					MolData: &schemapb.MolArray{
+						Data: [][]byte{[]byte("CCO"), []byte("c1ccccc1"), []byte("CC(=O)O")},
+					},
+				},
+			},
+		},
+	}
+	dst := &schemapb.FieldData{}
+	AppendFieldDataByColumn(dst, src, []int64{0, 2})
+	result := dst.GetScalars().GetMolData().GetData()
+	assert.Len(t, result, 2)
+	assert.Equal(t, []byte("CCO"), result[0])
+	assert.Equal(t, []byte("CC(=O)O"), result[1])
+}
+
+func TestAppendFieldDataByColumn_MolSmilesData(t *testing.T) {
+	src := &schemapb.FieldData{
+		Type: schemapb.DataType_Mol,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_MolSmilesData{
+					MolSmilesData: &schemapb.MolSmilesArray{
+						Data: []string{"CCO", "c1ccccc1", "CC(=O)O"},
+					},
+				},
+			},
+		},
+	}
+	dst := &schemapb.FieldData{}
+	AppendFieldDataByColumn(dst, src, []int64{1, 2})
+	result := dst.GetScalars().GetMolSmilesData().GetData()
+	assert.Len(t, result, 2)
+	assert.Equal(t, "c1ccccc1", result[0])
+	assert.Equal(t, "CC(=O)O", result[1])
+}
+
+func TestGenEmptyFieldData_Mol(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		FieldID:  100,
+		Name:     "mol_field",
+		DataType: schemapb.DataType_Mol,
+	}
+	result, err := GenEmptyFieldData(field)
+	assert.NoError(t, err)
+	assert.Equal(t, schemapb.DataType_Mol, result.GetType())
+	assert.Equal(t, "mol_field", result.GetFieldName())
+	assert.Equal(t, int64(100), result.GetFieldId())
+	assert.NotNil(t, result.GetScalars().GetMolData())
+	assert.Nil(t, result.GetScalars().GetMolData().GetData())
+}

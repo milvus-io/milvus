@@ -1764,6 +1764,81 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
+	t.Run("TestAddMol after finish", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Mol)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddOneMolToPayload([]byte("CCO"), true)
+		assert.NoError(t, err)
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+
+		err = w.AddOneMolToPayload([]byte("CC"), true)
+		assert.Error(t, err)
+		w.ReleasePayloadWriter()
+	})
+
+	t.Run("TestAddMol with wrong builder type", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Int32)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddOneMolToPayload([]byte("CCO"), true)
+		assert.Error(t, err)
+		w.ReleasePayloadWriter()
+	})
+
+	t.Run("TestGetMolFromPayload with wrong type", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_VarChar)
+		require.Nil(t, err)
+		err = w.AddOneStringToPayload("hello", true)
+		assert.NoError(t, err)
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.NoError(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_VarChar, buffer, false)
+		assert.NoError(t, err)
+		_, _, err = r.GetMolFromPayload()
+		assert.Error(t, err)
+		r.ReleasePayloadReader()
+		w.ReleasePayloadWriter()
+	})
+
+	t.Run("TestAddMol with wrong data type", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Mol)
+		require.Nil(t, err)
+		err = w.AddDataToPayloadForUT("not bytes", nil)
+		assert.Error(t, err)
+		w.ReleasePayloadWriter()
+	})
+
+	t.Run("TestAddMol with wrong valid data length", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Mol)
+		require.Nil(t, err)
+		err = w.AddDataToPayloadForUT([]byte("CCO"), []bool{true, false})
+		assert.Error(t, err)
+		w.ReleasePayloadWriter()
+	})
+
+	t.Run("TestAddMol nullable without valid data", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Mol, WithNullable(true))
+		require.Nil(t, err)
+		err = w.AddDataToPayloadForUT([]byte("CCO"), nil)
+		assert.Error(t, err)
+		w.ReleasePayloadWriter()
+	})
+
+	t.Run("TestAddMol not nullable with valid data", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Mol)
+		require.Nil(t, err)
+		err = w.AddDataToPayloadForUT([]byte("CCO"), []bool{true})
+		assert.Error(t, err)
+		w.ReleasePayloadWriter()
+	})
+
 	t.Run("TestVectorArray", func(t *testing.T) {
 		dim := 4
 		w, err := NewPayloadWriter(
