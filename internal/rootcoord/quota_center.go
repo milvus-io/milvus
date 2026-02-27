@@ -27,7 +27,9 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"golang.org/x/exp/maps"
+	"maps"
+	"slices"
+
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -846,7 +848,7 @@ func (q *QuotaCenter) calculateReadRates() error {
 
 	deniedDatabaseIDs := q.getDenyReadingDBs()
 	if len(deniedDatabaseIDs) != 0 {
-		q.forceDenyReading(commonpb.ErrorCode_ForceDeny, false, maps.Keys(deniedDatabaseIDs), "force deny reading in database properties", log)
+		q.forceDenyReading(commonpb.ErrorCode_ForceDeny, false, slices.Collect(maps.Keys(deniedDatabaseIDs)), "force deny reading in database properties", log)
 	}
 	return nil
 }
@@ -882,7 +884,7 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	// check force deny writing of db level
 	dbIDs := q.getDenyWritingDBs()
 	if len(dbIDs) != 0 {
-		if err := q.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, maps.Keys(dbIDs), nil, nil, "force deny writing in database properties"); err != nil {
+		if err := q.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, slices.Collect(maps.Keys(dbIDs)), nil, nil, "force deny writing in database properties"); err != nil {
 			return err
 		}
 	}

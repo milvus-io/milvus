@@ -19,15 +19,15 @@ package etcdkv_test
 import (
 	"context"
 	"fmt"
+	"maps"
 	"path"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"golang.org/x/exp/maps"
 
 	embed_etcd_kv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
@@ -750,8 +750,7 @@ func TestEmbedEtcd(te *testing.T) {
 					"AB/2/100": "v4",
 				}
 
-				expectedSortedKey := maps.Keys(expected)
-				sort.Strings(expectedSortedKey)
+				expectedSortedKey := slices.Sorted(maps.Keys(expected))
 
 				ret := make(map[string]string)
 				actualSortedKey := make([]string, 0)

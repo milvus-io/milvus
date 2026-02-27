@@ -25,7 +25,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"golang.org/x/exp/maps"
+	"maps"
+	"slices"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -217,7 +218,7 @@ func (mt *MetaTable) reload() error {
 	for _, db := range dbs {
 		mt.dbName2Meta[db.Name] = db
 	}
-	dbNames := maps.Keys(mt.dbName2Meta)
+	dbNames := slices.Collect(maps.Keys(mt.dbName2Meta))
 	// create default database.
 	if !funcutil.SliceContain(dbNames, util.DefaultDBName) {
 		if err := mt.createDefaultDb(); err != nil {
@@ -493,7 +494,7 @@ func (mt *MetaTable) ListDatabases(ctx context.Context, ts typeutil.Timestamp) (
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
-	return maps.Values(mt.dbName2Meta), nil
+	return slices.Collect(maps.Values(mt.dbName2Meta)), nil
 }
 
 func (mt *MetaTable) GetDatabaseByID(ctx context.Context, dbID int64, ts Timestamp) (*model.Database, error) {

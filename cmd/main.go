@@ -23,7 +23,7 @@ import (
 	"os/signal"
 	"strings"
 
-	"golang.org/x/exp/slices"
+	"slices"
 
 	"github.com/milvus-io/milvus/cmd/asan"
 	"github.com/milvus-io/milvus/cmd/milvus"

@@ -20,9 +20,11 @@ import (
 	"context"
 	"time"
 
+	"maps"
+	"slices"
+
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/samber/lo"
-	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/json"
@@ -83,7 +85,7 @@ func (t *importTasks) remove(taskID int64) {
 }
 
 func (t *importTasks) listTasks() []ImportTask {
-	return maps.Values(t.tasks)
+	return slices.Collect(maps.Values(t.tasks))
 }
 
 func (t *importTasks) listTaskStats() []ImportTask {

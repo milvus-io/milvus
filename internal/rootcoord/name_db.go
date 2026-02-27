@@ -18,8 +18,8 @@ package rootcoord
 
 import (
 	"fmt"
-
-	"golang.org/x/exp/maps"
+	"maps"
+	"slices"
 
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -88,7 +88,7 @@ func (n *nameDb) listCollectionID(dbName string) ([]typeutil.UniqueID, error) {
 	if !ok {
 		return nil, fmt.Errorf("database not exist: %s", dbName)
 	}
-	return maps.Values(name2ID), nil
+	return slices.Collect(maps.Values(name2ID)), nil
 }
 
 func (n *nameDb) removeIf(selector func(db string, collection string, id UniqueID) bool) {

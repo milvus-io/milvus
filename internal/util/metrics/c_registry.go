@@ -40,7 +40,8 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"go.uber.org/zap"
-	"golang.org/x/exp/maps"
+	"maps"
+
 	"google.golang.org/protobuf/proto"
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo"

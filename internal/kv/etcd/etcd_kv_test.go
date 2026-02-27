@@ -19,9 +19,10 @@ package etcdkv
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path"
-	"sort"
+	"slices"
 	"testing"
 	"time"
 
@@ -30,7 +31,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/pkg/v2/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
@@ -763,8 +763,7 @@ func Test_WalkWithPagination(t *testing.T) {
 				"AB/2/100": "v4",
 			}
 
-			expectedSortedKey := maps.Keys(expected)
-			sort.Strings(expectedSortedKey)
+			expectedSortedKey := slices.Sorted(maps.Keys(expected))
 
 			ret := make(map[string]string)
 			actualSortedKey := make([]string, 0)

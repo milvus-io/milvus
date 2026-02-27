@@ -21,8 +21,10 @@ import (
 	"math"
 	"sync"
 
+	"maps"
+	"slices"
+
 	"go.uber.org/zap"
-	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -261,7 +263,7 @@ func (t *copySegmentTasks) remove(taskID int64) {
 
 // listTasks returns all tasks as a slice (unordered).
 func (t *copySegmentTasks) listTasks() []CopySegmentTask {
-	return maps.Values(t.tasks)
+	return slices.Collect(maps.Values(t.tasks))
 }
 
 // getByJobID retrieves all tasks belonging to a specific job using secondary index.

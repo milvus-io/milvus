@@ -27,7 +27,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"golang.org/x/exp/maps"
+	"maps"
+
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 

@@ -11,7 +11,7 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"golang.org/x/exp/slices"
+	"slices"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
