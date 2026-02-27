@@ -19,12 +19,11 @@ package querynodev2
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"os"
-	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
