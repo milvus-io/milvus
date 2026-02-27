@@ -980,6 +980,13 @@ func TestProxyDropDatabase(t *testing.T) {
 		mix.EXPECT().DropDatabase(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 		node.mixCoord = mix
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		cacheBak := globalMetaCache
+		defer func() { globalMetaCache = cacheBak }()
+		cache := NewMockCache(t)
+		cache.EXPECT().RemoveDatabase(mock.Anything, mock.AnythingOfType("string")).Return()
+		globalMetaCache = cache
+
 		ctx := context.Background()
 
 		resp, err := node.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{DbName: "db"})

@@ -421,10 +421,10 @@ func (s *mockRootCoordRetryServer) GetComponentStates(ctx context.Context, in *m
 func TestClientBase_RetryPolicy(t *testing.T) {
 	// server
 	lis, err := net.Listen("tcp", "localhost:")
-	address := lis.Addr()
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		t.Fatalf("failed to listen: %v", err)
 	}
+	address := lis.Addr()
 	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second,
 		PermitWithoutStream: true,
@@ -442,9 +442,8 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 	rootcoordpb.RegisterRootCoordServer(s, &mockRootCoordRetryServer{SuccessCount: uint(maxAttempts)})
 	reflection.Register(s)
 	go func() {
-		if err := s.Serve(lis); err != nil {
-			log.Fatalf("failed to serve: %v", err)
-		}
+		// s.Stop() causes Serve to return; ignore the error
+		s.Serve(lis)
 	}()
 	defer s.Stop()
 
@@ -483,10 +482,10 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 
 func TestClientBase_Compression(t *testing.T) {
 	lis, err := net.Listen("tcp", "localhost:")
-	address := lis.Addr()
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		t.Fatalf("failed to listen: %v", err)
 	}
+	address := lis.Addr()
 	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second,
 		PermitWithoutStream: true,
@@ -504,9 +503,8 @@ func TestClientBase_Compression(t *testing.T) {
 	rootcoordpb.RegisterRootCoordServer(s, &mockRootCoordRetryServer{SuccessCount: uint(1)})
 	reflection.Register(s)
 	go func() {
-		if err := s.Serve(lis); err != nil {
-			log.Fatalf("failed to serve: %v", err)
-		}
+		// s.Stop() causes Serve to return; ignore the error
+		s.Serve(lis)
 	}()
 	defer s.Stop()
 
