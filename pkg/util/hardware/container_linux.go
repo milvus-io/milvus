@@ -20,8 +20,15 @@ import (
 	statsv1 "github.com/containerd/cgroups/v3/cgroup1/stats"
 	"github.com/containerd/cgroups/v3/cgroup2"
 	statsv2 "github.com/containerd/cgroups/v3/cgroup2/stats"
+	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
+
+func init() {
+	// Suppress noisy log output from containerd/cgroups/v3 which uses logrus.
+	// Without this, production containers get flooded with cgroups error/warning logs.
+	logrus.SetLevel(logrus.PanicLevel)
+}
 
 func getCgroupV1Stats() (*statsv1.Metrics, error) {
 	manager, err := cgroup1.Load(cgroup1.StaticPath("/"))
