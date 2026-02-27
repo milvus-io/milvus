@@ -18,8 +18,8 @@
 
 #include <functional>
 #include <optional>
+#include <variant>
 
-#include "boost/variant/detail/apply_visitor_binary.hpp"
 #include "common/Tracer.h"
 #include "fmt/core.h"
 #include "folly/FBVector.h"
@@ -108,7 +108,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
                 res[processed_rows] = false;
                 valid_res[processed_rows] = false;
             } else {
-                res[processed_rows] = boost::apply_visitor(
+                res[processed_rows] = std::visit(
                     milvus::query::Relational<decltype(op)>{},
                     left_opt.value(),
                     right_opt.value());
@@ -151,7 +151,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
                 continue;
             }
             res[i] =
-                boost::apply_visitor(milvus::query::Relational<decltype(op)>{},
+                std::visit(milvus::query::Relational<decltype(op)>{},
                                      left_value.value(),
                                      right_value.value());
         }
@@ -202,7 +202,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
                     res[processed_rows] = false;
                     valid_res[processed_rows] = false;
                 } else {
-                    res[processed_rows] = boost::apply_visitor(
+                    res[processed_rows] = std::visit(
                         milvus::query::Relational<decltype(op)>{},
                         left(i).value(),
                         right(i).value());
