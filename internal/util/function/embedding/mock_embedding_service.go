@@ -239,7 +239,6 @@ func CreateTEIEmbeddingServer(dim int) *httptest.Server {
 }
 
 func CreateYCEmbeddingServer() *httptest.Server {
-	reqCount := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req YCEmbeddingRequest
 		body, _ := io.ReadAll(r.Body)
@@ -250,12 +249,6 @@ func CreateYCEmbeddingServer() *httptest.Server {
 			req.Texts = []string{req.Text}
 		}
 		embs := mockEmbedding[float32](req.Texts, 4)
-		for i := range embs {
-			for j := range embs[i] {
-				embs[i][j] += float32(reqCount)
-			}
-			reqCount++
-		}
 
 		res := YCEmbeddingResponse{
 			Embeddings: embs,
