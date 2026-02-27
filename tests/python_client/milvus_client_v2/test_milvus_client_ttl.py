@@ -287,8 +287,8 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         expected: Step 5 should success
         """
         # step 1: create collection
-        ttl_time = 30
-        margin = 3  # margin zone around TTL boundaries to avoid timing races
+        ttl_time = 20
+        margin = 2  # margin zone around TTL boundaries to avoid timing races
         client = self._client()
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
