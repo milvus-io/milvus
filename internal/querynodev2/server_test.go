@@ -165,7 +165,14 @@ func (suite *QueryNodeSuite) TestInit_QueryHook() {
 	suite.node.queryHook = mockHook
 	suite.node.handleQueryHookEvent()
 
-	yamlWriter := newYamlConfigWriter("../../configs/milvus.yaml")
+	configPath := "../../configs/milvus.yaml"
+	origConfig, err := os.ReadFile(configPath)
+	suite.Require().NoError(err)
+	suite.T().Cleanup(func() {
+		os.WriteFile(configPath, origConfig, 0o644)
+	})
+
+	yamlWriter := newYamlConfigWriter(configPath)
 	var x1, x2, x3 int32
 	suite.Equal(atomic.LoadInt32(&x1), int32(0))
 	suite.Equal(atomic.LoadInt32(&x2), int32(0))

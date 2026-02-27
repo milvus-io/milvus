@@ -46,6 +46,15 @@ func flattenYaml(prefix string, m map[string]interface{}, out map[string]string)
 		switch val := v.(type) {
 		case map[string]interface{}:
 			flattenYaml(fullKey, val, out)
+		case []interface{}:
+			for i, item := range val {
+				childKey := fmt.Sprintf("%s.%d", fullKey, i)
+				if nested, ok := item.(map[string]interface{}); ok {
+					flattenYaml(childKey, nested, out)
+				} else {
+					out[childKey] = fmt.Sprintf("%v", item)
+				}
+			}
 		default:
 			out[fullKey] = fmt.Sprintf("%v", val)
 		}
