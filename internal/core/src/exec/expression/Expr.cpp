@@ -61,6 +61,47 @@ ExprSet::Eval(int32_t begin,
     }
 }
 
+// Create TTL field filtering expression if schema has TTL field configured
+// Returns a single OR expression: ttl_field is null OR ttl_field > physical_us
+// This means: keep entities with null TTL (never expire) OR entities with TTL > current time (not expired)
+inline expr::TypedExprPtr
+CreateTTLFieldFilterExpression(QueryContext* query_context) {
+    auto segment = query_context->get_segment();
+    auto& schema = segment->get_schema();
+    if (!schema.get_ttl_field_id().has_value()) {
+        return nullptr;
+    }
+
+    auto ttl_field_id = schema.get_ttl_field_id().value();
+    auto& ttl_field_meta = schema[ttl_field_id];
+
+    // Use entity_ttl_physical_time_us (already converted to physical microseconds in Go layer)
+    // instead of query_timestamp (MVCC time) to ensure correct expiration judgment
+    // See issue #47413 - Strong consistency uses MVCC timestamp which doesn't advance
+    // without new writes, causing entity-level TTL to fail
+    int64_t physical_us = query_context->get_entity_ttl_physical_time_us();
+
+    expr::ColumnInfo ttl_column_info(ttl_field_id,
+                                     ttl_field_meta.get_data_type(),
+                                     {},
+                                     ttl_field_meta.is_nullable());
+
+    auto ttl_is_null_expr = std::make_shared<expr::NullExpr>(
+        ttl_column_info, proto::plan::NullExpr_NullOp_IsNull);
+
+    proto::plan::GenericValue ttl_threshold;
+    ttl_threshold.set_int64_val(physical_us);
+    auto ttl_greater_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        ttl_column_info, proto::plan::OpType::GreaterThan, ttl_threshold);
+
+    auto ttl_or_expr = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::Or,
+        ttl_is_null_expr,
+        ttl_greater_expr);
+
+    return ttl_or_expr;
+}
+
 std::vector<ExprPtr>
 CompileExpressions(const std::vector<expr::TypedExprPtr>& sources,
                    ExecContext* context,
