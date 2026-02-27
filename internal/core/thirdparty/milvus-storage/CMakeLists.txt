@@ -66,23 +66,25 @@ if ( NOT milvus-storage_POPULATED )
                 "(searched ${_HOMEBREW_PREFIX}/lib/cmake/AWSSDK). "
                 "Install with: brew install aws-sdk-cpp")
         endif()
-        find_package(AWSSDK REQUIRED COMPONENTS identity-management s3)
+        find_package(AWSSDK REQUIRED COMPONENTS core s3 identity-management)
 
         if(NOT TARGET AWS::aws-sdk-cpp-identity-management)
             add_library(AWS::aws-sdk-cpp-identity-management INTERFACE IMPORTED)
             set_target_properties(AWS::aws-sdk-cpp-identity-management PROPERTIES
                 INTERFACE_LINK_LIBRARIES "${AWSSDK_LINK_LIBRARIES}")
-            # Ensure transitive headers (e.g. sts → pagination) resolve
-            # correctly even when Conan's -isystem paths take precedence.
-            # Prefer AWSSDK_INCLUDE_DIR (set by the SDK's cmake config) for
-            # a narrow scope; fall back to the full Homebrew prefix.
-            if(AWSSDK_INCLUDE_DIR)
-                target_include_directories(AWS::aws-sdk-cpp-identity-management SYSTEM INTERFACE
-                    "${AWSSDK_INCLUDE_DIR}")
-            else()
-                target_include_directories(AWS::aws-sdk-cpp-identity-management SYSTEM INTERFACE
-                    "${_HOMEBREW_PREFIX}/include")
+            # AWSSDK_INCLUDE_DIR is set by find_package(AWSSDK REQUIRED ...).
+            # We add it as SYSTEM INTERFACE so transitive AWS headers
+            # (e.g. sts → pagination) resolve correctly even when Conan's
+            # -isystem paths take precedence. This exposes Homebrew's full
+            # include tree, but Conan's -I flags take priority over -isystem
+            # so there is no practical ABI conflict risk with Boost etc.
+            if(NOT AWSSDK_INCLUDE_DIR)
+                message(FATAL_ERROR
+                    "AWSSDK_INCLUDE_DIR not set after find_package(AWSSDK). "
+                    "Check Homebrew aws-sdk-cpp installation.")
             endif()
+            target_include_directories(AWS::aws-sdk-cpp-identity-management SYSTEM INTERFACE
+                "${AWSSDK_INCLUDE_DIR}")
         endif()
 
         # Ignore Homebrew paths so milvus-storage's find_package(Boost) uses
