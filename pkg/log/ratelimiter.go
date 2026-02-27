@@ -24,7 +24,7 @@ import (
 // RateLimiter is a simple token bucket rate limiter that replaces
 // the deprecated jaeger-client-go utils.ReconfigurableRateLimiter.
 type RateLimiter struct {
-	sync.Mutex
+	mu sync.Mutex
 	creditsPerSecond float64
 	maxBalance       float64
 	balance          float64
@@ -43,8 +43,8 @@ func NewRateLimiter(creditsPerSecond, maxBalance float64) *RateLimiter {
 
 // CheckCredit checks if the given amount of credits is available.
 func (r *RateLimiter) CheckCredit(itemCost float64) bool {
-	r.Lock()
-	defer r.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	now := time.Now()
 	elapsed := now.Sub(r.lastTime).Seconds()
@@ -63,8 +63,8 @@ func (r *RateLimiter) CheckCredit(itemCost float64) bool {
 // Update reconfigures the rate limiter, pro-rating the current balance
 // proportionally to the change in maxBalance (matching Jaeger behavior).
 func (r *RateLimiter) Update(creditsPerSecond, maxBalance float64) {
-	r.Lock()
-	defer r.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	// Update balance based on elapsed time (same as CheckCredit).
 	now := time.Now()
