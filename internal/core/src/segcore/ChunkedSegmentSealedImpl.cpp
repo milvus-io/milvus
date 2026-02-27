@@ -2960,7 +2960,7 @@ ChunkedSegmentSealedImpl::init_timestamp_index_from_column(
             std::copy_n(static_cast<const Timestamp*>(span.data()),
                         n,
                         temp.data() + offset);
-            offset += span.row_count();
+            offset += n;
         }
         AssertInfo(offset == num_rows,
                    "timestamp total row count {} != expected {}",
