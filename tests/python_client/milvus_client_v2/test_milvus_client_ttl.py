@@ -287,8 +287,8 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         expected: Step 5 should success
         """
         # step 1: create collection
-        ttl_time = 20
-        margin = 5  # margin zone around TTL boundaries to avoid timing races
+        ttl_time = 30
+        margin = 3  # margin zone around TTL boundaries to avoid timing races
         client = self._client()
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
@@ -305,10 +305,10 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         # step 2: Insert rows
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.insert(client, collection_name, rows)
+        start_time = time.time()  # start timing right after insert to align with server-side TTL calculation
         self.flush(client, collection_name)
         self.release_collection(client, collection_name)
         self.load_collection(client, collection_name)
-        start_time = time.time()  # start timing after load to avoid skew from flush/release/load overhead
 
         # step 3: Continuously query and search the collection
         upsert_time = ttl_time / 2
