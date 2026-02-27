@@ -326,8 +326,7 @@ ExecPlanNodeVisitor::setupRetrieveResult(
                 "Element Level Find", tracer::GetRootSpan(), true);
             auto array_offsets = query_context->get_array_offsets();
             auto [doc_offsets, element_indices, has_more] =
-                segment->find_first_element_n(
-                    node.limit_, view, array_offsets);
+                segment->find_first_element_n(node.limit_, view, array_offsets);
             tmp_retrieve_result.result_offsets_ = std::move(doc_offsets);
             tmp_retrieve_result.element_indices_ = std::move(element_indices);
             tmp_retrieve_result.has_more_result = has_more;

@@ -941,13 +941,9 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		// Get element indices for element-level query
 		var elemCount int = 1 // default for doc-level
 		if isElementLevel {
-			elemIndicesList := validRetrieveResults[sel].GetElementIndices()
-			if int(cursors[sel]) < len(elemIndicesList) {
-				elemIndices := elemIndicesList[cursors[sel]]
-				elemCount = len(elemIndices.GetIndices())
-				// Convert int32 to int64 and append to result
-				ret.ElementIndices = append(ret.ElementIndices, convertInternalElementIndicesToMilvus(elemIndices))
-			}
+			elemIndices := validRetrieveResults[sel].GetElementIndices()[cursors[sel]]
+			elemCount = len(elemIndices.GetIndices())
+			ret.ElementIndices = append(ret.ElementIndices, convertInternalElementIndicesToMilvus(elemIndices))
 		}
 
 		fieldIdxs := idxComputers[sel].Compute(cursors[sel])

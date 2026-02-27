@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "common/ArrayOffsets.h"
 #include "common/Types.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
@@ -86,7 +87,8 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_n) {
     all.reset();
     BitsetTypeView all_view(all.data(), num);
     {
-        auto [offsets, has_more_res] = this->map_.find_first_n(num / 2, all_view);
+        auto [offsets, has_more_res] =
+            this->map_.find_first_n(num / 2, all_view);
         ASSERT_EQ(num / 2, offsets.size());
         ASSERT_TRUE(has_more_res);
         for (int i = 1; i < offsets.size(); i++) {
@@ -144,5 +146,117 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_n) {
     }
 }
 
-REGISTER_TYPED_TEST_SUITE_P(TypedOffsetOrderedMapTest, find_first_n);
+TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_element_n) {
+    // Setup: insert 5 docs with sequential PKs
+    int num = 5;
+    int array_len = 3;
+    auto data = this->random_generate(num);
+    for (const auto& x : data) {
+        this->insert(x);
+    }
+
+    // Build ArrayOffsets: each doc has array_len elements
+    // element_row_ids: [0,0,0, 1,1,1, 2,2,2, 3,3,3, 4,4,4]
+    // row_to_element_start: [0, 3, 6, 9, 12, 15]
+    std::vector<int32_t> element_row_ids;
+    std::vector<int32_t> row_to_element_start = {0};
+    for (int doc = 0; doc < num; doc++) {
+        for (int e = 0; e < array_len; e++) {
+            element_row_ids.push_back(doc);
+        }
+        row_to_element_start.push_back(
+            static_cast<int32_t>((doc + 1) * array_len));
+    }
+    auto array_offsets = std::make_shared<ArrayOffsetsSealed>(
+        std::move(element_row_ids), std::move(row_to_element_start));
+
+    int total_elements = num * array_len;  // 15
+
+    // Case 1: all elements pass filter → get all docs
+    {
+        BitsetType all(total_elements);
+        all.reset();  // 0 = pass
+        BitsetTypeView view(all.data(), total_elements);
+        auto [doc_offsets, elem_indices, has_more] =
+            this->map_.find_first_element_n(
+                total_elements, view, array_offsets);
+        ASSERT_EQ(doc_offsets.size(), num);
+        for (size_t i = 0; i < doc_offsets.size(); i++) {
+            ASSERT_EQ(elem_indices[i].size(), array_len)
+                << "Each doc should have all elements";
+        }
+        ASSERT_FALSE(has_more);
+    }
+
+    // Case 2: limit counts elements, not docs
+    {
+        BitsetType all(total_elements);
+        all.reset();
+        BitsetTypeView view(all.data(), total_elements);
+        // limit=4: first doc contributes 3 elements, second doc contributes 1
+        auto [doc_offsets, elem_indices, has_more] =
+            this->map_.find_first_element_n(4, view, array_offsets);
+        int total = 0;
+        for (auto& indices : elem_indices) {
+            total += indices.size();
+        }
+        ASSERT_EQ(total, 4) << "Should collect exactly 4 elements";
+        ASSERT_EQ(doc_offsets.size(), 2) << "4 elements spans 2 docs (3 + 1)";
+        ASSERT_EQ(elem_indices[0].size(), 3);
+        ASSERT_EQ(elem_indices[1].size(), 1);
+        ASSERT_TRUE(has_more);
+    }
+
+    // Case 3: partial elements pass (only elem_idx=1 per doc)
+    {
+        BitsetType partial(total_elements);
+        partial.set();  // 1 = filtered out
+        for (int doc = 0; doc < num; doc++) {
+            partial.reset(doc * array_len + 1);  // only elem_idx=1 passes
+        }
+        BitsetTypeView view(partial.data(), total_elements);
+        auto [doc_offsets, elem_indices, has_more] =
+            this->map_.find_first_element_n(
+                total_elements, view, array_offsets);
+        ASSERT_EQ(doc_offsets.size(), num);
+        for (size_t i = 0; i < doc_offsets.size(); i++) {
+            ASSERT_EQ(elem_indices[i].size(), 1);
+            ASSERT_EQ(elem_indices[i][0], 1) << "Only elem_idx=1 should pass";
+        }
+    }
+
+    // Case 4: no elements pass
+    {
+        BitsetType none(total_elements);
+        none.set();  // all filtered out
+        BitsetTypeView view(none.data(), total_elements);
+        auto [doc_offsets, elem_indices, has_more] =
+            this->map_.find_first_element_n(
+                total_elements, view, array_offsets);
+        ASSERT_EQ(doc_offsets.size(), 0);
+        ASSERT_EQ(elem_indices.size(), 0);
+    }
+
+    // Case 5: element bitset smaller than array_offsets (concurrent insert)
+    {
+        int smaller_size = total_elements - array_len;  // 12 (missing last doc)
+        BitsetType small(smaller_size);
+        small.reset();
+        BitsetTypeView view(small.data(), smaller_size);
+        auto [doc_offsets, elem_indices, has_more] =
+            this->map_.find_first_element_n(
+                total_elements, view, array_offsets);
+        // Last doc's elements are beyond bitset, should be skipped
+        int total = 0;
+        for (auto& indices : elem_indices) {
+            total += indices.size();
+        }
+        ASSERT_EQ(total, smaller_size)
+            << "Should only collect elements within bitset range";
+    }
+}
+
+REGISTER_TYPED_TEST_SUITE_P(TypedOffsetOrderedMapTest,
+                            find_first_n,
+                            find_first_element_n);
 INSTANTIATE_TYPED_TEST_SUITE_P(Prefix, TypedOffsetOrderedMapTest, TypeOfPks);
