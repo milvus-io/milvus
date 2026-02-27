@@ -18,7 +18,6 @@
 #include "aws/core/client/ClientConfiguration.h"
 #include "aws/core/internal/AWSHttpResourceClient.h"
 #include "aws/core/utils/memory/stl/AWSString.h"
-#include "HuaweiCloudSTSClient.h"
 
 namespace Aws {
 namespace Http {
