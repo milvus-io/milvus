@@ -387,6 +387,10 @@ class Schema {
 
     bool
     ShouldLoadField(FieldId field_id) {
+        auto it = fields_.find(field_id);
+        if (it != fields_.end() && !it->second.NeedLoad()) {
+            return false;
+        }
         return load_fields_.empty() || load_fields_.count(field_id) > 0;
     }
 

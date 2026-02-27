@@ -50,12 +50,14 @@ class FieldMeta {
               FieldId id,
               DataType type,
               bool nullable,
-              std::optional<DefaultValueType> default_value)
+              std::optional<DefaultValueType> default_value,
+              std::string external_field_mapping = "")
         : name_(std::move(name)),
           id_(id),
           type_(type),
           nullable_(nullable),
-          default_value_(std::move(default_value)) {
+          default_value_(std::move(default_value)),
+          external_field_mapping_(std::move(external_field_mapping)) {
         Assert(!IsVectorDataType(type_));
     }
 
@@ -64,13 +66,15 @@ class FieldMeta {
               DataType type,
               int64_t max_length,
               bool nullable,
-              std::optional<DefaultValueType> default_value)
+              std::optional<DefaultValueType> default_value,
+              std::string external_field_mapping = "")
         : name_(std::move(name)),
           id_(id),
           type_(type),
           nullable_(nullable),
           string_info_(StringInfo{max_length}),
-          default_value_(std::move(default_value)) {
+          default_value_(std::move(default_value)),
+          external_field_mapping_(std::move(external_field_mapping)) {
         Assert(IsStringDataType(type_));
     }
 
@@ -82,7 +86,8 @@ class FieldMeta {
               bool enable_match,
               bool enable_analyzer,
               std::map<std::string, std::string>& params,
-              std::optional<DefaultValueType> default_value)
+              std::optional<DefaultValueType> default_value,
+              std::string external_field_mapping = "")
         : name_(std::move(name)),
           id_(id),
           type_(type),
@@ -93,7 +98,8 @@ class FieldMeta {
               enable_analyzer,
               std::move(params),
           }),
-          default_value_(std::move(default_value)) {
+          default_value_(std::move(default_value)),
+          external_field_mapping_(std::move(external_field_mapping)) {
         Assert(IsStringDataType(type_));
     }
 
@@ -102,13 +108,15 @@ class FieldMeta {
               DataType type,
               DataType element_type,
               bool nullable,
-              std::optional<DefaultValueType> default_value)
+              std::optional<DefaultValueType> default_value,
+              std::string external_field_mapping = "")
         : name_(std::move(name)),
           id_(id),
           type_(type),
           element_type_(element_type),
           nullable_(nullable),
-          default_value_(std::move(default_value)) {
+          default_value_(std::move(default_value)),
+          external_field_mapping_(std::move(external_field_mapping)) {
         Assert(IsArrayDataType(type_));
     }
 
@@ -120,13 +128,15 @@ class FieldMeta {
               int64_t dim,
               std::optional<knowhere::MetricType> metric_type,
               bool nullable,
-              std::optional<DefaultValueType> default_value)
+              std::optional<DefaultValueType> default_value,
+              std::string external_field_mapping = "")
         : name_(std::move(name)),
           id_(id),
           type_(type),
           nullable_(nullable),
           vector_info_(VectorInfo{dim, std::move(metric_type)}),
-          default_value_(std::move(default_value)) {
+          default_value_(std::move(default_value)),
+          external_field_mapping_(std::move(external_field_mapping)) {
         Assert(IsVectorDataType(type_));
         Assert(!default_value_.has_value() &&
                "vector fields do not support default values");
@@ -138,13 +148,15 @@ class FieldMeta {
               DataType type,
               DataType element_type,
               int64_t dim,
-              std::optional<knowhere::MetricType> metric_type)
+              std::optional<knowhere::MetricType> metric_type,
+              std::string external_field_mapping = "")
         : name_(std::move(name)),
           id_(id),
           type_(type),
           nullable_(false),
           element_type_(element_type),
-          vector_info_(VectorInfo{dim, std::move(metric_type)}) {
+          vector_info_(VectorInfo{dim, std::move(metric_type)}),
+          external_field_mapping_(std::move(external_field_mapping)) {
         Assert(type_ == DataType::VECTOR_ARRAY);
         Assert(IsVectorDataType(element_type_));
     }
@@ -156,13 +168,15 @@ class FieldMeta {
               int64_t main_field_id,
               DataType type,
               bool nullable,
-              std::optional<DefaultValueType> default_value)
+              std::optional<DefaultValueType> default_value,
+              std::string external_field_mapping = "")
         : name_(std::move(name)),
           id_(id),
           main_field_id_(main_field_id),
           type_(type),
           nullable_(nullable),
-          default_value_(std::move(default_value)) {
+          default_value_(std::move(default_value)),
+          external_field_mapping_(std::move(external_field_mapping)) {
         Assert(!IsVectorDataType(type_));
     }
 
@@ -247,6 +261,16 @@ class FieldMeta {
     }
 
     bool
+    NeedLoad() const {
+        return external_field_mapping_.empty();
+    }
+
+    const std::string&
+    get_external_field_mapping() const {
+        return external_field_mapping_;
+    }
+
+    bool
     has_default_value() const {
         return default_value_.has_value();
     }
@@ -308,6 +332,7 @@ class FieldMeta {
     // for json stats, the main field id is the real field id
     // of collection schema, the field id is the json shredding field id
     int64_t main_field_id_ = INVALID_FIELD_ID;
+    std::string external_field_mapping_;
 };
 
 }  // namespace milvus
