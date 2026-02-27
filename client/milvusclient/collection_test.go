@@ -89,6 +89,45 @@ func (s *CollectionSuite) TestCreateCollection() {
 		err := s.client.CreateCollection(ctx, SimpleCreateCollectionOptions("test_collection", 128))
 		s.Error(err)
 	})
+
+	s.Run("create_index_fail", func() {
+		s.mock.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+		s.mock.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.CreateCollection(ctx, SimpleCreateCollectionOptions("test_collection", 128))
+		s.Error(err)
+	})
+
+	s.Run("index_await_fail", func() {
+		s.mock.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+		s.mock.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+		s.mock.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&milvuspb.DescribeIndexResponse{
+			Status: merr.Success(),
+			IndexDescriptions: []*milvuspb.IndexDescription{
+				{FieldName: "vector", State: commonpb.IndexState_Failed, IndexStateFailReason: "mocked index build failure"},
+			},
+		}, nil).Once()
+
+		err := s.client.CreateCollection(ctx, SimpleCreateCollectionOptions("test_collection", 128))
+		s.Error(err)
+		s.Contains(err.Error(), "mocked index build failure")
+	})
+
+	s.Run("load_await_fail", func() {
+		s.mock.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+		s.mock.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+		s.mock.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&milvuspb.DescribeIndexResponse{
+			Status: merr.Success(),
+			IndexDescriptions: []*milvuspb.IndexDescription{
+				{FieldName: "vector", State: commonpb.IndexState_Finished},
+			},
+		}, nil).Once()
+		s.mock.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+		s.mock.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked load failure")).Once()
+
+		err := s.client.CreateCollection(ctx, SimpleCreateCollectionOptions("test_collection", 128))
+		s.Error(err)
+	})
 }
 
 func (s *CollectionSuite) TestCreateCollectionOptions() {
