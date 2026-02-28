@@ -54,9 +54,6 @@
 #include "aws/s3/S3Errors.h"
 #include "common/EasyAssert.h"
 #include "glog/logging.h"
-#include "google/cloud/internal/oauth2_compute_engine_credentials.h"
-#include "google/cloud/internal/oauth2_credentials.h"
-#include "google/cloud/internal/oauth2_google_credentials.h"
 #include "google/cloud/status.h"
 #include "log/Log.h"
 #include "storage/ChunkManager.h"
@@ -368,15 +365,12 @@ class GoogleHttpClientFactory : public Aws::Http::HttpClientFactory {
                 GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, uri, method);
         request->SetResponseStreamFactory(streamFactory);
         auto auth_header =
-            google::cloud::oauth2_internal::AuthorizationHeader(
-                *credentials_);
+            google::cloud::oauth2_internal::AuthorizationHeader(*credentials_);
         if (!auth_header.ok()) {
-            ThrowInfo(
-                S3Error,
-                fmt::format(
-                    "get authorization failed, errcode: {}",
-                    google::cloud::StatusCodeToString(
-                        auth_header.status().code())));
+            ThrowInfo(S3Error,
+                      fmt::format("get authorization failed, errcode: {}",
+                                  google::cloud::StatusCodeToString(
+                                      auth_header.status().code())));
         }
         request->SetHeaderValue(auth_header->first.c_str(),
                                 auth_header->second.c_str());
