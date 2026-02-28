@@ -15,11 +15,8 @@
 // limitations under the License.
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 
-#include "common/type_c.h"
-#include "segcore/Utils.h"
-#include "segcore/storagev2translator/GroupCTMeta.h"
-#include <cassert>
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -29,6 +26,7 @@
 
 #include "NamedType/named_type_impl.hpp"
 #include "arrow/api.h"
+
 #include "cachinglayer/Utils.h"
 #include "common/Chunk.h"
 #include "common/ChunkWriter.h"
@@ -37,29 +35,18 @@
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/GroupChunk.h"
-#include "mmap/Types.h"
 #include "common/Types.h"
+#include "common/type_c.h"
+#include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
-#include "milvus-storage/common/constants.h"
 #include "milvus-storage/format/parquet/file_reader.h"
-#include "storage/ThreadPools.h"
-#include "storage/KeyRetriever.h"
-#include "segcore/memory_planner.h"
-
-#include <memory>
-#include <string>
-#include <unordered_set>
-#include <vector>
-#include <unordered_map>
-#include <set>
-#include <algorithm>
-
-#include "arrow/type.h"
-#include "arrow/type_fwd.h"
-#include "cachinglayer/Utils.h"
-#include "common/ChunkWriter.h"
+#include "mmap/Types.h"
 #include "segcore/Utils.h"
+#include "segcore/memory_planner.h"
+#include "segcore/storagev2translator/GroupCTMeta.h"
+#include "storage/KeyRetriever.h"
+#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
 namespace milvus::segcore::storagev2translator {
@@ -345,17 +332,20 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
     }
 
     // Submit cell-batch loading tasks
-    auto channel = std::make_shared<milvus::segcore::CellReaderChannel>();
+    auto& pool = milvus::ThreadPools::GetThreadPool(
+        milvus::PriorityForLoad(load_priority_));
+    auto channel = std::make_shared<milvus::segcore::CellReaderChannel>(
+        static_cast<size_t>(pool.GetMaxThreadNum() * 1.5));
     auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                   .GetArrowFileSystem();
 
+    auto factory = milvus::segcore::MakeFileReaderFactory(insert_files_, fs);
     auto load_futures =
         milvus::segcore::LoadCellBatchAsync(ctx,
-                                            insert_files_,
                                             std::move(cell_specs),
+                                            std::move(factory),
                                             channel,
                                             DEFAULT_FIELD_MAX_MEMORY_LIMIT,
-                                            fs,
                                             load_priority_);
 
     LOG_INFO(
@@ -369,12 +359,26 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
         completed_cells;
     completed_cells.reserve(cids.size());
 
-    std::shared_ptr<milvus::segcore::CellLoadResult> cell_data;
-    while (channel->pop(cell_data)) {
-        CheckCancellation(
-            ctx, segment_id_, "GroupChunkTranslator::get_cells()");
-        completed_cells[cell_data->cid] =
-            load_group_chunk(cell_data->tables, cell_data->cid);
+    try {
+        std::shared_ptr<milvus::segcore::CellLoadResult> cell_data;
+        while (channel->pop(cell_data)) {
+            CheckCancellation(
+                ctx, segment_id_, "GroupChunkTranslator::get_cells()");
+            completed_cells[cell_data->cid] =
+                load_group_chunk(cell_data->tables, cell_data->cid);
+        }
+    } catch (...) {
+        // Drain the channel to unblock producers that may be stuck on push()
+        // to a full bounded channel. Without draining, producers block forever
+        // and their task_guard (which calls channel->close()) never executes.
+        std::shared_ptr<milvus::segcore::CellLoadResult> discard;
+        try {
+            while (channel->pop(discard)) {
+            }
+        } catch (...) {
+            LOG_WARN("drain channel exception swallowed");
+        }
+        throw;
     }
 
     // access underlying future to get exception if any
