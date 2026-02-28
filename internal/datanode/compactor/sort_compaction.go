@@ -317,7 +317,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		zap.Int("valid rows", numValidRows),
 		zap.Int("deleted rows", entityFilter.GetDeletedCount()),
 		zap.Int("expired rows", entityFilter.GetExpiredCount()),
-		zap.Int("deltaLogCount", len(t.deltaLogs)),
+		zap.Int("deltaLogCount", len(t.plan.SegmentBinlogs[0].GetDeltalogs())),
 		zap.Int("deletePKCount", len(deletePKs)),
 		zap.Bool("useManifest", t.manifest != ""),
 		zap.Duration("initWriterCost", initWriterCost),
