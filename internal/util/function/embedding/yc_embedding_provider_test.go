@@ -25,6 +25,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -171,4 +172,73 @@ func (s *YCEmbeddingProviderSuite) TestCustomAndDefaultURL() {
 	p, err := NewYCEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 	s.NoError(err)
 	s.Equal(defaultYCTextEmbeddingURL, p.url)
+}
+
+func (s *YCEmbeddingProviderSuite) TestMissingModelName() {
+	functionSchema := &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_Unknown,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+		Params: []*commonpb.KeyValuePair{
+			{Key: models.CredentialParamKey, Value: "mock"},
+		},
+	}
+	_, err := NewYCEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
+	s.ErrorContains(err, "yc embedding model name is required")
+}
+
+func (s *YCEmbeddingProviderSuite) TestInvalidDimParam() {
+	functionSchema := &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_Unknown,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+		Params: []*commonpb.KeyValuePair{
+			{Key: models.ModelNameParamKey, Value: "emb://test/model"},
+			{Key: models.DimParamKey, Value: "invalid"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		},
+	}
+	_, err := NewYCEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
+	s.ErrorContains(err, "is not a valid int")
+}
+
+func (s *YCEmbeddingProviderSuite) TestParseCredentialError() {
+	functionSchema := &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_Unknown,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+		Params: []*commonpb.KeyValuePair{
+			{Key: models.ModelNameParamKey, Value: "emb://test/model"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		},
+	}
+	_, err := NewYCEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.token": "not-apikey"}), &models.ModelExtraInfo{})
+	s.Error(err)
+}
+
+func (s *YCEmbeddingProviderSuite) TestEmptyEmbeddingResponse() {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(YCEmbeddingResponse{})
+	}))
+	defer ts.Close()
+
+	provider, err := createYCProvider(ts.URL, s.schema.Fields[2])
+	s.NoError(err)
+	_, err = provider.CallEmbedding(context.Background(), []string{"sentence"}, models.InsertMode)
+	s.ErrorContains(err, "number of texts and embeddings does not match")
+}
+
+func TestExtractYCEmbeddings(t *testing.T) {
+	resp := &YCEmbeddingResponse{}
+	assert.Equal(t, [][]float32(nil), extractYCEmbeddings(resp))
 }
