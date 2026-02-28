@@ -232,13 +232,6 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                                  static_cast<size_t>(block.offset + i),
                                  table});
                         }
-                        auto close_status = row_group_reader->Close();
-                        AssertInfo(
-                            close_status.ok(),
-                            "[StorageV2] Failed to close row group reader "
-                            "for file " +
-                                file + " with error " +
-                                close_status.ToString());
                         return ret;
                     }));
             }
@@ -359,6 +352,11 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                        "[StorageV2] Failed to read batch: " +
                            tables_result.status().ToString());
             auto all_tables = std::move(tables_result).ValueOrDie();
+            AssertInfo(all_tables.size() == static_cast<size_t>(batch.rg_count),
+                       "reader returns less tables than expected, batch rg "
+                       "count: {}, result size: {}",
+                       batch.rg_count,
+                       all_tables.size());
 
             int64_t table_offset = 0;
             for (const auto& cell : batch.cells) {
