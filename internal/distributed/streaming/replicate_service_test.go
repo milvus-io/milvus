@@ -319,6 +319,109 @@ func TestReplicateService_AlterConfigPChannelIncreasing(t *testing.T) {
 			assert.Contains(t, err.Error(), "failed to get target channel")
 		}
 	})
+
+	t.Run("with_flag_invalid_config_in_header", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+
+		h := mock_handler.NewMockHandlerClient(t)
+
+		// Current config has 2 channels
+		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(replicateutil.MustNewConfigHelper(
+			"by-dev",
+			&commonpb.ReplicateConfiguration{
+				Clusters: []*commonpb.MilvusCluster{
+					{ClusterId: "primary", Pchannels: []string{"primary-rootcoord-dml_0", "primary-rootcoord-dml_1"}},
+					{ClusterId: "by-dev", Pchannels: []string{"by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1"}},
+				},
+				CrossClusterTopology: []*commonpb.CrossClusterTopology{
+					{SourceClusterId: "primary", TargetClusterId: "by-dev"},
+				},
+			},
+		), nil)
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+
+		// Build with IsPchannelIncreasing flag but an invalid config (no topology, multiple primary => error)
+		invalidConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "primary", Pchannels: []string{"primary-rootcoord-dml_0"}},
+				{ClusterId: "by-dev", Pchannels: []string{"by-dev-rootcoord-dml_0"}},
+			},
+			// Missing CrossClusterTopology => both clusters are "primary" => primaryCount != 1
+		}
+		replicateMsgs := createReplicateAlterConfigMessages(invalidConfig,
+			[]string{"primary-rootcoord-dml_0"},
+			true)
+
+		for _, msg := range replicateMsgs {
+			_, err := rs.Append(context.Background(), msg)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "failed to parse new replicate config")
+		}
+	})
+
+	t.Run("with_flag_source_cluster_missing_in_new_config", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+
+		h := mock_handler.NewMockHandlerClient(t)
+
+		// Current config has 2 channels
+		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(replicateutil.MustNewConfigHelper(
+			"by-dev",
+			&commonpb.ReplicateConfiguration{
+				Clusters: []*commonpb.MilvusCluster{
+					{ClusterId: "primary", Pchannels: []string{"primary-rootcoord-dml_0", "primary-rootcoord-dml_1"}},
+					{ClusterId: "by-dev", Pchannels: []string{"by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1"}},
+				},
+				CrossClusterTopology: []*commonpb.CrossClusterTopology{
+					{SourceClusterId: "primary", TargetClusterId: "by-dev"},
+				},
+			},
+		), nil)
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+
+		// Build with IsPchannelIncreasing flag but the new config uses "other-cluster" instead of "primary"
+		// The replicate header has ClusterID="primary", but the new config doesn't contain "primary"
+		missingSourceConfig := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "other-cluster", Pchannels: []string{"other-rootcoord-dml_0"}},
+				{ClusterId: "by-dev", Pchannels: []string{"by-dev-rootcoord-dml_0"}},
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "other-cluster", TargetClusterId: "by-dev"},
+			},
+		}
+		replicateMsgs := createReplicateAlterConfigMessages(missingSourceConfig,
+			[]string{"primary-rootcoord-dml_0"},
+			true)
+
+		for _, msg := range replicateMsgs {
+			_, err := rs.Append(context.Background(), msg)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "source cluster primary not found in new replicate configuration")
+		}
+	})
 }
 
 func createReplicateAlterConfigMessages(newConfig *commonpb.ReplicateConfiguration, broadcastChannels []string, isPchannelIncreasing bool) []message.ReplicateMutableMessage {
