@@ -260,12 +260,16 @@ ManifestGroupTranslator::get_cells(
             completed_cells[cell_data->cid] =
                 load_group_chunk(cell_data->tables, cell_data->cid);
         }
-    } catch (std::exception& ex) {
-        // make sure all futures are handled, but still throw pop & load ex
+    } catch (...) {
+        // Drain the channel to unblock producers that may be stuck on push()
+        // to a full bounded channel. Without draining, producers block forever
+        // and their task_guard (which calls channel->close()) never executes.
+        std::shared_ptr<milvus::segcore::CellLoadResult> discard;
         try {
-            storage::WaitAllFutures(load_futures);
+            while (channel->pop(discard)) {
+            }
         } catch (...) {
-            LOG_WARN("WaitAllFutures exception swallowed");
+            LOG_WARN("drain channel exception swallowed");
         }
         throw;
     }
