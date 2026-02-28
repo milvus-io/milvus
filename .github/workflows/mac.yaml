@@ -95,6 +95,14 @@ jobs:
           fi
           brew install libomp ninja openblas ccache pkg-config aws-sdk-cpp
           BREW_PREFIX=$(brew --prefix)
+          # aws-sdk-cpp 1.11.750 had a packaging bug where Paginator.h was not
+          # installed. Homebrew backported the fix (rebuild 1). If the runner has
+          # a stale installation without the fix, reinstall to pick up the
+          # patched bottle.
+          if [ ! -f "${BREW_PREFIX}/include/aws/core/utils/pagination/Paginator.h" ]; then
+            echo "Paginator.h missing – reinstalling aws-sdk-cpp to pick up pagination header fix"
+            brew reinstall aws-sdk-cpp
+          fi
           # Install llvm@17 explicitly as a stable version
           brew install llvm@17
           if [[ ! -d "${BREW_PREFIX}/opt/llvm" ]]; then
