@@ -2,11 +2,11 @@ package streaming
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/protobuf/proto"
