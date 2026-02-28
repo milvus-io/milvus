@@ -2303,7 +2303,7 @@ func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRe
 	}
 
 	// Delegate to SnapshotManager
-	restoreInfos, err := s.snapshotManager.ListRestoreJobs(ctx, req.GetCollectionId())
+	restoreInfos, err := s.snapshotManager.ListRestoreJobs(ctx, req.GetCollectionId(), req.GetDbId())
 	if err != nil {
 		log.Ctx(ctx).Error("failed to list restore jobs", zap.Error(err))
 		return &datapb.ListRestoreSnapshotJobsResponse{
@@ -2331,7 +2331,7 @@ func (s *Server) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsReq
 	log.Info("receive ListSnapshots request")
 
 	// Delegate to SnapshotManager
-	snapshots, err := s.snapshotManager.ListSnapshots(ctx, req.GetCollectionId(), req.GetPartitionId())
+	snapshots, err := s.snapshotManager.ListSnapshots(ctx, req.GetCollectionId(), req.GetPartitionId(), req.GetDbId())
 	if err != nil {
 		log.Error("failed to list snapshots", zap.Error(err))
 		return &datapb.ListSnapshotsResponse{

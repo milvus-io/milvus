@@ -335,6 +335,7 @@ type listSnapshotsTask struct {
 	result   *milvuspb.ListSnapshotsResponse
 
 	collectionID UniqueID
+	dbID         UniqueID
 }
 
 func (lst *listSnapshotsTask) TraceCtx() context.Context {
@@ -379,7 +380,14 @@ func (lst *listSnapshotsTask) OnEnqueue() error {
 }
 
 func (lst *listSnapshotsTask) PreExecute(ctx context.Context) error {
-	// If collection_name is empty, set collectionID to 0 to list all snapshots
+	// Always resolve db_name to db_id (also validates db exists)
+	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, lst.req.GetDbName())
+	if err != nil {
+		return err
+	}
+	lst.dbID = dbInfo.dbID
+
+	// If collection_name is empty, DataCoord will filter by db_id
 	if lst.req.GetCollectionName() == "" {
 		lst.collectionID = 0
 		return nil
@@ -405,6 +413,7 @@ func (lst *listSnapshotsTask) Execute(ctx context.Context) error {
 			commonpbutil.WithMsgType(commonpb.MsgType_ListSnapshots),
 		),
 		CollectionId: lst.collectionID,
+		DbId:         lst.dbID,
 	})
 	if err = merr.CheckRPCCall(result, err); err != nil {
 		lst.result = &milvuspb.ListSnapshotsResponse{
@@ -648,6 +657,7 @@ type listRestoreSnapshotJobsTask struct {
 	result   *milvuspb.ListRestoreSnapshotJobsResponse
 
 	collectionID UniqueID
+	dbID         UniqueID
 }
 
 func (lrst *listRestoreSnapshotJobsTask) TraceCtx() context.Context {
@@ -692,6 +702,13 @@ func (lrst *listRestoreSnapshotJobsTask) OnEnqueue() error {
 }
 
 func (lrst *listRestoreSnapshotJobsTask) PreExecute(ctx context.Context) error {
+	// Always resolve db_name to db_id (also validates db exists)
+	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, lrst.req.GetDbName())
+	if err != nil {
+		return err
+	}
+	lrst.dbID = dbInfo.dbID
+
 	if lrst.req.GetCollectionName() != "" {
 		collectionID, err := globalMetaCache.GetCollectionID(ctx, lrst.req.GetDbName(), lrst.req.GetCollectionName())
 		if err != nil {
@@ -713,6 +730,7 @@ func (lrst *listRestoreSnapshotJobsTask) Execute(ctx context.Context) error {
 			commonpbutil.WithMsgType(commonpb.MsgType_Undefined),
 		),
 		CollectionId: lrst.collectionID,
+		DbId:         lrst.dbID,
 	})
 	if err = merr.CheckRPCCall(result, err); err != nil {
 		lrst.result = &milvuspb.ListRestoreSnapshotJobsResponse{
@@ -728,7 +746,7 @@ func (lrst *listRestoreSnapshotJobsTask) Execute(ctx context.Context) error {
 		collectionName := ""
 		if job.GetCollectionId() != 0 {
 			var err error
-			collectionName, err = globalMetaCache.GetCollectionName(ctx, "", job.GetCollectionId())
+			collectionName, err = globalMetaCache.GetCollectionName(ctx, lrst.req.GetDbName(), job.GetCollectionId())
 			if err != nil {
 				log.Ctx(ctx).Warn("ListRestoreSnapshotJobs fail to get collection name",
 					zap.Error(err))

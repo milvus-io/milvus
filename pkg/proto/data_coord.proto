@@ -1491,6 +1491,7 @@ message ListSnapshotsRequest {
   common.MsgBase base = 1;
   int64 collection_id = 2; // collection id, if collection_id is 0, it will list all snapshots.
   int64 partition_id = 3; // partition id, if partition_id is 0, it will list all snapshots.
+  int64 db_id = 4; // filter by database, 0 means no filter
 }
 
 // return all snapshots for the given collection or partition
@@ -1626,7 +1627,7 @@ message GetRestoreSnapshotStateResponse {
 message ListRestoreSnapshotJobsRequest {
   common.MsgBase base = 1;
   int64 collection_id = 2; // filter by collection id, empty for all
-
+  int64 db_id = 3; // filter by database, 0 means no filter
 }
 
 message ListRestoreSnapshotJobsResponse {

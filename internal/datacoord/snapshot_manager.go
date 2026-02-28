@@ -142,11 +142,12 @@ type SnapshotManager interface {
 	//   - ctx: Context for cancellation and timeout
 	//   - collectionID: Filter by collection ID (0 = all collections)
 	//   - partitionID: Filter by partition ID (0 = all partitions)
+	//   - dbID: Filter by database ID (0 = no database filter)
 	//
 	// Returns:
 	//   - snapshots: List of snapshot names
 	//   - error: If listing fails
-	ListSnapshots(ctx context.Context, collectionID, partitionID int64) ([]string, error)
+	ListSnapshots(ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error)
 
 	// Restore operations
 
@@ -252,16 +253,17 @@ type SnapshotManager interface {
 	//   - error: If job not found
 	GetRestoreState(ctx context.Context, jobID int64) (*datapb.RestoreSnapshotInfo, error)
 
-	// ListRestoreJobs returns a list of all restore jobs, optionally filtered by collection ID.
+	// ListRestoreJobs returns a list of all restore jobs, optionally filtered by collection ID and database ID.
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout
 	//   - collectionIDFilter: Filter by collection ID (0 = all jobs)
+	//   - dbID: Filter by database ID (0 = no database filter)
 	//
 	// Returns:
 	//   - restoreInfos: List of restore job information
 	//   - error: If listing fails
-	ListRestoreJobs(ctx context.Context, collectionIDFilter int64) ([]*datapb.RestoreSnapshotInfo, error)
+	ListRestoreJobs(ctx context.Context, collectionIDFilter, dbID int64) ([]*datapb.RestoreSnapshotInfo, error)
 
 	// Snapshot restore reference tracking
 	//
@@ -429,11 +431,27 @@ func (sm *snapshotManager) DescribeSnapshot(ctx context.Context, name string) (*
 }
 
 // ListSnapshots returns a list of snapshot names for the specified collection/partition.
-func (sm *snapshotManager) ListSnapshots(ctx context.Context, collectionID, partitionID int64) ([]string, error) {
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
+func (sm *snapshotManager) ListSnapshots(ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error) {
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID), zap.Int64("dbID", dbID))
 	log.Info("list snapshots request received")
 
-	// List snapshots
+	// When dbID is specified and collectionID is not, aggregate snapshots across all collections in the database.
+	if dbID != 0 && collectionID == 0 {
+		var allSnapshots []string
+		for _, coll := range sm.meta.GetCollections() {
+			if coll.DatabaseID != dbID {
+				continue
+			}
+			snapshots, err := sm.snapshotMeta.ListSnapshots(ctx, coll.ID, partitionID)
+			if err != nil {
+				log.Error("failed to list snapshots for collection", zap.Int64("collID", coll.ID), zap.Error(err))
+				return nil, err
+			}
+			allSnapshots = append(allSnapshots, snapshots...)
+		}
+		return allSnapshots, nil
+	}
+
 	snapshots, err := sm.snapshotMeta.ListSnapshots(ctx, collectionID, partitionID)
 	if err != nil {
 		log.Error("failed to list snapshots", zap.Error(err))
@@ -1150,19 +1168,26 @@ func (sm *snapshotManager) GetRestoreState(ctx context.Context, jobID int64) (*d
 	return restoreInfo, nil
 }
 
-// ListRestoreJobs returns a list of all restore jobs, optionally filtered by collection ID.
+// ListRestoreJobs returns a list of all restore jobs, optionally filtered by collection ID and database ID.
 func (sm *snapshotManager) ListRestoreJobs(
 	ctx context.Context,
-	collectionIDFilter int64,
+	collectionIDFilter, dbID int64,
 ) ([]*datapb.RestoreSnapshotInfo, error) {
 	// Get all jobs
 	jobs := sm.copySegmentMeta.GetJobBy(ctx)
 
-	// Filter by collection and build restore info list
+	// Filter by collection/database and build restore info list
 	restoreInfos := make([]*datapb.RestoreSnapshotInfo, 0)
 	for _, job := range jobs {
 		if collectionIDFilter != 0 && job.GetCollectionId() != collectionIDFilter {
 			continue
+		}
+		// Filter by database: check if the job's collection belongs to the specified database
+		if dbID != 0 {
+			coll := sm.meta.GetCollection(job.GetCollectionId())
+			if coll == nil || coll.DatabaseID != dbID {
+				continue
+			}
 		}
 
 		restoreInfos = append(restoreInfos, sm.buildRestoreInfo(job))
@@ -1170,7 +1195,8 @@ func (sm *snapshotManager) ListRestoreJobs(
 
 	log.Ctx(ctx).Info("list restore jobs completed",
 		zap.Int("totalJobs", len(restoreInfos)),
-		zap.Int64("filterCollectionId", collectionIDFilter))
+		zap.Int64("filterCollectionId", collectionIDFilter),
+		zap.Int64("filterDbId", dbID))
 
 	return restoreInfos, nil
 }

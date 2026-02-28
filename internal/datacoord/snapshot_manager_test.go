@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // --- Test CreateSnapshot ---
@@ -486,8 +487,8 @@ func TestSnapshotManager_ListSnapshots_Success(t *testing.T) {
 		nil,
 	)
 
-	// Execute
-	snapshots, err := sm.ListSnapshots(ctx, 100, 0)
+	// Execute - dbID=0 means no db filter
+	snapshots, err := sm.ListSnapshots(ctx, 100, 0, 0)
 
 	// Verify
 	assert.NoError(t, err)
@@ -513,8 +514,8 @@ func TestSnapshotManager_ListSnapshots_Error(t *testing.T) {
 		nil,
 	)
 
-	// Execute
-	snapshots, err := sm.ListSnapshots(ctx, 100, 0)
+	// Execute - dbID=0 means no db filter
+	snapshots, err := sm.ListSnapshots(ctx, 100, 0, 0)
 
 	// Verify
 	assert.Error(t, err)
@@ -641,8 +642,8 @@ func TestSnapshotManager_ListRestoreJobs_Success(t *testing.T) {
 		nil,
 	)
 
-	// Execute - no filter
-	jobs, err := sm.ListRestoreJobs(ctx, 0)
+	// Execute - no filter (dbID=0 means no db filter)
+	jobs, err := sm.ListRestoreJobs(ctx, 0, 0)
 
 	// Verify
 	assert.NoError(t, err)
@@ -700,8 +701,8 @@ func TestSnapshotManager_ListRestoreJobs_FilterByCollectionID(t *testing.T) {
 		nil,
 	)
 
-	// Execute - filter by collection ID 100
-	jobs, err := sm.ListRestoreJobs(ctx, 100)
+	// Execute - filter by collection ID 100 (dbID=0 means no db filter)
+	jobs, err := sm.ListRestoreJobs(ctx, 100, 0)
 
 	// Verify - should return 2 jobs for collection 100
 	assert.NoError(t, err)
@@ -711,7 +712,7 @@ func TestSnapshotManager_ListRestoreJobs_FilterByCollectionID(t *testing.T) {
 	}
 
 	// Execute - filter by collection ID 200
-	jobs, err = sm.ListRestoreJobs(ctx, 200)
+	jobs, err = sm.ListRestoreJobs(ctx, 200, 0)
 
 	// Verify - should return 1 job for collection 200
 	assert.NoError(t, err)
@@ -720,11 +721,173 @@ func TestSnapshotManager_ListRestoreJobs_FilterByCollectionID(t *testing.T) {
 	assert.Equal(t, int64(2), jobs[0].GetJobId())
 
 	// Execute - filter by non-existent collection ID
-	jobs, err = sm.ListRestoreJobs(ctx, 999)
+	jobs, err = sm.ListRestoreJobs(ctx, 999, 0)
 
 	// Verify - should return 0 jobs
 	assert.NoError(t, err)
 	assert.Len(t, jobs, 0)
+}
+
+func TestSnapshotManager_ListSnapshots_FilterByDbId(t *testing.T) {
+	ctx := context.Background()
+
+	// Setup: 2 collections in db1 (dbID=1), 1 collection in db2 (dbID=2)
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(100, &collectionInfo{ID: 100, DatabaseID: 1, DatabaseName: "db1"})
+	collections.Insert(200, &collectionInfo{ID: 200, DatabaseID: 1, DatabaseName: "db1"})
+	collections.Insert(300, &collectionInfo{ID: 300, DatabaseID: 2, DatabaseName: "db2"})
+
+	testMeta := &meta{collections: collections}
+
+	// Mock snapshotMeta.ListSnapshots to return per-collection snapshots
+	mockListSnapshots := mockey.Mock((*snapshotMeta).ListSnapshots).To(func(sm *snapshotMeta, ctx context.Context, collectionID, partitionID int64) ([]string, error) {
+		switch collectionID {
+		case 100:
+			return []string{"snap_coll100"}, nil
+		case 200:
+			return []string{"snap_coll200_a", "snap_coll200_b"}, nil
+		case 300:
+			return []string{"snap_coll300"}, nil
+		default:
+			return nil, nil
+		}
+	}).Build()
+	defer mockListSnapshots.UnPatch()
+
+	sm := NewSnapshotManager(
+		testMeta,
+		&snapshotMeta{},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+
+	t.Run("filter by db1 returns only db1 snapshots", func(t *testing.T) {
+		snapshots, err := sm.ListSnapshots(ctx, 0, 0, 1)
+		assert.NoError(t, err)
+		assert.Len(t, snapshots, 3) // snap_coll100 + snap_coll200_a + snap_coll200_b
+		assert.Contains(t, snapshots, "snap_coll100")
+		assert.Contains(t, snapshots, "snap_coll200_a")
+		assert.Contains(t, snapshots, "snap_coll200_b")
+	})
+
+	t.Run("filter by db2 returns only db2 snapshots", func(t *testing.T) {
+		snapshots, err := sm.ListSnapshots(ctx, 0, 0, 2)
+		assert.NoError(t, err)
+		assert.Len(t, snapshots, 1)
+		assert.Contains(t, snapshots, "snap_coll300")
+	})
+
+	t.Run("filter by nonexistent db returns empty", func(t *testing.T) {
+		snapshots, err := sm.ListSnapshots(ctx, 0, 0, 999)
+		assert.NoError(t, err)
+		assert.Len(t, snapshots, 0)
+	})
+
+	t.Run("specific collection ignores db filter", func(t *testing.T) {
+		snapshots, err := sm.ListSnapshots(ctx, 100, 0, 1)
+		assert.NoError(t, err)
+		assert.Len(t, snapshots, 1)
+		assert.Equal(t, []string{"snap_coll100"}, snapshots)
+	})
+}
+
+func TestSnapshotManager_ListSnapshots_FilterByDbId_Error(t *testing.T) {
+	ctx := context.Background()
+
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(100, &collectionInfo{ID: 100, DatabaseID: 1, DatabaseName: "db1"})
+	testMeta := &meta{collections: collections}
+
+	expectedErr := errors.New("list error")
+	mockListSnapshots := mockey.Mock((*snapshotMeta).ListSnapshots).Return(nil, expectedErr).Build()
+	defer mockListSnapshots.UnPatch()
+
+	sm := NewSnapshotManager(testMeta, &snapshotMeta{}, nil, nil, nil, nil, nil)
+
+	snapshots, err := sm.ListSnapshots(ctx, 0, 0, 1)
+	assert.Error(t, err)
+	assert.Equal(t, expectedErr, err)
+	assert.Nil(t, snapshots)
+}
+
+func TestSnapshotManager_ListRestoreJobs_FilterByDbId(t *testing.T) {
+	ctx := context.Background()
+
+	// Setup: collections in different databases
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(100, &collectionInfo{ID: 100, DatabaseID: 1, DatabaseName: "db1"})
+	collections.Insert(200, &collectionInfo{ID: 200, DatabaseID: 2, DatabaseName: "db2"})
+	collections.Insert(300, &collectionInfo{ID: 300, DatabaseID: 1, DatabaseName: "db1"})
+
+	testMeta := &meta{collections: collections}
+
+	testJobs := []CopySegmentJob{
+		&copySegmentJob{CopySegmentJob: &datapb.CopySegmentJob{
+			JobId: 1, SnapshotName: "snap1", CollectionId: 100,
+			State: datapb.CopySegmentJobState_CopySegmentJobCompleted, TotalSegments: 10, CopiedSegments: 10,
+		}},
+		&copySegmentJob{CopySegmentJob: &datapb.CopySegmentJob{
+			JobId: 2, SnapshotName: "snap2", CollectionId: 200,
+			State: datapb.CopySegmentJobState_CopySegmentJobPending, TotalSegments: 5, CopiedSegments: 0,
+		}},
+		&copySegmentJob{CopySegmentJob: &datapb.CopySegmentJob{
+			JobId: 3, SnapshotName: "snap3", CollectionId: 300,
+			State: datapb.CopySegmentJobState_CopySegmentJobExecuting, TotalSegments: 8, CopiedSegments: 4,
+		}},
+	}
+
+	mockGetJobBy := mockey.Mock((*copySegmentMeta).GetJobBy).To(func(csm *copySegmentMeta, ctx context.Context, filters ...CopySegmentJobFilter) []CopySegmentJob {
+		return testJobs
+	}).Build()
+	defer mockGetJobBy.UnPatch()
+
+	sm := NewSnapshotManager(
+		testMeta,
+		nil,
+		&copySegmentMeta{},
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+
+	t.Run("filter by db1 returns only db1 jobs", func(t *testing.T) {
+		jobs, err := sm.ListRestoreJobs(ctx, 0, 1)
+		assert.NoError(t, err)
+		assert.Len(t, jobs, 2) // job 1 (coll 100) + job 3 (coll 300)
+		assert.Equal(t, int64(1), jobs[0].GetJobId())
+		assert.Equal(t, int64(3), jobs[1].GetJobId())
+	})
+
+	t.Run("filter by db2 returns only db2 jobs", func(t *testing.T) {
+		jobs, err := sm.ListRestoreJobs(ctx, 0, 2)
+		assert.NoError(t, err)
+		assert.Len(t, jobs, 1)
+		assert.Equal(t, int64(2), jobs[0].GetJobId())
+	})
+
+	t.Run("filter by nonexistent db returns empty", func(t *testing.T) {
+		jobs, err := sm.ListRestoreJobs(ctx, 0, 999)
+		assert.NoError(t, err)
+		assert.Len(t, jobs, 0)
+	})
+
+	t.Run("collection filter takes priority over db filter", func(t *testing.T) {
+		jobs, err := sm.ListRestoreJobs(ctx, 100, 1)
+		assert.NoError(t, err)
+		assert.Len(t, jobs, 1)
+		assert.Equal(t, int64(1), jobs[0].GetJobId())
+	})
+
+	t.Run("db filter with no matching collection returns empty", func(t *testing.T) {
+		// collection 100 is in db1, not db2
+		jobs, err := sm.ListRestoreJobs(ctx, 100, 2)
+		assert.NoError(t, err)
+		assert.Len(t, jobs, 0)
+	})
 }
 
 // --- Test Helper Functions ---

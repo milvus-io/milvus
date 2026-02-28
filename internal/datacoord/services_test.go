@@ -2931,7 +2931,7 @@ func TestServer_ListSnapshots(t *testing.T) {
 
 		// Mock ListSnapshots to return empty list
 		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID int64) ([]string, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error) {
 				return []string{}, nil
 			}).Build()
 		defer mockList.UnPatch()
@@ -2955,7 +2955,7 @@ func TestServer_ListSnapshots(t *testing.T) {
 
 		// Mock ListSnapshots to return list
 		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID int64) ([]string, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error) {
 				return []string{"snapshot1", "snapshot2"}, nil
 			}).Build()
 		defer mockList.UnPatch()
@@ -2979,7 +2979,7 @@ func TestServer_ListSnapshots(t *testing.T) {
 
 		// Mock ListSnapshots to return error
 		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID int64) ([]string, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error) {
 				return nil, errors.New("failed to list snapshots")
 			}).Build()
 		defer mockList.UnPatch()
