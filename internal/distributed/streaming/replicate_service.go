@@ -18,10 +18,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+// buildSkipMessageTypes builds a set of message type names to skip during replication.
+func buildSkipMessageTypes(types []string) map[string]struct{} {
+	m := make(map[string]struct{}, len(types))
+	for _, t := range types {
+		if t != "" {
+			m[t] = struct{}{}
+		}
+	}
+	return m
+}
+
 var _ ReplicateService = replicateService{}
 
 type replicateService struct {
 	*walAccesserImpl
+	skipMessageTypes map[string]struct{}
 }
 
 // Append appends the message into current cluster.
@@ -82,21 +94,15 @@ func (s replicateService) GetReplicateCheckpoint(ctx context.Context, channelNam
 }
 
 // shouldSkipReplicateMessageType checks if the given message type should be skipped during replication.
-func shouldSkipReplicateMessageType(msgType message.MessageType) bool {
-	skipTypes := paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.GetAsStrings()
-	typeName := msgType.String()
-	for _, s := range skipTypes {
-		if s == typeName {
-			return true
-		}
-	}
-	return false
+func (s replicateService) shouldSkipReplicateMessageType(msgType message.MessageType) bool {
+	_, ok := s.skipMessageTypes[msgType.String()]
+	return ok
 }
 
 // overwriteReplicateMessage overwrites the replicate message.
 // because some message such as create collection message write vchannel in its body, so we need to overwrite the message.
 func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg message.ReplicateMutableMessage, rh *message.ReplicateHeader) (message.MutableMessage, error) {
-	if shouldSkipReplicateMessageType(msg.MessageType()) {
+	if s.shouldSkipReplicateMessageType(msg.MessageType()) {
 		return nil, status.NewIgnoreOperation("message type %s is configured to be skipped during replication", msg.MessageType())
 	}
 
