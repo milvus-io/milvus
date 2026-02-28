@@ -16,36 +16,38 @@
 
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
 
-#include "common/type_c.h"
-#include "segcore/Utils.h"
-#include "milvus-storage/reader.h"
-#include "segcore/storagev2translator/GroupCTMeta.h"
-#include "common/GroupChunk.h"
-#include "mmap/Types.h"
-#include "common/Types.h"
-#include "milvus-storage/common/metadata.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "milvus-storage/common/constants.h"
-#include "milvus-storage/format/parquet/file_reader.h"
-#include "storage/ThreadPools.h"
-#include "storage/KeyRetriever.h"
-#include "segcore/memory_planner.h"
-
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
+#include <filesystem>
 #include <memory>
+#include <set>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <unordered_map>
-#include <set>
-#include <algorithm>
 
 #include "arrow/type.h"
 #include "arrow/type_fwd.h"
+
 #include "cachinglayer/Utils.h"
 #include "common/ChunkWriter.h"
+#include "common/GroupChunk.h"
+#include "common/Types.h"
+#include "common/type_c.h"
+#include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/metadata.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/format/parquet/file_reader.h"
+#include "milvus-storage/reader.h"
+#include "mmap/Types.h"
 #include "segcore/Utils.h"
+#include "segcore/memory_planner.h"
+#include "segcore/storagev2translator/GroupCTMeta.h"
+#include "storage/KeyRetriever.h"
+#include "storage/ThreadPools.h"
+#include "storage/Util.h"
 
 namespace milvus::segcore::storagev2translator {
 
@@ -53,7 +55,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     int64_t segment_id,
     GroupChunkType group_chunk_type,
     int64_t column_group_index,
-    std::unique_ptr<milvus_storage::api::ChunkReader> chunk_reader,
+    std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
     bool use_mmap,
     bool mmap_populate,
@@ -209,53 +211,74 @@ ManifestGroupTranslator::get_cells(
             meta_.chunk_memory_size_.size());
     }
 
-    // Collect all row group indices needed for the requested cells
-    std::vector<int64_t> needed_row_group_indices;
-    needed_row_group_indices.reserve(kRowGroupsPerCell * cids.size());
+    // Build CellSpec for each requested cid
+    std::vector<milvus::segcore::CellSpec> cell_specs;
+    cell_specs.reserve(cids.size());
     for (auto cid : cids) {
         auto [start, end] = meta_.get_row_group_range(cid);
-        for (size_t i = start; i < end; ++i) {
-            needed_row_group_indices.push_back(static_cast<int64_t>(i));
+        cell_specs.push_back({cid,
+                              /*file_idx=*/0,
+                              static_cast<int64_t>(start),
+                              static_cast<int64_t>(end - start)});
+    }
+
+    // Create factory using ChunkReader — reads a batch of row groups at once
+    auto factory = milvus::segcore::MakeChunkReaderFactory(chunk_reader_);
+
+    // Submit cell-batch loading tasks
+    auto& pool = milvus::ThreadPools::GetThreadPool(
+        milvus::PriorityForLoad(load_priority_));
+    auto channel = std::make_shared<milvus::segcore::CellReaderChannel>(
+        static_cast<size_t>(pool.GetMaxThreadNum() * 1.5));
+
+    auto load_futures =
+        milvus::segcore::LoadCellBatchAsync(ctx,
+                                            std::move(cell_specs),
+                                            std::move(factory),
+                                            channel,
+                                            DEFAULT_FIELD_MAX_MEMORY_LIMIT,
+                                            load_priority_);
+
+    LOG_INFO(
+        "[StorageV2] translator {} submits {} batch tasks for manifest column "
+        "group {}",
+        key_,
+        load_futures.size(),
+        column_group_index_);
+
+    // Pop loop — convert each cell immediately, no ArrowTable accumulation
+    std::unordered_map<milvus::cachinglayer::cid_t,
+                       std::unique_ptr<milvus::GroupChunk>>
+        completed_cells;
+    completed_cells.reserve(cids.size());
+
+    try {
+        std::shared_ptr<milvus::segcore::CellLoadResult> cell_data;
+        while (channel->pop(cell_data)) {
+            CheckCancellation(
+                ctx, segment_id_, "ManifestGroupTranslator::get_cells()");
+            completed_cells[cell_data->cid] =
+                load_group_chunk(cell_data->tables, cell_data->cid);
         }
-    }
-
-    auto parallel_degree =
-        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-
-    auto read_result = chunk_reader_->get_chunks(
-        needed_row_group_indices, static_cast<int64_t>(parallel_degree));
-
-    if (!read_result.ok()) {
-        throw std::runtime_error("get chunk failed");
-    }
-
-    auto loaded_row_groups = read_result.ValueOrDie();
-
-    // Build a map from row group index to loaded record batch
-    std::unordered_map<int64_t, std::shared_ptr<arrow::RecordBatch>>
-        row_group_map;
-    row_group_map.reserve(needed_row_group_indices.size());
-    for (size_t i = 0; i < needed_row_group_indices.size(); ++i) {
-        row_group_map[needed_row_group_indices[i]] = loaded_row_groups[i];
-    }
-
-    for (const auto& cid : cids) {
-        auto [start, end] = meta_.get_row_group_range(cid);
-        std::vector<std::shared_ptr<arrow::RecordBatch>> record_batches;
-        record_batches.reserve(end - start);
-
-        for (size_t i = start; i < end; ++i) {
-            auto it = row_group_map.find(static_cast<int64_t>(i));
-            AssertInfo(it != row_group_map.end(),
-                       fmt::format("[StorageV2] translator {} row group {} for "
-                                   "cell {} was not loaded",
-                                   key_,
-                                   i,
-                                   cid));
-            record_batches.push_back(it->second);
+    } catch (std::exception& ex) {
+        // make sure all futures are handled, but still throw pop & load ex
+        try {
+            storage::WaitAllFutures(load_futures);
+        } catch (...) {
+            LOG_WARN("WaitAllFutures exception swallowed");
         }
+        throw;
+    }
 
-        cells.emplace_back(cid, load_group_chunk(record_batches, cid));
+    storage::WaitAllFutures(load_futures);
+
+    for (auto cid : cids) {
+        auto it = completed_cells.find(cid);
+        AssertInfo(
+            it != completed_cells.end(),
+            fmt::format(
+                "[StorageV2] translator {} cell {} not loaded", key_, cid));
+        cells.emplace_back(cid, std::move(it->second));
     }
 
     return cells;
@@ -263,23 +286,23 @@ ManifestGroupTranslator::get_cells(
 
 std::unique_ptr<milvus::GroupChunk>
 ManifestGroupTranslator::load_group_chunk(
-    const std::vector<std::shared_ptr<arrow::RecordBatch>>& record_batches,
+    const std::vector<std::shared_ptr<arrow::Table>>& tables,
     const milvus::cachinglayer::cid_t cid) {
-    assert(!record_batches.empty());
-    // Use the first record batch as the reference for field iteration
-    const auto& first_batch = record_batches[0];
+    assert(!tables.empty());
+    // Use the first table's schema as reference for field iteration
+    const auto& schema = tables[0]->schema();
 
     std::vector<FieldId> field_ids;
-    field_ids.reserve(first_batch->num_columns());
+    field_ids.reserve(schema->num_fields());
     std::vector<FieldMeta> field_metas;
-    field_metas.reserve(first_batch->num_columns());
+    field_metas.reserve(schema->num_fields());
     std::vector<arrow::ArrayVector> array_vecs;
-    array_vecs.reserve(first_batch->num_columns());
+    array_vecs.reserve(schema->num_fields());
 
-    // Iterate through field_id_list to get field_id and create chunk
-    for (int i = 0; i < first_batch->num_columns(); ++i) {
-        // column name here is field id
-        auto column_name = first_batch->column_name(i);
+    // Iterate through fields to get field_id and create chunk
+    for (int i = 0; i < schema->num_fields(); ++i) {
+        // column name here is field id (ChunkReader stores field IDs as column names)
+        auto column_name = schema->field(i)->name();
         auto field_id = std::stoll(column_name);
 
         auto fid = milvus::FieldId(field_id);
@@ -288,18 +311,20 @@ ManifestGroupTranslator::load_group_chunk(
             continue;
         }
         auto it = field_metas_.find(fid);
-        AssertInfo(
-            it != field_metas_.end(),
-            "[StorageV2] translator {} field id {} not found in field_metas",
-            key_,
-            fid.get());
+        // Workaround for projection push-down missing for chunk reader
+        // change back to assertion after supported
+        if (it == field_metas_.end()) {
+            continue;
+        }
         const auto& field_meta = it->second;
 
-        // Merge arrays from all record batches for this field
-        // All record batches in a cell come from the same column group with consistent schema
+        // Merge arrays from all tables for this field
+        // All tables in a cell come from the same column group with consistent schema
         arrow::ArrayVector merged_array_vec;
-        for (const auto& batch : record_batches) {
-            merged_array_vec.push_back(batch->column(i));
+        for (const auto& table : tables) {
+            auto chunks = table->column(i)->chunks();
+            merged_array_vec.insert(
+                merged_array_vec.end(), chunks.begin(), chunks.end());
         }
 
         field_ids.push_back(fid);
