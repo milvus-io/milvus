@@ -6718,7 +6718,7 @@ type streamingConfig struct {
 	ReplicationUseLocalReplicaConfig ParamItem `refreshable:"true"`
 
 	// Replication filtering configuration
-	ReplicationSkipMessageTypes ParamItem `refreshable:"true"`
+	ReplicationSkipMessageTypes ParamItem `refreshable:"false"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
