@@ -25,6 +25,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -477,7 +478,7 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 
 	t.Run("error on missing text index mapping", func(t *testing.T) {
 		partialMappings := map[string]string{
-			"files/index_files/111/222/333/100/1001/1002/index1": "files/index_files/444/555/666/100/1001/1002/index1",
+			"files/index_files/1002/1/222/333/index1": "files/index_files/1002/1/555/666/index1",
 		}
 		_, _, _, err := buildIndexInfoFromSource(source, target, partialMappings)
 		assert.Error(t, err)
@@ -486,8 +487,8 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 
 	t.Run("error on missing json index mapping", func(t *testing.T) {
 		partialMappings := map[string]string{
-			"files/index_files/111/222/333/100/1001/1002/index1": "files/index_files/444/555/666/100/1001/1002/index1",
-			"files/text_log/123/1/111/222/333/100/text1":         "files/text_log/123/1/444/555/666/100/text1",
+			"files/index_files/1002/1/222/333/index1":    "files/index_files/1002/1/555/666/index1",
+			"files/text_log/123/1/111/222/333/100/text1": "files/text_log/123/1/444/555/666/100/text1",
 		}
 		_, _, _, err := buildIndexInfoFromSource(source, target, partialMappings)
 		assert.Error(t, err)
@@ -720,202 +721,6 @@ func TestGenerateTargetPath_AllConstants(t *testing.T) {
 	}
 }
 
-func TestCreateFileMappings_ErrorPaths(t *testing.T) {
-	target := &datapb.CopySegmentTarget{
-		CollectionId: 444,
-		PartitionId:  555,
-		SegmentId:    666,
-	}
-
-	t.Run("insert binlog invalid path", func(t *testing.T) {
-		source := &datapb.CopySegmentSource{
-			InsertBinlogs: []*datapb.FieldBinlog{
-				{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "invalid/path"}}},
-			},
-		}
-		_, err := createFileMappings(source, target)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), BinlogTypeInsert)
-	})
-
-	t.Run("delta binlog invalid path", func(t *testing.T) {
-		source := &datapb.CopySegmentSource{
-			DeltaBinlogs: []*datapb.FieldBinlog{
-				{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "invalid/path"}}},
-			},
-		}
-		_, err := createFileMappings(source, target)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), BinlogTypeDelta)
-	})
-
-	t.Run("stats binlog invalid path", func(t *testing.T) {
-		source := &datapb.CopySegmentSource{
-			StatsBinlogs: []*datapb.FieldBinlog{
-				{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "invalid/path"}}},
-			},
-		}
-		_, err := createFileMappings(source, target)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), BinlogTypeStats)
-	})
-
-	t.Run("bm25 binlog invalid path", func(t *testing.T) {
-		source := &datapb.CopySegmentSource{
-			Bm25Binlogs: []*datapb.FieldBinlog{
-				{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "invalid/path"}}},
-			},
-		}
-		_, err := createFileMappings(source, target)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), BinlogTypeBM25)
-	})
-
-	t.Run("vector scalar index invalid path", func(t *testing.T) {
-		source := &datapb.CopySegmentSource{
-			IndexFiles: []*indexpb.IndexFilePathInfo{
-				{FieldID: 100, IndexFilePaths: []string{"invalid/path"}},
-			},
-		}
-		_, err := createFileMappings(source, target)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), IndexTypeVectorScalar)
-	})
-
-	t.Run("text index invalid path", func(t *testing.T) {
-		source := &datapb.CopySegmentSource{
-			TextIndexFiles: map[int64]*datapb.TextIndexStats{
-				100: {FieldID: 100, Files: []string{"invalid/path"}},
-			},
-		}
-		_, err := createFileMappings(source, target)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), IndexTypeText)
-	})
-
-	t.Run("json key index invalid path", func(t *testing.T) {
-		source := &datapb.CopySegmentSource{
-			JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
-				101: {FieldID: 101, JsonKeyStatsDataFormat: 1, Files: []string{"invalid/path"}},
-			},
-		}
-		_, err := createFileMappings(source, target)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), IndexTypeJSONKey)
-	})
-
-	t.Run("json stats invalid path", func(t *testing.T) {
-		source := &datapb.CopySegmentSource{
-			JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
-				102: {FieldID: 102, JsonKeyStatsDataFormat: 2, Files: []string{"invalid/path"}},
-			},
-		}
-		_, err := createFileMappings(source, target)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), IndexTypeJSONStats)
-	})
-}
-
-func TestCreateFileMappings_EmptySource(t *testing.T) {
-	source := &datapb.CopySegmentSource{}
-	target := &datapb.CopySegmentTarget{
-		CollectionId: 444,
-		PartitionId:  555,
-		SegmentId:    666,
-	}
-
-	mappings, err := createFileMappings(source, target)
-	assert.NoError(t, err)
-	assert.Equal(t, 0, len(mappings))
-}
-
-func TestCreateFileMappings_SkipsEmptyPaths(t *testing.T) {
-	source := &datapb.CopySegmentSource{
-		InsertBinlogs: []*datapb.FieldBinlog{
-			{
-				FieldID: 100,
-				Binlogs: []*datapb.Binlog{
-					{LogPath: ""},
-					{LogPath: "files/insert_log/111/222/333/100/log1"},
-				},
-			},
-		},
-		DeltaBinlogs: []*datapb.FieldBinlog{
-			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: ""}}},
-		},
-		StatsBinlogs: []*datapb.FieldBinlog{
-			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: ""}}},
-		},
-		Bm25Binlogs: []*datapb.FieldBinlog{
-			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: ""}}},
-		},
-	}
-	target := &datapb.CopySegmentTarget{
-		CollectionId: 444,
-		PartitionId:  555,
-		SegmentId:    666,
-	}
-
-	mappings, err := createFileMappings(source, target)
-	assert.NoError(t, err)
-	assert.Equal(t, 1, len(mappings)) // Only the non-empty insert path
-}
-
-func TestCreateFileMappings_JsonKeyFormatRouting(t *testing.T) {
-	target := &datapb.CopySegmentTarget{
-		CollectionId: 444,
-		PartitionId:  555,
-		SegmentId:    666,
-	}
-
-	t.Run("legacy format uses json_key_index_log", func(t *testing.T) {
-		source := &datapb.CopySegmentSource{
-			JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
-				101: {
-					FieldID:                101,
-					JsonKeyStatsDataFormat: 1,
-					Files:                  []string{"files/json_key_index_log/123/1/111/222/333/101/json1"},
-				},
-			},
-		}
-		mappings, err := createFileMappings(source, target)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(mappings))
-		assert.Contains(t, mappings["files/json_key_index_log/123/1/111/222/333/101/json1"], "json_key_index_log")
-	})
-
-	t.Run("new format uses json_stats", func(t *testing.T) {
-		source := &datapb.CopySegmentSource{
-			JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
-				102: {
-					FieldID:                102,
-					JsonKeyStatsDataFormat: 2,
-					Files:                  []string{"files/json_stats/2/3002/1/111/222/333/102/shared_key_index/idx1"},
-				},
-			},
-		}
-		mappings, err := createFileMappings(source, target)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(mappings))
-		assert.Contains(t, mappings["files/json_stats/2/3002/1/111/222/333/102/shared_key_index/idx1"], "json_stats")
-	})
-
-	t.Run("format 0 treated as legacy", func(t *testing.T) {
-		source := &datapb.CopySegmentSource{
-			JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
-				103: {
-					FieldID:                103,
-					JsonKeyStatsDataFormat: 0,
-					Files:                  []string{"files/json_key_index_log/123/1/111/222/333/103/json1"},
-				},
-			},
-		}
-		mappings, err := createFileMappings(source, target)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(mappings))
-	})
-}
-
 func TestGenerateSegmentInfoFromSource_AllBinlogTypes(t *testing.T) {
 	source := &datapb.CopySegmentSource{
 		CollectionId: 111,
@@ -1008,60 +813,64 @@ func TestBuildIndexInfoFromSource_EmptySource(t *testing.T) {
 		SegmentId:    666,
 	}
 
-	indexInfos, textIndexInfos, jsonKeyIndexInfos := buildIndexInfoFromSource(source, target, map[string]string{})
+	indexInfos, textIndexInfos, jsonKeyIndexInfos, err := buildIndexInfoFromSource(source, target, map[string]string{})
+	assert.NoError(t, err)
 	assert.Equal(t, 0, len(indexInfos))
 	assert.Equal(t, 0, len(textIndexInfos))
 	assert.Equal(t, 0, len(jsonKeyIndexInfos))
 }
 
 func TestBuildIndexInfoFromSource_UnmappedPaths(t *testing.T) {
-	source := &datapb.CopySegmentSource{
-		IndexFiles: []*indexpb.IndexFilePathInfo{
-			{
-				FieldID:        100,
-				IndexID:        1001,
-				BuildID:        1002,
-				IndexFilePaths: []string{"files/index_files/1002/1/222/333/index1", "unmapped/path"},
-				SerializedSize: 5000,
-			},
-		},
-		TextIndexFiles: map[int64]*datapb.TextIndexStats{
-			200: {
-				FieldID: 200,
-				Files:   []string{"unmapped/text/path"},
-			},
-		},
-		JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
-			300: {
-				FieldID: 300,
-				Files:   []string{"unmapped/json/path"},
-			},
-		},
-	}
 	target := &datapb.CopySegmentTarget{
 		CollectionId: 444,
 		PartitionId:  555,
 		SegmentId:    666,
 	}
 
-	mappings := map[string]string{
-		"files/index_files/1002/1/222/333/index1": "files/index_files/1002/1/555/666/index1",
-	}
+	t.Run("unmapped vector index path returns error", func(t *testing.T) {
+		source := &datapb.CopySegmentSource{
+			IndexFiles: []*indexpb.IndexFilePathInfo{
+				{
+					FieldID:        100,
+					IndexID:        1001,
+					BuildID:        1002,
+					IndexFilePaths: []string{"unmapped/path"},
+					SerializedSize: 5000,
+				},
+			},
+		}
+		_, _, _, err := buildIndexInfoFromSource(source, target, map[string]string{})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no mapping found for index file")
+	})
 
-	indexInfos, textIndexInfos, jsonKeyIndexInfos := buildIndexInfoFromSource(source, target, mappings)
+	t.Run("unmapped text index path returns error", func(t *testing.T) {
+		source := &datapb.CopySegmentSource{
+			TextIndexFiles: map[int64]*datapb.TextIndexStats{
+				200: {
+					FieldID: 200,
+					Files:   []string{"unmapped/text/path"},
+				},
+			},
+		}
+		_, _, _, err := buildIndexInfoFromSource(source, target, map[string]string{})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no mapping found for text index file")
+	})
 
-	// Vector/scalar: only mapped path included
-	assert.Equal(t, 1, len(indexInfos))
-	assert.Equal(t, 1, len(indexInfos[100].IndexFilePaths))
-	assert.Equal(t, "files/index_files/1002/1/555/666/index1", indexInfos[100].IndexFilePaths[0])
-
-	// Text: no mapped paths -> empty files list
-	assert.Equal(t, 1, len(textIndexInfos))
-	assert.Equal(t, 0, len(textIndexInfos[200].Files))
-
-	// JSON: no mapped paths -> empty files list
-	assert.Equal(t, 1, len(jsonKeyIndexInfos))
-	assert.Equal(t, 0, len(jsonKeyIndexInfos[300].Files))
+	t.Run("unmapped json index path returns error", func(t *testing.T) {
+		source := &datapb.CopySegmentSource{
+			JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
+				300: {
+					FieldID: 300,
+					Files:   []string{"unmapped/json/path"},
+				},
+			},
+		}
+		_, _, _, err := buildIndexInfoFromSource(source, target, map[string]string{})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no mapping found for JSON index file")
+	})
 }
 
 func TestTransformFieldBinlogs_NilInput(t *testing.T) {
@@ -1100,7 +909,7 @@ func TestTransformFieldBinlogs_MultipleBinlogsPerField(t *testing.T) {
 }
 
 func TestTransformFieldBinlogs_UnmappedPath(t *testing.T) {
-	// Path not in mappings -> LogPath becomes empty string (zero value)
+	// Path not in mappings -> returns error (fail-fast)
 	mappings := map[string]string{}
 
 	srcFieldBinlogs := []*datapb.FieldBinlog{
@@ -1112,16 +921,14 @@ func TestTransformFieldBinlogs_UnmappedPath(t *testing.T) {
 		},
 	}
 
-	result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true)
-	assert.NoError(t, err)
-	assert.Equal(t, int64(100), totalRows) // Still counts rows
-	assert.Equal(t, 1, len(result))
-	assert.Equal(t, "", result[0].Binlogs[0].LogPath) // Unmapped -> empty
+	_, _, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no mapping found for source path")
 }
 
 func TestCopySegmentAndIndexFiles_CreateFileMappingsError(t *testing.T) {
 	mockCM := mocks.NewChunkManager(t)
-	// Source with invalid path that will cause createFileMappings to fail
+	// Source with invalid path that will cause generateMappingsFromFiles to fail
 	source := &datapb.CopySegmentSource{
 		InsertBinlogs: []*datapb.FieldBinlog{
 			{
@@ -1142,7 +949,7 @@ func TestCopySegmentAndIndexFiles_CreateFileMappingsError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.Nil(t, copiedFiles)
-	assert.Contains(t, err.Error(), "failed to collect copy tasks")
+	assert.Contains(t, err.Error(), "failed to generate file mappings")
 }
 
 func TestShortenIndexFilePaths(t *testing.T) {
@@ -1615,7 +1422,7 @@ func TestGenerateMappingsFromFiles(t *testing.T) {
 			DeltaBinlogs:      []string{"files/delta_log/111/222/333/100/delta1"},
 			StatsBinlogs:      []string{"files/stats_log/111/222/333/100/stats1"},
 			Bm25Binlogs:       []string{"files/bm25_stats/111/222/333/100/bm25_1"},
-			VectorScalarIndex: []string{"files/index_files/111/222/333/100/1001/1002/idx1"},
+			VectorScalarIndex: []string{"files/index_files/1002/1/222/333/idx1"},
 			TextIndex:         []string{"files/text_log/123/1/111/222/333/100/text1"},
 			JsonKeyIndex:      []string{"files/json_key_index_log/123/1/111/222/333/101/json1"},
 			JsonStats:         []string{"files/json_stats/2/3002/1/111/222/333/102/shared_key_index/idx1"},
@@ -1631,8 +1438,8 @@ func TestGenerateMappingsFromFiles(t *testing.T) {
 			mappings["files/delta_log/111/222/333/100/delta1"])
 		assert.Equal(t, "files/bm25_stats/444/555/666/100/bm25_1",
 			mappings["files/bm25_stats/111/222/333/100/bm25_1"])
-		assert.Equal(t, "files/index_files/444/555/666/100/1001/1002/idx1",
-			mappings["files/index_files/111/222/333/100/1001/1002/idx1"])
+		assert.Equal(t, "files/index_files/1002/1/555/666/idx1",
+			mappings["files/index_files/1002/1/222/333/idx1"])
 	})
 
 	t.Run("empty files", func(t *testing.T) {
