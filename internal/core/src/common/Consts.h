@@ -21,6 +21,10 @@
 
 #include "knowhere/comp/index_param.h"
 
+// Number of logical bits in Milvus TSO timestamp.
+// Milvus timestamp = (physical_time_ms << LOGICAL_BITS) | logical_counter
+const int64_t LOGICAL_BITS = 18;
+
 const int64_t INVALID_FIELD_ID = -1;
 const int64_t INVALID_SEG_OFFSET = -1;
 const int64_t INVALID_ARRAY_INDEX = -1;
@@ -134,6 +138,9 @@ const std::string ELEMENT_TYPE_KEY_FOR_ARROW = "elementType";
 const float EPSILON = 0.0000000119;
 const std::string NAMESPACE_FIELD_NAME = "$namespace_id";
 const std::string MMAP_ENABLED_KEY = "mmap.enabled";
+
+// TTL field key (in collection properties)
+constexpr const char* COLLECTION_TTL_FIELD_KEY = "ttl_field";
 
 // Warmup policy keys
 // Field-level key (in field type_params)
