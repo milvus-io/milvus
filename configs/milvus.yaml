@@ -904,6 +904,18 @@ tls:
   serverPemPath: configs/cert/server.pem
   serverKeyPath: configs/cert/server.key
   caPemPath: configs/cert/ca.pem
+  # Per-cluster outbound TLS for CDC replication.
+  # Key is the cluster_id used in update_replicate_configuration.
+  # All target clusters' certs should be pre-configured so switchover works without restart.
+  # clusters:
+  #   target-cluster-1:
+  #     caPemPath: /path/to/target-1/ca.pem
+  #     clientPemPath: /path/to/target-1/client.pem
+  #     clientKeyPath: /path/to/target-1/client.key
+  #   target-cluster-2:
+  #     caPemPath: /path/to/target-2/ca.pem
+  #     clientPemPath: /path/to/target-2/client.pem
+  #     clientKeyPath: /path/to/target-2/client.key
 
 # Configure internal tls.
 internaltls:

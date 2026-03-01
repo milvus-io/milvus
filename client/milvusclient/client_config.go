@@ -2,6 +2,7 @@ package milvusclient
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"math"
 	"net/url"
@@ -53,8 +54,9 @@ type ClientConfig struct {
 	Password string // Password for auth.
 	DBName   string // DBName for this client.
 
-	EnableTLSAuth bool   // Enable TLS Auth for transport security.
-	APIKey        string // API key
+	EnableTLSAuth bool       // Enable TLS Auth for transport security.
+	APIKey        string     // API key
+	TLSConfig     *tls.Config // Custom TLS config (overrides EnableTLSAuth when set).
 
 	DialOptions []grpc.DialOption // Dial options for GRPC.
 
