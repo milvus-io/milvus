@@ -125,6 +125,110 @@ func TestPartialUpdateDynamicField(t *testing.T) {
 	common.EqualColumn(t, hp.MergeColumnsToDynamic(1, []column.Column{dynamicColumnA, dynamicColumnB}, common.DefaultDynamicFieldName), resSet.GetColumn(common.DefaultDynamicFieldName))
 }
 
+func TestPartialUpdateDynamicSchemaStaticOnly(t *testing.T) {
+	/*
+		Test partial upsert with dynamic schema enabled but data contains ONLY static fields:
+		1. Create collection with enable_dynamic_field=true, schema has id + vector + name(nullable)
+		2. Insert initial data with only static fields (no dynamic data)
+		3. Partial upsert a mixed batch: existing rows + new rows, all with only static fields
+		4. Verify that existing rows are updated and new rows are inserted correctly
+
+		This reproduces a bug where $meta valid_data length mismatches when:
+		- enable_dynamic_field=true
+		- partial_update=true
+		- data contains NO dynamic fields
+		- batch mixes existing and new primary keys
+	*/
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	collName := common.GenRandomString("update_dyn_static", 6)
+
+	// Create schema: id(pk) + vector + name(nullable), enable_dynamic_field=true
+	pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
+	nameField := entity.NewField().WithName("name").WithDataType(entity.FieldTypeVarChar).WithMaxLength(256).WithNullable(true)
+
+	fields := []*entity.Field{pkField, vecField, nameField}
+	schema := hp.GenSchema(hp.TNewSchemaOption().
+		TWithName(collName).
+		TWithDescription("test partial update with dynamic schema and static-only data").
+		TWithFields(fields).
+		TWithEnableDynamicField(true))
+
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second*10)
+		defer cancel()
+		err := mc.DropCollection(ctx, client.NewDropCollectionOption(collName))
+		common.CheckErr(t, err, true)
+	})
+
+	// Insert initial data: 10 rows with ONLY static fields (no dynamic data at all)
+	initNb := 10
+	initPks := make([]int64, initNb)
+	initNames := make([]string, initNb)
+	for i := 0; i < initNb; i++ {
+		initPks[i] = int64(i)
+		initNames[i] = fmt.Sprintf("item_%d", i)
+	}
+	initPkCol := column.NewColumnInt64(common.DefaultInt64FieldName, initPks)
+	initVecCol := hp.GenColumnData(initNb, entity.FieldTypeFloatVector, *hp.TNewDataOption())
+	initNameCol := column.NewColumnVarChar("name", initNames)
+
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(initPkCol, initVecCol, initNameCol))
+	common.CheckErr(t, err, true)
+
+	// Flush -> Index -> Load
+	prepare := &hp.CollectionPrepare{}
+	prepare.FlushData(ctx, t, mc, collName)
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(collName))
+	time.Sleep(time.Second * 3)
+
+	// Partial upsert: mixed batch with existing rows (id=0,1) and new rows (id=800,801)
+	// All rows contain ONLY static fields, no dynamic data
+	upsertPks := []int64{0, 1, 800, 801}
+	upsertNames := []string{"static_upd_0", "static_upd_1", "static_new_800", "static_new_801"}
+	upsertNb := len(upsertPks)
+
+	upsertPkCol := column.NewColumnInt64(common.DefaultInt64FieldName, upsertPks)
+	upsertVecCol := hp.GenColumnData(upsertNb, entity.FieldTypeFloatVector, *hp.TNewDataOption().TWithStart(500))
+	upsertNameCol := column.NewColumnVarChar("name", upsertNames)
+
+	upsertRes, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).
+		WithColumns(upsertPkCol, upsertVecCol, upsertNameCol).
+		WithPartialUpdate(true))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, upsertNb, upsertRes.UpsertCount)
+
+	// Query and verify
+	resSet, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter(fmt.Sprintf("%s in [0, 1, 800, 801]", common.DefaultInt64FieldName)).
+		WithOutputFields(common.DefaultInt64FieldName, "name").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+
+	// Build result map by id
+	require.Equal(t, 4, resSet.GetColumn(common.DefaultInt64FieldName).Len())
+	pkResults := resSet.GetColumn(common.DefaultInt64FieldName).(*column.ColumnInt64).Data()
+	nameResults := resSet.GetColumn("name").(*column.ColumnVarChar).Data()
+	resultMap := make(map[int64]string)
+	for i, pk := range pkResults {
+		resultMap[pk] = nameResults[i]
+	}
+
+	// Verify existing rows are updated
+	require.Equal(t, "static_upd_0", resultMap[0], "id=0 should be updated")
+	require.Equal(t, "static_upd_1", resultMap[1], "id=1 should be updated")
+
+	// Verify new rows are inserted
+	require.Equal(t, "static_new_800", resultMap[800], "id=800 should be inserted")
+	require.Equal(t, "static_new_801", resultMap[801], "id=801 should be inserted")
+}
+
 func TestUpdateNullableFieldBehavior(t *testing.T) {
 	/*
 		Test nullable field behavior for Update operation:
