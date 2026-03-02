@@ -500,6 +500,9 @@ func (m *externalCollectionRefreshMeta) UpdateTaskState(taskID int64, state inde
 	cloneTask := proto.Clone(task).(*datapb.ExternalCollectionRefreshTask)
 	cloneTask.State = state
 	cloneTask.FailReason = failReason
+	if state == indexpb.JobState_JobStateFinished {
+		cloneTask.Progress = 100
+	}
 
 	if err := m.catalog.SaveExternalCollectionRefreshTask(m.ctx, cloneTask); err != nil {
 		log.Warn("update task state failed",
@@ -629,7 +632,12 @@ func (m *externalCollectionRefreshMeta) AggregateJobStateFromTasks(jobID int64) 
 	var totalProgress int64
 
 	for _, task := range tasks {
-		totalProgress += task.GetProgress()
+		taskProgress := task.GetProgress()
+		// Finished tasks should always count as 100% regardless of stored value
+		if task.GetState() == indexpb.JobState_JobStateFinished {
+			taskProgress = 100
+		}
+		totalProgress += taskProgress
 		switch task.GetState() {
 		case indexpb.JobState_JobStateInit:
 			hasInit = true

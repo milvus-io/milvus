@@ -90,7 +90,7 @@ TEST_F(VirtualPKTest, IsVirtualPKFromSegment) {
 TEST_F(VirtualPKTest, IsVirtualPKFromSegmentWithTruncation) {
     // Test that comparison works when segment IDs differ in upper bits
     int64_t segment_id = 0x1000000001;  // Upper bits set
-    int64_t truncated_segment_id = 1;    // Same lower 32 bits
+    int64_t truncated_segment_id = 1;   // Same lower 32 bits
     int64_t offset = 100;
     int64_t virtual_pk = GetVirtualPK(segment_id, offset);
 
@@ -140,7 +140,8 @@ TEST_F(VirtualPKChunkedColumnTest, BasicProperties) {
     ASSERT_EQ(column.DataByteSize(), num_rows * sizeof(int64_t));
     ASSERT_FALSE(column.IsNullable());
     ASSERT_EQ(column.GetSegmentID(), segment_id);
-    ASSERT_EQ(column.GetTruncatedSegmentID(), GetTruncatedSegmentID(segment_id));
+    ASSERT_EQ(column.GetTruncatedSegmentID(),
+              GetTruncatedSegmentID(segment_id));
 }
 
 TEST_F(VirtualPKChunkedColumnTest, GetVirtualPKAt) {
@@ -165,7 +166,8 @@ TEST_F(VirtualPKChunkedColumnTest, BulkPrimitiveValueAt) {
     std::vector<int64_t> offsets = {0, 5, 10, 50, 99};
     std::vector<int64_t> results(offsets.size());
 
-    column.BulkPrimitiveValueAt(nullptr, results.data(), offsets.data(), offsets.size());
+    column.BulkPrimitiveValueAt(
+        nullptr, results.data(), offsets.data(), offsets.size());
 
     for (size_t i = 0; i < offsets.size(); i++) {
         int64_t expected = GetVirtualPK(segment_id, offsets[i]);
@@ -272,7 +274,8 @@ TEST_F(VirtualPKChunkedColumnTest, GetChunkIDsByOffsets) {
     VirtualPKChunkedColumn column(segment_id, num_rows);
 
     std::vector<int64_t> offsets = {0, 25, 50, 75, 99};
-    auto [cids, offsets_in_chunk] = column.GetChunkIDsByOffsets(offsets.data(), offsets.size());
+    auto [cids, offsets_in_chunk] =
+        column.GetChunkIDsByOffsets(offsets.data(), offsets.size());
 
     ASSERT_EQ(cids.size(), offsets.size());
     ASSERT_EQ(offsets_in_chunk.size(), offsets.size());
