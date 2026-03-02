@@ -31,34 +31,34 @@ func TestResizePools(t *testing.T) {
 	pt := paramtable.Get()
 
 	defer func() {
-		_ = pt.Reset(pt.DataNodeCfg.MaxVecIndexBuildConcurrency.Key)
+		_ = pt.Reset(pt.DataNodeCfg.MaxIndexBuildConcurrency.Key)
 	}()
 
-	t.Run("GetVecIndexBuildPool", func(t *testing.T) {
-		expectedCap := pt.DataNodeCfg.MaxVecIndexBuildConcurrency.GetAsInt()
-		assert.Equal(t, expectedCap, GetVecIndexBuildPool().Cap())
-		resizeVecIndexBuildPool(&config.Event{
+	t.Run("GetIndexBuildPool", func(t *testing.T) {
+		expectedCap := pt.DataNodeCfg.MaxIndexBuildConcurrency.GetAsInt()
+		assert.Equal(t, expectedCap, GetIndexBuildPool().Cap())
+		resizeIndexBuildPool(&config.Event{
 			HasUpdated: true,
 		})
-		assert.Equal(t, expectedCap, GetVecIndexBuildPool().Cap())
+		assert.Equal(t, expectedCap, GetIndexBuildPool().Cap())
 
-		_ = pt.Save(pt.DataNodeCfg.MaxVecIndexBuildConcurrency.Key, fmt.Sprintf("%d", expectedCap*2))
-		expectedCap = pt.DataNodeCfg.MaxVecIndexBuildConcurrency.GetAsInt()
-		resizeVecIndexBuildPool(&config.Event{
+		_ = pt.Save(pt.DataNodeCfg.MaxIndexBuildConcurrency.Key, fmt.Sprintf("%d", expectedCap*2))
+		expectedCap = pt.DataNodeCfg.MaxIndexBuildConcurrency.GetAsInt()
+		resizeIndexBuildPool(&config.Event{
 			HasUpdated: true,
 		})
-		assert.Equal(t, expectedCap, GetVecIndexBuildPool().Cap())
+		assert.Equal(t, expectedCap, GetIndexBuildPool().Cap())
 
-		_ = pt.Save(pt.DataNodeCfg.MaxVecIndexBuildConcurrency.Key, "0")
-		resizeVecIndexBuildPool(&config.Event{
+		_ = pt.Save(pt.DataNodeCfg.MaxIndexBuildConcurrency.Key, "0")
+		resizeIndexBuildPool(&config.Event{
 			HasUpdated: true,
 		})
-		assert.Equal(t, expectedCap, GetVecIndexBuildPool().Cap(), "pool shall not be resized when newSize is 0")
+		assert.Equal(t, expectedCap, GetIndexBuildPool().Cap(), "pool shall not be resized when newSize is 0")
 
-		_ = pt.Save(pt.DataNodeCfg.MaxVecIndexBuildConcurrency.Key, "invalid")
-		resizeVecIndexBuildPool(&config.Event{
+		_ = pt.Save(pt.DataNodeCfg.MaxIndexBuildConcurrency.Key, "invalid")
+		resizeIndexBuildPool(&config.Event{
 			HasUpdated: true,
 		})
-		assert.Equal(t, expectedCap, GetVecIndexBuildPool().Cap())
+		assert.Equal(t, expectedCap, GetIndexBuildPool().Cap())
 	})
 }

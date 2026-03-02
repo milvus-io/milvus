@@ -29,37 +29,37 @@ import (
 )
 
 var (
-	vecIndexBuildPool         *conc.Pool[any]
-	vecIndexBuildPoolInitOnce sync.Once
+	indexBuildPool         *conc.Pool[any]
+	indexBuildPoolInitOnce sync.Once
 )
 
-func initVecIndexBuildPool() {
+func initIndexBuildPool() {
 	pt := paramtable.Get()
-	initPoolSize := pt.DataNodeCfg.MaxVecIndexBuildConcurrency.GetAsInt()
-	vecIndexBuildPool = conc.NewPool[any](
+	initPoolSize := pt.DataNodeCfg.MaxIndexBuildConcurrency.GetAsInt()
+	indexBuildPool = conc.NewPool[any](
 		initPoolSize,
 	)
 
-	watchKey := pt.DataNodeCfg.MaxVecIndexBuildConcurrency.Key
-	pt.Watch(watchKey, config.NewHandler(watchKey, resizeVecIndexBuildPool))
-	log.Info("init vector index building pool done", zap.Int("size", initPoolSize))
+	watchKey := pt.DataNodeCfg.MaxIndexBuildConcurrency.Key
+	pt.Watch(watchKey, config.NewHandler(watchKey, resizeIndexBuildPool))
+	log.Info("init index building pool done", zap.Int("size", initPoolSize))
 }
 
-func resizeVecIndexBuildPool(evt *config.Event) {
+func resizeIndexBuildPool(evt *config.Event) {
 	if evt.HasUpdated {
-		newSize := paramtable.Get().DataNodeCfg.MaxVecIndexBuildConcurrency.GetAsInt()
+		newSize := paramtable.Get().DataNodeCfg.MaxIndexBuildConcurrency.GetAsInt()
 		log := log.Ctx(context.Background()).With(zap.Int("newSize", newSize))
 
-		err := GetVecIndexBuildPool().Resize(newSize)
+		err := GetIndexBuildPool().Resize(newSize)
 		if err != nil {
 			log.Warn("failed to resize pool", zap.Error(err))
 			return
 		}
-		log.Info("vector index building pool resize successfully")
+		log.Info("index building pool resize successfully")
 	}
 }
 
-func GetVecIndexBuildPool() *conc.Pool[any] {
-	vecIndexBuildPoolInitOnce.Do(initVecIndexBuildPool)
-	return vecIndexBuildPool
+func GetIndexBuildPool() *conc.Pool[any] {
+	indexBuildPoolInitOnce.Do(initIndexBuildPool)
+	return indexBuildPool
 }
