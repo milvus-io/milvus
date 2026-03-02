@@ -7187,7 +7187,7 @@ so we set 1 second here as a threshold.`,
 		Version:      "2.6.9",
 		Doc:          "The default burst size for the WAL rate limiter, 20MB by default. The burst size determines the maximum number of bytes that can be consumed at once.",
 		DefaultValue: "20m",
-		Export:       true,
+		Export:       false,
 	}
 	p.WALRateLimitDefaultBurst.Init(base.mgr)
 
@@ -7196,7 +7196,7 @@ so we set 1 second here as a threshold.`,
 		Version:      "2.6.9",
 		Doc:          "When the memory usage is greater than this threshold, the node memory rate limiter will enter slowdown mode, 0.9 by default.",
 		DefaultValue: "0.9",
-		Export:       true,
+		Export:       false,
 	}
 	p.WALRateLimitNodeMemorySlowdownThreshold.Init(base.mgr)
 
@@ -7205,7 +7205,7 @@ so we set 1 second here as a threshold.`,
 		Version:      "2.6.9",
 		Doc:          "When the memory usage is greater than this threshold, the node memory rate limiter will enter reject mode, 0.95 by default.",
 		DefaultValue: "0.95",
-		Export:       true,
+		Export:       false,
 	}
 	p.WALRateLimitNodeMemoryRejectThreshold.Init(base.mgr)
 
@@ -7214,7 +7214,7 @@ so we set 1 second here as a threshold.`,
 		Version:      "2.6.9",
 		Doc:          "When the memory usage is less than this threshold, the node memory rate limiter will enter recovery mode, 0.85 by default.",
 		DefaultValue: "0.85",
-		Export:       true,
+		Export:       false,
 	}
 	p.WALRateLimitNodeMemoryRecoverThreshold.Init(base.mgr)
 
@@ -7230,7 +7230,7 @@ so we set 1 second here as a threshold.`,
 		RecoveryNormalDelayInterval:  "10s",
 		RecoveryIncremental:          "512kb",
 		RecoveryIncreaseInterval:     "1s",
-		Export:                       true,
+		Export:                       false,
 	})
 
 	p.WALRateLimitRecoveryStorageAdaptiveRateLimit.init(base, "streaming.walRateLimit.recoveryStorage.adaptiveRateLimit", AdaptiveRateLimitConfigDefaultValue{
@@ -7245,7 +7245,7 @@ so we set 1 second here as a threshold.`,
 		RecoveryNormalDelayInterval:  "1m",
 		RecoveryIncremental:          "512kb",
 		RecoveryIncreaseInterval:     "1s",
-		Export:                       true,
+		Export:                       false,
 	})
 
 	p.WALRateLimitFlusherAdaptiveRateLimit.init(base, "streaming.walRateLimit.flusher.adaptiveRateLimit", AdaptiveRateLimitConfigDefaultValue{
@@ -7268,7 +7268,7 @@ so we set 1 second here as a threshold.`,
 		Version:      "2.6.10",
 		Doc:          "Whether to enable the append rate limiter, true by default. When enabled, the rate limiter will throttle writes based on append rate thresholds.",
 		DefaultValue: "false",
-		Export:       true,
+		Export:       false,
 	}
 	p.WALRateLimitAppendRateEnabled.Init(base.mgr)
 
@@ -7277,7 +7277,7 @@ so we set 1 second here as a threshold.`,
 		Version:      "2.6.10",
 		Doc:          "When the append rate (bytes/sec) is greater than this threshold, the append rate limiter will enter slowdown mode, 32MB/s by default. This protects each WAL from being overloaded.",
 		DefaultValue: "32m",
-		Export:       true,
+		Export:       false,
 	}
 	p.WALRateLimitAppendRateSlowdownThreshold.Init(base.mgr)
 
@@ -7286,7 +7286,7 @@ so we set 1 second here as a threshold.`,
 		Version:      "2.6.10",
 		Doc:          "When the append rate (bytes/sec) is less than this threshold, the append rate limiter will enter recovery mode, 28MB/s by default. The gap between slowdown and recover threshold prevents oscillation.",
 		DefaultValue: "28m",
-		Export:       true,
+		Export:       false,
 	}
 	p.WALRateLimitAppendRateRecoverThreshold.Init(base.mgr)
 
@@ -7302,7 +7302,7 @@ so we set 1 second here as a threshold.`,
 		RecoveryNormalDelayInterval:  "10s",
 		RecoveryIncremental:          "512kb",
 		RecoveryIncreaseInterval:     "1s",
-		Export:                       true,
+		Export:                       false,
 	})
 }
 
