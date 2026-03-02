@@ -344,8 +344,6 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 	})
 }
 
-
-
 func (s *CompactionTriggerManagerSuite) TestManualTriggerL0Compaction() {
 	handler := NewNMockHandler(s.T())
 	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
