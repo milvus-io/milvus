@@ -8,6 +8,14 @@ ENV GOPROXY=${CUSTOM_GOPROXY:-https://proxy.golang.org}
 
 RUN go install gotest.tools/gotestsum@v1.12.0
 
+# Install Python3 (3.13 in Debian Trixie) for external table test data generation.
+# vortex-data==0.56.0 must match the Rust vortex crate version in milvus-storage.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip && \
+    rm -rf /var/lib/apt/lists/*
+RUN pip3 install --no-cache-dir --break-system-packages \
+    pyarrow==23.0.1 lance==1.2.1 vortex-data==0.56.0 obstore==0.9.1 || true
+
 # Set the Current Working Directory inside the container
 WORKDIR /milvus
 

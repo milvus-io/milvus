@@ -376,12 +376,10 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 	refundCandidates(toRefund)
 }
 
-// refundCandidates refunds resources for candidates that implement Refundable.
+// refundCandidates refunds resources for removed candidates.
 func refundCandidates(candidates []pkoracle.Candidate) {
 	for _, c := range candidates {
-		if r, ok := c.(pkoracle.Refundable); ok {
-			r.Refund()
-		}
+		c.Refund()
 	}
 }
 

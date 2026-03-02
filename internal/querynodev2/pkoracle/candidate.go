@@ -24,6 +24,15 @@ import (
 )
 
 // Candidate is the interface for pk oracle candidate.
+//
+// Core methods (all implementers must provide meaningful logic):
+//
+//	MayPkExist, BatchPkExist, ID, Partition, Type, PkCandidateExist
+//
+// Resource lifecycle methods (no-op is a valid implementation for candidates
+// that don't track resources, e.g. ExternalSegmentCandidate, candidateKey):
+//
+//	UpdatePkCandidate, Stats, Charge, Refund
 type Candidate interface {
 	// MayPkExist checks whether primary key could exists in this candidate.
 	MayPkExist(lc *storage.LocationsCache) bool
@@ -32,11 +41,27 @@ type Candidate interface {
 	ID() int64
 	Partition() int64
 	Type() commonpb.SegmentState
-}
 
-// Refundable is an optional interface for candidates that need resource cleanup.
-// BloomFilterSet implements this interface to refund charged memory resources.
-type Refundable interface {
+	// PkCandidateExist reports whether the candidate has been initialized with PK data.
+	// This is a precondition for MayPkExist / BatchPkExist calls.
+	// BloomFilterSet: true when bloom filter data has been loaded.
+	// ExternalSegmentCandidate: always true (deterministic PK-to-segment mapping).
+	PkCandidateExist() bool
+
+	// UpdatePkCandidate feeds new primary keys into the candidate.
+	// BloomFilterSet: updates the bloom filter with the provided keys.
+	// ExternalSegmentCandidate: no-op (virtual PKs are deterministic).
+	UpdatePkCandidate(pks []storage.PrimaryKey)
+
+	// Stats returns PK statistics (min/max PK) if available, nil otherwise.
+	Stats() *storage.PkStatistics
+
+	// Charge charges memory resources consumed by this candidate.
+	// No-op is valid for candidates without trackable resources.
+	Charge()
+
+	// Refund releases memory resources previously charged by this candidate.
+	// No-op is valid for candidates without trackable resources.
 	Refund()
 }
 

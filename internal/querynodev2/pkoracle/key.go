@@ -56,6 +56,12 @@ func (k candidateKey) Type() commonpb.SegmentState {
 	return k.typ
 }
 
+func (k candidateKey) PkCandidateExist() bool                   { return true }
+func (k candidateKey) UpdatePkCandidate(_ []storage.PrimaryKey) {}
+func (k candidateKey) Stats() *storage.PkStatistics             { return nil }
+func (k candidateKey) Charge()                                  {}
+func (k candidateKey) Refund()                                  {}
+
 // NewCandidateKey creates a candidateKey and returns as Candidate.
 func NewCandidateKey(id int64, partitionID int64, typ commonpb.SegmentState) Candidate {
 	return candidateKey{
