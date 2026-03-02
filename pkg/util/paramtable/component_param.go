@@ -6754,7 +6754,7 @@ if this parameter <= 0, will set it as 10`,
 	p.BuildParallel.Init(base.mgr)
 
 	p.MaxIndexBuildConcurrency = ParamItem{
-		Key:          "dataNode.index.maxIndexBuildConcurrency",
+		Key:          "dataNode.index.maxVecIndexBuildConcurrency",
 		Version:      "2.6.9",
 		DefaultValue: "4",
 		Export:       false,
