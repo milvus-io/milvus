@@ -244,9 +244,9 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	for _, segment := range segments {
 		for pk := 0; pk < 100; pk++ {
 			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
-			exist := segment.BloomFilterExist()
-			suite.Require().True(exist)
-			exist = segment.MayPkExist(lc)
+			pkReady := segment.PkCandidateExist()
+			suite.Require().True(pkReady)
+			exist := segment.MayPkExist(lc)
 			suite.Require().True(exist)
 		}
 	}
@@ -281,9 +281,9 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	for _, segment := range segments {
 		for pk := 0; pk < 100; pk++ {
 			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
-			exist := segment.BloomFilterExist()
-			suite.True(exist)
-			exist = segment.MayPkExist(lc)
+			pkReady := segment.PkCandidateExist()
+			suite.True(pkReady)
+			exist := segment.MayPkExist(lc)
 			suite.True(exist)
 		}
 	}

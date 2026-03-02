@@ -123,6 +123,12 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     AssertInfo(schema->get_primary_field_id().has_value(),
                "primary key should be specified");
 
+    // Parse external collection properties
+    if (!schema_proto.external_source().empty()) {
+        schema->set_external_source(schema_proto.external_source());
+        schema->set_external_spec(schema_proto.external_spec());
+    }
+
     return schema;
 }
 
@@ -155,35 +161,6 @@ Schema::ConvertToArrowSchema() const {
             meta.is_nullable(),
             arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
                                       {std::to_string(meta.get_id().get())}));
-        arrow_fields.push_back(arrow_field);
-    }
-    return arrow::schema(arrow_fields);
-}
-
-const ArrowSchemaPtr
-Schema::ConvertToLoonArrowSchema() const {
-    arrow::FieldVector arrow_fields;
-    arrow_fields.reserve(field_ids_.size());
-    for (const auto& field_id : field_ids_) {
-        const auto& meta = fields_.at(field_id);
-        int dim = IsVectorDataType(meta.get_data_type()) &&
-                          !IsSparseFloatVectorDataType(meta.get_data_type())
-                      ? meta.get_dim()
-                      : 1;
-
-        std::shared_ptr<arrow::DataType> arrow_data_type = nullptr;
-        auto data_type = meta.get_data_type();
-        if (data_type == DataType::VECTOR_ARRAY) {
-            arrow_data_type = GetArrowDataTypeForVectorArray(
-                meta.get_element_type(), meta.get_dim());
-        } else {
-            arrow_data_type = GetArrowDataType(data_type, dim);
-        }
-
-        auto arrow_field =
-            std::make_shared<arrow::Field>(std::to_string(field_id.get()),
-                                           arrow_data_type,
-                                           meta.is_nullable());
         arrow_fields.push_back(arrow_field);
     }
     return arrow::schema(arrow_fields);
@@ -224,6 +201,52 @@ Schema::AbsentFields(Schema& old_schema) const {
     }
 
     return std::make_unique<std::vector<FieldMeta>>(std::move(result));
+}
+
+const ArrowSchemaPtr
+Schema::BuildReaderArrowSchema() const {
+    if (!is_external_collection()) {
+        return ConvertToArrowSchema();
+    }
+    // External collections: build a filtered schema containing only
+    // external fields. System fields (RowID, Timestamp) and virtual PK
+    // don't exist in the parquet files.
+    arrow::FieldVector external_fields;
+    for (const auto& [field_id, meta] : fields_) {
+        if (!meta.is_external_field()) {
+            continue;
+        }
+        int dim = IsVectorDataType(meta.get_data_type()) &&
+                          !IsSparseFloatVectorDataType(meta.get_data_type())
+                      ? meta.get_dim()
+                      : 1;
+        auto arrow_data_type = GetArrowDataType(meta.get_data_type(), dim);
+        auto arrow_field = std::make_shared<arrow::Field>(
+            meta.get_external_field(),
+            arrow_data_type,
+            meta.is_nullable(),
+            arrow::key_value_metadata(
+                {milvus_storage::ARROW_FIELD_ID_KEY},
+                {std::to_string(meta.get_id().get())}));
+        external_fields.push_back(arrow_field);
+    }
+    return arrow::schema(external_fields);
+}
+
+FieldId
+Schema::ResolveColumnFieldId(const std::string& column_name) const {
+    if (is_external_collection()) {
+        for (const auto& [fid, meta] : fields_) {
+            if (meta.is_external_field() &&
+                meta.get_external_field() == column_name) {
+                return fid;
+            }
+        }
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "external column '{}' not found in schema",
+                  column_name);
+    }
+    return FieldId(std::stoll(column_name));
 }
 
 std::pair<bool, bool>

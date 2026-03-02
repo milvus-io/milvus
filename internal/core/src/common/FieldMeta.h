@@ -280,6 +280,21 @@ class FieldMeta {
         return default_value_;
     }
 
+    bool
+    is_external_field() const {
+        return !external_field_mapping_.empty();
+    }
+
+    const std::string&
+    get_external_field() const {
+        return external_field_mapping_;
+    }
+
+    void
+    set_external_field(const std::string& external_field) {
+        external_field_mapping_ = external_field;
+    }
+
     milvus::proto::schema::FieldSchema
     ToProto() const;
 

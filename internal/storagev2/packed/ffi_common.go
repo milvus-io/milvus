@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"unsafe"
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
@@ -65,7 +66,13 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	// Add non-empty string fields
 	if storageConfig.GetAddress() != "" {
 		keys = append(keys, PropertyFSAddress)
-		values = append(values, storageConfig.GetAddress())
+		// Lance's BuildEndpointUrl defaults to HTTPS when no scheme is present.
+		// Prepend http:// when SSL is not enabled so that Lance sets allow_http=true.
+		fsAddr := storageConfig.GetAddress()
+		if !storageConfig.GetUseSSL() && !strings.Contains(fsAddr, "://") {
+			fsAddr = "http://" + fsAddr
+		}
+		values = append(values, fsAddr)
 	}
 	if storageConfig.GetBucketName() != "" {
 		keys = append(keys, PropertyFSBucketName)
@@ -155,7 +162,13 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	}
 	if storageConfig.GetAddress() != "" {
 		keys = append(keys, extfsPrefix+"address")
-		values = append(values, storageConfig.GetAddress())
+		// Lance's BuildEndpointUrl defaults to HTTPS when no scheme is present.
+		// Prepend http:// when SSL is not enabled so that Lance sets allow_http=true.
+		addr := storageConfig.GetAddress()
+		if !storageConfig.GetUseSSL() && !strings.Contains(addr, "://") {
+			addr = "http://" + addr
+		}
+		values = append(values, addr)
 	}
 	if storageConfig.GetRootPath() != "" {
 		keys = append(keys, extfsPrefix+"root_path")
@@ -189,6 +202,40 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		keys = append(keys, extfsPrefix+"gcp_credential_json")
 		values = append(values, storageConfig.GetGcpCredentialJSON())
 	}
+	// Temporarily disabled: extfs.default.* boolean properties.
+	//
+	// Root cause: extfs.* keys are not registered in milvus-storage's property_infos.
+	// The FFI (loon_properties_create) only accepts string key-value pairs, so
+	// ConvertFFIProperties stores unregistered keys as std::string (e.g.,
+	// extfs.default.use_ssl = string("false")). Later, ExtractExternalFsProperties
+	// copies this variant as-is to fs.use_ssl, but create_file_system_config expects
+	// GetValue<bool>, which fails because the variant holds a string, not a bool.
+	//
+	// Workaround: omit these properties so they are absent from the extfs-mapped
+	// Properties map. GetValue<bool> then falls back to the default value from
+	// property_infos (false), which is correct for non-SSL environments.
+	//
+	// TODO: re-enable once milvus-storage fixes ExtractExternalFsProperties to
+	// perform type conversion when mapping extfs.* → fs.* properties.
+	//
+	// keys = append(keys, extfsPrefix+"use_ssl")
+	// if storageConfig.GetUseSSL() {
+	// 	values = append(values, "true")
+	// } else {
+	// 	values = append(values, "false")
+	// }
+	// keys = append(keys, extfsPrefix+"use_iam")
+	// if storageConfig.GetUseIAM() {
+	// 	values = append(values, "true")
+	// } else {
+	// 	values = append(values, "false")
+	// }
+	// keys = append(keys, extfsPrefix+"use_virtual_host")
+	// if storageConfig.GetUseVirtualHost() {
+	// 	values = append(values, "true")
+	// } else {
+	// 	values = append(values, "false")
+	// }
 
 	// Add extra kvs
 	for k, v := range extraKVs {

@@ -840,15 +840,15 @@ func (s *UpdateExternalTaskSuite) TestParseExternalSpec() {
 	s.NoError(err)
 	s.Equal("parquet", spec.Format)
 
-	// Explicit format
-	spec, err = ParseExternalSpec(`{"format":"csv"}`)
+	// Lance-table format
+	spec, err = ParseExternalSpec(`{"format":"lance-table"}`)
 	s.NoError(err)
-	s.Equal("csv", spec.Format)
+	s.Equal("lance-table", spec.Format)
 
-	// JSON format
-	spec, err = ParseExternalSpec(`{"format":"json"}`)
+	// Vortex format
+	spec, err = ParseExternalSpec(`{"format":"vortex"}`)
 	s.NoError(err)
-	s.Equal("json", spec.Format)
+	s.Equal("vortex", spec.Format)
 
 	// Missing format defaults to parquet
 	spec, err = ParseExternalSpec(`{}`)

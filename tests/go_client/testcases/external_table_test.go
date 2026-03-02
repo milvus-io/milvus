@@ -56,8 +56,14 @@ func TestCreateExternalCollection(t *testing.T) {
 	require.Equal(t, "s3://test-bucket/data/", coll.Schema.ExternalSource)
 	require.Equal(t, `{"format": "parquet"}`, coll.Schema.ExternalSpec)
 
-	// Verify fields
-	require.Len(t, coll.Schema.Fields, 2)
+	// Verify fields (user-defined fields + auto-generated __virtual_pk__)
+	require.Len(t, coll.Schema.Fields, 3)
+
+	// Verify virtual PK field
+	vpkField := findFieldByName(coll.Schema.Fields, "__virtual_pk__")
+	require.NotNil(t, vpkField)
+	require.True(t, vpkField.PrimaryKey)
+	require.True(t, vpkField.AutoID)
 
 	// Verify text field
 	textField := findFieldByName(coll.Schema.Fields, "text")
@@ -290,8 +296,8 @@ func TestCreateExternalCollectionMultipleVectorFields(t *testing.T) {
 	// Verify external source
 	require.Equal(t, "s3://test-bucket/data/", coll.Schema.ExternalSource)
 
-	// Verify fields
-	require.Len(t, coll.Schema.Fields, 3)
+	// Verify fields (user-defined fields + auto-generated __virtual_pk__)
+	require.Len(t, coll.Schema.Fields, 4)
 
 	// Verify vector fields
 	denseField := findFieldByName(coll.Schema.Fields, "dense_embedding")

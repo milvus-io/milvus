@@ -176,30 +176,37 @@ func createColumnGroups(
 
 // ReadFragmentsFromManifest reads fragment info from a manifest path.
 // This function wraps the C exttable_read_column_groups call.
+//
+// The manifestPath is a JSON string like {"ver":1,"base_path":"external/.../segments/..."}.
+// The actual manifest file is at: base_path/_metadata/manifest-{ver}.avro
 func ReadFragmentsFromManifest(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
 ) ([]Fragment, error) {
-	// 1. Parse manifest path to get base path
-	basePath, _, err := UnmarshalManifestPath(manifestPath)
+	// 1. Parse manifest path to get base path and version
+	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse manifest path: %w", err)
 	}
 
-	// 2. Create properties from storage config
+	// 2. Construct full manifest file path: base_path/_metadata/manifest-{version}.avro
+	// This matches the C++ layout: get_manifest_filepath(base_path, version)
+	manifestFilePath := fmt.Sprintf("%s/_metadata/manifest-%d.avro", basePath, version)
+
+	// 3. Create properties from storage config
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create properties: %w", err)
 	}
 	defer C.loon_properties_free(cProperties)
 
-	// 3. Convert base path to C string
-	cBasePath := C.CString(basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
+	// 4. Convert manifest file path to C string
+	cManifestFilePath := C.CString(manifestFilePath)
+	defer C.free(unsafe.Pointer(cManifestFilePath))
 
-	// 4. Call loon_exttable_read_manifest
+	// 5. Call loon_exttable_read_manifest with the full file path
 	var manifest *C.LoonManifest
-	result := C.loon_exttable_read_manifest(cBasePath, cProperties, &manifest)
+	result := C.loon_exttable_read_manifest(cManifestFilePath, cProperties, &manifest)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, fmt.Errorf("loon_exttable_read_manifest failed: %w", err)
 	}

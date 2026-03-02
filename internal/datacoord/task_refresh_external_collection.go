@@ -231,8 +231,30 @@ func (t *refreshExternalCollectionTask) SetJobInfo(ctx context.Context, resp *da
 
 	// DataNode already used pre-allocated segment IDs and wrote manifests to final paths.
 	// Just set the segment state to Flushed — no second ID allocation needed.
+	// Also populate InsertChannel and PartitionID which DataNode doesn't set for external segments.
+	// These are required for QueryCoord to include segments in its loading target.
+	collInfo := t.mt.GetCollection(t.GetCollectionId())
+	if collInfo == nil {
+		return fmt.Errorf("collection %d not found in meta", t.GetCollectionId())
+	}
+	// External collections are single-shard, single-partition (enforced at creation).
+	// Assert exactly-one here to catch any invariant violation from data corruption or legacy data.
+	if len(collInfo.VChannelNames) != 1 {
+		return fmt.Errorf("external collection %d expected exactly 1 VChannel, got %d", t.GetCollectionId(), len(collInfo.VChannelNames))
+	}
+	if len(collInfo.Partitions) != 1 {
+		return fmt.Errorf("external collection %d expected exactly 1 partition, got %d", t.GetCollectionId(), len(collInfo.Partitions))
+	}
+	insertChannel := collInfo.VChannelNames[0]
+	partitionID := collInfo.Partitions[0]
 	for _, seg := range updatedSegments {
 		seg.State = commonpb.SegmentState_Flushed
+		if seg.InsertChannel == "" {
+			seg.InsertChannel = insertChannel
+		}
+		if seg.PartitionID == 0 {
+			seg.PartitionID = partitionID
+		}
 	}
 
 	// Build update operators
