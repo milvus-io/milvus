@@ -344,7 +344,6 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 
 	isNamespaceSorted := t.plan.GetSchema().GetEnableNamespace()
 	isSorted := !isNamespaceSorted
->>>>>>> 446fe26fec (fix: filter out namespace field in DescribeCollection response)
 	res := []*datapb.CompactionSegment{
 		{
 			PlanID:              t.GetPlanID(),
