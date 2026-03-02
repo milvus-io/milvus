@@ -1296,9 +1296,9 @@ streaming:
     # The max interval of balance task trigger backoff, 5s by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
     backoffMaxInterval: 5s
-    # The timeout of wal balancer operation, 30s by default.
+    # The timeout of wal balancer operation, 30m by default.
     # If the operation exceeds this timeout, it will be canceled.
-    operationTimeout: 30s
+    operationTimeout: 30m
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
       # Whether to allow rebalance, true by default.

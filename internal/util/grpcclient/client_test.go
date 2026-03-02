@@ -383,7 +383,7 @@ func TestClientBase_CheckGrpcError(t *testing.T) {
 	assert.True(t, reset)
 	assert.True(t, forceReset)
 
-	// test serverId mismatch
+	// test serverId mismatch (coord connection, isNode=false: should retry)
 	retry, reset, forceReset, _ = base.checkGrpcErr(ctx, status.Error(codes.Unknown, merr.ErrNodeNotMatch.Error()))
 	assert.True(t, retry)
 	assert.True(t, reset)
@@ -583,4 +583,50 @@ func TestVerifySession(t *testing.T) {
 	base.role = typeutil.QueryNodeRole
 	err = base.verifySession(ctx)
 	assert.ErrorIs(t, err, merr.ErrNodeNotFound)
+}
+
+func TestClientBase_CheckGrpcError_ServerIDMismatch_Node(t *testing.T) {
+	base := ClientBase[*mockClient]{
+		isNode: true,
+	}
+	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
+
+	ctx := context.Background()
+
+	// Node connection: ServerIDMismatch should fast-fail (no retry) with reset+forceReset
+	retry, reset, forceReset, err := base.checkGrpcErr(ctx, status.Error(codes.Unknown, merr.ErrNodeNotMatch.Error()))
+	assert.False(t, retry)
+	assert.True(t, reset)
+	assert.True(t, forceReset)
+	assert.True(t, IsServerIDMismatchErr(err))
+}
+
+func TestClientBase_ServerIDMismatch_NodeFastFail(t *testing.T) {
+	// Test the full Call() path: ServerIDMismatch on a node connection
+	// should fail immediately without retrying.
+	callCount := 0
+	base := ClientBase[*mockClient]{
+		maxCancelError: 10,
+		MaxAttempts:    3,
+		isNode:         true,
+	}
+	base.SetGetAddrFunc(func() (string, error) {
+		return "", errors.New("mocked address error")
+	})
+	base.role = typeutil.QueryNodeRole
+	mockSession := sessionutil.NewMockSession(t)
+	base.sess = mockSession
+	base.grpcClientMtx.Lock()
+	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
+	base.grpcClientMtx.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, err := base.Call(ctx, func(client *mockClient) (any, error) {
+		callCount++
+		return struct{}{}, status.Error(codes.Unknown, merr.ErrNodeNotMatch.Error())
+	})
+	assert.True(t, IsServerIDMismatchErr(err))
+	// The caller should be invoked exactly once (no retries)
+	assert.Equal(t, 1, callCount)
 }
