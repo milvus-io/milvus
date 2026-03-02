@@ -56,12 +56,12 @@ func (c *run) printBanner(w io.Writer) {
 	fmt.Fprintln(w, " /_/  /_/___/____/___/\\____/___/     ")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Welcome to Milvus!")
-	fmt.Fprintln(w, "Version:   "+common.Version.String())
+	fmt.Fprintln(w, "Version:   "+getEffectiveVersion())
 	fmt.Fprintln(w, "Built:     "+BuildTime)
 	fmt.Fprintln(w, "GitCommit: "+GitCommit)
 	fmt.Fprintln(w, "GoVersion: "+GoVersion)
 	fmt.Fprintln(w)
-	metrics.BuildInfo.WithLabelValues(common.Version.String(), BuildTime, GitCommit).Set(1)
+	metrics.BuildInfo.WithLabelValues(getEffectiveVersion(), BuildTime, GitCommit).Set(1)
 }
 
 func (c *run) printHardwareInfo(w io.Writer) {
