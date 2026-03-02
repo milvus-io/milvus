@@ -237,7 +237,7 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         bool enable_analyzer = get_bool_value("enable_analyzer");
         bool enable_match = get_bool_value("enable_match");
 
-        auto result = FieldMeta{name,
+        return FieldMeta{name,
                          field_id,
                          data_type,
                          max_len,

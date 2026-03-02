@@ -387,7 +387,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
                                 properties,
                                 cg_index,
                                 field_ids,
-                                /*eager_load=*/true,
+                                /*eager_load=*/false,
                                 /*op_ctx=*/nullptr);
             });
         load_group_futures.emplace_back(std::move(future));
@@ -447,7 +447,8 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields() {
         timestamps.data(), num_rows, min_slice_length);
     index.set_length_meta(std::move(meta));
     index.build_with(timestamps.data(), num_rows);
-    insert_record_.init_timestamps(timestamps, index);
+    insert_record_.init_timestamps_from_owned(std::move(timestamps),
+                                               std::move(index));
 
     // 4. Row count + readiness
     {
@@ -3181,7 +3182,7 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
             milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                 .GetProperties();
         auto column_groups = segment_load_info.GetColumnGroups();
-        auto arrow_schema = schema_->BuildReaderArrowSchema();
+        auto arrow_schema = schema_->ConvertToLoonArrowSchema();
         auto needed_columns = std::make_shared<std::vector<std::string>>();
         for (const auto& field_id : schema_->get_field_ids()) {
             needed_columns->push_back(std::to_string(field_id.get()));

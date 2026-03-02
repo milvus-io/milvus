@@ -394,6 +394,11 @@ class Schema {
     const ArrowSchemaPtr
     ConvertToArrowSchema() const;
 
+    /// Convert to Arrow schema with field ID strings as field names,
+    /// used by Loon FFI / milvus-storage Reader.
+    const ArrowSchemaPtr
+    ConvertToLoonArrowSchema() const;
+
     // Build an Arrow schema suitable for reading data from storage.
     // Normal collections: same as ConvertToArrowSchema().
     // External collections: filtered to external fields only, using
