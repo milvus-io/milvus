@@ -569,6 +569,13 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 
 	mt.collID2Meta[coll.CollectionID] = coll.Clone()
 	mt.names.insert(coll.DBName, coll.Name, coll.CollectionID)
+	// Build partition name index for the new collection
+	mt.partitionName2ID[coll.CollectionID] = make(map[string]int64)
+	for _, partition := range coll.Partitions {
+		if partition.Available() {
+			mt.partitionName2ID[coll.CollectionID][partition.PartitionName] = partition.PartitionID
+		}
+	}
 	for _, fileResourceID := range coll.FileResourceIds {
 		mt.fileResourceRefCnt[fileResourceID]++
 	}

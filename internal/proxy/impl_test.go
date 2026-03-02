@@ -978,6 +978,10 @@ func TestProxyDropDatabase(t *testing.T) {
 	t.Run("drop database ok", func(t *testing.T) {
 		mix := mocks.NewMockMixCoordClient(t)
 		mix.EXPECT().DropDatabase(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		mix.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+		}, nil).Maybe()
+		mix.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 		node.mixCoord = mix
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
@@ -988,6 +992,10 @@ func TestProxyDropDatabase(t *testing.T) {
 		globalMetaCache = cache
 
 		ctx := context.Background()
+
+		cache := globalMetaCache
+		defer func() { globalMetaCache = cache }()
+		InitMetaCache(ctx, mix)
 
 		resp, err := node.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{DbName: "db"})
 		assert.NoError(t, err)
