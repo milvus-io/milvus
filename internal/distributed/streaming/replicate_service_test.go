@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_producer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/mock_handler"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	pulsar2 "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
@@ -439,6 +440,111 @@ func createReplicateAlterConfigMessages(newConfig *commonpb.ReplicateConfigurati
 		immutableMsg := msg.WithLastConfirmedUseMessageID().WithTimeTick(1).IntoImmutableMessage(pulsar2.NewPulsarID(
 			pulsar.NewMessageID(1, 2, 3, 4),
 		))
+		replicateMsgs = append(replicateMsgs, message.MustNewReplicateMessage("primary", immutableMsg.IntoImmutableMessageProto()))
+	}
+	return replicateMsgs
+}
+
+func TestReplicateService_AlterLoadConfigUseLocalReplicaConfig(t *testing.T) {
+	newReplicateServiceForAlterLoadConfig := func(t *testing.T, appendAssert func(t *testing.T, mm message.MutableMessage)) *replicateService {
+		c := mock_client.NewMockClient(t)
+		as := mock_client.NewMockAssignmentService(t)
+		c.EXPECT().Assignment().Return(as).Maybe()
+
+		h := mock_handler.NewMockHandlerClient(t)
+		p := mock_producer.NewMockProducer(t)
+		p.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
+			appendAssert(t, mm)
+			return &types.AppendResult{
+				MessageID: walimplstest.NewTestMessageID(1),
+				TimeTick:  1,
+			}, nil
+		}).Maybe()
+		p.EXPECT().IsAvailable().Return(true).Maybe()
+		p.EXPECT().Available().Return(make(chan struct{})).Maybe()
+		h.EXPECT().CreateProducer(mock.Anything, mock.Anything).Return(p, nil).Maybe()
+
+		as.EXPECT().GetReplicateConfiguration(mock.Anything).Return(replicateutil.MustNewConfigHelper(
+			"by-dev",
+			&commonpb.ReplicateConfiguration{
+				Clusters: []*commonpb.MilvusCluster{
+					{ClusterId: "primary", Pchannels: []string{"primary-rootcoord-dml_0"}},
+					{ClusterId: "by-dev", Pchannels: []string{"by-dev-rootcoord-dml_0"}},
+				},
+				CrossClusterTopology: []*commonpb.CrossClusterTopology{
+					{SourceClusterId: "primary", TargetClusterId: "by-dev"},
+				},
+			},
+		), nil)
+
+		return &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+	}
+
+	t.Run("config_enabled", func(t *testing.T) {
+		old := paramtable.Get().StreamingCfg.ReplicationUseLocalReplicaConfig.SwapTempValue("true")
+		defer paramtable.Get().StreamingCfg.ReplicationUseLocalReplicaConfig.SwapTempValue(old)
+
+		rs := newReplicateServiceForAlterLoadConfig(t, func(t *testing.T, mm message.MutableMessage) {
+			alterLoadConfigMsg := message.MustAsMutableAlterLoadConfigMessageV2(mm)
+			assert.True(t, alterLoadConfigMsg.Header().GetUseLocalReplicaConfig(),
+				"replicated AlterLoadConfig should have UseLocalReplicaConfig=true when config is enabled")
+			assert.True(t, strings.HasPrefix(mm.VChannel(), "by-dev"),
+				"vchannel should be remapped to secondary cluster prefix")
+		})
+
+		replicateMsgs := createReplicateAlterLoadConfigMessages()
+		for _, msg := range replicateMsgs {
+			_, err := rs.Append(context.Background(), msg)
+			assert.NoError(t, err)
+		}
+	})
+
+	t.Run("config_disabled", func(t *testing.T) {
+		old := paramtable.Get().StreamingCfg.ReplicationUseLocalReplicaConfig.SwapTempValue("false")
+		defer paramtable.Get().StreamingCfg.ReplicationUseLocalReplicaConfig.SwapTempValue(old)
+
+		rs := newReplicateServiceForAlterLoadConfig(t, func(t *testing.T, mm message.MutableMessage) {
+			alterLoadConfigMsg := message.MustAsMutableAlterLoadConfigMessageV2(mm)
+			assert.False(t, alterLoadConfigMsg.Header().GetUseLocalReplicaConfig(),
+				"replicated AlterLoadConfig should have UseLocalReplicaConfig=false when config is disabled")
+		})
+
+		replicateMsgs := createReplicateAlterLoadConfigMessages()
+		for _, msg := range replicateMsgs {
+			_, err := rs.Append(context.Background(), msg)
+			assert.NoError(t, err)
+		}
+	})
+}
+
+func createReplicateAlterLoadConfigMessages() []message.ReplicateMutableMessage {
+	msg := message.NewAlterLoadConfigMessageBuilderV2().
+		WithHeader(&message.AlterLoadConfigMessageHeader{
+			CollectionId: 1,
+			PartitionIds: []int64{100},
+			Replicas: []*messagespb.LoadReplicaConfig{
+				{ReplicaId: 1, ResourceGroupName: "rg1"},
+				{ReplicaId: 2, ResourceGroupName: "rg2"},
+			},
+		}).
+		WithBody(&message.AlterLoadConfigMessageBody{}).
+		WithBroadcast([]string{"primary-rootcoord-dml_0_1v0"}).
+		MustBuildBroadcast()
+
+	msgs := msg.WithBroadcastID(200).SplitIntoMutableMessage()
+	replicateMsgs := make([]message.ReplicateMutableMessage, 0, len(msgs))
+	for _, msg := range msgs {
+		immutableMsg := msg.WithLastConfirmedUseMessageID().WithTimeTick(1).IntoImmutableMessage(
+			pulsar2.NewPulsarID(pulsar.NewMessageID(1, 2, 3, 4)),
+		)
 		replicateMsgs = append(replicateMsgs, message.MustNewReplicateMessage("primary", immutableMsg.IntoImmutableMessageProto()))
 	}
 	return replicateMsgs
