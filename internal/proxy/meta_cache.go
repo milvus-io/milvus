@@ -948,16 +948,27 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionNa
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	found := false
 	if db, dbOk := m.collInfo[database]; dbOk {
 		if coll, ok := db[collectionName]; ok {
 			m.removeCollectionByID(ctx, coll.collID, version, false)
+			found = true
 		}
 	}
 	if database == "" {
 		if db, dbOk := m.collInfo[defaultDB]; dbOk {
 			if coll, ok := db[collectionName]; ok {
 				m.removeCollectionByID(ctx, coll.collID, version, false)
+				found = true
 			}
+		}
+	}
+	// If the collection was not in cache, alias entries pointing to it won't
+	// have been cleaned up by removeCollectionByID. Clean them up here.
+	if !found {
+		m.removeAliasesForCollectionLocked(database, collectionName)
+		if database == "" {
+			m.removeAliasesForCollectionLocked(defaultDB, collectionName)
 		}
 	}
 	log.Ctx(ctx).Debug("remove collection", zap.String("db", database), zap.String("collection", collectionName))

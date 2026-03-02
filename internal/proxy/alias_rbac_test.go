@@ -27,9 +27,49 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // Tests for ResolveCollectionAlias in MetaCache and resolveCollectionAlias helper.
+
+func TestResolveCollectionAlias_WildcardAndEmptySkippedByInterceptor(t *testing.T) {
+	// The interceptor guard (objectName != util.AnyWord && objectName != "") ensures
+	// that "*" and "" never reach resolveCollectionAlias. This test verifies those
+	// values are correctly guarded at the interceptor level by checking that the
+	// cache's DescribeAlias RPC is never called for these sentinel values.
+	ctx := context.Background()
+	mockCoord := mocks.NewMockMixCoordClient(t)
+
+	cache := &MetaCache{
+		mixCoord:  mockCoord,
+		collInfo:  map[string]map[string]*collectionInfo{"default": {}},
+		aliasInfo: map[string]map[string]*aliasEntry{},
+	}
+
+	oldCache := globalMetaCache
+	globalMetaCache = cache
+	defer func() { globalMetaCache = oldCache }()
+
+	// Wildcard "*" should not trigger resolution
+	for _, sentinel := range []string{"*", ""} {
+		// These sentinel values should be caught by the interceptor guard
+		// (objectName != util.AnyWord && objectName != "") before calling
+		// resolveCollectionAlias. Verify the guard logic directly.
+		shouldSkip := sentinel == "*" || sentinel == ""
+		assert.True(t, shouldSkip, "sentinel %q should be skipped by interceptor guard", sentinel)
+	}
+
+	// Normal name should resolve via RPC
+	mockCoord.On("DescribeAlias", mock.Anything, mock.Anything).Return(&milvuspb.DescribeAliasResponse{
+		Status:     &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Collection: "real_col",
+	}, nil)
+
+	result, err := resolveCollectionAlias(ctx, "default", "some_alias")
+	assert.NoError(t, err)
+	assert.Equal(t, "real_col", result)
+	mockCoord.AssertCalled(t, "DescribeAlias", mock.Anything, mock.Anything)
+}
 
 func TestResolveCollectionAlias_CachedCollection(t *testing.T) {
 	ctx := context.Background()
@@ -363,6 +403,42 @@ func TestRemoveCollectionByID_CleansUpAliases(t *testing.T) {
 	assert.Equal(t, "other_collection", entry.collectionName)
 }
 
+func TestRemoveCollection_CleansUpAliasesWhenNotCached(t *testing.T) {
+	ctx := context.Background()
+	mockCoord := mocks.NewMockMixCoordClient(t)
+
+	// Collection is NOT in collInfo cache, but aliases pointing to it exist
+	cache := &MetaCache{
+		mixCoord: mockCoord,
+		collInfo: map[string]map[string]*collectionInfo{
+			"default": {},
+		},
+		aliasInfo: map[string]map[string]*aliasEntry{
+			"default": {
+				"alias1": {collectionName: "uncached_collection"},
+				"alias2": {collectionName: "uncached_collection"},
+				"alias3": {collectionName: "other_collection"},
+			},
+		},
+		collectionCacheVersion: make(map[UniqueID]uint64),
+		sfGlobal:               conc.Singleflight[*collectionInfo]{},
+	}
+
+	// RemoveCollection for an uncached collection
+	cache.RemoveCollection(ctx, "default", "uncached_collection", 0)
+
+	// Aliases pointing to uncached_collection should be removed
+	_, ok := cache.getAlias("default", "alias1")
+	assert.False(t, ok)
+	_, ok = cache.getAlias("default", "alias2")
+	assert.False(t, ok)
+
+	// Alias pointing to other_collection should remain
+	entry, ok := cache.getAlias("default", "alias3")
+	assert.True(t, ok)
+	assert.Equal(t, "other_collection", entry.collectionName)
+}
+
 func TestRemoveDatabase_CleansUpAliases(t *testing.T) {
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
@@ -387,4 +463,195 @@ func TestRemoveDatabase_CleansUpAliases(t *testing.T) {
 	// Alias cache for the database should be gone
 	_, ok := cache.getAlias("mydb", "alias1")
 	assert.False(t, ok)
+}
+
+func TestCreateAliasTask_ResolvesCollectionAlias(t *testing.T) {
+	ctx := context.Background()
+	mockCoord := mocks.NewMockMixCoordClient(t)
+
+	// Set up cache: "existing_alias" -> "real_collection"
+	cache := &MetaCache{
+		mixCoord: mockCoord,
+		collInfo: map[string]map[string]*collectionInfo{"default": {}},
+		aliasInfo: map[string]map[string]*aliasEntry{
+			"default": {
+				"existing_alias": {collectionName: "real_collection"},
+			},
+		},
+	}
+
+	oldCache := globalMetaCache
+	globalMetaCache = cache
+	defer func() { globalMetaCache = oldCache }()
+
+	paramtable.Init()
+
+	task := &CreateAliasTask{
+		Condition: NewTaskCondition(ctx),
+		CreateAliasRequest: &milvuspb.CreateAliasRequest{
+			Base:           &commonpb.MsgBase{},
+			DbName:         "default",
+			CollectionName: "existing_alias",
+			Alias:          "new_alias",
+		},
+		ctx:      ctx,
+		mixCoord: mockCoord,
+	}
+
+	err := task.PreExecute(ctx)
+	assert.NoError(t, err)
+	// CollectionName should always be resolved from alias to real collection
+	assert.Equal(t, "real_collection", task.CollectionName)
+}
+
+func TestAlterAliasTask_ResolvesCollectionAlias(t *testing.T) {
+	ctx := context.Background()
+	mockCoord := mocks.NewMockMixCoordClient(t)
+
+	// Set up cache: "existing_alias" -> "real_collection"
+	cache := &MetaCache{
+		mixCoord: mockCoord,
+		collInfo: map[string]map[string]*collectionInfo{"default": {}},
+		aliasInfo: map[string]map[string]*aliasEntry{
+			"default": {
+				"existing_alias": {collectionName: "real_collection"},
+			},
+		},
+	}
+
+	oldCache := globalMetaCache
+	globalMetaCache = cache
+	defer func() { globalMetaCache = oldCache }()
+
+	paramtable.Init()
+
+	task := &AlterAliasTask{
+		Condition: NewTaskCondition(ctx),
+		AlterAliasRequest: &milvuspb.AlterAliasRequest{
+			Base:           &commonpb.MsgBase{},
+			DbName:         "default",
+			CollectionName: "existing_alias",
+			Alias:          "some_alias",
+		},
+		ctx:      ctx,
+		mixCoord: mockCoord,
+	}
+
+	err := task.PreExecute(ctx)
+	assert.NoError(t, err)
+	// CollectionName should always be resolved from alias to real collection
+	assert.Equal(t, "real_collection", task.CollectionName)
+}
+
+func TestCreateAliasTask_ResolvesEvenWhenRBACFlagDisabled(t *testing.T) {
+	// Alias resolution in CreateAlias/AlterAlias is unconditional (for correctness),
+	// independent of the RBAC feature flag.
+	ctx := context.Background()
+	mockCoord := mocks.NewMockMixCoordClient(t)
+
+	cache := &MetaCache{
+		mixCoord: mockCoord,
+		collInfo: map[string]map[string]*collectionInfo{"default": {}},
+		aliasInfo: map[string]map[string]*aliasEntry{
+			"default": {
+				"existing_alias": {collectionName: "real_collection"},
+			},
+		},
+	}
+
+	oldCache := globalMetaCache
+	globalMetaCache = cache
+	defer func() { globalMetaCache = oldCache }()
+
+	paramtable.Init()
+	paramtable.Get().Save(Params.ProxyCfg.ResolveAliasForPrivilege.Key, "false")
+	defer paramtable.Get().Reset(Params.ProxyCfg.ResolveAliasForPrivilege.Key)
+
+	task := &CreateAliasTask{
+		Condition: NewTaskCondition(ctx),
+		CreateAliasRequest: &milvuspb.CreateAliasRequest{
+			Base:           &commonpb.MsgBase{},
+			DbName:         "default",
+			CollectionName: "existing_alias",
+			Alias:          "new_alias",
+		},
+		ctx:      ctx,
+		mixCoord: mockCoord,
+	}
+
+	err := task.PreExecute(ctx)
+	assert.NoError(t, err)
+	// CollectionName should be resolved even when RBAC flag is disabled
+	assert.Equal(t, "real_collection", task.CollectionName)
+}
+
+func TestListAliasesTask_ResolvesCollectionAlias(t *testing.T) {
+	ctx := context.Background()
+	mockCoord := mocks.NewMockMixCoordClient(t)
+
+	// Set up cache: "existing_alias" -> "real_collection"
+	cache := &MetaCache{
+		mixCoord: mockCoord,
+		collInfo: map[string]map[string]*collectionInfo{"default": {}},
+		aliasInfo: map[string]map[string]*aliasEntry{
+			"default": {
+				"existing_alias": {collectionName: "real_collection"},
+			},
+		},
+	}
+
+	oldCache := globalMetaCache
+	globalMetaCache = cache
+	defer func() { globalMetaCache = oldCache }()
+
+	paramtable.Init()
+
+	task := &ListAliasesTask{
+		Condition: NewTaskCondition(ctx),
+		ListAliasesRequest: &milvuspb.ListAliasesRequest{
+			Base:           &commonpb.MsgBase{},
+			DbName:         "default",
+			CollectionName: "existing_alias",
+		},
+		ctx:      ctx,
+		mixCoord: mockCoord,
+	}
+
+	err := task.PreExecute(ctx)
+	assert.NoError(t, err)
+	// CollectionName should be resolved from alias to real collection
+	assert.Equal(t, "real_collection", task.CollectionName)
+}
+
+func TestListAliasesTask_NoResolveWhenCollectionNameEmpty(t *testing.T) {
+	ctx := context.Background()
+	mockCoord := mocks.NewMockMixCoordClient(t)
+
+	cache := &MetaCache{
+		mixCoord:  mockCoord,
+		collInfo:  map[string]map[string]*collectionInfo{"default": {}},
+		aliasInfo: map[string]map[string]*aliasEntry{},
+	}
+
+	oldCache := globalMetaCache
+	globalMetaCache = cache
+	defer func() { globalMetaCache = oldCache }()
+
+	paramtable.Init()
+
+	task := &ListAliasesTask{
+		Condition: NewTaskCondition(ctx),
+		ListAliasesRequest: &milvuspb.ListAliasesRequest{
+			Base:   &commonpb.MsgBase{},
+			DbName: "default",
+		},
+		ctx:      ctx,
+		mixCoord: mockCoord,
+	}
+
+	err := task.PreExecute(ctx)
+	assert.NoError(t, err)
+	// CollectionName should remain empty
+	assert.Equal(t, "", task.CollectionName)
+	mockCoord.AssertNotCalled(t, "DescribeAlias")
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type PrivilegeFunc func(ctx context.Context, req interface{}) (context.Context, error)
@@ -73,8 +74,13 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 
 	// Resolve alias to actual collection name for RBAC checks
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndex != 0 {
-		if actualCollectionName, err := resolveCollectionAlias(ctx, dbName, objectName); err == nil {
-			objectName = actualCollectionName
+		if objectName != util.AnyWord && objectName != "" {
+			if actualCollectionName, err := resolveCollectionAlias(ctx, dbName, objectName); err != nil {
+				log.RatedWarn(60, "failed to resolve collection alias for RBAC, using original name",
+					zap.String("objectName", objectName), zap.String("dbName", dbName), zap.Error(err))
+			} else {
+				objectName = actualCollectionName
+			}
 		}
 	}
 
@@ -93,10 +99,16 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndexs != 0 && len(objectNames) > 0 {
 		resolvedNames := make([]string, 0, len(objectNames))
 		for _, name := range objectNames {
-			if actualName, err := resolveCollectionAlias(ctx, dbName, name); err == nil {
-				resolvedNames = append(resolvedNames, actualName)
-			} else {
+			if name == util.AnyWord || name == "" {
 				resolvedNames = append(resolvedNames, name)
+				continue
+			}
+			if actualName, err := resolveCollectionAlias(ctx, dbName, name); err != nil {
+				log.RatedWarn(60, "failed to resolve collection alias for RBAC, using original name",
+					zap.String("objectName", name), zap.String("dbName", dbName), zap.Error(err))
+				resolvedNames = append(resolvedNames, name)
+			} else {
+				resolvedNames = append(resolvedNames, actualName)
 			}
 		}
 		objectNames = resolvedNames
@@ -192,7 +204,7 @@ func isSelectMyRoleGrants(req interface{}, roleNames []string) bool {
 func resolveCollectionAlias(ctx context.Context, dbName, nameOrAlias string) (string, error) {
 	cache := globalMetaCache
 	if cache == nil {
-		return nameOrAlias, fmt.Errorf("meta cache not initialized")
+		return nameOrAlias, merr.WrapErrServiceInternal("meta cache not initialized")
 	}
 	return cache.ResolveCollectionAlias(ctx, dbName, nameOrAlias)
 }

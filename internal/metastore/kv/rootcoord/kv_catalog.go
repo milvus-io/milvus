@@ -1430,7 +1430,8 @@ func (kc *Catalog) DeleteGrantByCollectionName(ctx context.Context, tenant strin
 		return err
 	}
 
-	var removeKeys []string
+	var exactRemoveKeys []string
+	var prefixRemoveKeys []string
 	for i, key := range keys {
 		grantInfos := typeutil.AfterN(key, granteeKey+"/", "/")
 		if len(grantInfos) != 3 {
@@ -1442,20 +1443,32 @@ func (kc *Catalog) DeleteGrantByCollectionName(ctx context.Context, tenant strin
 		}
 		grantDB, grantObj := funcutil.SplitObjectName(grantInfos[2])
 		if grantObj == collectionName && grantDB == dbName {
-			removeKeys = append(removeKeys, key)
-			// value is the granteeID, also remove its privilege entries
+			// Use exact deletion for the grantee key
+			exactRemoveKeys = append(exactRemoveKeys, key)
+			// Use prefix deletion for the granteeID key (has sub-keys)
 			granteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, values[i]+"/")
-			removeKeys = append(removeKeys, granteeIDKey)
+			prefixRemoveKeys = append(prefixRemoveKeys, granteeIDKey)
 		}
 	}
 
-	if len(removeKeys) == 0 {
+	if len(exactRemoveKeys) == 0 && len(prefixRemoveKeys) == 0 {
 		return nil
 	}
 
-	if err = kc.Txn.MultiSaveAndRemoveWithPrefix(ctx, nil, removeKeys); err != nil {
-		log.Ctx(ctx).Warn("fail to remove grants for collection",
-			zap.String("dbName", dbName), zap.String("collectionName", collectionName), zap.Error(err))
+	// Remove exact grantee keys first
+	if len(exactRemoveKeys) > 0 {
+		if err = kc.Txn.MultiRemove(ctx, exactRemoveKeys); err != nil {
+			log.Ctx(ctx).Warn("fail to remove exact grantee keys for collection",
+				zap.String("dbName", dbName), zap.String("collectionName", collectionName), zap.Error(err))
+			return err
+		}
+	}
+	// Remove granteeID entries by prefix
+	if len(prefixRemoveKeys) > 0 {
+		if err = kc.Txn.MultiSaveAndRemoveWithPrefix(ctx, nil, prefixRemoveKeys); err != nil {
+			log.Ctx(ctx).Warn("fail to remove granteeID entries for collection",
+				zap.String("dbName", dbName), zap.String("collectionName", collectionName), zap.Error(err))
+		}
 	}
 	return err
 }
@@ -1494,7 +1507,9 @@ func (kc *Catalog) MigrateGrantCollectionName(ctx context.Context, tenant string
 		return nil
 	}
 
-	if err = kc.Txn.MultiSaveAndRemoveWithPrefix(ctx, saves, removeKeys); err != nil {
+	// Use MultiSaveAndRemove (exact deletion) instead of prefix-based deletion
+	// to avoid accidentally matching keys like col1_backup when removing col1
+	if err = kc.Txn.MultiSaveAndRemove(ctx, saves, removeKeys); err != nil {
 		log.Ctx(ctx).Warn("fail to migrate grants for renamed collection",
 			zap.String("oldDBName", oldDBName), zap.String("oldName", oldName),
 			zap.String("newDBName", newDBName), zap.String("newName", newName), zap.Error(err))
