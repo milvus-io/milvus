@@ -4,6 +4,7 @@
 #include "index/StringIndexSort.h"
 #include "index/IndexFactory.h"
 #include "pb/plan.pb.h"
+#include "test_utils/Constants.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
 constexpr int64_t nb = 100;
@@ -33,7 +34,7 @@ TEST_F(StringIndexSortTest, ConstructorMemory) {
 
 TEST_F(StringIndexSortTest, ConstructorMmap) {
     Config config;
-    config["mmap_file_path"] = "/tmp/milvus_test";
+    config["mmap_file_path"] = TestLocalPath + "milvus_test";
     auto index = milvus::index::CreateStringIndexSort({});
     ASSERT_NE(index, nullptr);
 }
@@ -47,7 +48,7 @@ TEST_F(StringIndexSortTest, BuildMemory) {
 
 TEST_F(StringIndexSortTest, BuildMmap) {
     Config config;
-    config["mmap_file_path"] = "/tmp/milvus_test";
+    config["mmap_file_path"] = TestLocalPath + "milvus_test";
     auto index = milvus::index::CreateStringIndexSort({});
     index->Build(strs.size(), strs.data());
     ASSERT_EQ(index->Count(), nb);
@@ -75,7 +76,7 @@ TEST_F(StringIndexSortTest, InMemory) {
 
 TEST_F(StringIndexSortTest, InMmap) {
     Config config;
-    config["mmap_file_path"] = "/tmp/milvus_test";
+    config["mmap_file_path"] = TestLocalPath + "milvus_test";
     auto index = milvus::index::CreateStringIndexSort({});
     index->Build(nb, strs.data());
 
@@ -172,7 +173,7 @@ TEST_F(StringIndexSortTest, PrefixMatchMemory) {
 
 TEST_F(StringIndexSortTest, PrefixMatchMmap) {
     Config config;
-    config["mmap_file_path"] = "/tmp/milvus_test";
+    config["mmap_file_path"] = TestLocalPath + "milvus_test";
     auto index = milvus::index::CreateStringIndexSort({});
 
     std::vector<std::string> test_strs = {
@@ -201,7 +202,7 @@ TEST_F(StringIndexSortTest, ReverseLookupMemory) {
 
 TEST_F(StringIndexSortTest, ReverseLookupMmap) {
     Config config;
-    config["mmap_file_path"] = "/tmp/milvus_test";
+    config["mmap_file_path"] = TestLocalPath + "milvus_test";
     auto index = milvus::index::CreateStringIndexSort({});
     index->Build(strs.size(), strs.data());
 
@@ -239,7 +240,7 @@ TEST_F(StringIndexSortTest, SerializeDeserializeMemory) {
 
 TEST_F(StringIndexSortTest, SerializeDeserializeMmap) {
     Config config;
-    config["mmap_file_path"] = "/tmp/milvus_test";
+    config["mmap_file_path"] = TestLocalPath + "milvus_test";
     auto index = milvus::index::CreateStringIndexSort({});
     index->Build(strs.size(), strs.data());
 
@@ -284,7 +285,7 @@ TEST_F(StringIndexSortTest, NullHandlingMemory) {
 
 TEST_F(StringIndexSortTest, NullHandlingMmap) {
     Config config;
-    config["mmap_file_path"] = "/tmp/milvus_test";
+    config["mmap_file_path"] = TestLocalPath + "milvus_test";
     auto index = milvus::index::CreateStringIndexSort({});
 
     std::unique_ptr<bool[]> valid(new bool[nb]);
@@ -328,7 +329,8 @@ TEST_F(StringIndexSortTest, MmapLoadAfterSerialize) {
 
     // Step 2: Load with mmap configuration
     Config mmap_config;
-    mmap_config[MMAP_FILE_PATH] = "/tmp/test_string_index_sort_mmap.idx";
+    mmap_config[MMAP_FILE_PATH] =
+        TestLocalPath + "test_string_index_sort_mmap.idx";
 
     auto mmap_index = milvus::index::CreateStringIndexSort({});
     mmap_index->Load(binary_set, mmap_config);
@@ -374,7 +376,7 @@ TEST_F(StringIndexSortTest, MmapLoadAfterSerialize) {
     auto prefix_binary = prefix_index->Serialize(build_config);
 
     Config prefix_mmap_config;
-    prefix_mmap_config[MMAP_FILE_PATH] = "/tmp/test_prefix_mmap.idx";
+    prefix_mmap_config[MMAP_FILE_PATH] = TestLocalPath + "test_prefix_mmap.idx";
     auto prefix_mmap_index = milvus::index::CreateStringIndexSort({});
     prefix_mmap_index->Load(prefix_binary, prefix_mmap_config);
 
@@ -389,8 +391,8 @@ TEST_F(StringIndexSortTest, MmapLoadAfterSerialize) {
     }
 
     // Clean up temp files
-    std::remove("/tmp/test_string_index_sort_mmap.idx");
-    std::remove("/tmp/test_prefix_mmap.idx");
+    std::remove((TestLocalPath + "test_string_index_sort_mmap.idx").c_str());
+    std::remove((TestLocalPath + "test_prefix_mmap.idx").c_str());
 }
 
 TEST_F(StringIndexSortTest, LoadWithoutAssembleMmap) {
@@ -406,7 +408,8 @@ TEST_F(StringIndexSortTest, LoadWithoutAssembleMmap) {
 
     // Load without assemble using mmap
     Config mmap_config;
-    mmap_config[MMAP_FILE_PATH] = "/tmp/test_load_without_assemble.idx";
+    mmap_config[MMAP_FILE_PATH] =
+        TestLocalPath + "test_load_without_assemble.idx";
 
     auto mmap_index = milvus::index::CreateStringIndexSort({});
     mmap_index->LoadWithoutAssemble(binary_set, mmap_config);
@@ -420,7 +423,7 @@ TEST_F(StringIndexSortTest, LoadWithoutAssembleMmap) {
     ASSERT_EQ(range_bitset.count(), 3);  // apple, cat, dog
 
     // Clean up
-    std::remove("/tmp/test_load_without_assemble.idx");
+    std::remove((TestLocalPath + "test_load_without_assemble.idx").c_str());
 }
 }  // namespace index
 }  // namespace milvus
@@ -472,7 +475,7 @@ TEST(StringIndexSortStandaloneTest, StringIndexSortBuildAndSearch) {
     // Test Mmap mode
     {
         milvus::Config config;
-        config["mmap_file_path"] = "/tmp/milvus_scalar_test";
+        config["mmap_file_path"] = TestLocalPath + "milvus_scalar_test";
         auto index = milvus::index::CreateStringIndexSort({});
         index->Build(n, test_data.data());
 
@@ -534,7 +537,7 @@ TEST(StringIndexSortStandaloneTest, StringIndexSortWithNulls) {
     // Mmap mode with nulls
     {
         milvus::Config config;
-        config["mmap_file_path"] = "/tmp/milvus_scalar_test";
+        config["mmap_file_path"] = TestLocalPath + "milvus_scalar_test";
         auto index = milvus::index::CreateStringIndexSort({});
         index->Build(n, test_data.data(), valid_data.get());
 
@@ -585,7 +588,7 @@ TEST(StringIndexSortStandaloneTest, StringIndexSortSerialization) {
     // Test Mmap mode serialization
     {
         milvus::Config config;
-        config["mmap_file_path"] = "/tmp/milvus_scalar_test";
+        config["mmap_file_path"] = TestLocalPath + "milvus_scalar_test";
         auto index = milvus::index::CreateStringIndexSort({});
         index->Build(n, test_data.data());
 
@@ -797,7 +800,7 @@ TEST(StringIndexSortPatternMatchTest, PatternMatchMmap) {
 
     milvus::Config mmap_config;
     mmap_config[milvus::index::MMAP_FILE_PATH] =
-        "/tmp/test_pattern_match_mmap.idx";
+        TestLocalPath + "test_pattern_match_mmap.idx";
 
     auto mmap_index = milvus::index::CreateStringIndexSort({});
     mmap_index->Load(binary_set, mmap_config);
@@ -817,7 +820,7 @@ TEST(StringIndexSortPatternMatchTest, PatternMatchMmap) {
         ASSERT_TRUE(bitset[4]);
     }
 
-    std::remove("/tmp/test_pattern_match_mmap.idx");
+    std::remove((TestLocalPath + "test_pattern_match_mmap.idx").c_str());
 }
 
 TEST(StringIndexSortPatternMatchTest, PatternMatchComplexEscape) {

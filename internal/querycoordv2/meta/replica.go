@@ -393,6 +393,7 @@ func (replica *mutableReplica) TryEnableChannelExclusiveMode(channelNames ...str
 	if replica.exclusiveRWNodeToChannel == nil {
 		replica.exclusiveRWNodeToChannel = make(map[int64]string)
 	}
+	replica.tryBalanceNodeForChannel()
 }
 
 func (replica *mutableReplica) DisableChannelExclusiveMode() {

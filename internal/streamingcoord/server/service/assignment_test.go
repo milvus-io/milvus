@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -33,7 +34,6 @@ func TestAssignmentService(t *testing.T) {
 	resource.InitForTest()
 
 	mw := mock_streaming.NewMockWALAccesser(t)
-	mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan")
 	streaming.SetWALForTest(mw)
 
 	broadcast.ResetBroadcaster()
@@ -47,6 +47,13 @@ func TestAssignmentService(t *testing.T) {
 	})
 	b.EXPECT().Close().Return().Maybe()
 	balance.Register(b)
+
+	// Mock channel.GetClusterChannels to avoid blocking on unregistered singleton.
+	mockGetClusterChannels := mockey.Mock(channel.GetClusterChannels).Return(message.ClusterChannels{
+		Channels:       []string{"by-dev-1"},
+		ControlChannel: "by-dev-1_vcchan",
+	}).Build()
+	defer mockGetClusterChannels.UnPatch()
 
 	// Set up the broadcaster
 	fb := syncutil.NewFuture[broadcaster.Broadcaster]()

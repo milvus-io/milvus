@@ -63,13 +63,13 @@ func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*Cha
 	if err != nil {
 		return nil, err
 	}
-	channels, metrics, err := recoverFromConfigurationAndMeta(ctx, streamingVersion, incomingChannel...)
+	channels, metrics, err := recoverFromConfigurationAndMeta(ctx, streamingVersion, replicateConfig, incomingChannel...)
 	if err != nil {
 		return nil, err
 	}
 
 	globalVersion := resource.Resource().Session().GetRegisteredRevision()
-	return &ChannelManager{
+	cm := &ChannelManager{
 		cond:     syncutil.NewContextCond(&sync.Mutex{}),
 		channels: channels,
 		version: typeutil.VersionInt64Pair{
@@ -80,7 +80,37 @@ func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*Cha
 		cchannelMeta:     cchannelMeta,
 		streamingVersion: streamingVersion,
 		replicateConfig:  replicateConfig,
-	}, nil
+	}
+
+	// Register the channel manager singleton after recovery.
+	register(cm)
+
+	return cm, nil
+}
+
+// getClusterChannels returns the pchannel names and the control channel name.
+// By default, only channels available in replication are returned.
+// Use OptIncludeUnavailableInReplication() to include unavailable channels.
+func (cm *ChannelManager) getClusterChannels(opts ...GetClusterChannelsOpt) message.ClusterChannels {
+	o := &getClusterChannelsOptions{}
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	cm.cond.L.Lock()
+	defer cm.cond.L.Unlock()
+
+	channels := make([]string, 0, len(cm.channels))
+	for _, ch := range cm.channels {
+		if !o.includeUnavailableInReplication && !ch.AvailableInReplication() {
+			continue
+		}
+		channels = append(channels, ch.Name())
+	}
+	return message.ClusterChannels{
+		Channels:       channels,
+		ControlChannel: funcutil.GetControlChannel(cm.cchannelMeta.Pchannel),
+	}
 }
 
 // recoverCChannelMeta recovers the control channel meta.
@@ -105,7 +135,7 @@ func recoverCChannelMeta(ctx context.Context, incomingChannel ...string) (*strea
 }
 
 // recoverFromConfigurationAndMeta recovers the channel manager from configuration and meta.
-func recoverFromConfigurationAndMeta(ctx context.Context, streamingVersion *streamingpb.StreamingVersion, incomingChannel ...string) (map[ChannelID]*PChannelMeta, *channelMetrics, error) {
+func recoverFromConfigurationAndMeta(ctx context.Context, streamingVersion *streamingpb.StreamingVersion, replicateConfig *replicateutil.ConfigHelper, incomingChannel ...string) (map[ChannelID]*PChannelMeta, *channelMetrics, error) {
 	// Recover metrics.
 	metrics := newPChannelMetrics()
 
@@ -118,7 +148,7 @@ func recoverFromConfigurationAndMeta(ctx context.Context, streamingVersion *stre
 	// TODO: only support rw channel here now, add ro channel in future.
 	channels := make(map[ChannelID]*PChannelMeta, len(channelMetas))
 	for _, channel := range channelMetas {
-		c := newPChannelMetaFromProto(channel)
+		c := newPChannelMetaFromProto(channel, replicateConfig)
 		metrics.AssignPChannelStatus(c)
 		channels[c.ChannelID()] = c
 	}
@@ -133,6 +163,7 @@ func recoverFromConfigurationAndMeta(ctx context.Context, streamingVersion *stre
 			// once the streaming service is enabled, we treat all channels as read-write.
 			c = NewPChannelMeta(newChannel, types.AccessModeRW)
 		}
+		c.availableInReplication = isChannelAvailableInReplication(c.Name(), replicateConfig)
 		if _, ok := channels[c.ChannelID()]; !ok {
 			channels[c.ChannelID()] = c
 		}
@@ -149,6 +180,24 @@ func recoverReplicateConfiguration(ctx context.Context) (*replicateutil.ConfigHe
 		paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 		config.GetReplicateConfiguration(),
 	), nil
+}
+
+// isChannelAvailableInReplication returns whether a channel is available for replication.
+// A channel is unavailable only when there's a multi-cluster replication topology
+// AND the channel is not in the current cluster's PChannel list.
+func isChannelAvailableInReplication(channelName string, config *replicateutil.ConfigHelper) bool {
+	if config == nil {
+		return true
+	}
+	if !config.IsJoinReplication() {
+		return true
+	}
+	for _, pchannel := range config.GetCurrentCluster().GetPchannels() {
+		if pchannel == channelName {
+			return true
+		}
+	}
+	return false
 }
 
 // ChannelManager manages the channels.
@@ -219,6 +268,51 @@ func (cm *ChannelManager) ReplicateRole() replicateutil.Role {
 		return replicateutil.RolePrimary
 	}
 	return cm.replicateConfig.GetCurrentCluster().Role()
+}
+
+// AddPChannels adds new PChannels dynamically. Channels that already exist are skipped.
+// Only newly added channels are persisted. Local version is not incremented
+// because new PChannels should not trigger service discovery.
+func (cm *ChannelManager) AddPChannels(ctx context.Context, newChannels []string) error {
+	cm.cond.L.Lock()
+	defer cm.cond.L.Unlock()
+
+	newMetas := make([]*streamingpb.PChannelMeta, 0, len(newChannels))
+	for _, name := range newChannels {
+		id := ChannelID{Name: name}
+		if _, ok := cm.channels[id]; ok {
+			continue
+		}
+		var meta *PChannelMeta
+		if cm.streamingVersion == nil {
+			meta = NewPChannelMeta(name, types.AccessModeRO)
+		} else {
+			meta = NewPChannelMeta(name, types.AccessModeRW)
+		}
+		meta.availableInReplication = isChannelAvailableInReplication(name, cm.replicateConfig)
+		cm.channels[id] = meta
+		cm.metrics.AssignPChannelStatus(meta)
+		newMetas = append(newMetas, meta.CopyForWrite().IntoRawMeta())
+	}
+
+	if len(newMetas) == 0 {
+		return nil
+	}
+
+	if err := resource.Resource().StreamingCatalog().SavePChannels(ctx, newMetas); err != nil {
+		// Rollback in-memory changes on persist failure
+		for _, m := range newMetas {
+			c := newPChannelMetaFromProto(m, cm.replicateConfig)
+			delete(cm.channels, c.ChannelID())
+		}
+		cm.Logger().Error("failed to save new pchannels", zap.Error(err))
+		return err
+	}
+
+	cm.Logger().Info("dynamically added new pchannels",
+		zap.Int("count", len(newMetas)),
+		zap.Strings("channels", newChannels))
+	return nil
 }
 
 // TriggerWatchUpdate triggers the watch update.
@@ -293,15 +387,18 @@ func (cm *ChannelManager) CurrentPChannelsView() *PChannelView {
 }
 
 // AllocVirtualChannels allocates virtual channels for a collection.
+// Only channels that are available in replication are considered.
 func (cm *ChannelManager) AllocVirtualChannels(ctx context.Context, param AllocVChannelParam) ([]string, error) {
 	cm.cond.L.Lock()
 	defer cm.cond.L.Unlock()
-	if len(cm.channels) < param.Num {
-		return nil, errors.Errorf("not enough pchannels to allocate, expected: %d, got: %d", param.Num, len(cm.channels))
+
+	availableChannels := cm.sortAvailableChannelsByVChannelCount()
+	if len(availableChannels) < param.Num {
+		return nil, errors.Errorf("not enough pchannels to allocate, expected: %d, got: %d", param.Num, len(availableChannels))
 	}
 
 	vchannels := make([]string, 0, param.Num)
-	for _, channel := range cm.sortChannelsByVChannelCount() {
+	for _, channel := range availableChannels {
 		if len(vchannels) >= param.Num {
 			break
 		}
@@ -316,10 +413,14 @@ type withVChannelCount struct {
 	vchannelCount int
 }
 
-// sortChannelsByVChannelCount sorts the channels by the vchannel count.
-func (cm *ChannelManager) sortChannelsByVChannelCount() []withVChannelCount {
+// sortAvailableChannelsByVChannelCount sorts the available channels by the vchannel count.
+// Channels that are unavailable in replication are excluded.
+func (cm *ChannelManager) sortAvailableChannelsByVChannelCount() []withVChannelCount {
 	vchannelCounts := make([]withVChannelCount, 0, len(cm.channels))
-	for id := range cm.channels {
+	for id, ch := range cm.channels {
+		if !ch.AvailableInReplication() {
+			continue
+		}
 		vchannelCounts = append(vchannelCounts, withVChannelCount{
 			id:            id,
 			vchannelCount: StaticPChannelStatsManager.Get().GetPChannelStats(id).VChannelCount(),
@@ -362,7 +463,7 @@ func (cm *ChannelManager) AssignPChannels(ctx context.Context, pChannelToStreami
 	}
 	updates := make(map[ChannelID]*PChannelMeta, len(pChannelMetas))
 	for _, pchannel := range pChannelMetas {
-		meta := newPChannelMetaFromProto(pchannel)
+		meta := newPChannelMetaFromProto(pchannel, cm.replicateConfig)
 		updates[meta.ChannelID()] = meta
 		cm.metrics.AssignPChannelStatus(meta)
 	}
@@ -395,7 +496,7 @@ func (cm *ChannelManager) AssignPChannelsDone(ctx context.Context, pChannels []C
 
 	// Update metrics.
 	for _, pchannel := range pChannelMetas {
-		cm.metrics.AssignPChannelStatus(newPChannelMetaFromProto(pchannel))
+		cm.metrics.AssignPChannelStatus(newPChannelMetaFromProto(pchannel, cm.replicateConfig))
 	}
 	return nil
 }
@@ -421,7 +522,7 @@ func (cm *ChannelManager) MarkAsUnavailable(ctx context.Context, pChannels []typ
 		return err
 	}
 	for _, pchannel := range pChannelMetas {
-		cm.metrics.AssignPChannelStatus(newPChannelMetaFromProto(pchannel))
+		cm.metrics.AssignPChannelStatus(newPChannelMetaFromProto(pchannel, cm.replicateConfig))
 	}
 	return nil
 }
@@ -439,7 +540,7 @@ func (cm *ChannelManager) updatePChannelMeta(ctx context.Context, pChannelMetas 
 
 	// update in-memory copy and increase the version.
 	for _, pchannel := range pChannelMetas {
-		c := newPChannelMetaFromProto(pchannel)
+		c := newPChannelMetaFromProto(pchannel, cm.replicateConfig)
 		cm.channels[c.ChannelID()] = c
 	}
 	cm.version.Local++
@@ -517,6 +618,10 @@ func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, resu
 	}
 
 	cm.replicateConfig = config
+	// Recompute availableInReplication for all channels after config update
+	for _, ch := range cm.channels {
+		ch.availableInReplication = isChannelAvailableInReplication(ch.Name(), cm.replicateConfig)
+	}
 	cm.cond.UnsafeBroadcast()
 	cm.version.Local++
 	cm.metrics.UpdateAssignmentVersion(cm.version.Local)

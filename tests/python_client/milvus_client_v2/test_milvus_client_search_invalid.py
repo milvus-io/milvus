@@ -174,11 +174,9 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 2. search collection with missing parameters
         log.info("test_search_param_missing: Searching collection %s "
                  "with missing parameters" % collection_w.name)
-        try:
-            collection_w.search()
-        except TypeError as e:
-            assert "missing 4 required positional arguments: 'data', " \
-                   "'anns_field', 'param', and 'limit'" in str(e)
+        collection_w.search(check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "Either ids or data must be provided"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_vectors(self, get_invalid_vectors):

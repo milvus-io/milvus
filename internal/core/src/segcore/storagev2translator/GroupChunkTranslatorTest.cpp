@@ -26,6 +26,7 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/packed/writer.h"
 #include "milvus-storage/format/parquet/file_reader.h"
+#include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/Utils.h"
@@ -43,10 +44,6 @@ using namespace milvus::segcore::storagev2translator;
 class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
     void
     SetUp() override {
-        auto conf = milvus_storage::ArrowFileSystemConfig();
-        conf.storage_type = "local";
-        conf.root_path = path_;
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
         fs_ = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                   .GetArrowFileSystem();
         schema_ = CreateTestSchema();
@@ -95,7 +92,7 @@ class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
     SchemaPtr schema_;
     milvus_storage::ArrowFileSystemPtr fs_;
     std::shared_ptr<arrow::Schema> arrow_schema_;
-    std::string path_ = "/tmp";
+    std::string path_ = TestLocalPath;
 
     std::vector<std::string> paths_;
     int64_t segment_id_ = 0;
@@ -103,7 +100,7 @@ class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
 
 TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     auto temp_dir =
-        std::filesystem::temp_directory_path() / "gctt_test_with_mmap";
+        std::filesystem::path(TestLocalPath) / "gctt_test_with_mmap";
     std::filesystem::create_directory(temp_dir);
 
     auto use_mmap = GetParam();
@@ -271,7 +268,7 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     }
 
     auto temp_dir =
-        std::filesystem::temp_directory_path() / "gctt_test_multiple_files";
+        std::filesystem::path(TestLocalPath) / "gctt_test_multiple_files";
     std::filesystem::create_directory(temp_dir);
     auto column_group_info = FieldDataInfo(0, total_rows, temp_dir.string());
 
@@ -288,12 +285,12 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         /* warmup_policy */ "");
 
     // Test total number of cells across all files
+    // Cells never span files, so count per-file ceil
     int64_t expected_total_cells = 0;
     for (auto row_groups : expected_row_groups_per_file) {
-        expected_total_cells += row_groups;
+        expected_total_cells +=
+            (row_groups + kRowGroupsPerCell - 1) / kRowGroupsPerCell;
     }
-    expected_total_cells =
-        (expected_total_cells + kRowGroupsPerCell - 1) / kRowGroupsPerCell;
     EXPECT_EQ(translator->num_cells(), expected_total_cells);
 
     // Test get_file_and_row_group_offset for global row group indices across
@@ -367,9 +364,8 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         auto usage = translator->estimated_byte_size_of_cell(cid).first;
 
         // Calculate expected size by summing all row groups in this cell
-        size_t rg_start = cid * kRowGroupsPerCell;
-        size_t rg_end =
-            std::min(rg_start + kRowGroupsPerCell, total_row_groups);
+        auto [rg_start, rg_end] = static_cast<GroupCTMeta*>(translator->meta())
+                                      ->get_row_group_range(cid);
         int64_t expected_size = 0;
         for (size_t rg_idx = rg_start; rg_idx < rg_end; ++rg_idx) {
             auto [file_idx, local_rg_idx] =

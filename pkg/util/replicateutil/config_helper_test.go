@@ -352,6 +352,25 @@ func TestConfigHelper_GetTargetChannel(t *testing.T) {
 	}
 }
 
+func TestConfigHelper_IsJoinReplication(t *testing.T) {
+	// Single cluster, no topology → not in replication
+	singleCfg := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "by-dev", Pchannels: []string{"ch1"}},
+		},
+	}
+	h := MustNewConfigHelper("by-dev", singleCfg)
+	assert.False(t, h.IsJoinReplication())
+
+	// Multi-cluster with topology → primary is in replication
+	h = MustNewConfigHelper("source-cluster", createValidConfig())
+	assert.True(t, h.IsJoinReplication())
+
+	// Secondary is also in replication
+	h = MustNewConfigHelper("target-cluster-a", createValidConfig())
+	assert.True(t, h.IsJoinReplication())
+}
+
 func TestConfigHelper_EdgeCases(t *testing.T) {
 	t.Run("config with different channel counts", func(t *testing.T) {
 		config := createConfigWithDifferentChannelCounts()

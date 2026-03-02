@@ -70,11 +70,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
             segcore::SegcoreConfig::default_config(),
             true);
 
-        // Initialize file system
-        auto conf = milvus_storage::ArrowFileSystemConfig();
-        conf.storage_type = "local";
-        conf.root_path = "/tmp/test_data";
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
+        // Use globally initialized ArrowFileSystem
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
 
@@ -92,7 +88,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         }
 
         std::vector<std::vector<int>> column_groups = {
-            {0, 4, 3}, {2}, {1}};  // narrow columns and wide columns
+            {0, 1, 4}, {2}, {3}};  // narrow columns and wide columns
         auto writer_memory = 16 * 1024 * 1024;
         auto storage_config = milvus_storage::StorageConfig();
 

@@ -20,7 +20,11 @@
 
 namespace milvus::index {
 
-constexpr const char* TMP_RTREE_INDEX_PREFIX = "/tmp/milvus/rtree-index/";
+static std::string
+GetRTreeTempPrefix() {
+    auto& lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance();
+    return lcm.GetChunkManager()->GetRootPath() + "/rtree-index/";
+}
 
 // helper to check suffix
 static inline bool
@@ -38,7 +42,7 @@ RTreeIndex<T>::InitForBuildIndex(bool is_growing) {
         path_ = "";
     } else {
         auto prefix = disk_file_manager_->GetIndexIdentifier();
-        path_ = std::string(TMP_RTREE_INDEX_PREFIX) + prefix;
+        path_ = GetRTreeTempPrefix() + prefix;
         boost::filesystem::create_directories(path_);
         index_file_path = path_ + "/index_file";  // base path (no ext)
         if (boost::filesystem::exists(index_file_path + ".bgi")) {

@@ -1240,7 +1240,12 @@ func (suite *ServiceSuite) syncDistribution(ctx context.Context) {
 			PartitionIDs: suite.partitionIDs,
 		},
 		Actions: []*querypb.SyncAction{
-			{Type: querypb.SyncType_UpdateVersion, SealedInTarget: suite.validSegmentIDs, TargetVersion: time.Now().UnixNano()},
+			{
+				Type:                  querypb.SyncType_UpdateVersion,
+				SealedInTarget:        suite.validSegmentIDs,
+				SealedSegmentRowCount: map[int64]int64{1: 100, 2: 100, 3: 100},
+				TargetVersion:         time.Now().UnixNano(),
+			},
 		},
 	})
 }
@@ -1381,7 +1386,8 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	}
 
 	syncVersionAction := &querypb.SyncAction{
-		Type: querypb.SyncType_UpdateVersion,
+		Type:           querypb.SyncType_UpdateVersion,
+		SealedInTarget: suite.validSegmentIDs,
 		SealedSegmentRowCount: map[int64]int64{
 			1: 100,
 			2: 200,
@@ -2196,6 +2202,57 @@ func (suite *ServiceSuite) TestSyncDistribution_Failed() {
 	status, err := suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
+}
+
+func (suite *ServiceSuite) TestSyncDistribution_RejectV25Message() {
+	ctx := context.Background()
+	// prepare
+	// watch dmchannel and load some segments
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+
+	// data
+	req := &querypb.SyncDistributionRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID: suite.collectionID,
+		Channel:      suite.vchannel,
+		LoadMeta: &querypb.LoadMetaInfo{
+			PartitionIDs: suite.partitionIDs,
+		},
+	}
+
+	// Create a v2.5 style message: SealedInTarget is not empty but SealedSegmentRowCount is empty
+	v25StyleAction := &querypb.SyncAction{
+		Type:           querypb.SyncType_UpdateVersion,
+		SealedInTarget: []int64{3, 4, 5}, // Non-empty
+		// Note: SealedSegmentRowCount is not set (empty), simulating v2.5 format
+		GrowingInTarget: []int64{6},
+		DroppedInTarget: []int64{1, 2},
+		TargetVersion:   time.Now().UnixMilli(),
+		Checkpoint:      &msgpb.MsgPosition{Timestamp: 1000},
+		DeleteCP:        &msgpb.MsgPosition{Timestamp: 500},
+	}
+
+	req.Actions = []*querypb.SyncAction{v25StyleAction}
+
+	// This should succeed (no error returned), but the v2.5 message should be rejected
+	status, err := suite.node.SyncDistribution(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	// Verify that the v2.5 message was rejected by checking that no version sync happened
+	// The delegator should not have processed this message
+	// We can verify this by checking if the state was not updated (delegator should remain serviceable: false)
+	shardDelegator, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.True(ok)
+
+	// After rejection, the delegator's version should still be at initial state
+	// (not updated by the v2.5 message)
+	// We verify this indirectly by checking that no segments were marked as excluded
+	suite.Equal(int64(0), shardDelegator.Version())
 }
 
 func (suite *ServiceSuite) TestDelete_Int64() {

@@ -24,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -2118,10 +2117,12 @@ func TestServer_FlushAll(t *testing.T) {
 		server := createTestFlushAllServer()
 		server.handler = NewNMockHandler(t)
 
-		// Mock WAL
-		wal := mock_streaming.NewMockWALAccesser(t)
-		wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
-		streaming.SetWALForTest(wal)
+		// Mock channel.GetClusterChannels
+		mockGetClusterChannels := mockey.Mock(channel.GetClusterChannels).Return(message.ClusterChannels{
+			Channels:       []string{"by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1"},
+			ControlChannel: funcutil.GetControlChannel("by-dev-rootcoord-dml_0"),
+		}).Build()
+		defer mockGetClusterChannels.UnPatch()
 
 		// Mock broadcaster
 		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
@@ -2159,22 +2160,19 @@ func TestServer_FlushAll(t *testing.T) {
 		broadcast.ResetBroadcaster()
 		broadcast.Register(mb)
 
-		// Register mock balancer
-		snmanager.ResetStreamingNodeManager()
+		// Register mock balancer for balance.GetWithContext in StartBroadcastWithResourceKeys
 		b := mock_balancer.NewMockBalancer(t)
+		b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil)
 		b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, callback balancer.WatchChannelAssignmentsCallback) error {
 			<-ctx.Done()
 			return ctx.Err()
 		}).Maybe()
-		b.EXPECT().GetLatestChannelAssignment().Return(&balancer.WatchChannelAssignmentsCallbackParam{
-			PChannelView: &channel.PChannelView{
-				Channels: map[channel.ChannelID]*channel.PChannelMeta{
-					{Name: "by-dev-1"}: channel.NewPChannelMeta("by-dev-1", types2.AccessModeRW),
-				},
-			},
-		}, nil)
-		b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil)
+		b.EXPECT().Close().Return().Maybe()
+		balance.ResetBalancer()
 		balance.Register(b)
+
+		// Register DDL callbacks so registry.CallMessageAckCallback can resolve
+		RegisterDDLCallbacks(server)
 
 		req := &datapb.FlushAllRequest{}
 		resp, err := server.FlushAll(context.Background(), req)

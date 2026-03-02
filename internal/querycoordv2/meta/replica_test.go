@@ -728,6 +728,117 @@ func (suite *ReplicaSuite) TestCalculateOptimalAssignments() {
 	suite.Equal(1, countsOfThree) // 1 channel gets 3 nodes
 }
 
+// TestTryEnableChannelExclusiveModeTriggersBalance tests that TryEnableChannelExclusiveMode
+// calls tryBalanceNodeForChannel to balance nodes across channels.
+func (suite *ReplicaSuite) TestTryEnableChannelExclusiveModeTriggersBalance() {
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ChannelLevelScoreBalancerName)
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key, "1")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.Balancer.Key)
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key)
+	}()
+
+	// Create a replica with nodes but no ChannelNodeInfos (nil) to trigger initialization path
+	r := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  2,
+		ResourceGroup: DefaultResourceGroupName,
+		Nodes:         []int64{1, 2, 3, 4, 5, 6},
+	})
+
+	mutableReplica := r.CopyForWrite()
+	// Verify ChannelNodeInfos is nil before calling TryEnableChannelExclusiveMode
+	suite.Nil(mutableReplica.replicaPB.ChannelNodeInfos)
+
+	// Call TryEnableChannelExclusiveMode with channel names
+	mutableReplica.TryEnableChannelExclusiveMode("channel1", "channel2", "channel3")
+
+	newR := mutableReplica.IntoReplica()
+
+	// Verify that ChannelNodeInfos was created
+	suite.NotNil(newR.replicaPB.GetChannelNodeInfos())
+	suite.Equal(3, len(newR.replicaPB.GetChannelNodeInfos()))
+
+	// Verify that tryBalanceNodeForChannel was called and nodes were balanced
+	// 6 nodes / 3 channels = 2 nodes per channel
+	totalAssignedNodes := 0
+	for _, channelNodeInfo := range newR.replicaPB.GetChannelNodeInfos() {
+		suite.Equal(2, len(channelNodeInfo.GetRwNodes()))
+		totalAssignedNodes += len(channelNodeInfo.GetRwNodes())
+	}
+	suite.Equal(6, totalAssignedNodes)
+}
+
+// TestTryEnableChannelExclusiveModeExistingChannelNodeInfos tests that TryEnableChannelExclusiveMode
+// does not overwrite existing ChannelNodeInfos but still triggers balance.
+func (suite *ReplicaSuite) TestTryEnableChannelExclusiveModeExistingChannelNodeInfos() {
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ChannelLevelScoreBalancerName)
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key, "1")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.Balancer.Key)
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key)
+	}()
+
+	// Create a replica with existing ChannelNodeInfos but no balanced nodes
+	r := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  2,
+		ResourceGroup: DefaultResourceGroupName,
+		Nodes:         []int64{1, 2, 3, 4},
+		ChannelNodeInfos: map[string]*querypb.ChannelNodeInfo{
+			"channel1": {},
+			"channel2": {},
+		},
+	})
+
+	mutableReplica := r.CopyForWrite()
+	// ChannelNodeInfos is not nil, so TryEnableChannelExclusiveMode should not overwrite
+	mutableReplica.TryEnableChannelExclusiveMode("channel1", "channel2")
+
+	newR := mutableReplica.IntoReplica()
+
+	// Verify existing channels are preserved (not overwritten with new ones)
+	suite.Equal(2, len(newR.replicaPB.GetChannelNodeInfos()))
+
+	// Verify that tryBalanceNodeForChannel was still called and nodes were balanced
+	// 4 nodes / 2 channels = 2 nodes per channel
+	totalAssignedNodes := 0
+	for _, channelNodeInfo := range newR.replicaPB.GetChannelNodeInfos() {
+		suite.Equal(2, len(channelNodeInfo.GetRwNodes()))
+		totalAssignedNodes += len(channelNodeInfo.GetRwNodes())
+	}
+	suite.Equal(4, totalAssignedNodes)
+}
+
+// TestTryEnableChannelExclusiveModeInsufficientNodes tests that TryEnableChannelExclusiveMode
+// properly handles the case where there are not enough nodes for exclusive mode.
+func (suite *ReplicaSuite) TestTryEnableChannelExclusiveModeInsufficientNodes() {
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ChannelLevelScoreBalancerName)
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key, "3")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.Balancer.Key)
+		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key)
+	}()
+
+	// 2 nodes for 2 channels with factor 3: need 6 nodes, only have 2
+	r := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  2,
+		ResourceGroup: DefaultResourceGroupName,
+		Nodes:         []int64{1, 2},
+	})
+
+	mutableReplica := r.CopyForWrite()
+	mutableReplica.TryEnableChannelExclusiveMode("channel1", "channel2")
+
+	newR := mutableReplica.IntoReplica()
+
+	// With insufficient nodes, tryBalanceNodeForChannel should disable exclusive mode
+	for _, channelNodeInfo := range newR.replicaPB.GetChannelNodeInfos() {
+		suite.Equal(0, len(channelNodeInfo.GetRwNodes()))
+	}
+}
+
 func TestReplica(t *testing.T) {
 	suite.Run(t, new(ReplicaSuite))
 }

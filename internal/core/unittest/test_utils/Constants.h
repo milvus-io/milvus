@@ -11,11 +11,20 @@
 
 #pragma once
 
-#include <stdint.h>
+#include <cstdint>
+#include <string>
 
 constexpr int64_t TestChunkSize = 32 * 1024;
-constexpr char TestLocalPath[] = "/tmp/milvus/local_data/";
-constexpr char TestRemotePath[] = "/tmp/milvus/remote_data";
+// Root path for LocalChunkManager and ArrowFileSystem in tests.
+// Initialized in init_gtest.cpp with a shard-aware random path to
+// avoid conflicts during parallel test execution.
+extern std::string TestLocalPath;
+// Root path for RemoteChunkManager in tests (simulated as local storage).
+// Shares the same random prefix as TestLocalPath.
+extern std::string TestRemotePath;
+// Root path for MmapManager tests. Separate from TestLocalPath to avoid
+// being deleted when tests clean up LocalChunkManager's root path.
+extern std::string TestMmapPath;
 
 constexpr int64_t kTestSparseDim = 1000;
 constexpr float kTestSparseVectorDensity = 0.003;

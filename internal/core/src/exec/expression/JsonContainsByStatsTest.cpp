@@ -29,6 +29,7 @@
 #include "storage/InsertData.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
+#include "test_utils/Constants.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
@@ -78,12 +79,6 @@ BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
     storage_config.root_path = root_path;
     auto chunk_manager = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
-
-    milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(
-        milvus_storage::ArrowFileSystemConfig{
-            .root_path = root_path,
-            .storage_type = "local",
-        });
 
     auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
                                 root_path,
@@ -174,7 +169,7 @@ TEST(JsonContainsByStatsTest, BasicContainsAnyOnArray) {
     const int64_t field_id = json_fid.get();
     const int64_t build_id = 5001;
     const int64_t version_id = 1;
-    const std::string root_path = "/tmp/test-json-contains-by-stats";
+    const std::string root_path = TestLocalPath;
 
     auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
                                           json_fid,

@@ -1141,6 +1141,7 @@ func (sd *shardDelegator) Close() {
 
 	// Refund all sealed segment candidates in distribution
 	sd.distribution.RefundAllCandidates()
+
 	// clean idf oracle
 	if sd.idfOracle != nil {
 		sd.idfOracle.Close()

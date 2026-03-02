@@ -287,13 +287,13 @@ func (r *recoveryStorageImpl) updateCheckpoint(msg message.ImmutableMessage) {
 
 // The incoming message id is always sorted with timetick.
 func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
-	if funcutil.IsControlChannel(msg.VChannel()) && msg.MessageType() != message.MessageTypeAlterReplicateConfig {
-		// message on control channel except AlterReplicateConfig message is just used to determine the DDL/DCL order,
+	if funcutil.IsControlChannel(msg.VChannel()) && !msg.IsPChannelLevel() {
+		// message on control channel except pchannel-level messages is just used to determine the DDL/DCL order,
 		// will not affect the recovery storage, so skip it.
 		return
 	}
 
-	if msg.VChannel() != "" && msg.MessageType() != message.MessageTypeCreateCollection &&
+	if msg.VChannel() != "" && !msg.IsPChannelLevel() && msg.MessageType() != message.MessageTypeCreateCollection &&
 		msg.MessageType() != message.MessageTypeDropCollection && r.vchannels[msg.VChannel()] == nil && !funcutil.IsControlChannel(msg.VChannel()) {
 		r.detectInconsistency(msg, "vchannel not found")
 	}

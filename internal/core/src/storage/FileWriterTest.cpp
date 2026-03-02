@@ -19,6 +19,7 @@
 #include <thread>
 
 #include "storage/FileWriter.h"
+#include "test_utils/Constants.h"
 
 using namespace milvus;
 using namespace milvus::storage;
@@ -27,7 +28,7 @@ class FileWriterTest : public testing::Test {
  protected:
     void
     SetUp() override {
-        test_dir_ = std::filesystem::temp_directory_path() / "file_writer_test";
+        test_dir_ = std::filesystem::path(TestLocalPath) / "file_writer_test";
         std::filesystem::create_directories(test_dir_);
     }
 
@@ -951,17 +952,12 @@ TEST_F(FileWriterTest, ConcurrentAccessToFileWriterConfig) {
 
     // Verify that the configuration is still valid
     FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
-    std::string filename =
-        (std::filesystem::temp_directory_path() / "concurrent_config_test.txt")
-            .string();
+    std::string filename = (test_dir_ / "concurrent_config_test.txt").string();
 
     FileWriter writer(filename);
     std::string test_data = "Concurrent config test";
     writer.Write(test_data.data(), test_data.size());
     writer.Finish();
-
-    // Clean up
-    std::filesystem::remove(filename);
 }
 // Test that changing FileWriterConfig during FileWriter operations doesn't affect existing instances
 TEST_F(FileWriterTest, ConfigChangeDuringFileWriterOperations) {
@@ -969,12 +965,8 @@ TEST_F(FileWriterTest, ConfigChangeDuringFileWriterOperations) {
     FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
     FileWriteWorkerPool::GetInstance().Configure(2);
 
-    std::string filename1 =
-        (std::filesystem::temp_directory_path() / "config_change_test1.txt")
-            .string();
-    std::string filename2 =
-        (std::filesystem::temp_directory_path() / "config_change_test2.txt")
-            .string();
+    std::string filename1 = (test_dir_ / "config_change_test1.txt").string();
+    std::string filename2 = (test_dir_ / "config_change_test2.txt").string();
 
     // Create first FileWriter
     FileWriter writer1(filename1);
@@ -1016,8 +1008,4 @@ TEST_F(FileWriterTest, ConfigChangeDuringFileWriterOperations) {
     std::string content2((std::istreambuf_iterator<char>(file2)),
                          std::istreambuf_iterator<char>());
     EXPECT_EQ(content2, test_data2);
-
-    // Clean up
-    std::filesystem::remove(filename1);
-    std::filesystem::remove(filename2);
 }

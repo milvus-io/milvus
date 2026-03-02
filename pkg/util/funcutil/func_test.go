@@ -992,6 +992,29 @@ func TestChannelConvert(t *testing.T) {
 		channel := GetVirtualChannel("by-dev-rootcoord-dml_2", 1001, 0)
 		assert.Equal(t, "by-dev-rootcoord-dml_2_1001v0", channel)
 	})
+
+	t.Run("is on physical channel with prefix ambiguity", func(t *testing.T) {
+		// Two pchannels where one is a prefix of the other:
+		// by-dev-rootcoord-dml_1 vs by-dev-rootcoord-dml_10
+		pchannel1 := "by-dev-rootcoord-dml_1"
+		pchannel10 := "by-dev-rootcoord-dml_10"
+
+		// vchannel on pchannel_1
+		vchannel1 := "by-dev-rootcoord-dml_1_1001v0"
+		assert.True(t, IsOnPhysicalChannel(vchannel1, pchannel1))
+		assert.False(t, IsOnPhysicalChannel(vchannel1, pchannel10))
+
+		// vchannel on pchannel_10
+		vchannel10 := "by-dev-rootcoord-dml_10_1001v0"
+		assert.False(t, IsOnPhysicalChannel(vchannel10, pchannel1))
+		assert.True(t, IsOnPhysicalChannel(vchannel10, pchannel10))
+
+		// pchannel matches itself
+		assert.True(t, IsOnPhysicalChannel(pchannel1, pchannel1))
+		assert.True(t, IsOnPhysicalChannel(pchannel10, pchannel10))
+		assert.False(t, IsOnPhysicalChannel(pchannel1, pchannel10))
+		assert.False(t, IsOnPhysicalChannel(pchannel10, pchannel1))
+	})
 }
 
 func TestString2KeyValuePair(t *testing.T) {

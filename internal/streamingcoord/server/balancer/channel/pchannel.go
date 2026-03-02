@@ -7,10 +7,17 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 )
 
 // NewPChannelMeta creates a new PChannelMeta.
+// By default, the channel is available in replication.
 func NewPChannelMeta(name string, accessMode types.AccessMode) *PChannelMeta {
+	return newPChannelMetaWithAvailability(name, accessMode, true)
+}
+
+// newPChannelMetaWithAvailability creates a new PChannelMeta with explicit availability in replication.
+func newPChannelMetaWithAvailability(name string, accessMode types.AccessMode, availableInReplication bool) *PChannelMeta {
 	return &PChannelMeta{
 		inner: &streamingpb.PChannelMeta{
 			Channel: &streamingpb.PChannelInfo{
@@ -22,20 +29,30 @@ func NewPChannelMeta(name string, accessMode types.AccessMode) *PChannelMeta {
 			State:     streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED,
 			Histories: make([]*streamingpb.PChannelAssignmentLog, 0),
 		},
+		availableInReplication: availableInReplication,
 	}
 }
 
 // newPChannelMetaFromProto creates a new PChannelMeta from proto.
-func newPChannelMetaFromProto(channel *streamingpb.PChannelMeta) *PChannelMeta {
+// The availableInReplication flag is computed from the given replicateConfig.
+func newPChannelMetaFromProto(channel *streamingpb.PChannelMeta, replicateConfig *replicateutil.ConfigHelper) *PChannelMeta {
 	return &PChannelMeta{
-		inner: channel,
+		inner:                  channel,
+		availableInReplication: isChannelAvailableInReplication(channel.GetChannel().GetName(), replicateConfig),
 	}
 }
 
 // PChannelMeta is the read only version of PChannelInfo, to be used in balancer,
 // If you need to update PChannelMeta, please use CopyForWrite to get mutablePChannel.
 type PChannelMeta struct {
-	inner *streamingpb.PChannelMeta
+	inner                  *streamingpb.PChannelMeta
+	availableInReplication bool
+}
+
+// AvailableInReplication returns whether the channel is available for VChannel allocation
+// and DDL broadcasts. Dynamically-added PChannels are gated until they appear in ReplicateConfig.
+func (c *PChannelMeta) AvailableInReplication() bool {
+	return c.availableInReplication
 }
 
 // Name returns the name of the channel.
@@ -108,7 +125,8 @@ func (c *PChannelMeta) State() streamingpb.PChannelMetaState {
 func (c *PChannelMeta) CopyForWrite() *mutablePChannel {
 	return &mutablePChannel{
 		PChannelMeta: &PChannelMeta{
-			inner: proto.Clone(c.inner).(*streamingpb.PChannelMeta),
+			inner:                  proto.Clone(c.inner).(*streamingpb.PChannelMeta),
+			availableInReplication: c.availableInReplication,
 		},
 	}
 }

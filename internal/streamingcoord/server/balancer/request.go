@@ -48,7 +48,7 @@ func newOpUpdateBalancePolicy(ctx context.Context, req *types.UpdateWALBalancePo
 			// apply the freeze streaming nodes.
 			if len(req.GetNodes().GetFreezeNodeIds()) > 0 || len(req.GetNodes().GetDefreezeNodeIds()) > 0 {
 				impl.Logger().Info("update freeze nodes", zap.Int64s("freezeNodeIDs", req.GetNodes().GetFreezeNodeIds()), zap.Int64s("defreezeNodeIDs", req.GetNodes().GetDefreezeNodeIds()))
-				impl.freezeNodes.Insert(req.GetNodes().GetFreezeNodeIds()...)
+				impl.freezeNodes.Upsert(req.GetNodes().GetFreezeNodeIds()...)
 				impl.freezeNodes.Remove(req.GetNodes().GetDefreezeNodeIds()...)
 			}
 			future.Set(response{resp: &types.UpdateWALBalancePolicyResponse{

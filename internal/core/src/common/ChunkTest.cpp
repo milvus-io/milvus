@@ -1203,7 +1203,7 @@ TEST(chunk, test_create_group_chunk_with_mmap) {
                                                     std::nullopt)};
 
     // Create group chunk with mmap
-    std::string mmap_file = "/tmp/test_group_chunk_mmap.bin";
+    std::string mmap_file = TestLocalPath + "test_group_chunk_mmap.bin";
     if (boost::filesystem::exists(mmap_file)) {
         boost::filesystem::remove(mmap_file);
     }

@@ -1804,7 +1804,6 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 		Key:          "rootCoord.dmlChannelNum",
 		Version:      "2.0.0",
 		DefaultValue: "16",
-		Forbidden:    true,
 		Doc:          "The number of DML-Channels to create at the root coord startup.",
 		Export:       true,
 	}
@@ -2559,6 +2558,8 @@ type queryCoordConfig struct {
 	ResourceExhaustionCleanupInterval ParamItem `refreshable:"true"`
 
 	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
+
+	AutoWarmupForNonPKIsolationCollection ParamItem `refreshable:"false"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -3237,6 +3238,16 @@ Set to 0 to disable the penalty period.`,
 		Export:       false,
 	}
 	p.UpdateTargetNeedSegmentDataReady.Init(base.mgr)
+
+	p.AutoWarmupForNonPKIsolationCollection = ParamItem{
+		Key:          "queryCoord.autoWarmupForNonPKIsolationCollection",
+		Version:      "2.6.12",
+		DefaultValue: "false",
+		Doc:          `When enabled, forces vectorIndex, scalarField, and scalarIndex warmup to sync for collections without partition key isolation. vectorField is not affected.`,
+		Forbidden:    true,
+		Export:       false,
+	}
+	p.AutoWarmupForNonPKIsolationCollection.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

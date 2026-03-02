@@ -113,8 +113,12 @@ func (impl *flusherComponents) WhenDropCollection(vchannel string) {
 
 // HandleMessage handles the plain message.
 func (impl *flusherComponents) HandleMessage(ctx context.Context, msg message.ImmutableMessage) error {
+	// AlterReplicateConfig is a coordinator-only message, skip it in flusher.
+	if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
+		return nil
+	}
 	vchannel := msg.VChannel()
-	if vchannel == "" || msg.MessageType().IsBroadcastToAll() {
+	if vchannel == "" || msg.IsPChannelLevel() {
 		return impl.broadcastToAllDataSyncService(ctx, msg)
 	}
 	if _, ok := impl.dataServices[vchannel]; !ok {

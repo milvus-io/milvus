@@ -40,7 +40,7 @@
 #include "storage/Util.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/LocalChunkManagerSingleton.h"
-
+#include "test_utils/Constants.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace std;
@@ -69,7 +69,8 @@ class DiskAnnFileManagerTest : public testing::Test {
 
 TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    std::string indexFilePath = "/tmp/diskann/index_files/1000/index";
+    std::string indexFilePath =
+        TestLocalPath + "diskann/index_files/1000/index";
     auto exist = lcm->Exist(indexFilePath);
     EXPECT_EQ(exist, false);
     uint64_t index_size = 50 << 20;
@@ -125,7 +126,7 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
 TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     auto conf = milvus_storage::ArrowFileSystemConfig();
     conf.storage_type = "local";
-    conf.root_path = "/tmp";
+    conf.root_path = TestLocalPath + "diskann";
     milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
 
     auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
@@ -133,12 +134,13 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
 
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string small_index_file_path =
-        "/tmp/diskann/index_files/1000/small_index_file";
+        TestLocalPath + "diskann/index_files/1000/1/2/3/small_index_file";
     std::string large_index_file_path =
-        "/tmp/diskann/index_files/1000/large_index_file";
+        TestLocalPath + "diskann/index_files/1000/1/2/3/large_index_file";
     auto exist = lcm->Exist(large_index_file_path);
 
-    std::string index_file_path = "/tmp/diskann/index_files/1000/index_file";
+    std::string index_file_path =
+        TestLocalPath + "diskann/index_files/1000/1/2/3/index_file";
     boost::filesystem::path localPath(index_file_path);
     auto local_file_name = localPath.filename().string();
 
@@ -164,8 +166,10 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     FieldDataMeta filed_data_meta = {1, 2, 3, 100};
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
 
+    auto storage_config = gen_local_storage_config(TestLocalPath + "diskann/");
+    auto cm = storage::CreateChunkManager(storage_config);
     auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(filed_data_meta, index_meta, cm_, fs_));
+        storage::FileManagerContext(filed_data_meta, index_meta, cm, fs));
 
     auto os = diskAnnFileManager->OpenOutputStream(index_file_path);
     size_t write_offset = 0;
@@ -207,7 +211,7 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     EXPECT_EQ(read_small_index_size, small_index_size);
     EXPECT_EQ(is->Tell(), read_offset);
     std::string small_index_file_path_read =
-        "/tmp/diskann/index_files/1000/small_index_file_read";
+        TestLocalPath + "diskann/index_files/1000/1/2/3/small_index_file_read";
     lcm->CreateFile(small_index_file_path_read);
     int fd_read = open(small_index_file_path_read.c_str(), O_WRONLY);
     ASSERT_NE(fd_read, -1);
@@ -318,7 +322,7 @@ namespace {
 const int64_t kOptFieldId = 123456;
 const std::string kOptFieldName = "opt_field_name";
 const int64_t kOptFieldDataRange = 1000;
-const std::string kOptFieldPath = "/tmp/diskann/opt_field/";
+// kOptFieldPath computed inline to avoid static initialization order issue
 const size_t kEntityCnt = 1000 * 10;
 const FieldDataMeta kOptVecFieldDataMeta = {1, 2, 3, 100};
 using OffsetT = uint32_t;
@@ -392,7 +396,8 @@ PrepareInsertData(const int64_t opt_field_data_range) -> std::string {
     auto chunk_manager =
         storage::CreateChunkManager(get_default_local_storage_config());
 
-    std::string path = kOptFieldPath + std::to_string(kOptFieldId);
+    std::string path =
+        TestLocalPath + "diskann/opt_field/" + std::to_string(kOptFieldId);
     boost::filesystem::remove_all(path);
     chunk_manager->Write(path, serialized_data.data(), serialized_data.size());
     return path;
