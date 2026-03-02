@@ -182,16 +182,6 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 		return fmt.Errorf("failed to marshal collection info: %s", err.Error())
 	}
 
-	// Due to the limit of etcd txn number, we must split these kvs into several batches.
-	// Save collection key first, and the state of collection is creating.
-	// If we save collection key with error, then no garbage will be generated and error will be raised.
-	// If we succeeded to save collection but failed to save other related keys, the garbage meta can be removed
-	// outside and the collection won't be seen by any others (since it's of creating state).
-	// However, if we save other keys first, there is no chance to remove the intermediate meta.
-	if err := kc.Snapshot.Save(ctx, k1, string(v1), ts); err != nil {
-		return err
-	}
-
 	kvs := map[string]string{}
 
 	// save partition info to new path.
@@ -239,13 +229,23 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 		kvs[k] = string(v)
 	}
 
-	// Though batchSave is not atomic enough, we can promise the atomicity outside.
-	// Recovering from failure, if we found collection is creating, we should remove all these related meta.
-	// since SnapshotKV may save both snapshot key and the original key if the original key is newest
+	// Due to the limit of etcd txn number, we must split these kvs into several batches.
+	// Save fields/partitions/functions first, then save the collection key last.
+	// If we crash after saving fields but before the collection key, the collection won't be
+	// loaded on restart (no collection key = not in collID2Meta), so the DDL ack callback will
+	// retry and complete the full write. The orphan field keys will be overwritten on retry.
+	// If we crash after saving the collection key, all data is persisted — no issue.
+	// This ordering avoids the case where the collection key exists without fields, which would
+	// cause the idempotency check in AddCollection to short-circuit and skip saving fields.
 	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
-	return etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
+	if err := etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
 		return kc.Snapshot.MultiSave(ctx, partialKvs, ts)
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Save the collection key last — this is the "commit point" that makes the collection visible.
+	return kc.Snapshot.Save(ctx, k1, string(v1), ts)
 }
 
 func (kc *Catalog) loadCollectionFromDb(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*pb.CollectionInfo, error) {

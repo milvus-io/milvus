@@ -302,6 +302,9 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 	if err != nil || collInfo == nil {
 		return nil, fmt.Errorf("failed to get collection info: %w", err)
 	}
+	if collInfo.Schema == nil || len(collInfo.Schema.GetFields()) == 0 {
+		return nil, fmt.Errorf("collection schema is nil or has no fields, collectionID: %d", segment.GetCollectionID())
+	}
 
 	// Calculate binlog allocation
 	binlogNum := (segment.getSegmentSize()/Params.DataNodeCfg.BinLogMaxSize.GetAsInt64() + 1) *
