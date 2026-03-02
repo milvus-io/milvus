@@ -181,6 +181,7 @@ func PublishDefaultFilesystemMetrics() (*FilesystemMetrics, error) {
 			CloudProvider:     params.MinioCfg.CloudProvider.GetValue(),
 			RequestTimeoutMs:  params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
 			GcpCredentialJSON: params.MinioCfg.GcpCredentialJSON.GetValue(),
+			SslTlsMinVersion:  params.MinioCfg.SslTLSMinVersion.GetValue(),
 		}
 	}
 	return PublishFilesystemMetricsWithConfig(storageConfig)
