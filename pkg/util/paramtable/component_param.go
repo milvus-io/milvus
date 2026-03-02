@@ -6207,7 +6207,7 @@ type dataNodeConfig struct {
 	DeltalogFormat ParamItem `refreshable:"false"`
 
 	// index services config
-	BuildParallel               ParamItem `refreshable:"false"`
+	BuildParallel            ParamItem `refreshable:"false"`
 	MaxIndexBuildConcurrency ParamItem `refreshable:"true"`
 
 	WorkerSlotUnit      ParamItem `refreshable:"true"`
