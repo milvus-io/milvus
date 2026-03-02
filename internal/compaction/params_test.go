@@ -47,6 +47,7 @@ func TestGetJSONParams(t *testing.T) {
 		PreferSegmentSizeRatio:    paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat(),
 		BloomFilterApplyBatchSize: paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
 		StorageConfig:             CreateStorageConfig(),
+		UseLoonFFI:                paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
 	}, result)
 }
 
