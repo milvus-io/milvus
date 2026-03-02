@@ -199,61 +199,67 @@ func TestChannelManager(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, m.ReplicateRole(), replicateutil.RolePrimary)
 
-		// TODO: support add new pchannels into existing clusters.
 		// Add more pchannels into existing clusters.
-		// 	Clusters: []*commonpb.MilvusCluster{
-		// 		{ClusterId: "by-dev", Pchannels: []string{"by-dev-test-channel-1", "by-dev-test-channel-2", "by-dev-test-channel-3"}},
-		// 		{ClusterId: "by-dev2", Pchannels: []string{"by-dev2-test-channel-1", "by-dev2-test-channel-2", "by-dev2-test-channel-3"}},
-		// 	},
-		// 	CrossClusterTopology: []*commonpb.CrossClusterTopology{
-		// 		{SourceClusterId: "by-dev", TargetClusterId: "by-dev2"},
-		// 	},
-		// }
-		// msg = message.NewAlterReplicateConfigMessageBuilderV2().
-		// 	WithHeader(&message.AlterReplicateConfigMessageHeader{
-		// 		ReplicateConfiguration: cfg,
-		// 	}).
-		// 	WithBody(&message.AlterReplicateConfigMessageBody{}).
-		// 	WithBroadcast([]string{"by-dev-test-channel-1", "by-dev-test-channel-2", "by-dev-test-channel-3"}).
-		// 	MustBuildBroadcast()
-		// result = message.BroadcastResultAlterReplicateConfigMessageV2{
-		// 	Message: message.MustAsBroadcastAlterReplicateConfigMessageV2(msg),
-		// 	Results: map[string]*message.AppendResult{
-		// 		"by-dev-test-channel-1": {
-		// 			MessageID:              walimplstest.NewTestMessageID(1),
-		// 			LastConfirmedMessageID: walimplstest.NewTestMessageID(2),
-		// 			TimeTick:               1,
-		// 		},
-		// 		"by-dev-test-channel-2": {
-		// 			MessageID:              walimplstest.NewTestMessageID(3),
-		// 			LastConfirmedMessageID: walimplstest.NewTestMessageID(4),
-		// 			TimeTick:               1,
-		// 		},
-		// 		"by-dev-test-channel-3": {
-		// 			MessageID:              walimplstest.NewTestMessageID(5),
-		// 			LastConfirmedMessageID: walimplstest.NewTestMessageID(6),
-		// 			TimeTick:               1,
-		// 		},
-		// 	},
-		// }
-		// catalog.EXPECT().SaveReplicateConfiguration(mock.Anything, mock.Anything, mock.Anything).Unset()
-		// catalog.EXPECT().SaveReplicateConfiguration(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		// 	func(ctx context.Context, config *streamingpb.ReplicateConfigurationMeta, replicatingTasks []*streamingpb.ReplicatePChannelMeta) error {
-		// 		assert.True(t, proto.Equal(config.ReplicateConfiguration, cfg))
-		// 		assert.Len(t, replicatingTasks, 1) // here should be two new incoming tasks.
-		// 		for _, task := range replicatingTasks {
-		// 			assert.Equal(t, task.GetSourceChannelName(), "by-dev-test-channel-3")
-		// 			result := result.Results[task.GetSourceChannelName()]
-		// 			assert.True(t, result.LastConfirmedMessageID.EQ(message.MustUnmarshalMessageID(task.InitializedCheckpoint.MessageId)))
-		// 			assert.Equal(t, result.TimeTick, task.InitializedCheckpoint.TimeTick)
-		// 			assert.Equal(t, task.GetTargetChannelName(), strings.Replace(task.GetSourceChannelName(), "by-dev", "by-dev2", 1))
-		// 			assert.Equal(t, task.GetTargetCluster().GetClusterId(), "by-dev2")
-		// 		}
-		// 		return nil
-		// 	})
+		cfg = &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "by-dev", Pchannels: []string{"by-dev-test-channel-1", "by-dev-test-channel-2", "by-dev-test-channel-3"}},
+				{ClusterId: "by-dev2", Pchannels: []string{"by-dev2-test-channel-1", "by-dev2-test-channel-2", "by-dev2-test-channel-3"}},
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "by-dev", TargetClusterId: "by-dev2"},
+			},
+		}
+		msg = message.NewAlterReplicateConfigMessageBuilderV2().
+			WithHeader(&message.AlterReplicateConfigMessageHeader{
+				ReplicateConfiguration: cfg,
+			}).
+			WithBody(&message.AlterReplicateConfigMessageBody{}).
+			WithBroadcast([]string{"by-dev-test-channel-1", "by-dev-test-channel-2", "by-dev-test-channel-3"}).
+			MustBuildBroadcast()
+		result = message.BroadcastResultAlterReplicateConfigMessageV2{
+			Message: message.MustAsBroadcastAlterReplicateConfigMessageV2(msg),
+			Results: map[string]*message.AppendResult{
+				"by-dev-test-channel-1": {
+					MessageID:              walimplstest.NewTestMessageID(1),
+					LastConfirmedMessageID: walimplstest.NewTestMessageID(2),
+					TimeTick:               1,
+				},
+				"by-dev-test-channel-2": {
+					MessageID:              walimplstest.NewTestMessageID(3),
+					LastConfirmedMessageID: walimplstest.NewTestMessageID(4),
+					TimeTick:               1,
+				},
+				"by-dev-test-channel-3": {
+					MessageID:              walimplstest.NewTestMessageID(5),
+					LastConfirmedMessageID: walimplstest.NewTestMessageID(6),
+					TimeTick:               1,
+				},
+			},
+		}
+		catalog.EXPECT().SaveReplicateConfiguration(mock.Anything, mock.Anything, mock.Anything).Unset()
+		catalog.EXPECT().SaveReplicateConfiguration(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, config *streamingpb.ReplicateConfigurationMeta, replicatingTasks []*streamingpb.ReplicatePChannelMeta) error {
+				assert.True(t, proto.Equal(config.ReplicateConfiguration, cfg))
+				assert.Len(t, replicatingTasks, 1) // only one new pchannel task for the appended channel.
+				for _, task := range replicatingTasks {
+					assert.Equal(t, task.GetSourceChannelName(), "by-dev-test-channel-3")
+					result := result.Results[task.GetSourceChannelName()]
+					assert.True(t, result.LastConfirmedMessageID.EQ(message.MustUnmarshalMessageID(task.InitializedCheckpoint.MessageId)))
+					// For pchannel-increasing tasks, TimeTick is decremented by 1 so the CDC scanner
+					// includes the AlterReplicateConfig message itself (DeliverFilterTimeTickGT is strict).
+					assert.Equal(t, result.TimeTick-1, task.InitializedCheckpoint.TimeTick)
+					assert.True(t, task.GetSkipGetReplicateCheckpoint())
+					assert.Equal(t, task.GetTargetChannelName(), strings.Replace(task.GetSourceChannelName(), "by-dev", "by-dev2", 1))
+					assert.Equal(t, task.GetTargetCluster().GetClusterId(), "by-dev2")
+				}
+				return nil
+			})
 
-		// err = m.UpdateReplicateConfiguration(ctx, result)
-		// assert.NoError(t, err)
+		err = m.UpdateReplicateConfiguration(ctx, result)
+		assert.NoError(t, err)
+		param, err = m.GetLatestChannelAssignment()
+		assert.NoError(t, err)
+		assert.Equal(t, param.Version.Local, oldLocalVersion+2)
 
 		// Add new cluster into existing config.
 		cfg = &commonpb.ReplicateConfiguration{
@@ -310,7 +316,7 @@ func TestChannelManager(t *testing.T) {
 
 		param, err = m.GetLatestChannelAssignment()
 		assert.NoError(t, err)
-		assert.Equal(t, param.Version.Local, oldLocalVersion+2)
+		assert.Equal(t, param.Version.Local, oldLocalVersion+3)
 		assert.True(t, proto.Equal(param.ReplicateConfiguration, cfg))
 		assert.Equal(t, m.ReplicateRole(), replicateutil.RolePrimary)
 
@@ -362,7 +368,7 @@ func TestChannelManager(t *testing.T) {
 
 		param, err = m.GetLatestChannelAssignment()
 		assert.NoError(t, err)
-		assert.Equal(t, param.Version.Local, oldLocalVersion+3)
+		assert.Equal(t, param.Version.Local, oldLocalVersion+4)
 		assert.True(t, proto.Equal(param.ReplicateConfiguration, cfg))
 		assert.Equal(t, m.ReplicateRole(), replicateutil.RoleSecondary)
 	})
