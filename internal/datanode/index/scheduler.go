@@ -30,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // TaskQueue is a queue used to store tasks.
@@ -277,8 +279,8 @@ func (sched *TaskScheduler) indexBuildLoop() {
 		case <-sched.TaskQueue.utChan():
 			t := sched.TaskQueue.PopUnissuedTask()
 			go func(t Task) {
-				if t.IsVectorIndex() {
-					GetVecIndexBuildPool().Submit(func() (any, error) {
+				if t.IsVectorIndex() || paramtable.GetRole() == typeutil.StandaloneRole {
+					GetIndexBuildPool().Submit(func() (any, error) {
 						sched.processTask(t)
 						return nil, nil
 					})

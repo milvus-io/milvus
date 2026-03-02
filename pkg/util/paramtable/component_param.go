@@ -6208,7 +6208,7 @@ type dataNodeConfig struct {
 
 	// index services config
 	BuildParallel               ParamItem `refreshable:"false"`
-	MaxVecIndexBuildConcurrency ParamItem `refreshable:"true"`
+	MaxIndexBuildConcurrency ParamItem `refreshable:"true"`
 
 	WorkerSlotUnit      ParamItem `refreshable:"true"`
 	StandaloneSlotRatio ParamItem `refreshable:"false"`
@@ -6660,13 +6660,13 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.BuildParallel.Init(base.mgr)
 
-	p.MaxVecIndexBuildConcurrency = ParamItem{
-		Key:          "dataNode.index.maxVecIndexBuildConcurrency",
+	p.MaxIndexBuildConcurrency = ParamItem{
+		Key:          "dataNode.index.maxIndexBuildConcurrency",
 		Version:      "2.6.9",
 		DefaultValue: "4",
 		Export:       false,
 	}
-	p.MaxVecIndexBuildConcurrency.Init(base.mgr)
+	p.MaxIndexBuildConcurrency.Init(base.mgr)
 
 	p.WorkerSlotUnit = ParamItem{
 		Key:          "dataNode.workerSlotUnit",
