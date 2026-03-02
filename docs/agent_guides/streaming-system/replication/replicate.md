@@ -35,7 +35,7 @@ On WAL open, `RecoverReplicateManager` loads the `ReplicateConfig` and `Replicat
 
 All topology changes are triggered by `AlterReplicateConfig` broadcast messages, which require **ExclusiveCluster** [resource lock](../coordination/broadcaster.md) — acting as a global barrier across all PChannels.
 
-- **AddNewMember**: Add a new cluster entry to `Clusters` and a new topology edge in `CrossClusterTopology`. The new secondary starts with an empty checkpoint and receives the full WAL from the primary. Existing cluster attributes are immutable.
+- **AddNewMember**: Add a new cluster and topology edge. Replication starts from the current WAL position of new incoming `AlterReplicateConfig` message. Existing cluster attributes are immutable.
 - **AddNewPChannel**: Not supported via config change — all clusters must have equal PChannel count set at initial configuration.
 - **SwitchOver**: Update topology edges to reverse roles (e.g., PRIMARY A → SECONDARY B becomes PRIMARY B → SECONDARY A). On the old primary, `SwitchReplicateMode` drops the secondary state. On the new primary, it creates a new secondary state pointing to the new source.
 - **FailOver**: Remove the failed primary from topology edges and designate a secondary as the new primary by updating the topology. The CDC ChannelReplicator on the old primary stops when it detects its topology edge is removed.
