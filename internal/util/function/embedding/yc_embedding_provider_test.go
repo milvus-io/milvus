@@ -238,7 +238,74 @@ func (s *YCEmbeddingProviderSuite) TestEmptyEmbeddingResponse() {
 	s.ErrorContains(err, "number of texts and embeddings does not match")
 }
 
+func (s *YCEmbeddingProviderSuite) TestYCProviderBasicGetters() {
+	ts := CreateYCEmbeddingServer()
+	defer ts.Close()
+
+	functionSchema := &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_Unknown,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+		Params: []*commonpb.KeyValuePair{
+			{Key: models.ModelNameParamKey, Value: "emb://test/model"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+			{Key: models.DimParamKey, Value: "4"},
+		},
+	}
+	provider, err := NewYCEmbeddingProvider(
+		s.schema.Fields[2],
+		functionSchema,
+		map[string]string{models.URLParamKey: ts.URL},
+		credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}),
+		&models.ModelExtraInfo{BatchFactor: 3},
+	)
+	s.NoError(err)
+	s.Equal(int64(4), provider.FieldDim())
+	s.Equal(384, provider.MaxBatch())
+	s.Equal("Api-Key mock", provider.headers()["Authorization"])
+}
+
+func (s *YCEmbeddingProviderSuite) TestBatchEmbeddingAcrossMultipleRequests() {
+	ts := CreateYCEmbeddingServer()
+	defer ts.Close()
+
+	provider, err := createYCProvider(ts.URL, s.schema.Fields[2])
+	s.NoError(err)
+
+	ycProvider := provider.(*YCEmbeddingProvider)
+	ycProvider.maxBatch = 2
+	ret, err := ycProvider.CallEmbedding(context.Background(), []string{"1", "2", "3", "4", "5"}, models.InsertMode)
+	s.NoError(err)
+	embeddings, ok := ret.([][]float32)
+	s.True(ok)
+	s.Len(embeddings, 5)
+	for _, emb := range embeddings {
+		s.Len(emb, 4)
+	}
+}
+
+func (s *YCEmbeddingProviderSuite) TestCallEmbeddingHTTPError() {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("internal error"))
+	}))
+	defer ts.Close()
+
+	provider, err := createYCProvider(ts.URL, s.schema.Fields[2])
+	s.NoError(err)
+	_, err = provider.CallEmbedding(context.Background(), []string{"sentence"}, models.InsertMode)
+	s.Error(err)
+}
+
 func TestExtractYCEmbeddings(t *testing.T) {
 	resp := &YCEmbeddingResponse{}
 	assert.Equal(t, [][]float32(nil), extractYCEmbeddings(resp))
+}
+
+func TestExtractYCEmbeddingsSingleEmbedding(t *testing.T) {
+	resp := &YCEmbeddingResponse{Embedding: []float32{1, 2, 3, 4}}
+	assert.Equal(t, [][]float32{{1, 2, 3, 4}}, extractYCEmbeddings(resp))
 }

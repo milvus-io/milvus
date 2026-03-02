@@ -114,6 +114,24 @@ func (s *TextEmbeddingFunctionSuite) TestInvalidProvider() {
 	s.Error(err)
 }
 
+func (s *TextEmbeddingFunctionSuite) TestUnsupportedProvider() {
+	_, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_TextEmbedding,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+		Params: []*commonpb.KeyValuePair{
+			{Key: Provider, Value: "unknown"},
+			{Key: models.ModelNameParamKey, Value: "test-model"},
+			{Key: models.DimParamKey, Value: "4"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		},
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
+	s.ErrorContains(err, "Unsupported text embedding service provider")
+}
+
 func (s *TextEmbeddingFunctionSuite) TestProcessInsert() {
 	ts := CreateOpenAIEmbeddingServer()
 	defer ts.Close()
