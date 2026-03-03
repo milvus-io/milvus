@@ -654,6 +654,7 @@ func TestComponentParam(t *testing.T) {
 		// compaction
 		assert.Equal(t, 10, Params.MaxCompactionConcurrency.GetAsInt())
 
+		assert.Equal(t, 4, Params.MaxVecIndexBuildConcurrency.GetAsInt())
 		assert.Equal(t, 4, Params.MaxIndexBuildConcurrency.GetAsInt())
 
 		// clustering compaction

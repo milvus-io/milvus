@@ -6177,8 +6177,9 @@ type dataNodeConfig struct {
 	DeltalogFormat ParamItem `refreshable:"false"`
 
 	// index services config
-	BuildParallel            ParamItem `refreshable:"false"`
-	MaxIndexBuildConcurrency ParamItem `refreshable:"true"`
+	BuildParallel               ParamItem `refreshable:"false"`
+	MaxVecIndexBuildConcurrency ParamItem `refreshable:"true"`
+	MaxIndexBuildConcurrency    ParamItem `refreshable:"true"`
 
 	WorkerSlotUnit      ParamItem `refreshable:"true"`
 	StandaloneSlotRatio ParamItem `refreshable:"false"`
@@ -6627,9 +6628,17 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.BuildParallel.Init(base.mgr)
 
-	p.MaxIndexBuildConcurrency = ParamItem{
+	p.MaxVecIndexBuildConcurrency = ParamItem{
 		Key:          "dataNode.index.maxVecIndexBuildConcurrency",
 		Version:      "2.6.9",
+		DefaultValue: "4",
+		Export:       false,
+	}
+	p.MaxVecIndexBuildConcurrency.Init(base.mgr)
+
+	p.MaxIndexBuildConcurrency = ParamItem{
+		Key:          "dataNode.index.maxIndexBuildConcurrency",
+		Version:      "2.6.12",
 		DefaultValue: "4",
 		Export:       false,
 	}
