@@ -18,10 +18,10 @@ package compaction
 
 import (
 	"context"
-	"errors"
 	"io"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
