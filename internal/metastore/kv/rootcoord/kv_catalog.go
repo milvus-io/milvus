@@ -1455,20 +1455,13 @@ func (kc *Catalog) DeleteGrantByCollectionName(ctx context.Context, tenant strin
 		return nil
 	}
 
-	// Remove exact grantee keys first
-	if len(exactRemoveKeys) > 0 {
-		if err = kc.Txn.MultiRemove(ctx, exactRemoveKeys); err != nil {
-			log.Ctx(ctx).Warn("fail to remove exact grantee keys for collection",
-				zap.String("dbName", dbName), zap.String("collectionName", collectionName), zap.Error(err))
-			return err
-		}
-	}
-	// Remove granteeID entries by prefix
-	if len(prefixRemoveKeys) > 0 {
-		if err = kc.Txn.MultiSaveAndRemoveWithPrefix(ctx, nil, prefixRemoveKeys); err != nil {
-			log.Ctx(ctx).Warn("fail to remove granteeID entries for collection",
-				zap.String("dbName", dbName), zap.String("collectionName", collectionName), zap.Error(err))
-		}
+	// Combine both exact grantee keys and granteeID prefix keys into a single
+	// prefix-based removal to ensure atomicity. Using exact grantee keys as
+	// prefixes is safe since they are leaf keys with no sub-keys.
+	allPrefixKeys := append(prefixRemoveKeys, exactRemoveKeys...)
+	if err = kc.Txn.MultiSaveAndRemoveWithPrefix(ctx, nil, allPrefixKeys); err != nil {
+		log.Ctx(ctx).Warn("fail to remove grant entries for collection",
+			zap.String("dbName", dbName), zap.String("collectionName", collectionName), zap.Error(err))
 	}
 	return err
 }

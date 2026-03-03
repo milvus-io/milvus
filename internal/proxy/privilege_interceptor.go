@@ -75,9 +75,9 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	// Resolve alias to actual collection name for RBAC checks
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndex != 0 {
 		if objectName != util.AnyWord && objectName != "" {
-			if actualCollectionName, err := resolveCollectionAlias(ctx, dbName, objectName); err != nil {
+			if actualCollectionName, resolveErr := resolveCollectionAlias(ctx, dbName, objectName); resolveErr != nil {
 				log.RatedWarn(60, "failed to resolve collection alias for RBAC, using original name",
-					zap.String("objectName", objectName), zap.String("dbName", dbName), zap.Error(err))
+					zap.String("objectName", objectName), zap.String("dbName", dbName), zap.Error(resolveErr))
 			} else {
 				objectName = actualCollectionName
 			}
@@ -103,9 +103,9 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 				resolvedNames = append(resolvedNames, name)
 				continue
 			}
-			if actualName, err := resolveCollectionAlias(ctx, dbName, name); err != nil {
+			if actualName, resolveErr := resolveCollectionAlias(ctx, dbName, name); resolveErr != nil {
 				log.RatedWarn(60, "failed to resolve collection alias for RBAC, using original name",
-					zap.String("objectName", name), zap.String("dbName", dbName), zap.Error(err))
+					zap.String("objectName", name), zap.String("dbName", dbName), zap.Error(resolveErr))
 				resolvedNames = append(resolvedNames, name)
 			} else {
 				resolvedNames = append(resolvedNames, actualName)

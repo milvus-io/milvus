@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -239,7 +240,7 @@ func TestResolveCollectionAlias_AliasCacheHit(t *testing.T) {
 		},
 		aliasInfo: map[string]map[string]*aliasEntry{
 			"default": {
-				"my_alias": {collectionName: "real_collection"},
+				"my_alias": {collectionName: "real_collection", cachedAt: time.Now()},
 			},
 		},
 	}
@@ -262,7 +263,7 @@ func TestResolveCollectionAlias_NegativeCacheHit(t *testing.T) {
 		},
 		aliasInfo: map[string]map[string]*aliasEntry{
 			"default": {
-				"regular_name": {collectionName: ""},
+				"regular_name": {collectionName: "", cachedAt: time.Now()},
 			},
 		},
 	}
@@ -350,7 +351,7 @@ func TestRemoveAlias_InvalidatesCache(t *testing.T) {
 		},
 		aliasInfo: map[string]map[string]*aliasEntry{
 			"default": {
-				"my_alias": {collectionName: "real_collection"},
+				"my_alias": {collectionName: "real_collection", cachedAt: time.Now()},
 			},
 		},
 	}
@@ -379,9 +380,9 @@ func TestRemoveCollectionByID_CleansUpAliases(t *testing.T) {
 		},
 		aliasInfo: map[string]map[string]*aliasEntry{
 			"default": {
-				"alias1": {collectionName: "my_collection"},
-				"alias2": {collectionName: "my_collection"},
-				"alias3": {collectionName: "other_collection"},
+				"alias1": {collectionName: "my_collection", cachedAt: time.Now()},
+				"alias2": {collectionName: "my_collection", cachedAt: time.Now()},
+				"alias3": {collectionName: "other_collection", cachedAt: time.Now()},
 			},
 		},
 		collectionCacheVersion: make(map[UniqueID]uint64),
@@ -415,9 +416,9 @@ func TestRemoveCollection_CleansUpAliasesWhenNotCached(t *testing.T) {
 		},
 		aliasInfo: map[string]map[string]*aliasEntry{
 			"default": {
-				"alias1": {collectionName: "uncached_collection"},
-				"alias2": {collectionName: "uncached_collection"},
-				"alias3": {collectionName: "other_collection"},
+				"alias1": {collectionName: "uncached_collection", cachedAt: time.Now()},
+				"alias2": {collectionName: "uncached_collection", cachedAt: time.Now()},
+				"alias3": {collectionName: "other_collection", cachedAt: time.Now()},
 			},
 		},
 		collectionCacheVersion: make(map[UniqueID]uint64),
@@ -450,7 +451,7 @@ func TestRemoveDatabase_CleansUpAliases(t *testing.T) {
 		},
 		aliasInfo: map[string]map[string]*aliasEntry{
 			"mydb": {
-				"alias1": {collectionName: "coll1"},
+				"alias1": {collectionName: "coll1", cachedAt: time.Now()},
 			},
 		},
 		dbInfo: map[string]*databaseInfo{
@@ -475,7 +476,7 @@ func TestCreateAliasTask_ResolvesCollectionAlias(t *testing.T) {
 		collInfo: map[string]map[string]*collectionInfo{"default": {}},
 		aliasInfo: map[string]map[string]*aliasEntry{
 			"default": {
-				"existing_alias": {collectionName: "real_collection"},
+				"existing_alias": {collectionName: "real_collection", cachedAt: time.Now()},
 			},
 		},
 	}
@@ -514,7 +515,7 @@ func TestAlterAliasTask_ResolvesCollectionAlias(t *testing.T) {
 		collInfo: map[string]map[string]*collectionInfo{"default": {}},
 		aliasInfo: map[string]map[string]*aliasEntry{
 			"default": {
-				"existing_alias": {collectionName: "real_collection"},
+				"existing_alias": {collectionName: "real_collection", cachedAt: time.Now()},
 			},
 		},
 	}
@@ -554,7 +555,7 @@ func TestCreateAliasTask_ResolvesEvenWhenRBACFlagDisabled(t *testing.T) {
 		collInfo: map[string]map[string]*collectionInfo{"default": {}},
 		aliasInfo: map[string]map[string]*aliasEntry{
 			"default": {
-				"existing_alias": {collectionName: "real_collection"},
+				"existing_alias": {collectionName: "real_collection", cachedAt: time.Now()},
 			},
 		},
 	}
@@ -595,7 +596,7 @@ func TestListAliasesTask_ResolvesCollectionAlias(t *testing.T) {
 		collInfo: map[string]map[string]*collectionInfo{"default": {}},
 		aliasInfo: map[string]map[string]*aliasEntry{
 			"default": {
-				"existing_alias": {collectionName: "real_collection"},
+				"existing_alias": {collectionName: "real_collection", cachedAt: time.Now()},
 			},
 		},
 	}

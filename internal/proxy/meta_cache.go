@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -118,8 +119,11 @@ type collectionInfo struct {
 	properties            []*commonpb.KeyValuePair
 }
 
+const aliasCacheNegativeTTL = 30 * time.Second
+
 type aliasEntry struct {
-	collectionName string // real collection name; "" means negative cache (not an alias)
+	collectionName string    // real collection name; "" means negative cache (not an alias)
+	cachedAt       time.Time // when this entry was cached; used for TTL on negative entries
 }
 
 type databaseInfo struct {
@@ -660,6 +664,10 @@ func (m *MetaCache) getAlias(database, alias string) (*aliasEntry, bool) {
 	defer m.mu.RUnlock()
 	if db, ok := m.aliasInfo[database]; ok {
 		if entry, ok := db[alias]; ok {
+			// Expire negative cache entries after TTL
+			if entry.collectionName == "" && time.Since(entry.cachedAt) > aliasCacheNegativeTTL {
+				return nil, false
+			}
 			return entry, true
 		}
 	}
@@ -727,7 +735,7 @@ func (m *MetaCache) ResolveCollectionAlias(ctx context.Context, database, nameOr
 		if errors.Is(err, merr.ErrAliasNotFound) || errors.Is(err, merr.ErrCollectionNotFound) {
 			// Negative cache: this name is not an alias
 			m.mu.Lock()
-			m.setAliasLocked(database, nameOrAlias, &aliasEntry{collectionName: ""})
+			m.setAliasLocked(database, nameOrAlias, &aliasEntry{collectionName: "", cachedAt: time.Now()})
 			m.mu.Unlock()
 			return nameOrAlias, nil
 		}
@@ -737,14 +745,14 @@ func (m *MetaCache) ResolveCollectionAlias(ctx context.Context, database, nameOr
 	if resp.GetCollection() == "" {
 		// Negative cache
 		m.mu.Lock()
-		m.setAliasLocked(database, nameOrAlias, &aliasEntry{collectionName: ""})
+		m.setAliasLocked(database, nameOrAlias, &aliasEntry{collectionName: "", cachedAt: time.Now()})
 		m.mu.Unlock()
 		return nameOrAlias, nil
 	}
 
 	// Positive cache: alias -> real collection name
 	m.mu.Lock()
-	m.setAliasLocked(database, nameOrAlias, &aliasEntry{collectionName: resp.GetCollection()})
+	m.setAliasLocked(database, nameOrAlias, &aliasEntry{collectionName: resp.GetCollection(), cachedAt: time.Now()})
 	m.mu.Unlock()
 	return resp.GetCollection(), nil
 }
