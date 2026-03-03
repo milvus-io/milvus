@@ -30,35 +30,38 @@ func TestResizePools(t *testing.T) {
 	paramtable.Get().Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	pt := paramtable.Get()
 
-	defer func() {
-		_ = pt.Reset(pt.DataNodeCfg.MaxIndexBuildConcurrency.Key)
-	}()
+	testCases := []struct {
+		name  string
+		pool  *indexBuildPool
+		param *paramtable.ParamItem
+	}{
+		{"VecIndexBuildPool", vecPool, &pt.DataNodeCfg.MaxVecIndexBuildConcurrency},
+		{"StandaloneIndexBuildPool", standalonePool, &pt.DataNodeCfg.StandaloneIndexBuildParallelism},
+	}
 
-	t.Run("GetIndexBuildPool", func(t *testing.T) {
-		expectedCap := pt.DataNodeCfg.MaxIndexBuildConcurrency.GetAsInt()
-		assert.Equal(t, expectedCap, GetIndexBuildPool().Cap())
-		resizeIndexBuildPool(&config.Event{
-			HasUpdated: true,
-		})
-		assert.Equal(t, expectedCap, GetIndexBuildPool().Cap())
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				_ = pt.Reset(tc.param.Key)
+			}()
 
-		_ = pt.Save(pt.DataNodeCfg.MaxIndexBuildConcurrency.Key, fmt.Sprintf("%d", expectedCap*2))
-		expectedCap = pt.DataNodeCfg.MaxIndexBuildConcurrency.GetAsInt()
-		resizeIndexBuildPool(&config.Event{
-			HasUpdated: true,
-		})
-		assert.Equal(t, expectedCap, GetIndexBuildPool().Cap())
+			expectedCap := tc.param.GetAsInt()
+			assert.Equal(t, expectedCap, tc.pool.Get().Cap())
+			tc.pool.resize(&config.Event{HasUpdated: true})
+			assert.Equal(t, expectedCap, tc.pool.Get().Cap())
 
-		_ = pt.Save(pt.DataNodeCfg.MaxIndexBuildConcurrency.Key, "0")
-		resizeIndexBuildPool(&config.Event{
-			HasUpdated: true,
-		})
-		assert.Equal(t, expectedCap, GetIndexBuildPool().Cap(), "pool shall not be resized when newSize is 0")
+			_ = pt.Save(tc.param.Key, fmt.Sprintf("%d", expectedCap*2))
+			expectedCap = tc.param.GetAsInt()
+			tc.pool.resize(&config.Event{HasUpdated: true})
+			assert.Equal(t, expectedCap, tc.pool.Get().Cap())
 
-		_ = pt.Save(pt.DataNodeCfg.MaxIndexBuildConcurrency.Key, "invalid")
-		resizeIndexBuildPool(&config.Event{
-			HasUpdated: true,
+			_ = pt.Save(tc.param.Key, "0")
+			tc.pool.resize(&config.Event{HasUpdated: true})
+			assert.Equal(t, expectedCap, tc.pool.Get().Cap(), "pool shall not be resized when newSize is 0")
+
+			_ = pt.Save(tc.param.Key, "invalid")
+			tc.pool.resize(&config.Event{HasUpdated: true})
+			assert.Equal(t, expectedCap, tc.pool.Get().Cap())
 		})
-		assert.Equal(t, expectedCap, GetIndexBuildPool().Cap())
-	})
+	}
 }
