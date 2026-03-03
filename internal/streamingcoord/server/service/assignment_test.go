@@ -767,6 +767,14 @@ func TestUpdateReplicateConfigNonPrimaryBroadcastError(t *testing.T) {
 
 	broadcast.ResetBroadcaster()
 	snmanager.ResetStreamingNodeManager()
+
+	// Mock channel.GetClusterChannels to avoid blocking on unregistered singleton.
+	mockGetClusterChannels := mockey.Mock(channel.GetClusterChannels).Return(message.ClusterChannels{
+		Channels:       []string{"by-dev-1"},
+		ControlChannel: "by-dev-1_vcchan",
+	}).Build()
+	defer mockGetClusterChannels.UnPatch()
+
 	b := mock_balancer.NewMockBalancer(t)
 	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
@@ -815,6 +823,14 @@ func TestUpdateReplicateConfigBroadcastError(t *testing.T) {
 
 	broadcast.ResetBroadcaster()
 	snmanager.ResetStreamingNodeManager()
+
+	// Mock channel.GetClusterChannels to avoid blocking on unregistered singleton.
+	mockGetClusterChannels := mockey.Mock(channel.GetClusterChannels).Return(message.ClusterChannels{
+		Channels:       []string{"by-dev-1"},
+		ControlChannel: "by-dev-1_vcchan",
+	}).Build()
+	defer mockGetClusterChannels.UnPatch()
+
 	b := mock_balancer.NewMockBalancer(t)
 	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
@@ -869,6 +885,13 @@ func TestUpdateReplicateConfigSecondValidateSameConfig(t *testing.T) {
 
 	broadcast.ResetBroadcaster()
 	snmanager.ResetStreamingNodeManager()
+
+	// Mock channel.GetClusterChannels to avoid blocking on unregistered singleton.
+	mockGetClusterChannels := mockey.Mock(channel.GetClusterChannels).Return(message.ClusterChannels{
+		Channels:       []string{"by-dev-1"},
+		ControlChannel: "by-dev-1_vcchan",
+	}).Build()
+	defer mockGetClusterChannels.UnPatch()
 
 	callCount := 0
 	cfg := &commonpb.ReplicateConfiguration{
