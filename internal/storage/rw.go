@@ -514,7 +514,7 @@ func NewDeltalogReader(
 }
 
 // NewDeltalogReaderFromManifest creates a deltalog reader from segment manifest path.
-// The manifest contains deltalog file paths that will be read using FFI.
+// It extracts delta log file paths from the manifest and reads them as V2 parquet files.
 func NewDeltalogReaderFromManifest(
 	pkType schemapb.DataType,
 	manifestPath string,
@@ -528,21 +528,13 @@ func NewDeltalogReaderFromManifest(
 		return nil, err
 	}
 
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID:      0,
-				Name:         "pk",
-				DataType:     pkType,
-				IsPrimaryKey: true,
-			},
-			{
-				FieldID:  common.TimeStampField,
-				Name:     "ts",
-				DataType: schemapb.DataType_Int64,
-			},
-		},
+	paths, err := packed.GetDeltaLogPathsFromManifest(manifestPath, rwOptions.storageConfig)
+	if err != nil {
+		return nil, err
+	}
+	if len(paths) == 0 {
+		return nil, io.EOF
 	}
 
-	return NewManifestReader(manifestPath, schema, rwOptions.bufferSize, rwOptions.storageConfig, nil)
+	return NewDeltalogReader(pkType, paths, WithVersion(StorageV2), WithStorageConfig(rwOptions.storageConfig))
 }

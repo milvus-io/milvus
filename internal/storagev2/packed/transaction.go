@@ -113,6 +113,63 @@ func AddDeltaLogsToManifest(
 	return newManifestPath, nil
 }
 
+// GetDeltaLogPathsFromManifest extracts delta log file paths from a Loon manifest.
+// It opens a transaction, reads the manifest's delta_logs section, converts relative
+// paths to absolute paths, and returns them.
+func GetDeltaLogPathsFromManifest(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+) ([]string, error) {
+	basePath, version, err := UnmarshalManfestPath(manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse manifest path: %w", err)
+	}
+
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create properties: %w", err)
+	}
+	defer C.loon_properties_free(cProperties)
+
+	cBasePath := C.CString(basePath)
+	defer C.free(unsafe.Pointer(cBasePath))
+
+	var cTransactionHandle C.LoonTransactionHandle
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), 1, &cTransactionHandle)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer C.loon_transaction_destroy(cTransactionHandle)
+
+	var cManifest *C.LoonManifest
+	result = C.loon_transaction_get_manifest(cTransactionHandle, &cManifest)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return nil, fmt.Errorf("failed to get manifest: %w", err)
+	}
+	defer C.loon_manifest_destroy(cManifest)
+
+	numDeltaLogs := int(cManifest.delta_logs.num_delta_logs)
+	if numDeltaLogs == 0 {
+		return nil, nil
+	}
+
+	// Convert C array of relative paths to Go slice of absolute paths
+	cPaths := unsafe.Slice(cManifest.delta_logs.delta_log_paths, numDeltaLogs)
+	paths := make([]string, 0, numDeltaLogs)
+	for _, cPath := range cPaths {
+		relativePath := C.GoString(cPath)
+		absolutePath := filepath.Clean(filepath.Join(basePath, relativePath))
+		paths = append(paths, absolutePath)
+	}
+
+	log.Debug("GetDeltaLogPathsFromManifest",
+		zap.String("manifestPath", manifestPath),
+		zap.Int("numDeltaLogs", numDeltaLogs),
+		zap.Strings("paths", paths))
+
+	return paths, nil
+}
+
 // toRelativePath converts a full path to a path relative to the base path.
 // The deltalog path format is: {rootPath}/delta_log/{collectionID}/{partitionID}/{segmentID}/{logID}
 // The basePath format is: {rootPath}/insert_log/{collectionID}/{partitionID}/{segmentID}
