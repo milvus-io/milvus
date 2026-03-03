@@ -35,6 +35,7 @@ import (
 	"path"
 	"path/filepath"
 	"plugin"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -79,6 +80,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+const queryCoordCollectionResourceLimitFlagKeyPrefix = "querycoord/failed_load/resource_limit/collections"
 
 // make sure QueryNode implements types.QueryNode
 var _ types.QueryNode = (*QueryNode)(nil)
@@ -542,48 +545,65 @@ func (node *QueryNode) Stop() error {
 			// Integration test is still using it, Remove it in future.
 			timeoutCh := time.After(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second))
 
+			lastResourceCheck := time.Now().Add(-time.Minute)
+			resourceLimitedCollections := make(map[int64]struct{})
 		outer:
 			for (node.manager != nil && !node.manager.Segment.Empty()) ||
 				(node.pipelineManager != nil && node.pipelineManager.Num() != 0) {
 				var (
-					sealedSegments  = []segments.Segment{}
-					growingSegments = []segments.Segment{}
-					channelNum      = 0
+					sealedSegments     = []segments.Segment{}
+					growingSegments    = []segments.Segment{}
+					pipelineCollection = []int64{}
 				)
 				if node.manager != nil {
 					sealedSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed), segments.WithoutLevel(datapb.SegmentLevel_L0))
 					growingSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing), segments.WithoutLevel(datapb.SegmentLevel_L0))
 				}
 				if node.pipelineManager != nil {
-					channelNum = node.pipelineManager.Num()
+					pipelineCollection = node.pipelineManager.CollectionIDs()
 				}
-				if len(sealedSegments) == 0 && len(growingSegments) == 0 && channelNum == 0 {
-					break
+
+				if time.Since(lastResourceCheck) >= time.Minute {
+					lastResourceCheck = time.Now()
+					pendingCollections := node.pendingMigrationCollectionIDs(sealedSegments, growingSegments, pipelineCollection)
+					resourceLimitedCollections = node.getResourceLimitedCollections(log, pendingCollections)
+				}
+
+				pendingSealed := node.filterSegmentsByLimitedCollections(sealedSegments, resourceLimitedCollections)
+				pendingGrowing := node.filterSegmentsByLimitedCollections(growingSegments, resourceLimitedCollections)
+				pendingChannelCollection := lo.Filter(pipelineCollection, func(collectionID int64, _ int) bool {
+					_, limited := resourceLimitedCollections[collectionID]
+					return !limited
+				})
+
+				if len(pendingSealed) == 0 && len(pendingGrowing) == 0 && len(pendingChannelCollection) == 0 {
+					break outer
 				}
 
 				select {
 				case <-timeoutCh:
 					log.Warn("migrate data timed out", zap.Int64("ServerID", node.GetNodeID()),
-						zap.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
+						zap.Int64s("sealedSegments", lo.Map(pendingSealed, func(s segments.Segment, i int) int64 {
 							return s.ID()
 						})),
-						zap.Int64s("growingSegments", lo.Map(growingSegments, func(t segments.Segment, i int) int64 {
+						zap.Int64s("growingSegments", lo.Map(pendingGrowing, func(t segments.Segment, i int) int64 {
 							return t.ID()
 						})),
-						zap.Int("channelNum", channelNum),
+						zap.Int("channelCollectionNum", len(pendingChannelCollection)),
 					)
 					break outer
 				case <-time.After(time.Second):
-					metrics.StoppingBalanceSegmentNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(float64(len(sealedSegments)))
-					metrics.StoppingBalanceChannelNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(float64(channelNum))
+					metrics.StoppingBalanceSegmentNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(float64(len(pendingSealed)))
+					metrics.StoppingBalanceChannelNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(float64(len(pendingChannelCollection)))
 					log.Info("migrate data...", zap.Int64("ServerID", node.GetNodeID()),
-						zap.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
+						zap.Int64s("sealedSegments", lo.Map(pendingSealed, func(s segments.Segment, i int) int64 {
 							return s.ID()
 						})),
-						zap.Int64s("growingSegments", lo.Map(growingSegments, func(t segments.Segment, i int) int64 {
+						zap.Int64s("growingSegments", lo.Map(pendingGrowing, func(t segments.Segment, i int) int64 {
 							return t.ID()
 						})),
-						zap.Int("channelNum", channelNum),
+						zap.Int("channelCollectionNum", len(pendingChannelCollection)),
+						zap.Int("resourceLimitedCollectionNum", len(resourceLimitedCollections)),
 					)
 				}
 			}
@@ -623,6 +643,74 @@ func (node *QueryNode) Stop() error {
 // UpdateStateCode updata the state of query node, which can be initializing, healthy, and abnormal
 func (node *QueryNode) UpdateStateCode(code commonpb.StateCode) {
 	node.lifetime.SetState(code)
+}
+
+func (node *QueryNode) getResourceLimitedCollections(log *log.MLogger, collectionIDs []int64) map[int64]struct{} {
+	limitedCollections := make(map[int64]struct{})
+	if node.etcdCli == nil {
+		return limitedCollections
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+
+	for _, collectionID := range collectionIDs {
+		if collectionID <= 0 {
+			continue
+		}
+		key := node.collectionResourceLimitFlagPath(collectionID)
+		resp, err := node.etcdCli.Get(ctx, key)
+		if err != nil {
+			log.Warn("failed to get collection resource limit flag", zap.String("key", key), zap.Int64("collectionID", collectionID), zap.Error(err))
+			continue
+		}
+		if resp.Count > 0 {
+			limitedCollections[collectionID] = struct{}{}
+		}
+	}
+
+	return limitedCollections
+}
+
+func (node *QueryNode) pendingMigrationCollectionIDs(sealedSegments, growingSegments []segments.Segment, pipelineCollections []int64) []int64 {
+	set := typeutil.NewUniqueSet()
+	for _, segment := range sealedSegments {
+		set.Insert(segment.Collection())
+	}
+	for _, segment := range growingSegments {
+		set.Insert(segment.Collection())
+	}
+	for _, collectionID := range pipelineCollections {
+		set.Insert(collectionID)
+	}
+
+	ids := set.Collect()
+	ret := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		ret = append(ret, id)
+	}
+	return ret
+}
+
+func (node *QueryNode) filterSegmentsByLimitedCollections(segmentsIn []segments.Segment, limitedCollections map[int64]struct{}) []segments.Segment {
+	if len(limitedCollections) == 0 {
+		return segmentsIn
+	}
+
+	ret := make([]segments.Segment, 0, len(segmentsIn))
+	for _, segment := range segmentsIn {
+		if _, limited := limitedCollections[segment.Collection()]; !limited {
+			ret = append(ret, segment)
+		}
+	}
+	return ret
+}
+
+func (node *QueryNode) collectionResourceLimitFlagPath(collectionID int64) string {
+	return path.Join(
+		paramtable.Get().EtcdCfg.MetaRootPath.GetValue(),
+		queryCoordCollectionResourceLimitFlagKeyPrefix,
+		strconv.FormatInt(collectionID, 10),
+	)
 }
 
 // SetEtcdClient assigns parameter client to its member etcdCli

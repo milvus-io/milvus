@@ -43,6 +43,7 @@ type Manager interface {
 	Start(channels ...string) error
 	Close()
 	GetChannelStats(collectionID int64) []*metricsinfo.Channel
+	CollectionIDs() []int64
 }
 
 type manager struct {
@@ -177,6 +178,23 @@ func (m *manager) GetChannelStats(collectionID int64) []*metricsinfo.Channel {
 				CollectionID:   p.GetCollectionID(),
 			})
 		}
+	}
+	return ret
+}
+
+func (m *manager) CollectionIDs() []int64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	set := typeutil.NewUniqueSet()
+	for _, p := range m.channel2Pipeline {
+		set.Insert(p.GetCollectionID())
+	}
+
+	ids := set.Collect()
+	ret := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		ret = append(ret, id)
 	}
 	return ret
 }

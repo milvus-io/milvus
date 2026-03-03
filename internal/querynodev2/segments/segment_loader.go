@@ -1500,12 +1500,13 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	)
 
 	if predictMemUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
-		return 0, 0, fmt.Errorf("load segment failed, OOM if load, maxSegmentSize = %v MB,  memUsage = %v MB, predictMemUsage = %v MB, totalMem = %v MB thresholdFactor = %f",
+		return 0, 0, merr.WrapErrServiceMemoryLimitExceeded(float32(predictMemUsage), float32(totalMem), fmt.Sprintf(
+			"load segment failed, OOM if load, maxSegmentSize = %v MB, memUsage = %v MB, predictMemUsage = %v MB, totalMem = %v MB thresholdFactor = %f",
 			toMB(maxSegmentSize),
 			toMB(memUsage),
 			toMB(predictMemUsage),
 			toMB(totalMem),
-			paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat())
+			paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()))
 	}
 
 	if predictDiskUsage > uint64(float64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())*paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()) {

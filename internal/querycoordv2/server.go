@@ -420,6 +420,12 @@ func (s *Server) initQueryCoord() error {
 
 	// Init load status cache
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
+	task.SetResourceLimitFlagHook(func(collectionID int64) {
+		markResourceLimitFlag(s.ctx, s.etcdCli, collectionID)
+	})
+	job.SetResourceLimitFlagClearHook(func(collectionID int64) {
+		clearResourceLimitFlag(s.ctx, s.etcdCli, collectionID)
+	})
 
 	log.Info("init querycoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", s.address))
 	return err
