@@ -79,14 +79,14 @@ func (c *WALRateLimitComponent) RegisterMemoryObserver() {
 		Condition: func(sm hardware.SystemMetrics, _ *hardware.SystemMetricsListener) bool {
 			return true
 		},
-		Callback: c.hardwardCallback,
+		Callback: c.hardwareCallback,
 	}
 	hardware.RegisterSystemMetricsListener(l)
 	c.handler = l
 }
 
-// hardwardCallback is the callback function for the hardware metrics listener.
-func (c *WALRateLimitComponent) hardwardCallback(sm hardware.SystemMetrics, _ *hardware.SystemMetricsListener) {
+// hardwareCallback is the callback function for the hardware metrics listener.
+func (c *WALRateLimitComponent) hardwareCallback(sm hardware.SystemMetrics, _ *hardware.SystemMetricsListener) {
 	slowdownThreshold := paramtable.Get().StreamingCfg.WALRateLimitNodeMemorySlowdownThreshold.GetAsFloat()
 	recoverThreshold := paramtable.Get().StreamingCfg.WALRateLimitNodeMemoryRecoverThreshold.GetAsFloat()
 	rejectThreshold := paramtable.Get().StreamingCfg.WALRateLimitNodeMemoryRejectThreshold.GetAsFloat()

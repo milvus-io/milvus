@@ -85,7 +85,7 @@ func (p *ResumableProducer) BeginProduce(ctx context.Context, msgs ...message.Mu
 		panic("begin produce with no messages")
 	}
 	vchannel := msgs[0].VChannel()
-	isNotDML := false
+	isNotDML := !msgs[0].MessageType().IsDMLMessageType()
 	for i := 1; i < len(msgs); i++ {
 		if msgs[i].VChannel() != vchannel {
 			panic("begin produce with messages of different vchannels")

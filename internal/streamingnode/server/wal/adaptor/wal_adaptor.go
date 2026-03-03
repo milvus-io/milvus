@@ -346,6 +346,9 @@ func (w *walAdaptorImpl) Close() {
 	w.scanMetrics.Close()
 	w.writeMetrics.Close()
 
+	// close the rate limit component.
+	w.WALRateLimitComponent.Close()
+
 	if w.appendExecutionPool != nil {
 		w.appendExecutionPool.Release()
 	}

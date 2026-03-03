@@ -52,23 +52,23 @@ func TestWALRateLimitComponent(t *testing.T) {
 		return !component.IsRejected()
 	}, 1*time.Second, 10*time.Millisecond)
 
-	component.hardwardCallback(hardware.SystemMetrics{UsedMemoryBytes: 91, TotalMemoryBytes: 100}, nil)
+	component.hardwareCallback(hardware.SystemMetrics{UsedMemoryBytes: 91, TotalMemoryBytes: 100}, nil)
 	// State transitions are async, wait for any changes to propagate
 	time.Sleep(50 * time.Millisecond)
 	assert.False(t, component.IsRejected())
 
-	component.hardwardCallback(hardware.SystemMetrics{UsedMemoryBytes: 100, TotalMemoryBytes: 100}, nil)
+	component.hardwareCallback(hardware.SystemMetrics{UsedMemoryBytes: 100, TotalMemoryBytes: 100}, nil)
 	// EnterRejectMode triggered by high memory is async
 	assert.Eventually(t, func() bool {
 		return component.IsRejected()
 	}, 1*time.Second, 10*time.Millisecond)
 
-	component.hardwardCallback(hardware.SystemMetrics{UsedMemoryBytes: 91, TotalMemoryBytes: 100}, nil)
+	component.hardwareCallback(hardware.SystemMetrics{UsedMemoryBytes: 91, TotalMemoryBytes: 100}, nil)
 	// Memory is still above recover threshold, should still be rejected
 	time.Sleep(50 * time.Millisecond)
 	assert.True(t, component.IsRejected())
 
-	component.hardwardCallback(hardware.SystemMetrics{UsedMemoryBytes: 84, TotalMemoryBytes: 100}, nil)
+	component.hardwareCallback(hardware.SystemMetrics{UsedMemoryBytes: 84, TotalMemoryBytes: 100}, nil)
 	// Memory dropped below recover threshold, should trigger recovery
 	assert.Eventually(t, func() bool {
 		return !component.IsRejected()
