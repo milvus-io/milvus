@@ -56,7 +56,7 @@ func generateTestCerts(t *testing.T) (caPem, clientPem, clientKey string) {
 	require.NoError(t, err)
 
 	caPem = filepath.Join(dir, "ca.pem")
-	require.NoError(t, os.WriteFile(caPem, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCertDER}), 0o644))
+	require.NoError(t, os.WriteFile(caPem, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCertDER}), 0o600))
 
 	// Generate client key and cert signed by CA.
 	clientPriv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -74,7 +74,7 @@ func generateTestCerts(t *testing.T) (caPem, clientPem, clientKey string) {
 	require.NoError(t, err)
 
 	clientPem = filepath.Join(dir, "client.pem")
-	require.NoError(t, os.WriteFile(clientPem, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: clientCertDER}), 0o644))
+	require.NoError(t, os.WriteFile(clientPem, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: clientCertDER}), 0o600))
 
 	clientKeyBytes, err := x509.MarshalECPrivateKey(clientPriv)
 	require.NoError(t, err)
@@ -110,7 +110,7 @@ func TestBuildTLSConfig(t *testing.T) {
 	t.Run("invalid CA content", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		badCA := filepath.Join(tmpDir, "bad-ca.pem")
-		os.WriteFile(badCA, []byte("not a certificate"), 0o644)
+		os.WriteFile(badCA, []byte("not a certificate"), 0o600)
 		_, err := BuildTLSConfig(badCA, "", "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse CA cert")
