@@ -688,3 +688,16 @@ func TestBaseSegment_SkipGrowingBF(t *testing.T) {
 	results := bs.BatchPkExist(blc)
 	assert.Equal(t, []bool{true, true, true}, results)
 }
+
+func TestLocalSegment_UpdatePkCandidateSkipAndNil(t *testing.T) {
+	segment := &LocalSegment{
+		baseSegment: newTestBaseSegment(100, 10),
+	}
+
+	segment.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(1)})
+
+	segment.pkCandidate = pkoracle.NewBloomFilterSet(100, 10, SegmentTypeGrowing)
+	segment.skipGrowingBF = true
+	segment.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(2)})
+	assert.False(t, segment.pkCandidate.PkCandidateExist())
+}

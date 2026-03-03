@@ -175,7 +175,6 @@ func (suite *SearchSuite) TestSearchWithFilter() {
 
 	// create more sealed segments with different pk ranges for testing
 	// seg1: pk [0], seg2: pk [0,1], ..., seg10: pk [0..9]
-	loader := NewLoader(ctx, suite.manager, suite.chunkManager)
 	for i := range 10 {
 		segID := int64(i + 1000)
 		msgLen := i + 1
@@ -208,10 +207,6 @@ func (suite *SearchSuite) TestSearchWithFilter() {
 			loadInfo,
 		)
 		suite.Require().NoError(err)
-
-		bfs, err := loader.loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeSealed)
-		suite.Require().NoError(err)
-		seg.SetPKCandidate(bfs)
 
 		for _, binlog := range binlogs {
 			err = seg.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLen), binlog)
@@ -248,7 +243,6 @@ func (suite *SearchSuite) TestSearchWithFilter() {
 
 func (suite *SearchSuite) TestSearchStreamingWithFilterDoesNotPruneGrowing() {
 	ctx := context.Background()
-	loader := NewLoader(ctx, suite.manager, suite.chunkManager)
 
 	growingSegIDs := make([]int64, 0, 10)
 	for i := range 10 {
@@ -282,10 +276,6 @@ func (suite *SearchSuite) TestSearchStreamingWithFilterDoesNotPruneGrowing() {
 			loadInfo,
 		)
 		suite.Require().NoError(err)
-
-		bfs, err := loader.loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeGrowing)
-		suite.Require().NoError(err)
-		seg.SetPKCandidate(bfs)
 
 		insertMsg, err := mock_segcore.GenInsertMsg(suite.collection.GetCCollection(), suite.partitionID, segID, msgLen)
 		suite.Require().NoError(err)
