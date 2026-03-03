@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -261,6 +262,41 @@ func (s *StateChannelStoreSuite) TestUpdateWithTxnLimit() {
 			s.NoError(err)
 		})
 	}
+}
+
+func (s *StateChannelStoreSuite) TestUpdateWithTxnByteLimit() {
+	// Ensure Update splits txns by bytes (not only by operation count).
+	nameLen := 8 * 1024
+	makeCh := func(i int) RWChannel {
+		name := fmt.Sprintf("ch%d_%s", i, strings.Repeat("a", nameLen))
+		ch := NewStateChannel(getChannel(name, 1))
+		ch.Info = generateWatchInfo(name, datapb.ChannelWatchState_ToWatch)
+		return ch
+	}
+
+	// Find a per-op size so that a single op fits, but two ops exceed maxBytesPerTxn.
+	for {
+		op := NewChannelOp(1, Watch, makeCh(1))
+		opBytes, err := estimateOpBytes(op)
+		s.Require().NoError(err)
+		if opBytes < defaultMaxBytesPerTxn && 2*opBytes > defaultMaxBytesPerTxn {
+			break
+		}
+		nameLen += 8 * 1024
+		s.Require().LessOrEqual(nameLen, 4*1024*1024, "failed to find suitable nameLen for byte-limit test")
+	}
+
+	ops := NewChannelOpSet(
+		NewChannelOp(1, Watch, makeCh(1)),
+		NewChannelOp(1, Watch, makeCh(2)),
+	)
+	s.SetupTest()
+	s.mockTxn.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(2)
+
+	store := NewStateChannelStore(s.mockTxn)
+	store.AddNode(1)
+	err := store.Update(ops)
+	s.NoError(err)
 }
 
 func (s *StateChannelStoreSuite) TestUpdateMeta2000kSegs() {
