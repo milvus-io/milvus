@@ -35,9 +35,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/eventlog"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -96,16 +98,28 @@ func (job *LoadCollectionJob) Execute() error {
 		return err
 	}
 
-	// 1. create replica if not exist
+	// 1. resolve replica config: use local cluster-level config if this is a replicated message
+	replicas := req.GetReplicas()
+	if req.GetUseLocalReplicaConfig() {
+		localReplicas, err := getLocalReplicaConfig(job.ctx, job.meta, req.GetCollectionId())
+		if err != nil {
+			return err
+		}
+		replicas = localReplicas
+		log.Info("using local cluster-level replica config for replicated load",
+			zap.Int("localReplicaCount", len(localReplicas)))
+	}
+
+	// 2. create replica if not exist
 	if _, err := utils.SpawnReplicasWithReplicaConfig(job.ctx, job.meta, meta.SpawnWithReplicaConfigParams{
 		CollectionID: req.GetCollectionId(),
 		Channels:     collInfo.GetVirtualChannelNames(),
-		Configs:      req.GetReplicas(),
+		Configs:      replicas,
 	}); err != nil {
 		return err
 	}
 
-	// 2. put load info meta
+	// 3. put load info meta
 	fieldIndexIDs := make(map[int64]int64, len(req.GetLoadFields()))
 	fieldIDs := make([]int64, 0, len(req.GetLoadFields()))
 	for _, loadField := range req.GetLoadFields() {
@@ -114,7 +128,7 @@ func (job *LoadCollectionJob) Execute() error {
 		}
 		fieldIDs = append(fieldIDs, loadField.GetFieldId())
 	}
-	replicaNumber := int32(len(req.GetReplicas()))
+	replicaNumber := int32(len(replicas))
 	partitions := lo.Map(req.GetPartitionIds(), func(partID int64, _ int) *meta.Partition {
 		return &meta.Partition{
 			PartitionLoadInfo: &querypb.PartitionLoadInfo{
@@ -196,4 +210,40 @@ func (job *LoadCollectionJob) Execute() error {
 		log.Info("wait for partition released done", zap.Int64s("toReleasePartitions", toReleasePartitions))
 	}
 	return nil
+}
+
+// getLocalReplicaConfig reads the local cluster-level replica config and generates LoadReplicaConfig entries.
+// It uses generateReplicas to ensure idempotency on WAL replay by reusing existing replicas from meta.
+// If local config is not set, defaults to 1 replica in __default_resource_group.
+func getLocalReplicaConfig(ctx context.Context, m *meta.Meta, collectionID int64) ([]*messagespb.LoadReplicaConfig, error) {
+	replicaNum := int(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt64())
+	rgs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+
+	if replicaNum <= 0 {
+		replicaNum = 1
+	}
+	if len(rgs) == 0 {
+		rgs = []string{meta.DefaultResourceGroupName}
+	}
+
+	// Use AssignReplica to determine expected replica distribution per RG
+	expectedReplicaNumber, err := utils.AssignReplica(ctx, m, rgs, int32(replicaNum), false)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get current replicas from meta for idempotent generation
+	currentReplicas := m.ReplicaManager.GetByCollection(ctx, collectionID)
+	currentReplicaMap := make(map[int64]*meta.Replica)
+	for _, r := range currentReplicas {
+		currentReplicaMap[r.GetID()] = r
+	}
+
+	// Use generateReplicas which reuses existing replicas (idempotent on replay)
+	req := &AlterLoadConfigRequest{
+		Meta:     m,
+		Current:  CurrentLoadConfig{Replicas: currentReplicaMap},
+		Expected: ExpectedLoadConfig{ExpectedReplicaNumber: expectedReplicaNumber},
+	}
+	return req.generateReplicas(ctx)
 }

@@ -161,6 +161,7 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 	b := message.NewAlterReplicateConfigMessageBuilderV2().
 		WithHeader(&message.AlterReplicateConfigMessageHeader{
 			ReplicateConfiguration: config,
+			IsPchannelIncreasing:   validator.IsPChannelIncreasing(),
 		}).
 		WithBody(&message.AlterReplicateConfigMessageBody{}).
 		WithClusterLevelBroadcast(cc).

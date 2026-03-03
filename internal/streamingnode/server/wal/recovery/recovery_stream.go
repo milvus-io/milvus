@@ -75,15 +75,42 @@ L:
 func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta, len(r.segments))
 	vchannels := make(map[string]*streamingpb.VChannelMeta, len(r.vchannels))
-	for segmentID, segment := range r.segments {
-		if segment.IsGrowing() {
-			segments[segmentID] = proto.Clone(segment.meta).(*streamingpb.SegmentAssignmentMeta)
-		}
-	}
+	// Collect active vchannels and build a set of active partition IDs (globally unique).
+	activePartitions := make(map[int64]struct{})
 	for channelName, vchannel := range r.vchannels {
 		if vchannel.IsActive() {
 			vchannels[channelName] = proto.Clone(vchannel.meta).(*streamingpb.VChannelMeta)
+			for _, p := range vchannel.meta.CollectionInfo.Partitions {
+				activePartitions[p.PartitionId] = struct{}{}
+			}
 		}
+	}
+	for segmentID, segment := range r.segments {
+		if !segment.IsGrowing() {
+			continue
+		}
+		// Defensive filtering: skip GROWING segments whose parent vchannel does not exist
+		// or is not active, or whose partition has been dropped. This can happen due to
+		// non-atomic etcd persistence or Kafka offset compaction replaying CreateSegment
+		// for dropped collections/partitions.
+		if _, ok := vchannels[segment.meta.Vchannel]; !ok {
+			r.Logger().Warn("getSnapshot: skipping orphaned growing segment with non-active vchannel",
+				zap.Int64("segmentID", segmentID),
+				zap.String("vchannel", segment.meta.Vchannel),
+				zap.Int64("collectionID", segment.meta.CollectionId),
+			)
+			continue
+		}
+		if _, ok := activePartitions[segment.meta.PartitionId]; !ok {
+			r.Logger().Warn("getSnapshot: skipping orphaned growing segment with dropped partition",
+				zap.Int64("segmentID", segmentID),
+				zap.String("vchannel", segment.meta.Vchannel),
+				zap.Int64("collectionID", segment.meta.CollectionId),
+				zap.Int64("partitionID", segment.meta.PartitionId),
+			)
+			continue
+		}
+		segments[segmentID] = proto.Clone(segment.meta).(*streamingpb.SegmentAssignmentMeta)
 	}
 	return &RecoverySnapshot{
 		VChannels:          vchannels,
