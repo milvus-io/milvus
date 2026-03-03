@@ -7,6 +7,10 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
+	bloomfilter "github.com/milvus-io/milvus/internal/util/bloomfilter"
+
+	datapb "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+
 	mock "github.com/stretchr/testify/mock"
 
 	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
@@ -445,6 +449,31 @@ func (_c *MockLoader_ReopenSegments_Call) Return(_a0 error) *MockLoader_ReopenSe
 func (_c *MockLoader_ReopenSegments_Call) RunAndReturn(run func(context.Context, []*querypb.SegmentLoadInfo) error) *MockLoader_ReopenSegments_Call {
 	_c.Call.Return(run)
 	return _c
+}
+
+// GetPkStatsMmapManager provides a mock function with no fields
+func (_m *MockLoader) GetPkStatsMmapManager() *bloomfilter.PkStatsMmapManager {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPkStatsMmapManager")
+	}
+
+	var r0 *bloomfilter.PkStatsMmapManager
+	if rf, ok := ret.Get(0).(func() *bloomfilter.PkStatsMmapManager); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*bloomfilter.PkStatsMmapManager)
+		}
+	}
+
+	return r0
+}
+
+// Close provides a mock function for the Close method.
+func (_m *MockLoader) Close() {
+	_m.Called()
 }
 
 // NewMockLoader creates a new instance of MockLoader. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

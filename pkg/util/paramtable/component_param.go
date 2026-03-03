@@ -306,6 +306,7 @@ type commonConfig struct {
 	BloomFilterType           ParamItem `refreshable:"true"`
 	MaxBloomFalsePositive     ParamItem `refreshable:"true"`
 	BloomFilterApplyBatchSize ParamItem `refreshable:"true"`
+	BloomFilterMmapEnabled   ParamItem `refreshable:"false"`
 	PanicWhenPluginFail       ParamItem `refreshable:"false"`
 
 	UsePartitionKeyAsClusteringKey ParamItem `refreshable:"true"`
@@ -1127,6 +1128,15 @@ The default value is 1, which is enough for most cases.`,
 		},
 	}
 	p.BloomFilterApplyBatchSize.Init(base.mgr)
+
+	p.BloomFilterMmapEnabled = ParamItem{
+		Key:          "common.bloomFilterMmapEnabled",
+		Version:      "2.5.6",
+		DefaultValue: "false",
+		Doc:          "if true, mmap bloom filter data to local file to reduce Go heap pressure",
+		Export:       true,
+	}
+	p.BloomFilterMmapEnabled.Init(base.mgr)
 
 	p.PanicWhenPluginFail = ParamItem{
 		Key:          "common.panicWhenPluginFail",
