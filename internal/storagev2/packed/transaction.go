@@ -153,13 +153,13 @@ func GetDeltaLogPathsFromManifest(
 		return nil, nil
 	}
 
-	// Convert C array of relative paths to Go slice of absolute paths
+	// The C loon library resolves relative paths to absolute via ToAbsolute
+	// (prepending basePath/_delta/ and normalizing). The returned paths are
+	// already absolute and can be used directly.
 	cPaths := unsafe.Slice(cManifest.delta_logs.delta_log_paths, numDeltaLogs)
 	paths := make([]string, 0, numDeltaLogs)
 	for _, cPath := range cPaths {
-		relativePath := C.GoString(cPath)
-		absolutePath := filepath.Clean(filepath.Join(basePath, relativePath))
-		paths = append(paths, absolutePath)
+		paths = append(paths, C.GoString(cPath))
 	}
 
 	log.Debug("GetDeltaLogPathsFromManifest",
@@ -173,9 +173,12 @@ func GetDeltaLogPathsFromManifest(
 // toRelativePath converts a full path to a path relative to the base path.
 // The deltalog path format is: {rootPath}/delta_log/{collectionID}/{partitionID}/{segmentID}/{logID}
 // The basePath format is: {rootPath}/insert_log/{collectionID}/{partitionID}/{segmentID}
-// We need to return the relative path from basePath, e.g., "../../../delta_log/..."
+//
+// The C loon library stores delta log paths relative to basePath/_delta/ (the kDeltaPath convention).
+// When deserializing, it prepends basePath/_delta/ to the relative path and normalizes.
+// So we need baseDepth + 1 levels of "../" (the +1 accounts for the _delta/ subdirectory).
 func toRelativePath(fullPath, basePath, rootPath string) string {
-	// If fullPath starts with rootPath, make it relative to basePath
+	// If fullPath starts with rootPath, make it relative to basePath/_delta/
 	if strings.HasPrefix(fullPath, rootPath) {
 		// Get the path relative to rootPath for both
 		fullRel := strings.TrimPrefix(fullPath, rootPath)
@@ -184,8 +187,9 @@ func toRelativePath(fullPath, basePath, rootPath string) string {
 		baseRel := strings.TrimPrefix(basePath, rootPath)
 		baseRel = strings.TrimPrefix(baseRel, "/")
 
-		// Count the depth of basePath to know how many "../" we need
-		baseDepth := len(strings.Split(baseRel, "/"))
+		// Count the depth of basePath to know how many "../" we need.
+		// Add 1 for the _delta/ subdirectory that C prepends during deserialization.
+		baseDepth := len(strings.Split(baseRel, "/")) + 1
 
 		// Build the relative path: go up baseDepth levels, then down to fullRel
 		var parts []string

@@ -18,6 +18,8 @@ package compaction
 
 import (
 	"context"
+	"io"
+	"path/filepath"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -28,7 +30,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -319,4 +324,190 @@ func (s *CommonSuite) createTestRecord(pkType schemapb.DataType, int64Pks []int6
 	}
 
 	return storage.NewSimpleArrowRecord(record, field2Col)
+}
+
+// writeV2DeltaLog writes a V2 deltalog parquet file at the given path.
+// path should follow production pattern: filepath.Join(rootPath, "delta_log/collID/partID/segID/logID")
+func (s *CommonSuite) writeV2DeltaLog(
+	ctx context.Context,
+	pkType schemapb.DataType,
+	pks any,
+	tss []int64,
+	path string,
+	storageConfig *indexpb.StorageConfig,
+) {
+	t := s.T()
+
+	var record storage.Record
+	switch pkType {
+	case schemapb.DataType_Int64:
+		int64Pks := pks.([]int64)
+		record = s.createTestRecord(pkType, int64Pks, nil, tss)
+	case schemapb.DataType_VarChar:
+		stringPks := pks.([]string)
+		record = s.createTestRecord(pkType, nil, stringPks, tss)
+	default:
+		s.FailNow("unsupported pk type")
+	}
+	defer record.Release()
+
+	writer, err := storage.NewDeltalogWriter(ctx, 1, 2, 3, 101, pkType, path,
+		storage.WithVersion(storage.StorageV2),
+		storage.WithStorageConfig(storageConfig))
+	require.NoError(t, err)
+
+	err = writer.Write(record)
+	require.NoError(t, err)
+
+	err = writer.Close()
+	require.NoError(t, err)
+}
+
+// createBaseManifest creates a base manifest via FFIPackedWriter for V2 deltalog tests.
+// basePath should follow production pattern: filepath.Join(rootPath, "insert_log/collID/partID/segID")
+func (s *CommonSuite) createBaseManifest(basePath string, storageConfig *indexpb.StorageConfig) string {
+	t := s.T()
+
+	arrowSchema := arrow.NewSchema([]arrow.Field{
+		{
+			Name:     "pk",
+			Type:     arrow.PrimitiveTypes.Int64,
+			Nullable: false,
+			Metadata: arrow.NewMetadata([]string{packed.ArrowFieldIdMetadataKey}, []string{"100"}),
+		},
+		{
+			Name:     "vector",
+			Type:     &arrow.FixedSizeBinaryType{ByteWidth: 16},
+			Nullable: false,
+			Metadata: arrow.NewMetadata([]string{packed.ArrowFieldIdMetadataKey}, []string{"101"}),
+		},
+	}, nil)
+
+	columnGroups := []storagecommon.ColumnGroup{
+		{Columns: []int{0, 1}, GroupID: storagecommon.DefaultShortColumnGroupID},
+	}
+
+	pw, err := packed.NewFFIPackedWriter(basePath, 0, arrowSchema, columnGroups, storageConfig, nil)
+	require.NoError(t, err)
+
+	// Write minimal data to create a valid manifest
+	b := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer b.Release()
+	b.Field(0).(*array.Int64Builder).Append(1)
+	vectorBytes := make([]byte, 16)
+	b.Field(1).(*array.FixedSizeBinaryBuilder).Append(vectorBytes)
+	rec := b.NewRecord()
+	defer rec.Release()
+
+	err = pw.WriteRecordBatch(rec)
+	require.NoError(t, err)
+
+	manifestPath, err := pw.Close()
+	require.NoError(t, err)
+
+	return manifestPath
+}
+
+func (s *CommonSuite) TestComposeDeleteFromDeltalogsV2() {
+	ctx := context.Background()
+
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	dir := s.T().TempDir()
+	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+	s.T().Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+
+	// Options that match production callers: downloader (for V1 validate) + storageConfig (for V2 ops)
+	options := []storage.RwOption{
+		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+			return nil, nil
+		}),
+		storage.WithStorageConfig(storageConfig),
+	}
+
+	s.Run("V2 manifest - Int64 PK", func() {
+		// Use basePath matching production pattern: path.Join(rootPath, "insert_log", collID, partID, segID)
+		basePath := filepath.Join(dir, "insert_log/1/2/3_int64")
+		manifestPath := s.createBaseManifest(basePath, storageConfig)
+
+		// deltaPath matching production: path.Join(rootPath, "delta_log", collID, partID, segID, logID)
+		deltaPath := filepath.Join(dir, "delta_log/1/2/3/101")
+		s.writeV2DeltaLog(ctx, schemapb.DataType_Int64, []int64{10, 20, 30}, []int64{1000, 1001, 1002}, deltaPath, storageConfig)
+
+		newManifest, err := packed.AddDeltaLogsToManifest(manifestPath, storageConfig, []packed.DeltaLogEntry{
+			{Path: deltaPath, NumEntries: 3},
+		})
+		s.Require().NoError(err)
+
+		segment := &datapb.CompactionSegmentBinlogs{Manifest: newManifest}
+		pk2Ts, err := ComposeDeleteFromDeltalogs(ctx, schemapb.DataType_Int64, segment, options...)
+		s.NoError(err)
+		s.Equal(3, len(pk2Ts))
+		s.Equal(typeutil.Timestamp(1000), pk2Ts[int64(10)])
+		s.Equal(typeutil.Timestamp(1001), pk2Ts[int64(20)])
+		s.Equal(typeutil.Timestamp(1002), pk2Ts[int64(30)])
+	})
+
+	s.Run("V2 manifest - VarChar PK", func() {
+		basePath := filepath.Join(dir, "insert_log/1/2/3_varchar")
+		manifestPath := s.createBaseManifest(basePath, storageConfig)
+
+		deltaPath := filepath.Join(dir, "delta_log/1/2/3/102")
+		s.writeV2DeltaLog(ctx, schemapb.DataType_VarChar, []string{"pk_a", "pk_b", "pk_c"}, []int64{2000, 2001, 2002}, deltaPath, storageConfig)
+
+		newManifest, err := packed.AddDeltaLogsToManifest(manifestPath, storageConfig, []packed.DeltaLogEntry{
+			{Path: deltaPath, NumEntries: 3},
+		})
+		s.Require().NoError(err)
+
+		segment := &datapb.CompactionSegmentBinlogs{Manifest: newManifest}
+		pk2Ts, err := ComposeDeleteFromDeltalogs(ctx, schemapb.DataType_VarChar, segment, options...)
+		s.NoError(err)
+		s.Equal(3, len(pk2Ts))
+		s.Equal(typeutil.Timestamp(2000), pk2Ts["pk_a"])
+		s.Equal(typeutil.Timestamp(2001), pk2Ts["pk_b"])
+		s.Equal(typeutil.Timestamp(2002), pk2Ts["pk_c"])
+	})
+
+	s.Run("V2 manifest - multiple deltalogs", func() {
+		basePath := filepath.Join(dir, "insert_log/1/2/3_multi")
+		manifestPath := s.createBaseManifest(basePath, storageConfig)
+
+		deltaPath1 := filepath.Join(dir, "delta_log/1/2/3/201")
+		deltaPath2 := filepath.Join(dir, "delta_log/1/2/3/202")
+		s.writeV2DeltaLog(ctx, schemapb.DataType_Int64, []int64{100, 200}, []int64{3000, 3001}, deltaPath1, storageConfig)
+		s.writeV2DeltaLog(ctx, schemapb.DataType_Int64, []int64{300, 400}, []int64{3002, 3003}, deltaPath2, storageConfig)
+
+		newManifest, err := packed.AddDeltaLogsToManifest(manifestPath, storageConfig, []packed.DeltaLogEntry{
+			{Path: deltaPath1, NumEntries: 2},
+			{Path: deltaPath2, NumEntries: 2},
+		})
+		s.Require().NoError(err)
+
+		segment := &datapb.CompactionSegmentBinlogs{Manifest: newManifest}
+		pk2Ts, err := ComposeDeleteFromDeltalogs(ctx, schemapb.DataType_Int64, segment, options...)
+		s.NoError(err)
+		s.Equal(4, len(pk2Ts))
+		s.Equal(typeutil.Timestamp(3000), pk2Ts[int64(100)])
+		s.Equal(typeutil.Timestamp(3001), pk2Ts[int64(200)])
+		s.Equal(typeutil.Timestamp(3002), pk2Ts[int64(300)])
+		s.Equal(typeutil.Timestamp(3003), pk2Ts[int64(400)])
+	})
+
+	s.Run("V2 manifest - no deltalogs", func() {
+		basePath := filepath.Join(dir, "insert_log/1/2/3_empty")
+		manifestPath := s.createBaseManifest(basePath, storageConfig)
+
+		segment := &datapb.CompactionSegmentBinlogs{Manifest: manifestPath}
+		_, err := ComposeDeleteFromDeltalogs(ctx, schemapb.DataType_Int64, segment, options...)
+		s.ErrorIs(err, io.EOF)
+	})
 }
