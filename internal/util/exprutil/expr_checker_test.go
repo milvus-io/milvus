@@ -264,12 +264,12 @@ func TestValidatePartitionKeyIsolation(t *testing.T) {
 		{
 			name:                "partition key isolation equal AND with same field equal diff",
 			expr:                "key_field == 10 && key_field == 20",
-			expectedErrorString: "",
+			expectedErrorString: "partition key not found in expr",
 		},
 		{
 			name:                "partition key isolation equal AND with same field equal 3",
 			expr:                "key_field == 10 && key_field == 11 && key_field == 12",
-			expectedErrorString: "",
+			expectedErrorString: "partition key not found in expr",
 		},
 		{
 			name:                "partition key isolation equal AND with varchar field equal",

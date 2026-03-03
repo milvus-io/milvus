@@ -2,6 +2,7 @@ package rewriter
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
@@ -517,21 +518,19 @@ func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 				inc := op == planpb.OpType_GreaterEqual || op == planpb.OpType_LessEqual
 				if isLower {
 					g.intervals = append(g.intervals, interval{
-						lower:         ure.GetValue(),
-						lowerInc:      inc,
-						upper:         nil,
-						upperInc:      false,
-						exprIndex:     idx,
-						isBinaryRange: false,
+						lower:     ure.GetValue(),
+						lowerInc:  inc,
+						upper:     nil,
+						upperInc:  false,
+						exprIndex: idx,
 					})
 				} else {
 					g.intervals = append(g.intervals, interval{
-						lower:         nil,
-						lowerInc:      false,
-						upper:         ure.GetValue(),
-						upperInc:      inc,
-						exprIndex:     idx,
-						isBinaryRange: false,
+						lower:     nil,
+						lowerInc:  false,
+						upper:     ure.GetValue(),
+						upperInc:  inc,
+						exprIndex: idx,
 					})
 				}
 				continue
@@ -646,21 +645,23 @@ func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 	return out
 }
 
+// orInterval represents an interval in OR merging with original expression index.
+type orInterval struct {
+	lower     *planpb.GenericValue
+	lowerInc  bool
+	upper     *planpb.GenericValue
+	upperInc  bool
+	exprIndex int
+}
+
 // combineOrBinaryRanges merges BinaryRangeExpr nodes with OR semantics (union if overlapping/adjacent).
 // Also handles mixing BinaryRangeExpr with UnaryRangeExpr.
+// Supports N intervals (sort-and-sweep) and bounded+unbounded merging.
 func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
-	type interval struct {
-		lower         *planpb.GenericValue
-		lowerInc      bool
-		upper         *planpb.GenericValue
-		upperInc      bool
-		exprIndex     int
-		isBinaryRange bool
-	}
 	type group struct {
 		col       *planpb.ColumnInfo
 		effDt     schemapb.DataType
-		intervals []interval
+		intervals []orInterval
 	}
 	groups := map[string]*group{}
 	others := []int{}
@@ -692,13 +693,12 @@ func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 				g = &group{col: col, effDt: effDt}
 				groups[key] = g
 			}
-			g.intervals = append(g.intervals, interval{
-				lower:         bre.GetLowerValue(),
-				lowerInc:      bre.GetLowerInclusive(),
-				upper:         bre.GetUpperValue(),
-				upperInc:      bre.GetUpperInclusive(),
-				exprIndex:     idx,
-				isBinaryRange: true,
+			g.intervals = append(g.intervals, orInterval{
+				lower:     bre.GetLowerValue(),
+				lowerInc:  bre.GetLowerInclusive(),
+				upper:     bre.GetUpperValue(),
+				upperInc:  bre.GetUpperInclusive(),
+				exprIndex: idx,
 			})
 			continue
 		}
@@ -735,22 +735,20 @@ func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 				isLower := op == planpb.OpType_GreaterThan || op == planpb.OpType_GreaterEqual
 				inc := op == planpb.OpType_GreaterEqual || op == planpb.OpType_LessEqual
 				if isLower {
-					g.intervals = append(g.intervals, interval{
-						lower:         ure.GetValue(),
-						lowerInc:      inc,
-						upper:         nil,
-						upperInc:      false,
-						exprIndex:     idx,
-						isBinaryRange: false,
+					g.intervals = append(g.intervals, orInterval{
+						lower:     ure.GetValue(),
+						lowerInc:  inc,
+						upper:     nil,
+						upperInc:  false,
+						exprIndex: idx,
 					})
 				} else {
-					g.intervals = append(g.intervals, interval{
-						lower:         nil,
-						lowerInc:      false,
-						upper:         ure.GetValue(),
-						upperInc:      inc,
-						exprIndex:     idx,
-						isBinaryRange: false,
+					g.intervals = append(g.intervals, orInterval{
+						lower:     nil,
+						lowerInc:  false,
+						upper:     ure.GetValue(),
+						upperInc:  inc,
+						exprIndex: idx,
 					})
 				}
 				continue
@@ -768,148 +766,42 @@ func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 	}
 
 	for _, g := range groups {
-		if len(g.intervals) == 0 {
-			continue
-		}
-		if len(g.intervals) == 1 {
-			// Single interval, keep as is
+		if len(g.intervals) <= 1 {
 			continue
 		}
 
-		// For OR, try to merge overlapping/adjacent intervals
-		// If any interval is unbounded on one side, check if it subsumes others
-		// For simplicity, we'll handle the common cases:
-		// 1. All bounded intervals: try to merge if overlapping/adjacent
-		// 2. Mix of bounded/unbounded: merge unbounded with compatible bounds
+		merged := mergeOrIntervals(g.effDt, g.intervals)
+		if merged == nil {
+			continue
+		}
 
-		var hasUnboundedLower, hasUnboundedUpper bool
-		var unboundedLowerVal *planpb.GenericValue
-		var unboundedLowerInc bool
-		var unboundedUpperVal *planpb.GenericValue
-		var unboundedUpperInc bool
-
-		// Check for unbounded intervals
+		// Mark all original intervals as used
 		for _, iv := range g.intervals {
-			if iv.lower != nil && iv.upper == nil {
-				// Lower bound only (x > a)
-				if !hasUnboundedLower {
-					hasUnboundedLower = true
-					unboundedLowerVal = iv.lower
-					unboundedLowerInc = iv.lowerInc
-				} else {
-					// Multiple lower-only bounds: take weakest (minimum)
-					c := cmpGeneric(g.effDt, iv.lower, unboundedLowerVal)
-					if c < 0 || (c == 0 && iv.lowerInc && !unboundedLowerInc) {
-						unboundedLowerVal = iv.lower
-						unboundedLowerInc = iv.lowerInc
-					}
-				}
-			}
-			if iv.lower == nil && iv.upper != nil {
-				// Upper bound only (x < b)
-				if !hasUnboundedUpper {
-					hasUnboundedUpper = true
-					unboundedUpperVal = iv.upper
-					unboundedUpperInc = iv.upperInc
-				} else {
-					// Multiple upper-only bounds: take weakest (maximum)
-					c := cmpGeneric(g.effDt, iv.upper, unboundedUpperVal)
-					if c > 0 || (c == 0 && iv.upperInc && !unboundedUpperInc) {
-						unboundedUpperVal = iv.upper
-						unboundedUpperInc = iv.upperInc
-					}
-				}
-			}
+			used[iv.exprIndex] = true
 		}
 
-		// Case 1: Have both unbounded lower and upper → entire domain (always true, but we can't express that simply)
-		// For now, keep them separate
-		// Case 2: Have one unbounded side → merge with compatible bounded intervals
-		// Case 3: All bounded → try to merge overlapping/adjacent
-
-		if hasUnboundedLower && hasUnboundedUpper {
-			// Both unbounded sides - this likely covers most values
-			// Keep as separate predicates for now (more advanced merging could be done)
-			continue
-		}
-
-		if hasUnboundedLower || hasUnboundedUpper {
-			// Merge unbounded with bounded intervals where applicable
-			// For unbounded lower (x > a): can merge with binary ranges that have compatible upper bounds
-			// For unbounded upper (x < b): can merge with binary ranges that have compatible lower bounds
-			// This is complex, so for now we'll keep it simple and just skip merging
-			// In practice, unbounded intervals often dominate
-			continue
-		}
-
-		// All bounded intervals: try to merge overlapping/adjacent ones
-		// This requires sorting and checking overlap
-		// For simplicity in this initial implementation, we'll check if there are exactly 2 intervals
-		// and try to merge them if they overlap or are adjacent
-
-		if len(g.intervals) == 2 {
-			iv1, iv2 := g.intervals[0], g.intervals[1]
-			if iv1.lower == nil || iv1.upper == nil || iv2.lower == nil || iv2.upper == nil {
-				// One is not fully bounded, skip
+		// Emit merged intervals
+		for _, m := range merged {
+			if m.lower == nil && m.upper == nil {
+				// Unbounded on both sides shouldn't happen from merge, skip
 				continue
 			}
-
-			// Check if they overlap or are adjacent
-			// They overlap if: iv1.lower <= iv2.upper AND iv2.lower <= iv1.upper
-			// They are adjacent if: iv1.upper == iv2.lower (or vice versa) with at least one inclusive
-
-			// Determine order: which has smaller lower bound
-			var first, second interval
-			c := cmpGeneric(g.effDt, iv1.lower, iv2.lower)
-			if c <= 0 {
-				first, second = iv1, iv2
+			if m.lower != nil && m.upper != nil {
+				out = append(out, newBinaryRangeExpr(g.col, m.lowerInc, m.upperInc, m.lower, m.upper))
+			} else if m.lower != nil {
+				op := planpb.OpType_GreaterThan
+				if m.lowerInc {
+					op = planpb.OpType_GreaterEqual
+				}
+				out = append(out, newUnaryRangeExpr(g.col, op, m.lower))
 			} else {
-				first, second = iv2, iv1
-			}
-
-			// Check if they can be merged
-			// Overlap: first.upper >= second.lower
-			cmpUpperLower := cmpGeneric(g.effDt, first.upper, second.lower)
-			canMerge := false
-			if cmpUpperLower > 0 {
-				// Overlap
-				canMerge = true
-			} else if cmpUpperLower == 0 {
-				// Adjacent: at least one bound must be inclusive
-				if first.upperInc || second.lowerInc {
-					canMerge = true
+				op := planpb.OpType_LessThan
+				if m.upperInc {
+					op = planpb.OpType_LessEqual
 				}
-			}
-
-			if canMerge {
-				// Merge: take min lower and max upper
-				mergedLower := first.lower
-				mergedLowerInc := first.lowerInc
-				mergedUpper := second.upper
-				mergedUpperInc := second.upperInc
-
-				// Upper bound: take maximum
-				cmpUppers := cmpGeneric(g.effDt, first.upper, second.upper)
-				if cmpUppers > 0 {
-					mergedUpper = first.upper
-					mergedUpperInc = first.upperInc
-				} else if cmpUppers == 0 {
-					// Same value: prefer inclusive
-					if first.upperInc {
-						mergedUpperInc = true
-					}
-				}
-
-				// Mark both as used
-				used[first.exprIndex] = true
-				used[second.exprIndex] = true
-
-				// Emit merged interval
-				out = append(out, newBinaryRangeExpr(g.col, mergedLowerInc, mergedUpperInc, mergedLower, mergedUpper))
+				out = append(out, newUnaryRangeExpr(g.col, op, m.upper))
 			}
 		}
-		// For more than 2 intervals, we'd need more sophisticated merging logic
-		// For now, we'll leave them separate
 	}
 
 	// Add unused parts
@@ -920,4 +812,232 @@ func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 	}
 
 	return out
+}
+
+// mergedInterval is a result of OR interval merging.
+type mergedInterval struct {
+	lower    *planpb.GenericValue
+	lowerInc bool
+	upper    *planpb.GenericValue
+	upperInc bool
+}
+
+// mergeOrIntervals performs a sort-and-sweep merge of OR intervals.
+// Returns nil if no merging happened (callers should keep originals).
+func mergeOrIntervals(dt schemapb.DataType, intervals []orInterval) []mergedInterval {
+	if len(intervals) < 2 {
+		return nil
+	}
+
+	// Separate into bounded, lower-only (x > a), and upper-only (x < b)
+	type bounded struct {
+		lower    *planpb.GenericValue
+		lowerInc bool
+		upper    *planpb.GenericValue
+		upperInc bool
+	}
+	var boundedList []bounded
+	var lowerOnlyList []bounded // lower set, upper nil
+	var upperOnlyList []bounded // lower nil, upper set
+
+	for _, iv := range intervals {
+		b := bounded{
+			lower: iv.lower, lowerInc: iv.lowerInc,
+			upper: iv.upper, upperInc: iv.upperInc,
+		}
+		switch {
+		case iv.lower != nil && iv.upper != nil:
+			boundedList = append(boundedList, b)
+		case iv.lower != nil && iv.upper == nil:
+			lowerOnlyList = append(lowerOnlyList, b)
+		case iv.lower == nil && iv.upper != nil:
+			upperOnlyList = append(upperOnlyList, b)
+		}
+	}
+
+	// Merge multiple lower-only into weakest: x > min(a1, a2, ...)
+	var mergedLowerOnly *bounded
+	if len(lowerOnlyList) > 0 {
+		best := lowerOnlyList[0]
+		for i := 1; i < len(lowerOnlyList); i++ {
+			c := cmpGeneric(dt, lowerOnlyList[i].lower, best.lower)
+			if c < 0 || (c == 0 && lowerOnlyList[i].lowerInc && !best.lowerInc) {
+				best = lowerOnlyList[i]
+			}
+		}
+		mergedLowerOnly = &best
+	}
+
+	// Merge multiple upper-only into weakest: x < max(b1, b2, ...)
+	var mergedUpperOnly *bounded
+	if len(upperOnlyList) > 0 {
+		best := upperOnlyList[0]
+		for i := 1; i < len(upperOnlyList); i++ {
+			c := cmpGeneric(dt, upperOnlyList[i].upper, best.upper)
+			if c > 0 || (c == 0 && upperOnlyList[i].upperInc && !best.upperInc) {
+				best = upperOnlyList[i]
+			}
+		}
+		mergedUpperOnly = &best
+	}
+
+	// Try to extend unbounded intervals by absorbing overlapping bounded intervals.
+	// (x > a) OR (b < x < c) where b <= a → x > min(a, b) (if overlapping/adjacent)
+	// (x < b) OR (a < x < c) where c >= b → x < max(b, c) (if overlapping/adjacent)
+
+	if mergedLowerOnly != nil {
+		// Absorb bounded intervals that overlap with the lower-only interval
+		remaining := make([]bounded, 0, len(boundedList))
+		for _, bnd := range boundedList {
+			// The lower-only covers [a, +∞). The bounded covers (bnd.lower, bnd.upper).
+			// They overlap/adjacent if bnd.upper >= a (considering inclusivity)
+			cmpBndUpperVsLower := cmpGeneric(dt, bnd.upper, mergedLowerOnly.lower)
+			overlaps := cmpBndUpperVsLower > 0 ||
+				(cmpBndUpperVsLower == 0 && (bnd.upperInc || mergedLowerOnly.lowerInc))
+			if overlaps {
+				// Extend: lower bound = min(a, bnd.lower)
+				c := cmpGeneric(dt, bnd.lower, mergedLowerOnly.lower)
+				if c < 0 || (c == 0 && bnd.lowerInc && !mergedLowerOnly.lowerInc) {
+					mergedLowerOnly.lower = bnd.lower
+					mergedLowerOnly.lowerInc = bnd.lowerInc
+				}
+			} else {
+				remaining = append(remaining, bnd)
+			}
+		}
+		boundedList = remaining
+	}
+
+	if mergedUpperOnly != nil {
+		remaining := make([]bounded, 0, len(boundedList))
+		for _, bnd := range boundedList {
+			// Upper-only covers (-∞, b). Bounded covers (bnd.lower, bnd.upper).
+			// They overlap/adjacent if bnd.lower <= b (considering inclusivity)
+			cmpBndLowerVsUpper := cmpGeneric(dt, bnd.lower, mergedUpperOnly.upper)
+			overlaps := cmpBndLowerVsUpper < 0 ||
+				(cmpBndLowerVsUpper == 0 && (bnd.lowerInc || mergedUpperOnly.upperInc))
+			if overlaps {
+				// Extend: upper bound = max(b, bnd.upper)
+				c := cmpGeneric(dt, bnd.upper, mergedUpperOnly.upper)
+				if c > 0 || (c == 0 && bnd.upperInc && !mergedUpperOnly.upperInc) {
+					mergedUpperOnly.upper = bnd.upper
+					mergedUpperOnly.upperInc = bnd.upperInc
+				}
+			} else {
+				remaining = append(remaining, bnd)
+			}
+		}
+		boundedList = remaining
+	}
+
+	// Note: if lower-only and upper-only together overlap, they form a tautology
+	// for non-nullable columns. We leave that to combineOrComplementaryRanges.
+
+	// Sort-and-sweep merge of remaining bounded intervals
+	if len(boundedList) > 1 {
+		// Sort by lower bound
+		sort.Slice(boundedList, func(i, j int) bool {
+			c := cmpGeneric(dt, boundedList[i].lower, boundedList[j].lower)
+			if c != 0 {
+				return c < 0
+			}
+			// Equal lower bounds: inclusive first (covers more)
+			return boundedList[i].lowerInc && !boundedList[j].lowerInc
+		})
+
+		// Sweep merge
+		merged := []bounded{boundedList[0]}
+		for i := 1; i < len(boundedList); i++ {
+			cur := &merged[len(merged)-1]
+			next := boundedList[i]
+
+			// Check overlap or adjacency
+			cmpCurUpperNextLower := cmpGeneric(dt, cur.upper, next.lower)
+			canMerge := cmpCurUpperNextLower > 0 ||
+				(cmpCurUpperNextLower == 0 && (cur.upperInc || next.lowerInc))
+
+			if canMerge {
+				// Extend upper bound to max
+				cmpUppers := cmpGeneric(dt, next.upper, cur.upper)
+				if cmpUppers > 0 {
+					cur.upper = next.upper
+					cur.upperInc = next.upperInc
+				} else if cmpUppers == 0 && next.upperInc {
+					cur.upperInc = true
+				}
+			} else {
+				merged = append(merged, next)
+			}
+		}
+		boundedList = merged
+	}
+
+	// Also try to absorb remaining bounded intervals into unbounded ones (post-bounded-merge)
+	if mergedLowerOnly != nil && len(boundedList) > 0 {
+		remaining := make([]bounded, 0, len(boundedList))
+		for _, bnd := range boundedList {
+			cmpBndUpperVsLower := cmpGeneric(dt, bnd.upper, mergedLowerOnly.lower)
+			overlaps := cmpBndUpperVsLower > 0 ||
+				(cmpBndUpperVsLower == 0 && (bnd.upperInc || mergedLowerOnly.lowerInc))
+			if overlaps {
+				c := cmpGeneric(dt, bnd.lower, mergedLowerOnly.lower)
+				if c < 0 || (c == 0 && bnd.lowerInc && !mergedLowerOnly.lowerInc) {
+					mergedLowerOnly.lower = bnd.lower
+					mergedLowerOnly.lowerInc = bnd.lowerInc
+				}
+			} else {
+				remaining = append(remaining, bnd)
+			}
+		}
+		boundedList = remaining
+	}
+	if mergedUpperOnly != nil && len(boundedList) > 0 {
+		remaining := make([]bounded, 0, len(boundedList))
+		for _, bnd := range boundedList {
+			cmpBndLowerVsUpper := cmpGeneric(dt, bnd.lower, mergedUpperOnly.upper)
+			overlaps := cmpBndLowerVsUpper < 0 ||
+				(cmpBndLowerVsUpper == 0 && (bnd.lowerInc || mergedUpperOnly.upperInc))
+			if overlaps {
+				c := cmpGeneric(dt, bnd.upper, mergedUpperOnly.upper)
+				if c > 0 || (c == 0 && bnd.upperInc && !mergedUpperOnly.upperInc) {
+					mergedUpperOnly.upper = bnd.upper
+					mergedUpperOnly.upperInc = bnd.upperInc
+				}
+			} else {
+				remaining = append(remaining, bnd)
+			}
+		}
+		boundedList = remaining
+	}
+
+	// Count total result intervals
+	totalResults := len(boundedList)
+	if mergedLowerOnly != nil {
+		totalResults++
+	}
+	if mergedUpperOnly != nil {
+		totalResults++
+	}
+
+	// Only return merged results if we actually reduced the count
+	if totalResults >= len(intervals) {
+		return nil
+	}
+
+	result := make([]mergedInterval, 0, totalResults)
+	if mergedUpperOnly != nil {
+		result = append(result, mergedInterval{
+			upper: mergedUpperOnly.upper, upperInc: mergedUpperOnly.upperInc,
+		})
+	}
+	for _, b := range boundedList {
+		result = append(result, mergedInterval(b))
+	}
+	if mergedLowerOnly != nil {
+		result = append(result, mergedInterval{
+			lower: mergedLowerOnly.lower, lowerInc: mergedLowerOnly.lowerInc,
+		})
+	}
+
+	return result
 }
