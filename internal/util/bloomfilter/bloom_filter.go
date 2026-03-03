@@ -16,6 +16,8 @@
 package bloomfilter
 
 import (
+	"bytes"
+
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
 	"github.com/greatroar/blobloom"
@@ -336,4 +338,39 @@ func Locations(data []byte, k uint, bfType BFType) []uint64 {
 		log.Info("unsupported bloom filter type, using block bloom filter", zap.String("type", bfType.String()))
 		return nil
 	}
+}
+
+// blobloomHeaderSize is the size of blobloom's binary Dump header.
+const blobloomHeaderSize = 64
+
+// blobloomMagic is the expected magic bytes at the start of blobloom's Dump output.
+const blobloomMagic = "blobloom"
+
+// DumpBlockData extracts the raw block data from a BlockedBF bloom filter.
+// Uses blobloom's Dump function to get the binary representation, then strips the 64-byte header.
+// Returns the raw block data (numBlocks × 64 bytes).
+func DumpBlockData(bf BloomFilterInterface) ([]byte, error) {
+	bbf, ok := bf.(*blockedBloomFilter)
+	if !ok {
+		return nil, errors.New("DumpBlockData only supports blockedBloomFilter")
+	}
+
+	var buf bytes.Buffer
+	_, err := blobloom.Dump(&buf, bbf.inner, "")
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to dump bloom filter")
+	}
+
+	raw := buf.Bytes()
+	if len(raw) < blobloomHeaderSize {
+		return nil, errors.New("dump output too short")
+	}
+
+	// Validate the magic bytes to detect blobloom format changes
+	if string(raw[:len(blobloomMagic)]) != blobloomMagic {
+		return nil, errors.Errorf("unexpected blobloom dump header magic: %q", string(raw[:8]))
+	}
+
+	// Strip the 64-byte blobloom header, return only block data
+	return raw[blobloomHeaderSize:], nil
 }

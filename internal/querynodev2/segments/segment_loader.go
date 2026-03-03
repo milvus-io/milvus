@@ -29,6 +29,7 @@ import (
 	"io"
 	"math"
 	"path"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -47,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -80,6 +82,9 @@ type Loader interface {
 	// NOTE: make sure the ref count of the corresponding collection will never go down to 0 during this
 	Load(ctx context.Context, collectionID int64, segmentType SegmentType, version int64, segments ...*querypb.SegmentLoadInfo) ([]Segment, error)
 
+	// GetPkStatsMmapManager returns the shared bloom filter mmap manager.
+	GetPkStatsMmapManager() *bloomfilter.PkStatsMmapManager
+
 	// LoadDeltaLogs load deltalog and write delta data into provided segment.
 	// it also executes resource protection logic in case of OOM.
 	LoadDeltaLogs(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error
@@ -104,6 +109,9 @@ type Loader interface {
 	ReopenSegments(ctx context.Context,
 		loadInfos []*querypb.SegmentLoadInfo,
 	) error
+
+	// Close releases resources held by the loader.
+	Close()
 }
 
 type ResourceEstimate struct {
@@ -187,12 +195,21 @@ func NewLoader(
 	duf := NewDiskUsageFetcher(ctx)
 	go duf.Start()
 
+	fileBacked := paramtable.Get().CommonCfg.BloomFilterMmapEnabled.GetAsBool()
+	mmapDir := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
+	if mmapDir == "" {
+		mmapDir = filepath.Join(paramtable.Get().ServiceParam.LocalStorageCfg.Path.GetValue(), "bf_mmap")
+	}
+	pkStatsMmapMgr := bloomfilter.NewPkStatsMmapManager(mmapDir, fileBacked)
+	log.Info("bloom filter manager created", zap.Bool("fileBacked", fileBacked), zap.String("mmapDir", mmapDir))
+
 	loader := &segmentLoader{
 		manager:                   manager,
 		cm:                        cm,
 		loadingSegments:           typeutil.NewConcurrentMap[int64, *loadResult](),
 		committedResourceNotifier: syncutil.NewVersionedNotifier(),
 		duf:                       duf,
+		pkStatsMmapMgr:            pkStatsMmapMgr,
 	}
 
 	return loader
@@ -237,6 +254,8 @@ type segmentLoader struct {
 	committedResourceNotifier *syncutil.VersionedNotifier
 
 	duf *diskUsageFetcher
+
+	pkStatsMmapMgr *bloomfilter.PkStatsMmapManager
 }
 
 var _ Loader = (*segmentLoader)(nil)
@@ -776,7 +795,11 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 
 	err := funcutil.ProcessFuncParallel(segmentNum, segmentNum, loadRemoteFunc, "loadRemoteFunc")
 	if err != nil {
-		// no partial success here
+		// Refund any successfully loaded bloom filters to release mmap references.
+		loadedBfs.Range(func(bfs *pkoracle.BloomFilterSet) bool {
+			bfs.Refund()
+			return true
+		})
 		log.Warn("failed to load remote segment", zap.Error(err))
 		return nil, err
 	}
@@ -1278,6 +1301,33 @@ func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int6
 	}
 
 	startTs := time.Now()
+	cacheKey := binlogPaths[0]
+
+	// Fast path: if this segment's BF data is already in the manager
+	// (e.g. delegator loaded it first), reuse without downloading from S3.
+	if cachedData, ok := loader.pkStatsMmapMgr.TryAddRef(cacheKey); ok {
+		mmapStats, err := storage.DeserializeBinaryStats(cachedData)
+		if err == nil {
+			var size uint
+			for _, stat := range mmapStats {
+				pkStat := &storage.PkStatistics{
+					PkFilter: stat.BF,
+					MinPK:    stat.MinPk,
+					MaxPK:    stat.MaxPk,
+				}
+				size += stat.BF.Cap()
+				bfs.AddHistoricalStats(pkStat)
+			}
+			bfs.SetMmapPaths(cacheKey)
+			bfs.SetMmapManager(loader.pkStatsMmapMgr)
+			log.Info("Reused cached pk stats", zap.Duration("time", time.Since(startTs)), zap.Uint("size", size))
+			return nil
+		}
+		loader.pkStatsMmapMgr.Release(cacheKey)
+		log.Warn("failed to deserialize cached stats, reloading from storage", zap.Error(err))
+	}
+
+	// Normal path: download from storage and deserialize
 	values, err := loader.cm.MultiRead(ctx, binlogPaths)
 	if err != nil {
 		return err
@@ -1293,6 +1343,31 @@ func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int6
 		return err
 	}
 
+	// Convert in-heap BFs to manager-backed BFs (file-mmap or memory-dedup).
+	// Serialize to local binary format, store via manager, then re-deserialize
+	// to get MmapBloomFilter instances pointing to the shared data.
+	if len(stats) > 0 && allBlockedBF(stats) {
+		binaryData, serErr := storage.SerializeBinaryStats(stats)
+		if serErr == nil {
+			sharedData, loadErr := loader.pkStatsMmapMgr.GetOrLoad(cacheKey, binaryData)
+			if loadErr == nil {
+				sharedStats, desErr := storage.DeserializeBinaryStats(sharedData)
+				if desErr == nil {
+					stats = sharedStats
+					bfs.SetMmapPaths(cacheKey)
+					bfs.SetMmapManager(loader.pkStatsMmapMgr)
+				} else {
+					loader.pkStatsMmapMgr.Release(cacheKey)
+					log.Warn("failed to deserialize binary stats, using heap", zap.Error(desErr))
+				}
+			} else {
+				log.Warn("failed to store stats in manager, using heap", zap.Error(loadErr))
+			}
+		} else {
+			log.Warn("failed to serialize stats to binary, using heap", zap.Error(serErr))
+		}
+	}
+
 	var size uint
 	for _, stat := range stats {
 		pkStat := &storage.PkStatistics{
@@ -1305,6 +1380,28 @@ func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int6
 	}
 	log.Info("Successfully load pk stats", zap.Duration("time", time.Since(startTs)), zap.Uint("size", size))
 	return nil
+}
+
+// allBlockedBF returns true if every stat in the slice uses BlockedBF type.
+func allBlockedBF(stats []*storage.PrimaryKeyStats) bool {
+	for _, s := range stats {
+		if s.BFType != bloomfilter.BlockedBF {
+			return false
+		}
+	}
+	return true
+}
+
+// GetPkStatsMmapManager returns the bloom filter mmap manager for shared access.
+func (loader *segmentLoader) GetPkStatsMmapManager() *bloomfilter.PkStatsMmapManager {
+	return loader.pkStatsMmapMgr
+}
+
+// Close releases resources held by the segment loader.
+func (loader *segmentLoader) Close() {
+	if loader.pkStatsMmapMgr != nil {
+		loader.pkStatsMmapMgr.Close()
+	}
 }
 
 // loadDeltalogs performs the internal actions of `LoadDeltaLogs`

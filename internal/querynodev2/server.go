@@ -522,8 +522,17 @@ func (node *QueryNode) Stop() error {
 		if node.dispClient != nil {
 			node.dispClient.Close()
 		}
+		if node.delegators != nil {
+			node.delegators.Range(func(_ string, sd delegator.ShardDelegator) bool {
+				sd.Close()
+				return true
+			})
+		}
 		if node.manager != nil {
 			node.manager.Segment.Clear(context.Background())
+		}
+		if node.loader != nil {
+			node.loader.Close()
 		}
 
 		node.CloseSegcore()
