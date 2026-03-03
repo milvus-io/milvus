@@ -2,9 +2,17 @@
 
 ## 一、Executive Summary
 
-将 Milvus QueryNode 从 Go 完全重写为 C++ 是一个**高复杂度**的工程任务。QueryNode 的 Go 代码约 **28,600 行**（82个非测试文件），涉及 7 个子系统。当前架构中，**85-90% 的计算密集型工作已经在 C++ segcore 中执行**（~215K 行 C++），Go 层主要负责分布式编排、生命周期管理和外部依赖集成。
+将 Milvus QueryNode 从 Go 完全重写为 C++ 是一个**中等复杂度**的工程任务。
 
-**关键发现**：Milvus 在 standalone 模式下确实存在**进程内直连调用优化**（`InMemResolver`），这意味着纯 gRPC 兼容不够，standalone 模式还需要 CGo/FFI 兼容层。
+**重大架构变化（2.6.0+）**：自 Milvus 2.6.0 起，Streaming Service 默认启用（`cmd/main.go:38`）。在新架构下：
+- **StreamingNode**（嵌入 embedded QN）负责 channel 管理、delegator、growing segment 的查询
+- **独立 QueryNode** 只负责 **sealed segment 的加载和查询**，**不再管理 delegator 和 growing segment**
+
+这意味着需要重写的范围**大幅缩小**：QueryNode 不再需要 delegator 子系统（~6,164 行）、pipeline/消息消费（~1,207 行）、消息队列客户端等复杂模块。剩余的核心功能集中在 sealed segment 的加载、搜索、检索和释放。
+
+QueryNode 的 Go 代码约 **28,600 行**（82个非测试文件），但在新架构下**独立 QN 实际活跃的代码仅约 15,000 行**。当前架构中，**85-90% 的计算密集型工作已经在 C++ segcore 中执行**（~215K 行 C++），Go 层主要负责 segment 生命周期管理和 gRPC 服务。
+
+**关于 standalone 模式**：Milvus 确实存在**进程内直连调用优化**（`InMemResolver`），但建议 C++ QN 在 standalone 下也走 gRPC，因 standalone 场景的额外序列化开销可忽略。
 
 ---
 
@@ -536,10 +544,220 @@ QueryNode 还暴露 HTTP 健康检查和管理端点。C++ 版本也需要实现
 3. **维护成本**：两个版本的维护过渡期
 4. **人才要求**：需要熟悉分布式系统和 C++ 的工程师
 
-### 建议
-考虑到 **85-90% 的计算已在 C++**，Go 层的主要开销是 CGo 和 GC。建议先做以下优化评估：
+### 建议（已更新）
+考虑到 2.6.0+ 架构变化，**独立 QN 的职责大幅简化**，C++ 重写的工程量相比之前评估显著降低。建议：
 
 1. **量化 CGo 开销**：Benchmark 当前 CGo 调用的实际耗时占比
 2. **量化 GC 影响**：Profile GC 停顿对 P99 延迟的实际影响
 3. 如果两者总和 < 5% 的查询延迟，可能不值得全量重写
 4. 如果 > 10%，则 C++ 重写有明确收益
+5. **新架构下独立 QN 只处理 sealed segment**，复杂度降为中等，预估 3-5 个月 2-3 名工程师可完成
+
+---
+
+## 十三、重大更新：2.6.0+ 架构变化 — StreamingNode 与 QueryNode 职责分离
+
+### 13.1 核心变化
+
+自 Milvus 2.6.0 起，`StreamingService` **默认启用**：
+
+```go
+// cmd/main.go:36-38
+// after 2.6.0, we enable streaming service by default.
+streamingutil.SetStreamingServiceEnabled()
+```
+
+这导致 QueryNode 的架构发生根本性变化。
+
+### 13.2 两种 QueryNode 角色
+
+在新架构下，Milvus 的 QueryNode 分为两种：
+
+#### A. 独立 QueryNode（`rwNodes`）— 只处理 Sealed Segment
+
+- 由 QueryCoord 分配 **sealed segment 加载任务**
+- **不再被分配 DML Channel**（channel 只分配给 SQNodes）
+- **不再运行 Delegator**
+- **不再消费消息队列**（无 pipeline、无 growing segment）
+- 功能简化为：加载 sealed segment → 搜索/检索 → 释放
+
+关键代码证据：
+```go
+// internal/querycoordv2/checkers/channel_checker.go:218-224
+if streamingutil.IsStreamingServiceEnabled() {
+    rwNodes = replica.GetRWSQNodes()  // channel 只分配给 SQNodes
+} else {
+    rwNodes = replica.GetRWNodes()    // 旧模式
+}
+
+// internal/querycoordv2/checkers/segment_checker.go:411-413
+// sealed segment 仍然分配给 rwNodes（独立QN）
+rwNodes = replica.GetRWNodes()
+```
+
+#### B. Embedded QueryNode in StreamingNode（`rwSQNodes`）— 处理 Channel + Growing Segment
+
+- 当启动 `StreamingNodeRole` 时，同时启动一个 QueryNode 并打上 `LabelStreamingNodeEmbeddedQueryNode` 标签
+- QueryCoord 将 **DML Channel 分配给这些 SQNodes**
+- 这些 embedded QN **运行 Delegator**，管理 growing segment 查询
+- QueryCoord 的 ResourceManager **不会将 embedded QN 加入资源组**（`resource_manager.go:536`）
+
+```go
+// cmd/milvus/util.go:139-142
+case typeutil.StreamingNodeRole:
+    sessionutil.EnableEmbededQueryNodeLabel()
+    role.EnableStreamingNode = true
+    role.EnableQueryNode = true   // 同时启动 QN
+```
+
+```go
+// internal/querycoordv2/meta/replica.go:62-72
+// Nodes (rwNodes) is the legacy querynode that is not embedded in the streamingnode,
+// which can only load sealed segment.
+//
+// SQNodes (rwSQNodes) is the querynode that is embedded in the streamingnode,
+// which can only watch channel and load growing segment.
+```
+
+### 13.3 架构图（新）
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     StreamingNode Process                     │
+│                                                              │
+│  ┌─────────────────────┐  ┌──────────────────────────────┐  │
+│  │  StreamingNode       │  │  Embedded QueryNode (SQNode) │  │
+│  │  - WAL Manager       │  │  - Delegator (per channel)   │  │
+│  │  - Segment Manager   │  │  - Growing Segment 查询      │  │
+│  │  - Flusher Pipeline  │  │  - Pipeline (MQ消费)         │  │
+│  │  - Segment Alloc     │  │  - InMemResolver 注册        │  │
+│  └─────────────────────┘  └──────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────┐
+│         独立 QueryNode (rwNode)           │
+│  - 只加载/管理 Sealed Segment            │
+│  - Search / Retrieve / Release           │
+│  - 不管 Channel、不管 Growing             │
+│  - 不运行 Delegator                      │
+│  - 不消费消息队列                         │
+│  - 直接调用 C++ segcore                   │
+└──────────────────────────────────────────┘
+
+┌──────────────────────────────────────────┐
+│              Proxy                        │
+│  - 搜索路由：                             │
+│    sealed segment → 独立 QN (gRPC)        │
+│    growing segment → embedded QN (SQNode) │
+└──────────────────────────────────────────┘
+```
+
+### 13.4 对 C++ 重写的影响 — **复杂度大幅降低**
+
+如果只重写**独立 QueryNode**（只处理 sealed segment），需要重写的范围：
+
+| 模块 | 是否需要重写 | 说明 |
+|------|-------------|------|
+| gRPC Server（33 个 RPC） | **是**，但多数可返回 Unimplemented | 许多 RPC 只在有 channel 时才有意义 |
+| Sealed Segment 加载/释放 | **是** | 从对象存储加载 segment、index |
+| Search/Retrieve 执行 | **是**，但核心已在 C++ | 直接调用 segcore |
+| Segment Manager | **是** | 管理 sealed segment 生命周期 |
+| **Delegator 子系统** | **否！** | 只在 embedded QN 中运行 |
+| **Pipeline/MQ 消费** | **否！** | 只在 embedded QN 中运行 |
+| **消息队列客户端** | **否！** | 不需要 Pulsar/Kafka 客户端 |
+| **删除缓冲** | **否！** | delegator 职责 |
+| 配置/Session/etcd | **是** | 但简化，无需 config watch for MQ |
+| Prometheus 指标 | **是** | 但只需 segment 相关指标 |
+| Cluster Worker | **部分** | 只需 gRPC client 调远程 QN |
+
+### 13.5 修正后的代码量估算
+
+| 模块 | 原估算Go代码量 | 新架构下需重写 | 预估C++代码量 |
+|------|---------------|---------------|-------------|
+| gRPC Server 层 | 430行 | 430行 | ~500行 |
+| 核心服务逻辑 | 1,794行 | ~800行（去掉 channel 相关） | ~1,200行 |
+| ~~Delegator 子系统~~ | ~~6,164行~~ | **0行（不需要）** | **0行** |
+| Segment 管理 | 9,200行 | ~7,000行 | ~4,500行（消除CGo桥接） |
+| ~~Pipeline~~ | ~~1,207行~~ | **0行（不需要）** | **0行** |
+| Cluster Worker | 368行 | ~200行 | ~300行 |
+| 配置系统 | ~500行 | ~300行 | ~400行 |
+| Session/服务注册 | ~300行 | ~300行 | ~400行 |
+| 指标/监控 | 332行 | ~200行 | ~250行 |
+| ~~PK Oracle~~ | ~~569行~~ | **0行（delegator 依赖）** | **0行** |
+| **合计** | **~21,000行** | **~9,200行** | **~7,550行** |
+
+### 13.6 修正后的实施路线图
+
+#### Phase 1：基础骨架（3-4周）
+- C++ gRPC Server 搭建
+- etcd session 注册
+- 配置系统（milvus.yaml 读取）
+- 基础生命周期管理
+
+#### Phase 2：Sealed Segment 管理（4-6周）
+- Segment Manager 实现（直接调用 segcore C++ API）
+- Segment Loader（对象存储读取 + segment/index 加载）
+- 内存/磁盘资源管理
+- 索引加载
+
+#### Phase 3：查询引擎（2-3周）
+- Search/SearchSegments 实现
+- Query/QuerySegments 实现
+- QueryStream 实现（streaming RPC）
+- Cluster Worker（gRPC client 调远程 QN）
+
+#### Phase 4：集成测试（3-4周）
+- 与现有 Milvus 集群兼容性测试
+- 性能基准测试
+- 滚动升级测试
+
+**总预估：3-5 个月，2-3 名工程师**（相比之前 6-9 个月 3-5 名工程师大幅缩减）
+
+### 13.7 需要注意的 RPC 方法分类
+
+在新架构下，33 个 RPC 方法的实际需求：
+
+| 必须实现 | 可返回 Unimplemented/空 | 说明 |
+|---------|----------------------|------|
+| GetComponentStates | GetTimeTickChannel | 心跳 |
+| LoadSegments | WatchDmChannels | 独立QN不管channel |
+| ReleaseSegments | UnsubDmChannel | 同上 |
+| ReleaseCollection | ~~Pipeline相关~~ | |
+| LoadPartitions | | |
+| ReleasePartitions | | |
+| SearchSegments | Search (legacy) | |
+| QuerySegments | Query (legacy) | |
+| QueryStreamSegments | QueryStream (legacy) | |
+| GetSegmentInfo | | |
+| GetStatistics | | |
+| GetMetrics | | |
+| GetDataDistribution | | |
+| SyncDistribution | | |
+| Delete/DeleteBatch | | 仍需处理 sealed segment 上的删除 |
+| UpdateSchema | | |
+| UpdateIndex | | |
+| DropIndex | | |
+| ShowConfigurations | | |
+| SyncFileResource | | |
+
+### 13.8 Standalone 模式在新架构下的注意事项
+
+在 standalone 模式下：
+```go
+// cmd/milvus/util.go:143-151
+case typeutil.StandaloneRole:
+    role.EnableMixCoord = true
+    role.EnableProxy = true
+    role.EnableQueryNode = true        // 独立 QN
+    role.EnableDataNode = true
+    role.EnableStreamingNode = true    // StreamingNode + embedded QN
+    role.Local = true
+```
+
+Standalone 同时启动：
+1. 一个 StreamingNode（含 embedded QN，负责 channel + growing）
+2. 一个独立 QueryNode（负责 sealed segment）
+
+**注意**：standalone 模式下没有 `EnableEmbededQueryNodeLabel()`，所以独立 QN **不会**被标记为 embedded。这意味着 standalone 的独立 QN 会被 QueryCoord 正常分配 sealed segment。
+
+因此 C++ 重写的独立 QN 在 standalone 模式下也能正常工作——它只处理 sealed segment，growing 由 embedded QN 处理。
