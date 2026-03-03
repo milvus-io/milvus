@@ -26,6 +26,14 @@
 #include <aws/core/utils/logging/FormattedLogSystem.h>
 #include <aws/s3/S3Client.h>
 #include <fmt/core.h>
+#include <google/cloud/credentials.h>
+#include <google/cloud/internal/oauth2_credentials.h>
+#include <google/cloud/internal/oauth2_compute_engine_credentials.h>
+#include <google/cloud/internal/oauth2_google_credentials.h>
+#include <google/cloud/internal/oauth2_http_client_factory.h>
+#include <google/cloud/internal/rest_client.h>
+#include <google/cloud/storage/oauth2/compute_engine_credentials.h>
+#include <google/cloud/storage/oauth2/google_credentials.h>
 #include <google/cloud/status_or.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -46,9 +54,6 @@
 #include "aws/s3/S3Errors.h"
 #include "common/EasyAssert.h"
 #include "glog/logging.h"
-#include "google/cloud/internal/oauth2_compute_engine_credentials.h"
-#include "google/cloud/internal/oauth2_credentials.h"
-#include "google/cloud/internal/oauth2_google_credentials.h"
 #include "google/cloud/status.h"
 #include "log/Log.h"
 #include "storage/ChunkManager.h"
@@ -359,12 +364,13 @@ class GoogleHttpClientFactory : public Aws::Http::HttpClientFactory {
             Aws::MakeShared<Aws::Http::Standard::StandardHttpRequest>(
                 GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, uri, method);
         request->SetResponseStreamFactory(streamFactory);
-        auto auth_header = credentials_->AuthorizationHeader();
+        auto auth_header =
+            google::cloud::oauth2_internal::AuthorizationHeader(*credentials_);
         if (!auth_header.ok()) {
-            ThrowInfo(
-                S3Error,
-                fmt::format("get authorization failed, errcode: {}",
-                            StatusCodeToString(auth_header.status().code())));
+            ThrowInfo(S3Error,
+                      fmt::format("get authorization failed, errcode: {}",
+                                  google::cloud::StatusCodeToString(
+                                      auth_header.status().code())));
         }
         request->SetHeaderValue(auth_header->first.c_str(),
                                 auth_header->second.c_str());
