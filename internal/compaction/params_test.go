@@ -87,7 +87,8 @@ func TestGetParamsFromJSON_EmptyJSON(t *testing.T) {
 	result, err := ParseParamsFromJSON(emptyJSON)
 	assert.NoError(t, err)
 	assert.Equal(t, Params{
-		StorageVersion:            storage.StorageV2,
+		StorageVersion:            storage.StorageV3,
+		UseLoonFFI:                true,
 		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
 		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
