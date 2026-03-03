@@ -18,6 +18,7 @@ package compaction
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -109,8 +110,13 @@ func readDeltalogsV2(
 	manifestPath string,
 	option ...storage.RwOption,
 ) ([]storage.PrimaryKey, []typeutil.Timestamp, error) {
+	log := log.Ctx(ctx)
 	reader, err := storage.NewDeltalogReaderFromManifest(pkType, manifestPath, option...)
 	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return []storage.PrimaryKey{}, []typeutil.Timestamp{}, nil
+		}
+		log.Info("new detalog reader returns EOF, no deltalog found")
 		return nil, nil, err
 	}
 	defer reader.Close()
@@ -120,7 +126,7 @@ func readDeltalogsV2(
 		return nil, nil, err
 	}
 
-	log.Ctx(ctx).Info("read V2 deltalogs from manifest", zap.Int("entries", len(pks)))
+	log.Info("read V2 deltalogs from manifest", zap.Int("entries", len(pks)))
 	return pks, tss, nil
 }
 
