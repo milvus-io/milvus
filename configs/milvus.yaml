@@ -1456,6 +1456,10 @@ function:
         credential:  # The name in the crendential configuration item
         enable: true # Whether to enable voyageai model service
         url:  # Your voyageai embedding url, Default is the official embedding url
+      yc:
+        credential:  # The name in the credential configuration item
+        enable: true # Whether to enable Yandex Cloud model service
+        url:  # Your Yandex Cloud text embedding url, Default is the official text embedding url
   rerank:
     model:
       providers:
