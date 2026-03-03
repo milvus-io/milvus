@@ -933,3 +933,25 @@ func testForceKill(serverName string) {
 	// trigger a force kill
 	etcdCli.Revoke(context.Background(), *session.LeaseID)
 }
+
+func TestGetResourceGroupName(t *testing.T) {
+	t.Run("nil server labels returns empty", func(t *testing.T) {
+		s := &SessionRaw{ServerLabels: nil}
+		assert.Equal(t, "", s.GetResourceGroupName())
+	})
+
+	t.Run("empty server labels returns empty", func(t *testing.T) {
+		s := &SessionRaw{ServerLabels: map[string]string{}}
+		assert.Equal(t, "", s.GetResourceGroupName())
+	})
+
+	t.Run("missing resource group label returns empty", func(t *testing.T) {
+		s := &SessionRaw{ServerLabels: map[string]string{"OTHER_LABEL": "value"}}
+		assert.Equal(t, "", s.GetResourceGroupName())
+	})
+
+	t.Run("valid resource group label returns value", func(t *testing.T) {
+		s := &SessionRaw{ServerLabels: map[string]string{LabelResourceGroup: "my_rg"}}
+		assert.Equal(t, "my_rg", s.GetResourceGroupName())
+	})
+}

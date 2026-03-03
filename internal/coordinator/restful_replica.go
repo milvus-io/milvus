@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -47,6 +48,11 @@ type LoadConfigComplianceResponse struct {
 
 // HandleReplicaLoadConfigCompliance checks if all loaded collections meet the cluster-level replica configuration requirements
 func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		writeJSONError(w, "Method not allowed, use GET", http.StatusMethodNotAllowed)
+		return
+	}
+
 	ctx := req.Context()
 	logger := log.Ctx(ctx).With(zap.String("handler", "ReplicaLoadConfigCompliance"))
 
@@ -142,7 +148,7 @@ func (s *mixCoordImpl) validateRGDistribution(
 	}
 	for _, cnt := range counts {
 		if cnt != 0 {
-			return fmt.Sprintf("collection %d: %s mismatch (expected [%v], actual [%v])", collectionID, rgType, expectedRGs, actualRGs)
+			return fmt.Sprintf("collection %d: %s mismatch (expected [%s], actual [%s])", collectionID, rgType, strings.Join(expectedRGs, ","), strings.Join(actualRGs, ","))
 		}
 	}
 	return ""

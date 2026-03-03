@@ -40,12 +40,11 @@ func TestHandleAlterConfig(t *testing.T) {
 	// Mark some keys as immutable for testing
 	mgr.ImmutableUpdate("test.immutable.key1")
 
-	// Create a mixCoordImpl
 	coord := &mixCoordImpl{}
 
 	t.Run("single config update", func(t *testing.T) {
 		reqBody := map[string]interface{}{
-			"configs": []map[string]string{
+			"configs": []map[string]interface{}{
 				{"key": "test.alter.config.key1", "value": "value1"},
 			},
 		}
@@ -60,16 +59,122 @@ func TestHandleAlterConfig(t *testing.T) {
 		json.Unmarshal(w.Body.Bytes(), &resp)
 		assert.Equal(t, "OK", resp["msg"])
 
-		// Verify the config was written (etcd refresh interval is 5s, so wait longer)
 		assert.Eventually(t, func() bool {
 			_, value, err := mgr.GetConfig("test.alter.config.key1")
 			return err == nil && value == "value1"
 		}, time.Second*10, 100*time.Millisecond)
 	})
 
+	t.Run("legacy single-key format", func(t *testing.T) {
+		reqBody := map[string]string{
+			"key":   "test.alter.config.legacy",
+			"value": "legacy_value",
+		}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+
+		coord.HandleAlterConfig(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		assert.Eventually(t, func() bool {
+			_, value, err := mgr.GetConfig("test.alter.config.legacy")
+			return err == nil && value == "legacy_value"
+		}, time.Second*10, 100*time.Millisecond)
+	})
+
+	t.Run("set config with empty value", func(t *testing.T) {
+		reqBody := map[string]interface{}{
+			"configs": []map[string]interface{}{
+				{"key": "test.alter.config.empty", "value": ""},
+			},
+		}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		assert.Eventually(t, func() bool {
+			_, value, err := mgr.GetConfig("test.alter.config.empty")
+			return err == nil && value == ""
+		}, time.Second*10, 100*time.Millisecond)
+	})
+
+	t.Run("reset config by omitting value", func(t *testing.T) {
+		// First set a value
+		reqBody := map[string]interface{}{
+			"configs": []map[string]interface{}{
+				{"key": "test.alter.config.reset_me", "value": "to_be_reset"},
+			},
+		}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		assert.Eventually(t, func() bool {
+			_, value, err := mgr.GetConfig("test.alter.config.reset_me")
+			return err == nil && value == "to_be_reset"
+		}, time.Second*10, 100*time.Millisecond)
+
+		// Reset by omitting value (value is null/absent → delete from etcd)
+		reqBody = map[string]interface{}{
+			"configs": []map[string]interface{}{
+				{"key": "test.alter.config.reset_me"},
+			},
+		}
+		body, _ = json.Marshal(reqBody)
+		req = httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w = httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("mixed update and reset in one request", func(t *testing.T) {
+		// Setup: write two configs
+		reqBody := map[string]interface{}{
+			"configs": []map[string]interface{}{
+				{"key": "test.alter.mixed.keep", "value": "old_value"},
+				{"key": "test.alter.mixed.remove", "value": "to_remove"},
+			},
+		}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		assert.Eventually(t, func() bool {
+			_, v1, err1 := mgr.GetConfig("test.alter.mixed.keep")
+			_, v2, err2 := mgr.GetConfig("test.alter.mixed.remove")
+			return err1 == nil && v1 == "old_value" && err2 == nil && v2 == "to_remove"
+		}, time.Second*10, 100*time.Millisecond)
+
+		// Atomically: update one, reset (delete) the other
+		reqBody = map[string]interface{}{
+			"configs": []map[string]interface{}{
+				{"key": "test.alter.mixed.keep", "value": "new_value"},
+				{"key": "test.alter.mixed.remove"}, // no value → reset
+			},
+		}
+		body, _ = json.Marshal(reqBody)
+		req = httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w = httptest.NewRecorder()
+		coord.HandleAlterConfig(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		assert.Eventually(t, func() bool {
+			_, v, err := mgr.GetConfig("test.alter.mixed.keep")
+			return err == nil && v == "new_value"
+		}, time.Second*10, 100*time.Millisecond)
+	})
+
 	t.Run("multiple configs atomic update", func(t *testing.T) {
 		reqBody := map[string]interface{}{
-			"configs": []map[string]string{
+			"configs": []map[string]interface{}{
 				{"key": "test.alter.config.key1", "value": "atomic_value1"},
 				{"key": "test.alter.config.key2", "value": "atomic_value2"},
 				{"key": "test.alter.config.key3", "value": "atomic_value3"},
@@ -83,7 +188,6 @@ func TestHandleAlterConfig(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		// Verify all configs were written atomically (etcd refresh interval is 5s, so wait longer)
 		assert.Eventually(t, func() bool {
 			_, v1, err1 := mgr.GetConfig("test.alter.config.key1")
 			_, v2, err2 := mgr.GetConfig("test.alter.config.key2")
@@ -96,7 +200,7 @@ func TestHandleAlterConfig(t *testing.T) {
 
 	t.Run("empty configs array should fail", func(t *testing.T) {
 		reqBody := map[string]interface{}{
-			"configs": []map[string]string{},
+			"configs": []map[string]interface{}{},
 		}
 		body, _ := json.Marshal(reqBody)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
@@ -110,7 +214,7 @@ func TestHandleAlterConfig(t *testing.T) {
 
 	t.Run("missing key should fail", func(t *testing.T) {
 		reqBody := map[string]interface{}{
-			"configs": []map[string]string{
+			"configs": []map[string]interface{}{
 				{"value": "value_without_key"},
 			},
 		}
@@ -124,25 +228,9 @@ func TestHandleAlterConfig(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "non-empty key")
 	})
 
-	t.Run("missing value should fail", func(t *testing.T) {
-		reqBody := map[string]interface{}{
-			"configs": []map[string]string{
-				{"key": "test.alter.config.key1"},
-			},
-		}
-		body, _ := json.Marshal(reqBody)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
-		w := httptest.NewRecorder()
-
-		coord.HandleAlterConfig(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "empty value")
-	})
-
 	t.Run("duplicate keys should fail", func(t *testing.T) {
 		reqBody := map[string]interface{}{
-			"configs": []map[string]string{
+			"configs": []map[string]interface{}{
 				{"key": "test.alter.config.key1", "value": "value1"},
 				{"key": "test.alter.config.key1", "value": "value2"},
 			},
@@ -159,7 +247,7 @@ func TestHandleAlterConfig(t *testing.T) {
 
 	t.Run("mqtype config should fail", func(t *testing.T) {
 		reqBody := map[string]interface{}{
-			"configs": []map[string]string{
+			"configs": []map[string]interface{}{
 				{"key": "mq.type", "value": "pulsar"},
 			},
 		}
@@ -176,7 +264,7 @@ func TestHandleAlterConfig(t *testing.T) {
 
 	t.Run("immutable config should fail", func(t *testing.T) {
 		reqBody := map[string]interface{}{
-			"configs": []map[string]string{
+			"configs": []map[string]interface{}{
 				{"key": "test.immutable.key1", "value": "value"},
 			},
 		}

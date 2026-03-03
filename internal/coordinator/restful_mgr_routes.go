@@ -1248,12 +1248,17 @@ func (s *mixCoordImpl) broadcastAlterWALMessage(ctx context.Context, targetWALNa
 // Immutable configurations cannot be modified through this endpoint.
 // For mqtype modifications, use the alterWAL endpoint instead.
 //
-// Request format:
+// Each config entry has a key and an optional value pointer:
+//   - value present (including empty string): set the config
+//   - value absent (null/omitted): reset the config (delete from etcd, revert to default)
 //
-//	{"configs": [{"key": "config.key1", "value": "value1"}, {"key": "config.key2", "value": "value2"}]}
+// Supported request formats:
+//
+//	Batch format: {"configs": [{"key": "k1", "value": "v1"}, {"key": "k2"}]}
+//	Legacy single format: {"key": "config.key", "value": "value"}
 func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
-		http.Error(writer, `{"msg": "Method not allowed, use POST"}`, http.StatusMethodNotAllowed)
+		writeJSONError(writer, "Method not allowed, use POST", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -1261,54 +1266,61 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 	paramMgr := paramtable.GetBaseTable().Manager()
 
 	type ConfigPair struct {
-		Key   string `json:"key"`
-		Value string `json:"value"`
+		Key   string  `json:"key"`
+		Value *string `json:"value"` // nil means reset (delete from etcd)
 	}
 
 	var requestBody struct {
+		// Batch format
 		Configs []ConfigPair `json:"configs"`
+		// Legacy single-key format (backward compatibility)
+		Key   string  `json:"key"`
+		Value *string `json:"value"`
 	}
 
 	if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
 		logger.Info("HandleAlterConfig failed to decode request body", zap.Error(err))
-		http.Error(writer, `{"msg": "Invalid request body"}`, http.StatusBadRequest)
+		writeJSONError(writer, "Invalid request body", http.StatusBadRequest)
 		return
+	}
+
+	// Backward compatibility: if "configs" is empty but "key" is set, convert legacy format.
+	if len(requestBody.Configs) == 0 && requestBody.Key != "" {
+		requestBody.Configs = []ConfigPair{{Key: requestBody.Key, Value: requestBody.Value}}
 	}
 
 	if len(requestBody.Configs) == 0 {
 		logger.Info("HandleAlterConfig no configs provided")
-		http.Error(writer, `{"msg": "configs array is required and cannot be empty"}`, http.StatusBadRequest)
+		writeJSONError(writer, "configs array is required and cannot be empty", http.StatusBadRequest)
 		return
 	}
 
-	// Convert array to map and validate
-	configsToUpdate := make(map[string]string, len(requestBody.Configs))
+	// Classify into updates and deletes, and validate.
+	seen := make(map[string]struct{}, len(requestBody.Configs))
+	configsToUpdate := make(map[string]string)
+	keysToDelete := make([]string, 0)
+
 	for _, config := range requestBody.Configs {
 		if config.Key == "" {
 			logger.Info("HandleAlterConfig config missing key")
-			http.Error(writer, `{"msg": "all configs must have a non-empty key"}`, http.StatusBadRequest)
-			return
-		}
-
-		if config.Value == "" {
-			logger.Info("HandleAlterConfig config missing value", zap.String("key", config.Key))
-			http.Error(writer, fmt.Sprintf(`{"msg": "config with key '%s' has empty value"}`, config.Key), http.StatusBadRequest)
+			writeJSONError(writer, "all configs must have a non-empty key", http.StatusBadRequest)
 			return
 		}
 
 		// Check for duplicate keys
-		if _, exists := configsToUpdate[config.Key]; exists {
+		if _, exists := seen[config.Key]; exists {
 			logger.Info("HandleAlterConfig duplicate key found", zap.String("key", config.Key))
-			http.Error(writer, fmt.Sprintf(`{"msg": "duplicate key found: %s"}`, config.Key), http.StatusBadRequest)
+			writeJSONError(writer, fmt.Sprintf("duplicate key found: %s", config.Key), http.StatusBadRequest)
 			return
 		}
+		seen[config.Key] = struct{}{}
 
 		// Check if it's mqtype configuration
 		normalizedKey := strings.ToLower(strings.ReplaceAll(config.Key, "/", "."))
 		if strings.Contains(normalizedKey, "mqtype") || strings.Contains(normalizedKey, "mq.type") {
 			logger.Info("HandleAlterConfig attempted to modify mqtype",
 				zap.String("key", config.Key))
-			http.Error(writer, fmt.Sprintf(`{"msg": "mqtype configuration cannot be modified through this endpoint. Please use the alterWAL endpoint instead. Invalid key: %s"}`, config.Key), http.StatusBadRequest)
+			writeJSONError(writer, fmt.Sprintf("mqtype configuration cannot be modified through this endpoint. Please use the alterWAL endpoint instead. Invalid key: %s", config.Key), http.StatusBadRequest)
 			return
 		}
 
@@ -1316,36 +1328,54 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		if paramMgr.IsImmutable(config.Key) {
 			logger.Info("HandleAlterConfig attempted to modify immutable config",
 				zap.String("key", config.Key))
-			http.Error(writer, fmt.Sprintf(`{"msg": "immutable configuration cannot be modified through this endpoint. Invalid key: %s"}`, config.Key), http.StatusBadRequest)
+			writeJSONError(writer, fmt.Sprintf("immutable configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
 			return
 		}
 
-		configsToUpdate[config.Key] = config.Value
+		if config.Value != nil {
+			configsToUpdate[config.Key] = *config.Value
+		} else {
+			keysToDelete = append(keysToDelete, config.Key)
+		}
 	}
 
 	// Get EtcdSource to save the configuration
 	etcdSource, ok := paramMgr.GetEtcdSource()
 	if !ok {
 		logger.Info("HandleAlterConfig failed, etcd source not enabled")
-		http.Error(writer, `{"msg": "etcd source is not enabled"}`, http.StatusInternalServerError)
+		writeJSONError(writer, "etcd source is not enabled", http.StatusInternalServerError)
 		return
 	}
 
-	// Update configuration(s) in etcd
-	// Batch update - use atomic transaction
-	if err := paramMgr.UpdateConfigsInEtcd(etcdSource, configsToUpdate); err != nil {
-		logger.Info("HandleAlterConfig failed to atomically update configs to etcd",
-			zap.Any("configs", configsToUpdate),
+	// Alter configuration(s) in etcd atomically (updates + deletes in one transaction)
+	if err := paramMgr.AlterConfigsInEtcd(etcdSource, configsToUpdate, keysToDelete); err != nil {
+		logger.Info("HandleAlterConfig failed to atomically alter configs in etcd",
+			zap.Any("updates", configsToUpdate),
+			zap.Strings("deletes", keysToDelete),
 			zap.Error(err))
-		http.Error(writer, fmt.Sprintf(`{"msg": "failed to atomically update configurations to etcd: %s"}`, err.Error()), http.StatusInternalServerError)
+		writeJSONError(writer, fmt.Sprintf("failed to atomically alter configurations in etcd: %s", err.Error()), http.StatusInternalServerError)
 		return
 	}
 
 	logger.Info("HandleAlterConfig success",
-		zap.Int("count", len(configsToUpdate)),
-		zap.Any("configs", configsToUpdate))
+		zap.Int("updates", len(configsToUpdate)),
+		zap.Int("deletes", len(keysToDelete)),
+		zap.Any("updated", configsToUpdate),
+		zap.Strings("deleted", keysToDelete))
 
-	writer.Header().Set("Content-Type", "application/json")
-	writer.WriteHeader(http.StatusOK)
-	writer.Write([]byte(`{"msg": "OK"}`))
+	writeJSONResponse(writer, http.StatusOK, map[string]string{"msg": "OK"})
+}
+
+// writeJSONError writes a JSON error response with proper escaping.
+func writeJSONError(w http.ResponseWriter, msg string, statusCode int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(map[string]string{"msg": msg})
+}
+
+// writeJSONResponse writes a JSON response with proper escaping.
+func writeJSONResponse(w http.ResponseWriter, statusCode int, resp interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(resp)
 }

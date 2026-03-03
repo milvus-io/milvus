@@ -769,7 +769,7 @@ func (m *ReplicaManager) buildSQNodeAssignmentHelpers(
 				allSQNodes.Insert(nodeID)
 			}
 		}
-		helpers[DefaultResourceGroupName] = newReplicaSQNAssignmentHelper("", replicas, allSQNodes)
+		helpers[DefaultResourceGroupName] = newReplicaSQNAssignmentHelper(DefaultResourceGroupName, replicas, allSQNodes)
 	} else {
 		// Isolation mode: each replica gets nodes only from its own resource group.
 		// Uncovered replicas (if any and isolation is enabled) simply don't get any streaming query nodes.

@@ -581,44 +581,51 @@ func (m *Manager) SaveConfigToEtcd(etcdSource *EtcdSource, key, value string) er
 // UpdateConfigInEtcd updates a configuration value in etcd.
 // Unlike SaveConfigToEtcd, this function will update the config even if it already exists.
 func (m *Manager) UpdateConfigInEtcd(etcdSource *EtcdSource, key, value string) error {
-	return m.UpdateConfigsInEtcd(etcdSource, map[string]string{key: value})
+	return m.AlterConfigsInEtcd(etcdSource, map[string]string{key: value}, nil)
 }
 
-// UpdateConfigsInEtcd atomically updates multiple configuration values in etcd.
-// This function uses etcd transaction to ensure all configs are updated atomically.
-func (m *Manager) UpdateConfigsInEtcd(etcdSource *EtcdSource, configs map[string]string) error {
+// AlterConfigsInEtcd atomically updates and/or deletes configuration values in etcd.
+// Both updates (put) and deletes are executed in a single etcd transaction.
+func (m *Manager) AlterConfigsInEtcd(etcdSource *EtcdSource, updates map[string]string, deletes []string) error {
 	if etcdSource == nil || etcdSource.etcdCli == nil {
 		return errors.New("etcd client is not available")
 	}
 
-	if len(configs) == 0 {
-		return errors.New("no configs to update")
+	if len(updates) == 0 && len(deletes) == 0 {
+		return errors.New("no configs to alter")
 	}
 
 	// Build transaction operations
-	ops := make([]clientv3.Op, 0, len(configs))
-
-	for key, value := range configs {
+	ops := make([]clientv3.Op, 0, len(updates)+len(deletes))
+	for key, value := range updates {
 		fmtKey := formatKey(key)
 		etcdKey := fmt.Sprintf("%s/config/%s", etcdSource.keyPrefix, fmtKey)
 		ops = append(ops, clientv3.OpPut(etcdKey, value))
+	}
+	for _, key := range deletes {
+		fmtKey := formatKey(key)
+		etcdKey := fmt.Sprintf("%s/config/%s", etcdSource.keyPrefix, fmtKey)
+		ops = append(ops, clientv3.OpDelete(etcdKey))
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Execute all operations in a single transaction for atomicity
 	resp, err := etcdSource.etcdCli.Txn(ctx).
 		Then(ops...).
 		Commit()
 	if err != nil {
-		return fmt.Errorf("failed to atomically update configs in etcd: %w", err)
+		return fmt.Errorf("failed to atomically alter configs in etcd: %w", err)
 	}
 
 	if !resp.Succeeded {
-		return errors.New("transaction failed to update configs in etcd")
+		return errors.New("transaction failed to alter configs in etcd")
 	}
 
-	log.Info("configs atomically updated in etcd", zap.Int("count", len(configs)), zap.Any("configs", configs))
+	log.Info("configs atomically altered in etcd",
+		zap.Int("updates", len(updates)),
+		zap.Int("deletes", len(deletes)),
+		zap.Any("updated", updates),
+		zap.Strings("deleted", deletes))
 	return nil
 }

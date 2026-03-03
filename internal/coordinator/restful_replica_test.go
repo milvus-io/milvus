@@ -37,6 +37,17 @@ import (
 func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 	paramtable.Init()
 
+	t.Run("wrong HTTP method should fail", func(t *testing.T) {
+		coord := &mixCoordImpl{}
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/replicas/compliance", nil)
+		w := httptest.NewRecorder()
+
+		coord.HandleReplicaLoadConfigCompliance(w, req)
+
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+		assert.Contains(t, w.Body.String(), "Method not allowed")
+	})
+
 	t.Run("no cluster config returns Ready", func(t *testing.T) {
 		// Set cluster config with no constraints
 		paramtable.Get().Save(Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "0")
