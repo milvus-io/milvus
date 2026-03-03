@@ -23,12 +23,17 @@ import (
 
 // RateCounter tracks the rate of bytes over a sliding time window.
 // It is safe for concurrent use.
+//
+// Note: during the startup phase (before a full window has elapsed),
+// the rate may be underestimated because the elapsed time since creation
+// is shorter than the full window but the fallback duration uses the full window.
 type RateCounter struct {
-	mu       sync.Mutex
-	window   time.Duration
-	buckets  []bucket
-	current  int
-	lastTick time.Time
+	mu        sync.Mutex
+	window    time.Duration
+	buckets   []bucket
+	current   int
+	lastTick  time.Time
+	createdAt time.Time
 }
 
 type bucket struct {
@@ -46,10 +51,11 @@ func NewRateCounter(window time.Duration) *RateCounter {
 		buckets[i].time = now
 	}
 	return &RateCounter{
-		window:   window,
-		buckets:  buckets,
-		current:  0,
-		lastTick: now,
+		window:    window,
+		buckets:   buckets,
+		current:   0,
+		lastTick:  now,
+		createdAt: now,
 	}
 }
 
@@ -91,11 +97,16 @@ func (r *RateCounter) Rate() float64 {
 	// Calculate the actual time span
 	duration := newest.Sub(oldest)
 	if duration <= 0 {
-		duration = r.window
-	}
-
-	if duration.Seconds() == 0 {
-		return 0
+		// During startup, use elapsed time since creation (capped at window)
+		// to avoid underestimating the rate.
+		elapsed := now.Sub(r.createdAt)
+		if elapsed > r.window {
+			duration = r.window
+		} else if elapsed > 0 {
+			duration = elapsed
+		} else {
+			return 0
+		}
 	}
 	return float64(totalBytes) / duration.Seconds()
 }

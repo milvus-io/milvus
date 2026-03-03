@@ -78,7 +78,7 @@ func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 		cleanup:         func() {},
 		ScannerHelper:   helper.NewScannerHelper(name),
 		metrics:         scanMetrics,
-		readRateCounter: utility.NewRateCounter(10 * time.Second), // 15 second sliding window
+		readRateCounter: utility.NewRateCounter(10 * time.Second), // 10 second sliding window
 	}
 	go s.execute()
 	return s

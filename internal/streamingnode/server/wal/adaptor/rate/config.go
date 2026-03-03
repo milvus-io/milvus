@@ -72,7 +72,6 @@ func (f *adaptiveRateLimitControllerConfigFetcher) FetchRecoveryConfig() ratelim
 			zap.Int64("incremental", newConfig.Incremental),
 			zap.Duration("increaseDelayInterval", newConfig.IncreaseInterval))
 	}
-	f.lastRecovery = newConfig
 	f.reportRecoveryConfigMetrics(newConfig)
 	return newConfig
 }

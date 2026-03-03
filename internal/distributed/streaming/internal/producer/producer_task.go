@@ -221,6 +221,8 @@ func (g *ProduceGuard) commitTxn(ctx context.Context, vchannel string, txn *mess
 
 // Cancel cancel the produce task.
 func (g *ProduceGuard) Cancel() {
-	// return the quota of reservation to the limiter as much as possible.
-	g.r.Cancel()
+	if g.r != nil {
+		// return the quota of reservation to the limiter as much as possible.
+		g.r.Cancel()
+	}
 }
