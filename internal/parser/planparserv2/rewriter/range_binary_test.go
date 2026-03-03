@@ -297,100 +297,81 @@ func TestRewrite_BinaryRange_AND_JSON_DifferentPaths(t *testing.T) {
 }
 
 // Test BinaryRangeExpr OR with 3 overlapping intervals
-// NOTE: Current implementation limitation - only merges 2 intervals at a time
-func TestRewrite_BinaryRange_OR_ThreeOverlapping_CurrentLimitation(t *testing.T) {
+func TestRewrite_BinaryRange_OR_ThreeOverlapping(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// (10 < x < 20) OR (15 < x < 25) OR (22 < x < 30)
-	// Ideally should merge to (10 < x < 30)
-	// Currently: may only partially merge due to limitation
+	// (10 < x < 20) OR (15 < x < 25) OR (22 < x < 30) → (10 < x < 30)
 	expr, err := parser.ParseExpr(helper, `(Int64Field > 10 and Int64Field < 20) or (Int64Field > 15 and Int64Field < 25) or (Int64Field > 22 and Int64Field < 30)`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-
-	// Due to current limitation, result may vary depending on tree structure
-	// This test documents the current behavior rather than ideal behavior
-	// When enhancement is implemented, this test should be updated to verify (10 < x < 30)
-
-	// For now, just verify it doesn't crash and produces valid output
-	require.NotNil(t, expr)
-	// Could be BinaryRangeExpr (if some merged) or BinaryExpr OR (if not merged)
-	// We document that 3+ intervals are NOT fully optimized yet
+	bre := expr.GetBinaryRangeExpr()
+	require.NotNil(t, bre, "3 overlapping intervals should merge to single range")
+	require.Equal(t, int64(10), bre.GetLowerValue().GetInt64Val())
+	require.Equal(t, int64(30), bre.GetUpperValue().GetInt64Val())
 }
 
 // Test BinaryRangeExpr OR with 3 fully overlapping intervals
 func TestRewrite_BinaryRange_OR_ThreeFullyOverlapping(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// (10 < x < 30) OR (12 < x < 28) OR (15 < x < 25)
-	// The second and third are fully contained in the first
-	// Ideally should merge to (10 < x < 30)
+	// (10 < x < 30) OR (12 < x < 28) OR (15 < x < 25) → (10 < x < 30)
 	expr, err := parser.ParseExpr(helper, `(Int64Field > 10 and Int64Field < 30) or (Int64Field > 12 and Int64Field < 28) or (Int64Field > 15 and Int64Field < 25)`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-
-	// Current limitation: may not fully optimize
-	// This test documents that 3+ interval merging is not yet complete
-	require.NotNil(t, expr)
+	bre := expr.GetBinaryRangeExpr()
+	require.NotNil(t, bre, "fully contained intervals should merge")
+	require.Equal(t, int64(10), bre.GetLowerValue().GetInt64Val())
+	require.Equal(t, int64(30), bre.GetUpperValue().GetInt64Val())
 }
 
 // Test BinaryRangeExpr OR with 4 adjacent intervals
-func TestRewrite_BinaryRange_OR_FourAdjacent_CurrentLimitation(t *testing.T) {
+func TestRewrite_BinaryRange_OR_FourAdjacent(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// (10 < x <= 20) OR (20 < x <= 30) OR (30 < x <= 40) OR (40 < x <= 50)
-	// Ideally should merge to (10 < x <= 50)
+	// (10 < x <= 20) OR (20 < x <= 30) OR (30 < x <= 40) OR (40 < x <= 50) → (10 < x <= 50)
 	expr, err := parser.ParseExpr(helper, `(Int64Field > 10 and Int64Field <= 20) or (Int64Field > 20 and Int64Field <= 30) or (Int64Field > 30 and Int64Field <= 40) or (Int64Field > 40 and Int64Field <= 50)`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-
-	// Current limitation: only pairs of adjacent intervals may merge
-	// Full chain merging not implemented
-	require.NotNil(t, expr)
+	bre := expr.GetBinaryRangeExpr()
+	require.NotNil(t, bre, "4 adjacent intervals should merge to single range")
+	require.Equal(t, false, bre.GetLowerInclusive())
+	require.Equal(t, true, bre.GetUpperInclusive())
+	require.Equal(t, int64(10), bre.GetLowerValue().GetInt64Val())
+	require.Equal(t, int64(50), bre.GetUpperValue().GetInt64Val())
 }
 
 // Test OR with unbounded lower + bounded interval
-// NOTE: Current implementation limitation - unbounded intervals not merged with bounded
-func TestRewrite_BinaryRange_OR_UnboundedLower_Bounded_CurrentLimitation(t *testing.T) {
+func TestRewrite_BinaryRange_OR_UnboundedLower_Bounded(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// (x > 10) OR (5 < x < 15)
-	// Ideally should merge to (x > 5)
-	// Currently: both predicates remain separate
+	// (x > 10) OR (5 < x < 15) → (x > 5)
 	expr, err := parser.ParseExpr(helper, `Int64Field > 10 or (Int64Field > 5 and Int64Field < 15)`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-
-	// Current limitation: unbounded + bounded intervals not optimized
-	// Result should be a BinaryExpr OR with both predicates
-	be := expr.GetBinaryExpr()
-	require.NotNil(t, be, "should remain as OR (not merged)")
-	require.Equal(t, planpb.BinaryExpr_LogicalOr, be.GetOp())
+	ure := expr.GetUnaryRangeExpr()
+	require.NotNil(t, ure, "should merge to single unbounded range")
+	require.Equal(t, planpb.OpType_GreaterThan, ure.GetOp())
+	require.Equal(t, int64(5), ure.GetValue().GetInt64Val())
 }
 
 // Test OR with unbounded upper + bounded interval
-func TestRewrite_BinaryRange_OR_UnboundedUpper_Bounded_CurrentLimitation(t *testing.T) {
+func TestRewrite_BinaryRange_OR_UnboundedUpper_Bounded(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// (x < 20) OR (10 < x < 30)
-	// Ideally should merge to (x < 30)
-	// Currently: both predicates remain separate
+	// (x < 20) OR (10 < x < 30) → (x < 30)
 	expr, err := parser.ParseExpr(helper, `Int64Field < 20 or (Int64Field > 10 and Int64Field < 30)`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-
-	// Current limitation: unbounded + bounded intervals not optimized
-	be := expr.GetBinaryExpr()
-	require.NotNil(t, be, "should remain as OR (not merged)")
-	require.Equal(t, planpb.BinaryExpr_LogicalOr, be.GetOp())
+	ure := expr.GetUnaryRangeExpr()
+	require.NotNil(t, ure, "should merge to single unbounded range")
+	require.Equal(t, planpb.OpType_LessThan, ure.GetOp())
+	require.Equal(t, int64(30), ure.GetValue().GetInt64Val())
 }
 
-// Test OR with unbounded lower + unbounded upper
-func TestRewrite_BinaryRange_OR_UnboundedBoth_CurrentLimitation(t *testing.T) {
+// Test OR with unbounded lower + unbounded upper (overlapping)
+func TestRewrite_BinaryRange_OR_UnboundedBoth_Overlapping(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// (x > 10) OR (x < 20)
-	// This covers most values (gap only between 10 and 20 if both exclusive)
-	// Currently: both predicates remain separate
+	// (x > 10) OR (x < 20) — overlapping range, covers everything
+	// Keep as separate predicates (tautology detection handles non-nullable case)
 	expr, err := parser.ParseExpr(helper, `Int64Field > 10 or Int64Field < 20`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-
-	// Current limitation: unbounded intervals in OR not merged
+	// Both unbounded sides remain separate since we can't express "everything" as single range
 	be := expr.GetBinaryExpr()
 	require.NotNil(t, be, "should remain as OR")
 	require.Equal(t, planpb.BinaryExpr_LogicalOr, be.GetOp())

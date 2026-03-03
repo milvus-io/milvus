@@ -275,82 +275,49 @@ func TestRewrite_Or_In_Or_NotEqual_VNotInSet_ToNotEqual(t *testing.T) {
 }
 
 // Test contradictory equals: (a == 1) AND (a == 2) → false
-// NOTE: This is a known limitation - currently NOT optimized
-func TestRewrite_And_Equal_And_Equal_Contradiction_CurrentLimitation(t *testing.T) {
+func TestRewrite_And_Equal_And_Equal_Contradiction(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// Int64Field == 1 AND Int64Field == 2 → false (contradiction)
-	// Currently NOT optimized because equals don't convert to IN in AND context
 	expr, err := parser.ParseExpr(helper, `Int64Field == 1 and Int64Field == 2`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-
-	// Current limitation: NOT optimized to false
-	// Remains as BinaryExpr AND with two equal predicates
-	be := expr.GetBinaryExpr()
-	require.NotNil(t, be, "should remain as AND (not optimized)")
-	require.Equal(t, planpb.BinaryExpr_LogicalAnd, be.GetOp())
+	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
 }
 
 // Test contradictory equals with three values
-func TestRewrite_And_Equal_ThreeWay_Contradiction_CurrentLimitation(t *testing.T) {
+func TestRewrite_And_Equal_ThreeWay_Contradiction(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// Int64Field == 1 AND Int64Field == 2 AND Int64Field == 3 → false
-	// Currently NOT optimized
 	expr, err := parser.ParseExpr(helper, `Int64Field == 1 and Int64Field == 2 and Int64Field == 3`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-
-	// Current limitation: NOT optimized to false
-	be := expr.GetBinaryExpr()
-	require.NotNil(t, be, "should remain as AND chain (not optimized)")
-	require.Equal(t, planpb.BinaryExpr_LogicalAnd, be.GetOp())
+	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
 }
 
 // Test range + contradictory equal: (a > 10) AND (a == 5) → false
-// NOTE: Current limitation - NOT optimized
-func TestRewrite_And_Range_And_Equal_Contradiction_CurrentLimitation(t *testing.T) {
+func TestRewrite_And_Range_And_Equal_Contradiction(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// Int64Field > 10 AND Int64Field == 5 → false (5 is not > 10)
-	// This requires combining range and equality checks, which is partially implemented
 	expr, err := parser.ParseExpr(helper, `Int64Field > 10 and Int64Field == 5`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-
-	// Current behavior: may not optimize to false
-	// If it does optimize via IN+range filtering, it would become false
-	// This test documents current limitation
-	// When fully optimized, should be constant false
-	_ = expr // Test documents that this case exists
+	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
 }
 
-// Test non-contradictory range + equal: (a > 10) AND (a == 15) → stays as is
-// NOTE: This requires Equal to be in IN form first, which happens via combineAndInWithEqual
-// But Equal alone doesn't convert to IN in AND context, so this optimization doesn't happen
-func TestRewrite_And_Range_And_Equal_NonContradiction_CurrentLimitation(t *testing.T) {
+// Test non-contradictory range + equal: (a > 10) AND (a == 15) → a == 15
+func TestRewrite_And_Range_And_Equal_NonContradiction(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// Int64Field > 10 AND Int64Field == 15 → should simplify to Int64Field == 15
-	// But currently NOT optimized without IN involved
 	expr, err := parser.ParseExpr(helper, `Int64Field > 10 and Int64Field == 15`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-
-	// Current limitation: remains as AND with range and equal
-	be := expr.GetBinaryExpr()
-	require.NotNil(t, be, "should remain as AND (not optimized)")
-	require.Equal(t, planpb.BinaryExpr_LogicalAnd, be.GetOp())
+	ure := expr.GetUnaryRangeExpr()
+	require.NotNil(t, ure, "should simplify to equality")
+	require.Equal(t, planpb.OpType_Equal, ure.GetOp())
+	require.Equal(t, int64(15), ure.GetValue().GetInt64Val())
 }
 
-// Test string contradictory equals - current limitation
-func TestRewrite_And_Equal_String_Contradiction_CurrentLimitation(t *testing.T) {
+// Test string contradictory equals
+func TestRewrite_And_Equal_String_Contradiction(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// VarCharField == "apple" AND VarCharField == "banana" → false
-	// Currently NOT optimized
 	expr, err := parser.ParseExpr(helper, `VarCharField == "apple" and VarCharField == "banana"`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-
-	// Current limitation: NOT optimized to false
-	be := expr.GetBinaryExpr()
-	require.NotNil(t, be, "should remain as AND (not optimized)")
-	require.Equal(t, planpb.BinaryExpr_LogicalAnd, be.GetOp())
+	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
 }
