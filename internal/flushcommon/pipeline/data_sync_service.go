@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -149,6 +150,12 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 	segmentPks := typeutil.NewConcurrentMap[int64, pkoracle.PkStat]()
 	segmentBm25 := typeutil.NewConcurrentMap[int64, map[int64]*storage.BM25Stats]()
 
+	pkField, err := typeutil.GetPrimaryFieldSchema(info.GetSchema())
+	if err != nil {
+		return nil, err
+	}
+	pkFieldID := pkField.GetFieldID()
+
 	loadSegmentStats := func(segType string, segments []*datapb.SegmentInfo) {
 		for _, item := range segments {
 			log.Info("recover segments from checkpoints",
@@ -159,9 +166,12 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 			)
 			segment := item
 			future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
-				var stats []*storage.PkStatistics
-				var err error
-				stats, err = compaction.LoadStats(initCtx, chunkManager, info.GetSchema(), segment.GetID(), segment.GetStatslogs())
+				resolver := packed.NewStatsResolverFromSegmentInfo(segment)
+				bfPaths, err := resolver.BloomFilterPaths(pkFieldID)
+				if err != nil {
+					return nil, err
+				}
+				stats, err := compaction.LoadStatsFromPaths(initCtx, chunkManager, segment.GetID(), bfPaths)
 				if err != nil {
 					return nil, err
 				}
@@ -170,12 +180,18 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 					tickler.Inc()
 				}
 
-				if segType == "growing" && len(segment.GetBm25Statslogs()) > 0 {
-					bm25stats, err := compaction.LoadBM25Stats(initCtx, chunkManager, segment.GetID(), segment.GetBm25Statslogs())
+				if segType == "growing" {
+					bm25Paths, err := resolver.BM25StatsPaths()
 					if err != nil {
 						return nil, err
 					}
-					segmentBm25.Insert(segment.GetID(), bm25stats)
+					if len(bm25Paths) > 0 {
+						bm25stats, err := compaction.LoadBM25StatsFromPaths(initCtx, chunkManager, segment.GetID(), bm25Paths)
+						if err != nil {
+							return nil, err
+						}
+						segmentBm25.Insert(segment.GetID(), bm25stats)
+					}
 				}
 
 				return struct{}{}, nil
