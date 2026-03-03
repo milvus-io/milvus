@@ -153,13 +153,13 @@ func GetDeltaLogPathsFromManifest(
 		return nil, nil
 	}
 
-	// Convert C array of relative paths to Go slice of absolute paths
+	// The C loon library resolves relative paths to absolute via ToAbsolute
+	// (prepending basePath/_delta/ and normalizing). The returned paths are
+	// already absolute and can be used directly.
 	cPaths := unsafe.Slice(cManifest.delta_logs.delta_log_paths, numDeltaLogs)
 	paths := make([]string, 0, numDeltaLogs)
 	for _, cPath := range cPaths {
-		relativePath := C.GoString(cPath)
-		absolutePath := filepath.Clean(filepath.Join(basePath, relativePath))
-		paths = append(paths, absolutePath)
+		paths = append(paths, C.GoString(cPath))
 	}
 
 	log.Debug("GetDeltaLogPathsFromManifest",
