@@ -10,6 +10,7 @@ import "milvus.proto";
 import "schema.proto";
 import "msg.proto";
 import "index_coord.proto";
+import "view.proto";
 
 // TODO: import google/protobuf/empty.proto
 message Empty {}
@@ -447,6 +448,10 @@ message SegmentInfo {
   // at the 20%, 40%, 60%, 80%, and 100% data distribution levels
   repeated int64 expirQuantiles = 33;
   int32 schema_version = 34;
+
+  // The data view version when this segment joined the data view (via flush or compaction).
+  // Immutable once assigned. Used by streaming nodes to determine growing segment query behavior.
+  view.DataVersion data_version = 35;
 }
 
 message SegmentStartPosition {
