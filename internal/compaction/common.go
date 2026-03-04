@@ -114,9 +114,9 @@ func readDeltalogsV2(
 	reader, err := storage.NewDeltalogReaderFromManifest(pkType, manifestPath, option...)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
+			log.Info("new detalog reader returns EOF, no deltalog found")
 			return []storage.PrimaryKey{}, []typeutil.Timestamp{}, nil
 		}
-		log.Info("new detalog reader returns EOF, no deltalog found")
 		return nil, nil, err
 	}
 	defer reader.Close()
