@@ -139,13 +139,12 @@ func TestDefaultValueDefault(t *testing.T) {
 	count, _ := countRes.Fields[0].GetAsInt64(0)
 	require.EqualValues(t, 0, count)
 
-	// insert data with validData (half valid, half use default values), use different PK range to avoid overlap
+	// insert data with validData (half valid, half use default values)
 	validData := make([]bool, common.DefaultNb)
 	for i := 0; i < common.DefaultNb; i++ {
 		validData[i] = i%2 == 0
 	}
-	columnOpt := hp.TNewColumnOptions().
-		WithColumnOption(common.DefaultInt64FieldName, hp.TNewDataOption().TWithStart(common.DefaultNb))
+	columnOpt := hp.TNewColumnOptions()
 	for _, name := range []string{
 		defaultBoolField.Name, defaultInt8Field.Name, defaultInt16Field.Name, defaultInt32Field.Name,
 		defaultInt64Field.Name, defaultFloatField.Name, defaultDoubleField.Name, defaultVarCharField.Name,
@@ -159,7 +158,7 @@ func TestDefaultValueDefault(t *testing.T) {
 		expr  string
 		count int64
 	}
-	// Expected counts with 6000 total rows (2 inserts x 3000, different PKs):
+	// Expected counts with 6000 total rows (2 inserts x 3000, same PKs but count(*) doesn't dedup):
 	// - First insert: full generated data (3000 rows, no defaults)
 	// - Second insert: 1500 valid (generated) + 1500 invalid (filled with default values)
 	// For int8: default=-1 also appears in generated data due to int8 wrapping (int8(255)==-1, etc.)
