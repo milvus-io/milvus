@@ -1,13 +1,13 @@
 #include "TimestamptzArithCompareExpr.h"
 
+#include <climits>
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <memory>
 #include <variant>
 
 #include "BinaryArithOpEvalRangeExpr.h"
-#include "absl/time/civil_time.h"
-#include "absl/time/time.h"
 #include "bitset/bitset.h"
 #include "common/EasyAssert.h"
 #include "common/Types.h"
@@ -103,43 +103,95 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             TargetBitmapView valid_res,
             T compare_value,
             proto::plan::Interval interval) {
-        absl::TimeZone utc = absl::UTCTimeZone();
-        absl::Time compare_t = absl::FromUnixMicros(compare_value);
+        const int64_t compare_us = compare_value;
         for (int i = 0; i < size; ++i) {
             auto offset = (offsets) ? offsets[i] : i;
             const int64_t current_ts_us = data[i];
             const int op_sign =
                 (arith_op == proto::plan::ArithOpType::Add) ? 1 : -1;
-            absl::Time t = absl::FromUnixMicros(current_ts_us);
-            // CivilSecond can handle calendar time for us
-            absl::CivilSecond cs = absl::ToCivilSecond(t, utc);
-            absl::CivilSecond new_cs(
-                cs.year() + (interval.years() * op_sign),
-                cs.month() + (interval.months() * op_sign),
-                cs.day() + (interval.days() * op_sign),
-                cs.hour() + (interval.hours() * op_sign),
-                cs.minute() + (interval.minutes() * op_sign),
-                cs.second() + (interval.seconds() * op_sign));
-            absl::Time final_time = absl::FromCivil(new_cs, utc);
+            // Floor division to correctly handle pre-epoch (negative) timestamps:
+            // C++ truncates toward zero, but we need floor for time decomposition.
+            // e.g., -1500000 us should be epoch_sec=-2, sub_sec_us=500000
+            //        not epoch_sec=-1, sub_sec_us=-500000
+            // Uses div-then-adjust pattern to avoid signed overflow near INT64_MIN.
+            std::time_t epoch_sec =
+                current_ts_us / 1000000 - (current_ts_us % 1000000 < 0 ? 1 : 0);
+            int64_t sub_sec_us = current_ts_us - epoch_sec * 1000000;
+            struct std::tm tm_buf;
+            if (::gmtime_r(&epoch_sec, &tm_buf) == nullptr) {
+                ThrowInfo(OpTypeInvalid,
+                          "gmtime_r failed for timestamp {} us",
+                          current_ts_us);
+            }
+            // Apply interval fields using int64_t intermediate arithmetic
+            // to avoid int overflow UB, then validate range before assigning
+            // back to struct tm (which uses int fields).
+            auto safe_add = [](int base, int64_t delta) -> int {
+                int64_t result = static_cast<int64_t>(base) + delta;
+                AssertInfo(result >= INT_MIN && result <= INT_MAX,
+                           "timestamp interval arithmetic overflow: "
+                           "{} + {} = {}",
+                           base,
+                           delta,
+                           result);
+                return static_cast<int>(result);
+            };
+            // Cast to int64_t before multiplying to avoid int * int overflow
+            // (e.g. interval.years() == INT32_MIN, op_sign == -1).
+            tm_buf.tm_year =
+                safe_add(tm_buf.tm_year,
+                         static_cast<int64_t>(interval.years()) * op_sign);
+            tm_buf.tm_mon =
+                safe_add(tm_buf.tm_mon,
+                         static_cast<int64_t>(interval.months()) * op_sign);
+            tm_buf.tm_mday =
+                safe_add(tm_buf.tm_mday,
+                         static_cast<int64_t>(interval.days()) * op_sign);
+            tm_buf.tm_hour =
+                safe_add(tm_buf.tm_hour,
+                         static_cast<int64_t>(interval.hours()) * op_sign);
+            tm_buf.tm_min =
+                safe_add(tm_buf.tm_min,
+                         static_cast<int64_t>(interval.minutes()) * op_sign);
+            tm_buf.tm_sec =
+                safe_add(tm_buf.tm_sec,
+                         static_cast<int64_t>(interval.seconds()) * op_sign);
+            // timegm normalizes the tm fields and converts back to epoch.
+            // It succeeds for all normalized inputs from gmtime_r + safe_add.
+            // No -1 check: -1 is a valid epoch second (1969-12-31T23:59:59Z)
+            // and is reachable via legal interval arithmetic (e.g., epoch 0 - 1s).
+            std::time_t new_epoch_sec = ::timegm(&tm_buf);
+            // Guard against overflow in epoch_sec * 1000000.
+            // INT64_MAX / 1000000 ≈ ±9.2e12 sec ≈ ±292,271 years from epoch.
+            constexpr int64_t kMaxSec = (INT64_MAX - 999999) / 1000000;
+            constexpr int64_t kMinSec = (INT64_MIN + 999999) / 1000000;
+            AssertInfo(
+                new_epoch_sec >= kMinSec && new_epoch_sec <= kMaxSec,
+                "timestamp after interval arithmetic out of representable "
+                "range: {} seconds from epoch",
+                static_cast<int64_t>(new_epoch_sec));
+            // Restore sub-second microseconds from the original timestamp
+            int64_t final_us =
+                static_cast<int64_t>(new_epoch_sec) * 1000000 + sub_sec_us;
             bool match = false;
             switch (compare_op) {
                 case proto::plan::OpType::Equal:
-                    match = (final_time == compare_t);
+                    match = (final_us == compare_us);
                     break;
                 case proto::plan::OpType::NotEqual:
-                    match = (final_time != compare_t);
+                    match = (final_us != compare_us);
                     break;
                 case proto::plan::OpType::GreaterThan:
-                    match = (final_time > compare_t);
+                    match = (final_us > compare_us);
                     break;
                 case proto::plan::OpType::GreaterEqual:
-                    match = (final_time >= compare_t);
+                    match = (final_us >= compare_us);
                     break;
                 case proto::plan::OpType::LessThan:
-                    match = (final_time < compare_t);
+                    match = (final_us < compare_us);
                     break;
                 case proto::plan::OpType::LessEqual:
-                    match = (final_time <= compare_t);
+                    match = (final_us <= compare_us);
                     break;
                 default:  // Should not happen
                     ThrowInfo(OpTypeInvalid,

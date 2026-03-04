@@ -538,7 +538,7 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 	for _, task := range scanTasks {
 		gc.recycleUnusedBinLogWithChecker(ctx, task.prefix, task.label, task.checker)
 	}
-	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
+	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
 }
 
 // recycleUnusedBinLogWithChecker scans the prefix and checks the path with checker.
@@ -640,7 +640,7 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 		zap.Error(err))
 
 	metrics.GarbageCollectorFileScanDuration.
-		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), label).
+		WithLabelValues(paramtable.GetStringNodeID(), label).
 		Observe(float64(cost.Milliseconds()))
 }
 
@@ -1331,7 +1331,7 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context, sig
 	}
 	log.Info("text index files recycle done")
 
-	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
+	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
 }
 
 // recycleUnusedJSONStatsFiles load meta file info and compares OSS keys
@@ -1439,7 +1439,7 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 		zap.Int("deleteJSONStatsNum", int(deletedFilesNum.Load())),
 		zap.Int("walkFileNum", fileNum))
 
-	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
+	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
 }
 
 // recycleUnusedJSONIndexFiles load meta file info and compares OSS keys
@@ -1526,7 +1526,7 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 	}
 	log.Info("json index files recycle done", zap.Int("deleteJSONKeyIndexNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
 
-	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
+	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
 }
 
 // recyclePendingSnapshots cleans up orphaned snapshot files from failed 2PC commits.
@@ -1684,5 +1684,5 @@ func (gc *garbageCollector) recyclePendingSnapshots(ctx context.Context, signal 
 			zap.Int("cleanedCount", deletingCleanedCount))
 	}
 
-	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
+	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
 }

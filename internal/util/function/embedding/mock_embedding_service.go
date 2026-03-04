@@ -238,6 +238,33 @@ func CreateTEIEmbeddingServer(dim int) *httptest.Server {
 	return ts
 }
 
+func CreateYCEmbeddingServer() *httptest.Server {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req YCEmbeddingRequest
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		_ = json.Unmarshal(body, &req)
+
+		if req.Text != "" {
+			req.Texts = []string{req.Text}
+		}
+		embs := mockEmbedding[float32](req.Texts, 4)
+
+		res := YCEmbeddingResponse{
+			Embeddings: embs,
+		}
+		if len(embs) == 1 {
+			res.Embedding = embs[0]
+			res.Embeddings = nil
+		}
+
+		w.WriteHeader(http.StatusOK)
+		data, _ := json.Marshal(res)
+		w.Write(data)
+	}))
+	return ts
+}
+
 type MockBedrockClient struct {
 	dim int
 }

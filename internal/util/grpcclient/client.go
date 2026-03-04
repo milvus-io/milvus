@@ -428,10 +428,14 @@ func (c *ClientBase[T]) checkGrpcErr(ctx context.Context, err error) (needRetry,
 		// so if new interface appear in new coord, will got a unimplemented error
 		return false, true, true, merr.WrapErrServiceUnimplemented(err)
 	case IsServerIDMismatchErr(err):
-		if ok := c.checkNodeSessionExist(ctx); !ok {
-			// if session doesn't exist, no need to retry for datanode/indexnode/querynode/proxy
-			return false, false, false, err
+		if c.isNode {
+			// Node connections: fast-fail to let shard client handle failover.
+			// Retrying is futile because NodeID (injected via interceptor at
+			// connection time) won't change during retry.
+			return false, true, true, err
 		}
+		// Coord connections: retry with force reset (only one coord instance,
+		// getAddrFunc may return new address after reset).
 		return true, true, true, err
 	case IsCrossClusterRoutingErr(err):
 		return true, true, true, err

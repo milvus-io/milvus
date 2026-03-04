@@ -291,7 +291,7 @@ func (suite *ReaderSuite) createMockChunk(schema *schemapb.CollectionSchema, ins
 		if len(suite.deletePKs) != 0 {
 			for _, path := range deltaLogs {
 				buf := createDeltaBuf(suite.T(), suite.deletePKs, suite.deleteTss)
-				cm.EXPECT().Read(mock.Anything, path).Return(buf, nil)
+				cm.EXPECT().MultiRead(mock.Anything, []string{path}).Return([][]byte{buf}, nil)
 			}
 		}
 	}
@@ -518,6 +518,18 @@ func (suite *ReaderSuite) TestStringPK() {
 }
 
 func (suite *ReaderSuite) TestVector() {
+	suite.pkDataType = schemapb.DataType_Int64
+	suite.tsStart = 2
+	suite.tsEnd = 8
+	suite.deletePKs = []storage.PrimaryKey{
+		storage.NewInt64PrimaryKey(1),
+		storage.NewInt64PrimaryKey(4),
+		storage.NewInt64PrimaryKey(6),
+		storage.NewInt64PrimaryKey(8),
+	}
+	suite.deleteTss = []int64{
+		8, 8, 1, 8,
+	}
 	suite.vecDataType = schemapb.DataType_BinaryVector
 	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
 	suite.vecDataType = schemapb.DataType_FloatVector

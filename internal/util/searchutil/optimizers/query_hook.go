@@ -59,7 +59,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 	case *planpb.PlanNode_VectorAnns:
 		// use shardNum * segments num in shard to estimate total segment number
 		estSegmentNum := numSegments * int(channelNum)
-		metrics.QueryNodeSearchHitSegmentNum.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(collectionId), metrics.SearchLabel).Observe(float64(estSegmentNum))
+		metrics.QueryNodeSearchHitSegmentNum.WithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(collectionId), metrics.SearchLabel).Observe(float64(estSegmentNum))
 
 		withFilter := (plan.GetVectorAnns().GetPredicates() != nil)
 		queryInfo := plan.GetVectorAnns().GetQueryInfo()

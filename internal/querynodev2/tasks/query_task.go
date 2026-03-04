@@ -2,7 +2,6 @@ package tasks
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"time"
 
@@ -117,6 +116,7 @@ func (t *QueryTask) Execute() error {
 		t.req.Req.Base.GetMsgID(),
 		t.req.Req.GetConsistencyLevel(),
 		t.req.Req.GetCollectionTtlTimestamps(),
+		t.req.Req.GetEntityTtlPhysicalTime(),
 	)
 	if err != nil {
 		return err
@@ -145,7 +145,7 @@ func (t *QueryTask) Execute() error {
 	reducedResult, err := reducer.Reduce(t.ctx, reduceResults, querySegments, retrievePlan)
 
 	metrics.QueryNodeReduceLatency.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
+		paramtable.GetStringNodeID(),
 		metrics.QueryLabel,
 		metrics.ReduceSegments,
 		metrics.BatchReduce).Observe(float64(time.Since(beforeReduce).Milliseconds()))

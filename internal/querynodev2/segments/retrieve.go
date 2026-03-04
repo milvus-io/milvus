@@ -18,7 +18,6 @@ package segments
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"go.uber.org/zap"
@@ -85,7 +84,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 			result,
 			s,
 		}
-		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryNodeSQSegmentLatency.WithLabelValues(paramtable.GetStringNodeID(),
 			metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil
 	}
@@ -148,7 +147,7 @@ func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []
 			}
 
 			errs[i] = nil
-			metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			metrics.QueryNodeSQSegmentLatency.WithLabelValues(paramtable.GetStringNodeID(),
 				metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		}(segment, i)
 	}

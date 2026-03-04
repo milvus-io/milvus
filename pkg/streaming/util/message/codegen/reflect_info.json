@@ -504,6 +504,16 @@
                 "MessageType": "MessageTypeBatchUpdateManifest",
                 "Version": 2
             }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.RefreshExternalCollectionMessageHeader",
+                "BodyType": "messagespb.RefreshExternalCollectionMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeRefreshExternalCollection",
+                "Version": 2
+            }
         }
     ]
 }

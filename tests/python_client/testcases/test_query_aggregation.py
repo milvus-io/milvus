@@ -56,6 +56,8 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         self.c7_field_name = "c7_int8"
         self.c8_field_name = "c8_int64"
         self.c9_field_name = "c9_float"
+        self.c10_field_name = "c10_nullable_varchar"
+        self.c11_field_name = "c11_nullable_int16"
         self.datas = []
 
     @pytest.fixture(scope="class", autouse=True)
@@ -75,20 +77,19 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         - c7_int8: Int8 (non-nullable, grouping field, 5 unique values)
         - c8_int64: Int64 (non-nullable, grouping field, 5 unique values)
         - c9_float: Float (nullable, aggregation field - tests aggregations with NULL)
+        - c10_nullable_varchar: VarChar (nullable, grouping field, 7 unique values + ~15% NULL)
+        - c11_nullable_int16: Int16 (nullable, grouping field, 5 unique values + ~15% NULL)
 
         Note: Nullable fields (c2, c4, c9_float) contain ~10-15% NULL values to test
               that aggregation functions correctly ignore NULL values.
-
-        IMPORTANT: GROUP BY fields (c1, c6, c7_int8, c8_int64) are non-nullable
-                   because nullable GROUP BY fields have a bug (issue #47350) where
-                   Milvus returns NULL for all group values instead of actual values.
+              Nullable GROUP BY fields (c10, c11) test fix for issue #47350 (PR #47445).
         """
         client = self._client()
 
-        # Create schema with nullable aggregation fields (but non-nullable GROUP BY fields due to bug #47350)
+        # Create schema with nullable aggregation fields (GROUP BY fields are non-nullable in this shared collection)
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(self.pk_field_name, DataType.VARCHAR, is_primary=True, max_length=100)
-        # GROUP BY fields - all non-nullable (nullable GROUP BY has bug #47350)
+        # GROUP BY fields - all non-nullable in this shared collection
         schema.add_field(self.c1_field_name, DataType.VARCHAR, max_length=100)
         schema.add_field(self.c6_field_name, DataType.VARCHAR, max_length=100)
         schema.add_field(self.c7_field_name, DataType.INT8)
@@ -98,6 +99,9 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         schema.add_field(self.c3_field_name, DataType.INT32)
         schema.add_field(self.c4_field_name, DataType.DOUBLE, nullable=True)
         schema.add_field(self.c9_field_name, DataType.FLOAT, nullable=True)
+        # Nullable GROUP BY fields - tests fix for issue #47350
+        schema.add_field(self.c10_field_name, DataType.VARCHAR, max_length=100, nullable=True)
+        schema.add_field(self.c11_field_name, DataType.INT16, nullable=True)
         # Other fields - non-nullable
         schema.add_field(self.ts_field_name, DataType.INT64)
         schema.add_field(self.vector_field_name, DataType.FLOAT_VECTOR, dim=8)
@@ -111,6 +115,8 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         unique_values_c7 = [1, 2, 3, 4, 5]  # INT8 grouping values
         unique_values_c8 = [100, 200, 300, 400, 500]  # INT64 grouping values
         unique_values_c9 = [1.0, 2.0, 3.0, 4.0, 5.0]  # FLOAT aggregation values
+        unique_values_c10 = ["P", "Q", "R", "S", "T_v", "U_v", "V_v"]  # Nullable VARCHAR grouping values
+        unique_values_c11 = [10, 20, 30, 40, 50]  # Nullable INT16 grouping values
 
         np.random.seed(19530)
         rows = []
@@ -121,7 +127,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
 
             row = {
                 self.pk_field_name: f"pk_{i}",
-                # GROUP BY fields - all non-nullable (due to bug #47350)
+                # GROUP BY fields - all non-nullable in this shared collection
                 self.c1_field_name: np.random.choice(unique_values_c1),
                 self.c6_field_name: np.random.choice(unique_values_c6),
                 self.c7_field_name: int(np.random.choice(unique_values_c7)),
@@ -130,6 +136,9 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
                 self.c2_field_name: maybe_null(int(np.random.randint(0, 100, dtype=np.int16))),
                 self.c4_field_name: maybe_null(float(np.random.uniform(0, 100))),
                 self.c9_field_name: maybe_null(float(np.random.choice(unique_values_c9))),
+                # Nullable GROUP BY fields (~15% NULL) - tests fix for #47350
+                self.c10_field_name: maybe_null(np.random.choice(unique_values_c10)),
+                self.c11_field_name: maybe_null(int(np.random.choice(unique_values_c11))),
                 # Other non-nullable fields
                 self.c3_field_name: int(np.random.randint(0, 1000, dtype=np.int32)),
                 self.ts_field_name: int(np.random.randint(1000000, 2000000, dtype=np.int64)),
@@ -1187,6 +1196,197 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         )
 
         log.info("test_unsupported_double_type_for_groupby passed")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_group_by_nullable_varchar_field(self):
+        """
+        target: test GROUP BY on nullable VARCHAR field returns actual group values (not all NULLs)
+        method: query with GROUP BY on c10_nullable_varchar (nullable, ~15% NULL)
+        expected: 1. non-NULL groups return actual VARCHAR values
+                  2. NULL group returns None
+                  3. aggregation values match pandas ground truth
+        verified fix for: issue #47350, PR #47445
+        """
+        client = self._client()
+
+        results, _ = self.query(
+            client, self.collection_name,
+            filter="", limit=100,
+            group_by_fields=[self.c10_field_name],
+            output_fields=[self.c10_field_name, "count(c3)", "sum(c3)"]
+        )
+
+        group_values = [r[self.c10_field_name] for r in results]
+        non_null_groups = sorted([v for v in group_values if v is not None])
+        null_groups = [v for v in group_values if v is None]
+
+        # Core assertion: non-NULL groups must return actual values (not all NULLs)
+        expected_groups = sorted(["P", "Q", "R", "S", "T_v", "U_v", "V_v"])
+        assert non_null_groups == expected_groups, \
+            f"Expected groups {expected_groups}, got {non_null_groups}. Bug #47350 may not be fixed!"
+        assert len(null_groups) == 1, f"Expected exactly 1 NULL group, got {len(null_groups)}"
+
+        # Verify aggregation values against pandas ground truth
+        ground_truth = self.datas.groupby(self.c10_field_name).agg(
+            count_c3=(self.c3_field_name, "count"),
+            sum_c3=(self.c3_field_name, "sum")
+        ).reset_index()
+
+        for result in results:
+            if result[self.c10_field_name] is None:
+                continue
+            expected = ground_truth[ground_truth[self.c10_field_name] == result[self.c10_field_name]].iloc[0]
+            assert result["count(c3)"] == expected["count_c3"], \
+                f"COUNT mismatch for {self.c10_field_name}={result[self.c10_field_name]}"
+            assert result["sum(c3)"] == expected["sum_c3"], \
+                f"SUM mismatch for {self.c10_field_name}={result[self.c10_field_name]}"
+
+        log.info("test_group_by_nullable_varchar_field passed")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_group_by_nullable_int16_field(self):
+        """
+        target: test GROUP BY on nullable INT16 field returns actual group values
+        method: query with GROUP BY on c11_nullable_int16 (nullable, ~15% NULL)
+        expected: 1. non-NULL groups return actual INT16 values
+                  2. NULL group returns None
+                  3. aggregation values match pandas ground truth
+        verified fix for: issue #47350, PR #47445
+        """
+        client = self._client()
+
+        results, _ = self.query(
+            client, self.collection_name,
+            filter="", limit=100,
+            group_by_fields=[self.c11_field_name],
+            output_fields=[self.c11_field_name, "count(c3)", "sum(c3)"]
+        )
+
+        group_values = [r[self.c11_field_name] for r in results]
+        non_null_groups = sorted([v for v in group_values if v is not None])
+        null_groups = [v for v in group_values if v is None]
+
+        expected_groups = sorted([10, 20, 30, 40, 50])
+        assert non_null_groups == expected_groups, \
+            f"Expected INT16 groups {expected_groups}, got {non_null_groups}. Bug #47350 may not be fixed!"
+        assert len(null_groups) == 1, f"Expected 1 NULL group, got {len(null_groups)}"
+
+        # Verify aggregation against pandas
+        ground_truth = self.datas.groupby(self.c11_field_name).agg(
+            count_c3=(self.c3_field_name, "count"),
+            sum_c3=(self.c3_field_name, "sum")
+        ).reset_index()
+
+        for result in results:
+            if result[self.c11_field_name] is None:
+                continue
+            expected = ground_truth[ground_truth[self.c11_field_name] == result[self.c11_field_name]].iloc[0]
+            assert result["count(c3)"] == expected["count_c3"], \
+                f"COUNT mismatch for {self.c11_field_name}={result[self.c11_field_name]}"
+            assert result["sum(c3)"] == expected["sum_c3"], \
+                f"SUM mismatch for {self.c11_field_name}={result[self.c11_field_name]}"
+
+        log.info("test_group_by_nullable_int16_field passed")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_multi_column_group_by_with_nullable_field(self):
+        """
+        target: test multi-column GROUP BY where one column is nullable
+        method: GROUP BY [c1 (non-nullable VARCHAR), c10_nullable_varchar (nullable VARCHAR)]
+        expected: 1. non-nullable column always has actual values
+                  2. nullable column returns actual values for non-NULL groups and None for NULL group
+                  3. aggregation values correct
+        verified fix for: issue #47350, PR #47445
+        """
+        client = self._client()
+
+        results, _ = self.query(
+            client, self.collection_name,
+            filter="", limit=100,
+            group_by_fields=[self.c1_field_name, self.c10_field_name],
+            output_fields=[self.c1_field_name, self.c10_field_name, "count(c3)", "sum(c3)"]
+        )
+
+        assert len(results) > 0, "Expected at least 1 group"
+
+        expected_c1_values = {"A", "B", "C", "D", "E", "F", "G"}
+        expected_c10_values = {"P", "Q", "R", "S", "T_v", "U_v", "V_v"}
+
+        # Verify non-nullable column always has actual values
+        for r in results:
+            assert r[self.c1_field_name] in expected_c1_values, \
+                f"Non-nullable GROUP BY field '{self.c1_field_name}' has unexpected value: {r[self.c1_field_name]}"
+
+        # Verify nullable column has actual values for non-NULL groups
+        c10_values = [r[self.c10_field_name] for r in results]
+        non_null_c10 = set(v for v in c10_values if v is not None)
+        has_null_c10 = None in c10_values
+
+        assert non_null_c10 == expected_c10_values, \
+            f"Expected c10 values {expected_c10_values}, got {non_null_c10}"
+        assert has_null_c10, "Expected at least one NULL group for nullable c10 since ~15% of data is NULL"
+
+        # Verify aggregation against pandas (for non-null c10 groups only)
+        non_null_df = self.datas[self.datas[self.c10_field_name].notna()]
+        ground_truth = non_null_df.groupby([self.c1_field_name, self.c10_field_name]).agg(
+            count_c3=(self.c3_field_name, "count"),
+            sum_c3=(self.c3_field_name, "sum")
+        ).reset_index()
+
+        for result in results:
+            if result[self.c10_field_name] is None:
+                continue
+            mask = (ground_truth[self.c1_field_name] == result[self.c1_field_name]) & \
+                   (ground_truth[self.c10_field_name] == result[self.c10_field_name])
+            if mask.sum() == 0:
+                continue
+            expected = ground_truth[mask].iloc[0]
+            assert result["count(c3)"] == expected["count_c3"], \
+                f"COUNT mismatch for c1={result[self.c1_field_name]}, c10={result[self.c10_field_name]}"
+            assert result["sum(c3)"] == expected["sum_c3"], \
+                f"SUM mismatch for c1={result[self.c1_field_name]}, c10={result[self.c10_field_name]}"
+
+        log.info("test_multi_column_group_by_with_nullable_field passed")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_group_by_nullable_field(self):
+        """
+        target: test search with GROUP BY on nullable field returns actual group values
+        method: search with group_by_field=c10_nullable_varchar on the shared collection
+        expected: 1. search results have actual group values (not all NULLs)
+                  2. each group appears at most once
+        verified fix for: issue #47350, PR #47445
+        """
+        client = self._client()
+
+        search_vec = [[float(x) for x in np.random.random(8)]]
+        search_res = self.search(
+            client, self.collection_name,
+            data=search_vec, limit=20,
+            group_by_field=self.c10_field_name,
+            output_fields=[self.c10_field_name],
+            search_params={"metric_type": "L2"}
+        )[0]
+
+        # search_res is SearchResult; search_res[0] is Hits for nq=0
+        hits = search_res[0]
+        group_values = [hit.fields.get(self.c10_field_name) for hit in hits]
+        non_null_groups = [v for v in group_values if v is not None]
+
+        # Core assertion: search GROUP BY returns actual values
+        assert len(non_null_groups) > 0, \
+            "All search GROUP BY values are NULL - bug #47350 may not be fixed!"
+
+        # Verify actual group values are from expected set
+        expected_groups = {"P", "Q", "R", "S", "T_v", "U_v", "V_v"}
+        for v in non_null_groups:
+            assert v in expected_groups, f"Unexpected group value: {v}"
+
+        # Verify group uniqueness (each group appears at most once)
+        assert len(group_values) == len(set(str(v) for v in group_values)), \
+            f"Duplicate group values in search results: {group_values}"
+
+        log.info("test_search_group_by_nullable_field passed")
 
 
 @pytest.mark.xdist_group("TestQueryAggregationIndependentV2")

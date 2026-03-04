@@ -232,12 +232,12 @@ func (e *executor) executeTask(task Compactor) {
 		deleteCount += getDataCount(seg.GetDeltalogs())
 	})
 	metrics.DataNodeWriteDataCount.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
+		paramtable.GetStringNodeID(),
 		metrics.CompactionDataSourceLabel,
 		metrics.InsertLabel,
 		fmt.Sprint(task.GetCollection())).Add(float64(entityCount))
 	metrics.DataNodeWriteDataCount.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
+		paramtable.GetStringNodeID(),
 		metrics.CompactionDataSourceLabel,
 		metrics.DeleteLabel,
 		fmt.Sprint(task.GetCollection())).Add(float64(deleteCount))

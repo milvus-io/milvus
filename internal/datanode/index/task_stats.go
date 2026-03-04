@@ -73,7 +73,6 @@ type statsTask struct {
 	binlogIO io.BinlogIO
 	cm       storage.ChunkManager
 
-	deltaLogs   []string
 	logIDOffset int64
 	currentTime time.Time
 }
@@ -166,12 +165,6 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	for _, d := range st.req.GetDeltaLogs() {
-		for _, l := range d.GetBinlogs() {
-			st.deltaLogs = append(st.deltaLogs, l.GetLogPath())
-		}
-	}
-
 	preExecuteRecordSpan := st.tr.RecordSpan()
 
 	log.Ctx(ctx).Info("successfully PreExecute stats task",
@@ -223,7 +216,9 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		zap.Int64("segmentID", st.req.GetSegmentID()),
 	)
 
-	deletePKs, err := compaction.ComposeDeleteFromDeltalogs(ctx, st.binlogIO, st.deltaLogs)
+	deletePKs, err := compaction.ComposeDeleteFromDeltalogsV1(ctx, pkField.DataType, st.req.GetDeltaLogs(),
+		storage.WithDownloader(st.binlogIO.Download),
+		storage.WithStorageConfig(st.req.GetStorageConfig()))
 	if err != nil {
 		log.Warn("load deletePKs failed", zap.Error(err))
 		return nil, err
@@ -262,7 +257,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 	defer rr.Close()
 
 	rrs := []storage.RecordReader{rr}
-	numValidRows, err := storage.Sort(st.req.GetBinlogMaxSize(), st.req.GetSchema(), rrs, srw, predicate, []int64{pkField.FieldID})
+	numValidRows, _, err := storage.Sort(st.req.GetBinlogMaxSize(), st.req.GetSchema(), rrs, srw, predicate, []int64{pkField.FieldID})
 	if err != nil {
 		log.Warn("sort failed", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 		return nil, err

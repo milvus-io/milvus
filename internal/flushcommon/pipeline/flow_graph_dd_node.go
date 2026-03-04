@@ -183,15 +183,15 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			util.GetRateCollector().Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(imsg.InsertRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
-				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).
+				WithLabelValues(paramtable.GetStringNodeID(), metrics.InsertLabel).
 				Add(float64(proto.Size(imsg.InsertRequest)))
 
 			metrics.DataNodeConsumeMsgCount.
-				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel, fmt.Sprint(ddn.collectionID)).
+				WithLabelValues(paramtable.GetStringNodeID(), metrics.InsertLabel, fmt.Sprint(ddn.collectionID)).
 				Inc()
 
 			metrics.DataNodeConsumeMsgRowsCount.
-				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).
+				WithLabelValues(paramtable.GetStringNodeID(), metrics.InsertLabel).
 				Add(float64(imsg.GetNumRows()))
 
 			log.Debug("DDNode receive insert messages",
@@ -222,15 +222,15 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			util.GetRateCollector().Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
-				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
+				WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).
 				Add(float64(proto.Size(dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeMsgCount.
-				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel, fmt.Sprint(ddn.collectionID)).
+				WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel, fmt.Sprint(ddn.collectionID)).
 				Inc()
 
 			metrics.DataNodeConsumeMsgRowsCount.
-				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
+				WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).
 				Add(float64(dmsg.GetNumRows()))
 			fgMsg.DeleteMessages = append(fgMsg.DeleteMessages, dmsg)
 		case commonpb.MsgType_CreateSegment:

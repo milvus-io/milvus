@@ -114,6 +114,24 @@ func (s *TextEmbeddingFunctionSuite) TestInvalidProvider() {
 	s.Error(err)
 }
 
+func (s *TextEmbeddingFunctionSuite) TestUnsupportedProvider() {
+	_, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_TextEmbedding,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+		Params: []*commonpb.KeyValuePair{
+			{Key: Provider, Value: "unknown"},
+			{Key: models.ModelNameParamKey, Value: "test-model"},
+			{Key: models.DimParamKey, Value: "4"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		},
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
+	s.ErrorContains(err, "Unsupported text embedding service provider")
+}
+
 func (s *TextEmbeddingFunctionSuite) TestProcessInsert() {
 	ts := CreateOpenAIEmbeddingServer()
 	defer ts.Close()
@@ -1022,6 +1040,62 @@ func (s *TextEmbeddingFunctionSuite) TestDisable() {
 		},
 	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.ErrorContains(err, "Text embedding model provider [openai] is disabled")
+}
+
+func (s *TextEmbeddingFunctionSuite) TestYCEmbedding() {
+	ts := CreateYCEmbeddingServer()
+	defer ts.Close()
+
+	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+		key := ycProvider + "." + models.URLParamKey
+		return map[string]string{
+			key: ts.URL,
+		}
+	}
+
+	runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_TextEmbedding,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+		Params: []*commonpb.KeyValuePair{
+			{Key: Provider, Value: ycProvider},
+			{Key: models.ModelNameParamKey, Value: "emb://test/model"},
+			{Key: models.DimParamKey, Value: "4"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		},
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
+	s.NoError(err)
+
+	ret, err := runner.ProcessInsert(context.Background(), createData([]string{"sentence", "sentence 2"}))
+	s.NoError(err)
+	s.Equal([]float32{0.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 4.0}, ret[0].GetVectors().GetFloatVector().GetData())
+}
+
+func (s *TextEmbeddingFunctionSuite) TestDisableYC() {
+	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+		key := ycProvider + "." + models.EnableConf
+		return map[string]string{
+			key: "false",
+		}
+	}
+	_, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_TextEmbedding,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+		Params: []*commonpb.KeyValuePair{
+			{Key: Provider, Value: ycProvider},
+			{Key: models.ModelNameParamKey, Value: "emb://test/model"},
+			{Key: models.DimParamKey, Value: "4"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		},
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
+	s.ErrorContains(err, "Text embedding model provider [yc] is disabled")
 }
 
 func (s *TextEmbeddingFunctionSuite) TestCheck() {

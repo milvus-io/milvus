@@ -50,10 +50,12 @@ func (s *Server) initBasicComponent(ctx context.Context) (err error) {
 	futures := make([]*conc.Future[struct{}], 0)
 	futures = append(futures, conc.Go(func() (struct{}, error) {
 		s.logger.Info("start recovery balancer...")
-		// Read new incoming topics from configuration, and register it into balancer.
-		newIncomingTopics := util.GetAllTopicsFromConfiguration()
-		balancer, err := balancer.RecoverBalancer(ctx, newIncomingTopics.Collect()...)
+		// Create a provider that reads channel names from configuration
+		// and polls for dynamic changes.
+		provider := util.NewConfigChannelProvider()
+		balancer, err := balancer.RecoverBalancer(ctx, provider)
 		if err != nil {
+			provider.Close()
 			s.logger.Warn("recover balancer failed", zap.Error(err))
 			return struct{}{}, err
 		}

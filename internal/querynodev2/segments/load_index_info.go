@@ -26,7 +26,6 @@ import "C"
 
 import (
 	"context"
-	"fmt"
 	"runtime"
 	"time"
 	"unsafe"
@@ -96,7 +95,7 @@ func (li *LoadIndexInfo) loadIndex(ctx context.Context) error {
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
-				fmt.Sprint(paramtable.GetNodeID()),
+				paramtable.GetStringNodeID(),
 				"AppendIndexV2",
 				"Sync",
 			).Observe(float64(time.Since(start).Milliseconds()))

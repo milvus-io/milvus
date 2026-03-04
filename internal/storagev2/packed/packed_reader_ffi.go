@@ -44,6 +44,7 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get manifest")
 	}
+	defer C.loon_manifest_destroy(cLoonManifest)
 
 	var cas cdata.CArrowSchema
 	cdata.ExportArrowSchema(schema, &cas)
@@ -196,6 +197,7 @@ func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig
 	if err != nil {
 		return cManifestHandle, err
 	}
+	defer C.loon_properties_free(cProperties)
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 

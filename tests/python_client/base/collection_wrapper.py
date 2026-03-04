@@ -1,6 +1,5 @@
 import sys
 import time
-import timeout_decorator
 from numpy import NaN
 
 from pymilvus import Collection
@@ -135,23 +134,6 @@ class ApiCollectionWrapper:
                                        data=data, partition_name=partition_name,
                                        **kwargs).run()
         return res, check_result
-
-    # @trace()
-    # def flush(self, check_task=None, check_items=None, **kwargs):
-    #     #TODO:currently, flush is not supported by sdk in milvus
-    #     timeout = kwargs.get("timeout", TIMEOUT)
-    #
-    #     @timeout_decorator.timeout(timeout, timeout_exception=TimeoutError)
-    #     def _flush():
-    #         res = self.collection.num_entities
-    #         return res
-    #     try:
-    #         res = _flush()
-    #         return res, True
-    #     except TimeoutError as e:
-    #         log.error(f"flush timeout error: {e}")
-    #         res = None
-    #         return res, False
 
     @trace()
     def flush(self, check_task=None, check_items=None, **kwargs):

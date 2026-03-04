@@ -196,12 +196,15 @@ void
 SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
     // Get current index IDs from converted cache
     std::set<int64_t> current_index_ids;
+    // Build a set of field IDs that currently have indexes loaded
+    std::set<FieldId> current_indexed_fields;
     for (const auto& load_index_info : converted_index_infos_) {
         current_index_ids.insert(load_index_info.index_id);
+        current_indexed_fields.insert(FieldId(load_index_info.field_id));
     }
 
     std::set<int64_t> new_index_ids;
-    // Find indexes to load: indexes in new_info but not in current
+    // Find indexes to load/replace: indexes in new_info but not in current
     // Use converted_field_index_cache_ from new_info
     for (const auto& [field_id, load_index_infos] :
          new_info.converted_field_index_cache_) {
@@ -209,7 +212,14 @@ SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
             new_index_ids.insert(load_index_info.index_id);
             if (current_index_ids.find(load_index_info.index_id) ==
                 current_index_ids.end()) {
-                diff.indexes_to_load[field_id].push_back(load_index_info);
+                // New index_id: check if field already has an index loaded
+                if (current_indexed_fields.find(field_id) !=
+                    current_indexed_fields.end()) {
+                    diff.indexes_to_replace[field_id].push_back(
+                        load_index_info);
+                } else {
+                    diff.indexes_to_load[field_id].push_back(load_index_info);
+                }
             }
         }
     }
@@ -245,6 +255,7 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
     for (int i = 0; i < new_info.GetBinlogPathCount(); i++) {
         auto& new_field_binlog = new_info.GetBinlogPath(i);
         std::vector<FieldId> ids_to_load;
+        std::vector<FieldId> ids_to_replace;
         std::vector<int64_t> child_fields(
             new_field_binlog.child_fields().begin(),
             new_field_binlog.child_fields().end());
@@ -255,14 +266,25 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
         for (auto child_id : child_fields) {
             new_binlog_fields[child_id] = new_field_binlog.fieldid();
             auto iter = current_fields.find(new_field_binlog.fieldid());
-            // Find binlogs to load: fields in new_info match current
+            // Find binlogs to load/replace: fields in new_info not matching current
             if (iter == current_fields.end() ||
                 iter->second != new_field_binlog.fieldid()) {
-                ids_to_load.emplace_back(child_id);
+                // Check if this child field already exists in current
+                // (either from binlogs or from default value filling)
+                if (current_fields.find(child_id) != current_fields.end() ||
+                    fields_filled_with_default_.count(FieldId(child_id)) > 0) {
+                    ids_to_replace.emplace_back(child_id);
+                } else {
+                    ids_to_load.emplace_back(child_id);
+                }
             }
         }
         if (!ids_to_load.empty()) {
             diff.binlogs_to_load.emplace_back(ids_to_load, new_field_binlog);
+        }
+        if (!ids_to_replace.empty()) {
+            diff.binlogs_to_replace.emplace_back(ids_to_replace,
+                                                 new_field_binlog);
         }
     }
 
@@ -293,36 +315,60 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
         }
     }
 
-    // Build a set of new FieldIds and find column groups to load
+    // Build a set of new FieldIds and find column groups to load/replace
     std::map<int64_t, int> new_field_ids;
     for (int i = 0; i < new_column_group->size(); i++) {
         auto cg = new_column_group->at(i);
         std::vector<FieldId> fields;
+        std::vector<FieldId> replace_fields;
         std::vector<FieldId> lazy_fields;
+        std::vector<FieldId> lazy_replace_fields;
         for (const auto& column : cg->columns) {
             auto field_id = std::stoll(column);
             new_field_ids.emplace(field_id, i);
 
             auto iter = cur_field_ids.find(field_id);
-            // If this field doesn't exist in current, mark the column group for loading
-            if (iter == cur_field_ids.end() || iter->second != i) {
+            bool was_default_filled =
+                fields_filled_with_default_.count(FieldId(field_id)) > 0;
+            bool is_new_field =
+                iter == cur_field_ids.end() && !was_default_filled;
+            bool is_replace_field =
+                was_default_filled ||
+                (iter != cur_field_ids.end() && iter->second != i);
+            if (is_new_field) {
+                // Field not in current and not default-filled → new load
                 if (field_id < START_USER_FIELDID ||
                     (schema_->ShouldLoadField(FieldId(field_id)) &&
                      field_index_has_raw_data_.find(FieldId(field_id)) ==
                          field_index_has_raw_data_.end())) {
-                    // system fields are always proactively loaded
                     fields.emplace_back(field_id);
                 } else {
-                    // put lazy load & index_has_raw_data field in lazy_fields
                     lazy_fields.emplace_back(field_id);
+                }
+            } else if (is_replace_field) {
+                // Field was default-filled or moved between groups → replace
+                if (field_id < START_USER_FIELDID ||
+                    (schema_->ShouldLoadField(FieldId(field_id)) &&
+                     field_index_has_raw_data_.find(FieldId(field_id)) ==
+                         field_index_has_raw_data_.end())) {
+                    replace_fields.emplace_back(field_id);
+                } else {
+                    lazy_replace_fields.emplace_back(field_id);
                 }
             }
         }
         if (!fields.empty()) {
             diff.column_groups_to_load.emplace_back(i, fields);
         }
+        if (!replace_fields.empty()) {
+            diff.column_groups_to_replace.emplace_back(i, replace_fields);
+        }
         if (!lazy_fields.empty()) {
             diff.column_groups_to_lazyload.emplace_back(i, lazy_fields);
+        }
+        if (!lazy_replace_fields.empty()) {
+            diff.column_groups_to_lazyreplace.emplace_back(i,
+                                                           lazy_replace_fields);
         }
     }
 
@@ -497,6 +543,10 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
     if (HasManifestPath()) {
         AssertInfo(new_info.HasManifestPath(),
                    "manifest could only be updated with other manifest");
+        if (GetManifestPath() != new_info.GetManifestPath()) {
+            diff.manifest_updated = true;
+            diff.new_manifest_path = new_info.GetManifestPath();
+        }
         ComputeDiffColumnGroups(diff, new_info);
     } else {
         AssertInfo(

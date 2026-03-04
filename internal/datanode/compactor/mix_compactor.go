@@ -212,13 +212,9 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	seg *datapb.CompactionSegmentBinlogs,
 	mWriter *MultiSegmentWriter, pkField *schemapb.FieldSchema,
 ) (deletedRowCount, expiredRowCount int64, err error) {
-	deltaPaths := make([]string, 0)
-	for _, fieldBinlog := range seg.GetDeltalogs() {
-		for _, binlog := range fieldBinlog.GetBinlogs() {
-			deltaPaths = append(deltaPaths, binlog.GetLogPath())
-		}
-	}
-	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.binlogIO, deltaPaths)
+	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, seg,
+		storage.WithDownloader(t.binlogIO.Download),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig))
 	if err != nil {
 		log.Warn("compact wrong, fail to merge deltalogs", zap.Error(err))
 		return
@@ -419,8 +415,8 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 
 	log.Info("compact done", zap.Duration("compact elapse", time.Since(compactStart)), zap.Any("res", res))
 
-	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
-	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(durInQueue.Milliseconds()))
+	metrics.DataNodeCompactionLatency.WithLabelValues(paramtable.GetStringNodeID(), t.plan.GetType().String()).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
+	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(durInQueue.Milliseconds()))
 
 	planResult := &datapb.CompactionPlanResult{
 		State:    datapb.CompactionTaskState_completed,

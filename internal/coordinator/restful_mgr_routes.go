@@ -17,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -25,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -1216,42 +1214,6 @@ func (s *mixCoordImpl) broadcastAlterWALMessage(ctx context.Context, targetWALNa
 	}
 	defer broadcaster.Close()
 
-	// Get balancer to access channel assignments
-	balancer, err := balance.GetWithContext(ctx)
-	if err != nil {
-		logger.Info("broadcastAlterWALMessage failed to get balancer", zap.Error(err))
-		return errors.Wrap(err, "failed to get balancer")
-	}
-
-	// Get all pChannels from the latest channel assignment
-	latestAssignment, err := balancer.GetLatestChannelAssignment()
-	if err != nil {
-		logger.Info("broadcastAlterWALMessage failed to get latest channel assignment", zap.Error(err))
-		return errors.Wrap(err, "failed to get channel assignment")
-	}
-
-	controlChannel := streaming.WAL().ControlChannel()
-	pChannels := lo.MapToSlice(latestAssignment.PChannelView.Channels, func(_ channel.ChannelID, channel *channel.PChannelMeta) string {
-		return channel.Name()
-	})
-	broadcastPChannels := lo.Map(pChannels, func(pChannel string, _ int) string {
-		if funcutil.IsOnPhysicalChannel(controlChannel, pChannel) {
-			// return control channel if the control channel is on the pChannel.
-			return controlChannel
-		}
-		return pChannel
-	})
-
-	if len(broadcastPChannels) == 0 {
-		logger.Info("broadcastAlterWALMessage failed, no active pChannel found")
-		return errors.New("no active pChannels found")
-	}
-
-	logger.Info("broadcastAlterWALMessage preparing",
-		zap.Int("pChannelCount", len(broadcastPChannels)),
-		zap.Strings("pChannels", broadcastPChannels),
-		zap.Any("config", config))
-
 	// Create AlterWAL broadcast message
 	broadcastMsg, err := message.NewAlterWALMessageBuilderV2().
 		WithHeader(&message.AlterWALMessageHeader{
@@ -1259,7 +1221,7 @@ func (s *mixCoordImpl) broadcastAlterWALMessage(ctx context.Context, targetWALNa
 			Config:        config,
 		}).
 		WithBody(&message.AlterWALMessageBody{}).
-		WithBroadcast(broadcastPChannels).
+		WithClusterLevelBroadcast(channel.GetClusterChannels()).
 		BuildBroadcast()
 	if err != nil {
 		logger.Info("broadcastAlterWALMessage failed to build broadcast message", zap.Error(err))

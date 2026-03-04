@@ -93,8 +93,15 @@ jobs:
           if [[ ! -d "/var/tmp/ccache" ]];then
             mkdir -p /var/tmp/ccache
           fi
-          brew install libomp ninja openblas ccache pkg-config aws-sdk-cpp
+          brew install libomp ninja openblas ccache pkg-config
           BREW_PREFIX=$(brew --prefix)
+          # aws-sdk-cpp 1.11.750 had a packaging bug where Paginator.h was
+          # not installed (missing CMake install rule for pagination headers).
+          # Homebrew backported the fix with "rebuild 1", but the CI runner's
+          # formula may be stale.  Run brew update first so we get the
+          # patched bottle.
+          brew update
+          brew install aws-sdk-cpp || brew upgrade aws-sdk-cpp
           # Install llvm@17 explicitly as a stable version
           brew install llvm@17
           if [[ ! -d "${BREW_PREFIX}/opt/llvm" ]]; then

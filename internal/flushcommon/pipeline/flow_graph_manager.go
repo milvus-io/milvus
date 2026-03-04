@@ -18,7 +18,6 @@ package pipeline
 
 import (
 	"context"
-	"fmt"
 
 	"go.uber.org/zap"
 
@@ -67,7 +66,7 @@ func NewFlowgraphManager() *fgManagerImpl {
 
 func (fm *fgManagerImpl) AddFlowgraph(ds *DataSyncService) {
 	fm.flowgraphs.Insert(ds.vchannelName, ds)
-	metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
+	metrics.DataNodeNumFlowGraphs.WithLabelValues(paramtable.GetStringNodeID()).Inc()
 }
 
 func (fm *fgManagerImpl) RemoveFlowgraph(channel string) {
@@ -75,7 +74,7 @@ func (fm *fgManagerImpl) RemoveFlowgraph(channel string) {
 		fg.close()
 		fm.flowgraphs.Remove(channel)
 
-		metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
+		metrics.DataNodeNumFlowGraphs.WithLabelValues(paramtable.GetStringNodeID()).Dec()
 		util.GetRateCollector().RemoveFlowGraphChannel(channel)
 	}
 }

@@ -60,10 +60,11 @@ enum MessageType {
     DropIndex            = 36;
     FlushAll             = 37;
     TruncateCollection   = 38;
-    RestoreSnapshot      = 39;
-    CreateSnapshot       = 40;
-    DropSnapshot         = 41;
-    BatchUpdateManifest  = 42;
+    RestoreSnapshot              = 39;
+    CreateSnapshot               = 40;
+    DropSnapshot                 = 41;
+    BatchUpdateManifest          = 42;
+    RefreshExternalCollection    = 43;
 
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;
@@ -231,6 +232,11 @@ message DropPartitionMessageHeader {
 // AlterReplicateConfigMessageHeader is the header of alter replicate configuration message.
 message AlterReplicateConfigMessageHeader {
     common.ReplicateConfiguration replicate_configuration = 1;
+    // is_pchannel_increasing is set to true when this config change only adds new pchannels
+    // (append-only growth). When set, the secondary uses the new config from the message header
+    // (instead of the current config) to map all broadcast channels including newly added ones,
+    // and CDC uses nil checkpoint for new pchannels.
+    bool is_pchannel_increasing = 2;
 }
 
 // AlterReplicateConfigMessageBody is the body of alter replicate configuration message.
@@ -312,6 +318,7 @@ message AlterLoadConfigMessageHeader {
     repeated LoadFieldConfig load_fields = 4; // the field id that has to be loaded.
     repeated LoadReplicaConfig replicas = 5; // the replicas that has to be loaded.
     bool user_specified_replica_mode = 6; // whether the replica mode is user specified.
+    bool use_local_replica_config = 7; // when true, use local cluster-level replica config instead of the replicas field above.
 }
 
 // AlterLoadConfigMessageBody is the body of alter load config message.
@@ -603,6 +610,20 @@ message AlterWALMessageHeader {
 }
 
 message AlterWALMessageBody {}
+
+// RefreshExternalCollectionMessageHeader is the header of refresh external collection message.
+// Used by DDL callback to trigger external collection data refresh.
+message RefreshExternalCollectionMessageHeader {
+    int64 collection_id = 1;       // Collection ID to refresh
+    string collection_name = 2;    // Collection name
+    int64 job_id = 3;              // Pre-allocated job ID for idempotency
+    string external_source = 4;    // External data source type
+    string external_spec = 5;      // External data specification
+}
+
+// RefreshExternalCollectionMessageBody is the body of refresh external collection message.
+// Empty - all info is in header.
+message RefreshExternalCollectionMessageBody {}
 
 // CacheExpirations is the cache expirations of proxy collection meta cache.
 message CacheExpirations {

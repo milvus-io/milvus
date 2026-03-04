@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
@@ -195,35 +194,11 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 	}
 	defer broadcaster.Close()
 
-	// Get broadcast pchannels
-	balancer, err := balance.GetWithContext(ctx)
-	if err != nil {
-		return &datapb.FlushAllResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	latestAssignment, err := balancer.GetLatestChannelAssignment()
-	if err != nil {
-		return &datapb.FlushAllResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	controlChannel := streaming.WAL().ControlChannel()
-	pchannels := lo.MapToSlice(latestAssignment.PChannelView.Channels, func(_ channel.ChannelID, channel *channel.PChannelMeta) string {
-		return channel.Name()
-	})
-	broadcastPChannels := lo.Map(pchannels, func(pchannel string, _ int) string {
-		if funcutil.IsOnPhysicalChannel(controlChannel, pchannel) {
-			// return control channel if the control channel is on the pchannel.
-			return controlChannel
-		}
-		return pchannel
-	})
-
+	cc := channel.GetClusterChannels()
 	broadcastFlushAllMsg := message.NewFlushAllMessageBuilderV2().
 		WithHeader(&message.FlushAllMessageHeader{}).
 		WithBody(&message.FlushAllMessageBody{}).
-		WithBroadcast(broadcastPChannels).
+		WithClusterLevelBroadcast(cc).
 		MustBuildBroadcast()
 	res, err := broadcaster.Broadcast(ctx, broadcastFlushAllMsg)
 	if err != nil {
@@ -238,20 +213,20 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 	for _, msg := range msgs {
 		appendResult := res.GetAppendResult(msg.VChannel())
 		// if is control channel, convert it to physical channel.
-		channel := funcutil.ToPhysicalChannel(msg.VChannel())
-		flushAllMsgs[channel] = msg.WithTimeTick(appendResult.TimeTick).
+		pchannel := msg.PChannel()
+		flushAllMsgs[pchannel] = msg.WithTimeTick(appendResult.TimeTick).
 			WithLastConfirmed(appendResult.LastConfirmedMessageID).
 			IntoImmutableMessage(appendResult.MessageID).
 			IntoImmutableMessageProto()
 	}
-	log.Ctx(ctx).Info("FlushAll successfully", zap.Strings("broadcastedPChannels", broadcastPChannels), log.FieldMessages(msgs))
+	log.Ctx(ctx).Info("FlushAll successfully", log.FieldMessages(msgs))
 	return &datapb.FlushAllResponse{
 		Status:       merr.Success(),
 		FlushAllMsgs: flushAllMsgs,
 		ClusterInfo: &milvuspb.ClusterInfo{
 			ClusterId: Params.CommonCfg.ClusterID.GetValue(),
-			Cchannel:  controlChannel,
-			Pchannels: pchannels,
+			Cchannel:  cc.ControlChannel,
+			Pchannels: cc.Channels,
 		},
 	}, nil
 }
@@ -739,7 +714,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	}
 	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
 	s.compactionInspector.removeTasksByChannel(channel)
-	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)
+	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), channel)
 	s.meta.MarkChannelCheckpointDropped(ctx, channel)
 
 	// no compaction triggered in Drop procedure
@@ -1983,48 +1958,11 @@ func (s *Server) NotifyDropPartition(ctx context.Context, channel string, partit
 	return s.meta.DropSegmentsOfPartition(ctx, partitionIDs)
 }
 
-// CreateExternalCollection creates an external collection in datacoord
-// This is a skeleton implementation - details to be filled in later
-func (s *Server) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
-	log := log.Ctx(ctx).With(
-		zap.String("dbName", req.GetDbName()),
-		zap.String("collectionName", req.GetCollectionName()),
-		zap.Int64("dbID", req.GetDbID()),
-		zap.Int64("collectionID", req.GetCollectionID()))
-
-	log.Info("receive CreateExternalCollection request")
-
-	// Check if server is healthy
-	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		log.Warn("server is not healthy", zap.Error(err))
-		return &datapb.CreateExternalCollectionResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-
-	// Create collection info and add to meta
-	// This will make the collection visible to inspectors
-	// The collection schema already contains external_source and external_spec fields
-	collInfo := &collectionInfo{
-		ID:            req.GetCollectionID(),
-		Schema:        req.GetCollectionSchema(),
-		Partitions:    req.GetPartitionIDs(),
-		Properties:    make(map[string]string),
-		DatabaseID:    req.GetDbID(),
-		DatabaseName:  req.GetDbName(),
-		VChannelNames: req.GetVirtualChannelNames(),
-	}
-
-	s.meta.AddCollection(collInfo)
-
-	log.Info("CreateExternalCollection: collection added to meta",
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.String("collectionName", req.GetCollectionName()),
-		zap.String("externalSource", req.GetCollectionSchema().GetExternalSource()),
-		zap.String("externalSpec", req.GetCollectionSchema().GetExternalSpec()))
-
+// CreateExternalCollection is a no-op stub to satisfy the DataCoordServer interface.
+// External collection creation goes through the standard CreateCollection flow in RootCoord.
+func (s *Server) CreateExternalCollection(_ context.Context, _ *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
 	return &datapb.CreateExternalCollectionResponse{
-		Status: merr.Success(),
+		Status: merr.Status(merr.WrapErrServiceInternal("CreateExternalCollection is not supported, use CreateCollection instead")),
 	}, nil
 }
 
@@ -2404,5 +2342,148 @@ func (s *Server) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsReq
 	return &datapb.ListSnapshotsResponse{
 		Status:    merr.Success(),
 		Snapshots: snapshots,
+	}, nil
+}
+
+// RefreshExternalCollection manually triggers a refresh job for an external collection
+// This uses WAL Broadcast mechanism for idempotency and distributed consistency.
+func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.RefreshExternalCollectionRequest) (*datapb.RefreshExternalCollectionResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionId()),
+		zap.String("collectionName", req.GetCollectionName()))
+
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.RefreshExternalCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("receive RefreshExternalCollection request")
+
+	if s.externalCollectionRefreshManager == nil {
+		log.Warn("external collection refresh manager not initialized")
+		return &datapb.RefreshExternalCollectionResponse{
+			Status: merr.Status(merr.WrapErrServiceUnavailable("external collection refresh manager not initialized")),
+		}, nil
+	}
+
+	// Pre-allocate JobID for idempotency (ensures same JobID even if retry after failure)
+	allocatedJobID, err := s.allocator.AllocID(ctx)
+	if err != nil {
+		log.Warn("failed to allocate job ID", zap.Error(err))
+		return &datapb.RefreshExternalCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	log.Info("pre-allocated job ID for refresh", zap.Int64("jobID", allocatedJobID))
+
+	// Start broadcaster with resource lock (shared DB + exclusive collection)
+	b, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionId())
+	if err != nil {
+		log.Warn("failed to start broadcaster", zap.Error(err))
+		return &datapb.RefreshExternalCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	defer b.Close()
+
+	// Build and broadcast the message
+	msg := message.NewRefreshExternalCollectionMessageBuilderV2().
+		WithHeader(&message.RefreshExternalCollectionMessageHeader{
+			CollectionId:   req.GetCollectionId(),
+			CollectionName: req.GetCollectionName(),
+			JobId:          allocatedJobID,
+			ExternalSource: req.GetExternalSource(),
+			ExternalSpec:   req.GetExternalSpec(),
+		}).
+		WithBody(&message.RefreshExternalCollectionMessageBody{}).
+		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		MustBuildBroadcast()
+
+	if _, err := b.Broadcast(ctx, msg); err != nil {
+		log.Warn("failed to broadcast refresh message", zap.Error(err))
+		return &datapb.RefreshExternalCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("refresh external collection job submitted via WAL broadcast", zap.Int64("jobID", allocatedJobID))
+
+	return &datapb.RefreshExternalCollectionResponse{
+		Status: merr.Success(),
+		JobId:  allocatedJobID,
+	}, nil
+}
+
+// GetRefreshExternalCollectionProgress returns the progress of a refresh job
+func (s *Server) GetRefreshExternalCollectionProgress(ctx context.Context, req *datapb.GetRefreshExternalCollectionProgressRequest) (*datapb.GetRefreshExternalCollectionProgressResponse, error) {
+	log := log.Ctx(ctx).With(zap.Int64("jobID", req.GetJobId()))
+
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.GetRefreshExternalCollectionProgressResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("receive GetRefreshExternalCollectionProgress request")
+
+	if s.externalCollectionRefreshManager == nil {
+		log.Warn("external collection refresh manager not initialized")
+		return &datapb.GetRefreshExternalCollectionProgressResponse{
+			Status: merr.Status(merr.WrapErrServiceUnavailable("external collection refresh manager not initialized")),
+		}, nil
+	}
+
+	jobInfo, err := s.externalCollectionRefreshManager.GetJobProgress(ctx, req.GetJobId())
+	if err != nil {
+		log.Warn("failed to get job progress", zap.Error(err))
+		return &datapb.GetRefreshExternalCollectionProgressResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("get refresh external collection progress completed",
+		zap.String("state", jobInfo.GetState().String()),
+		zap.Int64("progress", jobInfo.GetProgress()))
+
+	return &datapb.GetRefreshExternalCollectionProgressResponse{
+		Status:  merr.Success(),
+		JobInfo: jobInfo,
+	}, nil
+}
+
+// ListRefreshExternalCollectionJobs lists refresh jobs for a collection
+func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionId()))
+
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.ListRefreshExternalCollectionJobsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("receive ListRefreshExternalCollectionJobs request")
+
+	if s.externalCollectionRefreshManager == nil {
+		log.Warn("external collection refresh manager not initialized")
+		return &datapb.ListRefreshExternalCollectionJobsResponse{
+			Status: merr.Status(merr.WrapErrServiceUnavailable("external collection refresh manager not initialized")),
+		}, nil
+	}
+
+	jobs, err := s.externalCollectionRefreshManager.ListJobs(ctx, req.GetCollectionId())
+	if err != nil {
+		log.Warn("failed to list jobs", zap.Error(err))
+		return &datapb.ListRefreshExternalCollectionJobsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("list refresh external collection jobs completed", zap.Int("jobCount", len(jobs)))
+
+	return &datapb.ListRefreshExternalCollectionJobsResponse{
+		Status: merr.Success(),
+		Jobs:   jobs,
 	}, nil
 }

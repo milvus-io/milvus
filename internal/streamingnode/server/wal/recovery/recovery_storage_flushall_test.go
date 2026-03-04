@@ -12,6 +12,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 )
 
+// buildFlushAllOnControlChannel builds a FlushAll ImmutableMessage for the control channel
+// using WithClusterLevelBroadcast + SplitIntoMutableMessage, which mirrors the production path.
+func buildFlushAllOnControlChannel(pchannel string, controlChannel string, broadcastID uint64, timeTick uint64, lastConfirmedID, msgID int64) message.ImmutableMessage {
+	cc := message.ClusterChannels{
+		Channels:       []string{pchannel},
+		ControlChannel: controlChannel,
+	}
+	broadcastMsg := message.NewFlushAllMessageBuilderV2().
+		WithHeader(&message.FlushAllMessageHeader{}).
+		WithBody(&message.FlushAllMessageBody{}).
+		WithClusterLevelBroadcast(cc).
+		MustBuildBroadcast()
+	broadcastMsg.WithBroadcastID(broadcastID)
+	splitMsgs := broadcastMsg.SplitIntoMutableMessage()
+	// Single pchannel, so exactly one split message with vchannel = controlChannel.
+	return splitMsgs[0].
+		WithTimeTick(timeTick).
+		WithLastConfirmed(rmq.NewRmqID(lastConfirmedID)).
+		IntoImmutableMessage(rmq.NewRmqID(msgID))
+}
+
 func TestFlushAllOnControlChannel(t *testing.T) {
 	pchannel := "test_channel"
 	controlChannel := funcutil.GetControlChannel(pchannel)
@@ -61,15 +82,8 @@ func TestFlushAllOnControlChannel(t *testing.T) {
 			assert.False(t, seg.dirty)
 		}
 
-		// Create FlushAll message on control channel
-		flushAllMsg := message.NewFlushAllMessageBuilderV2().
-			WithVChannel(controlChannel).
-			WithHeader(&message.FlushAllMessageHeader{}).
-			WithBody(&message.FlushAllMessageBody{}).
-			MustBuildMutable().
-			WithTimeTick(10).
-			WithLastConfirmed(rmq.NewRmqID(5)).
-			IntoImmutableMessage(rmq.NewRmqID(10))
+		// Create FlushAll message on control channel via broadcast split
+		flushAllMsg := buildFlushAllOnControlChannel(pchannel, controlChannel, 1, 10, 5, 10)
 
 		rs.observeMessage(flushAllMsg)
 
@@ -115,14 +129,7 @@ func TestFlushAllOnControlChannel(t *testing.T) {
 		rs := newTestRS()
 
 		// First FlushAll
-		flushAllMsg1 := message.NewFlushAllMessageBuilderV2().
-			WithVChannel(controlChannel).
-			WithHeader(&message.FlushAllMessageHeader{}).
-			WithBody(&message.FlushAllMessageBody{}).
-			MustBuildMutable().
-			WithTimeTick(10).
-			WithLastConfirmed(rmq.NewRmqID(5)).
-			IntoImmutableMessage(rmq.NewRmqID(10))
+		flushAllMsg1 := buildFlushAllOnControlChannel(pchannel, controlChannel, 1, 10, 5, 10)
 
 		rs.observeMessage(flushAllMsg1)
 
@@ -131,14 +138,7 @@ func TestFlushAllOnControlChannel(t *testing.T) {
 		}
 
 		// Second FlushAll with higher timetick - should be idempotent
-		flushAllMsg2 := message.NewFlushAllMessageBuilderV2().
-			WithVChannel(controlChannel).
-			WithHeader(&message.FlushAllMessageHeader{}).
-			WithBody(&message.FlushAllMessageBody{}).
-			MustBuildMutable().
-			WithTimeTick(20).
-			WithLastConfirmed(rmq.NewRmqID(15)).
-			IntoImmutableMessage(rmq.NewRmqID(20))
+		flushAllMsg2 := buildFlushAllOnControlChannel(pchannel, controlChannel, 2, 20, 15, 20)
 
 		rs.observeMessage(flushAllMsg2)
 

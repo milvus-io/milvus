@@ -254,6 +254,17 @@ echo "CC $CC"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD} -G "${CMAKE_GENERATOR}"
 
+# Export PROTOC for Rust prost-build (used by lance-encoding).
+# Conan imports() copies the protoc binary into cmake_build/bin/.
+# We prefer that over a system protoc to match the Conan protobuf version.
+if [ -z "${PROTOC}" ] && [ -x "${BUILD_OUTPUT_DIR}/bin/protoc" ]; then
+  export PROTOC="${BUILD_OUTPUT_DIR}/bin/protoc"
+  echo "Using Conan protoc: ${PROTOC}"
+elif [ -z "${PROTOC}" ] && command -v protoc &> /dev/null; then
+  export PROTOC="$(command -v protoc)"
+  echo "Using system protoc: ${PROTOC}"
+fi
+
 if [[ ${RUN_CPPLINT} == "ON" ]]; then
   if [ "$CMAKE_GENERATOR" = "Ninja" ]; then
     BUILD_CMD="ninja"

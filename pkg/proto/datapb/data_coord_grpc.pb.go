@@ -24,62 +24,65 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	DataCoord_Flush_FullMethodName                       = "/milvus.proto.data.DataCoord/Flush"
-	DataCoord_FlushAll_FullMethodName                    = "/milvus.proto.data.DataCoord/FlushAll"
-	DataCoord_CreateExternalCollection_FullMethodName    = "/milvus.proto.data.DataCoord/CreateExternalCollection"
-	DataCoord_AllocSegment_FullMethodName                = "/milvus.proto.data.DataCoord/AllocSegment"
-	DataCoord_AssignSegmentID_FullMethodName             = "/milvus.proto.data.DataCoord/AssignSegmentID"
-	DataCoord_GetSegmentInfo_FullMethodName              = "/milvus.proto.data.DataCoord/GetSegmentInfo"
-	DataCoord_GetSegmentStates_FullMethodName            = "/milvus.proto.data.DataCoord/GetSegmentStates"
-	DataCoord_GetInsertBinlogPaths_FullMethodName        = "/milvus.proto.data.DataCoord/GetInsertBinlogPaths"
-	DataCoord_GetCollectionStatistics_FullMethodName     = "/milvus.proto.data.DataCoord/GetCollectionStatistics"
-	DataCoord_GetPartitionStatistics_FullMethodName      = "/milvus.proto.data.DataCoord/GetPartitionStatistics"
-	DataCoord_GetSegmentInfoChannel_FullMethodName       = "/milvus.proto.data.DataCoord/GetSegmentInfoChannel"
-	DataCoord_SaveBinlogPaths_FullMethodName             = "/milvus.proto.data.DataCoord/SaveBinlogPaths"
-	DataCoord_GetRecoveryInfo_FullMethodName             = "/milvus.proto.data.DataCoord/GetRecoveryInfo"
-	DataCoord_GetRecoveryInfoV2_FullMethodName           = "/milvus.proto.data.DataCoord/GetRecoveryInfoV2"
-	DataCoord_GetChannelRecoveryInfo_FullMethodName      = "/milvus.proto.data.DataCoord/GetChannelRecoveryInfo"
-	DataCoord_GetFlushedSegments_FullMethodName          = "/milvus.proto.data.DataCoord/GetFlushedSegments"
-	DataCoord_GetSegmentsByStates_FullMethodName         = "/milvus.proto.data.DataCoord/GetSegmentsByStates"
-	DataCoord_GetFlushAllState_FullMethodName            = "/milvus.proto.data.DataCoord/GetFlushAllState"
-	DataCoord_ShowConfigurations_FullMethodName          = "/milvus.proto.data.DataCoord/ShowConfigurations"
-	DataCoord_GetMetrics_FullMethodName                  = "/milvus.proto.data.DataCoord/GetMetrics"
-	DataCoord_ManualCompaction_FullMethodName            = "/milvus.proto.data.DataCoord/ManualCompaction"
-	DataCoord_GetCompactionState_FullMethodName          = "/milvus.proto.data.DataCoord/GetCompactionState"
-	DataCoord_GetCompactionStateWithPlans_FullMethodName = "/milvus.proto.data.DataCoord/GetCompactionStateWithPlans"
-	DataCoord_WatchChannels_FullMethodName               = "/milvus.proto.data.DataCoord/WatchChannels"
-	DataCoord_GetFlushState_FullMethodName               = "/milvus.proto.data.DataCoord/GetFlushState"
-	DataCoord_DropVirtualChannel_FullMethodName          = "/milvus.proto.data.DataCoord/DropVirtualChannel"
-	DataCoord_SetSegmentState_FullMethodName             = "/milvus.proto.data.DataCoord/SetSegmentState"
-	DataCoord_UpdateSegmentStatistics_FullMethodName     = "/milvus.proto.data.DataCoord/UpdateSegmentStatistics"
-	DataCoord_UpdateChannelCheckpoint_FullMethodName     = "/milvus.proto.data.DataCoord/UpdateChannelCheckpoint"
-	DataCoord_MarkSegmentsDropped_FullMethodName         = "/milvus.proto.data.DataCoord/MarkSegmentsDropped"
-	DataCoord_BroadcastAlteredCollection_FullMethodName  = "/milvus.proto.data.DataCoord/BroadcastAlteredCollection"
-	DataCoord_CheckHealth_FullMethodName                 = "/milvus.proto.data.DataCoord/CheckHealth"
-	DataCoord_CreateIndex_FullMethodName                 = "/milvus.proto.data.DataCoord/CreateIndex"
-	DataCoord_AlterIndex_FullMethodName                  = "/milvus.proto.data.DataCoord/AlterIndex"
-	DataCoord_GetIndexState_FullMethodName               = "/milvus.proto.data.DataCoord/GetIndexState"
-	DataCoord_GetSegmentIndexState_FullMethodName        = "/milvus.proto.data.DataCoord/GetSegmentIndexState"
-	DataCoord_GetIndexInfos_FullMethodName               = "/milvus.proto.data.DataCoord/GetIndexInfos"
-	DataCoord_DropIndex_FullMethodName                   = "/milvus.proto.data.DataCoord/DropIndex"
-	DataCoord_DescribeIndex_FullMethodName               = "/milvus.proto.data.DataCoord/DescribeIndex"
-	DataCoord_GetIndexStatistics_FullMethodName          = "/milvus.proto.data.DataCoord/GetIndexStatistics"
-	DataCoord_GetIndexBuildProgress_FullMethodName       = "/milvus.proto.data.DataCoord/GetIndexBuildProgress"
-	DataCoord_ListIndexes_FullMethodName                 = "/milvus.proto.data.DataCoord/ListIndexes"
-	DataCoord_GcConfirm_FullMethodName                   = "/milvus.proto.data.DataCoord/GcConfirm"
-	DataCoord_ReportDataNodeTtMsgs_FullMethodName        = "/milvus.proto.data.DataCoord/ReportDataNodeTtMsgs"
-	DataCoord_GcControl_FullMethodName                   = "/milvus.proto.data.DataCoord/GcControl"
-	DataCoord_ImportV2_FullMethodName                    = "/milvus.proto.data.DataCoord/ImportV2"
-	DataCoord_GetImportProgress_FullMethodName           = "/milvus.proto.data.DataCoord/GetImportProgress"
-	DataCoord_ListImports_FullMethodName                 = "/milvus.proto.data.DataCoord/ListImports"
-	DataCoord_CreateSnapshot_FullMethodName              = "/milvus.proto.data.DataCoord/CreateSnapshot"
-	DataCoord_DropSnapshot_FullMethodName                = "/milvus.proto.data.DataCoord/DropSnapshot"
-	DataCoord_ListSnapshots_FullMethodName               = "/milvus.proto.data.DataCoord/ListSnapshots"
-	DataCoord_DescribeSnapshot_FullMethodName            = "/milvus.proto.data.DataCoord/DescribeSnapshot"
-	DataCoord_RestoreSnapshot_FullMethodName             = "/milvus.proto.data.DataCoord/RestoreSnapshot"
-	DataCoord_GetRestoreSnapshotState_FullMethodName     = "/milvus.proto.data.DataCoord/GetRestoreSnapshotState"
-	DataCoord_ListRestoreSnapshotJobs_FullMethodName     = "/milvus.proto.data.DataCoord/ListRestoreSnapshotJobs"
-	DataCoord_BatchUpdateManifest_FullMethodName         = "/milvus.proto.data.DataCoord/BatchUpdateManifest"
+	DataCoord_Flush_FullMethodName                                = "/milvus.proto.data.DataCoord/Flush"
+	DataCoord_FlushAll_FullMethodName                             = "/milvus.proto.data.DataCoord/FlushAll"
+	DataCoord_CreateExternalCollection_FullMethodName             = "/milvus.proto.data.DataCoord/CreateExternalCollection"
+	DataCoord_AllocSegment_FullMethodName                         = "/milvus.proto.data.DataCoord/AllocSegment"
+	DataCoord_AssignSegmentID_FullMethodName                      = "/milvus.proto.data.DataCoord/AssignSegmentID"
+	DataCoord_GetSegmentInfo_FullMethodName                       = "/milvus.proto.data.DataCoord/GetSegmentInfo"
+	DataCoord_GetSegmentStates_FullMethodName                     = "/milvus.proto.data.DataCoord/GetSegmentStates"
+	DataCoord_GetInsertBinlogPaths_FullMethodName                 = "/milvus.proto.data.DataCoord/GetInsertBinlogPaths"
+	DataCoord_GetCollectionStatistics_FullMethodName              = "/milvus.proto.data.DataCoord/GetCollectionStatistics"
+	DataCoord_GetPartitionStatistics_FullMethodName               = "/milvus.proto.data.DataCoord/GetPartitionStatistics"
+	DataCoord_GetSegmentInfoChannel_FullMethodName                = "/milvus.proto.data.DataCoord/GetSegmentInfoChannel"
+	DataCoord_SaveBinlogPaths_FullMethodName                      = "/milvus.proto.data.DataCoord/SaveBinlogPaths"
+	DataCoord_GetRecoveryInfo_FullMethodName                      = "/milvus.proto.data.DataCoord/GetRecoveryInfo"
+	DataCoord_GetRecoveryInfoV2_FullMethodName                    = "/milvus.proto.data.DataCoord/GetRecoveryInfoV2"
+	DataCoord_GetChannelRecoveryInfo_FullMethodName               = "/milvus.proto.data.DataCoord/GetChannelRecoveryInfo"
+	DataCoord_GetFlushedSegments_FullMethodName                   = "/milvus.proto.data.DataCoord/GetFlushedSegments"
+	DataCoord_GetSegmentsByStates_FullMethodName                  = "/milvus.proto.data.DataCoord/GetSegmentsByStates"
+	DataCoord_GetFlushAllState_FullMethodName                     = "/milvus.proto.data.DataCoord/GetFlushAllState"
+	DataCoord_ShowConfigurations_FullMethodName                   = "/milvus.proto.data.DataCoord/ShowConfigurations"
+	DataCoord_GetMetrics_FullMethodName                           = "/milvus.proto.data.DataCoord/GetMetrics"
+	DataCoord_ManualCompaction_FullMethodName                     = "/milvus.proto.data.DataCoord/ManualCompaction"
+	DataCoord_GetCompactionState_FullMethodName                   = "/milvus.proto.data.DataCoord/GetCompactionState"
+	DataCoord_GetCompactionStateWithPlans_FullMethodName          = "/milvus.proto.data.DataCoord/GetCompactionStateWithPlans"
+	DataCoord_WatchChannels_FullMethodName                        = "/milvus.proto.data.DataCoord/WatchChannels"
+	DataCoord_GetFlushState_FullMethodName                        = "/milvus.proto.data.DataCoord/GetFlushState"
+	DataCoord_DropVirtualChannel_FullMethodName                   = "/milvus.proto.data.DataCoord/DropVirtualChannel"
+	DataCoord_SetSegmentState_FullMethodName                      = "/milvus.proto.data.DataCoord/SetSegmentState"
+	DataCoord_UpdateSegmentStatistics_FullMethodName              = "/milvus.proto.data.DataCoord/UpdateSegmentStatistics"
+	DataCoord_UpdateChannelCheckpoint_FullMethodName              = "/milvus.proto.data.DataCoord/UpdateChannelCheckpoint"
+	DataCoord_MarkSegmentsDropped_FullMethodName                  = "/milvus.proto.data.DataCoord/MarkSegmentsDropped"
+	DataCoord_BroadcastAlteredCollection_FullMethodName           = "/milvus.proto.data.DataCoord/BroadcastAlteredCollection"
+	DataCoord_CheckHealth_FullMethodName                          = "/milvus.proto.data.DataCoord/CheckHealth"
+	DataCoord_CreateIndex_FullMethodName                          = "/milvus.proto.data.DataCoord/CreateIndex"
+	DataCoord_AlterIndex_FullMethodName                           = "/milvus.proto.data.DataCoord/AlterIndex"
+	DataCoord_GetIndexState_FullMethodName                        = "/milvus.proto.data.DataCoord/GetIndexState"
+	DataCoord_GetSegmentIndexState_FullMethodName                 = "/milvus.proto.data.DataCoord/GetSegmentIndexState"
+	DataCoord_GetIndexInfos_FullMethodName                        = "/milvus.proto.data.DataCoord/GetIndexInfos"
+	DataCoord_DropIndex_FullMethodName                            = "/milvus.proto.data.DataCoord/DropIndex"
+	DataCoord_DescribeIndex_FullMethodName                        = "/milvus.proto.data.DataCoord/DescribeIndex"
+	DataCoord_GetIndexStatistics_FullMethodName                   = "/milvus.proto.data.DataCoord/GetIndexStatistics"
+	DataCoord_GetIndexBuildProgress_FullMethodName                = "/milvus.proto.data.DataCoord/GetIndexBuildProgress"
+	DataCoord_ListIndexes_FullMethodName                          = "/milvus.proto.data.DataCoord/ListIndexes"
+	DataCoord_GcConfirm_FullMethodName                            = "/milvus.proto.data.DataCoord/GcConfirm"
+	DataCoord_ReportDataNodeTtMsgs_FullMethodName                 = "/milvus.proto.data.DataCoord/ReportDataNodeTtMsgs"
+	DataCoord_GcControl_FullMethodName                            = "/milvus.proto.data.DataCoord/GcControl"
+	DataCoord_ImportV2_FullMethodName                             = "/milvus.proto.data.DataCoord/ImportV2"
+	DataCoord_GetImportProgress_FullMethodName                    = "/milvus.proto.data.DataCoord/GetImportProgress"
+	DataCoord_ListImports_FullMethodName                          = "/milvus.proto.data.DataCoord/ListImports"
+	DataCoord_CreateSnapshot_FullMethodName                       = "/milvus.proto.data.DataCoord/CreateSnapshot"
+	DataCoord_DropSnapshot_FullMethodName                         = "/milvus.proto.data.DataCoord/DropSnapshot"
+	DataCoord_ListSnapshots_FullMethodName                        = "/milvus.proto.data.DataCoord/ListSnapshots"
+	DataCoord_DescribeSnapshot_FullMethodName                     = "/milvus.proto.data.DataCoord/DescribeSnapshot"
+	DataCoord_RestoreSnapshot_FullMethodName                      = "/milvus.proto.data.DataCoord/RestoreSnapshot"
+	DataCoord_GetRestoreSnapshotState_FullMethodName              = "/milvus.proto.data.DataCoord/GetRestoreSnapshotState"
+	DataCoord_ListRestoreSnapshotJobs_FullMethodName              = "/milvus.proto.data.DataCoord/ListRestoreSnapshotJobs"
+	DataCoord_BatchUpdateManifest_FullMethodName                  = "/milvus.proto.data.DataCoord/BatchUpdateManifest"
+	DataCoord_RefreshExternalCollection_FullMethodName            = "/milvus.proto.data.DataCoord/RefreshExternalCollection"
+	DataCoord_GetRefreshExternalCollectionProgress_FullMethodName = "/milvus.proto.data.DataCoord/GetRefreshExternalCollectionProgress"
+	DataCoord_ListRefreshExternalCollectionJobs_FullMethodName    = "/milvus.proto.data.DataCoord/ListRefreshExternalCollectionJobs"
 )
 
 // DataCoordClient is the client API for DataCoord service.
@@ -153,6 +156,10 @@ type DataCoordClient interface {
 	ListRestoreSnapshotJobs(ctx context.Context, in *ListRestoreSnapshotJobsRequest, opts ...grpc.CallOption) (*ListRestoreSnapshotJobsResponse, error)
 	// batch update manifest
 	BatchUpdateManifest(ctx context.Context, in *BatchUpdateManifestRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// External Table Refresh APIs
+	RefreshExternalCollection(ctx context.Context, in *RefreshExternalCollectionRequest, opts ...grpc.CallOption) (*RefreshExternalCollectionResponse, error)
+	GetRefreshExternalCollectionProgress(ctx context.Context, in *GetRefreshExternalCollectionProgressRequest, opts ...grpc.CallOption) (*GetRefreshExternalCollectionProgressResponse, error)
+	ListRefreshExternalCollectionJobs(ctx context.Context, in *ListRefreshExternalCollectionJobsRequest, opts ...grpc.CallOption) (*ListRefreshExternalCollectionJobsResponse, error)
 }
 
 type dataCoordClient struct {
@@ -669,6 +676,33 @@ func (c *dataCoordClient) BatchUpdateManifest(ctx context.Context, in *BatchUpda
 	return out, nil
 }
 
+func (c *dataCoordClient) RefreshExternalCollection(ctx context.Context, in *RefreshExternalCollectionRequest, opts ...grpc.CallOption) (*RefreshExternalCollectionResponse, error) {
+	out := new(RefreshExternalCollectionResponse)
+	err := c.cc.Invoke(ctx, DataCoord_RefreshExternalCollection_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) GetRefreshExternalCollectionProgress(ctx context.Context, in *GetRefreshExternalCollectionProgressRequest, opts ...grpc.CallOption) (*GetRefreshExternalCollectionProgressResponse, error) {
+	out := new(GetRefreshExternalCollectionProgressResponse)
+	err := c.cc.Invoke(ctx, DataCoord_GetRefreshExternalCollectionProgress_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) ListRefreshExternalCollectionJobs(ctx context.Context, in *ListRefreshExternalCollectionJobsRequest, opts ...grpc.CallOption) (*ListRefreshExternalCollectionJobsResponse, error) {
+	out := new(ListRefreshExternalCollectionJobsResponse)
+	err := c.cc.Invoke(ctx, DataCoord_ListRefreshExternalCollectionJobs_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DataCoordServer is the server API for DataCoord service.
 // All implementations should embed UnimplementedDataCoordServer
 // for forward compatibility
@@ -740,6 +774,10 @@ type DataCoordServer interface {
 	ListRestoreSnapshotJobs(context.Context, *ListRestoreSnapshotJobsRequest) (*ListRestoreSnapshotJobsResponse, error)
 	// batch update manifest
 	BatchUpdateManifest(context.Context, *BatchUpdateManifestRequest) (*commonpb.Status, error)
+	// External Table Refresh APIs
+	RefreshExternalCollection(context.Context, *RefreshExternalCollectionRequest) (*RefreshExternalCollectionResponse, error)
+	GetRefreshExternalCollectionProgress(context.Context, *GetRefreshExternalCollectionProgressRequest) (*GetRefreshExternalCollectionProgressResponse, error)
+	ListRefreshExternalCollectionJobs(context.Context, *ListRefreshExternalCollectionJobsRequest) (*ListRefreshExternalCollectionJobsResponse, error)
 }
 
 // UnimplementedDataCoordServer should be embedded to have forward compatible implementations.
@@ -913,6 +951,15 @@ func (UnimplementedDataCoordServer) ListRestoreSnapshotJobs(context.Context, *Li
 }
 func (UnimplementedDataCoordServer) BatchUpdateManifest(context.Context, *BatchUpdateManifestRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BatchUpdateManifest not implemented")
+}
+func (UnimplementedDataCoordServer) RefreshExternalCollection(context.Context, *RefreshExternalCollectionRequest) (*RefreshExternalCollectionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RefreshExternalCollection not implemented")
+}
+func (UnimplementedDataCoordServer) GetRefreshExternalCollectionProgress(context.Context, *GetRefreshExternalCollectionProgressRequest) (*GetRefreshExternalCollectionProgressResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetRefreshExternalCollectionProgress not implemented")
+}
+func (UnimplementedDataCoordServer) ListRefreshExternalCollectionJobs(context.Context, *ListRefreshExternalCollectionJobsRequest) (*ListRefreshExternalCollectionJobsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRefreshExternalCollectionJobs not implemented")
 }
 
 // UnsafeDataCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -1934,6 +1981,60 @@ func _DataCoord_BatchUpdateManifest_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DataCoord_RefreshExternalCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RefreshExternalCollectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).RefreshExternalCollection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_RefreshExternalCollection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).RefreshExternalCollection(ctx, req.(*RefreshExternalCollectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_GetRefreshExternalCollectionProgress_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRefreshExternalCollectionProgressRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).GetRefreshExternalCollectionProgress(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_GetRefreshExternalCollectionProgress_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).GetRefreshExternalCollectionProgress(ctx, req.(*GetRefreshExternalCollectionProgressRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_ListRefreshExternalCollectionJobs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRefreshExternalCollectionJobsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).ListRefreshExternalCollectionJobs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_ListRefreshExternalCollectionJobs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).ListRefreshExternalCollectionJobs(ctx, req.(*ListRefreshExternalCollectionJobsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DataCoord_ServiceDesc is the grpc.ServiceDesc for DataCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2164,6 +2265,18 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BatchUpdateManifest",
 			Handler:    _DataCoord_BatchUpdateManifest_Handler,
+		},
+		{
+			MethodName: "RefreshExternalCollection",
+			Handler:    _DataCoord_RefreshExternalCollection_Handler,
+		},
+		{
+			MethodName: "GetRefreshExternalCollectionProgress",
+			Handler:    _DataCoord_GetRefreshExternalCollectionProgress_Handler,
+		},
+		{
+			MethodName: "ListRefreshExternalCollectionJobs",
+			Handler:    _DataCoord_ListRefreshExternalCollectionJobs_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

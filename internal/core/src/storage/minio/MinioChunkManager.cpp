@@ -127,9 +127,16 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type,
         sigaction(SIGPIPE, &psa, 0);
         if (type == RemoteStorageType::GOOGLE_CLOUD && useIAM) {
             sdk_options_.httpOptions.httpClientFactory_create_fn = []() {
+                auto client_factory = [](google::cloud::Options const& opts)
+                    -> std::unique_ptr<
+                        google::cloud::rest_internal::RestClient> {
+                    return google::cloud::rest_internal::MakeDefaultRestClient(
+                        {}, opts);
+                };
                 auto credentials = std::make_shared<
                     google::cloud::oauth2_internal::GOOGLE_CLOUD_CPP_NS::
-                        ComputeEngineCredentials>();
+                        ComputeEngineCredentials>(google::cloud::Options{},
+                                                  client_factory);
                 return Aws::MakeShared<GoogleHttpClientFactory>(
                     GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, credentials);
             };

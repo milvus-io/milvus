@@ -139,7 +139,7 @@ NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
             MakeInternalPropertiesFromStorageConfig(c_storage_config);
         auto column_groups =
             std::make_shared<milvus_storage::api::ColumnGroups>();
-        auto status = milvus_storage::import_column_groups(
+        auto status = milvus_storage::column_groups_import(
             &loon_manifest->column_groups, column_groups.get());
         AssertInfo(status.ok(),
                    "Failed to import column groups: {}",

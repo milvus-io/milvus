@@ -316,7 +316,7 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 	}
 
 	metrics.DataNodeCompactionLatency.
-		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).
+		WithLabelValues(paramtable.GetStringNodeID(), t.plan.GetType().String()).
 		Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 	log.Info("Clustering compaction finished", zap.Duration("elapse", t.tr.ElapseSpan()), zap.Int64("flushTimes", t.flushCount.Load()))
 	// clear the buffer cache
@@ -576,13 +576,11 @@ func (t *clusteringCompactionTask) mappingSegment(
 	processStart := time.Now()
 	var remained int64 = 0
 
-	deltaPaths := make([]string, 0)
-	for _, d := range segment.GetDeltalogs() {
-		for _, l := range d.GetBinlogs() {
-			deltaPaths = append(deltaPaths, l.GetLogPath())
-		}
+	options := []storage.RwOption{
+		storage.WithDownloader(t.binlogIO.Download),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	}
-	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.binlogIO, deltaPaths)
+	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.primaryKeyField.DataType, segment, options...)
 	if err != nil {
 		return err
 	}
