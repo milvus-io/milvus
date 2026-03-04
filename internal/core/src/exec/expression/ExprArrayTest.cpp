@@ -2010,13 +2010,9 @@ TEST(Expr, TestArrayContainsForStruct) {
         ASSERT_LE(search_result->seg_offsets_.size(),
                   static_cast<size_t>(topK * num_queries));
 
-        std::cout << "Array contains search returned:" << std::endl;
         for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
             int64_t doc_id = search_result->seg_offsets_[i];
             float distance = search_result->distances_[i];
-
-            std::cout << "doc_id: " << doc_id << ", distance: " << distance
-                      << std::endl;
 
             // Verify the doc's array contains value 5 using our tracked set
             ASSERT_TRUE(rows_containing_5.count(doc_id) > 0)
@@ -2057,13 +2053,9 @@ TEST(Expr, TestArrayContainsForStruct) {
         // Verify each result's array contains BOTH 5 and 10
         auto array_col =
             raw_data.get_col(int_array_fid)->scalars().array_data().data();
-        std::cout << "Array contains_all search returned:" << std::endl;
         for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
             int64_t doc_id = search_result->seg_offsets_[i];
             float distance = search_result->distances_[i];
-
-            std::cout << "doc_id: " << doc_id << ", distance: " << distance
-                      << std::endl;
 
             auto& arr = array_col[doc_id].int_data().data();
             bool has_5 = std::find(arr.begin(), arr.end(), 5) != arr.end();
