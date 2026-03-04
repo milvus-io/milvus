@@ -146,7 +146,7 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_n) {
     }
 }
 
-TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_element_n) {
+TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_n_element) {
     // Setup: insert 5 docs with sequential PKs
     int num = 5;
     int array_len = 3;
@@ -178,7 +178,7 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_element_n) {
         all.reset();  // 0 = pass
         BitsetTypeView view(all.data(), total_elements);
         auto [doc_offsets, elem_indices, has_more] =
-            this->map_.find_first_element_n(
+            this->map_.find_first_n_element(
                 total_elements, view, array_offsets);
         ASSERT_EQ(doc_offsets.size(), num);
         for (size_t i = 0; i < doc_offsets.size(); i++) {
@@ -195,7 +195,7 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_element_n) {
         BitsetTypeView view(all.data(), total_elements);
         // limit=4: first doc contributes 3 elements, second doc contributes 1
         auto [doc_offsets, elem_indices, has_more] =
-            this->map_.find_first_element_n(4, view, array_offsets);
+            this->map_.find_first_n_element(4, view, array_offsets);
         int total = 0;
         for (auto& indices : elem_indices) {
             total += indices.size();
@@ -216,7 +216,7 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_element_n) {
         }
         BitsetTypeView view(partial.data(), total_elements);
         auto [doc_offsets, elem_indices, has_more] =
-            this->map_.find_first_element_n(
+            this->map_.find_first_n_element(
                 total_elements, view, array_offsets);
         ASSERT_EQ(doc_offsets.size(), num);
         for (size_t i = 0; i < doc_offsets.size(); i++) {
@@ -231,7 +231,7 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_element_n) {
         none.set();  // all filtered out
         BitsetTypeView view(none.data(), total_elements);
         auto [doc_offsets, elem_indices, has_more] =
-            this->map_.find_first_element_n(
+            this->map_.find_first_n_element(
                 total_elements, view, array_offsets);
         ASSERT_EQ(doc_offsets.size(), 0);
         ASSERT_EQ(elem_indices.size(), 0);
@@ -244,7 +244,7 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_element_n) {
         small.reset();
         BitsetTypeView view(small.data(), smaller_size);
         auto [doc_offsets, elem_indices, has_more] =
-            this->map_.find_first_element_n(
+            this->map_.find_first_n_element(
                 total_elements, view, array_offsets);
         // Last doc's elements are beyond bitset, should be skipped
         int total = 0;
@@ -258,5 +258,5 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first_element_n) {
 
 REGISTER_TYPED_TEST_SUITE_P(TypedOffsetOrderedMapTest,
                             find_first_n,
-                            find_first_element_n);
+                            find_first_n_element);
 INSTANTIATE_TYPED_TEST_SUITE_P(Prefix, TypedOffsetOrderedMapTest, TypeOfPks);

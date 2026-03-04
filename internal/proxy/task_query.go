@@ -867,14 +867,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	)
 
 	// Detect if this is an element-level query
-	isElementLevel := false
-	for _, r := range retrieveResults {
-		// all results must be element-level if any result is element-level
-		if r.GetElementLevel() {
-			isElementLevel = true
-		}
-		break
-	}
+	isElementLevel := len(retrieveResults) > 0 && retrieveResults[0].GetElementLevel()
 
 	validRetrieveResults := []*internalpb.RetrieveResults{}
 	for _, r := range retrieveResults {

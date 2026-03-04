@@ -1450,13 +1450,13 @@ ChunkedSegmentSealedImpl::find_first_n(int64_t limit,
 }
 
 std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-ChunkedSegmentSealedImpl::find_first_element_n(
+ChunkedSegmentSealedImpl::find_first_n_element(
     int64_t limit,
     const BitsetTypeView& element_bitset,
     std::shared_ptr<const IArrayOffsets> array_offsets) const {
     if (!is_sorted_by_pk_) {
         // Not sorted by PK, use pk2offset_ to iterate in PK order
-        return insert_record_.pk2offset_->find_first_element_n(
+        return insert_record_.pk2offset_->find_first_n_element(
             limit, element_bitset, array_offsets);
     }
 

@@ -294,14 +294,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	defer sp.End()
 
 	// Detect if this is an element-level query
-	isElementLevel := false
-	for _, r := range retrieveResults {
-		// all results must be element-level if any result is element-level
-		if r.GetElementLevel() {
-			isElementLevel = true
-		}
-		break
-	}
+	isElementLevel := len(retrieveResults) > 0 && retrieveResults[0].GetElementLevel()
 	ret.ElementLevel = isElementLevel
 
 	validRetrieveResults := []*TimestampedRetrieveResult[*internalpb.RetrieveResults]{}
@@ -334,13 +327,16 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	}
 	ret.HasMoreResult = hasMoreResult
 
+	if len(validRetrieveResults) == 0 {
+		return ret, nil
+	}
+
 	var limit int = -1
 	if param.limit != typeutil.Unlimited && reduce.ShouldUseInputLimit(param.reduceType) {
 		limit = int(param.limit)
-	}
-
-	if param.limit != typeutil.Unlimited && reduce.ShouldUseInputLimit(param.reduceType) {
-		loopEnd = int(param.limit)
+		if !isElementLevel {
+			loopEnd = int(param.limit)
+		}
 	}
 
 	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].Result.GetFieldsData(), int64(loopEnd))
@@ -475,14 +471,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	)
 
 	// Detect if this is an element-level query
-	isElementLevel := false
-	for _, r := range retrieveResults {
-		// all results must be element-level if any result is element-level
-		if r.GetElementLevel() {
-			isElementLevel = true
-		}
-		break
-	}
+	isElementLevel := len(retrieveResults) > 0 && retrieveResults[0].GetElementLevel()
 	ret.ElementLevel = isElementLevel
 
 	validRetrieveResults := []*TimestampedRetrieveResult[*segcorepb.RetrieveResults]{}

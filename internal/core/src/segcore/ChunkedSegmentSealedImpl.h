@@ -341,7 +341,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     find_first_n(int64_t limit, const BitsetTypeView& bitset) const override;
 
     std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-    find_first_element_n(
+    find_first_n_element(
         int64_t limit,
         const BitsetTypeView& element_bitset,
         std::shared_ptr<const IArrayOffsets> array_offsets) const override;

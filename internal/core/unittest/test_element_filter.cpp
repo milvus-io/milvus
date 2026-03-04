@@ -933,6 +933,126 @@ TEST(ElementFilter, MultiQueryCollectResults) {
     EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
 }
 
+TEST(ElementFilter, CollectResultsWithCosineMetric) {
+    // Test CollectResults with large_is_better=true (COSINE metric)
+    auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::COSINE);
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    size_t N = 500;
+    int array_len = 3;
+
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    // Customize int_array data: doc i has elements [i*3+1, i*3+2, i*3+3]
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
+            for (size_t row = 0; row < N; row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
+                for (int elem = 0; elem < array_len; elem++) {
+                    int value = row * array_len + elem + 1;
+                    array_data->mutable_int_data()->mutable_data()->Add(value);
+                }
+            }
+            break;
+        }
+    }
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    // Build and load vector index with COSINE metric
+    auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
+    std::vector<float> vector_data(dim * N * array_len);
+    for (size_t i = 0; i < N; i++) {
+        const auto& float_vec = array_vec_values[i].float_vector().data();
+        for (int j = 0; j < array_len * dim; j++) {
+            vector_data[i * array_len * dim + j] = float_vec[j];
+        }
+    }
+    auto indexing = GenVecIndexing(N * array_len,
+                                   dim,
+                                   vector_data.data(),
+                                   knowhere::IndexEnum::INDEX_HNSW,
+                                   knowhere::metric::COSINE);
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = vec_fid.get();
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index_params["metric_type"] = knowhere::metric::COSINE;
+    load_index_info.field_type = DataType::VECTOR_ARRAY;
+    load_index_info.element_type = DataType::VECTOR_FLOAT;
+    segment->LoadIndex(load_index_info);
+
+    int topK = 5;
+
+    // with_predicate=false to exercise CollectResults path
+    ScopedSchemaHandle handle(*schema);
+    std::string search_params = R"({"ef": 50, "hints": "iterative_filter"})";
+    std::string expr = "element_filter(structA, 400 > $[price_array] > 100)";
+
+    auto plan_bytes = handle.ParseSearch(
+        expr, "structA[array_vec]", topK, "COSINE", search_params, 1);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_bytes.data(), plan_bytes.size());
+    ASSERT_NE(plan, nullptr);
+
+    auto ph_group_raw = CreatePlaceholderGroup(1, dim, 1024, true);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto search_result = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+
+    ASSERT_NE(search_result, nullptr);
+    ASSERT_TRUE(search_result->element_level_);
+
+    // Count valid results
+    int valid_count = 0;
+    for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
+        if (search_result->seg_offsets_[i] != INVALID_SEG_OFFSET) {
+            valid_count++;
+        }
+    }
+    ASSERT_GT(valid_count, 0);
+
+    // For COSINE (large_is_better), distances should be sorted descending
+    for (int i = 1; i < valid_count; i++) {
+        ASSERT_GE(search_result->distances_[i - 1],
+                  search_result->distances_[i])
+            << "COSINE distances should be sorted descending";
+    }
+
+    // Verify filter correctness
+    for (int i = 0; i < valid_count; i++) {
+        int64_t doc_id = search_result->seg_offsets_[i];
+        int32_t elem_idx = search_result->element_indices_[i];
+        int element_value = doc_id * array_len + elem_idx + 1;
+        ASSERT_GT(element_value, 100);
+        ASSERT_LT(element_value, 400);
+    }
+
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
+}
+
 // Test parameter for Growing: <use_hints, element_type, metric_type, dim>
 using ElementFilterGrowingParam = std::tuple<bool, DataType, std::string, int>;
 
@@ -1415,7 +1535,7 @@ TEST_P(ElementFilterRetrieve, RangeExpr) {
             << "Each doc should have exactly 1 matching element";
 
         // Verify element-level limit enforcement:
-        // find_first_element_n counts elements toward limit, not documents.
+        // find_first_n_element counts elements toward limit, not documents.
         // With limit=100 and 1 element per doc, total_elements <= 100.
         ASSERT_LE(total_elements, 100)
             << "Total matching elements should not exceed limit";
@@ -1605,7 +1725,7 @@ TEST_P(ElementFilterRetrieve, UnaryExpr) {
         }
 
         // Verify element-level limit enforcement:
-        // find_first_element_n counts elements toward limit, not documents.
+        // find_first_n_element counts elements toward limit, not documents.
         // With limit=100, total matching elements should not exceed 100.
         ASSERT_LE(total_elements, 100)
             << "Total matching elements should not exceed limit";
@@ -1627,6 +1747,126 @@ INSTANTIATE_TEST_SUITE_P(
         name += with_predicate ? "WithPredicate" : "WithoutPredicate";
         return name;
     });
+
+TEST(ElementFilter, RetrieveSortedByPk) {
+    // Test find_first_n_element on the is_sorted_by_pk_=true path
+    auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    size_t N = 1000;
+    int array_len = 3;
+
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    // Customize int_array data: doc i has elements [i*3+1, i*3+2, i*3+3]
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
+
+            for (int row = 0; row < N; row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
+                for (int elem = 0; elem < array_len; elem++) {
+                    int value = row * array_len + elem + 1;
+                    array_data->mutable_int_data()->mutable_data()->Add(value);
+                }
+            }
+            break;
+        }
+    }
+
+    // Create sealed segment with is_sorted_by_pk=true
+    auto segment = CreateSealedSegment(schema,
+                                       empty_index_meta,
+                                       /*segment_id=*/0,
+                                       SegcoreConfig::default_config(),
+                                       /*is_sorted_by_pk=*/true);
+    LoadGeneratedDataIntoSegment(raw_data, segment.get());
+
+    // Build retrieve plan: element_filter(structA, $[price_array] % 3 == 2)
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_is_count(false);
+    query->set_limit(50);
+
+    auto* expr = query->mutable_predicates();
+    auto* element_filter = expr->mutable_element_filter_expr();
+    element_filter->set_struct_name("structA");
+
+    auto* element_expr = element_filter->mutable_element_expr();
+    auto* arith_expr = element_expr->mutable_binary_arith_op_eval_range_expr();
+    auto* column_info = arith_expr->mutable_column_info();
+    column_info->set_field_id(int_array_fid.get());
+    column_info->set_data_type(proto::schema::DataType::Int32);
+    column_info->set_element_type(proto::schema::DataType::Int32);
+    column_info->set_is_element_level(true);
+    arith_expr->set_arith_op(proto::plan::ArithOpType::Mod);
+    arith_expr->mutable_right_operand()->set_int64_val(3);
+    arith_expr->set_op(proto::plan::OpType::Equal);
+    arith_expr->mutable_value()->set_int64_val(2);
+
+    plan_node.add_output_field_ids(int64_fid.get());
+    plan_node.add_output_field_ids(int_array_fid.get());
+
+    auto parser = ProtoParser(schema);
+    auto plan = parser.CreateRetrievePlan(plan_node);
+
+    auto retrieve_results = segment->Retrieve(nullptr,
+                                              plan.get(),
+                                              1L << 63,
+                                              INT64_MAX,
+                                              false,
+                                              folly::CancellationToken(),
+                                              0,
+                                              0);
+
+    ASSERT_NE(retrieve_results, nullptr);
+    ASSERT_TRUE(retrieve_results->element_level());
+    ASSERT_GT(retrieve_results->element_indices_size(), 0);
+    ASSERT_EQ(retrieve_results->element_indices_size(),
+              retrieve_results->offset_size());
+
+    // Verify results are in PK order (sorted-by-pk path should return ordered)
+    for (int i = 1; i < retrieve_results->offset_size(); i++) {
+        ASSERT_LT(retrieve_results->offset(i - 1), retrieve_results->offset(i))
+            << "Results should be in ascending PK order for sorted segment";
+    }
+
+    // Verify each element satisfies filter (value % 3 == 2 => only elem_idx=1)
+    int total_elements = 0;
+    for (int i = 0; i < retrieve_results->offset_size(); i++) {
+        int64_t doc_id = retrieve_results->offset(i);
+        const auto& elem_indices = retrieve_results->element_indices(i);
+        ASSERT_EQ(elem_indices.indices_size(), 1);
+        ASSERT_EQ(elem_indices.indices(0), 1);
+        int element_value = doc_id * array_len + 1 + 1;
+        ASSERT_EQ(element_value % 3, 2);
+        total_elements += elem_indices.indices_size();
+    }
+
+    // Limit=50 counts elements, 1 element per doc => 50 docs
+    ASSERT_LE(total_elements, 50);
+
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
+}
 
 enum class NestedIndexType { NONE, STL_SORT, INVERTED };
 

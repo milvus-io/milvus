@@ -81,7 +81,7 @@ class OffsetMap {
     //   - has_more flag indicating if there are more results
     virtual std::
         tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-        find_first_element_n(
+        find_first_n_element(
             int64_t limit,
             const BitsetTypeView& element_bitset,
             std::shared_ptr<const IArrayOffsets> array_offsets) const = 0;
@@ -212,7 +212,7 @@ class OffsetOrderedMap : public OffsetMap {
     }
 
     std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-    find_first_element_n(
+    find_first_n_element(
         int64_t limit,
         const BitsetTypeView& element_bitset,
         std::shared_ptr<const IArrayOffsets> array_offsets) const override {
@@ -222,7 +222,7 @@ class OffsetOrderedMap : public OffsetMap {
             limit = static_cast<int64_t>(element_bitset.size());
         }
 
-        return find_first_element_n_by_index(
+        return find_first_n_element_by_index(
             limit, element_bitset, array_offsets);
     }
 
@@ -270,7 +270,7 @@ class OffsetOrderedMap : public OffsetMap {
     }
 
     std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-    find_first_element_n_by_index(
+    find_first_n_element_by_index(
         int64_t limit,
         const BitsetTypeView& element_bitset,
         std::shared_ptr<const IArrayOffsets> array_offsets) const {
@@ -457,7 +457,7 @@ class OffsetOrderedArray : public OffsetMap {
     }
 
     std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-    find_first_element_n(
+    find_first_n_element(
         int64_t limit,
         const BitsetTypeView& element_bitset,
         std::shared_ptr<const IArrayOffsets> array_offsets) const override {
@@ -467,7 +467,7 @@ class OffsetOrderedArray : public OffsetMap {
             limit = static_cast<int64_t>(element_bitset.size());
         }
 
-        return find_first_element_n_by_index(
+        return find_first_n_element_by_index(
             limit, element_bitset, array_offsets);
     }
 
@@ -509,7 +509,7 @@ class OffsetOrderedArray : public OffsetMap {
     }
 
     std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-    find_first_element_n_by_index(
+    find_first_n_element_by_index(
         int64_t limit,
         const BitsetTypeView& element_bitset,
         std::shared_ptr<const IArrayOffsets> array_offsets) const {
