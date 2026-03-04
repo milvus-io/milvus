@@ -1978,41 +1978,16 @@ TEST(Expr, TestArrayContainsForStruct) {
 
     int topK = 5;
 
-    std::cout << "Rows containing value 5: " << rows_containing_5.size()
-              << " out of " << N << std::endl;
+    ScopedSchemaHandle schema_handle(*schema);
 
-    // Step 5: Test with array contains filter
-    // Query: Search array elements, filter by array contains specific value
+    // Step 5a: Test with array_contains_any filter
     {
-        std::string raw_plan = boost::str(boost::format(R"(vector_anns: <
-                                        field_id: %1%
-                                        predicates: <
-                                          json_contains_expr: <
-                                            column_info: <
-                                              field_id: %2%
-                                              data_type: Array
-                                              element_type: Int32
-                                            >
-                                            elements:<int64_val:5>
-                                            op: ContainsAny
-                                            elements_same_type: true
-                                          >
-                                        >
-                                        query_info: <
-                                          topk: 5
-                                          round_decimal: 3
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 50}"
-                                        >
-                                        placeholder_tag: "$0">)") %
-                                          vec_fid.get() % int_array_fid.get());
+        std::string expr = "array_contains_any(structA[price_array], [5])";
 
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        ASSERT_TRUE(ok) << "Failed to parse element-level filter plan";
-
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto plan_bytes = schema_handle.ParseSearch(
+            expr, "structA[array_float_vec]", topK, "L2", R"({"ef": 50})", 3);
+        auto plan = CreateSearchPlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
         ASSERT_NE(plan, nullptr);
 
         auto num_queries = 1;
@@ -2056,10 +2031,56 @@ TEST(Expr, TestArrayContainsForStruct) {
         }
     }
 
+    // Step 5b: Test with array_contains_all filter
+    // contains_all requires the array to contain ALL given elements
+    {
+        std::string expr = "array_contains_all(structA[price_array], [5, 10])";
+
+        auto plan_bytes = schema_handle.ParseSearch(
+            expr, "structA[array_float_vec]", topK, "L2", R"({"ef": 50})", 3);
+        auto plan = CreateSearchPlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
+        ASSERT_NE(plan, nullptr);
+
+        auto num_queries = 1;
+        auto seed = 1024;
+        auto ph_group_raw =
+            CreatePlaceholderGroup(num_queries, dim, seed, true);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+        auto search_result =
+            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+
+        ASSERT_NE(search_result, nullptr);
+
+        // Verify each result's array contains BOTH 5 and 10
+        auto array_col =
+            raw_data.get_col(int_array_fid)->scalars().array_data().data();
+        std::cout << "Array contains_all search returned:" << std::endl;
+        for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
+            int64_t doc_id = search_result->seg_offsets_[i];
+            float distance = search_result->distances_[i];
+
+            std::cout << "doc_id: " << doc_id << ", distance: " << distance
+                      << std::endl;
+
+            auto& arr = array_col[doc_id].int_data().data();
+            bool has_5 = std::find(arr.begin(), arr.end(), 5) != arr.end();
+            bool has_10 = std::find(arr.begin(), arr.end(), 10) != arr.end();
+            ASSERT_TRUE(has_5 && has_10) << "Result doc_id " << doc_id
+                                         << " should contain both 5 and 10";
+        }
+
+        for (size_t i = 1; i < search_result->distances_.size(); ++i) {
+            ASSERT_LE(search_result->distances_[i - 1],
+                      search_result->distances_[i])
+                << "Distances should be sorted in ascending order";
+        }
+    }
+
     // Step 6: Test with scalar index on price_array field
     {
-        std::cout << "\n=== Testing with Array Scalar Index ===" << std::endl;
-
         // Get array data from raw_data and convert to boost::container::vector format
         // (required by InvertedIndexTantivy::BuildWithRawDataForUT)
         auto array_col =
@@ -2090,38 +2111,13 @@ TEST(Expr, TestArrayContainsForStruct) {
             CreateTestCacheIndex("test_array", std::move(arr_index));
         segment->LoadIndex(arr_index_info);
 
-        std::cout << "Loaded scalar index for price_array field" << std::endl;
-
         // Now search with index
-        std::string raw_plan = boost::str(boost::format(R"(vector_anns: <
-                                        field_id: %1%
-                                        predicates: <
-                                          json_contains_expr: <
-                                            column_info: <
-                                              field_id: %2%
-                                              data_type: Array
-                                              element_type: Int32
-                                            >
-                                            elements:<int64_val:5>
-                                            op: ContainsAny
-                                            elements_same_type: true
-                                          >
-                                        >
-                                        query_info: <
-                                          topk: 5
-                                          round_decimal: 3
-                                          metric_type: "L2"
-                                          search_params: "{\"ef\": 50}"
-                                        >
-                                        placeholder_tag: "$0">)") %
-                                          vec_fid.get() % int_array_fid.get());
+        std::string expr = "array_contains_any(structA[price_array], [5])";
 
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        ASSERT_TRUE(ok) << "Failed to parse plan with index";
-
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+        auto plan_bytes = schema_handle.ParseSearch(
+            expr, "structA[array_float_vec]", topK, "L2", R"({"ef": 50})", 3);
+        auto plan = CreateSearchPlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
         ASSERT_NE(plan, nullptr);
 
         auto num_queries = 1;
@@ -2140,13 +2136,9 @@ TEST(Expr, TestArrayContainsForStruct) {
         ASSERT_LE(search_result->seg_offsets_.size(),
                   static_cast<size_t>(topK * num_queries));
 
-        std::cout << "Array contains search with index returned:" << std::endl;
         for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
             int64_t doc_id = search_result->seg_offsets_[i];
             float distance = search_result->distances_[i];
-
-            std::cout << "doc_id: " << doc_id << ", distance: " << distance
-                      << std::endl;
 
             // Verify the doc's array contains value 5
             ASSERT_TRUE(rows_containing_5.count(doc_id) > 0)
