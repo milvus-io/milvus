@@ -522,43 +522,13 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 		return err
 	}
 
-	// Phase 1: Calculate modifications under read lock (fast, memory-only)
-	modifiedReplicas, err := m.calculateRecoverModifications(collectionID, rgs)
-	if err != nil {
-		return err
-	}
-
-	if len(modifiedReplicas) == 0 {
-		return nil
-	}
-
-	// Phase 2: Persist to etcd without holding lock (slow, IO operation)
-	replicaPBs := make([]*querypb.Replica, 0, len(modifiedReplicas))
-	for _, replica := range modifiedReplicas {
-		replicaPBs = append(replicaPBs, replica.replicaPB)
-	}
-	if err := m.catalog.SaveReplica(ctx, replicaPBs...); err != nil {
-		return err
-	}
-
-	// Phase 3: Update in-memory state under write lock (fast, memory-only)
 	m.rwmutex.Lock()
-	m.putReplicaInMemory(modifiedReplicas...)
-	m.rwmutex.Unlock()
-
-	return nil
-}
-
-// calculateRecoverModifications calculates the replica modifications needed for recovery.
-// This method holds read lock only and performs no IO operations.
-func (m *ReplicaManager) calculateRecoverModifications(collectionID typeutil.UniqueID, rgs map[string]typeutil.UniqueSet) ([]*Replica, error) {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
+	defer m.rwmutex.Unlock()
 
 	// create a helper to do the recover.
 	helper, err := m.getCollectionAssignmentHelper(collectionID, rgs)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	modifiedReplicas := make([]*Replica, 0)
@@ -596,7 +566,7 @@ func (m *ReplicaManager) calculateRecoverModifications(collectionID typeutil.Uni
 			modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
 		})
 	})
-	return modifiedReplicas, nil
+	return m.put(ctx, modifiedReplicas...)
 }
 
 // validateResourceGroups checks if the resource groups are valid.
@@ -638,56 +608,32 @@ func (m *ReplicaManager) getCollectionAssignmentHelper(collectionID typeutil.Uni
 
 // RemoveNode removes the node from all replicas of given collection.
 func (m *ReplicaManager) RemoveNode(ctx context.Context, replicaID typeutil.UniqueID, nodes ...typeutil.UniqueID) error {
-	// Phase 1: Calculate modifications under read lock (fast, memory-only)
-	m.rwmutex.RLock()
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
 	replica, ok := m.replicas[replicaID]
 	if !ok {
-		m.rwmutex.RUnlock()
 		return merr.WrapErrReplicaNotFound(replicaID)
 	}
+
 	mutableReplica := replica.CopyForWrite()
 	mutableReplica.RemoveNode(nodes...) // ro -> unused
-	modifiedReplica := mutableReplica.IntoReplica()
-	m.rwmutex.RUnlock()
-
-	// Phase 2: Persist to etcd without holding lock (slow, IO operation)
-	if err := m.catalog.SaveReplica(ctx, modifiedReplica.replicaPB); err != nil {
-		return err
-	}
-
-	// Phase 3: Update in-memory state under write lock (fast, memory-only)
-	m.rwmutex.Lock()
-	m.putReplicaInMemory(modifiedReplica)
-	m.rwmutex.Unlock()
-
-	return nil
+	return m.put(ctx, mutableReplica.IntoReplica())
 }
 
 // RemoveSQNode removes the sq node from all replicas of given collection.
 func (m *ReplicaManager) RemoveSQNode(ctx context.Context, replicaID typeutil.UniqueID, nodes ...typeutil.UniqueID) error {
-	// Phase 1: Calculate modifications under read lock (fast, memory-only)
-	m.rwmutex.RLock()
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
 	replica, ok := m.replicas[replicaID]
 	if !ok {
-		m.rwmutex.RUnlock()
 		return merr.WrapErrReplicaNotFound(replicaID)
 	}
+
 	mutableReplica := replica.CopyForWrite()
 	mutableReplica.RemoveSQNode(nodes...) // ro -> unused
-	modifiedReplica := mutableReplica.IntoReplica()
-	m.rwmutex.RUnlock()
-
-	// Phase 2: Persist to etcd without holding lock (slow, IO operation)
-	if err := m.catalog.SaveReplica(ctx, modifiedReplica.replicaPB); err != nil {
-		return err
-	}
-
-	// Phase 3: Update in-memory state under write lock (fast, memory-only)
-	m.rwmutex.Lock()
-	m.putReplicaInMemory(modifiedReplica)
-	m.rwmutex.Unlock()
-
-	return nil
+	return m.put(ctx, mutableReplica.IntoReplica())
 }
 
 func (m *ReplicaManager) GetResourceGroupByCollection(ctx context.Context, collection typeutil.UniqueID) typeutil.Set[string] {
@@ -742,42 +688,12 @@ func (m *ReplicaManager) GetReplicasJSON(ctx context.Context, meta *Meta) string
 // 2. Add new incoming nodes into the replica if they are not ro node of other replicas in same collection.
 // 3. replicas will shared the nodes in resource group fairly.
 func (m *ReplicaManager) RecoverSQNodesInCollection(ctx context.Context, collectionID int64, sqnNodeIDs typeutil.UniqueSet) error {
-	// Phase 1: Calculate modifications under read lock (fast, memory-only)
-	modifiedReplicas, err := m.calculateRecoverSQNModifications(collectionID, sqnNodeIDs)
-	if err != nil {
-		return err
-	}
-
-	if len(modifiedReplicas) == 0 {
-		return nil
-	}
-
-	// Phase 2: Persist to etcd without holding lock (slow, IO operation)
-	replicaPBs := make([]*querypb.Replica, 0, len(modifiedReplicas))
-	for _, replica := range modifiedReplicas {
-		replicaPBs = append(replicaPBs, replica.replicaPB)
-	}
-	if err := m.catalog.SaveReplica(ctx, replicaPBs...); err != nil {
-		return err
-	}
-
-	// Phase 3: Update in-memory state under write lock (fast, memory-only)
 	m.rwmutex.Lock()
-	m.putReplicaInMemory(modifiedReplicas...)
-	m.rwmutex.Unlock()
-
-	return nil
-}
-
-// calculateRecoverSQNModifications calculates the replica modifications needed for SQN recovery.
-// This method holds read lock only and performs no IO operations.
-func (m *ReplicaManager) calculateRecoverSQNModifications(collectionID int64, sqnNodeIDs typeutil.UniqueSet) ([]*Replica, error) {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
+	defer m.rwmutex.Unlock()
 
 	collReplicas, ok := m.coll2Replicas[collectionID]
 	if !ok {
-		return nil, errors.Errorf("collection %d not loaded", collectionID)
+		return errors.Errorf("collection %d not loaded", collectionID)
 	}
 
 	helper := newReplicaSQNAssignmentHelper(collReplicas.replicas, sqnNodeIDs)
@@ -814,5 +730,5 @@ func (m *ReplicaManager) calculateRecoverSQNModifications(collectionID int64, sq
 		)
 		modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
 	})
-	return modifiedReplicas, nil
+	return m.put(ctx, modifiedReplicas...)
 }
